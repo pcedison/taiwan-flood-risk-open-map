@@ -1078,7 +1078,7 @@ As of 2026-04-28:
 - ADR skeleton：Done.
 - OpenAPI draft：Done and linted.
 - Monorepo folders：Done.
-- Docker Compose base：Done and validated.
+- Docker Compose base：Done and validated with full `docker compose up` smoke.
 - Zeabur runbook：Done.
 - API/web/worker placeholder runtime：Done and smoke-tested.
 - First commit/push：Done.
@@ -1096,8 +1096,9 @@ Completed execution order:
 8. Add Zeabur deployment runbook.
 9. Add API/web/worker placeholder runtimes.
 10. Run first integration smoke.
-11. Commit Phase 0 foundation.
-12. Push `main` to GitHub.
+11. Run full `docker compose up` smoke and verify API/Web `/health`.
+12. Commit Phase 0 foundation.
+13. Push `main` to GitHub.
 
 Next execution order:
 
