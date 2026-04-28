@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+
+jobs:
+  skeleton:
+    name: Runtime skeleton checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile Python skeletons
+        run: python -m compileall apps/api apps/workers
+
+      - name: Backend lint placeholder
+        run: echo "Install backend dev dependencies before enabling ruff and mypy."
+
+      - name: Backend unit test placeholder
+        run: echo "Add pytest suites under apps/api/tests and apps/workers/tests."
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate frontend package metadata
+        run: node -e "JSON.parse(require('fs').readFileSync('apps/web/package.json', 'utf8'))"
+
+      - name: Frontend lint and test placeholder
+        run: echo "Install frontend dependencies before enabling lint, typecheck, and unit tests."
+
+      - name: OpenAPI validation placeholder
+        run: |
+          if [ -f docs/api/openapi.yaml ]; then
+            echo "OpenAPI spec found; wire validator after contract package lands."
+          else
+            echo "OpenAPI spec not present in this runtime skeleton checkout; skipping."
+          fi
+
+      - name: Validate Docker Compose config
+        run: docker compose config
+

@@ -1,0 +1,2 @@
+"""User report adapter placeholder."""
+

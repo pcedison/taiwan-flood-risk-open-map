@@ -1,0 +1,111 @@
+:root {
+  color-scheme: light;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --border: #cbd5e1;
+  --accent: #0f766e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.map-shell {
+  min-height: 100vh;
+  border-right: 1px solid var(--border);
+  background:
+    linear-gradient(90deg, rgba(15, 118, 110, 0.12) 1px, transparent 1px),
+    linear-gradient(rgba(15, 118, 110, 0.12) 1px, transparent 1px),
+    #e2e8f0;
+  background-size: 48px 48px;
+  display: grid;
+  place-items: center;
+}
+
+.map-label {
+  width: min(420px, calc(100% - 48px));
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.86);
+  padding: 24px;
+}
+
+.side-panel {
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.panel-section {
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.primary-action {
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #ffffff;
+  background: var(--accent);
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 800px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .map-shell {
+    min-height: 56vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .side-panel {
+    min-height: auto;
+  }
+}
+

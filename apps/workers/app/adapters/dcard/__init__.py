@@ -1,0 +1,2 @@
+"""Dcard adapter placeholder."""
+

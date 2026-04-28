@@ -1,0 +1,56 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs and caches
+*.log
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Data and generated artifacts
+data/raw/
+data/processed/
+data/tmp/
+*.mbtiles
+*.pmtiles
+*.gpkg
+*.sqlite
+*.sqlite3
+
+# Docker / local volumes
+.docker-data/
+postgres-data/
+redis-data/
+minio-data/

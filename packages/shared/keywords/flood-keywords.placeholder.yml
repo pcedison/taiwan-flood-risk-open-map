@@ -1,0 +1,7 @@
+version: keywords-v0
+positive:
+  - flood
+  - rainfall
+  - water_level
+negative: []
+

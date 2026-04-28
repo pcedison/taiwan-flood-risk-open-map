@@ -1,0 +1,2 @@
+"""WRA adapter placeholder."""
+

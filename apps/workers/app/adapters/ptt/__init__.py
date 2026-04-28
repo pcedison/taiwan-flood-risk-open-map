@@ -1,0 +1,2 @@
+"""PTT adapter placeholder."""
+

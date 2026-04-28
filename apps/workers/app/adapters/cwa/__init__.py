@@ -1,0 +1,2 @@
+"""CWA adapter placeholder."""
+

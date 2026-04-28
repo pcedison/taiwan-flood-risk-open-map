@@ -1,0 +1,48 @@
+{
+  "assessment_id": "018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+  "location": {
+    "lat": 25.033,
+    "lng": 121.5654
+  },
+  "radius_m": 500,
+  "score_version": "risk-v0.1.0",
+  "created_at": "2026-04-28T13:00:00Z",
+  "expires_at": "2026-04-28T13:10:00Z",
+  "realtime": {
+    "level": "低"
+  },
+  "historical": {
+    "level": "高"
+  },
+  "confidence": {
+    "level": "中"
+  },
+  "explanation": {
+    "summary": "歷史風險高，目前即時風險低。",
+    "main_reasons": [
+      "此位置半徑 500 公尺內有歷史淹水相關證據。",
+      "目前附近雨量與水位資料未達警戒條件。"
+    ],
+    "missing_sources": [
+      "部分水位資料暫時無法更新"
+    ]
+  },
+  "evidence": [],
+  "data_freshness": [
+    {
+      "source_id": "cwa-rainfall",
+      "name": "中央氣象署雨量資料",
+      "health_status": "healthy",
+      "observed_at": "2026-04-28T12:50:00Z",
+      "ingested_at": "2026-04-28T12:55:00Z",
+      "message": null
+    }
+  ],
+  "query_heat": {
+    "period": "P7D",
+    "attention_level": "低",
+    "query_count_bucket": "1-9",
+    "unique_approx_count_bucket": "1-9",
+    "updated_at": "2026-04-28T13:00:00Z"
+  }
+}

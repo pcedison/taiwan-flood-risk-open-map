@@ -1,0 +1,13 @@
+score_version: risk-v0
+levels:
+  - key: low
+    min_score: 0
+  - key: medium
+    min_score: 25
+  - key: high
+    min_score: 50
+  - key: severe
+    min_score: 75
+  - key: unknown
+    min_score: null
+

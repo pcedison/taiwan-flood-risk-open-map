@@ -1,0 +1,1288 @@
+openapi: 3.1.0
+info:
+  title: Flood Risk API
+  version: 0.1.0-draft
+  summary: API contract draft for the Flood Risk public and admin APIs.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  description: >
+    Draft contract derived from PROJECT_SDD sections 7 Domain Model,
+    9 Risk Scoring Design, and 10 API Contract Draft. Public risk levels
+    are the Traditional Chinese labels `低`, `中`, `高`, `極高`, and `未知`.
+    Query heat is exposed only as public attention metadata and must not be
+    used as a realtime or historical risk score input.
+servers:
+  - url: /
+    description: Same-origin deployment
+security: []
+tags:
+  - name: Public
+    description: Public user-facing APIs.
+  - name: Admin
+    description: Operational status APIs for workers, data sources, and ingestion.
+
+paths:
+  /health:
+    get:
+      tags:
+        - Public
+      operationId: getHealth
+      summary: Service health.
+      responses:
+        "200":
+          description: Service is reachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              examples:
+                ok:
+                  value:
+                    status: ok
+                    service: flood-risk-api
+                    version: 0.1.0
+                    checked_at: "2026-04-28T13:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/geocode:
+    post:
+      tags:
+        - Public
+      operationId: geocode
+      summary: Resolve an address, landmark, or parcel query into candidate points.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GeocodeRequest"
+            examples:
+              address:
+                value:
+                  query: "台北市信義區市府路1號"
+                  input_type: address
+                  limit: 5
+      responses:
+        "200":
+          description: Candidate places ordered by confidence.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GeocodeResponse"
+              examples:
+                candidates:
+                  value:
+                    candidates:
+                      - place_id: "place_01HTW8QK2Y3Z"
+                        name: "台北市信義區市府路1號"
+                        type: address
+                        point:
+                          lat: 25.0375
+                          lng: 121.5637
+                        admin_code: "63000000"
+                        source: mock-geocoder
+                        confidence: 0.92
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/risk/assess:
+    post:
+      tags:
+        - Public
+      operationId: assessRisk
+      summary: Assess realtime and historical flood risk for a point and radius.
+      description: >
+        Returns public risk levels and human-readable explanation. Numeric
+        scoring inputs and thresholds are internal implementation details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RiskAssessRequest"
+            examples:
+              now:
+                value:
+                  point:
+                    lat: 25.033
+                    lng: 121.5654
+                  radius_m: 500
+                  time_context: now
+      responses:
+        "200":
+          description: Flood risk assessment with evidence preview and freshness metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskAssessmentResponse"
+              examples:
+                basic:
+                  value:
+                    assessment_id: "018f3bd2-6e4a-7b10-8d21-3d7fd9676c11"
+                    location:
+                      lat: 25.033
+                      lng: 121.5654
+                    radius_m: 500
+                    score_version: "risk-v0.1.0"
+                    created_at: "2026-04-28T13:00:00Z"
+                    expires_at: "2026-04-28T13:10:00Z"
+                    realtime:
+                      level: "低"
+                    historical:
+                      level: "高"
+                    confidence:
+                      level: "中"
+                    explanation:
+                      summary: "歷史風險高，目前即時風險低。"
+                      main_reasons:
+                        - "此位置半徑 500 公尺內有歷史淹水相關證據。"
+                        - "目前附近雨量與水位資料未達警戒條件。"
+                      missing_sources:
+                        - "部分水位資料暫時無法更新"
+                    evidence:
+                      - id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073a"
+                        source_type: official
+                        event_type: flood_potential
+                        title: "淹水潛勢圖層交會"
+                        summary: "查詢點位落在官方淹水潛勢圖資範圍內。"
+                        occurred_at: null
+                        observed_at: "2026-04-28T12:50:00Z"
+                        ingested_at: "2026-04-28T12:55:00Z"
+                        distance_to_query_m: 0
+                        confidence: 0.9
+                    data_freshness:
+                      - source_id: cwa-rainfall
+                        name: "中央氣象署雨量資料"
+                        health_status: healthy
+                        observed_at: "2026-04-28T12:50:00Z"
+                        ingested_at: "2026-04-28T12:55:00Z"
+                    query_heat:
+                      period: P7D
+                      attention_level: "低"
+                      query_count_bucket: "1-9"
+                      unique_approx_count_bucket: "1-9"
+                      updated_at: "2026-04-28T13:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/evidence/{assessment_id}:
+    get:
+      tags:
+        - Public
+      operationId: listEvidence
+      summary: List evidence attached to an assessment.
+      parameters:
+        - $ref: "#/components/parameters/AssessmentId"
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Paginated evidence list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceListResponse"
+              examples:
+                page:
+                  value:
+                    assessment_id: "018f3bd2-6e4a-7b10-8d21-3d7fd9676c11"
+                    items:
+                      - id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073a"
+                        source_id: flood-potential
+                        source_type: official
+                        event_type: flood_potential
+                        title: "淹水潛勢圖層交會"
+                        summary: "查詢點位落在官方淹水潛勢圖資範圍內。"
+                        url: "https://example.gov.tw/flood-potential"
+                        occurred_at: null
+                        observed_at: "2026-04-28T12:50:00Z"
+                        ingested_at: "2026-04-28T12:55:00Z"
+                        point:
+                          lat: 25.033
+                          lng: 121.5654
+                        geometry:
+                          type: Point
+                          coordinates:
+                            - 121.5654
+                            - 25.033
+                        distance_to_query_m: 0
+                        confidence: 0.9
+                        freshness_score: 0.8
+                        source_weight: 1
+                        privacy_level: public
+                        raw_ref: "snapshot:flood-potential:20260428"
+                    next_cursor: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/layers:
+    get:
+      tags:
+        - Public
+      operationId: listLayers
+      summary: List available map layers and metadata.
+      responses:
+        "200":
+          description: Available map layers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LayersResponse"
+              examples:
+                layers:
+                  value:
+                    layers:
+                      - id: flood-potential
+                        name: "淹水潛勢"
+                        description: "官方淹水潛勢圖資。"
+                        category: flood_potential
+                        status: available
+                        minzoom: 8
+                        maxzoom: 18
+                        attribution: "Government open data"
+                        tilejson_url: "/v1/layers/flood-potential/tilejson"
+                        updated_at: "2026-04-28T12:00:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /v1/layers/{layer_id}/tilejson:
+    get:
+      tags:
+        - Public
+      operationId: getLayerTileJson
+      summary: Return TileJSON metadata for MapLibre.
+      parameters:
+        - $ref: "#/components/parameters/LayerId"
+      responses:
+        "200":
+          description: TileJSON document for the requested layer.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TileJson"
+              examples:
+                vector:
+                  value:
+                    tilejson: "3.0.0"
+                    name: "淹水潛勢"
+                    version: "2026-04-28"
+                    attribution: "Government open data"
+                    scheme: xyz
+                    tiles:
+                      - "https://tiles.example.test/flood-potential/{z}/{x}/{y}.pbf"
+                    minzoom: 8
+                    maxzoom: 18
+                    bounds:
+                      - 119.3
+                      - 21.8
+                      - 122.1
+                      - 25.4
+                    vector_layers:
+                      - id: flood_potential
+                        fields:
+                          depth_category: String
+                          source_id: String
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/jobs:
+    get:
+      tags:
+        - Admin
+      operationId: listAdminJobs
+      summary: List background job status.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/JobStatus"
+        - name: job_key
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+      responses:
+        "200":
+          description: Job status rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminJobsResponse"
+              examples:
+                jobs:
+                  value:
+                    jobs:
+                      - job_key: ingest.cwa.rainfall
+                        adapter_key: cwa.rainfall
+                        started_at: "2026-04-28T12:50:00Z"
+                        finished_at: "2026-04-28T12:55:00Z"
+                        status: succeeded
+                        items_fetched: 120
+                        items_promoted: 118
+                        items_rejected: 2
+                        error_code: null
+                        error_message: null
+                        source_timestamp_min: "2026-04-28T12:00:00Z"
+                        source_timestamp_max: "2026-04-28T12:50:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/sources:
+    get:
+      tags:
+        - Admin
+      operationId: listAdminSources
+      summary: List source health and data freshness.
+      parameters:
+        - name: health_status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/HealthStatus"
+      responses:
+        "200":
+          description: Data source health and freshness metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSourcesResponse"
+              examples:
+                sources:
+                  value:
+                    sources:
+                      - id: cwa-rainfall
+                        name: "中央氣象署雨量資料"
+                        adapter_key: cwa.rainfall
+                        source_type: official
+                        license: "Open Government Data License"
+                        update_frequency: PT10M
+                        last_success_at: "2026-04-28T12:55:00Z"
+                        last_failure_at: null
+                        health_status: healthy
+                        legal_basis: L1
+                        source_timestamp_min: "2026-04-28T12:00:00Z"
+                        source_timestamp_max: "2026-04-28T12:50:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    AssessmentId:
+      name: assessment_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Risk assessment identifier.
+    LayerId:
+      name: layer_id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9.-]{0,79}$"
+      description: Stable map layer identifier.
+    PageCursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+        minLength: 1
+      description: Opaque pagination cursor returned by the previous page.
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - service
+        - version
+        - checked_at
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+            - down
+        service:
+          type: string
+        version:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    GeocodeRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: Address, landmark, or parcel text.
+        input_type:
+          type: string
+          enum:
+            - address
+            - landmark
+            - parcel
+          default: address
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 5
+      additionalProperties: false
+
+    GeocodeResponse:
+      type: object
+      required:
+        - candidates
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaceCandidate"
+      additionalProperties: false
+
+    PlaceCandidate:
+      type: object
+      required:
+        - place_id
+        - name
+        - type
+        - point
+        - source
+        - confidence
+      properties:
+        place_id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum:
+            - address
+            - parcel
+            - landmark
+            - admin_area
+            - poi
+        point:
+          $ref: "#/components/schemas/LatLng"
+        admin_code:
+          type:
+            - string
+            - "null"
+        source:
+          type: string
+        confidence:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+      additionalProperties: false
+
+    RiskAssessRequest:
+      type: object
+      required:
+        - point
+        - radius_m
+        - time_context
+      properties:
+        point:
+          $ref: "#/components/schemas/LatLng"
+        radius_m:
+          type: integer
+          minimum: 50
+          maximum: 2000
+          default: 500
+        time_context:
+          type: string
+          enum:
+            - now
+          description: V1 supports current-condition assessment.
+      additionalProperties: false
+
+    RiskAssessmentResponse:
+      type: object
+      required:
+        - assessment_id
+        - location
+        - radius_m
+        - score_version
+        - created_at
+        - expires_at
+        - realtime
+        - historical
+        - confidence
+        - explanation
+        - evidence
+        - data_freshness
+        - query_heat
+      properties:
+        assessment_id:
+          type: string
+          format: uuid
+        location:
+          $ref: "#/components/schemas/LatLng"
+        radius_m:
+          type: integer
+        score_version:
+          type: string
+          description: Version of the scoring rules used for this assessment.
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        realtime:
+          $ref: "#/components/schemas/RiskLevelBlock"
+        historical:
+          $ref: "#/components/schemas/RiskLevelBlock"
+        confidence:
+          $ref: "#/components/schemas/ConfidenceBlock"
+        explanation:
+          $ref: "#/components/schemas/Explanation"
+        evidence:
+          type: array
+          description: Short evidence preview. Use /v1/evidence/{assessment_id} for pagination.
+          items:
+            $ref: "#/components/schemas/EvidencePreview"
+        data_freshness:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataFreshness"
+        query_heat:
+          $ref: "#/components/schemas/QueryHeat"
+      additionalProperties: false
+
+    RiskLevelBlock:
+      type: object
+      required:
+        - level
+      properties:
+        level:
+          $ref: "#/components/schemas/RiskLevel"
+      additionalProperties: false
+
+    ConfidenceBlock:
+      type: object
+      required:
+        - level
+      properties:
+        level:
+          $ref: "#/components/schemas/ConfidenceLevel"
+      additionalProperties: false
+
+    RiskLevel:
+      type: string
+      description: Public user-facing flood risk level.
+      enum:
+        - "低"
+        - "中"
+        - "高"
+        - "極高"
+        - "未知"
+
+    ConfidenceLevel:
+      type: string
+      description: Public data confidence label. This is not a risk level.
+      enum:
+        - "低"
+        - "中"
+        - "高"
+        - "未知"
+
+    AttentionLevel:
+      type: string
+      description: Public attention label for query heat. This is not a risk level.
+      enum:
+        - "低"
+        - "中"
+        - "高"
+        - "未知"
+
+    Explanation:
+      type: object
+      required:
+        - summary
+        - main_reasons
+        - missing_sources
+      properties:
+        summary:
+          type: string
+          minLength: 1
+        main_reasons:
+          type: array
+          items:
+            type: string
+          default: []
+        missing_sources:
+          type: array
+          items:
+            type: string
+          default: []
+      additionalProperties: false
+
+    EvidencePreview:
+      type: object
+      required:
+        - id
+        - source_type
+        - event_type
+        - title
+        - summary
+        - ingested_at
+        - confidence
+      properties:
+        id:
+          type: string
+          format: uuid
+        source_type:
+          $ref: "#/components/schemas/SourceType"
+        event_type:
+          $ref: "#/components/schemas/EventType"
+        title:
+          type: string
+        summary:
+          type: string
+        occurred_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        ingested_at:
+          type: string
+          format: date-time
+        distance_to_query_m:
+          type:
+            - number
+            - "null"
+          minimum: 0
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+      additionalProperties: false
+
+    EvidenceListResponse:
+      type: object
+      required:
+        - assessment_id
+        - items
+        - next_cursor
+      properties:
+        assessment_id:
+          type: string
+          format: uuid
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Evidence"
+        next_cursor:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    Evidence:
+      type: object
+      required:
+        - id
+        - source_id
+        - source_type
+        - event_type
+        - title
+        - summary
+        - ingested_at
+        - confidence
+        - freshness_score
+        - source_weight
+        - privacy_level
+      properties:
+        id:
+          type: string
+          format: uuid
+        source_id:
+          type: string
+        source_type:
+          $ref: "#/components/schemas/SourceType"
+        event_type:
+          $ref: "#/components/schemas/EventType"
+        title:
+          type: string
+        summary:
+          type: string
+        url:
+          type:
+            - string
+            - "null"
+          format: uri
+        occurred_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        ingested_at:
+          type: string
+          format: date-time
+        point:
+          oneOf:
+            - $ref: "#/components/schemas/LatLng"
+            - type: "null"
+        geometry:
+          oneOf:
+            - $ref: "#/components/schemas/GeoJsonGeometry"
+            - type: "null"
+        distance_to_query_m:
+          type:
+            - number
+            - "null"
+          minimum: 0
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        freshness_score:
+          type: number
+          minimum: 0
+          maximum: 1
+        source_weight:
+          type: number
+          minimum: 0
+        privacy_level:
+          type: string
+          enum:
+            - public
+            - aggregated
+            - redacted
+        raw_ref:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    SourceType:
+      type: string
+      enum:
+        - official
+        - news
+        - forum
+        - social
+        - user_report
+        - derived
+
+    EventType:
+      type: string
+      enum:
+        - rainfall
+        - water_level
+        - flood_warning
+        - flood_potential
+        - flood_report
+        - road_closure
+        - discussion
+
+    DataFreshness:
+      type: object
+      required:
+        - source_id
+        - name
+        - health_status
+      properties:
+        source_id:
+          type: string
+        name:
+          type: string
+        health_status:
+          $ref: "#/components/schemas/HealthStatus"
+        observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        ingested_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        message:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    QueryHeat:
+      type: object
+      description: >
+        Aggregated public attention near the query location. Query heat is not
+        risk and must not directly increase realtime or historical risk levels.
+      required:
+        - period
+        - attention_level
+        - updated_at
+      properties:
+        period:
+          type: string
+          description: ISO 8601 duration for the aggregation window.
+          examples:
+            - P7D
+        attention_level:
+          $ref: "#/components/schemas/AttentionLevel"
+        query_count_bucket:
+          type:
+            - string
+            - "null"
+          description: Bucketed count for privacy, for example 1-9 or 10-99.
+        unique_approx_count_bucket:
+          type:
+            - string
+            - "null"
+          description: Bucketed approximate unique count for privacy.
+        updated_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    LayersResponse:
+      type: object
+      required:
+        - layers
+      properties:
+        layers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MapLayer"
+      additionalProperties: false
+
+    MapLayer:
+      type: object
+      required:
+        - id
+        - name
+        - category
+        - status
+        - tilejson_url
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9.-]{0,79}$"
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        category:
+          type: string
+          enum:
+            - flood_potential
+            - rainfall
+            - water_level
+            - warning
+            - evidence
+            - query_heat
+        status:
+          type: string
+          enum:
+            - available
+            - degraded
+            - disabled
+        minzoom:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          maximum: 24
+        maxzoom:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          maximum: 24
+        attribution:
+          type:
+            - string
+            - "null"
+        tilejson_url:
+          type: string
+          description: Relative or absolute TileJSON URL.
+        updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      additionalProperties: false
+
+    TileJson:
+      type: object
+      required:
+        - tilejson
+        - name
+        - tiles
+      properties:
+        tilejson:
+          type: string
+          examples:
+            - "3.0.0"
+        name:
+          type: string
+        version:
+          type:
+            - string
+            - "null"
+        attribution:
+          type:
+            - string
+            - "null"
+        scheme:
+          type: string
+          enum:
+            - xyz
+            - tms
+          default: xyz
+        tiles:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uri-template
+        minzoom:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          maximum: 24
+        maxzoom:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          maximum: 24
+        bounds:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+        center:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: number
+        vector_layers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TileJsonVectorLayer"
+      additionalProperties: true
+
+    TileJsonVectorLayer:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        minzoom:
+          type: integer
+        maxzoom:
+          type: integer
+        fields:
+          type: object
+          additionalProperties:
+            type: string
+      additionalProperties: true
+
+    AdminJobsResponse:
+      type: object
+      required:
+        - jobs
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngestionJob"
+      additionalProperties: false
+
+    IngestionJob:
+      type: object
+      required:
+        - job_key
+        - status
+        - items_fetched
+        - items_promoted
+        - items_rejected
+      properties:
+        job_key:
+          type: string
+        adapter_key:
+          type:
+            - string
+            - "null"
+        started_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        finished_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        items_fetched:
+          type: integer
+          minimum: 0
+        items_promoted:
+          type: integer
+          minimum: 0
+        items_rejected:
+          type: integer
+          minimum: 0
+        error_code:
+          type:
+            - string
+            - "null"
+        error_message:
+          type:
+            - string
+            - "null"
+        source_timestamp_min:
+          type:
+            - string
+            - "null"
+          format: date-time
+        source_timestamp_max:
+          type:
+            - string
+            - "null"
+          format: date-time
+      additionalProperties: false
+
+    JobStatus:
+      type: string
+      enum:
+        - queued
+        - running
+        - succeeded
+        - failed
+        - skipped
+        - disabled
+
+    AdminSourcesResponse:
+      type: object
+      required:
+        - sources
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataSource"
+      additionalProperties: false
+
+    DataSource:
+      type: object
+      required:
+        - id
+        - name
+        - adapter_key
+        - source_type
+        - license
+        - update_frequency
+        - health_status
+        - legal_basis
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        adapter_key:
+          type: string
+        source_type:
+          $ref: "#/components/schemas/SourceType"
+        license:
+          type: string
+        update_frequency:
+          type: string
+          description: ISO 8601 duration or human-readable source cadence.
+        last_success_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        last_failure_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        health_status:
+          $ref: "#/components/schemas/HealthStatus"
+        legal_basis:
+          $ref: "#/components/schemas/LegalBasis"
+        source_timestamp_min:
+          type:
+            - string
+            - "null"
+          format: date-time
+        source_timestamp_max:
+          type:
+            - string
+            - "null"
+          format: date-time
+      additionalProperties: false
+
+    HealthStatus:
+      type: string
+      enum:
+        - healthy
+        - degraded
+        - failed
+        - disabled
+        - unknown
+
+    LegalBasis:
+      type: string
+      description: Data legality level from the SDD source policy.
+      enum:
+        - L1
+        - L2
+        - L3
+        - L4
+        - L5
+
+    LatLng:
+      type: object
+      required:
+        - lat
+        - lng
+      properties:
+        lat:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+        lng:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+      additionalProperties: false
+
+    GeoJsonGeometry:
+      type: object
+      required:
+        - type
+        - coordinates
+      properties:
+        type:
+          type: string
+          enum:
+            - Point
+            - LineString
+            - Polygon
+            - MultiPolygon
+        coordinates:
+          type: array
+          description: GeoJSON coordinates in longitude, latitude order.
+      additionalProperties: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type:
+                - object
+                - array
+                - string
+                - "null"
+            request_id:
+              type:
+                - string
+                - "null"
+          additionalProperties: false
+      additionalProperties: false
