@@ -1081,8 +1081,8 @@ As of 2026-04-28:
 - Docker Compose base：Done and validated.
 - Zeabur runbook：Done.
 - API/web/worker placeholder runtime：Done and smoke-tested.
-- First commit/push：Pending.
-- Implementation：Phase 0 foundation files complete; Phase 1 map and core query implementation starts after first commit/push.
+- First commit/push：Done.
+- Implementation：Phase 0 foundation complete; Phase 1 map and core query implementation next.
 
 Completed execution order:
 
@@ -1096,12 +1096,8 @@ Completed execution order:
 8. Add Zeabur deployment runbook.
 9. Add API/web/worker placeholder runtimes.
 10. Run first integration smoke.
-
-Finalization before Phase 1:
-
-1. Stage Phase 0 files.
-2. Commit Phase 0 foundation.
-3. Push `main` to GitHub.
+11. Commit Phase 0 foundation.
+12. Push `main` to GitHub.
 
 Next execution order:
 
