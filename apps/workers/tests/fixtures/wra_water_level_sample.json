@@ -1,0 +1,24 @@
+[
+  {
+    "station_id": "WRA-1001",
+    "station_name": "Dahan Bridge",
+    "river_name": "Dahan River",
+    "observed_at": "2026-04-28T08:05:00+00:00",
+    "water_level_m": 7.82,
+    "warning_level_m": 8.5,
+    "source_url": "https://fhy.wra.gov.tw/fhy/api/water-level",
+    "attribution": "Water Resources Agency",
+    "confidence": 0.92
+  },
+  {
+    "station_id": "WRA-1002",
+    "station_name": "Xindian Creek Bridge",
+    "river_name": "Xindian River",
+    "observed_at": "2026-04-28T08:05:00+00:00",
+    "water_level_m": 5.41,
+    "warning_level_m": 6.0,
+    "source_url": "https://fhy.wra.gov.tw/fhy/api/water-level",
+    "attribution": "Water Resources Agency",
+    "confidence": 0.92
+  }
+]

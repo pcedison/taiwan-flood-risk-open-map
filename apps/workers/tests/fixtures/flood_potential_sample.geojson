@@ -1,0 +1,58 @@
+{
+  "type": "FeatureCollection",
+  "name": "sample_flood_potential",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "FP-TPE-ZZ-001",
+      "properties": {
+        "area_id": "TPE-ZZ-001",
+        "area_name": "Taipei City Zhongzheng District low-lying area",
+        "depth_class": "0.5-1.0m",
+        "return_period_years": 24,
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "source_url": "https://data.gov.tw/dataset/flood-potential",
+        "attribution": "Official flood potential dataset",
+        "confidence": 0.88
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [121.512, 25.034],
+            [121.522, 25.034],
+            [121.522, 25.044],
+            [121.512, 25.044],
+            [121.512, 25.034]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "FP-NTP-XD-001",
+      "properties": {
+        "area_id": "NTP-XD-001",
+        "area_name": "New Taipei City Xindian riverside area",
+        "depth_class": "1.0-2.0m",
+        "return_period_years": 24,
+        "updated_at": "2026-04-01T00:00:00+00:00",
+        "source_url": "https://data.gov.tw/dataset/flood-potential",
+        "attribution": "Official flood potential dataset",
+        "confidence": 0.88
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [121.530, 24.960],
+            [121.542, 24.960],
+            [121.542, 24.972],
+            [121.530, 24.972],
+            [121.530, 24.960]
+          ]
+        ]
+      }
+    }
+  ]
+}

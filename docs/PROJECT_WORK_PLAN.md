@@ -140,6 +140,7 @@ Phase 0 驗收：
 - Evidence drawer placeholder。
 - PostGIS radius query helper。
 - `POST /v1/risk/assess` mock implementation。
+- Frontend/backend lint、typecheck、unit-test CI gates 從 placeholder 升級為實際執行；若某一類測試仍無測試檔，必須以明確的 empty-suite 機制通過，不可只 echo。
 
 Phase 1 驗收：
 
@@ -149,6 +150,7 @@ Phase 1 驗收：
 - 風險面板顯示 `低/中/高/極高/未知` 之一。
 - 桌面與手機版 UI 不溢位。
 - Playwright smoke test 通過。
+- CI 不再含 frontend/backend lint、typecheck、unit-test placeholder step；contract、migration syntax、frontend/backend checks 皆為 hard gates。
 
 ### Phase 2：Official and Public Evidence Ingestion
 
@@ -176,18 +178,20 @@ Phase 1 驗收：
 - CWA rainfall/warning adapter。
 - WRA water/flood adapter。
 - Flood potential import pipeline。
-- News/RSS/public web adapter or legally reviewed forum adapter。
+- News/RSS/public web adapter from reviewed L2 sources。
 - Raw snapshot + staging + promote pipeline。
 - Data source health tracking。
 
 Phase 2 驗收：
 
 - 至少兩個官方資料家族可 ingestion。
-- 至少一個非官方公開佐證來源可 ingestion。
+- 至少一個 L2 非官方公開佐證來源可 ingestion，例如 news/RSS/public web；PTT/Dcard/forum 不可用來滿足 Phase 2 驗收。
 - Evidence normalization tests 通過。
 - Adapter failure 不會讓 API 整體失效。
 - Source freshness 可查詢。
 - Raw snapshots 有 retention policy。
+- Public API 不得以即時雨量/水位正常推論購屋歷史風險低；歷史風險必須來自淹水潛勢、官方歷史紀錄、L2 新聞/public web 或後續合法群眾佐證。
+- Live API bridge 只能作為 MVP smoke path；不能取代 worker ingestion、raw snapshot、staging、promote 與可稽核 evidence。
 
 ### Phase 3：Risk Scoring v0
 
@@ -384,8 +388,8 @@ Phase 6 驗收：
 | Work Package | Ownership | Can Run In Parallel With | Must Wait For |
 |---|---|---|---|
 | WP-001 SDD/ADR/Contracts | `docs/`, `packages/contracts/` | all docs-only tasks | user decisions |
-| WP-002 Frontend Map Shell | `apps/web/src/features/map/` | WP-004, WP-006 | frontend skeleton |
-| WP-003 Search/Risk UI | `apps/web/src/features/search/`, `risk/`, `evidence/` | WP-005 after API mock | OpenAPI risk response |
+| WP-002 Frontend Map Shell | `apps/web/app/`, `apps/web/components/map/`, `apps/web/features/map/` | WP-004, WP-006 | frontend skeleton |
+| WP-003 Search/Risk UI | `apps/web/app/`, `apps/web/features/search/`, `apps/web/features/risk/`, `apps/web/features/evidence/` | WP-005 after API mock | OpenAPI risk response |
 | WP-004 Backend API Core | `apps/api/app/api/`, `schemas/` | WP-002, WP-006 | OpenAPI draft |
 | WP-005 Risk Engine | `apps/api/app/domain/risk/`, `scoring/` | WP-003 after fixture contract | evidence schema |
 | WP-006 Geospatial/DB | `infra/migrations/`, db infra | WP-004 | schema draft |
@@ -827,8 +831,10 @@ Dependencies：A1
 
 Tasks:
 
-- Add lint/typecheck/unit workflow placeholders.
+- Replace lint/typecheck/unit workflow placeholders with real hard gates before Phase 1 acceptance.
 - Add OpenAPI validation.
+- Add admin-auth contract validation for all `/admin/` OpenAPI paths.
+- Add migration syntax/check target once migration tooling lands.
 - Add backend tests.
 - Add frontend tests.
 
@@ -836,6 +842,8 @@ Definition of Done:
 
 - CI runs on PR.
 - Required checks documented.
+- Frontend lint/typecheck/unit, backend lint/typecheck/unit, migration check, and contract tests are non-echo steps.
+- Empty suites must fail closed or pass through an explicit documented empty-suite command; plain placeholder echo is not allowed after Phase 1.
 
 #### I2. E2E smoke
 
@@ -1067,7 +1075,7 @@ Integration target:
 
 ## 10. Current Project Status
 
-As of 2026-04-28:
+As of 2026-04-29:
 
 - SDD：Done draft, accepted for planning.
 - Work plan：Created.
@@ -1076,13 +1084,17 @@ As of 2026-04-28:
 - Git remote `origin`：Done.
 - Apache-2.0 license：Done.
 - ADR skeleton：Done.
-- OpenAPI draft：Done and linted.
+- OpenAPI draft：Done and validated, including admin-auth contract guard.
 - Monorepo folders：Done.
 - Docker Compose base：Done and validated with full `docker compose up` smoke.
-- Zeabur runbook：Done.
-- API/web/worker placeholder runtime：Done and smoke-tested.
+- Zeabur runbook：Done and aligned to current runtime env var names.
+- API/web placeholder runtime：Replaced by Phase 1 FastAPI and Next.js dev runtimes in Compose.
+- Worker/scheduler placeholder runtime：Done and smoke-tested.
 - First commit/push：Done.
-- Implementation：Phase 0 foundation complete; Phase 1 map and core query implementation next.
+- CI：Hard gates added for backend lint/typecheck/tests, frontend lint/typecheck/tests, contracts, and compose config.
+- E2E：Phase 1 Playwright smoke added for map-first risk query rendering.
+- Worker adapters：Phase 2 adapter contract now includes official CWA rainfall, WRA water-level, flood-potential GeoJSON fixture parsers, plus L2 news/public-web sample tests.
+- Implementation：Phase 0 foundation re-accepted after review; Phase 1 map and core query implementation is near acceptance, Phase 2 adapter groundwork expanded, and Phase 3 scoring golden fixtures started.
 
 Completed execution order:
 
@@ -1099,16 +1111,31 @@ Completed execution order:
 11. Run full `docker compose up` smoke and verify API/Web `/health`.
 12. Commit Phase 0 foundation.
 13. Push `main` to GitHub.
+14. Add admin-auth OpenAPI contract and validator guard.
+15. Align Zeabur env var runbook with runtime config.
+16. Add Phase 1 FastAPI mock routes and public contract tests.
+17. Add Phase 1 map-first Next.js shell.
+18. Add Phase 1 core domain PostGIS migration skeleton.
+19. Replace local compose API/web placeholder commands with real Phase 1 runtimes.
+20. Add frontend lockfile, ESLint hard gate, and production dependency audit override.
+21. Connect frontend search/risk panel to `/v1/geocode` and `/v1/risk/assess`.
+22. Add Playwright E2E smoke for risk query rendering.
+23. Add Phase 2 worker `DataSourceAdapter` contract skeleton and sample L2 news/public-web adapter tests.
+24. Add API readiness endpoint with DB/Redis dependency checks.
+25. Add official CWA/WRA/flood-potential fixtures and parser tests.
+26. Add worker raw snapshot and staging evidence projection with validation split.
+27. Add Phase 3 pure risk scoring v0 with golden fixture regression tests.
+28. Add Phase 2 L2 public source allowlist and CI validation.
+29. Add deploy migration command strategy and CI PostGIS migration smoke.
+30. Expand Playwright smoke to cover map click, evidence/freshness rendering, and mobile Chrome.
+31. Expand Phase 3 scoring golden fixtures for no-evidence, partial-outage, and conflicting-signal cases.
+32. Add protected admin job/source health API skeleton with 401/403 contract tests.
+33. Add worker PostGIS staging writer with raw snapshot upsert and staging evidence insert tests.
 
 Next execution order:
 
-1. Replace placeholder API with contract-backed FastAPI routes.
-2. Add first real `/v1/risk/assess` mock response using contract fixture.
-3. Replace web placeholder with real Next.js map-first shell.
-4. Add geocode provider interface and mock provider.
-5. Add PostGIS table migration skeleton for core domain entities.
-6. Add first frontend-to-backend smoke path.
-7. Add Playwright E2E smoke for map-first workflow.
+1. Expand UI evidence drawer beyond inline summary list.
+2. Add production data-source configuration wiring for enabled adapters.
 
 ---
 

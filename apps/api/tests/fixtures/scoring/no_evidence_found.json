@@ -1,0 +1,14 @@
+{
+  "now": "2026-04-29T00:00:00+00:00",
+  "signals": [],
+  "expected": {
+    "score_version": "risk-v0.1.0",
+    "realtime_level": "未知",
+    "historical_level": "未知",
+    "confidence_level": "未知",
+    "missing_sources": [
+      "尚未接入即時雨量資料。",
+      "尚未接入即時水位資料。"
+    ]
+  }
+}

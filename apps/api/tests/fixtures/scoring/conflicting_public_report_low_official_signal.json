@@ -1,0 +1,34 @@
+{
+  "now": "2026-04-29T00:00:00+00:00",
+  "signals": [
+    {
+      "source_type": "official",
+      "event_type": "rainfall",
+      "confidence": 0.93,
+      "distance_to_query_m": 80,
+      "freshness_score": 0.95,
+      "source_weight": 1.0,
+      "risk_factor": 0.2,
+      "observed_at": "2026-04-28T23:55:00+00:00"
+    },
+    {
+      "source_type": "news",
+      "event_type": "flood_report",
+      "confidence": 0.6,
+      "distance_to_query_m": 480,
+      "freshness_score": 0.8,
+      "source_weight": 0.8,
+      "risk_factor": 1.0,
+      "observed_at": "2026-04-28T23:20:00+00:00"
+    }
+  ],
+  "expected": {
+    "score_version": "risk-v0.1.0",
+    "realtime_level": "低",
+    "historical_level": "低",
+    "confidence_level": "中",
+    "missing_sources": [
+      "尚未接入即時水位資料。"
+    ]
+  }
+}

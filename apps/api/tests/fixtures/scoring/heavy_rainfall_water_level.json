@@ -1,0 +1,30 @@
+{
+  "now": "2026-04-29T00:00:00+00:00",
+  "signals": [
+    {
+      "source_type": "official",
+      "event_type": "rainfall",
+      "confidence": 0.93,
+      "distance_to_query_m": 80,
+      "freshness_score": 0.95,
+      "source_weight": 1.0,
+      "observed_at": "2026-04-28T23:55:00+00:00"
+    },
+    {
+      "source_type": "official",
+      "event_type": "water_level",
+      "confidence": 0.9,
+      "distance_to_query_m": 120,
+      "freshness_score": 0.95,
+      "source_weight": 1.0,
+      "observed_at": "2026-04-28T23:55:00+00:00"
+    }
+  ],
+  "expected": {
+    "score_version": "risk-v0.1.0",
+    "realtime_level": "高",
+    "historical_level": "未知",
+    "confidence_level": "中",
+    "missing_sources": []
+  }
+}

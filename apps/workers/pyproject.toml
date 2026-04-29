@@ -3,7 +3,9 @@ name = "flood-risk-workers"
 version = "0.0.0"
 description = "Worker runtime skeleton for Flood Risk ingestion and scoring jobs."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "psycopg[binary]>=3.2",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -17,4 +19,3 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-

@@ -13,6 +13,9 @@ class Settings:
     redis_url: str
     minio_endpoint: str
     cors_origins: tuple[str, ...]
+    admin_bearer_token: str | None
+    realtime_official_enabled: bool
+    cwa_api_authorization: str | None
 
 
 @lru_cache(maxsize=1)
@@ -34,5 +37,14 @@ def get_settings() -> Settings:
         redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
         minio_endpoint=os.getenv("MINIO_ENDPOINT", "http://minio:9000"),
         cors_origins=cors_origins,
+        admin_bearer_token=os.getenv("ADMIN_BEARER_TOKEN") or None,
+        realtime_official_enabled=_env_bool("REALTIME_OFFICIAL_ENABLED", default=True),
+        cwa_api_authorization=os.getenv("CWA_API_AUTHORIZATION") or None,
     )
 
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}

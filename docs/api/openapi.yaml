@@ -48,6 +48,44 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /ready:
+    get:
+      tags:
+        - Public
+      operationId: getReadiness
+      summary: Service readiness including required dependency checks.
+      responses:
+        "200":
+          description: Service and required dependencies are ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+              examples:
+                ready:
+                  value:
+                    status: ok
+                    service: flood-risk-api
+                    version: 0.1.0
+                    checked_at: "2026-04-29T03:00:00Z"
+                    dependencies:
+                      database:
+                        status: healthy
+                        checked_at: "2026-04-29T03:00:00Z"
+                        message: null
+                      redis:
+                        status: healthy
+                        checked_at: "2026-04-29T03:00:00Z"
+                        message: null
+        "503":
+          description: One or more required dependencies are unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/geocode:
     post:
       tags:
@@ -114,6 +152,7 @@ paths:
                     lng: 121.5654
                   radius_m: 500
                   time_context: now
+                  location_text: 台北101
       responses:
         "200":
           description: Flood risk assessment with evidence preview and freshness metadata.
@@ -307,6 +346,10 @@ paths:
         - Admin
       operationId: listAdminJobs
       summary: List background job status.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
       parameters:
         - name: status
           in: query
@@ -345,6 +388,10 @@ paths:
                         source_timestamp_max: "2026-04-28T12:50:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -354,6 +401,10 @@ paths:
         - Admin
       operationId: listAdminSources
       summary: List source health and data freshness.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
       parameters:
         - name: health_status
           in: query
@@ -385,10 +436,25 @@ paths:
                         source_timestamp_max: "2026-04-28T12:50:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
 
 components:
+  securitySchemes:
+    AdminBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Opaque admin token
+      description: >
+        Admin API bearer token. The Phase skeleton accepts a configured opaque
+        admin token and treats it as the `admin` role. Production auth may move
+        to JWT or another RBAC provider, but every operation tagged Admin must
+        continue to require an authenticated admin principal.
+
   parameters:
     AssessmentId:
       name: assessment_id
@@ -437,6 +503,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Missing, expired, or invalid admin bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Authenticated principal does not have the required admin role.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     InternalError:
       description: Unexpected server error.
       content:
@@ -466,6 +544,57 @@ components:
         checked_at:
           type: string
           format: date-time
+      additionalProperties: false
+
+    ReadyResponse:
+      type: object
+      required:
+        - status
+        - service
+        - version
+        - checked_at
+        - dependencies
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+            - down
+        service:
+          type: string
+        version:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        dependencies:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/DependencyReadiness"
+      additionalProperties: false
+
+    DependencyReadiness:
+      type: object
+      required:
+        - status
+        - checked_at
+        - message
+      properties:
+        status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - failed
+            - unknown
+        checked_at:
+          type: string
+          format: date-time
+        message:
+          type:
+            - string
+            - "null"
       additionalProperties: false
 
     GeocodeRequest:
@@ -559,6 +688,12 @@ components:
           enum:
             - now
           description: V1 supports current-condition assessment.
+        location_text:
+          type:
+            - string
+            - "null"
+          maxLength: 300
+          description: Optional geocoded label or user query used to match historical road/area evidence.
       additionalProperties: false
 
     RiskAssessmentResponse:

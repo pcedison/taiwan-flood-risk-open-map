@@ -1,0 +1,24 @@
+[
+  {
+    "id": "sample-news-001",
+    "url": "https://example.test/news/flood-001",
+    "title": "Heavy rain reported near riverside district",
+    "summary": "Public report describes street flooding near the riverside district.",
+    "published_at": "2026-04-28T08:30:00+00:00",
+    "location_text": "Riverside District",
+    "confidence": 0.72,
+    "attribution": "Example Public News",
+    "tags": ["rain", "street-flooding"]
+  },
+  {
+    "id": "sample-news-002",
+    "url": "https://example.test/news/flood-002",
+    "title": "Road underpass temporarily closed after rainfall",
+    "summary": "A public web update notes ponding around a low-lying underpass.",
+    "published_at": "2026-04-28T09:10:00+00:00",
+    "location_text": "Lowland Underpass",
+    "confidence": 0.65,
+    "attribution": "Example Public News",
+    "tags": ["road", "underpass"]
+  }
+]

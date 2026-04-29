@@ -1,0 +1,52 @@
+version: 1
+policy:
+  phase: 2
+  allowed_legal_basis:
+    - L2
+  disallowed_source_families:
+    - forum
+    - social
+  full_text_redistribution_allowed: false
+sources:
+  - key: sample-public-web
+    adapter_key: news.public_web.sample
+    display_name: Sample public web fixture
+    source_family: news
+    legal_basis: L2
+    status: fixture_only
+    enabled_by_default: false
+    homepage_url: https://example.test/
+    robots_reviewed: true
+    terms_reviewed: true
+    full_text_redistribution: false
+    citation_required: true
+    ingestion_frequency: fixture_only
+    review_note: Fixture source used to lock the L2 normalized-evidence contract; not a production crawler.
+  - key: production-news-template
+    adapter_key: news.public_web.production-template
+    display_name: Production L2 news source template
+    source_family: news
+    legal_basis: L2
+    status: candidate
+    enabled_by_default: false
+    homepage_url: https://example.com/
+    robots_reviewed: false
+    terms_reviewed: false
+    full_text_redistribution: false
+    citation_required: true
+    ingestion_frequency: pending_review
+    review_note: Replace with a reviewed public news, RSS, or public API source before production enablement.
+  - key: gdelt-backfill-candidate
+    adapter_key: news.public_web.gdelt_backfill
+    display_name: GDELT DOC public-news backfill candidate
+    source_family: news
+    legal_basis: L2
+    status: candidate
+    enabled_by_default: false
+    homepage_url: https://www.gdeltproject.org/
+    robots_reviewed: false
+    terms_reviewed: false
+    full_text_redistribution: false
+    citation_required: true
+    ingestion_frequency: backfill_then_daily
+    review_note: Candidate public-news search index for broad Taiwan flood-history backfill; must pass terms/source review and dedupe/geocoding QA before production enablement.

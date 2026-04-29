@@ -21,6 +21,8 @@ Desktop.ini
 .mypy_cache/
 .coverage
 coverage/
+playwright-report/
+test-results/
 
 # Python
 __pycache__/

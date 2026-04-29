@@ -1,0 +1,26 @@
+[
+  {
+    "station_id": "C0A560",
+    "station_name": "Taipei Station",
+    "observed_at": "2026-04-28T08:00:00+00:00",
+    "rainfall_mm_1h": 42.5,
+    "rainfall_mm_24h": 156.0,
+    "county": "Taipei City",
+    "town": "Zhongzheng District",
+    "source_url": "https://opendata.cwa.gov.tw/dataset/observation/rainfall",
+    "attribution": "Central Weather Administration",
+    "confidence": 0.93
+  },
+  {
+    "station_id": "C0AC70",
+    "station_name": "Xindian Station",
+    "observed_at": "2026-04-28T08:00:00+00:00",
+    "rainfall_mm_1h": 35.0,
+    "rainfall_mm_24h": 121.5,
+    "county": "New Taipei City",
+    "town": "Xindian District",
+    "source_url": "https://opendata.cwa.gov.tw/dataset/observation/rainfall",
+    "attribution": "Central Weather Administration",
+    "confidence": 0.93
+  }
+]
