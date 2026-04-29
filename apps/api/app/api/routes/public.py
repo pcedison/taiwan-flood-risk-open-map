@@ -2,7 +2,7 @@ import json
 import re
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -34,6 +34,12 @@ from app.api.schemas import (
     TileJsonVectorLayer,
 )
 from app.core.config import get_settings
+from app.domain.evidence import (
+    EvidenceRecord,
+    EvidenceRepositoryUnavailable,
+    fetch_assessment_evidence,
+    query_nearby_evidence,
+)
 from app.domain.history import (
     HistoricalFloodRecord,
     historical_record_matches_location_text,
@@ -418,6 +424,59 @@ def _historical_record_evidence(
     )
 
 
+def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | None:
+    settings = get_settings()
+    try:
+        records = query_nearby_evidence(
+            database_url=settings.database_url,
+            lat=request.point.lat,
+            lng=request.point.lng,
+            radius_m=request.radius_m,
+            limit=50,
+        )
+    except EvidenceRepositoryUnavailable:
+        if settings.app_env in {"staging", "production", "production-beta"}:
+            return ()
+        return None
+    return tuple(_evidence_from_record(record) for record in records)
+
+
+def _evidence_from_record(record: EvidenceRecord) -> Evidence:
+    point = (
+        LatLng(lat=record.lat, lng=record.lng)
+        if record.lat is not None and record.lng is not None
+        else None
+    )
+    geometry = (
+        GeoJsonGeometry(
+            type=record.geometry["type"],
+            coordinates=record.geometry["coordinates"],
+        )
+        if record.geometry is not None
+        else None
+    )
+    return Evidence(
+        id=record.id,
+        source_id=record.source_id,
+        source_type=cast(Any, record.source_type),
+        event_type=cast(Any, record.event_type),
+        title=record.title,
+        summary=record.summary,
+        url=record.url,
+        occurred_at=record.occurred_at,
+        observed_at=record.observed_at,
+        ingested_at=record.ingested_at,
+        point=point,
+        geometry=geometry,
+        distance_to_query_m=record.distance_to_query_m,
+        confidence=record.confidence,
+        freshness_score=record.freshness_score,
+        source_weight=record.source_weight,
+        privacy_level=cast(Any, record.privacy_level),
+        raw_ref=record.raw_ref,
+    )
+
+
 def _evidence_preview(evidence: Evidence) -> EvidencePreview:
     return EvidencePreview(
         id=evidence.id,
@@ -460,6 +519,19 @@ def _signal_from_historical_record(
         source_weight=record.source_weight,
         risk_factor=record.risk_factor,
         observed_at=record.occurred_at,
+    )
+
+
+def _signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
+    return RiskEvidenceSignal(
+        source_type=evidence.source_type,
+        event_type=evidence.event_type,
+        confidence=evidence.confidence,
+        distance_to_query_m=evidence.distance_to_query_m,
+        freshness_score=evidence.freshness_score,
+        source_weight=evidence.source_weight,
+        risk_factor=1.0,
+        observed_at=evidence.observed_at or evidence.occurred_at,
     )
 
 
@@ -519,34 +591,47 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         enabled=settings.realtime_official_enabled,
         now=created_at,
     )
-    historical_records = nearby_historical_flood_records(
-        lat=request.point.lat,
-        lng=request.point.lng,
-        radius_m=request.radius_m,
-        location_text=request.location_text,
+    db_evidence_items = _nearby_db_evidence(request)
+    if db_evidence_items is None:
+        historical_records = nearby_historical_flood_records(
+            lat=request.point.lat,
+            lng=request.point.lng,
+            radius_m=request.radius_m,
+            location_text=request.location_text,
+        )
+        historical_evidence_items = [
+            _historical_record_evidence(record, distance_to_query_m=distance_m)
+            for record, distance_m in historical_records
+        ]
+        historical_signals = tuple(
+            _signal_from_historical_record(
+                record,
+                distance_to_query_m=_historical_scoring_distance(
+                    record=record,
+                    distance_to_query_m=distance_m,
+                    radius_m=request.radius_m,
+                    location_text=request.location_text,
+                ),
+            )
+            for record, distance_m in historical_records
+        )
+    else:
+        historical_records = ()
+        historical_evidence_items = list(db_evidence_items)
+        historical_signals = tuple(_signal_from_evidence(item) for item in db_evidence_items)
+    historical_freshness = _historical_data_freshness(
+        historical_records=historical_records,
+        db_evidence_items=db_evidence_items,
+        now=created_at,
     )
     evidence_items = [
         *(_official_realtime_evidence(observation) for observation in realtime_bundle.observations),
-        *(
-            _historical_record_evidence(record, distance_to_query_m=distance_m)
-            for record, distance_m in historical_records
-        ),
+        *historical_evidence_items,
     ]
     scoring = score_risk(
         (
             *(_signal_from_official_realtime(observation) for observation in realtime_bundle.observations),
-            *(
-                _signal_from_historical_record(
-                    record,
-                    distance_to_query_m=_historical_scoring_distance(
-                        record=record,
-                        distance_to_query_m=distance_m,
-                        radius_m=request.radius_m,
-                        location_text=request.location_text,
-                    ),
-                )
-                for record, distance_m in historical_records
-            ),
+            *historical_signals,
         ),
         now=created_at,
     )
@@ -564,18 +649,22 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         explanation=Explanation(
             summary=scoring.explanation_summary,
             main_reasons=list(scoring.main_reasons),
-            missing_sources=_visible_source_limitations(realtime_bundle, historical_records),
+            missing_sources=_visible_source_limitations(
+                realtime_bundle,
+                historical_records,
+                db_evidence_items,
+            ),
         ),
         evidence=[_evidence_preview(item) for item in evidence_items],
         data_freshness=[
             *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
             DataFreshness(
-                source_id="historical-flood-records",
+                source_id=historical_freshness.source_id,
                 name="歷史淹水紀錄與公開新聞",
-                health_status="healthy" if historical_records else "unknown",
-                observed_at=max((record.occurred_at for record, _ in historical_records), default=None),
-                ingested_at=created_at,
-                message=_historical_freshness_message(historical_records),
+                health_status=historical_freshness.health_status,
+                observed_at=historical_freshness.observed_at,
+                ingested_at=historical_freshness.ingested_at,
+                message=historical_freshness.message,
             )
         ],
         query_heat=QueryHeat(
@@ -603,6 +692,44 @@ def _historical_freshness_message(
     return (
         f"查詢半徑內找到 {len(historical_records)} 筆已匯入歷史淹水公開紀錄；"
         "目前完整新聞回填仍在 Phase 2 管線建置中。"
+    )
+
+
+def _historical_data_freshness(
+    *,
+    historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
+    db_evidence_items: tuple[Evidence, ...] | None,
+    now: datetime,
+) -> DataFreshness:
+    if db_evidence_items is None:
+        return DataFreshness(
+            source_id="historical-flood-records",
+            name="Historical flood fallback records",
+            health_status="healthy" if historical_records else "unknown",
+            observed_at=max((record.occurred_at for record, _ in historical_records), default=None),
+            ingested_at=now,
+            message=_historical_freshness_message(historical_records),
+        )
+
+    observed_values = [
+        observed_at
+        for item in db_evidence_items
+        for observed_at in (item.observed_at or item.occurred_at,)
+        if observed_at is not None
+    ]
+    latest_observed = max(observed_values, default=None)
+    latest_ingested = max((item.ingested_at for item in db_evidence_items), default=None)
+    return DataFreshness(
+        source_id="db-evidence",
+        name="Historical flood evidence database",
+        health_status="healthy" if db_evidence_items else "unknown",
+        observed_at=latest_observed,
+        ingested_at=latest_ingested or now,
+        message=(
+            f"Found {len(db_evidence_items)} accepted evidence record(s) in the query radius."
+            if db_evidence_items
+            else "No accepted historical evidence is currently stored in the query radius."
+        ),
     )
 
 
@@ -635,6 +762,7 @@ def _freshness_from_status(status: OfficialRealtimeSourceStatus) -> DataFreshnes
 def _visible_source_limitations(
     bundle: OfficialRealtimeBundle,
     historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
+    db_evidence_items: tuple[Evidence, ...] | None,
 ) -> list[str]:
     limitations: list[str] = []
     observation_types = {observation.event_type for observation in bundle.observations}
@@ -648,7 +776,7 @@ def _visible_source_limitations(
         water_level = statuses.get("wra-water-level")
         if water_level is not None:
             limitations.append(water_level.message or "即時水位資料目前沒有可用測站。")
-    if not historical_records:
+    if not historical_records and not db_evidence_items:
         limitations.append("查詢半徑內尚未匯入歷史淹水紀錄；目前不應把即時低風險解讀為購屋安全。")
     return limitations
 
@@ -660,12 +788,28 @@ async def list_evidence(
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> EvidenceListResponse:
     del cursor
-    items = _ASSESSMENT_EVIDENCE_CACHE.get(str(assessment_id), [])[:page_size]
+    cached_items = _ASSESSMENT_EVIDENCE_CACHE.get(str(assessment_id))
+    if cached_items is None:
+        items = list(_assessment_db_evidence(str(assessment_id), page_size=page_size))
+    else:
+        items = cached_items[:page_size]
     return EvidenceListResponse(
         assessment_id=str(assessment_id),
         items=items,
         next_cursor=None,
     )
+
+
+def _assessment_db_evidence(assessment_id: str, *, page_size: int) -> tuple[Evidence, ...]:
+    try:
+        records = fetch_assessment_evidence(
+            database_url=get_settings().database_url,
+            assessment_id=assessment_id,
+            page_size=page_size,
+        )
+    except EvidenceRepositoryUnavailable:
+        return ()
+    return tuple(_evidence_from_record(record) for record in records)
 
 
 @router.get("/layers", response_model=LayersResponse)

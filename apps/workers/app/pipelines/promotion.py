@@ -32,6 +32,7 @@ class PromotionCandidate:
 @dataclass(frozen=True)
 class EvidencePromotionPayload:
     data_source_id: str | None
+    adapter_key: str | None
     source_id: str
     source_type: str
     event_type: str
@@ -65,6 +66,7 @@ def build_evidence_promotion_payload(candidate: PromotionCandidate) -> EvidenceP
 
     return EvidencePromotionPayload(
         data_source_id=candidate.data_source_id,
+        adapter_key=_payload_adapter_key(candidate.payload),
         source_id=candidate.source_id,
         source_type=candidate.source_type,
         event_type=candidate.event_type,
@@ -133,11 +135,26 @@ class PostgresEvidencePromotionWriter:
                         ingestion_status,
                         properties
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'accepted', %s::jsonb)
+                    VALUES (
+                        COALESCE(%s, (SELECT id FROM data_sources WHERE adapter_key = %s)),
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        'accepted',
+                        %s::jsonb
+                    )
                     RETURNING id
                     """,
                     (
                         payload.data_source_id,
+                        payload.adapter_key,
                         payload.source_id,
                         payload.source_type,
                         payload.event_type,
@@ -175,7 +192,7 @@ def _accepted_staging_sql(*, limit: int | None) -> str:
             se.id,
             se.raw_snapshot_id,
             rs.raw_ref,
-            se.data_source_id,
+            COALESCE(se.data_source_id, rs.data_source_id, ds.id) AS data_source_id,
             se.source_id,
             se.source_type,
             se.event_type,
@@ -189,6 +206,7 @@ def _accepted_staging_sql(*, limit: int | None) -> str:
             se.payload
         FROM staging_evidence se
         LEFT JOIN raw_snapshots rs ON rs.id = se.raw_snapshot_id
+        LEFT JOIN data_sources ds ON ds.adapter_key = COALESCE(se.payload ->> 'adapter_key', rs.adapter_key)
         WHERE se.validation_status = 'accepted'
             AND NOT EXISTS (
                 SELECT 1
@@ -233,6 +251,11 @@ def _candidate_from_row(row: tuple[Any, ...]) -> PromotionCandidate:
         validation_status=str(row[13]),
         payload=dict(payload),
     )
+
+
+def _payload_adapter_key(payload: dict[str, Any]) -> str | None:
+    adapter_key = payload.get("adapter_key")
+    return str(adapter_key) if adapter_key else None
 
 
 def _json(value: dict[str, Any]) -> str:

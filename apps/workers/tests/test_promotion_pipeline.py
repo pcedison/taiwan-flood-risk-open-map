@@ -21,6 +21,7 @@ def test_build_evidence_promotion_payload_maps_accepted_staging_row() -> None:
     payload = build_evidence_promotion_payload(candidate)
 
     assert payload.source_id == "sample-news-001"
+    assert payload.adapter_key == "news.public_web.sample"
     assert payload.source_type == "news"
     assert payload.event_type == "flood_report"
     assert payload.raw_ref == "raw/news-public-web/sample.json"
@@ -70,7 +71,12 @@ def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() 
                 OBSERVED_AT,
                 0.72,
                 "accepted",
-                json.dumps({"location_text": "Riverside District"}),
+                json.dumps(
+                    {
+                        "adapter_key": "news.public_web.sample",
+                        "location_text": "Riverside District",
+                    }
+                ),
             )
         ],
         evidence_id="evidence-id",
@@ -86,13 +92,17 @@ def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() 
     select_sql, select_params = connection.cursor_instance.executions[0]
     insert_sql, insert_params = connection.cursor_instance.executions[1]
     assert "FROM staging_evidence se" in select_sql
+    assert "LEFT JOIN data_sources ds" in select_sql
+    assert "COALESCE(se.data_source_id, rs.data_source_id, ds.id) AS data_source_id" in select_sql
     assert "se.validation_status = 'accepted'" in select_sql
     assert "NOT EXISTS" in select_sql
     assert select_params == (5,)
     assert "INSERT INTO evidence" in insert_sql
-    assert insert_params[1] == "sample-news-001"
-    assert insert_params[10] == "raw/news-public-web/sample.json"
-    properties = json.loads(str(insert_params[11]))
+    assert "SELECT id FROM data_sources WHERE adapter_key = %s" in insert_sql
+    assert insert_params[1] == "news.public_web.sample"
+    assert insert_params[2] == "sample-news-001"
+    assert insert_params[11] == "raw/news-public-web/sample.json"
+    properties = json.loads(str(insert_params[12]))
     assert properties["location_text"] == "Riverside District"
     assert properties["staging_evidence_id"] == "staging-id"
 
@@ -122,7 +132,10 @@ def _candidate(*, validation_status: str = "accepted") -> PromotionCandidate:
         observed_at=OBSERVED_AT,
         confidence=0.72,
         validation_status=validation_status,
-        payload={"location_text": "Riverside District"},
+        payload={
+            "adapter_key": "news.public_web.sample",
+            "location_text": "Riverside District",
+        },
     )
 
 

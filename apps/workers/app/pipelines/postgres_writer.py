@@ -45,6 +45,7 @@ def _upsert_raw_snapshot(cursor: Any, batch: AdapterStagingBatch) -> str:
     cursor.execute(
         """
         INSERT INTO raw_snapshots (
+            data_source_id,
             adapter_key,
             raw_ref,
             content_hash,
@@ -54,8 +55,19 @@ def _upsert_raw_snapshot(cursor: Any, batch: AdapterStagingBatch) -> str:
             retention_expires_at,
             metadata
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        VALUES (
+            (SELECT id FROM data_sources WHERE adapter_key = %s),
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s::jsonb
+        )
         ON CONFLICT (raw_ref) DO UPDATE SET
+            data_source_id = COALESCE(EXCLUDED.data_source_id, raw_snapshots.data_source_id),
             content_hash = EXCLUDED.content_hash,
             fetched_at = EXCLUDED.fetched_at,
             source_timestamp_min = EXCLUDED.source_timestamp_min,
@@ -65,6 +77,7 @@ def _upsert_raw_snapshot(cursor: Any, batch: AdapterStagingBatch) -> str:
         RETURNING id
         """,
         (
+            raw.adapter_key,
             raw.adapter_key,
             raw.raw_ref,
             raw.content_hash,
@@ -90,6 +103,7 @@ def _insert_staging_evidence(
         """
         INSERT INTO staging_evidence (
             raw_snapshot_id,
+            data_source_id,
             source_id,
             source_type,
             event_type,
@@ -103,10 +117,26 @@ def _insert_staging_evidence(
             rejection_reason,
             payload
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+        VALUES (
+            %s,
+            (SELECT id FROM data_sources WHERE adapter_key = %s),
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s::jsonb
+        )
         """,
         (
             raw_snapshot_id,
+            item.adapter_key,
             item.source_id,
             item.source_type,
             item.event_type,

@@ -38,12 +38,18 @@ def test_postgres_writer_upserts_raw_snapshot_and_inserts_staging_rows() -> None
     raw_sql, raw_params = connection.cursor_instance.executions[0]
     staging_sql, staging_params = connection.cursor_instance.executions[1]
     assert "INSERT INTO raw_snapshots" in raw_sql
-    assert raw_params[1] == "raw/news-public-web/sample.json"
+    assert "data_source_id" in raw_sql
+    assert "SELECT id FROM data_sources WHERE adapter_key = %s" in raw_sql
+    assert raw_params[0] == "news.public_web.sample"
+    assert raw_params[2] == "raw/news-public-web/sample.json"
     assert "ON CONFLICT (raw_ref) DO UPDATE" in raw_sql
     assert "INSERT INTO staging_evidence" in staging_sql
+    assert "data_source_id" in staging_sql
+    assert "SELECT id FROM data_sources WHERE adapter_key = %s" in staging_sql
     assert staging_params[0] == "raw-snapshot-id"
-    assert staging_params[10] == "accepted"
-    payload = json.loads(str(staging_params[12]))
+    assert staging_params[1] == "news.public_web.sample"
+    assert staging_params[11] == "accepted"
+    payload = json.loads(str(staging_params[13]))
     assert payload["evidence_id"].startswith("ev_")
     assert payload["adapter_key"] == "news.public_web.sample"
 

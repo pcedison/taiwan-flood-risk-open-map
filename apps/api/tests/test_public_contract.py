@@ -5,11 +5,13 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+import pytest
 import yaml
 
 from app.api.schemas import DependencyReadiness, LatLng, PlaceCandidate
 from app.api.routes import health as health_routes
 from app.api.routes import public as public_routes
+from app.domain.evidence import EvidenceRecord, EvidenceRepositoryUnavailable
 from app.domain.realtime import (
     OfficialRealtimeBundle,
     OfficialRealtimeObservation,
@@ -27,6 +29,14 @@ RISK_LEVELS = {"低", "中", "高", "極高", "未知"}
 CONFIDENCE_LEVELS = {"低", "中", "高", "未知"}
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OPENAPI_SPEC = yaml.safe_load((REPO_ROOT / "docs" / "api" / "openapi.yaml").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(autouse=True)
+def fallback_to_local_historical_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(**_kwargs: object) -> tuple[EvidenceRecord, ...]:
+        raise EvidenceRepositoryUnavailable("database unavailable in contract tests")
+
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", unavailable)
 
 
 def assert_iso_datetime(value: str) -> None:
@@ -289,7 +299,7 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert set(payload["historical"]) == {"level"}
     assert set(payload["confidence"]) == {"level"}
     assert payload["realtime"]["level"] in RISK_LEVELS
-    assert payload["historical"]["level"] in RISK_LEVELS
+    assert payload["historical"]["level"] == "未知"
     assert payload["confidence"]["level"] in CONFIDENCE_LEVELS
     assert len(payload["evidence"]) >= 2
     assert payload["explanation"]["missing_sources"] == [
@@ -338,6 +348,63 @@ def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> No
     assert any("2025-08-02" in item["title"] for item in payload["evidence"])
     assert payload["data_freshness"][-1]["source_id"] == "historical-flood-records"
     assert "2 筆" in payload["data_freshness"][-1]["message"]
+
+
+def test_risk_assess_uses_db_evidence_when_repository_is_available(monkeypatch) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (_db_evidence_record(),),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 23.038818, "lng": 120.213493},
+            "radius_m": 300,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["source_id"] for item in payload["data_freshness"]][-1] == "db-evidence"
+    assert "accepted evidence" in payload["data_freshness"][-1]["message"]
+    assert payload["evidence"][0]["id"] == "b3f22a36-7316-4e2a-92b6-c6f6443c8528"
+    assert payload["evidence"][0]["source_type"] == "news"
+    assert not any("甇瑕" in source for source in payload["explanation"]["missing_sources"])
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_does_not_fallback_to_fixture_when_db_returns_empty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 23.038818, "lng": 120.213493},
+            "radius_m": 300,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["historical"]["level"] in RISK_LEVELS
+    assert payload["evidence"] == []
+    assert payload["data_freshness"][-1]["source_id"] == "db-evidence"
+    assert payload["data_freshness"][-1]["health_status"] == "unknown"
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
 def test_risk_assess_surfaces_changxi_road_historical_flood_records(monkeypatch) -> None:
@@ -389,6 +456,30 @@ def test_risk_assess_matches_historical_records_by_location_text(monkeypatch) ->
     payload = response.json()
     assert payload["historical"]["level"] == "高"
     assert any("長溪路二段" in item["title"] for item in payload["evidence"])
+
+
+def _db_evidence_record() -> EvidenceRecord:
+    return EvidenceRecord(
+        id="b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+        source_id="news:tainan-annan:2025-08-02",
+        source_type="news",
+        event_type="flood_report",
+        title="2025-08-02 accepted flood evidence near Annan",
+        summary="Accepted public evidence stored in the evidence table.",
+        url="https://example.test/news/tainan-flood",
+        occurred_at=datetime.fromisoformat("2025-08-02T08:00:00+08:00"),
+        observed_at=datetime.fromisoformat("2025-08-02T08:00:00+08:00"),
+        ingested_at=datetime.fromisoformat("2026-04-29T03:00:00+00:00"),
+        lat=23.038818,
+        lng=120.213493,
+        geometry={"type": "Point", "coordinates": [120.213493, 23.038818]},
+        distance_to_query_m=15.0,
+        confidence=0.86,
+        freshness_score=0.95,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref="raw/news/accepted.json",
+    )
 
 
 def _official_realtime_bundle() -> OfficialRealtimeBundle:
@@ -521,6 +612,25 @@ def test_evidence_list_contract(monkeypatch) -> None:
     }
     assert UUID(evidence["id"])
     assert evidence["geometry"] == {"type": "Point", "coordinates": [120.213493, 23.038818]}
+    assert_openapi_schema(payload, "EvidenceListResponse")
+
+
+def test_evidence_list_can_read_persisted_assessment_evidence(monkeypatch) -> None:
+    assessment_id = "d315d0e6-9c1e-475a-9118-f299d12d5c62"
+    public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_assessment_evidence",
+        lambda **_kwargs: (_db_evidence_record(),),
+    )
+
+    response = client.get(f"/v1/evidence/{assessment_id}", params={"page_size": 1})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assessment_id"] == assessment_id
+    assert payload["items"][0]["id"] == "b3f22a36-7316-4e2a-92b6-c6f6443c8528"
+    assert payload["items"][0]["point"] == {"lat": 23.038818, "lng": 120.213493}
     assert_openapi_schema(payload, "EvidenceListResponse")
 
 
