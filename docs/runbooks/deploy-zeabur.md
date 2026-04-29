@@ -105,6 +105,38 @@ Future or phase-specific variables:
 
 Use separate Zeabur services so each runtime can scale and restart independently.
 
+### Single-service preview deployment
+
+For early public preview and TGOS domain registration, the repository also supports a single Zeabur service through the root `Dockerfile`.
+
+Use this mode when the immediate goal is to obtain one stable public Zeabur domain for the web UI and API smoke testing. The container starts FastAPI on an internal loopback port and Next.js on Zeabur's public `$PORT`; Next.js rewrites `/v1/*`, `/health`, and `/ready` to the internal API.
+
+Zeabur settings:
+
+| Setting | Value |
+|---|---|
+| Service type | Dockerfile |
+| Root directory | repository root |
+| Build command | leave blank |
+| Start command | leave blank |
+| Public domain | enabled |
+
+Minimal environment variables:
+
+| Variable | Value |
+|---|---|
+| `APP_ENV` | `staging` |
+| `LOG_LEVEL` | `info` |
+| `NEXT_PUBLIC_API_BASE_URL` | empty string; same-origin API through Next rewrites |
+| `NEXT_TELEMETRY_DISABLED` | `1` |
+| `REALTIME_OFFICIAL_ENABLED` | `true` |
+| `CWA_API_AUTHORIZATION` | public CWA authorization token used by the runtime |
+| `ADMIN_BEARER_TOKEN` | random long secret if admin endpoints will be tested |
+
+Do not use `/ready` as the first health check in single-service preview mode unless PostgreSQL and Redis are also attached. Use `/health` for the initial Zeabur HTTP health check.
+
+This mode is not the final production topology. The split services below remain the target once database migrations, worker scheduling, and raw snapshot storage are actively operated.
+
 | Service | Root | Public | Purpose | Current command | Next target |
 |---|---|---|---|---|---|
 | `web` | `apps/web` | yes | Web UI | Local compose: `npm ci && npm run dev -- --hostname 0.0.0.0 --port 3000` | Zeabur: `npm run build` during build, then `npm run start -- --hostname 0.0.0.0 --port $PORT` |

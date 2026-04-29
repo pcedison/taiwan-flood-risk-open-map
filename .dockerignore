@@ -6,6 +6,9 @@
 **/.ruff_cache/
 **/node_modules/
 **/.next/
+**/test-results/
+**/*.tsbuildinfo
+**/*.log
 **/dist/
 **/build/
 .env
@@ -13,4 +16,3 @@
 !.env.example
 data/raw/
 data/processed/
-
