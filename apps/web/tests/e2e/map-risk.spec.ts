@@ -48,9 +48,23 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             ingested_at: "2026-04-29T02:55:00Z",
             observed_at: "2026-04-29T02:50:00Z",
             occurred_at: null,
+            published_at: "2026-04-29T02:45:00Z",
             source_type: "official",
+            source_url: "https://example.test/flood-potential",
             summary: "查詢點位附近有官方開放資料中的淹水潛勢訊號。",
             title: "淹水潛勢公開圖資",
+          },
+          {
+            confidence: 0.72,
+            distance_to_query_m: 420,
+            event_type: "discussion",
+            id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073b",
+            ingested_at: "2026-04-29T02:40:00Z",
+            observed_at: null,
+            occurred_at: "2026-04-29T01:30:00Z",
+            source_type: "forum",
+            summary: "Community report summary",
+            title: "Community flood report",
           },
         ],
         evidence_url: null,
@@ -93,6 +107,16 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("官方公開資料")).toBeVisible();
   await expect(page.getByText("90%")).toBeVisible();
   await expect(page.getByText("0 m", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 筆來源")).toBeVisible();
+  await expect(page.getByText("觀測 / 發布").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "開啟來源" })).toHaveAttribute(
+    "href",
+    "https://example.test/flood-potential",
+  );
+  await expect(page.getByText("Community flood report")).toBeVisible();
+  await expect(page.getByText("Community report summary")).toBeVisible();
+  await expect(page.getByText("420 m", { exact: true })).toBeVisible();
+  await expect(page.getByText("未提供連結")).toBeVisible();
   await expect(page.getByText("淹水潛勢公開資料：正常")).toBeVisible();
   await expect(page.getByText("目前為開發環境示範資料，尚未連接正式即時圖層。")).toBeVisible();
   await expect(page.getByText("查詢關注度：低")).toBeVisible();

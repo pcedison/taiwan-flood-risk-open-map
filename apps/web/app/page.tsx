@@ -45,8 +45,12 @@ type RiskAssessmentResponse = {
     title: string;
     summary: string;
     confidence: number;
+    occurred_at?: string | null;
     observed_at: string | null;
     ingested_at: string | null;
+    published_at?: string | null;
+    source_url?: string | null;
+    url?: string | null;
     distance_to_query_m: number | null;
   }>;
   data_freshness: Array<{
@@ -119,6 +123,12 @@ const text = {
   evidenceConfidence: "信心",
   evidenceDistance: "距離",
   evidenceObservedAt: "觀測",
+  evidenceCountSuffix: "筆來源",
+  evidenceTime: "觀測 / 發布",
+  evidenceUrl: "來源連結",
+  evidenceOpenSource: "開啟來源",
+  evidenceMissingUrl: "未提供連結",
+  evidenceEmpty: "本次查詢尚未回傳可列出的資料佐證。",
   limitations: "資料限制",
   evidenceFlood: "尚未查詢附近淹水事件。",
   evidenceRain: "查詢後會顯示雨量、水位與淹水潛勢資料。",
@@ -226,6 +236,23 @@ const formatDateTime = (value: string | null) => {
     minute: "2-digit",
     month: "2-digit",
   }).format(new Date(value));
+};
+
+const evidenceSourceUrl = (item: RiskAssessmentResponse["evidence"][number]) =>
+  item.url ?? item.source_url ?? null;
+
+const evidencePublishedAt = (item: RiskAssessmentResponse["evidence"][number]) =>
+  item.published_at ?? item.occurred_at ?? null;
+
+const evidenceTimeSummary = (item: RiskAssessmentResponse["evidence"][number]) => {
+  const observedAt = item.observed_at;
+  const publishedAt = evidencePublishedAt(item);
+
+  if (observedAt && publishedAt) {
+    return `${formatDateTime(observedAt)} / ${formatDateTime(publishedAt)}`;
+  }
+
+  return formatDateTime(observedAt ?? publishedAt ?? null);
 };
 
 const targetZoom = (coordinate: Coordinate, radius: number) => {
@@ -643,57 +670,96 @@ export default function HomePage() {
               </div>
             </dl>
           ) : null}
-          {assessment?.explanation.missing_sources.length ? (
-            <div className="limitations">
-              <strong>{text.limitations}</strong>
-              <ul>
-                {assessment.explanation.missing_sources.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
         </section>
 
         <section className="panel-section evidence-panel">
-          <div className="section-heading">
-            <span className="section-kicker">{text.evidenceKicker}</span>
-            <strong>{text.evidenceTitle}</strong>
-          </div>
-          {assessment ? (
-            <ul className="evidence-list">
-              {assessment.evidence.map((item) => (
-                <li key={item.id}>
-                  <strong>{item.title}</strong>
-                  <span>{item.summary}</span>
-                  <dl className="evidence-meta">
-                    <div>
-                      <dt>{text.evidenceSource}</dt>
-                      <dd>{sourceTypeLabel(item.source_type)}</dd>
+          <details className="evidence-drawer" open>
+            <summary>
+              <span className="section-kicker">{text.evidenceKicker}</span>
+              <strong>{text.evidenceTitle}</strong>
+              {assessment ? (
+                <span>
+                  {assessment.evidence.length} {text.evidenceCountSuffix}
+                </span>
+              ) : null}
+            </summary>
+            {assessment ? (
+              <div className="evidence-drawer-body">
+                {assessment.explanation.missing_sources.length ? (
+                  <div className="evidence-warning" role="status">
+                    <strong>{text.limitations}</strong>
+                    <ul>
+                      {assessment.explanation.missing_sources.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <div className="freshness-strip" aria-label={text.freshness}>
+                  {assessment.data_freshness.map((item) => (
+                    <div key={item.source_id}>
+                      <strong>{item.name}</strong>
+                      <span>{healthLabel(item.health_status)}</span>
+                      <small>{formatDateTime(item.observed_at ?? item.ingested_at)}</small>
                     </div>
-                    <div>
-                      <dt>{text.evidenceConfidence}</dt>
-                      <dd>{formatConfidence(item.confidence)}</dd>
-                    </div>
-                    <div>
-                      <dt>{text.evidenceDistance}</dt>
-                      <dd>{formatDistance(item.distance_to_query_m)}</dd>
-                    </div>
-                    <div>
-                      <dt>{text.evidenceObservedAt}</dt>
-                      <dd>{formatDateTime(item.observed_at)}</dd>
-                    </div>
-                  </dl>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <ul>
-              <li>{text.evidenceFlood}</li>
-              <li>{text.evidenceRain}</li>
-              <li>{text.evidenceTerrain}</li>
-            </ul>
-          )}
+                  ))}
+                </div>
+
+                {assessment.evidence.length ? (
+                  <ul className="evidence-list">
+                    {assessment.evidence.map((item) => {
+                      const sourceUrl = evidenceSourceUrl(item);
+
+                      return (
+                        <li key={item.id} className="evidence-card">
+                          <div className="evidence-card-header">
+                            <span>{sourceTypeLabel(item.source_type)}</span>
+                            <strong>{item.title}</strong>
+                          </div>
+                          <p>{item.summary}</p>
+                          <dl className="evidence-meta">
+                            <div>
+                              <dt>{text.evidenceDistance}</dt>
+                              <dd>{formatDistance(item.distance_to_query_m)}</dd>
+                            </div>
+                            <div>
+                              <dt>{text.evidenceTime}</dt>
+                              <dd>{evidenceTimeSummary(item)}</dd>
+                            </div>
+                            <div>
+                              <dt>{text.evidenceConfidence}</dt>
+                              <dd>{formatConfidence(item.confidence)}</dd>
+                            </div>
+                            <div>
+                              <dt>{text.evidenceUrl}</dt>
+                              <dd>
+                                {sourceUrl ? (
+                                  <a href={sourceUrl} target="_blank" rel="noreferrer">
+                                    {text.evidenceOpenSource}
+                                  </a>
+                                ) : (
+                                  <span className="missing-source">{text.evidenceMissingUrl}</span>
+                                )}
+                              </dd>
+                            </div>
+                          </dl>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <div className="evidence-empty">{text.evidenceEmpty}</div>
+                )}
+              </div>
+            ) : (
+              <ul className="evidence-placeholder-list">
+                <li>{text.evidenceFlood}</li>
+                <li>{text.evidenceRain}</li>
+                <li>{text.evidenceTerrain}</li>
+              </ul>
+            )}
+          </details>
         </section>
 
         <section className="panel-section freshness-panel">
