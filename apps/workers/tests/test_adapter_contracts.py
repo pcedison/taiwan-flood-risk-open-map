@@ -7,6 +7,7 @@ from pathlib import Path
 from app.adapters.contracts import DataSourceAdapter, EventType, IngestionStatus, SourceFamily
 from app.adapters.news import GdeltPublicNewsBackfillAdapter, SamplePublicWebNewsAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
+from app.config import load_worker_settings
 from app.pipelines.validation import validate_evidence_for_promotion
 
 
@@ -104,11 +105,13 @@ def test_pipeline_validation_rejects_out_of_range_confidence() -> None:
 
 
 def test_forum_adapters_remain_disabled_by_default() -> None:
-    assert "news.public_web.sample" not in enabled_adapter_keys()
-    assert "news.public_web.gdelt_backfill" not in enabled_adapter_keys()
-    assert "official.cwa.rainfall" in enabled_adapter_keys()
-    assert "official.wra.water_level" in enabled_adapter_keys()
-    assert "official.flood_potential.geojson" in enabled_adapter_keys()
+    settings = load_worker_settings({})
+
+    assert "news.public_web.sample" not in enabled_adapter_keys(settings)
+    assert "news.public_web.gdelt_backfill" not in enabled_adapter_keys(settings)
+    assert "official.cwa.rainfall" in enabled_adapter_keys(settings)
+    assert "official.wra.water_level" in enabled_adapter_keys(settings)
+    assert "official.flood_potential.geojson" in enabled_adapter_keys(settings)
     assert ADAPTER_REGISTRY["ptt"].enabled_by_default is False
     assert ADAPTER_REGISTRY["ptt"].terms_review_required is True
     assert ADAPTER_REGISTRY["dcard"].enabled_by_default is False

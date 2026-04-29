@@ -2,21 +2,118 @@
 
 ## Purpose
 
-This runbook defines the expected Zeabur deployment path for Flood Risk staging and production beta. The SDD decision is GitHub repo to Zeabur VPS auto deploy, while preserving Docker Compose portability for future migration.
+This runbook defines the expected Zeabur deployment path for Flood Risk staging and production beta. For the current public preview, use the single Zeabur Docker service described first. The longer split-service topology remains the future production target.
 
 ## Scope
 
 This runbook covers:
 
-- GitHub connection
+- Current single-service Docker deployment
 - Environment variables
-- Service split
-- Database migration
-- Worker and scheduler operations
-- Rollback
 - Health checks
+- TGOS domain registration notes
+- Future split-service deployment
+- Database migration, worker, scheduler, and rollback notes
 
 Commands below describe the current Phase 1 service contracts. Exact package commands may change as the app implementation grows, but changes must remain compatible with this runbook or update it in the same pull request.
+
+## Quick Path: Single Zeabur Service
+
+Use this path for the current Zeabur preview and for getting one public Zeabur domain that can be submitted during TGOS domain registration. It runs the Next.js web UI and FastAPI API in one container from the repository root `Dockerfile`.
+
+### Before You Start
+
+You need:
+
+- Access to the GitHub repository.
+- Access to the Zeabur project.
+- A CWA API authorization token if realtime official observations should be enabled.
+- A random long admin token only if admin endpoints will be tested.
+
+You do not need to create PostgreSQL, Redis, MinIO, worker, scheduler, or migration services for the first preview.
+
+### Create The Zeabur Service
+
+1. In Zeabur, create or open the project for the target environment.
+2. Add a service from the GitHub repository.
+3. Choose Dockerfile deployment.
+4. Set the service options exactly like this:
+
+   | Setting | Value |
+   |---|---|
+   | Service type | `Dockerfile` |
+   | Root Directory | repo root; leave it as the repository root, not `apps/web` or `apps/api` |
+   | Build Command | leave blank |
+   | Start Command | leave blank |
+   | Public Domain | enabled |
+
+5. Save the service and let Zeabur build the container.
+6. Copy the generated Zeabur domain, for example `https://your-service.zeabur.app`.
+
+Do not add custom build or start commands for this mode. The root `Dockerfile` already builds the web app, installs the API package, starts FastAPI internally, and starts Next.js on Zeabur's public `$PORT`.
+
+### Health Check
+
+Set the Zeabur HTTP health check to:
+
+```text
+/health
+```
+
+Use `/health` as the first health check because it only proves the process is alive. Do not use `/ready` for the first Zeabur health check unless PostgreSQL and Redis have already been attached and configured. `/ready` checks database and Redis connectivity and can correctly fail while the first single-service preview is still intentionally running without those services.
+
+After deploy, open:
+
+```text
+https://<your-zeabur-domain>/health
+```
+
+A healthy preview returns a JSON response with `status` set to `ok`.
+
+### Environment Variables For Single-Service Preview
+
+Add only the variables you need in Zeabur's Environment Variables page. See [zeabur-single-service-env.md](zeabur-single-service-env.md) for a copy-friendly checklist.
+
+Required:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `APP_ENV` | `staging` | Use `production-beta` only for the production beta project. |
+| `LOG_LEVEL` | `info` | Keeps logs readable. |
+| `NEXT_PUBLIC_API_BASE_URL` | leave empty or set to an empty string | Same-origin API calls go through Next.js rewrites. Do not paste the Zeabur domain here for single-service mode. |
+| `NEXT_TELEMETRY_DISABLED` | `1` | Disables Next.js telemetry. |
+| `REALTIME_OFFICIAL_ENABLED` | `true` | Enables official realtime observations. |
+| `CWA_API_AUTHORIZATION` | your CWA token | Required when realtime official observations are enabled. |
+
+Optional:
+
+| Variable | Value | When to set it |
+|---|---|---|
+| `ADMIN_BEARER_TOKEN` | random long secret | Set only if admin endpoints will be tested. |
+| `API_VERSION` | release label | Optional label returned by `/health`. |
+| `CORS_ORIGINS` | Zeabur domain origin, for example `https://your-service.zeabur.app` | Usually not needed in single-service mode because browser requests are same-origin. Set it if a separate test page calls the API directly. |
+
+Do not fill these for the first single-service preview:
+
+| Variable | Why not |
+|---|---|
+| `DATABASE_URL` | Only needed after attaching PostgreSQL. If set incorrectly, `/ready` fails. |
+| `REDIS_URL` | Only needed after attaching Redis. If set incorrectly, `/ready` fails. |
+| `MINIO_ENDPOINT`, `MINIO_BUCKET_RAW_SNAPSHOTS`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | Object storage is not required for the first public preview. |
+| `POSTGRES_*`, `REDIS_HOST`, `REDIS_PORT`, `WEB_PORT`, `API_PORT`, `API_HOST`, `WEB_HOST` | Local Docker Compose or advanced runtime knobs; Zeabur already injects `$PORT` for the public web process. |
+| `SOURCE_*_ENABLED` | Worker/scheduler adapter flags; no worker or scheduler runs in single-service preview. |
+| `S3_*` | Not supported by the current runtime settings. Use only after code and `.env.example` introduce S3 aliases. |
+| `TGOS_API_KEY` | Reserved for a future geocoding fallback; not used by the current single-service runtime. |
+
+### TGOS Domain Registration Notes
+
+When TGOS asks for an application domain during API/domain application:
+
+- Use the public Zeabur domain generated by the single service, for example `https://your-service.zeabur.app`.
+- Submit the exact domain users will open. Include `https://`; do not submit `localhost`, `127.0.0.1`, an internal Zeabur host, or a path like `/health`.
+- Keep the Zeabur domain stable while the TGOS application is under review.
+- If you later switch to a custom domain, update TGOS with the custom domain before relying on it in production.
+- Do not set `TGOS_API_KEY` in Zeabur yet unless the runtime has been updated to read it. Keep any TGOS credential in the secret manager or Zeabur environment only after the app actually supports it.
 
 ## GitHub Connection
 
@@ -78,12 +175,15 @@ Adapter and source variables:
 
 | Variable | Service | Notes |
 |---|---|---|
-| `SOURCE_CWA_ENABLED` | worker, scheduler | Current flag name; default `false` until official adapter is implemented |
-| `SOURCE_WRA_ENABLED` | worker, scheduler | Current flag name; default `false` until official adapter is implemented |
-| `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Current flag name; default `false` until official adapter is implemented |
-| `SOURCE_NEWS_ENABLED` | worker, scheduler | Current flag name; default `false` until legal/source review is complete |
-| `SOURCE_PTT_ENABLED` | worker, scheduler | Current flag name; default `false` until legal/source review is complete |
-| `SOURCE_DCARD_ENABLED` | worker, scheduler | Current flag name; default `false` until legal/source review is complete |
+| `SOURCE_CWA_ENABLED` | worker, scheduler | Optional override for `official.cwa.rainfall`; unset defaults to enabled, `false` disables it |
+| `SOURCE_WRA_ENABLED` | worker, scheduler | Optional override for `official.wra.water_level`; unset defaults to enabled, `false` disables it |
+| `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Optional override for `official.flood_potential.geojson`; unset defaults to enabled, `false` disables it |
+| `SOURCE_NEWS_ENABLED` | worker, scheduler | Enables reviewed L2 news/public-web adapters only; default `false` |
+| `SOURCE_FORUM_ENABLED` | worker, scheduler | Family-level forum gate; must stay `false` until Phase 4 legal/source review |
+| `SOURCE_PTT_ENABLED` | worker, scheduler | Source-level PTT gate; also requires `SOURCE_FORUM_ENABLED=true` and terms acknowledgement |
+| `SOURCE_DCARD_ENABLED` | worker, scheduler | Source-level Dcard gate; also requires `SOURCE_FORUM_ENABLED=true` and terms acknowledgement |
+| `SOURCE_TERMS_REVIEW_ACK` | worker, scheduler | Required to enable adapters marked `terms_review_required`, including GDELT backfill and future forum sources |
+| `SOURCE_SAMPLE_DATA_ENABLED` | worker, scheduler | Enables sample fixture adapters for demos/tests only; keep `false` outside local experiments |
 
 Future or phase-specific variables:
 
@@ -101,41 +201,11 @@ Future or phase-specific variables:
 | `RAW_SNAPSHOT_RETENTION_DAYS` | worker | Future retention policy once raw snapshot cleanup exists |
 | `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_RAW`, `S3_BUCKET_PROCESSED` | api, worker | Do not use these names in Phase 1. Current config uses `MINIO_ENDPOINT` and `MINIO_BUCKET_RAW_SNAPSHOTS`; introduce S3 aliases only with matching runtime support and `.env.example` updates. |
 
-## Service Split
+## Future Service Split
 
-Use separate Zeabur services so each runtime can scale and restart independently.
+Use separate Zeabur services later so each runtime can scale and restart independently.
 
-### Single-service preview deployment
-
-For early public preview and TGOS domain registration, the repository also supports a single Zeabur service through the root `Dockerfile`.
-
-Use this mode when the immediate goal is to obtain one stable public Zeabur domain for the web UI and API smoke testing. The container starts FastAPI on an internal loopback port and Next.js on Zeabur's public `$PORT`; Next.js rewrites `/v1/*`, `/health`, and `/ready` to the internal API.
-
-Zeabur settings:
-
-| Setting | Value |
-|---|---|
-| Service type | Dockerfile |
-| Root directory | repository root |
-| Build command | leave blank |
-| Start command | leave blank |
-| Public domain | enabled |
-
-Minimal environment variables:
-
-| Variable | Value |
-|---|---|
-| `APP_ENV` | `staging` |
-| `LOG_LEVEL` | `info` |
-| `NEXT_PUBLIC_API_BASE_URL` | empty string; same-origin API through Next rewrites |
-| `NEXT_TELEMETRY_DISABLED` | `1` |
-| `REALTIME_OFFICIAL_ENABLED` | `true` |
-| `CWA_API_AUTHORIZATION` | public CWA authorization token used by the runtime |
-| `ADMIN_BEARER_TOKEN` | random long secret if admin endpoints will be tested |
-
-Do not use `/ready` as the first health check in single-service preview mode unless PostgreSQL and Redis are also attached. Use `/health` for the initial Zeabur HTTP health check.
-
-This mode is not the final production topology. The split services below remain the target once database migrations, worker scheduling, and raw snapshot storage are actively operated.
+The single-service mode above is not the final production topology. The split services below remain the target once database migrations, worker scheduling, and raw snapshot storage are actively operated.
 
 | Service | Root | Public | Purpose | Current command | Next target |
 |---|---|---|---|---|---|

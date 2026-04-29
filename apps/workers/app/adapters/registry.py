@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from app.adapters.contracts import AdapterMetadata, SourceFamily
+from app.config import WorkerSettings, load_worker_settings
 
 
 ADAPTER_REGISTRY = MappingProxyType(
@@ -56,5 +57,43 @@ ADAPTER_REGISTRY = MappingProxyType(
 )
 
 
-def enabled_adapter_keys() -> tuple[str, ...]:
-    return tuple(key for key, metadata in ADAPTER_REGISTRY.items() if metadata.enabled_by_default)
+def enabled_adapter_keys(settings: WorkerSettings | None = None) -> tuple[str, ...]:
+    resolved_settings = settings or load_worker_settings()
+    return tuple(
+        key
+        for key, metadata in ADAPTER_REGISTRY.items()
+        if adapter_is_enabled(metadata, resolved_settings)
+    )
+
+
+def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
+    if _is_sample_adapter(metadata) and not settings.source_sample_data_enabled:
+        return False
+    if metadata.terms_review_required and not settings.source_terms_review_ack:
+        return False
+
+    if metadata.key == "official.cwa.rainfall":
+        return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
+    if metadata.key == "official.wra.water_level":
+        return _with_optional_override(metadata.enabled_by_default, settings.source_wra_enabled)
+    if metadata.key == "official.flood_potential.geojson":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_flood_potential_enabled,
+        )
+    if metadata.key == "ptt":
+        return settings.source_forum_enabled and settings.source_ptt_enabled
+    if metadata.key == "dcard":
+        return settings.source_forum_enabled and settings.source_dcard_enabled
+    if metadata.family is SourceFamily.NEWS:
+        return settings.source_news_enabled
+
+    return metadata.enabled_by_default
+
+
+def _with_optional_override(default: bool, override: bool | None) -> bool:
+    return default if override is None else override
+
+
+def _is_sample_adapter(metadata: AdapterMetadata) -> bool:
+    return metadata.key.endswith(".sample")
