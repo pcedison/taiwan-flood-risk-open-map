@@ -40,14 +40,15 @@ jobs:
       - name: Frontend lint and test placeholder
         run: echo "Install frontend dependencies before enabling lint, typecheck, and unit tests."
 
-      - name: OpenAPI validation placeholder
-        run: |
-          if [ -f docs/api/openapi.yaml ]; then
-            echo "OpenAPI spec found; wire validator after contract package lands."
-          else
-            echo "OpenAPI spec not present in this runtime skeleton checkout; skipping."
-          fi
+      - name: Install contract validator dependencies
+        run: pip install --quiet "openapi-spec-validator>=0.7" "jsonschema>=4.21" "pyyaml>=6"
+
+      - name: Validate OpenAPI spec
+        run: python infra/scripts/validate_openapi.py
+
+      - name: Validate contract fixtures against OpenAPI
+        run: python infra/scripts/validate_contract_fixtures.py
 
       - name: Validate Docker Compose config
-        run: docker compose config
+        run: docker compose config --quiet
 

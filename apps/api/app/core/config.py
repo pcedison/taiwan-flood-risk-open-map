@@ -5,7 +5,8 @@ import os
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str
+    app_title: str
+    service_id: str
     app_version: str
     app_env: str
     database_url: str
@@ -22,8 +23,9 @@ def get_settings() -> Settings:
         if origin.strip()
     )
     return Settings(
-        app_name="Flood Risk API",
-        app_version="0.0.0",
+        app_title="Flood Risk API",
+        service_id="flood-risk-api",
+        app_version=os.getenv("API_VERSION", "0.1.0-draft"),
         app_env=os.getenv("APP_ENV", "local"),
         database_url=os.getenv(
             "DATABASE_URL",

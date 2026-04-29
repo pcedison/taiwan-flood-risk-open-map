@@ -2,13 +2,24 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+SERVICE_NAME = "flood-risk-api"
+SERVICE_VERSION = os.getenv("API_VERSION", "0.1.0-draft")
 
 
 class PlaceholderHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
-            self._send_json({"status": "ok", "service": "api", "runtime": "placeholder"})
+            self._send_json(
+                {
+                    "status": "ok",
+                    "service": SERVICE_NAME,
+                    "version": SERVICE_VERSION,
+                    "checked_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                }
+            )
             return
         self._send_json({"error": {"code": "not_found", "message": "Route not found"}}, status=404)
 
