@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal, Protocol
 
 from app.adapters.contracts import AdapterRunResult, DataSourceAdapter
 from app.logging import log_event
@@ -45,11 +45,24 @@ class AdapterBatchRunSummary:
         }
 
 
+class IngestionRunSummaryWriter(Protocol):
+    def write_summary(
+        self,
+        summary: AdapterBatchRunSummary,
+        *,
+        job_key: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist an operational audit row for an adapter batch run."""
+
+
 def run_adapter_batch(
     adapter: DataSourceAdapter,
     *,
     writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
     job_key: str = "ingest.adapter",
+    parameters: dict[str, Any] | None = None,
 ) -> AdapterBatchRunSummary:
     started_at = _now()
     try:
@@ -86,6 +99,25 @@ def run_adapter_batch(
                 error_message=str(exc),
             )
 
+    if run_writer is not None:
+        try:
+            run_writer.write_summary(summary, job_key=job_key, parameters=parameters)
+        except Exception as exc:
+            summary = AdapterBatchRunSummary(
+                adapter_key=summary.adapter_key,
+                status="failed",
+                started_at=summary.started_at,
+                finished_at=_now(),
+                items_fetched=summary.items_fetched,
+                items_promoted=summary.items_promoted,
+                items_rejected=summary.items_rejected,
+                raw_ref=summary.raw_ref,
+                error_code=exc.__class__.__name__,
+                error_message=f"run summary write failed: {exc}",
+                source_timestamp_min=summary.source_timestamp_min,
+                source_timestamp_max=summary.source_timestamp_max,
+            )
+
     log_event("adapter.batch.completed", job_key=job_key, **summary.log_fields())
     return summary
 
@@ -94,9 +126,20 @@ def run_adapter_batches(
     adapters: Iterable[DataSourceAdapter],
     *,
     writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
     job_key: str = "ingest.adapter",
+    parameters: dict[str, Any] | None = None,
 ) -> tuple[AdapterBatchRunSummary, ...]:
-    return tuple(run_adapter_batch(adapter, writer=writer, job_key=job_key) for adapter in adapters)
+    return tuple(
+        run_adapter_batch(
+            adapter,
+            writer=writer,
+            run_writer=run_writer,
+            job_key=job_key,
+            parameters=parameters,
+        )
+        for adapter in adapters
+    )
 
 
 def _summary_from_result(

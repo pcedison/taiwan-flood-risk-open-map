@@ -6,6 +6,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import psycopg
+from psycopg.rows import dict_row
 
 from app.api.errors import error_payload
 from app.api.schemas import (
@@ -29,11 +31,10 @@ async def list_admin_jobs(
     status: JobStatus | None = None,
     job_key: str | None = Query(default=None, min_length=1, max_length=120),
 ) -> AdminJobsResponse:
-    jobs = _sample_jobs()
-    if status is not None:
-        jobs = [job for job in jobs if job.status == status]
-    if job_key is not None:
-        jobs = [job for job in jobs if job.job_key == job_key]
+    try:
+        jobs = _db_jobs(status=status, job_key=job_key)
+    except (OSError, psycopg.Error):
+        jobs = _filter_jobs(_sample_jobs(), status=status, job_key=job_key)
     return AdminJobsResponse(jobs=jobs)
 
 
@@ -42,9 +43,10 @@ async def list_admin_sources(
     _admin: Annotated[None, Depends(_require_admin)],
     health_status: HealthStatus | None = None,
 ) -> AdminSourcesResponse:
-    sources = _sample_sources()
-    if health_status is not None:
-        sources = [source for source in sources if source.health_status == health_status]
+    try:
+        sources = _db_sources(health_status=health_status)
+    except (OSError, psycopg.Error):
+        sources = _filter_sources(_sample_sources(), health_status=health_status)
     return AdminSourcesResponse(sources=sources)
 
 
@@ -73,6 +75,105 @@ async def _require_admin(
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
+
+
+def _db_jobs(*, status: JobStatus | None, job_key: str | None) -> list[IngestionJob]:
+    where: list[str] = []
+    params: list[str] = []
+    if status is not None:
+        where.append("status = %s")
+        params.append(status)
+    if job_key is not None:
+        where.append("job_key = %s")
+        params.append(job_key)
+
+    query = """
+        SELECT
+            job_key,
+            adapter_key,
+            started_at,
+            finished_at,
+            status,
+            items_fetched,
+            items_promoted,
+            items_rejected,
+            error_code,
+            error_message,
+            source_timestamp_min,
+            source_timestamp_max
+        FROM ingestion_jobs
+    """
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY COALESCE(started_at, created_at) DESC, created_at DESC LIMIT 100"
+
+    settings = get_settings()
+    with psycopg.connect(settings.database_url, connect_timeout=2, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, params)
+            return [IngestionJob(**row) for row in cursor.fetchall()]
+
+
+def _db_sources(*, health_status: HealthStatus | None) -> list[DataSource]:
+    where: list[str] = []
+    params: list[str] = []
+    if health_status is not None:
+        where.append("health_status = %s")
+        params.append(health_status)
+
+    query = """
+        SELECT
+            id::text AS id,
+            name,
+            adapter_key,
+            source_type,
+            license,
+            update_frequency,
+            last_success_at,
+            last_failure_at,
+            health_status,
+            legal_basis,
+            source_timestamp_min,
+            source_timestamp_max
+        FROM data_sources
+    """
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY name ASC, adapter_key ASC LIMIT 100"
+
+    settings = get_settings()
+    with psycopg.connect(settings.database_url, connect_timeout=2, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, params)
+            return [_data_source_from_row(row) for row in cursor.fetchall()]
+
+
+def _filter_jobs(
+    jobs: list[IngestionJob], *, status: JobStatus | None, job_key: str | None
+) -> list[IngestionJob]:
+    if status is not None:
+        jobs = [job for job in jobs if job.status == status]
+    if job_key is not None:
+        jobs = [job for job in jobs if job.job_key == job_key]
+    return jobs
+
+
+def _filter_sources(
+    sources: list[DataSource], *, health_status: HealthStatus | None
+) -> list[DataSource]:
+    if health_status is not None:
+        sources = [source for source in sources if source.health_status == health_status]
+    return sources
+
+
+def _data_source_from_row(row: dict) -> DataSource:
+    return DataSource(
+        **{
+            **row,
+            "license": row.get("license") or "",
+            "update_frequency": row.get("update_frequency") or "",
+        }
+    )
 
 
 def _sample_jobs() -> list[IngestionJob]:
