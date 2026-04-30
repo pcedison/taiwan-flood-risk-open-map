@@ -23,8 +23,9 @@ class TileRepositoryUnavailable(RuntimeError):
 class TileLayerSpec:
     layer_id: str
     vector_layer_id: str
-    source_sql: str
+    fallback_source_sql: str
     property_columns: tuple[str, ...]
+    production_property_sql: tuple[str, ...]
     bounds_filter_sql: str
 
 
@@ -32,7 +33,7 @@ _LAYER_SPECS: dict[str, TileLayerSpec] = {
     "flood-potential": TileLayerSpec(
         layer_id="flood-potential",
         vector_layer_id="flood_potential",
-        source_sql="""
+        fallback_source_sql="""
             SELECT
                 e.geom AS feature_geom,
                 e.source_id,
@@ -45,12 +46,17 @@ _LAYER_SPECS: dict[str, TileLayerSpec] = {
                 AND e.geom IS NOT NULL
         """,
         property_columns=("source_id", "category", "confidence"),
+        production_property_sql=(
+            "mlf.properties ->> 'source_id' AS source_id",
+            "mlf.properties ->> 'category' AS category",
+            "NULLIF(mlf.properties ->> 'confidence', '')::numeric AS confidence",
+        ),
         bounds_filter_sql="src.feature_geom && ST_Transform(bounds.geom, 4326)",
     ),
     "query-heat": TileLayerSpec(
         layer_id="query-heat",
         vector_layer_id="query_heat",
-        source_sql="""
+        fallback_source_sql="""
             SELECT
                 lq.geom AS feature_geom,
                 COALESCE(lq.privacy_bucket, 'unknown') AS privacy_bucket,
@@ -70,6 +76,11 @@ _LAYER_SPECS: dict[str, TileLayerSpec] = {
                 COALESCE(lq.privacy_bucket, 'unknown')
         """,
         property_columns=("privacy_bucket", "query_count_bucket", "period"),
+        production_property_sql=(
+            "mlf.properties ->> 'privacy_bucket' AS privacy_bucket",
+            "mlf.properties ->> 'query_count_bucket' AS query_count_bucket",
+            "mlf.properties ->> 'period' AS period",
+        ),
         bounds_filter_sql="src.feature_geom && ST_Transform(bounds.geom, 4326)",
     ),
 }
@@ -112,6 +123,7 @@ def build_mvt_sql(*, spec: TileLayerSpec, z: int, x: int, y: int) -> tuple[str, 
     property_select = ",\n                ".join(
         f"src.{column}" for column in spec.property_columns
     )
+    production_property_select = ",\n                ".join(spec.production_property_sql)
     sql = f"""
         WITH requested_layer AS (
             SELECT layer_id
@@ -119,11 +131,57 @@ def build_mvt_sql(*, spec: TileLayerSpec, z: int, x: int, y: int) -> tuple[str, 
             WHERE layer_id = %s
             LIMIT 1
         ),
+        cached_tile AS (
+            SELECT tile_data
+            FROM tile_cache_entries
+            WHERE
+                layer_id = %s
+                AND z = %s
+                AND x = %s
+                AND y = %s
+                AND (expires_at IS NULL OR expires_at > now())
+            ORDER BY generated_at DESC
+            LIMIT 1
+        ),
+        production_layer_has_features AS (
+            SELECT EXISTS (
+                SELECT 1
+                FROM map_layer_features
+                WHERE
+                    layer_id = %s
+                    AND geom IS NOT NULL
+                    AND (minzoom IS NULL OR minzoom <= %s)
+                    AND (maxzoom IS NULL OR maxzoom >= %s)
+                    AND (expires_at IS NULL OR expires_at > now())
+                LIMIT 1
+            ) AS has_features
+        ),
         bounds AS (
             SELECT ST_TileEnvelope(%s, %s, %s) AS geom
         ),
+        production_src AS (
+            SELECT
+                mlf.geom AS feature_geom,
+                {production_property_select}
+            FROM map_layer_features mlf
+            WHERE
+                mlf.layer_id = %s
+                AND mlf.geom IS NOT NULL
+                AND (mlf.minzoom IS NULL OR mlf.minzoom <= %s)
+                AND (mlf.maxzoom IS NULL OR mlf.maxzoom >= %s)
+                AND (mlf.expires_at IS NULL OR mlf.expires_at > now())
+        ),
+        fallback_src AS (
+            SELECT fallback.*
+            FROM (
+                {spec.fallback_source_sql}
+            ) fallback
+            WHERE NOT (SELECT has_features FROM production_layer_has_features)
+        ),
         src AS (
-            {spec.source_sql}
+            SELECT * FROM production_src
+            UNION ALL
+            SELECT * FROM fallback_src
         ),
         mvtgeom AS (
             SELECT
@@ -139,16 +197,36 @@ def build_mvt_sql(*, spec: TileLayerSpec, z: int, x: int, y: int) -> tuple[str, 
             WHERE
                 EXISTS (SELECT 1 FROM requested_layer)
                 AND {spec.bounds_filter_sql}
+                AND NOT EXISTS (SELECT 1 FROM cached_tile)
+        ),
+        generated_tile AS (
+            SELECT COALESCE(ST_AsMVT(mvtgeom, %s, 4096, 'geom'), '\\x'::bytea) AS tile
+            FROM mvtgeom
         )
         SELECT
             CASE
-                WHEN EXISTS (SELECT 1 FROM requested_layer)
-                THEN COALESCE(ST_AsMVT(mvtgeom, %s, 4096, 'geom'), '\\x'::bytea)
-                ELSE NULL
+                WHEN NOT EXISTS (SELECT 1 FROM requested_layer) THEN NULL
+                WHEN EXISTS (SELECT 1 FROM cached_tile) THEN (SELECT tile_data FROM cached_tile)
+                ELSE (SELECT tile FROM generated_tile)
             END AS tile
-        FROM mvtgeom
     """
-    return sql, (spec.layer_id, z, x, y, spec.vector_layer_id)
+    return sql, (
+        spec.layer_id,
+        spec.layer_id,
+        z,
+        x,
+        y,
+        spec.layer_id,
+        z,
+        z,
+        z,
+        x,
+        y,
+        spec.layer_id,
+        z,
+        z,
+        spec.vector_layer_id,
+    )
 
 
 def _connect(database_url: str, connection_factory: ConnectionFactory | None) -> Any:

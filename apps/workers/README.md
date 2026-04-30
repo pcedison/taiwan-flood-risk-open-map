@@ -32,6 +32,15 @@ database URL can come from `--database-url`, `WORKER_DATABASE_URL`, or
 `DATABASE_URL`.
 Heartbeat textfile metrics are opt-in. They are only written when
 `WORKER_METRICS_TEXTFILE_PATH` or `SCHEDULER_METRICS_TEXTFILE_PATH` is set.
+When `WORKER_DATABASE_URL` or `DATABASE_URL` is present, the bounded scheduler
+attempts to acquire a DB-backed singleton lease before running
+`--scheduler`. If the lease is held by another worker, the loop exits without
+running a duplicate tick; if the DB is unavailable, it logs the failure and
+falls back to the existing local safe loop. Runtime adapter jobs can also be
+enqueued/dequeued through the durable `worker_runtime_jobs` table, including
+expired lease recovery and succeeded/failed completion updates. Adapter
+construction still remains fixture-gated by `WORKER_RUNTIME_FIXTURES_ENABLED=true`,
+so no external API calls are made by default.
 
 ## Current scope
 
@@ -39,6 +48,7 @@ Heartbeat textfile metrics are opt-in. They are only written when
 - Official CWA rainfall, WRA water-level, and flood-potential fixture parsers.
 - Worker CLI/scheduler demo path for enabled official adapters.
 - Configurable run-once and bounded scheduler path for enabled runtime adapters.
+- DB-backed runtime job queue and singleton scheduler lease groundwork.
 - Lightweight freshness checks that emit alerts for stale or failed adapter runs.
 - L2 news/public-web sample adapter and source allowlist validation.
 - Raw snapshot, staging, validation, promotion, and PostGIS writer groundwork.
@@ -47,8 +57,8 @@ Heartbeat textfile metrics are opt-in. They are only written when
 
 ## Placeholder boundary
 
-- Runtime scheduling is still single-process and fixture-backed until production
-  queue dependencies and real source clients are selected.
+- Runtime scheduling has durable queue/lease primitives, but adapter execution
+  is still fixture-backed until production source clients are selected.
 - PTT and Dcard adapters are phase-delayed and must remain disabled until legal
   and privacy review work lands. Future PRs must satisfy
   `docs/privacy/public-discussion-user-report-gates.md` before enabling them.

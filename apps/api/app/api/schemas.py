@@ -102,6 +102,18 @@ class GeocodeResponse(ContractModel):
     candidates: list[PlaceCandidate]
 
 
+class UserReportCreateRequest(ContractModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    point: LatLng
+    summary: str = Field(min_length=1, max_length=500)
+
+
+class UserReportCreateResponse(ContractModel):
+    report_id: str
+    status: Literal["pending"]
+
+
 class RiskAssessRequest(ContractModel):
     point: LatLng
     radius_m: int = Field(default=500, ge=50, le=2000)

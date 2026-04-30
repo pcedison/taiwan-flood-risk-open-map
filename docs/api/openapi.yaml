@@ -212,6 +212,59 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/reports:
+    post:
+      tags:
+        - Public
+      operationId: createUserReport
+      summary: Submit an anonymous user flood report for moderation.
+      description: >
+        Default-disabled Phase 5 groundwork. When explicitly enabled, accepts
+        only a point and short summary, stores the report as pending moderation,
+        and does not accept media, EXIF, direct contact, account, or address
+        fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserReportCreateRequest"
+            examples:
+              point_summary_only:
+                value:
+                  point:
+                    lat: 25.033
+                    lng: 121.5654
+                  summary: "Water is over the curb near the intersection."
+      responses:
+        "202":
+          description: Report accepted into pending moderation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserReportCreateResponse"
+              examples:
+                pending:
+                  value:
+                    report_id: "0d51d545-dc6a-4e4b-8f8e-0e42d454d050"
+                    status: pending
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: User report intake is disabled by feature flag.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: User report storage is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/evidence/{assessment_id}:
     get:
       tags:
@@ -686,6 +739,36 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PlaceCandidate"
+      additionalProperties: false
+
+    UserReportCreateRequest:
+      type: object
+      required:
+        - point
+        - summary
+      properties:
+        point:
+          $ref: "#/components/schemas/LatLng"
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Short anonymous flood-condition summary; media and direct personal fields are not accepted.
+      additionalProperties: false
+
+    UserReportCreateResponse:
+      type: object
+      required:
+        - report_id
+        - status
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - pending
       additionalProperties: false
 
     PlaceCandidate:

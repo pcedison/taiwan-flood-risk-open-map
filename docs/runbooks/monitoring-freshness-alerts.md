@@ -12,12 +12,13 @@ Covered:
 
 - Source freshness checks through `GET /admin/v1/sources`.
 - Prometheus rule coverage for freshness, API readiness, and runtime heartbeats.
+- Grafana dashboard coverage for readiness, freshness, heartbeat, and worker
+  last-run status.
 - Dry-run and fixture-based verification.
 - Alert thresholds and triage steps.
 
 Not covered:
 
-- Grafana dashboard implementation.
 - Production pager wiring.
 - Adapter retry implementation.
 
@@ -33,6 +34,12 @@ Worker and scheduler heartbeat alerts read Prometheus textfile-compatible
 metrics. Set `WORKER_METRICS_TEXTFILE_PATH` or `SCHEDULER_METRICS_TEXTFILE_PATH`
 on the worker process to emit these files for a node exporter textfile
 collector.
+
+Dashboard and scrape deployment details live in:
+
+```text
+docs/runbooks/monitoring-dashboard.md
+```
 
 ## Alert Policy
 
@@ -78,6 +85,23 @@ Alerts:
 The current API scrape target is `api:8000/metrics`. If the deployed API does
 not expose Prometheus metrics yet, `FloodRiskApiReadyDown` should be interpreted
 as "API metrics target down" until a readiness probe exporter is wired.
+
+## Grafana Dashboard
+
+Dashboard file:
+
+```text
+infra/monitoring/flood-risk-runtime-dashboard.json
+```
+
+Import it into Grafana and choose the Prometheus datasource when prompted. The
+dashboard covers the same operational surfaces as the alert rules:
+
+- API scrape and readiness.
+- Source freshness age, stale count, and active status.
+- Worker heartbeat age.
+- Scheduler heartbeat age.
+- Worker last-run failed count and active last-run status.
 
 ## Manual Check
 
@@ -241,8 +265,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ops-source-freshne
 Also validate the monitoring YAML before shipping changes:
 
 ```powershell
-python -c "import yaml; [yaml.safe_load(open(p, encoding='utf-8')) for p in ['infra/monitoring/prometheus.yml','infra/monitoring/alert-rules.yml']]"
+python infra/scripts/validate_monitoring_assets.py
 ```
 
 This does not prove production freshness. It proves the supported monitoring
-entrypoint is syntactically valid and runnable.
+entrypoints are syntactically valid and runnable.

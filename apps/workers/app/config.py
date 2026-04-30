@@ -25,8 +25,10 @@ class WorkerSettings:
     worker_idle_seconds: int
     scheduler_interval_seconds: int
     scheduler_max_ticks: int | None
+    scheduler_lease_ttl_seconds: int
     freshness_max_age_seconds: int
     runtime_fixtures_enabled: bool
+    runtime_job_lease_seconds: int
     metrics_instance: str
     worker_metrics_textfile_path: str | None
     scheduler_metrics_textfile_path: str | None
@@ -49,12 +51,18 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         worker_idle_seconds=env_int(values, "WORKER_IDLE_SECONDS", default=60),
         scheduler_interval_seconds=env_int(values, "SCHEDULER_INTERVAL_SECONDS", default=300),
         scheduler_max_ticks=env_optional_int(values, "SCHEDULER_MAX_TICKS"),
+        scheduler_lease_ttl_seconds=env_int(
+            values,
+            "SCHEDULER_LEASE_TTL_SECONDS",
+            default=600,
+        ),
         freshness_max_age_seconds=env_int(
             values,
             "FRESHNESS_MAX_AGE_SECONDS",
             default=6 * 60 * 60,
         ),
         runtime_fixtures_enabled=env_flag(values, "WORKER_RUNTIME_FIXTURES_ENABLED"),
+        runtime_job_lease_seconds=env_int(values, "WORKER_RUNTIME_JOB_LEASE_SECONDS", default=300),
         metrics_instance=(
             env_str(values, "WORKER_INSTANCE")
             or env_str(values, "HOSTNAME")

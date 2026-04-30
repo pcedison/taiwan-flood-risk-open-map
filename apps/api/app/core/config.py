@@ -16,6 +16,7 @@ class Settings:
     admin_bearer_token: str | None
     realtime_official_enabled: bool
     cwa_api_authorization: str | None
+    user_reports_enabled: bool
 
 
 @lru_cache(maxsize=1)
@@ -40,6 +41,7 @@ def get_settings() -> Settings:
         admin_bearer_token=os.getenv("ADMIN_BEARER_TOKEN") or None,
         realtime_official_enabled=_env_bool("REALTIME_OFFICIAL_ENABLED", default=True),
         cwa_api_authorization=os.getenv("CWA_API_AUTHORIZATION") or None,
+        user_reports_enabled=_env_bool("USER_REPORTS_ENABLED", default=False),
     )
 
 

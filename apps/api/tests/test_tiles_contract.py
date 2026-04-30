@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 import pytest
 
@@ -11,7 +13,7 @@ from app.main import create_app
 client = TestClient(create_app())
 
 
-def test_fetch_vector_tile_builds_postgis_mvt_sql_for_seeded_layer() -> None:
+def test_fetch_vector_tile_prefers_dedicated_layer_feature_table() -> None:
     connection = _FakeConnection(row={"tile": b"mvt-bytes"})
 
     tile = fetch_vector_tile(
@@ -27,12 +29,77 @@ def test_fetch_vector_tile_builds_postgis_mvt_sql_for_seeded_layer() -> None:
     assert tile == b"mvt-bytes"
     assert "FROM map_layers" in sql
     assert "WHERE layer_id = %s" in sql
+    assert "FROM tile_cache_entries" in sql
+    assert "FROM map_layer_features" in sql
+    assert "AND (minzoom IS NULL OR minzoom <= %s)" in sql
+    assert "AND (expires_at IS NULL OR expires_at > now())" in sql
+    assert "FROM map_layer_features mlf" in sql
+    assert "mlf.properties ->> 'source_id' AS source_id" in sql
+    assert "NULLIF(mlf.properties ->> 'confidence', '')::numeric AS confidence" in sql
     assert "ST_TileEnvelope(%s, %s, %s)" in sql
     assert "ST_AsMVTGeom" in sql
     assert "ST_AsMVT(mvtgeom, %s, 4096, 'geom')" in sql
+    assert "SELECT * FROM production_src" in sql
+    assert "UNION ALL" in sql
+    assert "SELECT * FROM fallback_src" in sql
+    assert "AND NOT EXISTS (SELECT 1 FROM cached_tile)" in sql
+    assert "WHEN EXISTS (SELECT 1 FROM cached_tile) THEN (SELECT tile_data FROM cached_tile)" in sql
+    assert params == (
+        "flood-potential",
+        "flood-potential",
+        8,
+        215,
+        107,
+        "flood-potential",
+        8,
+        8,
+        8,
+        215,
+        107,
+        "flood-potential",
+        8,
+        8,
+        "flood_potential",
+    )
+
+
+def test_fetch_vector_tile_keeps_explicit_fallback_when_layer_features_empty() -> None:
+    connection = _FakeConnection(row={"tile": b"mvt-bytes"})
+
+    fetch_vector_tile(
+        database_url="postgresql://example.test/flood",
+        layer_id="flood-potential",
+        z=8,
+        x=215,
+        y=107,
+        connection_factory=lambda: connection,
+    )
+
+    sql, _params = connection.cursor_instance.executions[0]
+    assert "production_layer_has_features" in sql
+    assert "WHERE NOT (SELECT has_features FROM production_layer_has_features)" in sql
     assert "FROM evidence e" in sql
     assert "e.event_type = 'flood_potential'" in sql
-    assert params == ("flood-potential", 8, 215, 107, "flood_potential")
+
+
+def test_tile_layer_feature_cache_migration_defines_cache_schema() -> None:
+    migration = (
+        Path(__file__).resolve().parents[3]
+        / "infra"
+        / "migrations"
+        / "0007_tile_layer_feature_cache.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TABLE IF NOT EXISTS map_layer_features" in migration
+    assert "layer_id text NOT NULL REFERENCES map_layers(layer_id) ON DELETE CASCADE" in migration
+    assert "geom geometry(Geometry, 4326) NOT NULL" in migration
+    assert "properties jsonb NOT NULL DEFAULT '{}'::jsonb" in migration
+    assert "UNIQUE (layer_id, feature_key)" in migration
+    assert "CREATE INDEX IF NOT EXISTS idx_map_layer_features_geom" in migration
+    assert "CREATE TABLE IF NOT EXISTS tile_cache_entries" in migration
+    assert "tile_data bytea NOT NULL" in migration
+    assert "UNIQUE (layer_id, z, x, y)" in migration
+    assert "CREATE INDEX IF NOT EXISTS idx_tile_cache_entries_lookup" in migration
 
 
 def test_fetch_vector_tile_rejects_unknown_layer_without_sql() -> None:

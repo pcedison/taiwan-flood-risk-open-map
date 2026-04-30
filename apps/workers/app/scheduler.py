@@ -16,6 +16,7 @@ from app.jobs.ingestion import (
     run_enabled_adapter_batches,
 )
 from app.jobs.official_demo import build_official_demo_adapters
+from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
 from app.jobs.runtime import build_runtime_adapters
 from app.jobs.sample import run_sample_job
 from app.logging import log_event
@@ -116,15 +117,28 @@ def run_enabled_adapters_loop(
     tick_limit = max_ticks if max_ticks is not None else resolved_settings.scheduler_max_ticks
     results: list[ScheduledIngestionCycleResult] = []
     tick = 0
+    lease_holder = resolved_settings.metrics_instance
+    lease_acquired = _acquire_scheduler_lease(settings=resolved_settings, holder_id=lease_holder)
+    if lease_acquired is False:
+        log_event(
+            "scheduler.lease.skipped",
+            lease_key="scheduler.enabled-adapters",
+            holder_id=lease_holder,
+        )
+        return ()
 
-    while tick_limit is None or tick < tick_limit:
-        result = run_enabled_adapters_once(settings=resolved_settings)
-        results.append(result)
-        _write_scheduler_heartbeat(settings=resolved_settings, result=result)
-        tick += 1
-        if tick_limit is not None and tick >= tick_limit:
-            break
-        sleep(resolved_settings.scheduler_interval_seconds)
+    try:
+        while tick_limit is None or tick < tick_limit:
+            result = run_enabled_adapters_once(settings=resolved_settings)
+            results.append(result)
+            _write_scheduler_heartbeat(settings=resolved_settings, result=result)
+            tick += 1
+            if tick_limit is not None and tick >= tick_limit:
+                break
+            sleep(resolved_settings.scheduler_interval_seconds)
+    finally:
+        if lease_acquired is True:
+            _release_scheduler_lease(settings=resolved_settings, holder_id=lease_holder)
 
     return tuple(results)
 
@@ -231,6 +245,43 @@ def _run_status(result: ScheduledIngestionCycleResult) -> RunStatus:
 def _queue_label(settings: WorkerSettings) -> str:
     keys = enabled_adapter_keys(settings)
     return ",".join(keys) if keys else "none"
+
+
+def _acquire_scheduler_lease(*, settings: WorkerSettings, holder_id: str) -> bool | None:
+    if not settings.database_url:
+        return None
+
+    try:
+        acquired = PostgresRuntimeQueue(database_url=settings.database_url).acquire_scheduler_lease(
+            lease_key="scheduler.enabled-adapters",
+            holder_id=holder_id,
+            ttl_seconds=settings.scheduler_lease_ttl_seconds,
+        )
+    except RuntimeQueueUnavailable as exc:
+        log_event("scheduler.lease.unavailable", error=str(exc), fallback="local")
+        return None
+
+    if acquired:
+        log_event(
+            "scheduler.lease.acquired",
+            lease_key="scheduler.enabled-adapters",
+            holder_id=holder_id,
+            ttl_seconds=settings.scheduler_lease_ttl_seconds,
+        )
+    return acquired
+
+
+def _release_scheduler_lease(*, settings: WorkerSettings, holder_id: str) -> None:
+    if not settings.database_url:
+        return
+
+    try:
+        PostgresRuntimeQueue(database_url=settings.database_url).release_scheduler_lease(
+            lease_key="scheduler.enabled-adapters",
+            holder_id=holder_id,
+        )
+    except RuntimeQueueUnavailable as exc:
+        log_event("scheduler.lease.release_failed", error=str(exc))
 
 
 if __name__ == "__main__":
