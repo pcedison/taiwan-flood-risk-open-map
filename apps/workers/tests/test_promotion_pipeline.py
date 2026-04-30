@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import json
 
 from app.pipelines.promotion import (
+    EvidencePromotionPayload,
     PostgresEvidencePromotionWriter,
     PromotionCandidate,
     build_evidence_promotion_payload,
@@ -44,11 +45,16 @@ def test_build_evidence_promotion_payload_rejects_non_accepted_staging_row() -> 
 def test_promote_accepted_staging_uses_writer_protocol() -> None:
     writer = _MemoryPromotionWriter([_candidate()])
 
-    result = promote_accepted_staging(writer, limit=10)
+    result = promote_accepted_staging(
+        writer,
+        limit=10,
+        adapter_keys=("news.public_web.sample",),
+    )
 
     assert result.promoted == 1
     assert result.evidence_ids == ("evidence-1",)
     assert writer.requested_limit == 10
+    assert writer.requested_adapter_keys == ("news.public_web.sample",)
     assert len(writer.payloads) == 1
     assert writer.payloads[0].source_id == "sample-news-001"
 
@@ -92,19 +98,71 @@ def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() 
     select_sql, select_params = connection.cursor_instance.executions[0]
     insert_sql, insert_params = connection.cursor_instance.executions[1]
     assert "FROM staging_evidence se" in select_sql
+    assert "SELECT DISTINCT ON (se.source_id, rs.raw_ref)" in select_sql
     assert "LEFT JOIN data_sources ds" in select_sql
     assert "COALESCE(se.data_source_id, rs.data_source_id, ds.id) AS data_source_id" in select_sql
     assert "se.validation_status = 'accepted'" in select_sql
     assert "NOT EXISTS" in select_sql
     assert select_params == (5,)
     assert "INSERT INTO evidence" in insert_sql
+    assert "ST_GeomFromGeoJSON" in insert_sql
     assert "SELECT id FROM data_sources WHERE adapter_key = %s" in insert_sql
     assert insert_params[1] == "news.public_web.sample"
     assert insert_params[2] == "sample-news-001"
-    assert insert_params[11] == "raw/news-public-web/sample.json"
-    properties = json.loads(str(insert_params[12]))
+    assert insert_params[11] is None
+    assert insert_params[12] is None
+    assert insert_params[13] == "raw/news-public-web/sample.json"
+    properties = json.loads(str(insert_params[14]))
     assert properties["location_text"] == "Riverside District"
     assert properties["staging_evidence_id"] == "staging-id"
+
+
+def test_postgres_promotion_writer_inserts_geojson_geometry_when_present() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = build_evidence_promotion_payload(
+        _candidate(
+            payload={
+                "adapter_key": "official.flood_potential.geojson",
+                "location_payload": {
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [121.50, 25.03],
+                                [121.51, 25.03],
+                                [121.51, 25.04],
+                                [121.50, 25.04],
+                                [121.50, 25.03],
+                            ]
+                        ],
+                    }
+                },
+            }
+        )
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    insert_params = connection.cursor_instance.executions[0][1]
+    assert json.loads(str(insert_params[11]))["type"] == "Polygon"
+    assert insert_params[11] == insert_params[12]
+
+
+def test_postgres_promotion_writer_can_filter_accepted_rows_by_adapter_key() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    candidates = writer.fetch_accepted_staging(
+        limit=5,
+        adapter_keys=("official.cwa.rainfall", "official.wra.water_level"),
+    )
+
+    assert candidates == ()
+    select_sql, select_params = connection.cursor_instance.executions[0]
+    assert "COALESCE(se.payload ->> 'adapter_key', rs.adapter_key) = ANY(%s)" in select_sql
+    assert select_params == (["official.cwa.rainfall", "official.wra.water_level"], 5)
 
 
 def test_postgres_promotion_writer_requires_database_url_or_connection_factory() -> None:
@@ -116,7 +174,11 @@ def test_postgres_promotion_writer_requires_database_url_or_connection_factory()
         raise AssertionError("expected ValueError")
 
 
-def _candidate(*, validation_status: str = "accepted") -> PromotionCandidate:
+def _candidate(
+    *,
+    validation_status: str = "accepted",
+    payload: dict[str, object] | None = None,
+) -> PromotionCandidate:
     return PromotionCandidate(
         staging_evidence_id="staging-id",
         raw_snapshot_id="raw-snapshot-id",
@@ -132,7 +194,8 @@ def _candidate(*, validation_status: str = "accepted") -> PromotionCandidate:
         observed_at=OBSERVED_AT,
         confidence=0.72,
         validation_status=validation_status,
-        payload={
+        payload=payload
+        or {
             "adapter_key": "news.public_web.sample",
             "location_text": "Riverside District",
         },
@@ -143,13 +206,20 @@ class _MemoryPromotionWriter:
     def __init__(self, candidates: list[PromotionCandidate]) -> None:
         self._candidates = tuple(candidates)
         self.requested_limit: int | None = None
-        self.payloads: list[object] = []
+        self.requested_adapter_keys: tuple[str, ...] | None = None
+        self.payloads: list[EvidencePromotionPayload] = []
 
-    def fetch_accepted_staging(self, *, limit: int | None = None) -> tuple[PromotionCandidate, ...]:
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
         self.requested_limit = limit
+        self.requested_adapter_keys = adapter_keys
         return self._candidates
 
-    def write_evidence(self, payload: object) -> str:
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
 

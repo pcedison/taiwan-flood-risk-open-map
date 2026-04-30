@@ -1,0 +1,97 @@
+groups:
+  - name: flood-risk-freshness
+    rules:
+      - alert: FloodRiskSourceFreshnessFailed
+        expr: flood_risk_source_freshness_status{status="failed"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: "Source freshness failed for {{ $labels.source_id }}"
+          description: "The source freshness check reported failed status for {{ $labels.source_id }}. Run scripts/ops-source-freshness-check.ps1 against the same environment and inspect worker logs."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskSourceFreshnessDegraded
+        expr: flood_risk_source_freshness_status{status="degraded"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: "Source freshness degraded for {{ $labels.source_id }}"
+          description: "The source freshness check reported degraded status for {{ $labels.source_id }}. Confirm upstream availability, credentials, and recent ingestion results."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskSourceFreshnessUnknown
+        expr: flood_risk_source_freshness_status{status="unknown"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: "Source freshness unknown for {{ $labels.source_id }}"
+          description: "The source freshness check could not classify {{ $labels.source_id }}. Treat this as degraded until the source is confirmed disabled or healthy."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskSourceFreshnessStale
+        expr: flood_risk_source_freshness_stale == 1
+        for: 10m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: "Source data is stale for {{ $labels.source_id }}"
+          description: "{{ $labels.source_id }} is older than the freshness threshold used by the ops check. Compare source_timestamp_max and last_success_at in the admin source endpoint."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+  - name: flood-risk-api
+    rules:
+      - alert: FloodRiskApiReadyDown
+        expr: (up{job="flood-risk-api"} == 0) or (flood_risk_api_ready == 0)
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "Flood Risk API readiness is down"
+          description: "Prometheus cannot scrape the API metrics target, or a future readiness exporter is reporting /ready down. Check /health, /ready, database, and Redis."
+          runbook_url: "docs/runbooks/runtime-smoke.md"
+
+  - name: flood-risk-runtime-heartbeats
+    rules:
+      # Future metric placeholder:
+      # Workers should eventually publish flood_risk_worker_heartbeat_timestamp_seconds
+      # with labels such as service="worker", instance, and queue. When that metric
+      # exists, replace the non-firing expression below with:
+      # absent(flood_risk_worker_heartbeat_timestamp_seconds)
+      #   or (time() - max by (service, instance, queue) (flood_risk_worker_heartbeat_timestamp_seconds) > 300)
+      - alert: FloodRiskWorkerHeartbeatMissing
+        expr: vector(0) == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+          lifecycle: future_metric
+        annotations:
+          summary: "Worker heartbeat metric is not wired yet"
+          description: "Placeholder alert for the future worker heartbeat metric. Keep non-firing until workers publish heartbeat timestamps."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      # Future metric placeholder:
+      # The singleton scheduler should eventually publish
+      # flood_risk_scheduler_heartbeat_timestamp_seconds. When that metric exists,
+      # replace the non-firing expression below with:
+      # absent(flood_risk_scheduler_heartbeat_timestamp_seconds)
+      #   or (time() - max by (service, instance) (flood_risk_scheduler_heartbeat_timestamp_seconds) > 600)
+      - alert: FloodRiskSchedulerHeartbeatMissing
+        expr: vector(0) == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: scheduler
+          lifecycle: future_metric
+        annotations:
+          summary: "Scheduler heartbeat metric is not wired yet"
+          description: "Placeholder alert for the future scheduler heartbeat metric. Keep non-firing until the singleton scheduler publishes heartbeat timestamps."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"

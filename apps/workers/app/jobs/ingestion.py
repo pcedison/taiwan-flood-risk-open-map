@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from app.adapters.registry import enabled_adapter_keys
+from app.config import WorkerSettings
 from app.adapters.contracts import AdapterRunResult, DataSourceAdapter
 from app.logging import log_event
 from app.pipelines.staging import StagingBatchWriter, build_staging_batch, persist_staging_batch
@@ -139,6 +141,34 @@ def run_adapter_batches(
             parameters=parameters,
         )
         for adapter in adapters
+    )
+
+
+def run_enabled_adapter_batches(
+    adapter_by_key: Mapping[str, DataSourceAdapter],
+    *,
+    settings: WorkerSettings | None = None,
+    writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
+    job_key: str = "ingest.enabled_adapters",
+    parameters: dict[str, Any] | None = None,
+) -> tuple[AdapterBatchRunSummary, ...]:
+    selected_keys = enabled_adapter_keys(settings)
+    selected_adapters = tuple(
+        adapter_by_key[key]
+        for key in selected_keys
+        if key in adapter_by_key
+    )
+    return run_adapter_batches(
+        selected_adapters,
+        writer=writer,
+        run_writer=run_writer,
+        job_key=job_key,
+        parameters={
+            **(parameters or {}),
+            "enabled_adapter_keys": selected_keys,
+            "available_adapter_keys": tuple(adapter_by_key),
+        },
     )
 
 

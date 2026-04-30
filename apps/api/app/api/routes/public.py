@@ -38,12 +38,21 @@ from app.domain.evidence import (
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
     fetch_assessment_evidence,
+    fetch_query_heat_snapshot,
+    persist_risk_assessment,
     query_nearby_evidence,
+    RiskAssessmentPersistence,
 )
 from app.domain.history import (
     HistoricalFloodRecord,
     historical_record_matches_location_text,
     nearby_historical_flood_records,
+)
+from app.domain.layers import (
+    LayerRecord,
+    LayerRepositoryUnavailable,
+    fetch_map_layer,
+    fetch_map_layers,
 )
 from app.domain.realtime import (
     OfficialRealtimeBundle,
@@ -51,7 +60,7 @@ from app.domain.realtime import (
     OfficialRealtimeSourceStatus,
     fetch_official_realtime_bundle,
 )
-from app.domain.risk import RiskEvidenceSignal, score_risk
+from app.domain.risk import RiskEvidenceSignal, RiskScoringResult, score_risk
 
 router = APIRouter(prefix="/v1", tags=["Public"])
 
@@ -535,7 +544,7 @@ def _signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
     )
 
 
-def _layers(now: datetime) -> list[MapLayer]:
+def _legacy_static_layers(now: datetime) -> list[MapLayer]:
     return [
         MapLayer(
             id="flood-potential",
@@ -562,6 +571,105 @@ def _layers(now: datetime) -> list[MapLayer]:
             updated_at=now,
         ),
     ]
+
+
+def _static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
+    return (
+        LayerRecord(
+            id="flood-potential",
+            name="Flood potential",
+            description="Static fallback for official flood potential polygons.",
+            category="flood_potential",
+            status="disabled",
+            minzoom=8,
+            maxzoom=18,
+            attribution="Government open data",
+            tilejson_url="/v1/layers/flood-potential/tilejson",
+            updated_at=now,
+            metadata={
+                "version": "static-fallback",
+                "tiles": [
+                    "https://tiles.placeholder.flood-risk.local/flood-potential/{z}/{x}/{y}.pbf"
+                ],
+                "bounds": [119.3, 21.8, 122.1, 25.4],
+                "vector_layers": [
+                    {
+                        "id": "flood_potential",
+                        "fields": {"source_id": "String", "category": "String"},
+                    }
+                ],
+            },
+        ),
+        LayerRecord(
+            id="query-heat",
+            name="Query heat",
+            description="Static fallback for privacy-preserving query density.",
+            category="query_heat",
+            status="disabled",
+            minzoom=8,
+            maxzoom=14,
+            attribution="Flood Risk aggregated analytics",
+            tilejson_url="/v1/layers/query-heat/tilejson",
+            updated_at=now,
+            metadata={
+                "version": "static-fallback",
+                "tiles": [
+                    "https://tiles.placeholder.flood-risk.local/query-heat/{z}/{x}/{y}.pbf"
+                ],
+                "bounds": [119.3, 21.8, 122.1, 25.4],
+                "vector_layers": [
+                    {
+                        "id": "query_heat",
+                        "fields": {"query_count_bucket": "String", "period": "String"},
+                    }
+                ],
+            },
+        ),
+    )
+
+
+def _map_layer_from_record(record: LayerRecord) -> MapLayer:
+    return MapLayer(
+        id=record.id,
+        name=record.name,
+        description=record.description,
+        category=cast(Any, record.category),
+        status=cast(Any, record.status),
+        minzoom=record.minzoom,
+        maxzoom=record.maxzoom,
+        attribution=record.attribution,
+        tilejson_url=record.tilejson_url,
+        updated_at=record.updated_at,
+    )
+
+
+def _layer_records(now: datetime) -> tuple[LayerRecord, ...]:
+    try:
+        records = fetch_map_layers(database_url=get_settings().database_url)
+    except LayerRepositoryUnavailable:
+        return _static_layer_records(now)
+    return records or _static_layer_records(now)
+
+
+def _static_layer_by_id(layer_id: str, now: datetime) -> LayerRecord | None:
+    return {layer.id: layer for layer in _static_layer_records(now)}.get(layer_id)
+
+
+def _layer_record(layer_id: str, now: datetime) -> LayerRecord | None:
+    try:
+        records = fetch_map_layers(database_url=get_settings().database_url)
+    except LayerRepositoryUnavailable:
+        return _static_layer_by_id(layer_id, now)
+    if not records:
+        return _static_layer_by_id(layer_id, now)
+    try:
+        return fetch_map_layer(database_url=get_settings().database_url, layer_id=layer_id)
+    except LayerRepositoryUnavailable:
+        return _static_layer_by_id(layer_id, now)
+
+
+def _layers(now: datetime) -> list[MapLayer]:
+    return [_map_layer_from_record(record) for record in _layer_records(now)]
 
 
 @router.post("/geocode", response_model=GeocodeResponse)
@@ -636,6 +744,37 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         now=created_at,
     )
     _cache_assessment_evidence(assessment_id, evidence_items)
+    expires_at = created_at + timedelta(minutes=10)
+    explanation = Explanation(
+        summary=scoring.explanation_summary,
+        main_reasons=list(scoring.main_reasons),
+        missing_sources=_visible_source_limitations(
+            realtime_bundle,
+            historical_records,
+            db_evidence_items,
+        ),
+    )
+    data_freshness = [
+        *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
+        DataFreshness(
+            source_id=historical_freshness.source_id,
+            name="甇瑕瘛寞偌蝝???祇??啗?",
+            health_status=historical_freshness.health_status,
+            observed_at=historical_freshness.observed_at,
+            ingested_at=historical_freshness.ingested_at,
+            message=historical_freshness.message,
+        )
+    ]
+    _persist_assessment(
+        assessment_id=assessment_id,
+        request=request,
+        scoring=scoring,
+        explanation=explanation,
+        data_freshness=data_freshness,
+        evidence_items=evidence_items,
+        created_at=created_at,
+        expires_at=expires_at,
+    )
     return RiskAssessmentResponse(
         assessment_id=assessment_id,
         location=request.point,
@@ -667,13 +806,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
                 message=historical_freshness.message,
             )
         ],
-        query_heat=QueryHeat(
-            period="P7D",
-            attention_level=LOW_ATTENTION,
-            query_count_bucket="1-9",
-            unique_approx_count_bucket="1-9",
-            updated_at=created_at,
-        ),
+        query_heat=_query_heat(request, now=created_at),
     )
 
 
@@ -684,6 +817,43 @@ def _cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence
         del _ASSESSMENT_EVIDENCE_CACHE[oldest_key]
 
 
+def _persist_assessment(
+    *,
+    assessment_id: str,
+    request: RiskAssessRequest,
+    scoring: RiskScoringResult,
+    explanation: Explanation,
+    data_freshness: list[DataFreshness],
+    evidence_items: list[Evidence],
+    created_at: datetime,
+    expires_at: datetime,
+) -> None:
+    try:
+        persist_risk_assessment(
+            database_url=get_settings().database_url,
+            assessment=RiskAssessmentPersistence(
+                assessment_id=assessment_id,
+                lat=request.point.lat,
+                lng=request.point.lng,
+                radius_m=request.radius_m,
+                location_text=request.location_text,
+                score_version=scoring.score_version,
+                realtime_score=scoring.realtime_score,
+                historical_score=scoring.historical_score,
+                confidence_score=scoring.confidence_score,
+                realtime_level=scoring.realtime_level,
+                historical_level=scoring.historical_level,
+                explanation=explanation.model_dump(mode="json"),
+                data_freshness=[item.model_dump(mode="json") for item in data_freshness],
+                evidence_ids=tuple(item.id for item in evidence_items),
+                created_at=created_at,
+                expires_at=expires_at,
+            ),
+        )
+    except EvidenceRepositoryUnavailable:
+        return
+
+
 def _historical_freshness_message(
     historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
 ) -> str:
@@ -692,6 +862,33 @@ def _historical_freshness_message(
     return (
         f"查詢半徑內找到 {len(historical_records)} 筆已匯入歷史淹水公開紀錄；"
         "目前完整新聞回填仍在 Phase 2 管線建置中。"
+    )
+
+
+def _query_heat(request: RiskAssessRequest, *, now: datetime) -> QueryHeat:
+    try:
+        snapshot = fetch_query_heat_snapshot(
+            database_url=get_settings().database_url,
+            lat=request.point.lat,
+            lng=request.point.lng,
+            radius_m=request.radius_m,
+            period="P7D",
+        )
+    except EvidenceRepositoryUnavailable:
+        return QueryHeat(
+            period="P7D",
+            attention_level=LOW_ATTENTION,
+            query_count_bucket="limited-db-unavailable",
+            unique_approx_count_bucket="limited-db-unavailable",
+            updated_at=now,
+        )
+
+    return QueryHeat(
+        period=snapshot.period,
+        attention_level=LOW_ATTENTION,
+        query_count_bucket=snapshot.query_count_bucket,
+        unique_approx_count_bucket=snapshot.unique_approx_count_bucket,
+        updated_at=snapshot.updated_at,
     )
 
 
@@ -812,6 +1009,89 @@ def _assessment_db_evidence(assessment_id: str, *, page_size: int) -> tuple[Evid
     return tuple(_evidence_from_record(record) for record in records)
 
 
+def _tilejson_from_layer_record(record: LayerRecord) -> TileJson:
+    metadata = record.metadata
+    return TileJson(
+        tilejson=str(metadata.get("tilejson", "3.0.0")),
+        name=str(metadata.get("name", record.name)),
+        version=_optional_str(metadata.get("version")),
+        attribution=_optional_str(metadata.get("attribution")) or record.attribution,
+        scheme=cast(Any, metadata.get("scheme", "xyz")),
+        tiles=_string_list(
+            metadata.get("tiles"),
+            fallback=[
+                "https://tiles.placeholder.flood-risk.local/"
+                f"{record.id}/{{z}}/{{x}}/{{y}}.pbf"
+            ],
+        ),
+        minzoom=_optional_int(metadata.get("minzoom")) if "minzoom" in metadata else record.minzoom,
+        maxzoom=_optional_int(metadata.get("maxzoom")) if "maxzoom" in metadata else record.maxzoom,
+        bounds=_number_list(metadata.get("bounds"), expected_length=4),
+        center=_number_list(metadata.get("center"), expected_length=3),
+        vector_layers=_tilejson_vector_layers(record),
+    )
+
+
+def _tilejson_vector_layers(record: LayerRecord) -> list[TileJsonVectorLayer]:
+    vector_layers = record.metadata.get("vector_layers")
+    if isinstance(vector_layers, list) and vector_layers:
+        return [
+            TileJsonVectorLayer(
+                id=str(item.get("id", record.id.replace("-", "_"))),
+                description=_optional_str(item.get("description")),
+                minzoom=_optional_int(item.get("minzoom")),
+                maxzoom=_optional_int(item.get("maxzoom")),
+                fields=_string_dict(item.get("fields")),
+            )
+            for item in vector_layers
+            if isinstance(item, dict)
+        ]
+    return [
+        TileJsonVectorLayer(
+            id=record.id.replace("-", "_"),
+            fields={"source_id": "String", "category": "String"},
+        )
+    ]
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_list(value: object, *, fallback: list[str]) -> list[str]:
+    if isinstance(value, list):
+        items = [str(item) for item in value if item]
+        if items:
+            return items
+    return fallback
+
+
+def _number_list(value: object, *, expected_length: int) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != expected_length:
+        return None
+    try:
+        return [float(cast(Any, item)) for item in value]
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_dict(value: object) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    return {str(key): str(item) for key, item in value.items()}
+
+
 @router.get("/layers", response_model=LayersResponse)
 async def list_layers() -> LayersResponse:
     return LayersResponse(layers=_layers(_now()))
@@ -819,29 +1099,10 @@ async def list_layers() -> LayersResponse:
 
 @router.get("/layers/{layer_id}/tilejson", response_model=TileJson, response_model_exclude_none=True)
 async def get_layer_tilejson(layer_id: str) -> TileJson:
-    layer_by_id = {layer.id: layer for layer in _layers(_now())}
-    layer = layer_by_id.get(layer_id)
+    layer = _layer_record(layer_id, _now())
     if layer is None:
         raise HTTPException(
             status_code=404,
             detail=error_payload("not_found", f"Layer '{layer_id}' was not found.")["error"],
         )
-
-    vector_layer_id = layer_id.replace("-", "_")
-    return TileJson(
-        tilejson="3.0.0",
-        name=layer.name,
-        version="2026-04-28",
-        attribution=layer.attribution,
-        scheme="xyz",
-        tiles=[f"https://tiles.example.test/{layer_id}/{{z}}/{{x}}/{{y}}.pbf"],
-        minzoom=layer.minzoom,
-        maxzoom=layer.maxzoom,
-        bounds=[119.3, 21.8, 122.1, 25.4],
-        vector_layers=[
-            TileJsonVectorLayer(
-                id=vector_layer_id,
-                fields={"source_id": "String", "category": "String"},
-            )
-        ],
-    )
+    return _tilejson_from_layer_record(layer)

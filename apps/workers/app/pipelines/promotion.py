@@ -53,7 +53,12 @@ class PromotionResult:
 
 
 class EvidencePromotionWriter(Protocol):
-    def fetch_accepted_staging(self, *, limit: int | None = None) -> tuple[PromotionCandidate, ...]:
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
         """Load staging rows that are ready to become evidence records."""
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str:
@@ -89,10 +94,11 @@ def promote_accepted_staging(
     writer: EvidencePromotionWriter,
     *,
     limit: int | None = None,
+    adapter_keys: tuple[str, ...] | None = None,
 ) -> PromotionResult:
     evidence_ids = tuple(
         writer.write_evidence(build_evidence_promotion_payload(candidate))
-        for candidate in writer.fetch_accepted_staging(limit=limit)
+        for candidate in writer.fetch_accepted_staging(limit=limit, adapter_keys=adapter_keys)
     )
     return PromotionResult(promoted=len(evidence_ids), evidence_ids=evidence_ids)
 
@@ -109,10 +115,18 @@ class PostgresEvidencePromotionWriter:
         self._database_url = database_url
         self._connection_factory = connection_factory
 
-    def fetch_accepted_staging(self, *, limit: int | None = None) -> tuple[PromotionCandidate, ...]:
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
         with self._connect() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(_accepted_staging_sql(limit=limit), _accepted_staging_params(limit=limit))
+                cursor.execute(
+                    _accepted_staging_sql(limit=limit, adapter_keys=adapter_keys),
+                    _accepted_staging_params(limit=limit, adapter_keys=adapter_keys),
+                )
                 return tuple(_candidate_from_row(row) for row in cursor.fetchall())
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str:
@@ -131,6 +145,7 @@ class PostgresEvidencePromotionWriter:
                         occurred_at,
                         observed_at,
                         confidence,
+                        geom,
                         raw_ref,
                         ingestion_status,
                         properties
@@ -146,6 +161,10 @@ class PostgresEvidencePromotionWriter:
                         %s,
                         %s,
                         %s,
+                        CASE
+                            WHEN %s::text IS NULL THEN NULL
+                            ELSE ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326)
+                        END,
                         %s,
                         'accepted',
                         %s::jsonb
@@ -164,6 +183,8 @@ class PostgresEvidencePromotionWriter:
                         payload.occurred_at,
                         payload.observed_at,
                         payload.confidence,
+                        _geojson_geometry(payload.properties),
+                        _geojson_geometry(payload.properties),
                         payload.raw_ref,
                         _json(payload.properties),
                     ),
@@ -185,10 +206,19 @@ class PostgresEvidencePromotionWriter:
         return psycopg.connect(self._database_url)
 
 
-def _accepted_staging_sql(*, limit: int | None) -> str:
+def _accepted_staging_sql(
+    *,
+    limit: int | None,
+    adapter_keys: tuple[str, ...] | None,
+) -> str:
+    adapter_filter = (
+        "AND COALESCE(se.payload ->> 'adapter_key', rs.adapter_key) = ANY(%s)"
+        if adapter_keys is not None
+        else ""
+    )
     limit_clause = "LIMIT %s" if limit is not None else ""
     return f"""
-        SELECT
+        SELECT DISTINCT ON (se.source_id, rs.raw_ref)
             se.id,
             se.raw_snapshot_id,
             rs.raw_ref,
@@ -208,23 +238,34 @@ def _accepted_staging_sql(*, limit: int | None) -> str:
         LEFT JOIN raw_snapshots rs ON rs.id = se.raw_snapshot_id
         LEFT JOIN data_sources ds ON ds.adapter_key = COALESCE(se.payload ->> 'adapter_key', rs.adapter_key)
         WHERE se.validation_status = 'accepted'
+            {adapter_filter}
             AND NOT EXISTS (
                 SELECT 1
                 FROM evidence e
                 WHERE e.source_id = se.source_id
                     AND e.raw_ref IS NOT DISTINCT FROM rs.raw_ref
             )
-        ORDER BY se.created_at ASC, se.id ASC
+        ORDER BY se.source_id ASC, rs.raw_ref ASC, se.created_at ASC, se.id ASC
         {limit_clause}
     """
 
 
-def _accepted_staging_params(*, limit: int | None) -> tuple[object, ...]:
+def _accepted_staging_params(
+    *,
+    limit: int | None,
+    adapter_keys: tuple[str, ...] | None,
+) -> tuple[object, ...]:
+    params: list[object] = []
+    if adapter_keys is not None:
+        if not adapter_keys:
+            raise ValueError("adapter_keys must contain at least one key when provided")
+        params.append(list(adapter_keys))
     if limit is None:
-        return ()
+        return tuple(params)
     if limit < 1:
         raise ValueError("limit must be greater than 0")
-    return (limit,)
+    params.append(limit)
+    return tuple(params)
 
 
 def _candidate_from_row(row: tuple[Any, ...]) -> PromotionCandidate:
@@ -256,6 +297,16 @@ def _candidate_from_row(row: tuple[Any, ...]) -> PromotionCandidate:
 def _payload_adapter_key(payload: dict[str, Any]) -> str | None:
     adapter_key = payload.get("adapter_key")
     return str(adapter_key) if adapter_key else None
+
+
+def _geojson_geometry(properties: dict[str, Any]) -> str | None:
+    location_payload = properties.get("location_payload")
+    if not isinstance(location_payload, dict):
+        return None
+    geometry = location_payload.get("geometry")
+    if not isinstance(geometry, dict):
+        return None
+    return json.dumps(geometry, sort_keys=True, separators=(",", ":"))
 
 
 def _json(value: dict[str, Any]) -> str:

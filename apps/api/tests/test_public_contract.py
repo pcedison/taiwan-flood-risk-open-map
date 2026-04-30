@@ -4,14 +4,15 @@ import warnings
 from uuid import UUID
 
 from fastapi.testclient import TestClient
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from app.api.schemas import DependencyReadiness, LatLng, PlaceCandidate
 from app.api.routes import health as health_routes
 from app.api.routes import public as public_routes
-from app.domain.evidence import EvidenceRecord, EvidenceRepositoryUnavailable
+from app.domain.evidence import EvidenceRecord, EvidenceRepositoryUnavailable, QueryHeatSnapshot
+from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
 from app.domain.realtime import (
     OfficialRealtimeBundle,
     OfficialRealtimeObservation,
@@ -21,7 +22,7 @@ from app.main import create_app
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
-    from jsonschema import RefResolver
+    from jsonschema import RefResolver  # type: ignore[import-untyped]
 
 
 client = TestClient(create_app())
@@ -36,7 +37,13 @@ def fallback_to_local_historical_records(monkeypatch: pytest.MonkeyPatch) -> Non
     def unavailable(**_kwargs: object) -> tuple[EvidenceRecord, ...]:
         raise EvidenceRepositoryUnavailable("database unavailable in contract tests")
 
+    def layers_unavailable(**_kwargs: object) -> tuple[LayerRecord, ...]:
+        raise LayerRepositoryUnavailable("database unavailable in contract tests")
+
     monkeypatch.setattr(public_routes, "query_nearby_evidence", unavailable)
+    monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
+    monkeypatch.setattr(public_routes, "persist_risk_assessment", unavailable)
+    monkeypatch.setattr(public_routes, "fetch_map_layers", layers_unavailable)
 
 
 def assert_iso_datetime(value: str) -> None:
@@ -381,6 +388,118 @@ def test_risk_assess_uses_db_evidence_when_repository_is_available(monkeypatch) 
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
+def test_risk_assess_uses_db_query_heat_when_available(monkeypatch) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_query_heat_snapshot",
+        lambda **_kwargs: QueryHeatSnapshot(
+            period="P7D",
+            query_count=17,
+            unique_approx_count=6,
+            query_count_bucket="10-49",
+            unique_approx_count_bucket="1-9",
+            updated_at=datetime.fromisoformat("2026-04-30T03:00:00+00:00"),
+        ),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 23.038818, "lng": 120.213493},
+            "radius_m": 300,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["query_heat"]["period"] == "P7D"
+    assert payload["query_heat"]["query_count_bucket"] == "10-49"
+    assert payload["query_heat"]["unique_approx_count_bucket"] == "1-9"
+    assert payload["query_heat"]["updated_at"] == "2026-04-30T03:00:00Z"
+
+
+def test_risk_assess_persists_before_query_heat_snapshot(monkeypatch) -> None:
+    persisted: list[object] = []
+
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+
+    def persist(**kwargs: object) -> None:
+        persisted.append(kwargs["assessment"])
+
+    def heat(**_kwargs: object) -> QueryHeatSnapshot:
+        assert persisted
+        return QueryHeatSnapshot(
+            period="P7D",
+            query_count=1,
+            unique_approx_count=1,
+            query_count_bucket="1-9",
+            unique_approx_count_bucket="1-9",
+            updated_at=datetime.fromisoformat("2026-04-30T03:00:00+00:00"),
+        )
+
+    monkeypatch.setattr(public_routes, "persist_risk_assessment", persist)
+    monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", heat)
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 23.038818, "lng": 120.213493},
+            "radius_m": 300,
+            "time_context": "now",
+            "location_text": "Tainan Annan",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assessment = persisted[0]
+    assert getattr(assessment, "assessment_id") == payload["assessment_id"]
+    assert getattr(assessment, "lat") == 23.038818
+    assert getattr(assessment, "lng") == 120.213493
+    assert getattr(assessment, "radius_m") == 300
+    assert getattr(assessment, "location_text") == "Tainan Annan"
+    assert getattr(assessment, "explanation")["summary"]
+    assert getattr(assessment, "data_freshness")
+    assert payload["query_heat"]["query_count_bucket"] == "1-9"
+
+
+def test_risk_assess_marks_query_heat_limited_when_db_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+
+    def unavailable(**_kwargs: object) -> QueryHeatSnapshot:
+        raise EvidenceRepositoryUnavailable("query heat unavailable")
+
+    monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 23.038818, "lng": 120.213493},
+            "radius_m": 300,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["query_heat"]["query_count_bucket"] == "limited-db-unavailable"
+    assert payload["query_heat"]["unique_approx_count_bucket"] == "limited-db-unavailable"
+
+
 def test_risk_assess_does_not_fallback_to_fixture_when_db_returns_empty(monkeypatch) -> None:
     monkeypatch.setattr(
         public_routes,
@@ -634,6 +753,126 @@ def test_evidence_list_can_read_persisted_assessment_evidence(monkeypatch) -> No
     assert_openapi_schema(payload, "EvidenceListResponse")
 
 
+def test_layers_uses_db_records_when_available(monkeypatch) -> None:
+    layer_updated_at = datetime.fromisoformat("2026-04-30T03:00:00+00:00")
+    db_layer = LayerRecord(
+        id="db-flood",
+        name="DB flood layer",
+        description="Layer returned from map_layers.",
+        category="flood_potential",
+        status="degraded",
+        minzoom=7,
+        maxzoom=15,
+        attribution="DB attribution",
+        tilejson_url="/v1/layers/db-flood/tilejson",
+        updated_at=layer_updated_at,
+        metadata={"tiles": ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]},
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
+
+    response = client.get("/v1/layers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["layers"] == [
+        {
+            "id": "db-flood",
+            "name": "DB flood layer",
+            "description": "Layer returned from map_layers.",
+            "category": "flood_potential",
+            "status": "degraded",
+            "minzoom": 7,
+            "maxzoom": 15,
+            "attribution": "DB attribution",
+            "tilejson_url": "/v1/layers/db-flood/tilejson",
+            "updated_at": "2026-04-30T03:00:00Z",
+        }
+    ]
+    assert_openapi_schema(payload, "LayersResponse")
+
+
+def test_layers_falls_back_when_db_unavailable(monkeypatch) -> None:
+    def unavailable(**_kwargs: object) -> tuple[LayerRecord, ...]:
+        raise LayerRepositoryUnavailable("database unavailable in contract tests")
+
+    monkeypatch.setattr(public_routes, "fetch_map_layers", unavailable)
+
+    response = client.get("/v1/layers")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [layer["id"] for layer in payload["layers"]] == ["flood-potential", "query-heat"]
+    assert all(layer["status"] == "disabled" for layer in payload["layers"])
+    assert_openapi_schema(payload, "LayersResponse")
+
+
+def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
+    db_layer = LayerRecord(
+        id="db-flood",
+        name="DB flood layer",
+        description=None,
+        category="flood_potential",
+        status="available",
+        minzoom=5,
+        maxzoom=13,
+        attribution="DB attribution",
+        tilejson_url="/v1/layers/db-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "version": "db-v1",
+            "scheme": "xyz",
+            "tiles": ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"],
+            "bounds": [120.0, 22.0, 121.0, 23.0],
+            "vector_layers": [
+                {
+                    "id": "db_flood_vector",
+                    "fields": {"risk": "Number", "source_id": "String"},
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: db_layer)
+
+    response = client.get("/v1/layers/db-flood/tilejson")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "DB flood layer"
+    assert payload["version"] == "db-v1"
+    assert payload["attribution"] == "DB attribution"
+    assert payload["tiles"] == ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]
+    assert payload["minzoom"] == 5
+    assert payload["maxzoom"] == 13
+    assert payload["bounds"] == [120.0, 22.0, 121.0, 23.0]
+    assert payload["vector_layers"][0]["id"] == "db_flood_vector"
+    assert payload["vector_layers"][0]["fields"] == {"risk": "Number", "source_id": "String"}
+    assert_openapi_schema(payload, "TileJson")
+
+
+def test_tilejson_returns_404_for_missing_db_layer(monkeypatch) -> None:
+    db_layer = LayerRecord(
+        id="db-flood",
+        name="DB flood layer",
+        description=None,
+        category="flood_potential",
+        status="available",
+        minzoom=5,
+        maxzoom=13,
+        attribution=None,
+        tilejson_url="/v1/layers/db-flood/tilejson",
+        updated_at=None,
+        metadata={"tiles": ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]},
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: None)
+
+    response = client.get("/v1/layers/not-a-layer/tilejson")
+
+    assert response.status_code == 404
+    assert_error_envelope(response.json())
+
+
 def test_layers_and_tilejson_contracts() -> None:
     layers_response = client.get("/v1/layers")
 
@@ -661,6 +900,7 @@ def test_layers_and_tilejson_contracts() -> None:
     assert {"tilejson", "name", "tiles"}.issubset(tilejson)
     assert tilejson["tilejson"] == "3.0.0"
     assert tilejson["tiles"]
+    assert "tiles.example.test" not in tilejson["tiles"][0]
     assert len(tilejson["bounds"]) == 4
     assert tilejson["vector_layers"][0]["id"] == layer["id"].replace("-", "_")
     assert_openapi_schema(layers_payload, "LayersResponse")

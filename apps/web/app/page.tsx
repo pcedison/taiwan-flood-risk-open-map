@@ -2,6 +2,21 @@
 
 import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  buildRiskAssessmentPayload,
+  buildLayerDisplayState,
+  evidenceSourceUrl,
+  evidenceTimeSummary,
+  formatConfidence,
+  formatCoordinate,
+  formatDateTime,
+  formatDistance,
+  getEvidenceDisplayState,
+  selectEvidenceItems,
+  shouldFetchEvidenceList,
+} from "./lib/risk-display";
+import type { EvidenceItem, EvidencePreview, EvidenceStatus } from "./lib/risk-display";
+import type { LayerContractItem } from "./lib/risk-display";
 
 type CoordinateSource = "default" | "map" | "search";
 
@@ -23,7 +38,14 @@ type GeocodeResponse = {
   }>;
 };
 
+type EvidenceListResponse = {
+  assessment_id: string;
+  items: EvidenceItem[];
+  next_cursor: string | null;
+};
+
 type RiskAssessmentResponse = {
+  assessment_id: string;
   realtime: {
     level: string;
   };
@@ -38,21 +60,7 @@ type RiskAssessmentResponse = {
     main_reasons: string[];
     missing_sources: string[];
   };
-  evidence: Array<{
-    id: string;
-    source_type: string;
-    event_type: string;
-    title: string;
-    summary: string;
-    confidence: number;
-    occurred_at?: string | null;
-    observed_at: string | null;
-    ingested_at: string | null;
-    published_at?: string | null;
-    source_url?: string | null;
-    url?: string | null;
-    distance_to_query_m: number | null;
-  }>;
+  evidence: EvidencePreview[];
   data_freshness: Array<{
     source_id: string;
     name: string;
@@ -65,6 +73,8 @@ type RiskAssessmentResponse = {
     attention_level: string;
     updated_at: string;
   };
+  layers?: LayerContractItem[];
+  map_layers?: LayerContractItem[];
 };
 
 type RadiusFeatureCollection = {
@@ -129,11 +139,23 @@ const text = {
   evidenceOpenSource: "開啟來源",
   evidenceMissingUrl: "未提供連結",
   evidenceEmpty: "本次查詢尚未回傳可列出的資料佐證。",
+  evidenceLoading: "正在載入完整資料佐證。",
+  evidenceError: "完整資料佐證載入失敗，先顯示風險摘要中的預覽資料。",
   limitations: "資料限制",
   evidenceFlood: "尚未查詢附近淹水事件。",
   evidenceRain: "查詢後會顯示雨量、水位與淹水潛勢資料。",
   evidenceTerrain: "公開資料會保留來源與時間，方便回頭查證。",
   freshness: "資料新鮮度",
+  layers: "圖層管線",
+  layerReady: "可顯示",
+  layerLimited: "部分可用",
+  layerEmpty: "無圖層資料",
+  layerPending: "等待查詢",
+  layerContract: "API 圖層合約",
+  layerFallback: "由 freshness / evidence 推導",
+  layerNoTile: "尚未提供 tile URL",
+  layerNoData: "本次查詢未回傳可展示的圖層或資料來源。",
+  layerFeatureCount: "資料筆數",
   offline: "尚未連線",
   online: "已連線",
   loading: "查詢中",
@@ -194,8 +216,6 @@ const TAIWAN_CITY_GEOJSON: MapFeatureCollection = {
   ],
 };
 
-const formatCoordinate = (value: number) => value.toFixed(5);
-
 const healthLabels: Record<string, string> = {
   healthy: "正常",
   degraded: "延遲",
@@ -205,6 +225,16 @@ const healthLabels: Record<string, string> = {
 };
 
 const healthLabel = (value: string) => healthLabels[value] ?? value;
+
+const layerAvailabilityLabels: Record<string, string> = {
+  available: text.layerReady,
+  empty: text.layerEmpty,
+  limited: text.layerLimited,
+  pending: text.layerPending,
+  unavailable: "不可用",
+};
+
+const layerAvailabilityLabel = (value: string) => layerAvailabilityLabels[value] ?? value;
 
 const sourceTypeLabels: Record<string, string> = {
   official: "官方公開資料",
@@ -221,38 +251,6 @@ const riskMeterPosition = (level?: string) => {
   if (level === "高") return "75%";
   if (level === "極高") return "92%";
   return "8%";
-};
-
-const formatConfidence = (value: number) => `${Math.round(value * 100)}%`;
-
-const formatDistance = (value: number | null) =>
-  value === null ? "未提供" : `${Math.round(value).toLocaleString("zh-TW")} m`;
-
-const formatDateTime = (value: string | null) => {
-  if (!value) return "未提供";
-  return new Intl.DateTimeFormat("zh-TW", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  }).format(new Date(value));
-};
-
-const evidenceSourceUrl = (item: RiskAssessmentResponse["evidence"][number]) =>
-  item.url ?? item.source_url ?? null;
-
-const evidencePublishedAt = (item: RiskAssessmentResponse["evidence"][number]) =>
-  item.published_at ?? item.occurred_at ?? null;
-
-const evidenceTimeSummary = (item: RiskAssessmentResponse["evidence"][number]) => {
-  const observedAt = item.observed_at;
-  const publishedAt = evidencePublishedAt(item);
-
-  if (observedAt && publishedAt) {
-    return `${formatDateTime(observedAt)} / ${formatDateTime(publishedAt)}`;
-  }
-
-  return formatDateTime(observedAt ?? publishedAt ?? null);
 };
 
 const targetZoom = (coordinate: Coordinate, radius: number) => {
@@ -274,6 +272,16 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
     },
     method: "POST",
   });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`);
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
@@ -333,16 +341,33 @@ export default function HomePage() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
+  const requestIdRef = useRef(0);
   const [query, setQuery] = useState(text.taipeiMainStation);
   const [radius, setRadius] = useState(INITIAL_RADIUS);
   const [coordinate, setCoordinate] = useState<Coordinate>(INITIAL_COORDINATE);
   const [assessment, setAssessment] = useState<RiskAssessmentResponse | null>(null);
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([]);
+  const [evidenceStatus, setEvidenceStatus] = useState<EvidenceStatus>("idle");
   const [isLoading, setIsLoading] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [locationLabel, setLocationLabel] = useState(text.taipeiMainStation);
 
   const statusText = isMapReady ? text.mapStatusReady : text.mapStatusLoading;
+  const displayedEvidence = assessment
+    ? selectEvidenceItems(assessment.evidence, evidenceItems, evidenceStatus)
+    : [];
+  const evidenceDisplayState = getEvidenceDisplayState(
+    evidenceStatus,
+    displayedEvidence.length,
+  );
+  const layerDisplayState = assessment
+    ? buildLayerDisplayState({
+        dataFreshness: assessment.data_freshness,
+        evidenceItems,
+        layers: assessment.map_layers ?? assessment.layers,
+      })
+    : { hasTileContract: false, items: [], status: "pending" as const };
   const currentSummary = useMemo(
     () =>
       coordinate.source === "search"
@@ -451,7 +476,10 @@ export default function HomePage() {
           source: "map",
         });
         setLocationLabel(sourceLabels.map);
+        requestIdRef.current += 1;
         setAssessment(null);
+        setEvidenceItems([]);
+        setEvidenceStatus("idle");
         setErrorMessage(null);
       });
     }
@@ -499,6 +527,8 @@ export default function HomePage() {
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setIsLoading(true);
     setErrorMessage(null);
 
@@ -516,6 +546,8 @@ export default function HomePage() {
         const candidate = geocode.candidates[0];
         if (!candidate || candidate.confidence < MIN_GEOCODE_CONFIDENCE) {
           setAssessment(null);
+          setEvidenceItems([]);
+          setEvidenceStatus("idle");
           setErrorMessage(text.noGeocodeResult);
           return;
         }
@@ -537,20 +569,38 @@ export default function HomePage() {
         });
       }
 
-      const risk = await postJson<RiskAssessmentResponse>("/v1/risk/assess", {
-        point: {
-          lat: target.lat,
-          lng: target.lng,
-        },
-        radius_m: radius,
-        time_context: "now",
-        location_text: resolvedLocationText,
-      });
+      const risk = await postJson<RiskAssessmentResponse>(
+        "/v1/risk/assess",
+        buildRiskAssessmentPayload(target, radius, resolvedLocationText),
+      );
+      if (requestIdRef.current !== requestId) return;
       setAssessment(risk);
+      setEvidenceItems(risk.evidence);
+
+      if (shouldFetchEvidenceList(risk.assessment_id)) {
+        setEvidenceStatus("loading");
+        try {
+          const evidence = await getJson<EvidenceListResponse>(
+            `/v1/evidence/${encodeURIComponent(risk.assessment_id)}`,
+          );
+          if (requestIdRef.current !== requestId) return;
+          setEvidenceItems(evidence.items);
+          setEvidenceStatus("ready");
+        } catch {
+          if (requestIdRef.current !== requestId) return;
+          setEvidenceStatus("error");
+        }
+      } else {
+        setEvidenceStatus("ready");
+      }
     } catch {
-      setErrorMessage(text.queryFailed);
+      if (requestIdRef.current === requestId) {
+        setErrorMessage(text.queryFailed);
+      }
     } finally {
-      setIsLoading(false);
+      if (requestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
     }
   }
 
@@ -641,6 +691,57 @@ export default function HomePage() {
           </dl>
         </section>
 
+        <section className="panel-section layer-panel">
+          <div className="section-heading">
+            <span className="section-kicker">{text.layers}</span>
+            <strong>
+              {layerDisplayState.status === "ready"
+                ? text.layerReady
+                : layerDisplayState.status === "limited"
+                  ? text.layerLimited
+                  : layerDisplayState.status === "empty"
+                    ? text.layerEmpty
+                    : text.layerPending}
+            </strong>
+          </div>
+          <div className="layer-contract-status">
+            {layerDisplayState.hasTileContract ? text.layerContract : text.layerFallback}
+          </div>
+          {layerDisplayState.items.length ? (
+            <ul className="layer-list">
+              {layerDisplayState.items.map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{`${item.kind} / ${layerAvailabilityLabel(item.availability)}`}</span>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>{text.freshness}</dt>
+                      <dd>{formatDateTime(item.freshnessAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>{text.layerFeatureCount}</dt>
+                      <dd>{item.featureCount ?? "--"}</dd>
+                    </div>
+                    <div>
+                      <dt>{text.mapStatus}</dt>
+                      <dd>{healthLabel(item.status)}</dd>
+                    </div>
+                    <div>
+                      <dt>Tile</dt>
+                      <dd>{item.tileUrl ? "XYZ" : text.layerNoTile}</dd>
+                    </div>
+                  </dl>
+                  {item.message ? <p>{item.message}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>{assessment ? text.layerNoData : text.freshnessNote}</p>
+          )}
+        </section>
+
         <section className="panel-section risk-summary">
           <div className="section-heading">
             <span className="section-kicker">{text.riskSummary}</span>
@@ -679,7 +780,7 @@ export default function HomePage() {
               <strong>{text.evidenceTitle}</strong>
               {assessment ? (
                 <span>
-                  {assessment.evidence.length} {text.evidenceCountSuffix}
+                  {displayedEvidence.length} {text.evidenceCountSuffix}
                 </span>
               ) : null}
             </summary>
@@ -706,9 +807,21 @@ export default function HomePage() {
                   ))}
                 </div>
 
-                {assessment.evidence.length ? (
+                {evidenceDisplayState.showLoading ? (
+                  <div className="evidence-state" role="status">
+                    {text.evidenceLoading}
+                  </div>
+                ) : null}
+
+                {evidenceDisplayState.showError ? (
+                  <div className="evidence-state evidence-state-error" role="alert">
+                    {text.evidenceError}
+                  </div>
+                ) : null}
+
+                {evidenceDisplayState.showList ? (
                   <ul className="evidence-list">
-                    {assessment.evidence.map((item) => {
+                    {displayedEvidence.map((item) => {
                       const sourceUrl = evidenceSourceUrl(item);
 
                       return (
@@ -748,9 +861,9 @@ export default function HomePage() {
                       );
                     })}
                   </ul>
-                ) : (
+                ) : evidenceDisplayState.showEmpty ? (
                   <div className="evidence-empty">{text.evidenceEmpty}</div>
-                )}
+                ) : null}
               </div>
             ) : (
               <ul className="evidence-placeholder-list">

@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from app.adapters.contracts import AdapterMetadata, AdapterRunResult, SourceFamily
+from app.adapters.contracts import (
+    AdapterMetadata,
+    AdapterRunResult,
+    NormalizedEvidence,
+    RawSourceItem,
+    SourceFamily,
+)
 from app.adapters.news import SamplePublicWebNewsAdapter
-from app.jobs.ingestion import run_adapter_batch, run_adapter_batches
+from app.config import load_worker_settings
+from app.jobs.ingestion import run_adapter_batch, run_adapter_batches, run_enabled_adapter_batches
 from app.pipelines.staging import AdapterStagingBatch
 
 
@@ -116,6 +123,35 @@ def test_run_adapter_batches_runs_each_adapter() -> None:
     assert [summary.status for summary in summaries] == ["skipped", "failed"]
 
 
+def test_run_enabled_adapter_batches_uses_configured_adapter_allowlist() -> None:
+    first = _NamedEmptyAdapter("official.cwa.rainfall")
+    second = _NamedEmptyAdapter("official.wra.water_level")
+    settings = load_worker_settings(
+        {"WORKER_ENABLED_ADAPTER_KEYS": "official.wra.water_level"}
+    )
+    run_writer = _MemoryRunWriter()
+
+    summaries = run_enabled_adapter_batches(
+        {
+            first.metadata.key: first,
+            second.metadata.key: second,
+        },
+        settings=settings,
+        run_writer=run_writer,
+    )
+
+    assert [summary.adapter_key for summary in summaries] == ["official.wra.water_level"]
+    assert run_writer.parameters == [
+        {
+            "enabled_adapter_keys": ("official.wra.water_level",),
+            "available_adapter_keys": (
+                "official.cwa.rainfall",
+                "official.wra.water_level",
+            ),
+        }
+    ]
+
+
 class _MemoryWriter:
     def __init__(self) -> None:
         self.batches: list[AdapterStagingBatch] = []
@@ -140,6 +176,13 @@ class _EmptyAdapter:
     def run(self) -> AdapterRunResult:
         return AdapterRunResult(adapter_key=self.metadata.key, fetched=(), normalized=())
 
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
 
 class _FailingAdapter:
     metadata = AdapterMetadata(
@@ -151,3 +194,45 @@ class _FailingAdapter:
 
     def run(self) -> AdapterRunResult:
         raise RuntimeError("fetch failed")
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        raise RuntimeError("fetch failed")
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
+
+class _NamedEmptyAdapter:
+    def __init__(self, key: str) -> None:
+        self.metadata = AdapterMetadata(
+            key=key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=True,
+            display_name=f"{key} test adapter",
+        )
+
+    def run(self) -> AdapterRunResult:
+        return AdapterRunResult(adapter_key=self.metadata.key, fetched=(), normalized=())
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
+
+class _MemoryRunWriter:
+    def __init__(self) -> None:
+        self.parameters: list[dict[str, object] | None] = []
+
+    def write_summary(
+        self,
+        summary: object,
+        *,
+        job_key: str,
+        parameters: dict[str, object] | None = None,
+    ) -> None:
+        del summary, job_key
+        self.parameters.append(parameters)

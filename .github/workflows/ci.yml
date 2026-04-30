@@ -88,16 +88,7 @@ jobs:
         run: npm run typecheck --prefix apps/web
 
       - name: Frontend unit tests
-        run: |
-          set -euo pipefail
-          if find apps/web -type f \( \
-            -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.spec.ts" -o -name "*.spec.tsx" -o \
-            -name "*.test.js" -o -name "*.test.jsx" -o -name "*.spec.js" -o -name "*.spec.jsx" \
-          \) | grep -q .; then
-            npm test --prefix apps/web
-          else
-            echo "::notice title=Empty frontend test suite::apps/web has no JS/TS test files yet; Phase 1 allows this only through this explicit empty-suite check."
-          fi
+        run: npm test --prefix apps/web
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium

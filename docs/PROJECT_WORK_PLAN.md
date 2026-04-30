@@ -3,7 +3,7 @@
 版本：0.1.0  
 狀態：正式工作進度規劃  
 來源規格：`docs/PROJECT_SDD.md`  
-最後更新：2026-04-28  
+最後更新：2026-04-30
 專案授權決策：Apache-2.0  
 主要部署決策：GitHub repo -> Zeabur VPS auto deploy  
 語系決策：繁體中文 only
@@ -1075,7 +1075,7 @@ Integration target:
 
 ## 10. Current Project Status
 
-As of 2026-04-29:
+As of 2026-04-30:
 
 - SDD：Done draft, accepted for planning.
 - Work plan：Created.
@@ -1088,13 +1088,21 @@ As of 2026-04-29:
 - Monorepo folders：Done.
 - Docker Compose base：Done and validated with full `docker compose up` smoke.
 - Zeabur runbook：Done and aligned to current runtime env var names.
-- API/web placeholder runtime：Replaced by Phase 1 FastAPI and Next.js dev runtimes in Compose.
-- Worker/scheduler placeholder runtime：Done and smoke-tested.
+- API/web placeholder runtime：Phase 1 FastAPI and Next.js dev runtimes are used by Compose; legacy placeholder server files are fallback-only and must not be counted as completed product runtime.
+- Worker/scheduler placeholder runtime：sample job and scheduler loop are smoke/fallback paths; production queue/scheduler behavior remains pending implementation.
 - First commit/push：Done.
 - CI：Hard gates added for backend lint/typecheck/tests, frontend lint/typecheck/tests, contracts, and compose config.
 - E2E：Phase 1 Playwright smoke added for map-first risk query rendering.
 - Worker adapters：Phase 2 adapter contract now includes official CWA rainfall, WRA water-level, flood-potential GeoJSON fixture parsers, plus L2 news/public-web sample tests.
-- Implementation：Phase 0 foundation re-accepted after review; Phase 1 map and core query implementation is near acceptance, Phase 2 adapter groundwork expanded, and Phase 3 scoring golden fixtures started.
+- Evidence UI：evidence drawer groundwork has landed beyond the original inline-only summary and is now covered by unit plus desktop/mobile Playwright smoke tests.
+- Worker adapter config：`WORKER_ENABLED_ADAPTER_KEYS` groundwork has landed so enabled adapters can be controlled by configuration; production data-source rollout still needs validation against source allowlist and legal/privacy gates.
+- Placeholder boundary：PTT, Dcard, and user_report adapters are phase-delayed/pending implementation; `packages/geo` and `packages/shared` remain placeholder/baseline areas until dedicated implementation work lands; `infra/monitoring` now has scrape config and alert rules, with dashboards and worker heartbeat metrics still pending.
+- Implementation：Phase 0 foundation is accepted; Phase 1-3 groundwork exists with tests and fixtures, but the project is now in a hardening sprint rather than a completed MVP acceptance state.
+- Current hardening status：
+  - WP1 文件狀態與 placeholder 邊界：Done.
+  - WP2 Web tests / evidence UX：Done, including Node unit tests and desktop/mobile Playwright smoke.
+  - WP3 Runtime smoke：Done. `scripts/runtime-smoke.ps1 -StopOnExit` passed against the local Compose stack.
+  - WP4 Worker/API ingestion：Done for this hardening pass, including enabled-adapter batch selection, official WRA demo runtime command with DB persistence, DB-first evidence/query heat helper, and seeded layer metadata.
 
 Completed execution order:
 
@@ -1131,11 +1139,28 @@ Completed execution order:
 31. Expand Phase 3 scoring golden fixtures for no-evidence, partial-outage, and conflicting-signal cases.
 32. Add protected admin job/source health API skeleton with 401/403 contract tests.
 33. Add worker PostGIS staging writer with raw snapshot upsert and staging evidence insert tests.
+34. Expand UI evidence drawer beyond inline summary list.
+35. Add `WORKER_ENABLED_ADAPTER_KEYS` groundwork for configurable worker adapter enablement.
+36. Align README, work plan, app READMEs, and progress report around Phase 1-3 groundwork plus placeholder boundaries.
+37. Add frontend Node unit tests for risk/evidence display helpers and make `npm test` a real hard gate.
+38. Add runtime smoke PowerShell script and runbook.
+39. Add worker enabled-adapter batch helper and tests proving config-driven adapter selection.
+40. Add official WRA raw snapshot to staging to promotion demo-path test.
+41. Add DB-first query heat repository helper and API limited fallback behavior.
+42. Add checkpoint scope / PR hygiene artifact for `codex/phase2-runtime-demo`.
+43. Add Docker fallback and safety guards to backup/restore drill.
+44. Wire official demo execution into `python -m app.main --run-official-demo --persist --database-url ...`.
+45. Add DB-backed `/v1/layers` metadata with migration seed and fallback behavior.
+46. Add Prometheus source freshness and API availability alert rules.
+47. Verify API, Web, Workers, validators, ops scripts, runtime smoke, and worker DB demo persistence.
 
 Next execution order:
 
-1. Expand UI evidence drawer beyond inline summary list.
-2. Add production data-source configuration wiring for enabled adapters.
+1. Persist location queries / risk assessments from `/v1/risk/assess` so query heat can move beyond read-only nearby-query aggregation.
+2. Implement production worker scheduler/queue behavior beyond the official demo command.
+3. Build tile generation/hosting for the seeded layer metadata.
+4. Add real worker/scheduler heartbeat metrics behind the Prometheus alert placeholders.
+5. Prepare the checkpoint branch for review: final diff check, commit, push, and draft PR.
 
 ---
 
@@ -1172,3 +1197,96 @@ This work plan is intentionally designed so that implementation can be split acr
 - Integration branch controls convergence.
 
 No individual work package is allowed to redefine the product by accident.
+
+---
+
+## 13. WP-E Placeholder Boundary and Ops Runbooks Update - 2026-04-30
+
+This section records the WP-E docs/ops pass so it can be merged alongside the
+parallel hardening work without changing app code.
+
+### Placeholder boundary decisions
+
+- Keep API and Web placeholder server files as fallback-only diagnostics for
+  now. They are not product runtime and should not be counted toward Phase 1+
+  acceptance. A later cleanup can remove them only after runtime smoke and
+  deploy rollback paths no longer need a stdlib/minimal fallback.
+- Keep Worker scheduler/sample paths as smoke/fallback paths until a durable
+  queue and singleton scheduler are implemented.
+- Keep PTT, Dcard, and user_report adapters phase-delayed and disabled until
+  legal/source/privacy gates are complete.
+- Keep `packages/geo` and `packages/shared` marked as baseline/placeholder
+  areas until tile pipeline and shared rules land. `infra/monitoring` now has
+  scrape config and alert rules, but dashboards and worker heartbeat metrics
+  remain pending.
+- Treat query heat as partial: DB-first read helper exists, but risk assessment
+  persistence and materialized heat buckets are still pending.
+
+### Five-point hardening alignment
+
+1. Docs/status alignment: Done in README, work plan, and progress report.
+2. Placeholder boundary cleanup: Done for docs. Remaining code placeholders are
+   explicitly fallback-only, phase-delayed, or known limitations.
+3. Runtime smoke: Done. Cross-linked from README and ops docs; verified with
+   `scripts/runtime-smoke.ps1 -StopOnExit`.
+4. Worker/API data realism: Done for this checkpoint. WP-E still records query
+   heat persistence and production scheduler/queue as known limitations.
+5. Ops runbooks: Monitoring freshness alerts and backup/restore drill now have
+   runbooks plus CI/manual script entrypoints:
+   `docs/runbooks/monitoring-freshness-alerts.md`,
+   `docs/runbooks/backup-restore-drill.md`,
+   `scripts/ops-source-freshness-check.ps1`, and
+   `scripts/backup-restore-drill.ps1`.
+
+### Current four-package hardening status
+
+| Package | Scope | Status |
+|---|---|---|
+| WP1 Docs/status and placeholder boundary | README, work plan, app README, progress report | Done; WP-E added fallback ownership and ops cross-links. |
+| WP2 Web evidence UX/tests | Web UI and frontend tests | Done by owning subagent; WP-E did not modify app code. |
+| WP3 Runtime smoke | Compose smoke script/runbook | Done; local Compose runtime smoke passed. |
+| WP4 Worker/API ingestion realism | Adapter selection, WRA demo path, query heat helper | Done for this checkpoint, including DB-persisted official demo; production scheduler/queue and persisted query heat remain pending. |
+
+### Verification entrypoints
+
+- Runtime smoke: `.\scripts\runtime-smoke.ps1 -StopOnExit`
+- Monitoring freshness dry-run: `.\scripts\ops-source-freshness-check.ps1 -DryRun`
+- Backup/restore drill dry-run: `.\scripts\backup-restore-drill.ps1`
+- PowerShell syntax smoke:
+  `powershell -NoProfile -Command "[scriptblock]::Create((Get-Content -Raw .\scripts\ops-source-freshness-check.ps1)) | Out-Null; [scriptblock]::Create((Get-Content -Raw .\scripts\backup-restore-drill.ps1)) | Out-Null"`
+
+## 14. Checkpoint PR Hygiene - 2026-04-30
+
+This section is the PR-body-ready checkpoint for branch
+`codex/phase2-runtime-demo`. It records the integrated result of the current
+five-point next-step sequence. No files were staged, committed, or pushed as
+part of the checkpoint documentation pass.
+
+### Current five-point status
+
+1. Checkpoint scope / PR hygiene: Done. Scope, risks, rollback notes, suggested
+   commit message, and PR body draft are captured in
+   `docs/reviews/checkpoint-phase2-runtime-demo-2026-04-30.md`.
+2. Backup/restore Docker fallback: Done. Docker client verification and
+   non-scratch restore guard were checked.
+3. Runtime smoke acceptance: Done. `.\scripts\runtime-smoke.ps1 -StopOnExit`
+   passed against the local Compose stack.
+4. Query heat and worker runtime realism: Partially done. DB-first query heat
+   helper and worker official demo DB persistence exist, but persisted query
+   heat and production scheduler/queue wiring remain pending.
+5. Next implementation wave planning: Done at checkpoint level. Next wave is
+   persisted query heat, production worker runtime, tile hosting, worker
+   heartbeat metrics, and review/PR publication.
+
+### Checkpoint acceptance criteria
+
+- `git status --porcelain=v1 -uall` has been reviewed and summarized.
+- Staged scope is confirmed empty before any later commit step.
+- Modified and untracked files are grouped by root/config/docs, API, Web,
+  Workers, monitoring, runbooks, and scripts.
+- Functional scope, test matrix, known risks, and rollback/verification notes
+  are documented for PR review.
+- Suggested commit message and PR body draft exist in the checkpoint review doc.
+- Runtime smoke and worker DB demo persistence are verified before commit.
+- This pass records the integrated subagent output; final staging/commit should
+  include one last `git diff --check`.

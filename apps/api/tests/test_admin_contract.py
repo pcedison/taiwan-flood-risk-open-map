@@ -5,9 +5,9 @@ from pathlib import Path
 import warnings
 
 from fastapi.testclient import TestClient
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from app.api.routes import admin as admin_route
 from app.core.config import get_settings
@@ -15,7 +15,7 @@ from app.main import create_app
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
-    from jsonschema import RefResolver
+    from jsonschema import RefResolver  # type: ignore[import-untyped]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

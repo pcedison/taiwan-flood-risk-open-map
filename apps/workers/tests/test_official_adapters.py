@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, cast
 
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.cwa import CwaRainfallAdapter
@@ -17,7 +18,7 @@ FETCHED_AT = datetime(2026, 4, 28, 8, 10, tzinfo=timezone.utc)
 
 def test_cwa_rainfall_adapter_normalizes_fixture_records() -> None:
     adapter = CwaRainfallAdapter(
-        _load_json("cwa_rainfall_sample.json"),
+        _load_records("cwa_rainfall_sample.json"),
         fetched_at=FETCHED_AT,
         raw_snapshot_key="raw/cwa/rainfall/2026-04-28T08.json",
     )
@@ -39,7 +40,7 @@ def test_cwa_rainfall_adapter_normalizes_fixture_records() -> None:
 
 def test_wra_water_level_adapter_normalizes_fixture_records() -> None:
     adapter = WraWaterLevelAdapter(
-        _load_json("wra_water_level_sample.json"),
+        _load_records("wra_water_level_sample.json"),
         fetched_at=FETCHED_AT,
         raw_snapshot_key="raw/wra/water-level/2026-04-28T08.json",
     )
@@ -60,7 +61,7 @@ def test_wra_water_level_adapter_normalizes_fixture_records() -> None:
 
 def test_flood_potential_geojson_adapter_normalizes_feature_collection() -> None:
     adapter = FloodPotentialGeoJsonAdapter(
-        _load_json("flood_potential_sample.geojson"),
+        _load_feature_collection("flood_potential_sample.geojson"),
         fetched_at=FETCHED_AT,
         raw_snapshot_key="raw/flood-potential/2026-04.geojson",
     )
@@ -82,14 +83,14 @@ def test_flood_potential_geojson_adapter_normalizes_feature_collection() -> None
 
 def test_official_adapter_outputs_pass_promotion_validation() -> None:
     normalized = (
-        *CwaRainfallAdapter(_load_json("cwa_rainfall_sample.json"), fetched_at=FETCHED_AT)
+        *CwaRainfallAdapter(_load_records("cwa_rainfall_sample.json"), fetched_at=FETCHED_AT)
         .run()
         .normalized,
-        *WraWaterLevelAdapter(_load_json("wra_water_level_sample.json"), fetched_at=FETCHED_AT)
+        *WraWaterLevelAdapter(_load_records("wra_water_level_sample.json"), fetched_at=FETCHED_AT)
         .run()
         .normalized,
         *FloodPotentialGeoJsonAdapter(
-            _load_json("flood_potential_sample.geojson"), fetched_at=FETCHED_AT
+            _load_feature_collection("flood_potential_sample.geojson"), fetched_at=FETCHED_AT
         )
         .run()
         .normalized,
@@ -101,5 +102,15 @@ def test_official_adapter_outputs_pass_promotion_validation() -> None:
     assert validation.rejected == ()
 
 
-def _load_json(name: str) -> list[dict[str, object]] | dict[str, object]:
-    return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
+def _load_records(name: str) -> list[dict[str, Any]]:
+    return cast(
+        list[dict[str, Any]],
+        json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8")),
+    )
+
+
+def _load_feature_collection(name: str) -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8")),
+    )
