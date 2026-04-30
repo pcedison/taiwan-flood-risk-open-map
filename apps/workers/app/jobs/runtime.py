@@ -8,6 +8,8 @@ from typing import Literal
 from app.adapters.contracts import DataSourceAdapter
 from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
 from app.adapters.registry import enabled_adapter_keys
+from app.adapters.wra import FetchJson as WraFetchJson
+from app.adapters.wra import WraWaterLevelApiAdapter
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.ingestion import AdapterBatchRunSummary, run_adapter_batch
@@ -64,6 +66,7 @@ def build_runtime_adapters(
     *,
     fetched_at: datetime | None = None,
     cwa_fetch_json: FetchJson | None = None,
+    wra_fetch_json: WraFetchJson | None = None,
 ) -> Mapping[str, DataSourceAdapter]:
     if settings.runtime_fixtures_enabled:
         fixture_adapters = build_official_demo_adapters(
@@ -87,12 +90,23 @@ def build_runtime_adapters(
         )
         live_adapters[cwa_adapter.metadata.key] = cwa_adapter
 
+    if settings.source_wra_api_enabled and "official.wra.water_level" in enabled_keys:
+        wra_adapter = WraWaterLevelApiAdapter(
+            api_url=settings.wra_api_url,
+            api_token=settings.wra_api_token,
+            timeout_seconds=settings.wra_api_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=wra_fetch_json,
+        )
+        live_adapters[wra_adapter.metadata.key] = wra_adapter
+
     if not live_adapters:
         log_event(
             "runtime.adapters.noop",
             reason="runtime_sources_disabled",
             enabled_adapter_keys=enabled_keys,
             cwa_api_enabled=settings.source_cwa_api_enabled,
+            wra_api_enabled=settings.source_wra_api_enabled,
         )
         return {}
 

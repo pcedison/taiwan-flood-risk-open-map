@@ -24,6 +24,7 @@ Not covered:
 - Production scheduler or cron deployment.
 - Adapter retry/DLQ governance beyond current queue `failed`/`final_failed_at`
   visibility and row-level list/requeue commands.
+- Real credential review or WRA/CWA production egress verification.
 
 ## Current Phase Status
 
@@ -44,27 +45,31 @@ Partially complete:
   monitor. A scheduler/cron owner still has to run it at the target cadence.
 - Queue failure visibility is limited to heartbeat/last-run metrics and the
   `worker_runtime_jobs` terminal `failed`/`final_failed_at` state plus
-  row-level list/requeue commands. There is no DLQ metric, poison-job
-  escalation policy, or accepted production replay procedure yet.
+  row-level list/requeue commands. This is final-failed row visibility, not a
+  complete DLQ. There is no DLQ metric, poison-job quarantine/escalation
+  policy, or accepted production replay procedure yet.
 - Official worker freshness is partial: demo/fixture-backed adapter runs are
-  safe by default, and CWA rainfall can run through an explicit live-client
-  gate. WRA water-level and flood-potential worker freshness still need real
-  source clients. The API realtime official bridge may fetch CWA/WRA data, but
-  that does not create persisted worker ingestion freshness evidence.
+  safe by default, and CWA rainfall plus WRA water-level can run through
+  explicit live-client gates. Flood-potential worker freshness still needs a
+  real source client. The API realtime official bridge may fetch CWA/WRA data,
+  but that does not create persisted worker ingestion freshness evidence.
 - Heartbeat alerts prove that textfile metrics are present and recent; they do
   not prove real-source credentials, idempotent job handling, or production
   singleton scheduler behavior.
+- Freshness alerts should still distinguish deployable gated live paths from
+  fixture/demo validation and production beta readiness.
 
 Pending for production:
 
-- Real source credentials, deployed source clients, and per-source freshness
-  thresholds.
+- Real source credentials, credential review, deployed source clients,
+  WRA/CWA production egress verification, and per-source freshness thresholds.
 - Alert routing, TLS/auth, durable monitoring storage, retention, and incident
   ownership.
-- Scheduler deployment for freshness export plus worker/scheduler heartbeat
-  emission.
-- Queue DLQ/replay policy and abuse-governance alerts for future public
-  reports/public discussion ingestion.
+- Hosted scheduler/cadence deployment for freshness export plus
+  worker/scheduler heartbeat emission.
+- Queue DLQ/replay policy, poison-job quarantine, alert routing, and
+  abuse-governance alerts for future public reports/public discussion
+  ingestion.
 
 ## Placeholder Boundary
 
@@ -95,8 +100,8 @@ docker compose --profile monitoring up prometheus grafana node-exporter
 ## Queue Replay Boundary
 
 Current queue monitoring can detect worker last-run failures and inspect
-exhausted rows, but it does not expose a DLQ panel or replay alert workflow.
-Use this CLI during triage:
+exhausted final-failed rows, but it does not expose a DLQ panel or replay
+alert workflow. Use this CLI during triage:
 
 ```powershell
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
@@ -108,9 +113,10 @@ To requeue one failed row:
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
 ```
 
-Do not treat the row-level command as a complete replay operating model. Replay
-still needs policy for payload safety, source idempotency, backoff,
-poison-job quarantine, alert labels, and incident ownership.
+Do not treat the row-level list/requeue commands or any future summary of them
+as a complete DLQ or replay operating model. Replay still needs policy for
+payload safety, source idempotency, backoff, poison-job quarantine, alert
+routing, alert labels, and incident ownership.
 
 ## Alert Policy
 
@@ -319,9 +325,12 @@ alerts fire together, treat the API/dependency outage as the parent incident.
 3. Compare `source_timestamp_max` first, then `last_success_at`.
 4. Inspect worker and scheduler logs for repeated adapter failures.
 5. Confirm source credentials and upstream availability.
-6. If only the public API is affected, keep the API online and expose missing
+6. Confirm the environment has completed real credential review and WRA/CWA
+   production egress verification before treating a live official-source signal
+   as production beta evidence.
+7. If only the public API is affected, keep the API online and expose missing
    source warnings in risk responses.
-7. Record the incident with source id, first stale time, recovery time, and any
+8. Record the incident with source id, first stale time, recovery time, and any
    skipped adapters.
 
 ## Heartbeat Thresholds

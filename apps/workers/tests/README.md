@@ -9,3 +9,6 @@ Worker tests are fixture-first. External data adapters must prove that they can:
 - preserve source URL, timestamp, source family, event type, attribution, and confidence;
 - pass promotion validation before production persistence is added;
 - project adapter run results into raw snapshot and staging evidence upserts.
+
+Runtime live clients stay disabled by default. CWA and WRA API adapters are
+covered with official-shaped payload fixtures plus injected fetchers.

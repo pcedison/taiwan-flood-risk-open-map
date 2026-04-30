@@ -31,6 +31,7 @@ from app.scheduler import (
 from app.jobs.queue import (
     PostgresRuntimeQueue,
     RuntimeQueueDeadLetterJob,
+    RuntimeQueueDeadLetterSummary,
     RuntimeQueueUnavailable,
 )
 from app.jobs.runtime import work_runtime_queue_once
@@ -93,6 +94,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--list-runtime-dead-letter-jobs",
         action="store_true",
         help="Print dead-letter-equivalent failed worker_runtime_jobs as JSON lines.",
+    )
+    parser.add_argument(
+        "--summarize-runtime-dead-letter-jobs",
+        action="store_true",
+        help="Print a JSON summary of dead-letter-equivalent failed worker_runtime_jobs.",
     )
     parser.add_argument(
         "--dead-letter-queue-name",
@@ -202,6 +208,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             database_url=args.database_url,
             queue_name=args.dead_letter_queue_name,
             limit=args.dead_letter_limit,
+        )
+
+    if args.summarize_runtime_dead_letter_jobs:
+        return _summarize_runtime_dead_letter_jobs(
+            settings=settings,
+            database_url=args.database_url,
+            queue_name=args.dead_letter_queue_name,
         )
 
     if args.requeue_runtime_job:
@@ -382,6 +395,58 @@ def _list_runtime_dead_letter_jobs(
     return 0
 
 
+def _summarize_runtime_dead_letter_jobs(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    queue_name: str | None,
+) -> int:
+    resolved_database_url = database_url or settings.database_url
+    if not resolved_database_url:
+        print(
+            _runtime_dead_letter_summary_json(
+                RuntimeQueueDeadLetterSummary(
+                    queue_name=queue_name,
+                    failed_terminal_count=0,
+                    oldest_final_failed_at=None,
+                    newest_final_failed_at=None,
+                    max_attempts_observed=None,
+                    max_configured_attempts=None,
+                ),
+                available=False,
+                reason="no_database_url",
+            )
+        )
+        log_event("runtime.queue.dead_letter.summary.noop", reason="no_database_url")
+        return 0
+
+    try:
+        summary = PostgresRuntimeQueue(
+            database_url=resolved_database_url
+        ).summarize_dead_letter_jobs(queue_name=queue_name)
+    except RuntimeQueueUnavailable as exc:
+        print(
+            _runtime_dead_letter_summary_json(
+                RuntimeQueueDeadLetterSummary(
+                    queue_name=queue_name,
+                    failed_terminal_count=0,
+                    oldest_final_failed_at=None,
+                    newest_final_failed_at=None,
+                    max_attempts_observed=None,
+                    max_configured_attempts=None,
+                ),
+                available=False,
+                reason="queue_unavailable",
+                error=str(exc),
+            )
+        )
+        log_event("runtime.queue.dead_letter.summary.failed", error=str(exc))
+        return 1
+
+    print(_runtime_dead_letter_summary_json(summary, available=True))
+    return 0
+
+
 def _requeue_runtime_job(
     *,
     settings: WorkerSettings,
@@ -559,6 +624,37 @@ def _runtime_dead_letter_job_json(job: RuntimeQueueDeadLetterJob) -> str:
                 job.final_failed_at.isoformat() if job.final_failed_at is not None else None
             ),
             "dedupe_key": job.dedupe_key,
+        },
+        sort_keys=True,
+    )
+
+
+def _runtime_dead_letter_summary_json(
+    summary: RuntimeQueueDeadLetterSummary,
+    *,
+    available: bool,
+    reason: str | None = None,
+    error: str | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "available": available,
+            "queue_name": summary.queue_name,
+            "failed_terminal_count": summary.failed_terminal_count,
+            "oldest_final_failed_at": (
+                summary.oldest_final_failed_at.isoformat()
+                if summary.oldest_final_failed_at is not None
+                else None
+            ),
+            "newest_final_failed_at": (
+                summary.newest_final_failed_at.isoformat()
+                if summary.newest_final_failed_at is not None
+                else None
+            ),
+            "max_attempts_observed": summary.max_attempts_observed,
+            "max_configured_attempts": summary.max_configured_attempts,
+            "reason": reason,
+            "error": error,
         },
         sort_keys=True,
     )

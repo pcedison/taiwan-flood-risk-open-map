@@ -7,7 +7,12 @@ from pathlib import Path
 from app import scheduler as scheduler_module
 from app.config import load_worker_settings
 from app.jobs.official_demo import build_official_demo_adapters
-from app.jobs.queue import RuntimeQueueDeadLetterJob, RuntimeQueueRequeueResult
+from app.jobs.queue import (
+    RuntimeQueueDeadLetterJob,
+    RuntimeQueueDeadLetterSummary,
+    RuntimeQueueRequeueResult,
+    RuntimeQueueUnavailable,
+)
 from app.jobs.runtime import (
     RuntimeQueueProducerResult,
     RuntimeQueueWorkerResult,
@@ -204,6 +209,131 @@ def test_main_list_runtime_dead_letter_jobs_prints_json_lines(monkeypatch, capsy
     assert row["last_error"] == "source timeout"
     assert row["final_failed_at"] == "2026-04-30T08:00:00+00:00"
     assert row["payload"] == {"adapter_key": "official.cwa.rainfall"}
+
+
+def test_main_summarize_runtime_dead_letter_jobs_prints_json(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+    oldest = datetime(2026, 4, 30, 7, 0, tzinfo=UTC)
+    newest = datetime(2026, 4, 30, 8, 0, tzinfo=UTC)
+
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def summarize_dead_letter_jobs(
+            self,
+            *,
+            queue_name: str | None = None,
+        ) -> RuntimeQueueDeadLetterSummary:
+            captured["queue_name"] = queue_name
+            return RuntimeQueueDeadLetterSummary(
+                queue_name=queue_name,
+                failed_terminal_count=2,
+                oldest_final_failed_at=oldest,
+                newest_final_failed_at=newest,
+                max_attempts_observed=5,
+                max_configured_attempts=5,
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--summarize-runtime-dead-letter-jobs",
+            "--dead-letter-queue-name",
+            "runtime-adapters",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "database_url": "postgresql://worker:test@localhost/flood",
+        "queue_name": "runtime-adapters",
+    }
+    assert json.loads(capsys.readouterr().out) == {
+        "available": True,
+        "error": None,
+        "failed_terminal_count": 2,
+        "max_attempts_observed": 5,
+        "max_configured_attempts": 5,
+        "newest_final_failed_at": "2026-04-30T08:00:00+00:00",
+        "oldest_final_failed_at": "2026-04-30T07:00:00+00:00",
+        "queue_name": "runtime-adapters",
+        "reason": None,
+    }
+
+
+def test_main_summarize_runtime_dead_letter_jobs_noops_without_database_url(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fail_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("summary should not construct a queue without database URL")
+
+    monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--summarize-runtime-dead-letter-jobs",
+            "--dead-letter-queue-name",
+            "runtime-adapters",
+        ]
+    )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "available": False,
+        "error": None,
+        "failed_terminal_count": 0,
+        "max_attempts_observed": None,
+        "max_configured_attempts": None,
+        "newest_final_failed_at": None,
+        "oldest_final_failed_at": None,
+        "queue_name": "runtime-adapters",
+        "reason": "no_database_url",
+    }
+
+
+def test_main_summarize_runtime_dead_letter_jobs_reports_database_unavailable(
+    monkeypatch,
+    capsys,
+) -> None:
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            del database_url
+
+        def summarize_dead_letter_jobs(
+            self,
+            *,
+            queue_name: str | None = None,
+        ) -> RuntimeQueueDeadLetterSummary:
+            del queue_name
+            raise RuntimeQueueUnavailable("database unavailable")
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(["--summarize-runtime-dead-letter-jobs"])
+
+    assert exit_code == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "available": False,
+        "error": "database unavailable",
+        "failed_terminal_count": 0,
+        "max_attempts_observed": None,
+        "max_configured_attempts": None,
+        "newest_final_failed_at": None,
+        "oldest_final_failed_at": None,
+        "queue_name": None,
+        "reason": "queue_unavailable",
+    }
 
 
 def test_main_requeue_runtime_job_resets_attempts_by_default(monkeypatch, capsys) -> None:

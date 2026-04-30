@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This runbook defines the expected Zeabur deployment path for Flood Risk staging and production beta. For the current public preview, use the single Zeabur Docker service described first. The longer split-service topology remains the future production target.
+This runbook defines the expected Zeabur deployment path for Flood Risk staging and production beta. For the current public preview, use the single Zeabur Docker service described first. The longer split-service topology remains the future production target. A deployable preview is not the same as production beta readiness for workers, source credentials, monitoring, or queue replay.
 
 ## Scope
 
@@ -31,6 +31,9 @@ You need:
 - A random long admin token only if admin endpoints will be tested.
 
 You do not need to create PostgreSQL, Redis, MinIO, worker, scheduler, or migration services for the first preview.
+The preview does not run worker ingestion. WRA/CWA worker production egress
+verification, real credential review, hosted cadence, alert routing, and
+poison-job quarantine remain pending.
 
 ### Create The Zeabur Service
 
@@ -178,6 +181,7 @@ Adapter and source variables:
 | `SOURCE_CWA_ENABLED` | worker, scheduler | Optional override for `official.cwa.rainfall`; unset defaults to enabled, `false` disables it |
 | `SOURCE_CWA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker CWA rainfall runtime adapter; keep `false` until credentials, cadence, and operator ownership are ready |
 | `SOURCE_WRA_ENABLED` | worker, scheduler | Optional override for `official.wra.water_level`; unset defaults to enabled, `false` disables it |
+| `SOURCE_WRA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker WRA water-level runtime adapter; keep `false` until cadence, egress, and operator ownership are ready |
 | `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Optional override for `official.flood_potential.geojson`; unset defaults to enabled, `false` disables it |
 | `SOURCE_NEWS_ENABLED` | worker, scheduler | Enables reviewed L2 news/public-web adapters only; default `false` |
 | `SOURCE_FORUM_ENABLED` | worker, scheduler | Family-level forum gate; must stay `false` until Phase 4 legal/source review |
@@ -188,6 +192,21 @@ Adapter and source variables:
 | `CWA_API_AUTHORIZATION` | api, worker | CWA open-data token used by the API realtime bridge and, when `SOURCE_CWA_API_ENABLED=true`, by the worker CWA rainfall live adapter |
 | `CWA_API_URL` | worker | Optional override for the worker CWA rainfall endpoint; leave blank for the default CWA O-A0002-001 datastore |
 | `CWA_API_TIMEOUT_SECONDS` | worker | Worker CWA rainfall request timeout; default `8` seconds |
+| `WRA_API_URL` | worker | Optional override for the worker WRA water-level endpoint; leave blank for the default WRA open-data v2 datastore |
+| `WRA_API_TOKEN` | worker | Optional WRA token if an upstream environment requires one; omitted by default and never written into `source_url` |
+| `WRA_API_TIMEOUT_SECONDS` | worker | Worker WRA water-level request timeout; default `8` seconds |
+
+Boundary notes:
+
+- The single-service preview may use the API realtime CWA/WRA bridge when its
+  API credentials are configured. That direct-fetch path is separate from
+  persisted worker ingestion evidence.
+- Worker official-source live paths are deployable only behind explicit gates.
+  CWA rainfall and WRA water-level have gated worker live paths; flood-potential
+  remains pending.
+- Gated live paths do not imply production beta readiness until real credential
+  review, WRA/CWA production egress verification, hosted scheduler cadence,
+  alert routing, raw snapshot policy, and operator ownership are accepted.
 
 Future or phase-specific variables:
 
@@ -293,6 +312,9 @@ Operational rules:
 - Optional forum and public discussion adapters must remain disabled until legal/source review is complete.
 - Raw snapshots are retained according to `RAW_SNAPSHOT_RETENTION_DAYS`.
 - Job handlers should be idempotent before scaling workers above one replica.
+- Row-level failed-job list/requeue commands are not a complete DLQ. Do not
+  scale worker replay operations until a DLQ/replay policy, poison-job
+  quarantine, alert routing, and incident ownership are accepted.
 
 ## Rollback
 
@@ -356,3 +378,6 @@ Smoke checks after deploy:
 - Confirm worker and scheduler service definitions are present.
 - Confirm rollback target is known.
 - Confirm monitoring or manual source freshness checks are available.
+- Confirm real credential review, hosted cadence, alert routing, poison-job
+  quarantine, and WRA/CWA production egress verification are either accepted or
+  explicitly documented as pending for the environment.

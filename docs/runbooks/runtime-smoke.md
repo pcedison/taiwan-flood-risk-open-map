@@ -2,9 +2,10 @@
 
 This runbook verifies the local Docker Compose runtime without deleting Docker
 volumes. It now covers the Phase 2 runtime-demo readiness path: API/Web, risk
-query, query heat, durable worker queue with DLQ-equivalent list/requeue
-visibility, official adapter fixture dry-run, user reports gates, MVT tiles,
-and the documented query-heat materialization plus tile feature/cache smoke path.
+query, query heat, worker queue ops CLI surface, durable worker queue with
+DLQ-equivalent list/requeue visibility, official adapter fixture dry-run, user
+reports gates, MVT tiles, and the documented query-heat materialization plus
+tile feature/cache smoke path.
 
 The smoke is intentionally local. A passing run means the Compose services,
 migrations, fixture-backed worker paths, queue primitives, and monitoring
@@ -46,7 +47,12 @@ The script performs these checks:
 11. Runs `python -m app.main --run-official-demo` in a one-off `worker`
     container to prove the safe official adapter fixture parse/dry-run path
     without external API credentials or persistence.
-12. Runs a queue live smoke in a one-off `worker` container:
+12. Runs a queue ops CLI surface smoke in a one-off `worker` container:
+    - executes `python -m app.main --help`
+    - verifies the enqueue, consume, dead-letter summary/list, and requeue
+      flags are present
+    - does not connect to the database and does not require CWA/WRA credentials
+13. Runs a queue live smoke in a one-off `worker` container:
     - enables fixture runtime adapters with
       `WORKER_RUNTIME_FIXTURES_ENABLED=true`
     - verifies active-job producer dedupe for the same adapter
@@ -58,18 +64,18 @@ The script performs these checks:
     - requeues that row through `PostgresRuntimeQueue.requeue_failed_job`
       against the live DB table and verifies it can be dequeued again
     - deletes the smoke queue rows
-13. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
+14. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
     path with `--maintenance --scheduler --max-ticks 1`.
-14. Runs a reports enabled-path smoke in a one-off `api` container with
+15. Runs a reports enabled-path smoke in a one-off `api` container with
     `USER_REPORTS_ENABLED=true`; this inserts a minimized pending row in
     `user_reports`, verifies moderation/audit rows, then deletes the smoke rows
-15. Runs a query heat and tile cache job smoke:
+16. Runs a query heat and tile cache job smoke:
     - materializes `P1D` and `P7D` query heat buckets
     - refreshes `flood-potential` map features from accepted evidence
     - writes one smoke tile cache row
     - verifies the API serves the same cached tile payload bytes
     - deletes synthetic tile/evidence/cache rows
-16. Polls the web runtime until it responds at `http://localhost:3000`
+17. Polls the web runtime until it responds at `http://localhost:3000`
 
 By default, services are left running for debugging or follow-up manual testing. To stop the runtime containers after the smoke finishes, without removing volumes:
 
@@ -117,6 +123,7 @@ Reports default-disabled smoke: HTTP 404 feature_disabled
 MVT smoke: layer=query-heat, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 MVT smoke: layer=flood-potential, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 Official adapter fixture dry-run smoke: --run-official-demo completed without external API credentials.
+queue_cli_surface_smoke=ok enqueue=true work=true dead_letter_summary=true dead_letter_list=true requeue=true
 queue_smoke=ok dedupe_active_count=1 consumed_job_id=... adapter_key=official.wra.water_level failed_job_id=... failed_status=failed dead_letter_visible=true dead_letter_requeued=true
 Maintenance scheduler bounded tick smoke: --maintenance --scheduler --max-ticks 1 completed.
 reports_enabled_smoke=ok report_id=... status=pending
@@ -143,6 +150,20 @@ dead-letter listing, and requeue. The full smoke script still uses a small
 Python helper so it can capture the generated job id, verify DLQ-equivalent
 list/requeue/dequeue against the live `worker_runtime_jobs` table, and delete
 the synthetic queue row after the check.
+
+Queue ops CLI surface smoke. This is the focused no-database/no-network check
+used by the full smoke before the live queue helper. It only parses
+`python -m app.main --help` and verifies the expected ops flags are present:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . >/tmp/worker-install.log && python -m app.main --help"
+```
+
+Expected flags include `--enqueue-runtime-jobs`, `--work-runtime-queue`,
+`--list-runtime-dead-letter-jobs`,
+`--summarize-runtime-dead-letter-jobs`, `--dead-letter-queue-name`,
+`--dead-letter-limit`, `--requeue-runtime-job`, and
+`--requeue-keep-attempts`.
 
 Producer:
 

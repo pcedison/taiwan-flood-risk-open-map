@@ -29,6 +29,10 @@ Partially complete:
   inspectable through `--list-runtime-dead-letter-jobs`, and requeue is a
   row-level CLI action; neither is wired into dashboard alerts or poison-job
   routing.
+- If a queue summary panel is added before an accepted DLQ policy, label it as
+  final-failed row visibility rather than a complete DLQ.
+- Official-source panels do not prove real credential review, hosted cadence,
+  or WRA/CWA production egress verification.
 - The local profile proves wiring and syntax, not production uptime,
   persistence, access control, or incident response.
 
@@ -38,10 +42,12 @@ Pending for production:
   Prometheus/Grafana storage, Alertmanager or pager routing, and retention
   policy.
 - Scheduled freshness checks for the deployed API and per-source cadence.
+- Real credential review and WRA/CWA production egress verification for live
+  official-source paths.
 - Worker/scheduler deployment with heartbeat paths mounted into a real
   collector.
-- Queue DLQ/replay policy, poison-job routing, and alert labels for exhausted
-  jobs.
+- Queue DLQ/replay policy, poison-job quarantine/routing, alert routing, and
+  alert labels for exhausted jobs.
 
 ## Files
 
@@ -230,7 +236,7 @@ docker compose run --rm `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
   scheduler sh -c "pip install -e . && python -m app.scheduler --run-enabled-adapters --once"
 
-# Inspect final-failed queue rows outside the dashboard.
+# Inspect final-failed queue rows outside the dashboard. This is not a DLQ.
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
 ```
 
@@ -268,6 +274,9 @@ Optionally run the freshness script dry-run to prove the textfile writer path:
   accepted.
 - Add alert labels for exhausted jobs and poison-job quarantine before treating
   row-level requeue as production replay.
-- Wire hosted scrape targets, TLS/auth, persistent storage, and pager routing.
+- Wire hosted scrape targets, TLS/auth, persistent storage, and pager/alert
+  routing.
 - Schedule source freshness export and worker/scheduler heartbeat emission in
   the target environment.
+- Verify WRA/CWA production egress and complete real credential review before
+  using official-source dashboard health as production beta evidence.

@@ -8,8 +8,8 @@ This bridge is not Phase 2 completion by itself. Phase 2 acceptance still requir
 
 | Adapter key | Source family | Event type | Status |
 |---|---|---|---|
-| `official.cwa.rainfall` | `official` | `rainfall` | Fixture parser + live API bridge implemented |
-| `official.wra.water_level` | `official` | `water_level` | Fixture parser + live API bridge implemented |
+| `official.cwa.rainfall` | `official` | `rainfall` | Fixture parser + API bridge + gated worker live client implemented |
+| `official.wra.water_level` | `official` | `water_level` | Fixture parser + API bridge + gated worker live client implemented |
 | `official.flood_potential.geojson` | `official` | `flood_potential` | Fixture parser implemented |
 
 Current official endpoints used by the MVP bridge:
@@ -17,6 +17,11 @@ Current official endpoints used by the MVP bridge:
 - CWA automatic rainfall observations: `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001`
 - WRA realtime water level observations: `https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0`
 - WRA water-level station metadata: `https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92`
+
+Worker live clients are still explicit opt-in paths. CWA uses
+`SOURCE_CWA_API_ENABLED=true` plus `CWA_API_AUTHORIZATION`; WRA uses
+`SOURCE_WRA_API_ENABLED=true` with optional `WRA_API_TOKEN`. These gates prove a
+deployable worker path exists, not production beta readiness.
 
 Production enablement requirements:
 

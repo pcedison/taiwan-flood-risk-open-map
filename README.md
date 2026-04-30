@@ -36,15 +36,16 @@ groundwork is in place, Phase 2 ingestion/adapters have tested groundwork, and
 Phase 3 risk scoring v0 has golden-fixture coverage. The current sprint is a
 hardening pass across docs/status, Web evidence UX, runtime smoke, and
 worker/API ingestion wiring. Runtime smoke now covers the base API/Web path,
-query heat, durable queue smoke with active-job dedupe and final-failed
+query heat, durable queue smoke with active-job dedupe and final-failed row
 visibility, default-disabled and enabled-path report smoke, seeded MVT
 endpoints, query heat materialization, and a tile feature/cache smoke path. The
 worker official-adapter path is partial: `--run-official-demo --persist` can
 write staging, ingestion-run, and evidence rows from demo payloads, and CWA
-rainfall has an explicit live-client gate. WRA water level, flood-potential
+rainfall plus WRA water level have explicit live-client gates. Flood-potential
 runtime clients, reviewed credentials, and cadence are still pending. Public
-report product UX, production source-client rollout, production queue/DLQ
-operations, tile cache hosting/expiry, and governance remain next-phase work.
+report product UX, production source-client rollout, accepted queue
+DLQ/replay operations, tile cache hosting/expiry, and governance remain
+next-phase work.
 
 Current placeholder boundaries:
 
@@ -53,14 +54,14 @@ Current placeholder boundaries:
   only for last-resort diagnostics unless a follow-up explicitly removes them.
 - Worker scheduler and sample jobs are safe local runtime paths, not a
   completed production queue/scheduler. Durable queue smoke exists for local
-  fixture jobs, active-job dedupe, and final-failed visibility, but production
-  source clients, DLQ/replay policy, and deployed singleton scheduling are
-  still pending.
+  fixture jobs, active-job dedupe, and final-failed row visibility, but
+  production source clients, DLQ/replay policy, poison-job quarantine, and
+  deployed singleton scheduling are still pending.
 - Official data currently has two different paths that should not be conflated:
   the API realtime bridge can fetch CWA/WRA observations for risk responses,
-  while the worker official-adapter path has demo persistence plus a gated CWA
-  rainfall live client. WRA water level and flood-potential runtime clients are
-  not yet real-source worker paths.
+  while the worker official-adapter path has demo persistence plus gated CWA
+  rainfall and WRA water-level live clients. Flood-potential is not yet a
+  real-source worker path.
 - PTT, Dcard, and user report adapters are phase-delayed/pending
   implementation and must remain disabled until the required legal, privacy, and
   governance work lands.
@@ -99,11 +100,11 @@ not production readiness.
 
 | Area | Current status | Production boundary |
 |---|---|---|
-| Runtime smoke | Completed for local Compose API/Web, `/metrics`, risk query, reports gates, seeded MVT, query heat, queue smoke, and tile feature/cache smoke. | Passing local smoke does not prove hosted source credentials, scheduler cadence, alert routing, TLS, persistent storage, or public abuse controls. |
-| Worker queue | Partially complete. Postgres queue tables, enqueue/dequeue CLIs, row leases, active-job `dedupe_key`, retry-to-`failed`, `final_failed_at`, list/requeue commands, and local fixture-backed smoke exist. | Dedupe is scoped to active queue/job/adapter rows. There is no dedicated DLQ table, poison-job routing policy, alert ownership, or accepted production replay procedure; exhausted jobs remain `failed` in `worker_runtime_jobs` until explicitly requeued. Real source success/retry/failure must still be proven. |
-| Official ingestion paths | Partially complete. The API has a realtime official bridge for CWA/WRA risk evidence; the worker has fixture parsers, `--run-official-demo --persist` for staging/run/evidence persistence, and a gated CWA rainfall live client. | The API bridge is not auditable worker ingestion. CWA worker live mode is explicit opt-in; WRA water level and flood-potential live worker clients, reviewed credentials, raw snapshot storage policy, and cadence are pending. |
-| Scheduler and maintenance cadence | Partially complete. Bounded scheduler, queue producer, and maintenance commands exist, and queue/maintenance loops can acquire DB-backed leases. | Production scheduler deployment, singleton operating model, per-source cadence, maintenance windows, and ownership/runbook for retries are pending. |
-| Monitoring | Partially complete. Local `monitoring` profile, Prometheus rules, Grafana dashboard JSON, API scrape, freshness script, and opt-in worker/scheduler textfile metrics exist. | Hosted Prometheus/Grafana or equivalent still needs real service DNS, credentials, TLS/auth, persistent storage, Alertmanager/pager routing, and scheduled freshness jobs. |
+| Runtime smoke | Completed for local Compose API/Web, `/metrics`, risk query, reports gates, seeded MVT, query heat, queue smoke, and tile feature/cache smoke. | Passing local smoke does not prove real credential review, hosted source credentials, scheduler cadence, alert routing, TLS, persistent storage, WRA/CWA production egress, or public abuse controls. |
+| Worker queue | Partially complete. Postgres queue tables, enqueue/dequeue CLIs, row leases, active-job `dedupe_key`, retry-to-`failed`, `final_failed_at`, list/requeue commands, and local fixture-backed smoke exist. | Dedupe is scoped to active queue/job/adapter rows. Row-level list/requeue is operational visibility, not a complete DLQ. There is no dedicated DLQ table, poison-job quarantine/routing policy, alert ownership, or accepted production replay procedure; exhausted jobs remain `failed` in `worker_runtime_jobs` until explicitly requeued. Real source success/retry/failure must still be proven. |
+| Official ingestion paths | Partially complete. The API has a realtime official bridge for CWA/WRA risk evidence; the worker has fixture parsers, `--run-official-demo --persist` for staging/run/evidence persistence, and gated CWA rainfall/WRA water-level live clients. | The API bridge is not auditable worker ingestion. CWA/WRA worker live mode is explicit opt-in; flood-potential live worker clients, reviewed credentials, raw snapshot storage policy, hosted cadence, and WRA/CWA production egress verification are pending. These deployable gates are not production beta readiness by themselves. |
+| Scheduler and maintenance cadence | Partially complete. Bounded scheduler, queue producer, and maintenance commands exist, and queue/maintenance loops can acquire DB-backed leases. | Production scheduler deployment, hosted singleton operating model, per-source cadence, maintenance windows, and ownership/runbook for retries are pending. |
+| Monitoring | Partially complete. Local `monitoring` profile, Prometheus rules, Grafana dashboard JSON, API scrape, freshness script, and opt-in worker/scheduler textfile metrics exist. | Hosted Prometheus/Grafana or equivalent still needs real service DNS, credentials, TLS/auth, persistent storage, Alertmanager/pager routing, scheduled freshness jobs, and production alert routing ownership. |
 | Public reports and public discussion sources | Groundwork only. Reports are default-disabled; Phase 4/5 gates are documented. | Abuse governance, moderation UX, deletion/retention flows, upload handling, legal/source review, and forum/public source launch approval are pending. |
 
 Operator commands:
@@ -133,7 +134,14 @@ docker compose run --rm `
   -e SOURCE_CWA_API_ENABLED=true `
   worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
 
-# Inspect exhausted jobs with dead-letter-equivalent visibility.
+# Run the gated WRA water-level live adapter once.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e SOURCE_WRA_ENABLED=true `
+  -e SOURCE_WRA_API_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
+
+# Inspect exhausted final-failed job rows. This is not a complete DLQ.
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
 
 # Requeue one failed job by id; use only after confirming payload/idempotency.
@@ -157,16 +165,18 @@ python infra/scripts/validate_monitoring_assets.py
 
 Production pending checklist:
 
-- Harden the gated CWA rainfall worker client and add reviewed WRA water-level
-  and flood-potential runtime clients with real source credentials.
+- Harden the gated CWA rainfall and WRA water-level worker clients, and add a
+  reviewed flood-potential runtime client with real source credentials.
+- Complete real credential review and WRA/CWA production egress verification
+  before calling any official-source path production beta ready.
 - Decide whether the current API realtime official bridge remains a temporary
   direct-fetch bridge or is replaced by persisted worker-ingested evidence for
   public risk responses.
 - Deploy a singleton scheduler and documented maintenance cadence for
   ingestion, query heat materialization, tile refresh, and retention.
 - Harden the current queue active-job dedupe, final-failed visibility, and
-  row-level requeue command into an accepted DLQ/replay, poison-job, alerting,
-  and operational ownership policy before scaling workers.
+  row-level requeue command into an accepted DLQ/replay, poison-job quarantine,
+  alerting, and operational ownership policy before scaling workers.
 - Add hosted alert routing, TLS/auth, durable Prometheus/Grafana storage, and
   scheduled freshness checks.
 - Finish tile cache generation, expiry, invalidation, and hosting strategy.

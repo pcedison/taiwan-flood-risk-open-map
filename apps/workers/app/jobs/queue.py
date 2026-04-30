@@ -50,6 +50,16 @@ class RuntimeQueueDeadLetterJob:
 
 
 @dataclass(frozen=True)
+class RuntimeQueueDeadLetterSummary:
+    queue_name: str | None
+    failed_terminal_count: int
+    oldest_final_failed_at: datetime | None
+    newest_final_failed_at: datetime | None
+    max_attempts_observed: int | None
+    max_configured_attempts: int | None
+
+
+@dataclass(frozen=True)
 class RuntimeQueueRequeueResult:
     job_id: str
     requeued: bool
@@ -119,6 +129,20 @@ class NullRuntimeQueue:
     ) -> tuple[RuntimeQueueDeadLetterJob, ...]:
         del queue_name, limit
         return ()
+
+    def summarize_dead_letter_jobs(
+        self,
+        *,
+        queue_name: str | None = None,
+    ) -> RuntimeQueueDeadLetterSummary:
+        return RuntimeQueueDeadLetterSummary(
+            queue_name=queue_name,
+            failed_terminal_count=0,
+            oldest_final_failed_at=None,
+            newest_final_failed_at=None,
+            max_attempts_observed=None,
+            max_configured_attempts=None,
+        )
 
     def requeue_failed_job(
         self,
@@ -490,6 +514,56 @@ class PostgresRuntimeQueue:
                 dedupe_key=str(row[9]) if row[9] is not None else None,
             )
             for row in rows
+        )
+
+    def summarize_dead_letter_jobs(
+        self,
+        *,
+        queue_name: str | None = None,
+    ) -> RuntimeQueueDeadLetterSummary:
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT
+                            count(*)::bigint AS failed_terminal_count,
+                            min(COALESCE(final_failed_at, finished_at, updated_at))
+                                AS oldest_final_failed_at,
+                            max(COALESCE(final_failed_at, finished_at, updated_at))
+                                AS newest_final_failed_at,
+                            max(attempts) AS max_attempts_observed,
+                            max(max_attempts) AS max_configured_attempts
+                        FROM worker_runtime_jobs
+                        WHERE
+                            status = 'failed'
+                            AND attempts >= max_attempts
+                            AND (%s::text IS NULL OR queue_name = %s)
+                        """,
+                        (queue_name, queue_name),
+                    )
+                    row = cursor.fetchone()
+                connection.commit()
+        except Exception as exc:
+            raise RuntimeQueueUnavailable(str(exc)) from exc
+
+        if row is None:
+            return RuntimeQueueDeadLetterSummary(
+                queue_name=queue_name,
+                failed_terminal_count=0,
+                oldest_final_failed_at=None,
+                newest_final_failed_at=None,
+                max_attempts_observed=None,
+                max_configured_attempts=None,
+            )
+
+        return RuntimeQueueDeadLetterSummary(
+            queue_name=queue_name,
+            failed_terminal_count=int(row[0] or 0),
+            oldest_final_failed_at=row[1] if isinstance(row[1], datetime) else None,
+            newest_final_failed_at=row[2] if isinstance(row[2], datetime) else None,
+            max_attempts_observed=int(row[3]) if row[3] is not None else None,
+            max_configured_attempts=int(row[4]) if row[4] is not None else None,
         )
 
     def requeue_failed_job(

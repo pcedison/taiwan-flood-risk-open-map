@@ -32,9 +32,13 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     settings = load_worker_settings({})
 
     assert settings.source_cwa_api_enabled is False
+    assert settings.source_wra_api_enabled is False
     assert settings.cwa_api_authorization is None
     assert settings.cwa_api_url is None
     assert settings.cwa_api_timeout_seconds == 8
+    assert settings.wra_api_url is None
+    assert settings.wra_api_token is None
+    assert settings.wra_api_timeout_seconds == 8
 
 
 def test_cwa_api_runtime_client_config_reads_env() -> None:
@@ -51,6 +55,22 @@ def test_cwa_api_runtime_client_config_reads_env() -> None:
     assert settings.cwa_api_authorization == "test-token"
     assert settings.cwa_api_url == "https://example.test/cwa/rainfall"
     assert settings.cwa_api_timeout_seconds == 4
+
+
+def test_wra_api_runtime_client_config_reads_env() -> None:
+    settings = load_worker_settings(
+        {
+            "SOURCE_WRA_API_ENABLED": "true",
+            "WRA_API_URL": "https://example.test/wra/water-level",
+            "WRA_API_TOKEN": "optional-token",
+            "WRA_API_TIMEOUT_SECONDS": "6",
+        }
+    )
+
+    assert settings.source_wra_api_enabled is True
+    assert settings.wra_api_url == "https://example.test/wra/water-level"
+    assert settings.wra_api_token == "optional-token"
+    assert settings.wra_api_timeout_seconds == 6
 
 
 def test_reviewed_news_adapter_requires_family_flag_and_terms_ack() -> None:

@@ -34,6 +34,9 @@ Extended checks are enabled by default:
     producer, consume one durable worker_runtime_jobs item, and verify final
     failed/dead-letter-equivalent list and requeue/dequeue visibility for an
     exhausted queue job.
+  - Queue CLI surface smoke: parse worker --help in a one-off container and
+    verify enqueue, consume, dead-letter summary/list, and requeue ops flags are
+    present without connecting to the database or external networks.
   - Official adapter fixture dry run: run --run-official-demo in a one-off
     worker container without external API credentials.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
@@ -53,7 +56,7 @@ Options:
   -WebBaseUrl <url>             Web base URL. Default: http://localhost:3000.
   -StopOnExit                   Stop runtime services after the smoke.
   -SkipExtendedSmoke            Run only base API/Web smoke.
-  -SkipQueueSmoke               Skip only the durable queue live smoke.
+  -SkipQueueSmoke               Skip the queue CLI surface and durable queue live smoke.
   -SkipAdapterFixtureSmoke      Skip only the official adapter fixture dry run.
   -SkipReportsEnabledSmoke      Skip only the reports enabled-path smoke.
   -Help                         Print this help and exit without touching Docker.
@@ -797,6 +800,41 @@ finally:
     }
 }
 
+function Invoke-QueueCliSurfaceSmoke {
+    $queueCliSurfacePython = @'
+import subprocess
+import sys
+
+required_flags = [
+    "--enqueue-runtime-jobs",
+    "--work-runtime-queue",
+    "--list-runtime-dead-letter-jobs",
+    "--summarize-runtime-dead-letter-jobs",
+    "--dead-letter-queue-name",
+    "--dead-letter-limit",
+    "--requeue-runtime-job",
+    "--requeue-keep-attempts",
+]
+
+result = subprocess.run(
+    [sys.executable, "-m", "app.main", "--help"],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+print(result.stdout, end="")
+missing = [flag for flag in required_flags if flag not in result.stdout]
+if missing:
+    raise SystemExit(f"missing queue ops CLI flags: {', '.join(missing)}")
+print("queue_cli_surface_smoke=ok enqueue=true work=true dead_letter_summary=true dead_letter_list=true requeue=true")
+'@
+
+    Invoke-ComposePythonScript `
+        -Description "Checking worker queue ops CLI surface without database or network access" `
+        -Service "worker" `
+        -PythonSource $queueCliSurfacePython
+}
+
 function Invoke-AdapterFixtureDryRunSmoke {
     Invoke-ComposeRun `
         -Description "Running official adapter fixture dry-run smoke" `
@@ -1128,9 +1166,10 @@ try {
         }
 
         if ($SkipQueueSmoke) {
-            Write-Host "Queue live smoke skipped by -SkipQueueSmoke."
+            Write-Host "Queue CLI surface and live smoke skipped by -SkipQueueSmoke."
         }
         else {
+            Invoke-QueueCliSurfaceSmoke
             Invoke-QueueLiveSmoke
         }
 

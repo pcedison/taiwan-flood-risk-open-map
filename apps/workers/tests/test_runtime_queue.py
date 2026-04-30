@@ -20,6 +20,7 @@ from app.config import load_worker_settings
 from app.jobs.queue import (
     NullRuntimeQueue,
     PostgresRuntimeQueue,
+    RuntimeQueueDeadLetterSummary,
     RuntimeQueueEnqueueResult,
     RuntimeQueueJob,
     RuntimeQueueRequeueResult,
@@ -243,6 +244,65 @@ def test_runtime_queue_lists_final_failed_jobs_for_dead_letter_visibility() -> N
     assert params == ("runtime-adapters", "runtime-adapters", 25)
 
 
+def test_runtime_queue_summarizes_final_failed_jobs_for_dead_letter_visibility() -> None:
+    oldest = datetime(2026, 4, 30, 7, 0, tzinfo=UTC)
+    newest = datetime(2026, 4, 30, 8, 0, tzinfo=UTC)
+    connection = _FakeConnection(fetch_rows=[(2, oldest, newest, 5, 5)])
+    queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
+
+    summary = queue.summarize_dead_letter_jobs(queue_name="runtime-adapters")
+
+    assert summary == RuntimeQueueDeadLetterSummary(
+        queue_name="runtime-adapters",
+        failed_terminal_count=2,
+        oldest_final_failed_at=oldest,
+        newest_final_failed_at=newest,
+        max_attempts_observed=5,
+        max_configured_attempts=5,
+    )
+    sql, params = connection.cursor_instance.executions[0]
+    assert "count(*)::bigint AS failed_terminal_count" in sql
+    assert "min(COALESCE(final_failed_at, finished_at, updated_at))" in sql
+    assert "max(COALESCE(final_failed_at, finished_at, updated_at))" in sql
+    assert "max(attempts) AS max_attempts_observed" in sql
+    assert "max(max_attempts) AS max_configured_attempts" in sql
+    assert "status = 'failed'" in sql
+    assert "attempts >= max_attempts" in sql
+    assert "%s::text IS NULL" in sql
+    assert params == ("runtime-adapters", "runtime-adapters")
+
+
+def test_runtime_queue_summarizes_dead_letter_jobs_without_queue_filter() -> None:
+    connection = _FakeConnection(fetch_rows=[(0, None, None, None, None)])
+    queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
+
+    summary = queue.summarize_dead_letter_jobs()
+
+    assert summary == RuntimeQueueDeadLetterSummary(
+        queue_name=None,
+        failed_terminal_count=0,
+        oldest_final_failed_at=None,
+        newest_final_failed_at=None,
+        max_attempts_observed=None,
+        max_configured_attempts=None,
+    )
+    _, params = connection.cursor_instance.executions[0]
+    assert params == (None, None)
+
+
+def test_null_runtime_queue_dead_letter_summary_is_empty() -> None:
+    summary = NullRuntimeQueue().summarize_dead_letter_jobs(queue_name="runtime-adapters")
+
+    assert summary == RuntimeQueueDeadLetterSummary(
+        queue_name="runtime-adapters",
+        failed_terminal_count=0,
+        oldest_final_failed_at=None,
+        newest_final_failed_at=None,
+        max_attempts_observed=None,
+        max_configured_attempts=None,
+    )
+
+
 def test_runtime_queue_requeues_failed_job_resetting_attempts_by_default() -> None:
     connection = _FakeConnection(fetch_rows=[("job-1", 0)])
     queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
@@ -341,6 +401,50 @@ def test_build_runtime_adapters_respects_cwa_source_gate_even_with_api_gate() ->
             "SOURCE_CWA_ENABLED": "false",
             "SOURCE_CWA_API_ENABLED": "true",
             "CWA_API_AUTHORIZATION": "test-token",
+        }
+    )
+
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_build_runtime_adapters_constructs_wra_api_adapter_with_configured_client() -> None:
+    captured: dict[str, object] = {}
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        captured["url"] = url
+        captured["timeout_seconds"] = timeout_seconds
+        return _load_wra_api_payload()
+
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.wra.water_level",
+            "SOURCE_WRA_API_ENABLED": "true",
+            "WRA_API_URL": "https://example.test/wra/water-level",
+            "WRA_API_TIMEOUT_SECONDS": "6",
+        }
+    )
+
+    adapters = build_runtime_adapters(
+        settings,
+        fetched_at=datetime(2026, 4, 28, 8, 10, tzinfo=UTC),
+        wra_fetch_json=fetch_json,
+    )
+    result = adapters["official.wra.water_level"].run()
+
+    assert tuple(adapters) == ("official.wra.water_level",)
+    assert captured["timeout_seconds"] == 6
+    assert "format=JSON" in str(captured["url"])
+    assert "api_key" not in str(captured["url"])
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+
+
+def test_build_runtime_adapters_respects_wra_source_gate_even_with_api_gate() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.wra.water_level",
+            "SOURCE_WRA_ENABLED": "false",
+            "SOURCE_WRA_API_ENABLED": "true",
         }
     )
 
@@ -962,6 +1066,10 @@ def _runtime_job(*, adapter_key: str | None) -> RuntimeQueueJob:
 
 def _load_cwa_api_payload() -> dict[str, Any]:
     return json.loads((FIXTURES / "cwa_rainfall_api_sample.json").read_text(encoding="utf-8"))
+
+
+def _load_wra_api_payload() -> dict[str, Any]:
+    return json.loads((FIXTURES / "wra_water_level_api_sample.json").read_text(encoding="utf-8"))
 
 
 class _UnavailableQueue:

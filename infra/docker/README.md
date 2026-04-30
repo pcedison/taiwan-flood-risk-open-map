@@ -23,32 +23,38 @@ Partially complete:
 
 - Worker queue persistence uses Postgres, row locks, leases, active-job
   `dedupe_key`, retries, `final_failed_at` visibility, and row-level
-  list/requeue commands, but there is no dedicated DLQ table, poison-job
-  routing policy, alert ownership, or accepted production replay procedure.
+  list/requeue commands, but that is not a complete DLQ. There is no dedicated
+  DLQ table, poison-job quarantine/routing policy, alert ownership, or
+  accepted production replay procedure.
 - The scheduler service defaults to `python -m app.scheduler`, which is still a
   placeholder/sample loop unless flags such as `--enqueue-runtime-jobs` or
   `--run-enabled-adapters` or `--maintenance` are supplied.
 - The worker container can run `--run-official-demo --persist` against the
-  Compose database, and can run the CWA rainfall live adapter when
-  `SOURCE_CWA_API_ENABLED=true` is explicitly supplied. WRA water-level and
-  flood-potential worker live clients are not deployed yet.
+  Compose database, and can run CWA rainfall or WRA water-level live adapters
+  when their explicit `SOURCE_*_API_ENABLED=true` gates are supplied.
+  Flood-potential worker live clients are not deployed yet. WRA/CWA production
+  egress verification and real credential review are still pending.
 - Maintenance jobs such as query heat materialization and tile feature/cache
   cleanup have manual and bounded scheduler commands, not a deployed production
   cadence.
 - Monitoring profile services use local defaults and named volumes. They do
-  not establish hosted TLS/auth, durable retention, or alert routing.
+  not establish hosted TLS/auth, durable retention, hosted cadence, or alert
+  routing.
 
 Pending before production:
 
-- Harden the gated CWA rainfall source-client path and add reviewed WRA
-  water-level and flood-potential worker source clients.
+- Harden the gated CWA rainfall and WRA water-level source-client paths and
+  add a reviewed flood-potential worker source client.
+- Complete real credential review and WRA/CWA production egress verification
+  before classifying official-source workers as production beta ready.
 - A decision on how the API realtime official bridge is replaced or reconciled
   with persisted worker-ingested official evidence.
-- Singleton scheduler deployment and documented ingestion/maintenance cadence.
+- Singleton scheduler deployment and documented hosted ingestion/maintenance
+  cadence.
 - Alertmanager or equivalent routing, TLS/auth, persistent monitoring storage,
   and backup/retention policy.
 - Production policy for queue idempotency scope, DLQ/replay, retry/backoff,
-  poison-job routing, and worker scaling.
+  poison-job quarantine/routing, and worker scaling.
 - Abuse governance, moderation, retention/deletion, and legal/privacy gates for
   public reports and public discussion sources.
 
@@ -83,7 +89,15 @@ docker compose run --rm `
   -e SOURCE_CWA_API_ENABLED=true `
   worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
 
+# Explicit WRA water-level live adapter path.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e SOURCE_WRA_ENABLED=true `
+  -e SOURCE_WRA_API_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
+
 # Inspect final-failed queue rows and requeue one by id after review.
+# This is row-level queue visibility, not a complete DLQ.
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
 

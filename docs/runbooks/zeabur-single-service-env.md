@@ -44,6 +44,7 @@ Do not add these variables for the first single-service preview unless an engine
 | `MINIO_*` | Object storage is not part of the first preview. |
 | `SOURCE_*_ENABLED` | These are worker and scheduler flags; there is no worker or scheduler in this service. |
 | `SOURCE_CWA_API_ENABLED`, `CWA_API_URL`, `CWA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
+| `SOURCE_WRA_API_ENABLED`, `WRA_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
 | `S3_*` | The current runtime does not read these names. |
 | `TGOS_API_KEY` | Reserved for future TGOS geocoding support; not read by the current runtime. |
 | `API_HOST`, `API_PORT`, `WEB_HOST`, `WEB_PORT` | Zeabur and the Dockerfile already choose the correct runtime ports. |
