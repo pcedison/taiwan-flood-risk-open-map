@@ -21,7 +21,7 @@ from app.logging import log_event
 
 
 RuntimeQueueWorkerStatus = Literal["succeeded", "failed", "skipped"]
-RuntimeQueueProducerStatus = Literal["succeeded", "skipped"]
+RuntimeQueueProducerStatus = Literal["succeeded", "skipped", "deduped"]
 RuntimeQueue = PostgresRuntimeQueue | NullRuntimeQueue
 
 
@@ -40,11 +40,22 @@ class RuntimeQueueProducerResult:
     status: RuntimeQueueProducerStatus
     adapter_keys: tuple[str, ...] = ()
     job_ids: tuple[str, ...] = ()
+    enqueued_job_ids: tuple[str, ...] = ()
+    deduped_job_ids: tuple[str, ...] = ()
+    dedupe_keys: tuple[str, ...] = ()
     reason: str | None = None
 
     @property
     def durable_job_count(self) -> int:
         return len(self.job_ids)
+
+    @property
+    def enqueued_job_count(self) -> int:
+        return len(self.enqueued_job_ids)
+
+    @property
+    def deduped_job_count(self) -> int:
+        return len(self.deduped_job_ids)
 
 
 def build_runtime_adapters(
@@ -86,6 +97,7 @@ def produce_enabled_runtime_adapter_jobs(
     *,
     queue: RuntimeQueue | None = None,
     job_key: str = "runtime.adapter.ingest",
+    queue_name: str = "runtime-adapters",
 ) -> RuntimeQueueProducerResult:
     adapter_keys = enabled_adapter_keys(settings)
     if not adapter_keys:
@@ -110,21 +122,39 @@ def produce_enabled_runtime_adapter_jobs(
         else NullRuntimeQueue()
     )
     job_ids: list[str] = []
+    enqueued_job_ids: list[str] = []
+    deduped_job_ids: list[str] = []
+    dedupe_keys: list[str] = []
     try:
         for adapter_key in adapter_keys:
-            job_id = runtime_queue.enqueue_adapter_job(
+            dedupe_key = _runtime_adapter_dedupe_key(
+                queue_name=queue_name,
+                job_key=job_key,
+                adapter_key=adapter_key,
+            )
+            enqueue_result = runtime_queue.enqueue_adapter_job(
                 adapter_key=adapter_key,
                 job_key=job_key,
+                queue_name=queue_name,
                 payload={"adapter_key": adapter_key},
+                dedupe_key=dedupe_key,
             )
-            if job_id is not None:
-                job_ids.append(job_id)
+            dedupe_keys.append(dedupe_key)
+            if enqueue_result.job_id is not None:
+                job_ids.append(enqueue_result.job_id)
+                if enqueue_result.status == "enqueued":
+                    enqueued_job_ids.append(enqueue_result.job_id)
+                elif enqueue_result.status == "deduped":
+                    deduped_job_ids.append(enqueue_result.job_id)
     except RuntimeQueueUnavailable as exc:
         log_event("runtime.queue.enqueue.unavailable", error=str(exc))
         return RuntimeQueueProducerResult(
             status="skipped",
             adapter_keys=adapter_keys,
             job_ids=tuple(job_ids),
+            enqueued_job_ids=tuple(enqueued_job_ids),
+            deduped_job_ids=tuple(deduped_job_ids),
+            dedupe_keys=tuple(dedupe_keys),
             reason="queue_unavailable",
         )
 
@@ -132,17 +162,33 @@ def produce_enabled_runtime_adapter_jobs(
         "runtime.queue.enqueue.completed",
         adapter_count=len(adapter_keys),
         durable_job_count=len(job_ids),
+        enqueued_job_count=len(enqueued_job_ids),
+        deduped_job_count=len(deduped_job_ids),
     )
     if not job_ids:
         return RuntimeQueueProducerResult(
             status="skipped",
             adapter_keys=adapter_keys,
+            dedupe_keys=tuple(dedupe_keys),
             reason="no_durable_jobs",
+        )
+    if not enqueued_job_ids and deduped_job_ids:
+        return RuntimeQueueProducerResult(
+            status="deduped",
+            adapter_keys=adapter_keys,
+            job_ids=tuple(job_ids),
+            enqueued_job_ids=tuple(enqueued_job_ids),
+            deduped_job_ids=tuple(deduped_job_ids),
+            dedupe_keys=tuple(dedupe_keys),
+            reason="active_jobs_already_exist",
         )
     return RuntimeQueueProducerResult(
         status="succeeded",
         adapter_keys=adapter_keys,
         job_ids=tuple(job_ids),
+        enqueued_job_ids=tuple(enqueued_job_ids),
+        deduped_job_ids=tuple(deduped_job_ids),
+        dedupe_keys=tuple(dedupe_keys),
     )
 
 
@@ -385,6 +431,15 @@ def _job_adapter_key(job: RuntimeQueueJob) -> str | None:
     if isinstance(payload_adapter_key, str) and payload_adapter_key.strip():
         return payload_adapter_key.strip()
     return None
+
+
+def _runtime_adapter_dedupe_key(
+    *,
+    queue_name: str,
+    job_key: str,
+    adapter_key: str,
+) -> str:
+    return f"{queue_name}:{job_key}:{adapter_key}"
 
 
 def _runtime_cycle_failure_reason(

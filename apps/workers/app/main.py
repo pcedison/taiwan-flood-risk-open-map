@@ -15,8 +15,14 @@ from app.jobs.query_heat import (
     QueryHeatAggregationUnavailable,
 )
 from app.scheduler import (
+    DEFAULT_QUERY_HEAT_RETENTION_DAYS,
+    DEFAULT_TILE_FEATURE_LIMIT,
+    DEFAULT_TILE_LAYER_ID,
+    DEFAULT_TILE_PRUNE_LIMIT,
     enqueue_enabled_adapters_loop,
     enqueue_enabled_adapters_once,
+    run_maintenance_loop,
+    run_maintenance_once,
     run_enabled_adapters_loop,
     run_enabled_adapters_once,
     run_scheduled_ingestion_cycle,
@@ -58,6 +64,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--scheduler",
         action="store_true",
         help="Run configured runtime adapters in a scheduler loop.",
+    )
+    parser.add_argument(
+        "--maintenance",
+        action="store_true",
+        help="Run Query Heat and tile cache maintenance. Combine with --scheduler for a loop.",
     )
     parser.add_argument(
         "--work-runtime-queue",
@@ -110,7 +121,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--tile-feature-limit",
         type=int,
-        help="Optional positive row limit for --refresh-tile-features.",
+        help=(
+            "Optional positive row limit for --refresh-tile-features. "
+            f"Maintenance default: {DEFAULT_TILE_FEATURE_LIMIT}."
+        ),
+    )
+    parser.add_argument(
+        "--tile-prune-limit",
+        type=int,
+        help=f"Positive per-table row limit for maintenance tile expired pruning. "
+        f"Default: {DEFAULT_TILE_PRUNE_LIMIT}.",
     )
     parser.add_argument(
         "--max-ticks",
@@ -151,6 +171,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             scheduler=args.scheduler,
             once=args.once,
             max_ticks=args.max_ticks,
+        )
+
+    if args.maintenance:
+        return _run_maintenance(
+            settings=settings,
+            scheduler=args.scheduler,
+            once=args.once,
+            max_ticks=args.max_ticks,
+            periods=_parse_query_heat_periods(args.query_heat_periods),
+            retention_days=args.query_heat_retention_days,
+            tile_layer_id=args.tile_layer_id,
+            tile_feature_limit=args.tile_feature_limit,
+            tile_prune_limit=args.tile_prune_limit,
         )
 
     if args.aggregate_query_heat:
@@ -271,6 +304,53 @@ def _enqueue_runtime_jobs(
     tick_limit = 1 if once else max(1, max_ticks) if max_ticks is not None else None
     enqueue_enabled_adapters_loop(settings=settings, max_ticks=tick_limit)
     return 0
+
+
+def _run_maintenance(
+    *,
+    settings: WorkerSettings,
+    scheduler: bool,
+    once: bool,
+    max_ticks: int | None,
+    periods: tuple[str, ...],
+    retention_days: int | None,
+    tile_layer_id: str,
+    tile_feature_limit: int | None,
+    tile_prune_limit: int | None,
+) -> int:
+    resolved_retention_days = (
+        retention_days if retention_days is not None else DEFAULT_QUERY_HEAT_RETENTION_DAYS
+    )
+    resolved_tile_feature_limit = (
+        tile_feature_limit if tile_feature_limit is not None else DEFAULT_TILE_FEATURE_LIMIT
+    )
+    resolved_tile_prune_limit = (
+        tile_prune_limit if tile_prune_limit is not None else DEFAULT_TILE_PRUNE_LIMIT
+    )
+    resolved_tile_layer_id = tile_layer_id or DEFAULT_TILE_LAYER_ID
+
+    if not scheduler:
+        result = run_maintenance_once(
+            settings=settings,
+            periods=periods,
+            retention_days=resolved_retention_days,
+            tile_layer_id=resolved_tile_layer_id,
+            tile_feature_limit=resolved_tile_feature_limit,
+            tile_prune_limit=resolved_tile_prune_limit,
+        )
+        return 1 if result.failed else 0
+
+    tick_limit = 1 if once else max(1, max_ticks) if max_ticks is not None else None
+    results = run_maintenance_loop(
+        settings=settings,
+        max_ticks=tick_limit,
+        periods=periods,
+        retention_days=resolved_retention_days,
+        tile_layer_id=resolved_tile_layer_id,
+        tile_feature_limit=resolved_tile_feature_limit,
+        tile_prune_limit=resolved_tile_prune_limit,
+    )
+    return 1 if any(result.failed for result in results) else 0
 
 
 def _aggregate_query_heat(

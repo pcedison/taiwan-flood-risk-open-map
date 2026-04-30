@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app.adapters.contracts import (
@@ -15,6 +15,7 @@ from app.config import load_worker_settings
 from app.jobs.queue import (
     NullRuntimeQueue,
     PostgresRuntimeQueue,
+    RuntimeQueueEnqueueResult,
     RuntimeQueueJob,
     RuntimeQueueUnavailable,
 )
@@ -71,7 +72,7 @@ def test_scheduler_lease_acquire_returns_false_when_active_holder_exists() -> No
 def test_runtime_queue_enqueue_dequeue_adapter_job() -> None:
     connection = _FakeConnection(
         fetch_rows=[
-            ("job-1",),
+            ("job-1", True),
             (
                 "job-1",
                 "runtime-adapters",
@@ -85,9 +86,10 @@ def test_runtime_queue_enqueue_dequeue_adapter_job() -> None:
     )
     queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
 
-    job_id = queue.enqueue_adapter_job(
+    enqueue_result = queue.enqueue_adapter_job(
         adapter_key="official.cwa.rainfall",
         payload={"adapter_key": "official.cwa.rainfall"},
+        dedupe_key="runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall",
     )
     job = queue.dequeue_adapter_job(
         queue_name="runtime-adapters",
@@ -95,7 +97,12 @@ def test_runtime_queue_enqueue_dequeue_adapter_job() -> None:
         lease_seconds=300,
     )
 
-    assert job_id == "job-1"
+    assert enqueue_result.status == "enqueued"
+    assert enqueue_result.job_id == "job-1"
+    assert (
+        enqueue_result.dedupe_key
+        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
+    )
     assert job is not None
     assert job.id == "job-1"
     assert job.adapter_key == "official.cwa.rainfall"
@@ -103,10 +110,51 @@ def test_runtime_queue_enqueue_dequeue_adapter_job() -> None:
     enqueue_sql, enqueue_params = connection.cursor_instance.executions[0]
     dequeue_sql, dequeue_params = connection.cursor_instance.executions[1]
     assert "INSERT INTO worker_runtime_jobs" in enqueue_sql
+    assert "dedupe_key" in enqueue_sql
+    assert "ON CONFLICT" in enqueue_sql
+    assert "existing_active_job" in enqueue_sql
+    assert "adapter_key IS NOT DISTINCT FROM %s" in enqueue_sql
+    assert "dedupe_key IS NOT DISTINCT FROM %s" in enqueue_sql
+    assert "dedupe_key IS NOT NULL" in enqueue_sql
+    assert "status IN ('queued', 'running')" in enqueue_sql
     assert enqueue_params[2] == "official.cwa.rainfall"
+    assert (
+        enqueue_params[3]
+        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
+    )
+    assert (
+        enqueue_params[-1]
+        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
+    )
     assert "FOR UPDATE SKIP LOCKED" in dequeue_sql
     assert "lease_expires_at <= now()" in dequeue_sql
     assert dequeue_params == ("runtime-adapters", "worker-a", 300)
+
+
+def test_runtime_queue_enqueue_reports_existing_active_dedupe_job() -> None:
+    connection = _FakeConnection(fetch_rows=[("job-existing", False)])
+    queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
+
+    result = queue.enqueue_adapter_job(
+        adapter_key="official.cwa.rainfall",
+        job_key="scheduler.enqueue.enabled_adapters",
+        payload={"adapter_key": "official.cwa.rainfall"},
+        dedupe_key="runtime-adapters:scheduler.enqueue.enabled_adapters:official.cwa.rainfall",
+    )
+
+    assert result.status == "deduped"
+    assert result.job_id == "job-existing"
+    assert (
+        result.dedupe_key
+        == "runtime-adapters:scheduler.enqueue.enabled_adapters:official.cwa.rainfall"
+    )
+    sql, params = connection.cursor_instance.executions[0]
+    assert "ON CONFLICT" in sql
+    assert "WHERE NOT EXISTS (SELECT 1 FROM existing_active_job)" in sql
+    assert "DO UPDATE SET" in sql
+    assert "RETURNING id, (xmax = 0) AS inserted" in sql
+    assert params[1] == "scheduler.enqueue.enabled_adapters"
+    assert params[-1] == result.dedupe_key
 
 
 def test_runtime_queue_marks_adapter_job_succeeded() -> None:
@@ -119,6 +167,7 @@ def test_runtime_queue_marks_adapter_job_succeeded() -> None:
     sql, params = connection.cursor_instance.executions[0]
     assert "status = 'succeeded'" in sql
     assert "lease_expires_at = NULL" in sql
+    assert "final_failed_at = NULL" in sql
     assert "finished_at = now()" in sql
     assert params == ("job-1", "worker-a")
 
@@ -138,8 +187,50 @@ def test_runtime_queue_marks_failed_job_retryable_until_max_attempts() -> None:
     sql, params = connection.cursor_instance.executions[0]
     assert "WHEN attempts < max_attempts THEN 'queued'" in sql
     assert "ELSE 'failed'" in sql
+    assert "final_failed_at = CASE" in sql
+    assert "ELSE now()" in sql
     assert "last_error = %s" in sql
     assert params == (120, "source timeout", "job-1", "worker-a")
+
+
+def test_runtime_queue_lists_final_failed_jobs_for_dead_letter_visibility() -> None:
+    final_failed_at = datetime(2026, 4, 30, 8, 0, tzinfo=UTC)
+    connection = _FakeConnection(
+        fetch_rows=[
+            (
+                "job-1",
+                "runtime-adapters",
+                "runtime.adapter.ingest",
+                "official.cwa.rainfall",
+                {"adapter_key": "official.cwa.rainfall"},
+                3,
+                3,
+                "source timeout",
+                final_failed_at,
+                "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall",
+            )
+        ]
+    )
+    queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
+
+    jobs = queue.list_dead_letter_jobs(queue_name="runtime-adapters", limit=25)
+
+    assert len(jobs) == 1
+    assert jobs[0].id == "job-1"
+    assert jobs[0].attempts == 3
+    assert jobs[0].max_attempts == 3
+    assert jobs[0].last_error == "source timeout"
+    assert jobs[0].final_failed_at == final_failed_at
+    assert (
+        jobs[0].dedupe_key
+        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
+    )
+    sql, params = connection.cursor_instance.executions[0]
+    assert "status = 'failed'" in sql
+    assert "attempts >= max_attempts" in sql
+    assert "%s::text IS NULL" in sql
+    assert "COALESCE(final_failed_at, finished_at, updated_at)" in sql
+    assert params == ("runtime-adapters", "runtime-adapters", 25)
 
 
 def test_runtime_queue_unavailable_raises_for_db_errors() -> None:
@@ -224,18 +315,77 @@ def test_produce_enabled_runtime_adapter_jobs_records_payloads_and_job_key() -> 
     assert result.reason is None
     assert result.adapter_keys == ("official.cwa.rainfall", "official.wra.water_level")
     assert result.job_ids == ("job-1", "job-2")
+    assert result.enqueued_job_ids == ("job-1", "job-2")
+    assert result.deduped_job_ids == ()
+    assert result.dedupe_keys == (
+        "runtime-adapters:test.enqueue.runtime:official.cwa.rainfall",
+        "runtime-adapters:test.enqueue.runtime:official.wra.water_level",
+    )
     assert queue.enqueued == [
         (
             "official.cwa.rainfall",
             "test.enqueue.runtime",
             "runtime-adapters",
             {"adapter_key": "official.cwa.rainfall"},
+            "runtime-adapters:test.enqueue.runtime:official.cwa.rainfall",
         ),
         (
             "official.wra.water_level",
             "test.enqueue.runtime",
             "runtime-adapters",
             {"adapter_key": "official.wra.water_level"},
+            "runtime-adapters:test.enqueue.runtime:official.wra.water_level",
+        ),
+    ]
+
+
+def test_produce_enabled_runtime_adapter_jobs_reports_deduped_existing_jobs() -> None:
+    settings = load_worker_settings(
+        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level"}
+    )
+    queue = _RecordingProducerQueue(
+        results=[
+            RuntimeQueueEnqueueResult(
+                status="deduped",
+                job_id="existing-rainfall",
+                dedupe_key="runtime-adapters:test.enqueue.runtime:official.cwa.rainfall",
+            ),
+            RuntimeQueueEnqueueResult(
+                status="deduped",
+                job_id="existing-water-level",
+                dedupe_key="runtime-adapters:test.enqueue.runtime:official.wra.water_level",
+            ),
+        ]
+    )
+
+    result = produce_enabled_runtime_adapter_jobs(
+        settings,
+        queue=queue,
+        job_key="test.enqueue.runtime",
+    )
+
+    assert result.status == "deduped"
+    assert result.reason == "active_jobs_already_exist"
+    assert result.job_ids == ("existing-rainfall", "existing-water-level")
+    assert result.enqueued_job_ids == ()
+    assert result.deduped_job_ids == ("existing-rainfall", "existing-water-level")
+    assert result.durable_job_count == 2
+    assert result.enqueued_job_count == 0
+    assert result.deduped_job_count == 2
+    assert queue.enqueued == [
+        (
+            "official.cwa.rainfall",
+            "test.enqueue.runtime",
+            "runtime-adapters",
+            {"adapter_key": "official.cwa.rainfall"},
+            "runtime-adapters:test.enqueue.runtime:official.cwa.rainfall",
+        ),
+        (
+            "official.wra.water_level",
+            "test.enqueue.runtime",
+            "runtime-adapters",
+            {"adapter_key": "official.wra.water_level"},
+            "runtime-adapters:test.enqueue.runtime:official.wra.water_level",
         ),
     ]
 
@@ -469,6 +619,11 @@ class _FakeCursor:
     def fetchone(self) -> tuple[Any, ...] | None:
         return self._fetch_rows.pop(0)
 
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        rows = [row for row in self._fetch_rows if row is not None]
+        self._fetch_rows = []
+        return rows
+
 
 class _BrokenConnection:
     def __enter__(self) -> _BrokenConnection:
@@ -492,15 +647,21 @@ class _CollectingQueue(NullRuntimeQueue):
         priority: int = 0,
         max_attempts: int = 3,
         run_after: datetime | None = None,
-    ) -> str:
+        dedupe_key: str | None = None,
+    ) -> RuntimeQueueEnqueueResult:
         del job_key, queue_name, payload, priority, max_attempts, run_after
         self.adapter_keys.append(adapter_key)
-        return f"job-{len(self.adapter_keys)}"
+        return RuntimeQueueEnqueueResult(
+            status="enqueued",
+            job_id=f"job-{len(self.adapter_keys)}",
+            dedupe_key=dedupe_key,
+        )
 
 
 class _RecordingProducerQueue(NullRuntimeQueue):
-    def __init__(self) -> None:
-        self.enqueued: list[tuple[str, str, str, Mapping[str, Any] | None]] = []
+    def __init__(self, *, results: list[RuntimeQueueEnqueueResult] | None = None) -> None:
+        self.enqueued: list[tuple[str, str, str, Mapping[str, Any] | None, str | None]] = []
+        self._results = list(results or [])
 
     def enqueue_adapter_job(
         self,
@@ -512,10 +673,17 @@ class _RecordingProducerQueue(NullRuntimeQueue):
         priority: int = 0,
         max_attempts: int = 3,
         run_after: datetime | None = None,
-    ) -> str:
+        dedupe_key: str | None = None,
+    ) -> RuntimeQueueEnqueueResult:
         del priority, max_attempts, run_after
-        self.enqueued.append((adapter_key, job_key, queue_name, payload))
-        return f"job-{len(self.enqueued)}"
+        self.enqueued.append((adapter_key, job_key, queue_name, payload, dedupe_key))
+        if self._results:
+            return self._results.pop(0)
+        return RuntimeQueueEnqueueResult(
+            status="enqueued",
+            job_id=f"job-{len(self.enqueued)}",
+            dedupe_key=dedupe_key,
+        )
 
 
 class _DequeuingQueue(NullRuntimeQueue):

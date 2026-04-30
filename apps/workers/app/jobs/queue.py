@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 import json
-from typing import Any
+from typing import Any, Literal
 
 
 ConnectionFactory = Callable[[], Any]
@@ -23,6 +23,30 @@ class RuntimeQueueJob:
     payload: Mapping[str, Any]
     attempts: int
     max_attempts: int
+
+
+RuntimeQueueEnqueueStatus = Literal["enqueued", "deduped", "skipped"]
+
+
+@dataclass(frozen=True)
+class RuntimeQueueEnqueueResult:
+    status: RuntimeQueueEnqueueStatus
+    job_id: str | None = None
+    dedupe_key: str | None = None
+
+
+@dataclass(frozen=True)
+class RuntimeQueueDeadLetterJob:
+    id: str
+    queue_name: str
+    job_key: str
+    adapter_key: str | None
+    payload: Mapping[str, Any]
+    attempts: int
+    max_attempts: int
+    last_error: str | None
+    final_failed_at: datetime | None
+    dedupe_key: str | None
 
 
 class NullRuntimeQueue:
@@ -49,9 +73,10 @@ class NullRuntimeQueue:
         priority: int = 0,
         max_attempts: int = 3,
         run_after: datetime | None = None,
-    ) -> str | None:
+        dedupe_key: str | None = None,
+    ) -> RuntimeQueueEnqueueResult:
         del adapter_key, job_key, queue_name, payload, priority, max_attempts, run_after
-        return None
+        return RuntimeQueueEnqueueResult(status="skipped", dedupe_key=dedupe_key)
 
     def dequeue_adapter_job(
         self,
@@ -77,6 +102,15 @@ class NullRuntimeQueue:
     ) -> bool:
         del job_id, worker_id, error, retry_delay_seconds
         return False
+
+    def list_dead_letter_jobs(
+        self,
+        *,
+        queue_name: str | None = None,
+        limit: int = 100,
+    ) -> tuple[RuntimeQueueDeadLetterJob, ...]:
+        del queue_name, limit
+        return ()
 
 
 class PostgresRuntimeQueue:
@@ -151,25 +185,61 @@ class PostgresRuntimeQueue:
         priority: int = 0,
         max_attempts: int = 3,
         run_after: datetime | None = None,
-    ) -> str:
+        dedupe_key: str | None = None,
+    ) -> RuntimeQueueEnqueueResult:
         try:
             with self._connect() as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO worker_runtime_jobs (
+                        WITH existing_active_job AS (
+                            SELECT id
+                            FROM worker_runtime_jobs
+                            WHERE
+                                queue_name = %s
+                                AND job_key = %s
+                                AND adapter_key IS NOT DISTINCT FROM %s
+                                AND dedupe_key IS NOT DISTINCT FROM %s
+                                AND dedupe_key IS NOT NULL
+                                AND status IN ('queued', 'running')
+                            ORDER BY created_at ASC
+                            LIMIT 1
+                        ),
+                        inserted_job AS (
+                            INSERT INTO worker_runtime_jobs (
+                                queue_name,
+                                job_key,
+                                adapter_key,
+                                payload,
+                                priority,
+                                max_attempts,
+                                run_after,
+                                dedupe_key
+                            )
+                            SELECT %s, %s, %s, %s::jsonb, %s, %s, COALESCE(%s, now()), %s
+                            WHERE NOT EXISTS (SELECT 1 FROM existing_active_job)
+                            ON CONFLICT (
+                                queue_name,
+                                job_key,
+                                (COALESCE(adapter_key, ''::text)),
+                                dedupe_key
+                            )
+                            WHERE status IN ('queued', 'running')
+                                AND dedupe_key IS NOT NULL
+                            DO UPDATE SET
+                                dedupe_key = worker_runtime_jobs.dedupe_key
+                            RETURNING id, (xmax = 0) AS inserted
+                        )
+                        SELECT id, false AS inserted FROM existing_active_job
+                        UNION ALL
+                        SELECT id, inserted FROM inserted_job
+                        LIMIT 1
+                        """,
+                        (
                             queue_name,
                             job_key,
                             adapter_key,
-                            payload,
-                            priority,
-                            max_attempts,
-                            run_after
-                        )
-                        VALUES (%s, %s, %s, %s::jsonb, %s, %s, COALESCE(%s, now()))
-                        RETURNING id
-                        """,
-                        (
+                            dedupe_key,
                             queue_name,
                             job_key,
                             adapter_key,
@@ -177,17 +247,23 @@ class PostgresRuntimeQueue:
                             priority,
                             max_attempts,
                             run_after,
+                            dedupe_key,
                         ),
                     )
                     row = cursor.fetchone()
                     if row is None:
                         raise RuntimeError("runtime job enqueue did not return an id")
                     job_id = str(row[0])
+                    inserted = _bool(row[1])
                 connection.commit()
         except Exception as exc:
             raise RuntimeQueueUnavailable(str(exc)) from exc
 
-        return job_id
+        return RuntimeQueueEnqueueResult(
+            status="enqueued" if inserted else "deduped",
+            job_id=job_id,
+            dedupe_key=dedupe_key,
+        )
 
     def dequeue_adapter_job(
         self,
@@ -269,6 +345,7 @@ class PostgresRuntimeQueue:
                             status = 'succeeded',
                             leased_by = NULL,
                             lease_expires_at = NULL,
+                            final_failed_at = NULL,
                             finished_at = now(),
                             updated_at = now()
                         WHERE
@@ -312,6 +389,10 @@ class PostgresRuntimeQueue:
                             END,
                             leased_by = NULL,
                             lease_expires_at = NULL,
+                            final_failed_at = CASE
+                                WHEN attempts < max_attempts THEN NULL
+                                ELSE now()
+                            END,
                             finished_at = CASE
                                 WHEN attempts < max_attempts THEN finished_at
                                 ELSE now()
@@ -332,6 +413,62 @@ class PostgresRuntimeQueue:
             raise RuntimeQueueUnavailable(str(exc)) from exc
 
         return updated
+
+    def list_dead_letter_jobs(
+        self,
+        *,
+        queue_name: str | None = None,
+        limit: int = 100,
+    ) -> tuple[RuntimeQueueDeadLetterJob, ...]:
+        capped_limit = max(1, min(limit, 500))
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT
+                            id,
+                            queue_name,
+                            job_key,
+                            adapter_key,
+                            payload,
+                            attempts,
+                            max_attempts,
+                            last_error,
+                            final_failed_at,
+                            dedupe_key
+                        FROM worker_runtime_jobs
+                        WHERE
+                            status = 'failed'
+                            AND attempts >= max_attempts
+                            AND (%s::text IS NULL OR queue_name = %s)
+                        ORDER BY
+                            COALESCE(final_failed_at, finished_at, updated_at) DESC,
+                            created_at DESC
+                        LIMIT %s
+                        """,
+                        (queue_name, queue_name, capped_limit),
+                    )
+                    rows = cursor.fetchall()
+                connection.commit()
+        except Exception as exc:
+            raise RuntimeQueueUnavailable(str(exc)) from exc
+
+        return tuple(
+            RuntimeQueueDeadLetterJob(
+                id=str(row[0]),
+                queue_name=str(row[1]),
+                job_key=str(row[2]),
+                adapter_key=str(row[3]) if row[3] is not None else None,
+                payload=_payload(row[4]),
+                attempts=int(row[5]),
+                max_attempts=int(row[6]),
+                last_error=str(row[7]) if row[7] is not None else None,
+                final_failed_at=row[8] if isinstance(row[8], datetime) else None,
+                dedupe_key=str(row[9]) if row[9] is not None else None,
+            )
+            for row in rows
+        )
 
     def _connect(self) -> Any:
         if self._connection_factory is not None:
@@ -355,3 +492,13 @@ def _payload(value: object) -> Mapping[str, Any]:
         if isinstance(decoded, Mapping):
             return decoded
     return {}
+
+
+def _bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        return value.lower() in {"1", "t", "true", "yes"}
+    return False

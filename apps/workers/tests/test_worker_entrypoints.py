@@ -13,9 +13,12 @@ from app.jobs.runtime import (
 )
 from app.main import main
 from app.scheduler import (
+    MaintenanceCycleResult,
     ScheduledIngestionCycleResult,
     run_enabled_adapters_loop,
     run_enabled_adapters_once,
+    run_maintenance_loop,
+    run_maintenance_once,
     run_scheduled_ingestion_cycle,
 )
 
@@ -137,6 +140,177 @@ def test_main_scheduler_enqueue_runtime_jobs_can_be_bounded(monkeypatch) -> None
 
     assert exit_code == 0
     assert captured["max_ticks"] == 2
+
+
+def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) -> None:
+    settings = load_worker_settings(
+        {"WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood"}
+    )
+    expired_before = datetime(2026, 4, 30, 12, 0, tzinfo=UTC)
+    calls: list[tuple[str, object]] = []
+
+    class FakeQueryHeatAggregationJob:
+        def __init__(self, *, database_url: str) -> None:
+            calls.append(("query.init", database_url))
+
+        def aggregate(
+            self,
+            *,
+            periods: tuple[str, ...],
+        ) -> tuple[_QueryHeatSummary, ...]:
+            calls.append(("query.aggregate", periods))
+            return (_QueryHeatSummary(period="P7D", buckets_upserted=2),)
+
+        def prune_retention(
+            self,
+            *,
+            periods: tuple[str, ...],
+            retention_days: int,
+        ) -> _QueryHeatRetentionSummary:
+            calls.append(("query.retention", (periods, retention_days)))
+            return _QueryHeatRetentionSummary(buckets_pruned=1)
+
+    class FakeTileCacheWriter:
+        def __init__(self, *, database_url: str) -> None:
+            calls.append(("tile.init", database_url))
+
+        def refresh_layer_features(
+            self,
+            *,
+            layer_id: str,
+            limit: int | None = None,
+        ) -> _TileRefreshResult:
+            calls.append(("tile.refresh", (layer_id, limit)))
+            return _TileRefreshResult(layer_id=layer_id, refreshed=3)
+
+        def prune_expired(
+            self,
+            *,
+            layer_id: str | None,
+            expired_before: datetime,
+            limit: int,
+        ) -> _TilePruneResult:
+            calls.append(("tile.prune", (layer_id, expired_before, limit)))
+            return _TilePruneResult(
+                layer_id=layer_id,
+                expired_before=expired_before,
+                tile_cache_deleted=4,
+                features_deleted=5,
+            )
+
+    monkeypatch.setattr(
+        scheduler_module,
+        "PostgresQueryHeatAggregationJob",
+        FakeQueryHeatAggregationJob,
+    )
+    monkeypatch.setattr(scheduler_module, "PostgresTileCacheWriter", FakeTileCacheWriter)
+
+    result = run_maintenance_once(
+        settings=settings,
+        periods=("P7D", "P1D", "P7D"),
+        retention_days=14,
+        tile_layer_id="flood-potential",
+        tile_feature_limit=25,
+        tile_prune_limit=50,
+        tile_expired_before=expired_before,
+    )
+
+    assert result.status == "succeeded"
+    assert calls == [
+        ("query.init", "postgresql://worker:test@localhost/flood"),
+        ("query.aggregate", ("P7D", "P1D")),
+        ("query.retention", (("P7D", "P1D"), 14)),
+        ("tile.init", "postgresql://worker:test@localhost/flood"),
+        ("tile.refresh", ("flood-potential", 25)),
+        ("tile.prune", ("flood-potential", expired_before, 50)),
+    ]
+
+
+def test_scheduler_maintenance_once_noops_without_database_url(monkeypatch) -> None:
+    def fail_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("maintenance should no-op without a database URL")
+
+    monkeypatch.setattr(scheduler_module, "PostgresQueryHeatAggregationJob", fail_constructor)
+    monkeypatch.setattr(scheduler_module, "PostgresTileCacheWriter", fail_constructor)
+
+    result = run_maintenance_once(settings=load_worker_settings({}))
+
+    assert result.status == "skipped"
+    assert result.reason == "no_database_url"
+
+
+def test_scheduler_maintenance_loop_can_be_bounded(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+    sleeps: list[int] = []
+
+    def fake_maintenance_once(*args: object, **kwargs: object) -> MaintenanceCycleResult:
+        del args
+        calls.append(dict(kwargs))
+        return MaintenanceCycleResult(status="succeeded")
+
+    monkeypatch.setattr(scheduler_module, "run_maintenance_once", fake_maintenance_once)
+
+    results = run_maintenance_loop(
+        settings=load_worker_settings({}),
+        max_ticks=2,
+        sleep=sleeps.append,
+        periods=("P1D",),
+        retention_days=30,
+        tile_layer_id="flood-potential",
+        tile_feature_limit=25,
+        tile_prune_limit=50,
+    )
+
+    assert len(results) == 2
+    assert len(calls) == 2
+    assert calls[0]["periods"] == ("P1D",)
+    assert calls[0]["retention_days"] == 30
+    assert calls[0]["tile_layer_id"] == "flood-potential"
+    assert calls[0]["tile_feature_limit"] == 25
+    assert calls[0]["tile_prune_limit"] == 50
+    assert sleeps == [300]
+
+
+def test_main_scheduler_maintenance_wires_overrides_to_bounded_loop(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_maintenance_loop(
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[MaintenanceCycleResult, ...]:
+        del args
+        captured.update(kwargs)
+        return (MaintenanceCycleResult(status="succeeded"),)
+
+    monkeypatch.setattr("app.main.run_maintenance_loop", fake_maintenance_loop)
+
+    exit_code = main(
+        [
+            "--maintenance",
+            "--scheduler",
+            "--max-ticks",
+            "2",
+            "--query-heat-periods",
+            "P7D,P1D,P7D",
+            "--query-heat-retention-days",
+            "14",
+            "--tile-layer-id",
+            "flood-potential",
+            "--tile-feature-limit",
+            "25",
+            "--tile-prune-limit",
+            "50",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["max_ticks"] == 2
+    assert captured["periods"] == ("P7D", "P1D")
+    assert captured["retention_days"] == 14
+    assert captured["tile_layer_id"] == "flood-potential"
+    assert captured["tile_feature_limit"] == 25
+    assert captured["tile_prune_limit"] == 50
 
 
 def test_scheduler_cli_enqueue_runtime_jobs_uses_lease_guarded_loop(monkeypatch) -> None:
@@ -480,3 +654,18 @@ class _TileRefreshResult:
     def __init__(self, *, layer_id: str, refreshed: int) -> None:
         self.layer_id = layer_id
         self.refreshed = refreshed
+
+
+class _TilePruneResult:
+    def __init__(
+        self,
+        *,
+        layer_id: str | None,
+        expired_before: datetime,
+        tile_cache_deleted: int,
+        features_deleted: int,
+    ) -> None:
+        self.layer_id = layer_id
+        self.expired_before = expired_before
+        self.tile_cache_deleted = tile_cache_deleted
+        self.features_deleted = features_deleted

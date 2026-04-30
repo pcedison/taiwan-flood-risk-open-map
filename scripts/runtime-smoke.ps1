@@ -29,15 +29,18 @@ Base checks:
   - Web HTTP 200.
 
 Extended checks are enabled by default:
-  - Queue live smoke: enqueue and consume one durable worker_runtime_jobs item
-    through a one-off worker container with fixture runtime adapters enabled.
+  - Queue live smoke: verify idempotent enqueue/dedupe for the same adapter
+    producer, consume one durable worker_runtime_jobs item, and verify final
+    failed/dead-letter-equivalent visibility for an exhausted queue job.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
   - MVT smoke: GET seeded query-heat and flood-potential .mvt endpoints.
+  - Maintenance scheduler bounded tick smoke: run the Query Heat/tile cadence
+    path once with --maintenance --scheduler --max-ticks 1.
   - Query heat / tile cache job readiness: run the worker query heat
-    aggregation and retention CLI paths, refresh flood-potential feature rows,
-    upsert/prune/invalidate tile cache rows, verify the API can serve the cached
-    tile path, and clean up smoke rows.
+    aggregation and retention CLI paths with bounded inputs, refresh
+    flood-potential feature rows, upsert/prune/invalidate tile cache rows,
+    verify the API can serve the cached tile path, and clean up smoke rows.
 
 Options:
   -StartupTimeoutSeconds <int>  Startup wait budget. Default: 180.
@@ -528,42 +531,255 @@ asyncio.run(main())
 }
 
 function Invoke-QueueLiveSmoke {
+    $queueSmokeCleanupSql = "DELETE FROM worker_runtime_jobs WHERE queue_name = 'runtime-smoke-adapters' OR job_key LIKE 'runtime-smoke.queue.%';"
+    $script:RuntimeSmokeCleanupSql += $queueSmokeCleanupSql
+
     $queueSmokePython = @'
+import psycopg
+
 from app.config import load_worker_settings
-from app.jobs.runtime import enqueue_enabled_runtime_adapter_jobs, work_runtime_queue_once
+from app.jobs.queue import PostgresRuntimeQueue
+from app.jobs.runtime import produce_enabled_runtime_adapter_jobs, work_runtime_queue_once
 
-settings = load_worker_settings()
-job_ids = enqueue_enabled_runtime_adapter_jobs(settings)
-if not job_ids:
-    raise SystemExit("expected at least one durable runtime queue job")
+SMOKE_QUEUE_NAME = "runtime-smoke-adapters"
+DEDUPE_JOB_KEY = "runtime-smoke.queue.dedupe"
+FAILED_JOB_KEY = "runtime-smoke.queue.final-failed"
+ADAPTER_KEY = "official.wra.water_level"
+UNKNOWN_ADAPTER_KEY = "runtime-smoke.unknown_adapter"
 
-result = None
-try:
-    result = work_runtime_queue_once(settings=settings)
-    if result.status != "succeeded":
-        raise SystemExit(f"runtime queue worker status={result.status} reason={result.reason}")
-finally:
-    import psycopg
 
-    with psycopg.connect(settings.database_url) as conn:
+class SmokeRuntimeQueue(PostgresRuntimeQueue):
+    def enqueue_adapter_job(
+        self,
+        *,
+        adapter_key,
+        job_key="runtime.adapter.ingest",
+        queue_name="runtime-adapters",
+        payload=None,
+        priority=0,
+        max_attempts=3,
+        run_after=None,
+        dedupe_key=None,
+    ):
+        del queue_name
+        return super().enqueue_adapter_job(
+            adapter_key=adapter_key,
+            job_key=job_key,
+            queue_name=SMOKE_QUEUE_NAME,
+            payload=payload,
+            priority=priority,
+            max_attempts=max_attempts,
+            run_after=run_after,
+            dedupe_key=dedupe_key,
+        )
+
+
+def cleanup(database_url: str) -> None:
+    with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM worker_runtime_jobs WHERE id = ANY(%s::uuid[])",
-                ([*job_ids],),
+                """
+                DELETE FROM worker_runtime_jobs
+                WHERE queue_name = %s
+                    OR job_key IN (%s, %s)
+                """,
+                (SMOKE_QUEUE_NAME, DEDUPE_JOB_KEY, FAILED_JOB_KEY),
             )
 
-print(f"queue_smoke=ok job_id={result.job_id} adapter_key={result.adapter_key}")
+
+def active_job_count(database_url: str, *, job_key: str, adapter_key: str) -> int:
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT count(*)
+                FROM worker_runtime_jobs
+                WHERE queue_name = %s
+                    AND job_key = %s
+                    AND adapter_key = %s
+                    AND status IN ('queued', 'running')
+                """,
+                (SMOKE_QUEUE_NAME, job_key, adapter_key),
+            )
+            return int(cur.fetchone()[0])
+
+
+def failed_job_visibility(database_url: str, *, job_id: str):
+    with psycopg.connect(database_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    status,
+                    attempts,
+                    max_attempts,
+                    last_error,
+                    finished_at IS NOT NULL,
+                    final_failed_at IS NOT NULL
+                FROM worker_runtime_jobs
+                WHERE id = %s
+                """,
+                (job_id,),
+            )
+            return cur.fetchone()
+
+settings = load_worker_settings()
+if not settings.database_url:
+    raise SystemExit("queue smoke requires WORKER_DATABASE_URL or DATABASE_URL")
+
+queue = SmokeRuntimeQueue(database_url=settings.database_url)
+cleanup(settings.database_url)
+
+try:
+    first = produce_enabled_runtime_adapter_jobs(
+        settings,
+        queue=queue,
+        job_key=DEDUPE_JOB_KEY,
+        queue_name=SMOKE_QUEUE_NAME,
+    )
+    if first.status != "succeeded" or not first.job_ids:
+        raise SystemExit(
+            "expected first runtime producer enqueue to write a durable smoke job, "
+            f"got status={first.status} reason={first.reason} job_ids={first.job_ids}"
+        )
+
+    second = produce_enabled_runtime_adapter_jobs(
+        settings,
+        queue=queue,
+        job_key=DEDUPE_JOB_KEY,
+        queue_name=SMOKE_QUEUE_NAME,
+    )
+    if second.status not in {"succeeded", "deduped"} and not (
+        second.status == "skipped" and second.reason == "no_durable_jobs"
+    ):
+        raise SystemExit(
+            "expected idempotent second producer run, "
+            f"got status={second.status} reason={second.reason}"
+        )
+
+    active_count = active_job_count(
+        settings.database_url,
+        job_key=DEDUPE_JOB_KEY,
+        adapter_key=ADAPTER_KEY,
+    )
+    if active_count != 1:
+        raise SystemExit(
+            "expected exactly one active runtime job after duplicate producer runs, "
+            f"got active_count={active_count}"
+        )
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        queue_name=SMOKE_QUEUE_NAME,
+        worker_id="runtime-smoke-consumer",
+    )
+    if result.status != "succeeded":
+        raise SystemExit(f"runtime queue worker status={result.status} reason={result.reason}")
+
+    remaining_active = active_job_count(
+        settings.database_url,
+        job_key=DEDUPE_JOB_KEY,
+        adapter_key=ADAPTER_KEY,
+    )
+    if remaining_active != 0:
+        raise SystemExit(
+            "expected no active runtime jobs after successful consume, "
+            f"got active_count={remaining_active}"
+        )
+
+    failed_enqueue = queue.enqueue_adapter_job(
+        adapter_key=UNKNOWN_ADAPTER_KEY,
+        job_key=FAILED_JOB_KEY,
+        payload={"adapter_key": UNKNOWN_ADAPTER_KEY},
+        max_attempts=1,
+        dedupe_key="runtime-smoke.queue.final-failed",
+    )
+    failed_job_id = failed_enqueue.job_id
+    if failed_job_id is None:
+        raise SystemExit(f"expected failed-job enqueue to return a job id, got {failed_enqueue!r}")
+    failed_result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        queue_name=SMOKE_QUEUE_NAME,
+        worker_id="runtime-smoke-failure-consumer",
+        retry_delay_seconds=1,
+    )
+    if failed_result.status != "failed":
+        raise SystemExit(
+            "expected exhausted unknown-adapter job to fail, "
+            f"got status={failed_result.status} reason={failed_result.reason}"
+        )
+
+    failed_row = failed_job_visibility(settings.database_url, job_id=failed_job_id)
+    if failed_row is None:
+        raise SystemExit("expected exhausted failed job to remain visible in worker_runtime_jobs")
+    status, attempts, max_attempts, last_error, finished, final_failed = failed_row
+    if status != "failed" or attempts != max_attempts or not finished or not final_failed:
+        raise SystemExit(
+            "expected final failed/dead-letter-equivalent visibility with exhausted attempts, "
+            f"got status={status} attempts={attempts} max_attempts={max_attempts} "
+            f"finished={finished} final_failed={final_failed}"
+        )
+    if not last_error or "unknown runtime adapter_key" not in last_error:
+        raise SystemExit(f"expected failed job last_error to explain unknown adapter, got {last_error!r}")
+
+    dead_letters = queue.list_dead_letter_jobs(queue_name=SMOKE_QUEUE_NAME, limit=5)
+    if not any(job.id == failed_job_id for job in dead_letters):
+        raise SystemExit(
+            "expected exhausted failed job to be visible through list_dead_letter_jobs"
+        )
+
+    print(
+        "queue_smoke=ok "
+        f"dedupe_active_count={active_count} "
+        f"consumed_job_id={result.job_id} "
+        f"adapter_key={result.adapter_key} "
+        f"failed_job_id={failed_job_id} "
+        f"failed_status={status} "
+        "dead_letter_visible=true"
+    )
+finally:
+    cleanup(settings.database_url)
 '@
 
-    Invoke-ComposePythonScript `
-        -Description "Running worker durable queue live smoke" `
-        -Service "worker" `
-        -PythonSource $queueSmokePython `
-        -Environment @(
-            "WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level",
-            "WORKER_RUNTIME_FIXTURES_ENABLED=true",
-            "WORKER_INSTANCE=runtime-smoke"
-        )
+    try {
+        Invoke-ComposePythonScript `
+            -Description "Running worker durable queue live smoke" `
+            -Service "worker" `
+            -PythonSource $queueSmokePython `
+            -Environment @(
+                "WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level",
+                "WORKER_RUNTIME_FIXTURES_ENABLED=true",
+                "WORKER_INSTANCE=runtime-smoke"
+            )
+    }
+    finally {
+        Invoke-BestEffortPostgresSql -Sql $queueSmokeCleanupSql
+        $script:RuntimeSmokeCleanupSql = @($script:RuntimeSmokeCleanupSql | Where-Object { $_ -ne $queueSmokeCleanupSql })
+    }
+}
+
+function Invoke-SchedulerBoundedTickSmoke {
+    $schedulerSmokeCleanupSql = "DELETE FROM worker_scheduler_leases WHERE lease_key = 'scheduler.maintenance' AND holder_id = 'runtime-smoke-maintenance';"
+    $script:RuntimeSmokeCleanupSql += $schedulerSmokeCleanupSql
+
+    try {
+        Invoke-ComposeRun `
+            -Description "Running maintenance scheduler bounded tick smoke" `
+            -Service "worker" `
+            -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --maintenance --scheduler --max-ticks 1 --query-heat-periods P1D,P7D --query-heat-retention-days 14 --tile-layer-id flood-potential --tile-feature-limit 1000 --tile-prune-limit 10" `
+            -Environment @(
+                "WORKER_INSTANCE=runtime-smoke-maintenance",
+                "SCHEDULER_INTERVAL_SECONDS=1",
+                "SCHEDULER_LEASE_TTL_SECONDS=30"
+            )
+        Write-Host "Maintenance scheduler bounded tick smoke: --maintenance --scheduler --max-ticks 1 completed."
+    }
+    finally {
+        Invoke-BestEffortPostgresSql -Sql $schedulerSmokeCleanupSql
+        $script:RuntimeSmokeCleanupSql = @($script:RuntimeSmokeCleanupSql | Where-Object { $_ -ne $schedulerSmokeCleanupSql })
+    }
 }
 
 function Invoke-MvtSmoke {
@@ -634,11 +850,13 @@ function Invoke-PostgresSqlSmoke {
 function Invoke-QueryHeatAndTileCacheJobSmoke {
     $tileSmokeCleanupSql = "DELETE FROM tile_cache_entries WHERE metadata ->> 'source' = 'runtime-smoke'; DELETE FROM map_layer_features WHERE feature_key IN ('runtime-smoke-flood-potential', 'runtime-smoke-expired-feature'); DELETE FROM evidence WHERE raw_ref = 'runtime-smoke:tile-cache'; DELETE FROM query_heat_buckets WHERE h3_index = 'runtime-smoke-retention';"
     $script:RuntimeSmokeCleanupSql += $tileSmokeCleanupSql
+    $queryHeatWindowStart = (Get-Date).ToUniversalTime().AddDays(-1).ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $queryHeatWindowEnd = (Get-Date).ToUniversalTime().AddDays(1).ToString("yyyy-MM-ddTHH:mm:ssZ")
 
     Invoke-ComposeRun `
-        -Description "Running query heat aggregation worker job" `
+        -Description "Running bounded query heat aggregation worker job" `
         -Service "worker" `
-        -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D"
+        -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D --query-heat-created-at-start $queryHeatWindowStart --query-heat-created-at-end $queryHeatWindowEnd"
 
     Invoke-PostgresSqlSmoke `
         -Description "Checking query heat materialized buckets" `
@@ -651,7 +869,7 @@ function Invoke-QueryHeatAndTileCacheJobSmoke {
     Invoke-ComposeRun `
         -Description "Running query heat retention worker job" `
         -Service "worker" `
-        -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D --query-heat-retention-days 14"
+        -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D --query-heat-created-at-start $queryHeatWindowStart --query-heat-created-at-end $queryHeatWindowEnd --query-heat-retention-days 14"
 
     Invoke-PostgresSqlSmoke `
         -Description "Checking query heat retention cleanup" `
@@ -661,10 +879,7 @@ function Invoke-QueryHeatAndTileCacheJobSmoke {
         -Description "Seeding flood-potential evidence for tile feature refresh smoke" `
         -Sql "$tileSmokeCleanupSql INSERT INTO evidence (source_id, source_type, event_type, title, summary, geom, confidence, privacy_level, ingestion_status, properties, raw_ref) VALUES ('runtime-smoke-flood-potential', 'derived', 'flood_potential', 'Runtime smoke flood potential', 'Synthetic smoke feature for tile cache validation.', ST_SetSRID(ST_MakePoint(121.5654, 25.033), 4326), 0.5, 'public', 'accepted', '{}'::jsonb, 'runtime-smoke:tile-cache');"
 
-    Invoke-ComposeRun `
-        -Description "Running tile feature refresh worker job" `
-        -Service "worker" `
-        -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --refresh-tile-features --tile-layer-id flood-potential --tile-feature-limit 25"
+    Invoke-SchedulerBoundedTickSmoke
 
     Invoke-PostgresSqlSmoke `
         -Description "Checking refreshed flood-potential layer features" `

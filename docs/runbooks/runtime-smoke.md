@@ -38,20 +38,24 @@ The script performs these checks:
 11. Runs a queue live smoke in a one-off `worker` container:
     - enables fixture runtime adapters with
       `WORKER_RUNTIME_FIXTURES_ENABLED=true`
-    - enqueues one `worker_runtime_jobs` row
-    - consumes it through `work_runtime_queue_once`
-    - marks it `succeeded`
-    - deletes the smoke queue row
-12. Runs a reports enabled-path smoke in a one-off `api` container with
+    - verifies active-job producer dedupe for the same adapter
+    - consumes one `worker_runtime_jobs` row through `work_runtime_queue_once`
+    - marks the consumed job `succeeded`
+    - verifies an exhausted unknown-adapter job remains visible as
+      `failed`/`final_failed_at`
+    - deletes the smoke queue rows
+12. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
+    path with `--maintenance --scheduler --max-ticks 1`.
+13. Runs a reports enabled-path smoke in a one-off `api` container with
     `USER_REPORTS_ENABLED=true`; this inserts a minimized pending row in
     `user_reports`, verifies moderation/audit rows, then deletes the smoke rows
-13. Runs a query heat and tile cache job smoke:
+14. Runs a query heat and tile cache job smoke:
     - materializes `P1D` and `P7D` query heat buckets
     - refreshes `flood-potential` map features from accepted evidence
     - writes one smoke tile cache row
     - verifies the API serves the same cached tile payload bytes
     - deletes synthetic tile/evidence/cache rows
-14. Polls the web runtime until it responds at `http://localhost:3000`
+15. Polls the web runtime until it responds at `http://localhost:3000`
 
 By default, services are left running for debugging or follow-up manual testing. To stop the runtime containers after the smoke finishes, without removing volumes:
 
@@ -97,7 +101,8 @@ Query heat smoke: period=P7D, query_count_bucket=..., unique_approx_count_bucket
 Reports default-disabled smoke: HTTP 404 feature_disabled
 MVT smoke: layer=query-heat, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 MVT smoke: layer=flood-potential, HTTP 200, content-type=application/vnd.mapbox-vector-tile
-queue_smoke=ok job_id=... adapter_key=official.wra.water_level
+queue_smoke=ok dedupe_active_count=1 consumed_job_id=... adapter_key=official.wra.water_level failed_job_id=... failed_status=failed
+Maintenance scheduler bounded tick smoke: --maintenance --scheduler --max-ticks 1 completed.
 reports_enabled_smoke=ok report_id=... status=pending
 Query heat/tile cache job smoke: aggregation, feature refresh, cache write, API cache read, and cleanup passed.
 Web smoke: HTTP 200 from http://localhost:3000
@@ -108,25 +113,40 @@ Runtime smoke passed.
 
 These are the underlying commands to run a focused check while debugging.
 
-Queue live smoke. A consume CLI exists through
-`python -m app.main --work-runtime-queue --once`, but there is not yet a
-standalone enqueue CLI, so the smoke uses the runtime queue helper to enqueue
-one job before consuming it:
+Queue producer and worker smoke. Standalone CLIs exist for both enqueue and
+consume. The full smoke script still uses a small Python helper so it can
+capture the generated job id and delete the synthetic queue row after the
+check.
+
+Producer:
+
+```powershell
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  worker sh -c "pip install -e . && python -m app.main --enqueue-runtime-jobs"
+```
+
+Worker:
 
 ```powershell
 docker compose run --rm `
   -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
-  -e WORKER_INSTANCE=runtime-smoke `
-  worker sh -c "pip install -e . && python - <<'PY'
-from app.config import load_worker_settings
-from app.jobs.runtime import enqueue_enabled_runtime_adapter_jobs, work_runtime_queue_once
-settings = load_worker_settings()
-job_ids = enqueue_enabled_runtime_adapter_jobs(settings)
-result = work_runtime_queue_once(settings=settings)
-print(job_ids, result)
-PY"
+  worker sh -c "pip install -e . && python -m app.main --work-runtime-queue --once"
 ```
+
+Maintenance scheduler bounded tick:
+
+```powershell
+docker compose run --rm `
+  -e WORKER_INSTANCE=runtime-smoke-maintenance `
+  worker sh -c "pip install -e . && python -m app.main --maintenance --scheduler --max-ticks 1 --query-heat-periods P1D,P7D --query-heat-retention-days 14 --tile-layer-id flood-potential --tile-feature-limit 25 --tile-prune-limit 10"
+```
+
+Use `.\scripts\runtime-smoke.ps1` for the full cleanup-aware queue check. The
+script uses smoke-isolated queue names so active dedupe and final-failed
+visibility can be verified without leaving durable jobs behind on successful
+runs.
 
 Reports default-disabled live HTTP check:
 

@@ -23,7 +23,9 @@ The project follows a spec-first SDD workflow. The source of truth is:
 - Backend: FastAPI.
 - Spatial database: PostgreSQL with PostGIS.
 - Workers: Python worker service with explicit scheduler.
-- Cache/queue: Redis.
+- Cache: Redis.
+- Durable worker queue groundwork: PostgreSQL `worker_runtime_jobs`; Redis is
+  not the accepted production queue backend yet.
 - Object storage: MinIO.
 - Local orchestration: Docker Compose.
 
@@ -34,11 +36,12 @@ groundwork is in place, Phase 2 ingestion/adapters have tested groundwork, and
 Phase 3 risk scoring v0 has golden-fixture coverage. The current sprint is a
 hardening pass across docs/status, Web evidence UX, runtime smoke, and
 worker/API ingestion wiring. Runtime smoke now covers the base API/Web path,
-query heat, durable queue smoke, default-disabled and enabled-path report
-smoke, seeded MVT endpoints, query heat materialization, and a tile
-feature/cache smoke path. Public report product UX, production source-client
-rollout, singleton queue/scheduler behavior, tile cache hosting/expiry, and
-governance remain next-phase work.
+query heat, durable queue smoke with active-job dedupe and final-failed
+visibility, default-disabled and enabled-path report smoke, seeded MVT
+endpoints, query heat materialization, and a tile feature/cache smoke path.
+Public report product UX, production source-client rollout, production
+queue/DLQ operations, tile cache hosting/expiry, and governance remain
+next-phase work.
 
 Current placeholder boundaries:
 
@@ -46,8 +49,9 @@ Current placeholder boundaries:
   now points at the FastAPI and Next.js development runtimes. Keep these files
   only for last-resort diagnostics unless a follow-up explicitly removes them.
 - Worker scheduler and sample jobs are safe local runtime paths, not a
-  completed production queue/scheduler. Durable queue smoke exists for one
-  local fixture job, but production source clients and singleton scheduling are
+  completed production queue/scheduler. Durable queue smoke exists for local
+  fixture jobs, active-job dedupe, and final-failed visibility, but production
+  source clients, DLQ/replay policy, and deployed singleton scheduling are
   still pending.
 - PTT, Dcard, and user report adapters are phase-delayed/pending
   implementation and must remain disabled until the required legal, privacy, and
@@ -78,3 +82,66 @@ Ops runbooks and dry-run checks:
 
 See [Project Work Plan](docs/PROJECT_WORK_PLAN.md) for the current execution order,
 work packages, integration rules, and subagent handoff protocol.
+
+## Phase 2.5/3 Operations Status
+
+This status is current for the `codex/phase2-runtime-demo` branch as of
+2026-04-30. It is intentionally conservative: local smoke and groundwork are
+not production readiness.
+
+| Area | Current status | Production boundary |
+|---|---|---|
+| Runtime smoke | Completed for local Compose API/Web, `/metrics`, risk query, reports gates, seeded MVT, query heat, queue smoke, and tile feature/cache smoke. | Passing local smoke does not prove hosted source credentials, scheduler cadence, alert routing, TLS, persistent storage, or public abuse controls. |
+| Worker queue | Partially complete. Postgres queue tables, enqueue/dequeue CLIs, row leases, active-job `dedupe_key`, retry-to-`failed`, `final_failed_at`, and local fixture-backed smoke exist. | Dedupe is scoped to active queue/job/adapter rows. There is no dedicated DLQ table, replay command, or poison-job routing policy; exhausted jobs remain `failed` in `worker_runtime_jobs`. Real source success/retry/failure must still be proven. |
+| Scheduler and maintenance cadence | Partially complete. Bounded scheduler, queue producer, and maintenance commands exist, and queue/maintenance loops can acquire DB-backed leases. | Production scheduler deployment, singleton operating model, per-source cadence, maintenance windows, and ownership/runbook for retries are pending. |
+| Monitoring | Partially complete. Local `monitoring` profile, Prometheus rules, Grafana dashboard JSON, API scrape, freshness script, and opt-in worker/scheduler textfile metrics exist. | Hosted Prometheus/Grafana or equivalent still needs real service DNS, credentials, TLS/auth, persistent storage, Alertmanager/pager routing, and scheduled freshness jobs. |
+| Public reports and public discussion sources | Groundwork only. Reports are default-disabled; Phase 4/5 gates are documented. | Abuse governance, moderation UX, deletion/retention flows, upload handling, legal/source review, and forum/public source launch approval are pending. |
+
+Operator commands:
+
+```powershell
+# Local runtime acceptance smoke.
+.\scripts\runtime-smoke.ps1 -StopOnExit
+
+# Enqueue one durable runtime adapter job per enabled adapter.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  worker sh -c "pip install -e . && python -m app.main --enqueue-runtime-jobs"
+
+# Consume one queued runtime adapter job using fixture-backed local adapters.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --work-runtime-queue --once"
+
+# Run one lease-guarded scheduler producer tick.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  scheduler sh -c "pip install -e . && python -m app.scheduler --enqueue-runtime-jobs --once"
+
+# Manual maintenance smoke for materialized query heat.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D --query-heat-retention-days 90"
+
+# One bounded maintenance scheduler tick for query heat and tile cache cleanup.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.scheduler --maintenance --once"
+
+# Local monitoring profile.
+docker compose --profile monitoring up prometheus grafana node-exporter
+python infra/scripts/validate_monitoring_assets.py
+```
+
+Production pending checklist:
+
+- Replace fixture-backed runtime adapters with reviewed real source clients and
+  real source credentials.
+- Deploy a singleton scheduler and documented maintenance cadence for
+  ingestion, query heat materialization, tile refresh, and retention.
+- Harden the current queue active-job dedupe/final-failed visibility into an
+  accepted DLQ/replay, poison-job, alerting, and operational ownership policy
+  before scaling workers.
+- Add hosted alert routing, TLS/auth, durable Prometheus/Grafana storage, and
+  scheduled freshness checks.
+- Finish tile cache generation, expiry, invalidation, and hosting strategy.
+- Keep public reports, forum sources, and public discussion ingestion disabled
+  until abuse governance, moderation, retention/deletion, and legal/privacy
+  gates are accepted.

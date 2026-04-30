@@ -6,6 +6,39 @@ This runbook explains how to deploy the baseline Prometheus scrape config,
 ingest textfile collector metrics, and import the Grafana dashboard for Flood
 Risk runtime monitoring.
 
+## Current Phase Status
+
+Completed:
+
+- Local Docker Compose `monitoring` profile for Prometheus, Grafana, and node
+  exporter wiring.
+- Prometheus rule loading and Grafana dashboard JSON/provisioning validation.
+- API `/metrics` scrape target for local Compose.
+- Source freshness script that can emit Prometheus textfile metrics.
+- Opt-in worker and scheduler heartbeat textfile metric contracts.
+
+Partially complete:
+
+- Dashboard panels are importable and useful for local validation, but they
+  only show real freshness/queue/scheduler state after the corresponding
+  producers write textfile metrics into a node exporter collector directory.
+- Worker queue panels observe heartbeats and last-run status; they do not yet
+  prove real-source retries, accepted DLQ/replay handling, poison-job routing,
+  or production scheduler singleton behavior.
+- The local profile proves wiring and syntax, not production uptime,
+  persistence, access control, or incident response.
+
+Pending for production:
+
+- Hosted scrape targets, service DNS, credentials, TLS/auth, persistent
+  Prometheus/Grafana storage, Alertmanager or pager routing, and retention
+  policy.
+- Scheduled freshness checks for the deployed API and per-source cadence.
+- Worker/scheduler deployment with heartbeat paths mounted into a real
+  collector.
+- Queue DLQ/replay policy, poison-job routing, and alert labels for exhausted
+  jobs.
+
 ## Files
 
 | File | Purpose |
@@ -22,6 +55,7 @@ Risk runtime monitoring.
 For local deployment wiring checks, start the runtime and monitoring profile:
 
 ```powershell
+docker compose --profile monitoring config
 docker compose --profile monitoring up
 ```
 
@@ -163,6 +197,35 @@ SCHEDULER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-
 The panels intentionally show missing metrics as deployment gaps until those
 producers are enabled. A clean dashboard import alone is not evidence that
 freshness jobs, queue heartbeats, or scheduler heartbeats are running.
+
+## Operator Commands
+
+```powershell
+# Validate monitoring YAML/JSON assets.
+python infra/scripts/validate_monitoring_assets.py
+
+# Start only the monitoring profile services.
+docker compose --profile monitoring up prometheus grafana node-exporter
+
+# Write a local freshness textfile without calling a live API.
+.\scripts\ops-source-freshness-check.ps1 `
+  -DryRun `
+  -MetricsPath ".\tmp\source-freshness.prom"
+
+# Write worker heartbeat metrics into the Compose textfile collector volume.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e WORKER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-worker.prom `
+  -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
+
+# Write scheduler heartbeat metrics for a bounded local adapter scheduler run.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e SCHEDULER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-scheduler.prom `
+  -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
+  scheduler sh -c "pip install -e . && python -m app.scheduler --run-enabled-adapters --once"
+```
 
 ## Validation
 

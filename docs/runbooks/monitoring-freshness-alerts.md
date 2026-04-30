@@ -20,7 +20,45 @@ Covered:
 Not covered:
 
 - Production pager wiring.
-- Adapter retry implementation.
+- Hosted TLS/auth/storage setup.
+- Production scheduler or cron deployment.
+- Adapter retry/DLQ governance beyond current queue `failed`/`final_failed_at`
+  visibility.
+
+## Current Phase Status
+
+Completed for local validation:
+
+- `scripts/ops-source-freshness-check.ps1` can call `GET /admin/v1/sources`
+  or run in dry-run/fixture mode.
+- The script can write Prometheus textfile metrics with `-MetricsPath`.
+- Prometheus alert rules and the Grafana dashboard can read freshness,
+  API-readiness, worker heartbeat, scheduler heartbeat, and last-run status
+  metrics.
+- Worker and scheduler runtimes can emit heartbeat textfiles when explicitly
+  configured.
+
+Partially complete:
+
+- Freshness export is a script and metric contract, not a deployed production
+  monitor. A scheduler/cron owner still has to run it at the target cadence.
+- Queue failure visibility is limited to heartbeat/last-run metrics and the
+  `worker_runtime_jobs` terminal `failed`/`final_failed_at` state. There is no
+  DLQ metric, replay command, or poison-job escalation policy yet.
+- Heartbeat alerts prove that textfile metrics are present and recent; they do
+  not prove real-source credentials, idempotent job handling, or production
+  singleton scheduler behavior.
+
+Pending for production:
+
+- Real source credentials, deployed source clients, and per-source freshness
+  thresholds.
+- Alert routing, TLS/auth, durable monitoring storage, retention, and incident
+  ownership.
+- Scheduler deployment for freshness export plus worker/scheduler heartbeat
+  emission.
+- Queue DLQ/replay policy and abuse-governance alerts for future public
+  reports/public discussion ingestion.
 
 ## Placeholder Boundary
 
