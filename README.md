@@ -43,9 +43,8 @@ worker official-adapter path is partial: `--run-official-demo --persist` can
 write staging, ingestion-run, and evidence rows from demo payloads, and CWA
 rainfall plus WRA water level have explicit live-client gates. Flood-potential
 runtime clients, reviewed credentials, and cadence are still pending. Public
-report product UX, production source-client rollout, accepted queue
-DLQ/replay operations, tile cache hosting/expiry, and governance remain
-next-phase work.
+report product UX, production source-client rollout, accepted queue replay
+operations, tile cache hosting/expiry, and governance remain next-phase work.
 
 Current placeholder boundaries:
 
@@ -107,6 +106,20 @@ not production readiness.
 | Monitoring | Partially complete. Local `monitoring` profile, Prometheus rules, Grafana dashboard JSON, API scrape, freshness script, and opt-in worker/scheduler textfile metrics exist. | Hosted Prometheus/Grafana or equivalent still needs real service DNS, credentials, TLS/auth, persistent storage, Alertmanager/pager routing, scheduled freshness jobs, and production alert routing ownership. |
 | Public reports and public discussion sources | Groundwork only. Reports are default-disabled; Phase 4/5 gates are documented. | Abuse governance, moderation UX, deletion/retention flows, upload handling, legal/source review, and forum/public source launch approval are pending. |
 
+Next-phase acceptance boundary:
+
+- Queue metrics acceptance is local/deployable only when the worker/scheduler
+  heartbeat textfiles are explicitly enabled, mounted into a collector, scraped,
+  and visible in the local or target preview dashboard. It does not prove hosted
+  alert routing, replay ownership, or a production incident workflow.
+- Flood-potential acceptance is limited to fixture/demo parsing and
+  worker-generated feature/cache smoke until a reviewed upstream URL, license,
+  credential, cadence, and production egress path are approved.
+- Pending items that must remain visible in release notes and handoffs: real
+  upstream URL/license review, credential review, hosted cadence, alert
+  routing, poison-job quarantine/replay audit, and production egress
+  verification.
+
 Operator commands:
 
 ```powershell
@@ -166,7 +179,9 @@ python infra/scripts/validate_monitoring_assets.py
 Production pending checklist:
 
 - Harden the gated CWA rainfall and WRA water-level worker clients, and add a
-  reviewed flood-potential runtime client with real source credentials.
+  reviewed flood-potential runtime client after real upstream URL/license
+  review, credential review, hosted cadence, alert routing, and production
+  egress verification are accepted.
 - Complete real credential review and WRA/CWA production egress verification
   before calling any official-source path production beta ready.
 - Decide whether the current API realtime official bridge remains a temporary
@@ -175,8 +190,9 @@ Production pending checklist:
 - Deploy a singleton scheduler and documented maintenance cadence for
   ingestion, query heat materialization, tile refresh, and retention.
 - Harden the current queue active-job dedupe, final-failed visibility, and
-  row-level requeue command into an accepted DLQ/replay, poison-job quarantine,
-  alerting, and operational ownership policy before scaling workers.
+  row-level requeue command into an accepted replay model with poison-job
+  quarantine, replay audit, alerting, and operational ownership before scaling
+  workers. Do not describe the current row-level visibility as a complete DLQ.
 - Add hosted alert routing, TLS/auth, durable Prometheus/Grafana storage, and
   scheduled freshness checks.
 - Finish tile cache generation, expiry, invalidation, and hosting strategy.

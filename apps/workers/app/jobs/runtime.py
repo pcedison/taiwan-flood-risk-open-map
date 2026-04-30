@@ -7,6 +7,8 @@ from typing import Literal
 
 from app.adapters.contracts import DataSourceAdapter
 from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
+from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
+from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
 from app.adapters.registry import enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import WraWaterLevelApiAdapter
@@ -67,6 +69,7 @@ def build_runtime_adapters(
     fetched_at: datetime | None = None,
     cwa_fetch_json: FetchJson | None = None,
     wra_fetch_json: WraFetchJson | None = None,
+    flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
 ) -> Mapping[str, DataSourceAdapter]:
     if settings.runtime_fixtures_enabled:
         fixture_adapters = build_official_demo_adapters(
@@ -100,6 +103,18 @@ def build_runtime_adapters(
         )
         live_adapters[wra_adapter.metadata.key] = wra_adapter
 
+    if (
+        settings.source_flood_potential_geojson_enabled
+        and "official.flood_potential.geojson" in enabled_keys
+    ):
+        flood_potential_adapter = FloodPotentialGeoJsonApiAdapter(
+            geojson_url=settings.flood_potential_geojson_url,
+            timeout_seconds=settings.flood_potential_geojson_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=flood_potential_fetch_json,
+        )
+        live_adapters[flood_potential_adapter.metadata.key] = flood_potential_adapter
+
     if not live_adapters:
         log_event(
             "runtime.adapters.noop",
@@ -107,6 +122,7 @@ def build_runtime_adapters(
             enabled_adapter_keys=enabled_keys,
             cwa_api_enabled=settings.source_cwa_api_enabled,
             wra_api_enabled=settings.source_wra_api_enabled,
+            flood_potential_geojson_enabled=settings.source_flood_potential_geojson_enabled,
         )
         return {}
 

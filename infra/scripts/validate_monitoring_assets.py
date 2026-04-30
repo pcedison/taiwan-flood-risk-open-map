@@ -23,14 +23,35 @@ EXPECTED_PANEL_TITLES = {
     "Worker Heartbeat Age",
     "Scheduler Heartbeat Age",
     "Worker Last Run Status",
+    "Queue Final-Failed Rows",
+    "Queue Expired Leases",
+    "Queue Oldest Final-Failed Age",
+    "Queue Metrics Available",
+    "Runtime Queue Counts",
 }
-EXPECTED_METRICS = {
+EXPECTED_DASHBOARD_METRICS = {
     "flood_risk_source_freshness_status",
     "flood_risk_source_freshness_stale",
     "flood_risk_source_freshness_age_seconds",
     "flood_risk_worker_heartbeat_timestamp_seconds",
     "flood_risk_scheduler_heartbeat_timestamp_seconds",
     "flood_risk_worker_last_run_status",
+    "flood_risk_runtime_queue_metrics_available",
+    "flood_risk_runtime_queue_queued_jobs",
+    "flood_risk_runtime_queue_running_jobs",
+    "flood_risk_runtime_queue_final_failed_jobs",
+    "flood_risk_runtime_queue_expired_leases",
+    "flood_risk_runtime_queue_oldest_final_failed_age_seconds",
+}
+EXPECTED_ALERT_METRICS = {
+    "flood_risk_source_freshness_status",
+    "flood_risk_source_freshness_stale",
+    "flood_risk_worker_heartbeat_timestamp_seconds",
+    "flood_risk_scheduler_heartbeat_timestamp_seconds",
+    "flood_risk_worker_last_run_status",
+    "flood_risk_runtime_queue_metrics_available",
+    "flood_risk_runtime_queue_final_failed_jobs",
+    "flood_risk_runtime_queue_expired_leases",
 }
 
 
@@ -54,7 +75,7 @@ def main() -> int:
 
     if isinstance(alert_rules, dict):
         alert_exprs = _collect_alert_exprs(alert_rules)
-        for metric in EXPECTED_METRICS - {"flood_risk_source_freshness_age_seconds"}:
+        for metric in EXPECTED_ALERT_METRICS:
             if not any(metric in expr for expr in alert_exprs):
                 errors.append(f"alert-rules.yml: missing alert expression for {metric}")
 
@@ -68,9 +89,18 @@ def main() -> int:
             errors.append(f"dashboard: missing panels {sorted(missing_titles)}")
 
         dashboard_exprs = _collect_dashboard_exprs(panels)
-        for metric in EXPECTED_METRICS:
+        for metric in EXPECTED_DASHBOARD_METRICS:
             if not any(metric in expr for expr in dashboard_exprs):
                 errors.append(f"dashboard: missing Prometheus query for {metric}")
+        runtime_queue_count_exprs = _dashboard_exprs_for_panel(panels, "Runtime Queue Counts")
+        if not runtime_queue_count_exprs:
+            errors.append("dashboard: Runtime Queue Counts panel must define targets")
+        for expr in runtime_queue_count_exprs:
+            if " or " in f" {expr} ":
+                errors.append(
+                    "dashboard: Runtime Queue Counts must not combine queue metrics "
+                    "with PromQL set operator 'or'"
+                )
 
     if errors:
         for error in errors:
@@ -79,7 +109,9 @@ def main() -> int:
 
     print(
         "Monitoring assets valid. "
-        f"dashboard_panels={len(EXPECTED_PANEL_TITLES)} metrics={len(EXPECTED_METRICS)}"
+        f"dashboard_panels={len(EXPECTED_PANEL_TITLES)} "
+        f"dashboard_metrics={len(EXPECTED_DASHBOARD_METRICS)} "
+        f"alert_metrics={len(EXPECTED_ALERT_METRICS)}"
     )
     return 0
 
@@ -123,6 +155,18 @@ def _collect_dashboard_exprs(panels: list[dict[str, Any]]) -> list[str]:
             if isinstance(target, dict) and isinstance(target.get("expr"), str):
                 exprs.append(target["expr"])
     return exprs
+
+
+def _dashboard_exprs_for_panel(panels: list[dict[str, Any]], title: str) -> list[str]:
+    for panel in panels:
+        if panel.get("title") != title:
+            continue
+        return [
+            target["expr"]
+            for target in _as_list(panel.get("targets"))
+            if isinstance(target, dict) and isinstance(target.get("expr"), str)
+        ]
+    return []
 
 
 if __name__ == "__main__":

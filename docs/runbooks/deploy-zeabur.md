@@ -31,9 +31,9 @@ You need:
 - A random long admin token only if admin endpoints will be tested.
 
 You do not need to create PostgreSQL, Redis, MinIO, worker, scheduler, or migration services for the first preview.
-The preview does not run worker ingestion. WRA/CWA worker production egress
-verification, real credential review, hosted cadence, alert routing, and
-poison-job quarantine remain pending.
+The preview does not run worker ingestion. Real upstream URL/license review,
+credential review, hosted cadence, alert routing, poison-job
+quarantine/replay audit, and production egress verification remain pending.
 
 ### Create The Zeabur Service
 
@@ -205,8 +205,9 @@ Boundary notes:
   CWA rainfall and WRA water-level have gated worker live paths; flood-potential
   remains pending.
 - Gated live paths do not imply production beta readiness until real credential
-  review, WRA/CWA production egress verification, hosted scheduler cadence,
-  alert routing, raw snapshot policy, and operator ownership are accepted.
+  review, real upstream URL/license review, WRA/CWA production egress
+  verification, hosted scheduler cadence, alert routing, raw snapshot policy,
+  poison-job quarantine/replay audit, and operator ownership are accepted.
 
 Future or phase-specific variables:
 
@@ -313,8 +314,8 @@ Operational rules:
 - Raw snapshots are retained according to `RAW_SNAPSHOT_RETENTION_DAYS`.
 - Job handlers should be idempotent before scaling workers above one replica.
 - Row-level failed-job list/requeue commands are not a complete DLQ. Do not
-  scale worker replay operations until a DLQ/replay policy, poison-job
-  quarantine, alert routing, and incident ownership are accepted.
+  scale worker replay operations until a replay policy, poison-job quarantine,
+  replay audit, alert routing, and incident ownership are accepted.
 
 ## Rollback
 
@@ -379,5 +380,6 @@ Smoke checks after deploy:
 - Confirm rollback target is known.
 - Confirm monitoring or manual source freshness checks are available.
 - Confirm real credential review, hosted cadence, alert routing, poison-job
-  quarantine, and WRA/CWA production egress verification are either accepted or
-  explicitly documented as pending for the environment.
+  quarantine/replay audit, real upstream URL/license review, and production
+  egress verification are either accepted or explicitly documented as pending
+  for the environment.

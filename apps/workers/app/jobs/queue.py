@@ -60,6 +60,16 @@ class RuntimeQueueDeadLetterSummary:
 
 
 @dataclass(frozen=True)
+class RuntimeQueueMetricsSnapshot:
+    queue_name: str
+    queued_count: int
+    running_count: int
+    final_failed_count: int
+    expired_lease_count: int
+    oldest_final_failed_at: datetime | None
+
+
+@dataclass(frozen=True)
 class RuntimeQueueRequeueResult:
     job_id: str
     requeued: bool
@@ -142,6 +152,22 @@ class NullRuntimeQueue:
             newest_final_failed_at=None,
             max_attempts_observed=None,
             max_configured_attempts=None,
+        )
+
+    def collect_metrics(
+        self,
+        *,
+        queue_name: str | None = None,
+    ) -> tuple[RuntimeQueueMetricsSnapshot, ...]:
+        return (
+            RuntimeQueueMetricsSnapshot(
+                queue_name=queue_name or "runtime-adapters",
+                queued_count=0,
+                running_count=0,
+                final_failed_count=0,
+                expired_lease_count=0,
+                oldest_final_failed_at=None,
+            ),
         )
 
     def requeue_failed_job(
@@ -564,6 +590,69 @@ class PostgresRuntimeQueue:
             newest_final_failed_at=row[2] if isinstance(row[2], datetime) else None,
             max_attempts_observed=int(row[3]) if row[3] is not None else None,
             max_configured_attempts=int(row[4]) if row[4] is not None else None,
+        )
+
+    def collect_metrics(
+        self,
+        *,
+        queue_name: str | None = None,
+    ) -> tuple[RuntimeQueueMetricsSnapshot, ...]:
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT
+                            queue_name,
+                            count(*) FILTER (WHERE status = 'queued')::bigint
+                                AS queued_count,
+                            count(*) FILTER (WHERE status = 'running')::bigint
+                                AS running_count,
+                            count(*) FILTER (
+                                WHERE status = 'failed' AND attempts >= max_attempts
+                            )::bigint AS final_failed_count,
+                            count(*) FILTER (
+                                WHERE
+                                    status = 'running'
+                                    AND lease_expires_at <= now()
+                            )::bigint AS expired_lease_count,
+                            min(COALESCE(final_failed_at, finished_at, updated_at)) FILTER (
+                                WHERE status = 'failed' AND attempts >= max_attempts
+                            ) AS oldest_final_failed_at
+                        FROM worker_runtime_jobs
+                        WHERE (%s::text IS NULL OR queue_name = %s)
+                        GROUP BY queue_name
+                        ORDER BY queue_name ASC
+                        """,
+                        (queue_name, queue_name),
+                    )
+                    rows = cursor.fetchall()
+                connection.commit()
+        except Exception as exc:
+            raise RuntimeQueueUnavailable(str(exc)) from exc
+
+        if not rows:
+            return (
+                RuntimeQueueMetricsSnapshot(
+                    queue_name=queue_name or "runtime-adapters",
+                    queued_count=0,
+                    running_count=0,
+                    final_failed_count=0,
+                    expired_lease_count=0,
+                    oldest_final_failed_at=None,
+                ),
+            )
+
+        return tuple(
+            RuntimeQueueMetricsSnapshot(
+                queue_name=str(row[0]),
+                queued_count=int(row[1] or 0),
+                running_count=int(row[2] or 0),
+                final_failed_count=int(row[3] or 0),
+                expired_lease_count=int(row[4] or 0),
+                oldest_final_failed_at=row[5] if isinstance(row[5], datetime) else None,
+            )
+            for row in rows
         )
 
     def requeue_failed_job(

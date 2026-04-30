@@ -8,11 +8,12 @@ for operational checks that can run before the full Grafana/pager stack exists.
 - `prometheus.yml` scrapes the API metrics endpoint at `api:8000/metrics` and
   loads `alert-rules.yml`. It also scrapes the Compose `node-exporter` service
   for textfile metrics.
-- `alert-rules.yml` defines source freshness, API readiness, and future
-  worker/scheduler heartbeat alerts.
+- `alert-rules.yml` defines source freshness, API readiness,
+  worker/scheduler heartbeat alerts, and runtime queue final-failed row
+  visibility alerts.
 - `flood-risk-runtime-dashboard.json` is an importable Grafana dashboard for
   API readiness, source freshness, worker heartbeat, scheduler heartbeat, and
-  worker last-run status.
+  worker last-run status plus queue final-failed row visibility.
 - `grafana/provisioning` contains the local Compose datasource and dashboard
   provider used by the optional monitoring profile.
 
@@ -117,6 +118,7 @@ datasource when prompted. The dashboard covers:
 - Worker heartbeat age.
 - Scheduler heartbeat age.
 - Worker last-run failed count and last-run status table.
+- Runtime queue queued/running/final-failed/expired-lease counts.
 
 ## Future Metrics
 
@@ -126,6 +128,10 @@ by the runtime when the corresponding environment variables are set:
 - `flood_risk_worker_heartbeat_timestamp_seconds`
 - `flood_risk_scheduler_heartbeat_timestamp_seconds`
 - `flood_risk_worker_last_run_status`
+- `flood_risk_runtime_queue_final_failed_jobs`
+- `flood_risk_runtime_queue_expired_leases`
+- `flood_risk_runtime_queue_oldest_final_failed_age_seconds`
+- `flood_risk_runtime_queue_metrics_available`
 
 Configure:
 
@@ -133,6 +139,17 @@ Configure:
 WORKER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-worker.prom
 SCHEDULER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-scheduler.prom
 ```
+
+Queue metrics are exported explicitly by the operator CLI and should use their
+own textfile to avoid clobbering heartbeat output:
+
+```text
+python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path /var/lib/node_exporter/textfile_collector/flood-risk-runtime-queue.prom
+```
+
+These metrics expose final-failed row visibility in `worker_runtime_jobs`; they
+are not a complete DLQ. Replay audit, poison-job policy, quarantine/routing,
+and auto replay remain out of scope.
 
 ## Validation
 

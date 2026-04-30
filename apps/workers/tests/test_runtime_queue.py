@@ -16,6 +16,7 @@ from app.adapters.contracts import (
     SourceFamily,
 )
 from app.adapters.cwa import CwaRainfallConfigurationError
+from app.adapters.flood_potential import FloodPotentialGeoJsonConfigurationError
 from app.config import load_worker_settings
 from app.jobs.queue import (
     NullRuntimeQueue,
@@ -23,6 +24,7 @@ from app.jobs.queue import (
     RuntimeQueueDeadLetterSummary,
     RuntimeQueueEnqueueResult,
     RuntimeQueueJob,
+    RuntimeQueueMetricsSnapshot,
     RuntimeQueueRequeueResult,
     RuntimeQueueUnavailable,
 )
@@ -303,6 +305,68 @@ def test_null_runtime_queue_dead_letter_summary_is_empty() -> None:
     )
 
 
+def test_runtime_queue_collects_queue_metrics_for_operator_visibility() -> None:
+    oldest = datetime(2026, 4, 30, 7, 0, tzinfo=UTC)
+    connection = _FakeConnection(
+        fetch_rows=[("runtime-adapters", 4, 2, 1, 1, oldest)]
+    )
+    queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
+
+    snapshots = queue.collect_metrics(queue_name="runtime-adapters")
+
+    assert snapshots == (
+        RuntimeQueueMetricsSnapshot(
+            queue_name="runtime-adapters",
+            queued_count=4,
+            running_count=2,
+            final_failed_count=1,
+            expired_lease_count=1,
+            oldest_final_failed_at=oldest,
+        ),
+    )
+    sql, params = connection.cursor_instance.executions[0]
+    assert "count(*) FILTER (WHERE status = 'queued')" in sql
+    assert "count(*) FILTER (WHERE status = 'running')" in sql
+    assert "status = 'failed' AND attempts >= max_attempts" in sql
+    assert "lease_expires_at <= now()" in sql
+    assert "GROUP BY queue_name" in sql
+    assert params == ("runtime-adapters", "runtime-adapters")
+
+
+def test_runtime_queue_collect_metrics_returns_zero_row_for_filtered_empty_queue() -> None:
+    queue = PostgresRuntimeQueue(connection_factory=lambda: _FakeConnection(fetch_rows=[]))
+
+    snapshots = queue.collect_metrics(queue_name="runtime-adapters")
+
+    assert snapshots == (
+        RuntimeQueueMetricsSnapshot(
+            queue_name="runtime-adapters",
+            queued_count=0,
+            running_count=0,
+            final_failed_count=0,
+            expired_lease_count=0,
+            oldest_final_failed_at=None,
+        ),
+    )
+
+
+def test_runtime_queue_collect_metrics_returns_default_zero_row_for_empty_queue() -> None:
+    queue = PostgresRuntimeQueue(connection_factory=lambda: _FakeConnection(fetch_rows=[]))
+
+    snapshots = queue.collect_metrics()
+
+    assert snapshots == (
+        RuntimeQueueMetricsSnapshot(
+            queue_name="runtime-adapters",
+            queued_count=0,
+            running_count=0,
+            final_failed_count=0,
+            expired_lease_count=0,
+            oldest_final_failed_at=None,
+        ),
+    )
+
+
 def test_runtime_queue_requeues_failed_job_resetting_attempts_by_default() -> None:
     connection = _FakeConnection(fetch_rows=[("job-1", 0)])
     queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
@@ -449,6 +513,79 @@ def test_build_runtime_adapters_respects_wra_source_gate_even_with_api_gate() ->
     )
 
     assert build_runtime_adapters(settings) == {}
+
+
+def test_build_runtime_adapters_constructs_flood_potential_geojson_adapter() -> None:
+    captured: dict[str, object] = {}
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        captured["url"] = url
+        captured["timeout_seconds"] = timeout_seconds
+        return _load_flood_potential_geojson_payload()
+
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.flood_potential.geojson",
+            "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED": "true",
+            "FLOOD_POTENTIAL_GEOJSON_URL": (
+                "https://example.test/flood-potential.geojson?token=secret"
+            ),
+            "FLOOD_POTENTIAL_GEOJSON_TIMEOUT_SECONDS": "9",
+        }
+    )
+
+    adapters = build_runtime_adapters(
+        settings,
+        fetched_at=datetime(2026, 4, 28, 8, 10, tzinfo=UTC),
+        flood_potential_fetch_json=fetch_json,
+    )
+    result = adapters["official.flood_potential.geojson"].run()
+
+    assert tuple(adapters) == ("official.flood_potential.geojson",)
+    assert captured["timeout_seconds"] == 9
+    assert "token=secret" in str(captured["url"])
+    assert len(result.fetched) == 2
+    assert len(result.normalized) == 2
+    assert "secret" not in result.fetched[0].source_url
+
+
+def test_build_runtime_adapters_respects_flood_potential_source_gate_with_geojson_gate() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.flood_potential.geojson",
+            "SOURCE_FLOOD_POTENTIAL_ENABLED": "false",
+            "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED": "true",
+            "FLOOD_POTENTIAL_GEOJSON_URL": "https://example.test/flood-potential.geojson",
+        }
+    )
+
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_build_runtime_adapters_missing_flood_potential_url_fails_without_fetch_call() -> None:
+    called = False
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        nonlocal called
+        del url, timeout_seconds
+        called = True
+        return _load_flood_potential_geojson_payload()
+
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.flood_potential.geojson",
+            "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED": "true",
+        }
+    )
+
+    adapters = build_runtime_adapters(settings, flood_potential_fetch_json=fetch_json)
+
+    with pytest.raises(
+        FloodPotentialGeoJsonConfigurationError,
+        match="FLOOD_POTENTIAL_GEOJSON_URL",
+    ):
+        adapters["official.flood_potential.geojson"].run()
+    assert called is False
 
 
 def test_build_runtime_adapters_constructs_cwa_api_adapter_with_configured_client() -> None:
@@ -1070,6 +1207,10 @@ def _load_cwa_api_payload() -> dict[str, Any]:
 
 def _load_wra_api_payload() -> dict[str, Any]:
     return json.loads((FIXTURES / "wra_water_level_api_sample.json").read_text(encoding="utf-8"))
+
+
+def _load_flood_potential_geojson_payload() -> dict[str, Any]:
+    return json.loads((FIXTURES / "flood_potential_sample.geojson").read_text(encoding="utf-8"))
 
 
 class _UnavailableQueue:

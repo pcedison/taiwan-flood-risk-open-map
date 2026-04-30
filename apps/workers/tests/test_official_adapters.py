@@ -17,6 +17,12 @@ from app.adapters.cwa import (
     parse_cwa_rainfall_api_payload,
 )
 from app.adapters.flood_potential import FloodPotentialGeoJsonAdapter
+from app.adapters.flood_potential import (
+    FloodPotentialGeoJsonApiAdapter,
+    FloodPotentialGeoJsonFetchError,
+    FloodPotentialGeoJsonPayloadError,
+    parse_flood_potential_geojson_payload,
+)
 from app.adapters.wra import WraWaterLevelAdapter
 from app.adapters.wra import (
     WraWaterLevelApiAdapter,
@@ -285,6 +291,75 @@ def test_flood_potential_geojson_adapter_normalizes_feature_collection() -> None
     assert first.source_id == "FP-TPE-ZZ-001"
     assert first.location_text == "Taipei City Zhongzheng District low-lying area"
     assert "0.5-1.0m" in first.summary
+
+
+def test_flood_potential_geojson_api_adapter_fetches_and_sanitizes_source_url() -> None:
+    captured: dict[str, object] = {}
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        captured["url"] = url
+        captured["timeout_seconds"] = timeout_seconds
+        return _load_feature_collection("flood_potential_sample.geojson")
+
+    adapter = FloodPotentialGeoJsonApiAdapter(
+        geojson_url=(
+            "https://operator:secret@example.test:8443/flood-potential.geojson?"
+            "token=secret&api_key=old-token&version=2026#access_token=frag-secret"
+        ),
+        timeout_seconds=7,
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+        raw_snapshot_key="raw/flood-potential/live.geojson",
+    )
+
+    result = adapter.run()
+
+    assert captured["timeout_seconds"] == 7
+    assert "token=secret" in str(captured["url"])
+    assert "api_key=old-token" in str(captured["url"])
+    assert len(result.fetched) == 2
+    assert len(result.normalized) == 2
+    assert result.rejected == ()
+
+    raw = result.fetched[0]
+    assert (
+        raw.source_url
+        == "https://example.test:8443/flood-potential.geojson?version=2026"
+    )
+    assert "operator" not in raw.source_url
+    assert "secret" not in raw.source_url
+    assert "old-token" not in raw.source_url
+    assert "frag-secret" not in raw.source_url
+    assert result.normalized[0].source_url == raw.source_url
+
+
+def test_flood_potential_geojson_payload_shape_errors_are_explicit() -> None:
+    with pytest.raises(FloodPotentialGeoJsonPayloadError, match="FeatureCollection"):
+        parse_flood_potential_geojson_payload(
+            {"type": "Feature"},
+            source_url="https://example.test/flood-potential.geojson",
+        )
+
+    with pytest.raises(FloodPotentialGeoJsonPayloadError, match="features list"):
+        parse_flood_potential_geojson_payload(
+            {"type": "FeatureCollection", "features": {}},
+            source_url="https://example.test/flood-potential.geojson",
+        )
+
+
+def test_flood_potential_geojson_api_adapter_wraps_injected_fetch_errors() -> None:
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        del url, timeout_seconds
+        raise TimeoutError("timed out")
+
+    adapter = FloodPotentialGeoJsonApiAdapter(
+        geojson_url="https://example.test/flood-potential.geojson",
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+    )
+
+    with pytest.raises(FloodPotentialGeoJsonFetchError, match="timed out"):
+        adapter.run()
 
 
 def test_official_adapter_outputs_pass_promotion_validation() -> None:

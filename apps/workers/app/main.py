@@ -5,7 +5,7 @@ import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.adapters.registry import enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
@@ -32,12 +32,14 @@ from app.jobs.queue import (
     PostgresRuntimeQueue,
     RuntimeQueueDeadLetterJob,
     RuntimeQueueDeadLetterSummary,
+    RuntimeQueueMetricsSnapshot,
     RuntimeQueueUnavailable,
 )
 from app.jobs.runtime import work_runtime_queue_once
 from app.jobs.sample import run_sample_job
 from app.jobs.tile_cache import PostgresTileCacheWriter, TileCacheUnavailable, TileLayerUnsupported
 from app.logging import log_event
+from app.metrics import render_runtime_queue_metrics, write_prometheus_textfile
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.postgres_writer import PostgresStagingBatchWriter
 from app.pipelines.promotion import (
@@ -99,6 +101,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--summarize-runtime-dead-letter-jobs",
         action="store_true",
         help="Print a JSON summary of dead-letter-equivalent failed worker_runtime_jobs.",
+    )
+    parser.add_argument(
+        "--export-runtime-queue-metrics",
+        action="store_true",
+        help="Print or write runtime queue final-failed row visibility metrics.",
+    )
+    parser.add_argument(
+        "--runtime-queue-metrics-format",
+        choices=("prometheus", "json"),
+        default="prometheus",
+        help="Output format for --export-runtime-queue-metrics. Defaults to prometheus.",
+    )
+    parser.add_argument(
+        "--runtime-queue-metrics-path",
+        help="Optional textfile path for Prometheus output from --export-runtime-queue-metrics.",
     )
     parser.add_argument(
         "--dead-letter-queue-name",
@@ -215,6 +232,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             settings=settings,
             database_url=args.database_url,
             queue_name=args.dead_letter_queue_name,
+        )
+
+    if args.export_runtime_queue_metrics:
+        return _export_runtime_queue_metrics(
+            settings=settings,
+            database_url=args.database_url,
+            queue_name=args.dead_letter_queue_name,
+            output_format=args.runtime_queue_metrics_format,
+            metrics_path=args.runtime_queue_metrics_path,
         )
 
     if args.requeue_runtime_job:
@@ -378,7 +404,6 @@ def _list_runtime_dead_letter_jobs(
 ) -> int:
     resolved_database_url = database_url or settings.database_url
     if not resolved_database_url:
-        log_event("runtime.queue.dead_letter.list.noop", reason="no_database_url")
         return 0
 
     try:
@@ -417,7 +442,6 @@ def _summarize_runtime_dead_letter_jobs(
                 reason="no_database_url",
             )
         )
-        log_event("runtime.queue.dead_letter.summary.noop", reason="no_database_url")
         return 0
 
     try:
@@ -440,11 +464,79 @@ def _summarize_runtime_dead_letter_jobs(
                 error=str(exc),
             )
         )
-        log_event("runtime.queue.dead_letter.summary.failed", error=str(exc))
         return 1
 
     print(_runtime_dead_letter_summary_json(summary, available=True))
     return 0
+
+
+def _export_runtime_queue_metrics(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    queue_name: str | None,
+    output_format: str,
+    metrics_path: str | None,
+) -> int:
+    collected_at = datetime.now(UTC)
+    resolved_database_url = database_url or settings.database_url
+    available = True
+    reason: str | None = None
+    error: str | None = None
+
+    if not resolved_database_url:
+        snapshots = _default_queue_metrics_snapshots(queue_name)
+        available = False
+        reason = "no_database_url"
+    else:
+        try:
+            snapshots = PostgresRuntimeQueue(
+                database_url=resolved_database_url
+            ).collect_metrics(queue_name=queue_name)
+        except RuntimeQueueUnavailable as exc:
+            snapshots = _default_queue_metrics_snapshots(queue_name)
+            available = False
+            reason = "queue_unavailable"
+            error = str(exc)
+
+    if output_format == "json":
+        print(
+            _runtime_queue_metrics_json(
+                snapshots,
+                collected_at=collected_at,
+                available=available,
+                reason=reason,
+                error=error,
+            )
+        )
+        return 0 if available or reason == "no_database_url" else 1
+
+    content = render_runtime_queue_metrics(
+        snapshots=snapshots,
+        collected_at=collected_at,
+        available=available,
+        reason=reason,
+    )
+    if metrics_path:
+        write_prometheus_textfile(metrics_path, content)
+    else:
+        print(content, end="")
+    return 0 if available or reason == "no_database_url" else 1
+
+
+def _default_queue_metrics_snapshots(
+    queue_name: str | None,
+) -> tuple[RuntimeQueueMetricsSnapshot, ...]:
+    return (
+        RuntimeQueueMetricsSnapshot(
+            queue_name=queue_name or "runtime-adapters",
+            queued_count=0,
+            running_count=0,
+            final_failed_count=0,
+            expired_lease_count=0,
+            oldest_final_failed_at=None,
+        ),
+    )
 
 
 def _requeue_runtime_job(
@@ -655,6 +747,40 @@ def _runtime_dead_letter_summary_json(
             "max_configured_attempts": summary.max_configured_attempts,
             "reason": reason,
             "error": error,
+        },
+        sort_keys=True,
+    )
+
+
+def _runtime_queue_metrics_json(
+    snapshots: tuple[RuntimeQueueMetricsSnapshot, ...],
+    *,
+    collected_at: datetime,
+    available: bool,
+    reason: str | None = None,
+    error: str | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "available": available,
+            "collected_at": collected_at.isoformat(),
+            "reason": reason,
+            "error": error,
+            "queues": [
+                {
+                    "queue_name": snapshot.queue_name,
+                    "queued_count": snapshot.queued_count,
+                    "running_count": snapshot.running_count,
+                    "final_failed_count": snapshot.final_failed_count,
+                    "expired_lease_count": snapshot.expired_lease_count,
+                    "oldest_final_failed_at": (
+                        snapshot.oldest_final_failed_at.isoformat()
+                        if snapshot.oldest_final_failed_at is not None
+                        else None
+                    ),
+                }
+                for snapshot in snapshots
+            ],
         },
         sort_keys=True,
     )

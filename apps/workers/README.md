@@ -50,6 +50,13 @@ Partially complete, not production-ready:
 - Heartbeat metrics are written only when `WORKER_METRICS_TEXTFILE_PATH` or
   `SCHEDULER_METRICS_TEXTFILE_PATH` is set and a node exporter textfile
   collector is deployed.
+- Queue metric acceptance is local/deployable only when those textfiles are
+  mounted into a collector and scraped in the target preview environment. It is
+  not a production alerting contract until hosted cadence, alert routing, and
+  incident ownership are accepted.
+- Flood-potential acceptance is fixture/demo and feature/cache-smoke only until
+  real upstream URL/license review, credential review, hosted cadence, alert
+  routing, and production egress verification are complete.
 
 ## Entry points
 
@@ -222,9 +229,9 @@ system. The missing pieces are poison-job quarantine, per-source idempotency
 checks, approval/incident workflow, alert routing, and alert labels for
 exhausted jobs.
 Adapter construction remains safe by default. Fixture adapters require
-`WORKER_RUNTIME_FIXTURES_ENABLED=true`; the CWA rainfall and WRA water-level
-live adapters require their `SOURCE_*_API_ENABLED=true` gates, so no external
-API calls are made by default.
+`WORKER_RUNTIME_FIXTURES_ENABLED=true`; the CWA rainfall, WRA water-level, and
+flood-potential GeoJSON live adapters require their explicit live-client gates,
+so no external API calls are made by default.
 The maintenance scheduler path is bounded by `--once`, `--max-ticks`, or
 `SCHEDULER_MAX_TICKS`, and defaults to a single tick when no bound is supplied.
 Each tick runs Query Heat aggregation, Query Heat retention pruning, tile
@@ -237,8 +244,8 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
 
 - Adapter contract and registry groundwork.
 - Official CWA rainfall, WRA water-level, and flood-potential fixture parsers.
-- Gated CWA rainfall and WRA water-level API runtime clients with
-  injected-fetcher test coverage.
+- Gated CWA rainfall, WRA water-level, and flood-potential GeoJSON runtime
+  clients with injected-fetcher test coverage.
 - Worker CLI/scheduler demo path for enabled official adapters.
 - Configurable run-once and bounded scheduler path for enabled runtime adapters.
 - DB-backed runtime job queue producer/consumer and singleton scheduler lease
@@ -257,14 +264,16 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
 
 ## Production pending checklist
 
-- Harden the CWA live client path and replace WRA/flood-potential demo adapters
-  with reviewed network source clients, credentials, attribution, and raw
-  snapshot storage.
-- Complete real credential review and WRA/CWA production egress verification
-  before treating official worker live paths as production beta ready.
-- Promote the current row-level list/requeue commands into an accepted DLQ
-  operating model with poison-job quarantine, alert routing, alert labels,
-  idempotency checks, and documented retry windows.
+- Harden the gated CWA/WRA/flood-potential live client paths with reviewed
+  source URLs, credentials, attribution, raw snapshot storage, and managed
+  persistence.
+- Complete real credential review and WRA/CWA/flood-potential production egress
+  verification before treating official worker live paths as production beta
+  ready.
+- Promote the current row-level list/requeue commands into an accepted replay
+  operating model with poison-job quarantine, replay audit, alert routing,
+  alert labels, idempotency checks, and documented retry windows. Do not call
+  the current row-level visibility a complete DLQ.
 - Deploy exactly one scheduler producer/maintenance cadence per environment and
   document owner, hosted cadence, and retry windows.
 - Mount worker/scheduler heartbeat textfiles into a real node exporter or
@@ -274,15 +283,16 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
 
 ## Placeholder boundary
 
-- Runtime scheduling has durable queue/lease primitives. CWA rainfall and WRA
-  water-level have gated live source client paths, but flood-potential runtime
-  source clients, production credential validation, WRA/CWA production egress
-  verification, hosted cadence, alert routing, and source-operation runbooks
-  are still pending.
+- Runtime scheduling has durable queue/lease primitives. CWA rainfall, WRA
+  water-level, and flood-potential GeoJSON have gated live source client paths,
+  but real upstream URL/license review, production credential validation,
+  production egress verification, hosted cadence, alert routing, managed
+  persistence, and source-operation runbooks are still pending.
 - Queue jobs have retry, active-job enqueue idempotency, terminal
   `failed`/`final_failed_at` visibility, and row-level requeue tooling, but a
-  dedicated DLQ/replay policy, poison-job quarantine, and alert routing are
-  pending.
+  dedicated replay policy, poison-job quarantine/replay audit, and alert
+  routing are pending. This row-level visibility must not be described as a
+  complete DLQ.
 - Maintenance jobs have manual CLIs, local smoke coverage, and a bounded
   scheduler command path, but production deployment and operator ownership are
   pending.

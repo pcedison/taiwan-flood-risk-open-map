@@ -33,12 +33,15 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
 
     assert settings.source_cwa_api_enabled is False
     assert settings.source_wra_api_enabled is False
+    assert settings.source_flood_potential_geojson_enabled is False
     assert settings.cwa_api_authorization is None
     assert settings.cwa_api_url is None
     assert settings.cwa_api_timeout_seconds == 8
     assert settings.wra_api_url is None
     assert settings.wra_api_token is None
     assert settings.wra_api_timeout_seconds == 8
+    assert settings.flood_potential_geojson_url is None
+    assert settings.flood_potential_geojson_timeout_seconds == 8
 
 
 def test_cwa_api_runtime_client_config_reads_env() -> None:
@@ -71,6 +74,22 @@ def test_wra_api_runtime_client_config_reads_env() -> None:
     assert settings.wra_api_url == "https://example.test/wra/water-level"
     assert settings.wra_api_token == "optional-token"
     assert settings.wra_api_timeout_seconds == 6
+
+
+def test_flood_potential_geojson_runtime_client_config_reads_env() -> None:
+    settings = load_worker_settings(
+        {
+            "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED": "true",
+            "FLOOD_POTENTIAL_GEOJSON_URL": "https://example.test/flood-potential.geojson",
+            "FLOOD_POTENTIAL_GEOJSON_TIMEOUT_SECONDS": "10",
+        }
+    )
+
+    assert settings.source_flood_potential_geojson_enabled is True
+    assert settings.flood_potential_geojson_url == (
+        "https://example.test/flood-potential.geojson"
+    )
+    assert settings.flood_potential_geojson_timeout_seconds == 10
 
 
 def test_reviewed_news_adapter_requires_family_flag_and_terms_ack() -> None:

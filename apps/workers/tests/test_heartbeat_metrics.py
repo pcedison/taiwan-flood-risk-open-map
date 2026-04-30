@@ -7,11 +7,13 @@ import yaml  # type: ignore[import-untyped]
 
 from app.metrics import (
     render_prometheus_text,
+    render_runtime_queue_metrics,
     render_scheduler_heartbeat_metrics,
     render_worker_heartbeat_metrics,
     write_prometheus_textfile,
     PrometheusSample,
 )
+from app.jobs.queue import RuntimeQueueMetricsSnapshot
 
 
 HEARTBEAT_AT = datetime(2026, 4, 30, 4, 0, 5, tzinfo=UTC)
@@ -71,6 +73,47 @@ def test_prometheus_textfile_helper_writes_utf8_with_trailing_newline(tmp_path: 
     assert target.read_text(encoding="utf-8") == 'flood_risk_test_metric{a="b"} 1\n'
 
 
+def test_runtime_queue_metrics_render_operator_visibility_without_dlq_name() -> None:
+    text = render_runtime_queue_metrics(
+        snapshots=(
+            RuntimeQueueMetricsSnapshot(
+                queue_name="runtime-adapters",
+                queued_count=4,
+                running_count=2,
+                final_failed_count=1,
+                expired_lease_count=1,
+                oldest_final_failed_at=datetime(2026, 4, 30, 3, 0, 5, tzinfo=UTC),
+            ),
+        ),
+        collected_at=HEARTBEAT_AT,
+        available=True,
+    )
+
+    assert "flood_risk_runtime_queue_metrics_available" in text
+    assert 'reason="ok",service="worker",surface="runtime_queue"} 1' in text
+    assert (
+        'flood_risk_runtime_queue_queued_jobs{queue_name="runtime-adapters",'
+        'service="worker",surface="runtime_queue"} 4'
+    ) in text
+    assert (
+        'flood_risk_runtime_queue_running_jobs{queue_name="runtime-adapters",'
+        'service="worker",surface="runtime_queue"} 2'
+    ) in text
+    assert (
+        'flood_risk_runtime_queue_final_failed_jobs{queue_name="runtime-adapters",'
+        'service="worker",surface="runtime_queue"} 1'
+    ) in text
+    assert (
+        'flood_risk_runtime_queue_expired_leases{queue_name="runtime-adapters",'
+        'service="worker",surface="runtime_queue"} 1'
+    ) in text
+    assert (
+        'flood_risk_runtime_queue_oldest_final_failed_age_seconds'
+        '{queue_name="runtime-adapters",service="worker",surface="runtime_queue"} 3600'
+    ) in text
+    assert "dlq" not in text.lower()
+
+
 def test_alert_rules_yaml_parse_and_reference_heartbeat_metrics() -> None:
     alert_rules = yaml.safe_load((REPO_ROOT / "infra/monitoring/alert-rules.yml").read_text())
     expressions = {
@@ -89,3 +132,11 @@ def test_alert_rules_yaml_parse_and_reference_heartbeat_metrics() -> None:
         in expressions["FloodRiskSchedulerHeartbeatMissing"]
     )
     assert "flood_risk_worker_last_run_status" in expressions["FloodRiskWorkerLastRunFailed"]
+    assert (
+        "flood_risk_runtime_queue_final_failed_jobs"
+        in expressions["FloodRiskRuntimeQueueFinalFailedRowsPresent"]
+    )
+    assert (
+        "flood_risk_runtime_queue_expired_leases"
+        in expressions["FloodRiskRuntimeQueueExpiredLeases"]
+    )

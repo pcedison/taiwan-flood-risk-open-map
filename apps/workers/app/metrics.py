@@ -5,11 +5,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from app.jobs.queue import RuntimeQueueMetricsSnapshot
+
 
 WORKER_HEARTBEAT_TIMESTAMP = "flood_risk_worker_heartbeat_timestamp_seconds"
 SCHEDULER_HEARTBEAT_TIMESTAMP = "flood_risk_scheduler_heartbeat_timestamp_seconds"
 WORKER_LAST_RUN_STATUS = "flood_risk_worker_last_run_status"
 SCHEDULER_LAST_RUN_STATUS = "flood_risk_scheduler_last_run_status"
+RUNTIME_QUEUE_METRICS_AVAILABLE = "flood_risk_runtime_queue_metrics_available"
+RUNTIME_QUEUE_QUEUED_JOBS = "flood_risk_runtime_queue_queued_jobs"
+RUNTIME_QUEUE_RUNNING_JOBS = "flood_risk_runtime_queue_running_jobs"
+RUNTIME_QUEUE_FINAL_FAILED_JOBS = "flood_risk_runtime_queue_final_failed_jobs"
+RUNTIME_QUEUE_EXPIRED_LEASES = "flood_risk_runtime_queue_expired_leases"
+RUNTIME_QUEUE_OLDEST_FINAL_FAILED_AGE_SECONDS = (
+    "flood_risk_runtime_queue_oldest_final_failed_age_seconds"
+)
 
 RunStatus = Literal["succeeded", "failed", "skipped", "running", "unknown"]
 MetricValue = int | float
@@ -72,6 +82,57 @@ def render_scheduler_heartbeat_metrics(
                 active_status=last_run_status,
                 labels=labels,
             )
+        )
+
+    return render_prometheus_text(samples, metric_metadata=_runtime_metric_metadata())
+
+
+def render_runtime_queue_metrics(
+    *,
+    snapshots: tuple[RuntimeQueueMetricsSnapshot, ...],
+    collected_at: datetime,
+    available: bool,
+    reason: str | None = None,
+) -> str:
+    base_labels = {"service": "worker", "surface": "runtime_queue"}
+    samples = [
+        PrometheusSample(
+            name=RUNTIME_QUEUE_METRICS_AVAILABLE,
+            labels=base_labels | {"reason": reason or "ok"},
+            value=int(available),
+        )
+    ]
+
+    for snapshot in snapshots:
+        labels = base_labels | {"queue_name": snapshot.queue_name}
+        samples.extend(
+            [
+                PrometheusSample(
+                    name=RUNTIME_QUEUE_QUEUED_JOBS,
+                    labels=labels,
+                    value=snapshot.queued_count,
+                ),
+                PrometheusSample(
+                    name=RUNTIME_QUEUE_RUNNING_JOBS,
+                    labels=labels,
+                    value=snapshot.running_count,
+                ),
+                PrometheusSample(
+                    name=RUNTIME_QUEUE_FINAL_FAILED_JOBS,
+                    labels=labels,
+                    value=snapshot.final_failed_count,
+                ),
+                PrometheusSample(
+                    name=RUNTIME_QUEUE_EXPIRED_LEASES,
+                    labels=labels,
+                    value=snapshot.expired_lease_count,
+                ),
+                PrometheusSample(
+                    name=RUNTIME_QUEUE_OLDEST_FINAL_FAILED_AGE_SECONDS,
+                    labels=labels,
+                    value=_age_seconds(collected_at, snapshot.oldest_final_failed_at),
+                ),
+            ]
         )
 
     return render_prometheus_text(samples, metric_metadata=_runtime_metric_metadata())
@@ -145,6 +206,14 @@ def _unix_timestamp_seconds(value: datetime) -> int:
     return int(resolved.timestamp())
 
 
+def _age_seconds(collected_at: datetime, then: datetime | None) -> int:
+    if then is None:
+        return 0
+    collected = collected_at.replace(tzinfo=UTC) if collected_at.tzinfo is None else collected_at
+    previous = then.replace(tzinfo=UTC) if then.tzinfo is None else then
+    return max(0, int((collected.astimezone(UTC) - previous.astimezone(UTC)).total_seconds()))
+
+
 def _runtime_metric_metadata() -> dict[str, tuple[str, str]]:
     return {
         WORKER_HEARTBEAT_TIMESTAMP: (
@@ -161,6 +230,30 @@ def _runtime_metric_metadata() -> dict[str, tuple[str, str]]:
         ),
         SCHEDULER_LAST_RUN_STATUS: (
             "One-hot status gauge for the scheduler's latest observed run.",
+            "gauge",
+        ),
+        RUNTIME_QUEUE_METRICS_AVAILABLE: (
+            "Whether runtime queue metrics were collected from the durable queue backend.",
+            "gauge",
+        ),
+        RUNTIME_QUEUE_QUEUED_JOBS: (
+            "Number of runtime queue rows currently queued.",
+            "gauge",
+        ),
+        RUNTIME_QUEUE_RUNNING_JOBS: (
+            "Number of runtime queue rows currently leased and running.",
+            "gauge",
+        ),
+        RUNTIME_QUEUE_FINAL_FAILED_JOBS: (
+            "Number of exhausted final-failed runtime queue rows. This is row visibility, not a replay store.",
+            "gauge",
+        ),
+        RUNTIME_QUEUE_EXPIRED_LEASES: (
+            "Number of running runtime queue rows whose lease has expired.",
+            "gauge",
+        ),
+        RUNTIME_QUEUE_OLDEST_FINAL_FAILED_AGE_SECONDS: (
+            "Age in seconds of the oldest exhausted final-failed runtime queue row.",
             "gauge",
         ),
     }

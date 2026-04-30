@@ -13,7 +13,7 @@ Covered:
 - Source freshness checks through `GET /admin/v1/sources`.
 - Prometheus rule coverage for freshness, API readiness, and runtime heartbeats.
 - Grafana dashboard coverage for readiness, freshness, heartbeat, and worker
-  last-run status.
+  last-run status plus runtime queue final-failed row visibility.
 - Dry-run and fixture-based verification.
 - Alert thresholds and triage steps.
 
@@ -23,7 +23,7 @@ Not covered:
 - Hosted TLS/auth/storage setup.
 - Production scheduler or cron deployment.
 - Adapter retry/DLQ governance beyond current queue `failed`/`final_failed_at`
-  visibility and row-level list/requeue commands.
+  visibility, queue metrics export, and row-level list/requeue commands.
 - Real credential review or WRA/CWA production egress verification.
 
 ## Current Phase Status
@@ -38,16 +38,19 @@ Completed for local validation:
   metrics.
 - Worker and scheduler runtimes can emit heartbeat textfiles when explicitly
   configured.
+- Operators can export runtime queue metrics for queued/running counts,
+  expired leases, final-failed row count, and oldest final-failed age.
 
 Partially complete:
 
 - Freshness export is a script and metric contract, not a deployed production
   monitor. A scheduler/cron owner still has to run it at the target cadence.
-- Queue failure visibility is limited to heartbeat/last-run metrics and the
-  `worker_runtime_jobs` terminal `failed`/`final_failed_at` state plus
-  row-level list/requeue commands. This is final-failed row visibility, not a
-  complete DLQ. There is no DLQ metric, poison-job quarantine/escalation
-  policy, or accepted production replay procedure yet.
+- Queue failure visibility is limited to heartbeat/last-run metrics,
+  operator-exported queue metrics, and the `worker_runtime_jobs` terminal
+  `failed`/`final_failed_at` state plus row-level list/requeue commands. This
+  is final-failed row visibility, not a complete DLQ. There is no replay audit,
+  poison-job quarantine/escalation policy, or accepted production replay
+  procedure yet.
 - Official worker freshness is partial: demo/fixture-backed adapter runs are
   safe by default, and CWA rainfall plus WRA water-level can run through
   explicit live-client gates. Flood-potential worker freshness still needs a
@@ -67,7 +70,7 @@ Pending for production:
   ownership.
 - Hosted scheduler/cadence deployment for freshness export plus
   worker/scheduler heartbeat emission.
-- Queue DLQ/replay policy, poison-job quarantine, alert routing, and
+- Queue replay audit, poison-job quarantine, alert routing, and
   abuse-governance alerts for future public reports/public discussion
   ingestion.
 
@@ -99,12 +102,24 @@ docker compose --profile monitoring up prometheus grafana node-exporter
 
 ## Queue Replay Boundary
 
-Current queue monitoring can detect worker last-run failures and inspect
-exhausted final-failed rows, but it does not expose a DLQ panel or replay
-alert workflow. Use this CLI during triage:
+Current queue monitoring can detect worker last-run failures, export queue
+counts, and inspect exhausted final-failed rows, but it does not expose a
+complete DLQ or replay alert workflow. Use this CLI during triage:
 
 ```powershell
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
+```
+
+To print the queue visibility summary as JSON:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-format json"
+```
+
+To write Prometheus textfile metrics:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path /var/lib/node_exporter/textfile_collector/flood-risk-runtime-queue.prom"
 ```
 
 To requeue one failed row:
@@ -113,10 +128,11 @@ To requeue one failed row:
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
 ```
 
-Do not treat the row-level list/requeue commands or any future summary of them
-as a complete DLQ or replay operating model. Replay still needs policy for
-payload safety, source idempotency, backoff, poison-job quarantine, alert
-routing, alert labels, and incident ownership.
+Do not treat the row-level list/requeue commands or metrics summary as a
+complete DLQ or replay operating model. Replay still needs audit records,
+payload safety review, source idempotency, backoff, poison-job quarantine,
+alert routing, alert labels, and incident ownership. There is no purge,
+quarantine, or auto replay in this phase.
 
 ## Alert Policy
 
@@ -158,6 +174,9 @@ Alerts:
 | `FloodRiskWorkerHeartbeatMissing` | warning | `flood_risk_worker_heartbeat_timestamp_seconds` | Worker heartbeat is absent or older than 300 seconds. |
 | `FloodRiskSchedulerHeartbeatMissing` | warning | `flood_risk_scheduler_heartbeat_timestamp_seconds` | Scheduler heartbeat is absent or older than 600 seconds. |
 | `FloodRiskWorkerLastRunFailed` | critical | `flood_risk_worker_last_run_status{status="failed"}` | Latest observed worker run failed. |
+| `FloodRiskRuntimeQueueMetricsUnavailable` | warning | `flood_risk_runtime_queue_metrics_available` | Queue metrics exporter could not read the durable queue backend. |
+| `FloodRiskRuntimeQueueFinalFailedRowsPresent` | warning | `flood_risk_runtime_queue_final_failed_jobs` | Exhausted final-failed rows are present; inspect before any manual requeue. |
+| `FloodRiskRuntimeQueueExpiredLeases` | warning | `flood_risk_runtime_queue_expired_leases` | Running queue rows have expired leases. |
 
 The current API scrape target is `api:8000/metrics`. If the deployed API does
 not expose Prometheus metrics yet, `FloodRiskApiReadyDown` should be interpreted
@@ -179,6 +198,8 @@ dashboard covers the same operational surfaces as the alert rules:
 - Worker heartbeat age.
 - Scheduler heartbeat age.
 - Worker last-run failed count and active last-run status.
+- Queue final-failed row count, expired leases, oldest final-failed age, and
+  metrics availability.
 
 ## Manual Check
 
@@ -283,12 +304,29 @@ Runtime heartbeat metrics:
 | `flood_risk_worker_last_run_status` | `service`, `instance`, `queue`, `job`, `status` | One-hot latest worker run status for `succeeded`, `failed`, `skipped`, `running`, `unknown`. |
 | `flood_risk_scheduler_last_run_status` | `service`, `instance`, `scheduler`, `status` | One-hot latest scheduler run status. |
 
+Runtime queue visibility metrics:
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `flood_risk_runtime_queue_metrics_available` | `service`, `surface`, `reason` | `1` when the queue metrics exporter queried the DB, otherwise `0`. |
+| `flood_risk_runtime_queue_queued_jobs` | `service`, `surface`, `queue_name` | Rows currently in `queued` status. |
+| `flood_risk_runtime_queue_running_jobs` | `service`, `surface`, `queue_name` | Rows currently in `running` status. |
+| `flood_risk_runtime_queue_final_failed_jobs` | `service`, `surface`, `queue_name` | Exhausted `failed` rows where attempts reached max attempts. Not a complete DLQ. |
+| `flood_risk_runtime_queue_expired_leases` | `service`, `surface`, `queue_name` | Running rows with an expired lease. |
+| `flood_risk_runtime_queue_oldest_final_failed_age_seconds` | `service`, `surface`, `queue_name` | Age of the oldest exhausted final-failed row, or `0` when none exists. |
+
 Until an HTTP `/metrics` endpoint is wired, configure the worker runtime to
 write helper output to node exporter textfile collector paths such as:
 
 ```text
 WORKER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-worker.prom
 SCHEDULER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-scheduler.prom
+```
+
+Queue metrics are written by the CLI rather than the worker heartbeat path:
+
+```text
+python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path /var/lib/node_exporter/textfile_collector/flood-risk-runtime-queue.prom
 ```
 
 The local Compose worker and scheduler services mount the shared collector

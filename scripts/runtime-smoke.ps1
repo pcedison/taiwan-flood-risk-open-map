@@ -35,8 +35,12 @@ Extended checks are enabled by default:
     failed/dead-letter-equivalent list and requeue/dequeue visibility for an
     exhausted queue job.
   - Queue CLI surface smoke: parse worker --help in a one-off container and
-    verify enqueue, consume, dead-letter summary/list, and requeue ops flags are
-    present without connecting to the database or external networks.
+    verify enqueue, consume, queue summary/list/requeue, queue metrics export
+    surface, and flood-potential GeoJSON gate config without
+    connecting to the database or external networks.
+  - Runtime live-gate no-network boundary smoke: run --run-enabled-adapters
+    with live API gates disabled and fail if the command attempts a socket
+    connection.
   - Official adapter fixture dry run: run --run-official-demo in a one-off
     worker container without external API credentials.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
@@ -805,6 +809,9 @@ function Invoke-QueueCliSurfaceSmoke {
 import subprocess
 import sys
 
+from app.adapters.registry import enabled_adapter_keys
+from app.config import WorkerSettings, load_worker_settings
+
 required_flags = [
     "--enqueue-runtime-jobs",
     "--work-runtime-queue",
@@ -814,6 +821,11 @@ required_flags = [
     "--dead-letter-limit",
     "--requeue-runtime-job",
     "--requeue-keep-attempts",
+    "--export-runtime-queue-metrics",
+    "--runtime-queue-metrics-format",
+    "--runtime-queue-metrics-path",
+    "--run-enabled-adapters",
+    "--list-adapters",
 ]
 
 result = subprocess.run(
@@ -826,13 +838,119 @@ print(result.stdout, end="")
 missing = [flag for flag in required_flags if flag not in result.stdout]
 if missing:
     raise SystemExit(f"missing queue ops CLI flags: {', '.join(missing)}")
-print("queue_cli_surface_smoke=ok enqueue=true work=true dead_letter_summary=true dead_letter_list=true requeue=true")
+
+
+flood_potential_disabled = load_worker_settings(
+    {
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.flood_potential.geojson",
+        "SOURCE_FLOOD_POTENTIAL_ENABLED": "false",
+        "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED": "true",
+        "FLOOD_POTENTIAL_GEOJSON_URL": "https://runtime-smoke.invalid/flood-potential.geojson",
+        "SOURCE_CWA_API_ENABLED": "false",
+        "SOURCE_WRA_API_ENABLED": "false",
+    }
+)
+if enabled_adapter_keys(flood_potential_disabled) != ():
+    raise SystemExit("SOURCE_FLOOD_POTENTIAL_ENABLED=false did not gate official.flood_potential.geojson")
+
+settings_fields = set(WorkerSettings.__dataclass_fields__)
+if "source_flood_potential_enabled" not in settings_fields:
+    raise SystemExit("missing source_flood_potential_enabled settings gate")
+for field in (
+    "source_flood_potential_geojson_enabled",
+    "flood_potential_geojson_url",
+    "flood_potential_geojson_timeout_seconds",
+):
+    if field not in settings_fields:
+        raise SystemExit(f"missing flood-potential GeoJSON settings field: {field}")
+
+flood_potential_geojson_enabled = load_worker_settings(
+    {
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.flood_potential.geojson",
+        "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED": "true",
+        "FLOOD_POTENTIAL_GEOJSON_URL": "https://runtime-smoke.invalid/flood-potential.geojson",
+    }
+)
+if not flood_potential_geojson_enabled.source_flood_potential_geojson_enabled:
+    raise SystemExit("SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=true was not read")
+if flood_potential_geojson_enabled.flood_potential_geojson_url is None:
+    raise SystemExit("FLOOD_POTENTIAL_GEOJSON_URL was not read")
+
+print(
+    "queue_cli_surface_smoke=ok "
+    "enqueue=true work=true queue_metrics_export=true "
+    "queue_summary=true queue_list=true requeue=true "
+    "flood_potential_geojson_gate=true"
+)
 '@
 
     Invoke-ComposePythonScript `
         -Description "Checking worker queue ops CLI surface without database or network access" `
         -Service "worker" `
         -PythonSource $queueCliSurfacePython
+}
+
+function Invoke-LiveGateNoNetworkBoundarySmoke {
+    $liveGateNoNetworkPython = @'
+import os
+import socket
+import sys
+
+from app.main import main
+
+os.environ.update(
+    {
+        "WORKER_ENABLED_ADAPTER_KEYS": (
+            "official.cwa.rainfall,"
+            "official.wra.water_level,"
+            "official.flood_potential.geojson"
+        ),
+        "WORKER_RUNTIME_FIXTURES_ENABLED": "false",
+        "SOURCE_CWA_ENABLED": "true",
+        "SOURCE_WRA_ENABLED": "true",
+        "SOURCE_FLOOD_POTENTIAL_ENABLED": "true",
+        "SOURCE_CWA_API_ENABLED": "false",
+        "SOURCE_WRA_API_ENABLED": "false",
+        "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED": "false",
+        "CWA_API_URL": "https://runtime-smoke.invalid/cwa",
+        "WRA_API_URL": "https://runtime-smoke.invalid/wra",
+        "FLOOD_POTENTIAL_GEOJSON_URL": "https://runtime-smoke.invalid/flood-potential.geojson",
+        "CWA_API_AUTHORIZATION": "",
+        "WRA_API_TOKEN": "",
+        "DATABASE_URL": "",
+        "WORKER_DATABASE_URL": "",
+        "WORKER_METRICS_TEXTFILE_PATH": "",
+        "SCHEDULER_METRICS_TEXTFILE_PATH": "",
+    }
+)
+
+network_attempts = []
+original_connect = socket.socket.connect
+
+
+def blocked_connect(self, address):
+    network_attempts.append(repr(address))
+    raise AssertionError(f"unexpected network connect: {address!r}")
+
+
+socket.socket.connect = blocked_connect
+try:
+    exit_code = main(["--run-enabled-adapters"])
+finally:
+    socket.socket.connect = original_connect
+
+if network_attempts:
+    raise SystemExit(f"unexpected network attempt with live gates disabled: {network_attempts}")
+if exit_code != 0:
+    raise SystemExit(f"expected --run-enabled-adapters no-op exit 0, got {exit_code}")
+
+print("live_gate_no_network_boundary_smoke=ok run_enabled_adapters_noop=true network_attempts=0")
+'@
+
+    Invoke-ComposePythonScript `
+        -Description "Checking --run-enabled-adapters live-gate no-network boundary" `
+        -Service "worker" `
+        -PythonSource $liveGateNoNetworkPython
 }
 
 function Invoke-AdapterFixtureDryRunSmoke {
@@ -1170,6 +1288,7 @@ try {
         }
         else {
             Invoke-QueueCliSurfaceSmoke
+            Invoke-LiveGateNoNetworkBoundarySmoke
             Invoke-QueueLiveSmoke
         }
 

@@ -41,6 +41,19 @@ Partially complete:
   not establish hosted TLS/auth, durable retention, hosted cadence, or alert
   routing.
 
+Deployable/local acceptance boundary:
+
+- Queue metrics are accepted only for local or preview smoke when
+  worker/scheduler textfiles are explicitly mounted, scraped, and visible in
+  the chosen dashboard. Hosted alert routing and incident ownership remain
+  pending.
+- Flood-potential is accepted only as fixture/demo parsing plus worker
+  feature/cache smoke. A real flood-potential source client still needs real
+  upstream URL/license review, credential review, hosted cadence, alert
+  routing, and production egress verification.
+- Row-level final-failed visibility and requeue commands are queue operations
+  tooling, not a complete DLQ.
+
 Pending before production:
 
 - Harden the gated CWA rainfall and WRA water-level source-client paths and
@@ -53,8 +66,8 @@ Pending before production:
   cadence.
 - Alertmanager or equivalent routing, TLS/auth, persistent monitoring storage,
   and backup/retention policy.
-- Production policy for queue idempotency scope, DLQ/replay, retry/backoff,
-  poison-job quarantine/routing, and worker scaling.
+- Production policy for queue idempotency scope, replay audit, retry/backoff,
+  poison-job quarantine/routing, alert routing, and worker scaling.
 - Abuse governance, moderation, retention/deletion, and legal/privacy gates for
   public reports and public discussion sources.
 

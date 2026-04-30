@@ -10,6 +10,7 @@ from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import (
     RuntimeQueueDeadLetterJob,
     RuntimeQueueDeadLetterSummary,
+    RuntimeQueueMetricsSnapshot,
     RuntimeQueueRequeueResult,
     RuntimeQueueUnavailable,
 )
@@ -276,7 +277,6 @@ def test_main_summarize_runtime_dead_letter_jobs_noops_without_database_url(
     monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -334,6 +334,231 @@ def test_main_summarize_runtime_dead_letter_jobs_reports_database_unavailable(
         "queue_name": None,
         "reason": "queue_unavailable",
     }
+
+
+def test_main_export_runtime_queue_metrics_prints_prometheus(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+    oldest = datetime(2026, 4, 30, 7, 0, tzinfo=UTC)
+
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def collect_metrics(
+            self,
+            *,
+            queue_name: str | None = None,
+        ) -> tuple[RuntimeQueueMetricsSnapshot, ...]:
+            captured["queue_name"] = queue_name
+            return (
+                RuntimeQueueMetricsSnapshot(
+                    queue_name=queue_name or "runtime-adapters",
+                    queued_count=4,
+                    running_count=2,
+                    final_failed_count=1,
+                    expired_lease_count=1,
+                    oldest_final_failed_at=oldest,
+                ),
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--export-runtime-queue-metrics",
+            "--dead-letter-queue-name",
+            "runtime-adapters",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "database_url": "postgresql://worker:test@localhost/flood",
+        "queue_name": "runtime-adapters",
+    }
+    output = capsys.readouterr().out
+    assert "flood_risk_runtime_queue_metrics_available" in output
+    assert "flood_risk_runtime_queue_final_failed_jobs" in output
+    assert "flood_risk_runtime_queue_expired_leases" in output
+    assert "dlq" not in output.lower()
+
+
+def test_main_export_runtime_queue_metrics_writes_textfile(monkeypatch, tmp_path: Path) -> None:
+    metrics_path = tmp_path / "runtime-queue.prom"
+
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            del database_url
+
+        def collect_metrics(
+            self,
+            *,
+            queue_name: str | None = None,
+        ) -> tuple[RuntimeQueueMetricsSnapshot, ...]:
+            return (
+                RuntimeQueueMetricsSnapshot(
+                    queue_name=queue_name or "runtime-adapters",
+                    queued_count=1,
+                    running_count=0,
+                    final_failed_count=0,
+                    expired_lease_count=0,
+                    oldest_final_failed_at=None,
+                ),
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--export-runtime-queue-metrics",
+            "--runtime-queue-metrics-path",
+            str(metrics_path),
+        ]
+    )
+
+    assert exit_code == 0
+    text = metrics_path.read_text(encoding="utf-8")
+    assert "flood_risk_runtime_queue_queued_jobs" in text
+    assert 'queue_name="runtime-adapters"' in text
+
+
+def test_main_export_runtime_queue_metrics_prints_json(monkeypatch, capsys) -> None:
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            del database_url
+
+        def collect_metrics(
+            self,
+            *,
+            queue_name: str | None = None,
+        ) -> tuple[RuntimeQueueMetricsSnapshot, ...]:
+            return (
+                RuntimeQueueMetricsSnapshot(
+                    queue_name=queue_name or "runtime-adapters",
+                    queued_count=4,
+                    running_count=2,
+                    final_failed_count=1,
+                    expired_lease_count=1,
+                    oldest_final_failed_at=datetime(2026, 4, 30, 7, 0, tzinfo=UTC),
+                ),
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--export-runtime-queue-metrics",
+            "--runtime-queue-metrics-format",
+            "json",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["available"] is True
+    assert payload["reason"] is None
+    assert payload["queues"] == [
+        {
+            "expired_lease_count": 1,
+            "final_failed_count": 1,
+            "oldest_final_failed_at": "2026-04-30T07:00:00+00:00",
+            "queue_name": "runtime-adapters",
+            "queued_count": 4,
+            "running_count": 2,
+        }
+    ]
+
+
+def test_main_export_runtime_queue_metrics_noops_without_database_url(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fail_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("metrics should not construct a queue without database URL")
+
+    monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--export-runtime-queue-metrics",
+            "--runtime-queue-metrics-format",
+            "json",
+            "--dead-letter-queue-name",
+            "runtime-adapters",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["available"] is False
+    assert payload["reason"] == "no_database_url"
+    assert payload["queues"][0]["queue_name"] == "runtime-adapters"
+    assert payload["queues"][0]["final_failed_count"] == 0
+
+
+def test_main_export_runtime_queue_metrics_no_db_prometheus_stdout_is_parseable(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fail_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("metrics should not construct a queue without database URL")
+
+    monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
+
+    exit_code = main(["--export-runtime-queue-metrics"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert output.startswith("# HELP flood_risk_runtime_queue_metrics_available")
+    assert 'reason="no_database_url"' in output
+    assert not output.startswith("{")
+
+
+def test_main_export_runtime_queue_metrics_reports_database_unavailable(
+    monkeypatch,
+    capsys,
+) -> None:
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            del database_url
+
+        def collect_metrics(
+            self,
+            *,
+            queue_name: str | None = None,
+        ) -> tuple[RuntimeQueueMetricsSnapshot, ...]:
+            del queue_name
+            raise RuntimeQueueUnavailable("database unavailable")
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+
+    exit_code = main(
+        [
+            "--export-runtime-queue-metrics",
+            "--runtime-queue-metrics-format",
+            "json",
+        ]
+    )
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["available"] is False
+    assert payload["reason"] == "queue_unavailable"
+    assert payload["error"] == "database unavailable"
 
 
 def test_main_requeue_runtime_job_resets_attempts_by_default(monkeypatch, capsys) -> None:

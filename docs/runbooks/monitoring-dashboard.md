@@ -16,21 +16,22 @@ Completed:
 - API `/metrics` scrape target for local Compose.
 - Source freshness script that can emit Prometheus textfile metrics.
 - Opt-in worker and scheduler heartbeat textfile metric contracts.
+- Operator-exported runtime queue metrics for queued/running counts,
+  final-failed row counts, expired leases, and oldest final-failed age.
 
 Partially complete:
 
 - Dashboard panels are importable and useful for local validation, but they
   only show real freshness/queue/scheduler state after the corresponding
   producers write textfile metrics into a node exporter collector directory.
-- Worker queue panels observe heartbeats and last-run status; they do not yet
+- Worker queue panels observe heartbeats, last-run status, queued/running
+  counts, expired leases, and final-failed row visibility. They do not yet
   prove real-source retries, accepted DLQ/replay handling, poison-job routing,
   or production scheduler singleton behavior.
-- There is no queue DLQ/replay panel yet. Exhausted runtime jobs are currently
-  inspectable through `--list-runtime-dead-letter-jobs`, and requeue is a
-  row-level CLI action; neither is wired into dashboard alerts or poison-job
-  routing.
-- If a queue summary panel is added before an accepted DLQ policy, label it as
-  final-failed row visibility rather than a complete DLQ.
+- Exhausted runtime jobs are inspectable through
+  `--list-runtime-dead-letter-jobs`, summarized/exported through
+  `--export-runtime-queue-metrics`, and requeue is a row-level CLI action.
+  This is final-failed row visibility rather than a complete DLQ.
 - Official-source panels do not prove real credential review, hosted cadence,
   or WRA/CWA production egress verification.
 - The local profile proves wiring and syntax, not production uptime,
@@ -46,8 +47,8 @@ Pending for production:
   official-source paths.
 - Worker/scheduler deployment with heartbeat paths mounted into a real
   collector.
-- Queue DLQ/replay policy, poison-job quarantine/routing, alert routing, and
-  alert labels for exhausted jobs.
+- Queue replay audit, poison-job quarantine/routing, auto replay policy,
+  alert routing, and incident ownership for exhausted jobs.
 
 ## Files
 
@@ -106,6 +107,11 @@ The dashboard includes:
 | Worker Heartbeat Age | `time() - flood_risk_worker_heartbeat_timestamp_seconds` | Shows worker heartbeat age by instance and queue. |
 | Scheduler Heartbeat Age | `time() - flood_risk_scheduler_heartbeat_timestamp_seconds` | Shows scheduler heartbeat age by instance and scheduler. |
 | Worker Last Run Status | `flood_risk_worker_last_run_status == 1` | Lists the latest worker run status by job. |
+| Queue Final-Failed Rows | `sum(flood_risk_runtime_queue_final_failed_jobs)` | Counts exhausted final-failed rows; this is not a complete DLQ. |
+| Queue Expired Leases | `sum(flood_risk_runtime_queue_expired_leases)` | Counts running rows whose leases have expired. |
+| Queue Oldest Final-Failed Age | `max(flood_risk_runtime_queue_oldest_final_failed_age_seconds)` | Shows how long the oldest final-failed row has been visible. |
+| Queue Metrics Available | `min(flood_risk_runtime_queue_metrics_available)` | Shows whether the CLI exporter could query the DB. |
+| Runtime Queue Counts | queue count metrics | Table view of queued/running/final-failed/expired-lease series. |
 
 ## Prometheus API Scrape
 
@@ -158,6 +164,7 @@ Use one file per producer to avoid clobbering metrics:
 | Source freshness script | `/var/lib/node_exporter/textfile_collector/flood-risk-source-freshness.prom` |
 | Worker runtime | `/var/lib/node_exporter/textfile_collector/flood-risk-worker.prom` |
 | Scheduler runtime | `/var/lib/node_exporter/textfile_collector/flood-risk-scheduler.prom` |
+| Runtime queue metrics CLI | `/var/lib/node_exporter/textfile_collector/flood-risk-runtime-queue.prom` |
 
 The worker runtime paths are controlled by:
 
@@ -194,6 +201,7 @@ Use the dashboard panels as deployment acceptance signals:
 |---|---|---|
 | Source freshness | `Stale Sources`, `Source Freshness Status`, `Source Freshness Age` | Scheduled `ops-source-freshness-check.ps1` with `-MetricsPath`, exported through node exporter. |
 | Worker queue health | `Worker Heartbeat Age`, `Worker Last Run Failed`, `Worker Last Run Status` | Worker process writes `WORKER_METRICS_TEXTFILE_PATH` into the collector directory. |
+| Runtime queue row visibility | `Queue Final-Failed Rows`, `Queue Expired Leases`, `Queue Oldest Final-Failed Age`, `Queue Metrics Available`, `Runtime Queue Counts` | Scheduled `python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path <collector-file>`. |
 | Scheduler health | `Scheduler Heartbeat Age` | Scheduler process writes `SCHEDULER_METRICS_TEXTFILE_PATH` into the collector directory. |
 
 For local Compose, set these paths when you want worker/scheduler textfile
@@ -238,6 +246,12 @@ docker compose run --rm `
 
 # Inspect final-failed queue rows outside the dashboard. This is not a DLQ.
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
+
+# Export queue visibility metrics for Prometheus textfile collection.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path /var/lib/node_exporter/textfile_collector/flood-risk-runtime-queue.prom"
+
+# Print the same queue visibility surface as JSON for operator inspection.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-format json"
 ```
 
 ## Validation
@@ -266,13 +280,14 @@ Optionally run the freshness script dry-run to prove the textfile writer path:
 - Worker and scheduler write heartbeat `.prom` files when their env vars are
   set.
 - Dashboard panels show API readiness, source freshness, worker heartbeat,
-  scheduler heartbeat, and worker last-run status.
+  scheduler heartbeat, worker last-run status, and runtime queue final-failed
+  row visibility.
 
 ## Pending Checklist
 
-- Add a first-class DLQ/replay metric or panel only after the queue policy is
-  accepted.
-- Add alert labels for exhausted jobs and poison-job quarantine before treating
+- Do not promote final-failed row visibility to a first-class DLQ until replay
+  audit and poison-job policy are accepted.
+- Add poison-job quarantine/routing and incident workflow before treating
   row-level requeue as production replay.
 - Wire hosted scrape targets, TLS/auth, persistent storage, and pager/alert
   routing.
