@@ -13,7 +13,33 @@ from psycopg.types.json import Jsonb
 ConnectionFactory = Callable[[], Any]
 UserReportStatus = Literal["pending", "approved", "rejected", "spam"]
 UserReportModerationStatus = Literal["approved", "rejected", "spam"]
+UserReportModerationReason = Literal[
+    "verified_flood_signal",
+    "duplicate",
+    "not_flood_related",
+    "insufficient_detail",
+    "abuse_or_spam",
+    "out_of_scope",
+]
 VALID_MODERATION_STATUSES: set[str] = {"approved", "rejected", "spam"}
+VALID_MODERATION_REASONS: set[str] = {
+    "verified_flood_signal",
+    "duplicate",
+    "not_flood_related",
+    "insufficient_detail",
+    "abuse_or_spam",
+    "out_of_scope",
+}
+MODERATION_REASONS_BY_STATUS: dict[UserReportModerationStatus, set[str]] = {
+    "approved": {"verified_flood_signal"},
+    "rejected": {
+        "duplicate",
+        "not_flood_related",
+        "insufficient_detail",
+        "out_of_scope",
+    },
+    "spam": {"abuse_or_spam"},
+}
 
 
 class UserReportRepositoryUnavailable(RuntimeError):
@@ -137,11 +163,16 @@ def moderate_user_report(
     database_url: str,
     report_id: str,
     status: UserReportModerationStatus,
+    reason_code: UserReportModerationReason,
     actor_ref: str,
     connection_factory: ConnectionFactory | None = None,
 ) -> UserReportModerationRecord | None:
     if status not in VALID_MODERATION_STATUSES:
         raise ValueError(f"invalid moderation status: {status}")
+    if reason_code not in VALID_MODERATION_REASONS:
+        raise ValueError(f"invalid moderation reason_code: {reason_code}")
+    if reason_code not in MODERATION_REASONS_BY_STATUS[status]:
+        raise ValueError(f"moderation reason_code {reason_code} is not allowed for status {status}")
 
     sql = """
         WITH target_report AS (
@@ -182,14 +213,16 @@ def moderate_user_report(
                 updated_report.id,
                 jsonb_build_object(
                     'previous_status', updated_report.previous_status,
-                    'status', updated_report.status
+                    'status', updated_report.status,
+                    'reason_code', %s,
+                    'reviewed_by', %s
                 )
             FROM updated_report
         )
         SELECT id, status, summary, lat, lng, created_at, reviewed_at
         FROM updated_report
     """
-    params = (report_id, status, actor_ref)
+    params = (report_id, status, actor_ref, reason_code, actor_ref)
     try:
         with _connect(database_url, connection_factory) as connection:
             with connection.cursor() as cursor:

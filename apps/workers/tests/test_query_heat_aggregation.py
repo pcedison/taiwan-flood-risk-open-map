@@ -12,6 +12,8 @@ from app.jobs.query_heat import (
 
 WINDOW_START = datetime(2026, 4, 23, 0, 0, tzinfo=UTC)
 WINDOW_END = datetime(2026, 4, 30, 0, 0, tzinfo=UTC)
+RETENTION_NOW = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+RETENTION_CUTOFF = datetime(2026, 4, 17, 0, 0, tzinfo=UTC)
 
 
 def test_query_heat_aggregation_upserts_p7d_and_p1d_buckets() -> None:
@@ -69,6 +71,93 @@ def test_query_heat_aggregation_validates_period_before_connecting() -> None:
 
     try:
         job.aggregate(periods=("PT1H",))
+    except ValueError as exc:
+        assert "unsupported query heat period 'PT1H'" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+    assert connected is False
+
+
+def test_query_heat_aggregation_validates_window_before_connecting() -> None:
+    connected = False
+
+    def connect() -> _FakeConnection:
+        nonlocal connected
+        connected = True
+        return _FakeConnection(fetch_rows=[(0,)])
+
+    job = PostgresQueryHeatAggregationJob(connection_factory=connect)
+
+    try:
+        job.aggregate(
+            periods=("P7D",),
+            created_at_start=WINDOW_END,
+            created_at_end=WINDOW_START,
+        )
+    except ValueError as exc:
+        assert str(exc) == "created_at_start must be before created_at_end"
+    else:
+        raise AssertionError("expected ValueError")
+
+    assert connected is False
+
+
+def test_query_heat_retention_prunes_old_buckets() -> None:
+    connection = _FakeConnection(fetch_rows=[(4,)])
+    job = PostgresQueryHeatAggregationJob(connection_factory=lambda: connection)
+
+    summary = job.prune_retention(
+        periods=("P7D", "P1D", "P7D"),
+        retention_days=14,
+        now=RETENTION_NOW,
+    )
+
+    assert connection.commits == 1
+    assert summary.periods == ("P7D", "P1D")
+    assert summary.retention_days == 14
+    assert summary.cutoff == RETENTION_CUTOFF
+    assert summary.buckets_pruned == 4
+    sql, params = connection.cursor_instance.executions[0]
+    assert "DELETE FROM query_heat_buckets" in sql
+    assert "period = ANY(%s::text[])" in sql
+    assert "period_started_at < %s::timestamptz" in sql
+    assert "location_queries" not in sql
+    assert params == (["P7D", "P1D"], RETENTION_CUTOFF)
+
+
+def test_query_heat_retention_validates_days_before_connecting() -> None:
+    connected = False
+
+    def connect() -> _FakeConnection:
+        nonlocal connected
+        connected = True
+        return _FakeConnection(fetch_rows=[(0,)])
+
+    job = PostgresQueryHeatAggregationJob(connection_factory=connect)
+
+    try:
+        job.prune_retention(periods=("P7D",), retention_days=0, now=RETENTION_NOW)
+    except ValueError as exc:
+        assert str(exc) == "query heat retention_days must be positive"
+    else:
+        raise AssertionError("expected ValueError")
+
+    assert connected is False
+
+
+def test_query_heat_retention_validates_period_before_connecting() -> None:
+    connected = False
+
+    def connect() -> _FakeConnection:
+        nonlocal connected
+        connected = True
+        return _FakeConnection(fetch_rows=[(0,)])
+
+    job = PostgresQueryHeatAggregationJob(connection_factory=connect)
+
+    try:
+        job.prune_retention(periods=("PT1H",), retention_days=14, now=RETENTION_NOW)
     except ValueError as exc:
         assert "unsupported query heat period 'PT1H'" in str(exc)
     else:

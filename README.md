@@ -65,6 +65,10 @@ Ops runbooks and dry-run checks:
 - [Monitoring Freshness Alerts](docs/runbooks/monitoring-freshness-alerts.md)
   and `scripts/ops-source-freshness-check.ps1` for admin source-health
   freshness checks.
+- [Monitoring Dashboard Runbook](docs/runbooks/monitoring-dashboard.md) for the
+  optional local Compose `monitoring` profile, Prometheus/Grafana wiring,
+  dashboard import validation, source freshness panels, and worker queue
+  heartbeat panel expectations.
 - [Backup and Restore Drill](docs/runbooks/backup-restore-drill.md) and
   `scripts/backup-restore-drill.ps1` for non-destructive drill planning,
   backup creation, and explicit scratch restore verification.

@@ -789,7 +789,10 @@
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {
+          "text": "Flood Risk Prometheus",
+          "value": "flood-risk-prometheus"
+        },
         "hide": 0,
         "includeAll": false,
         "label": "Prometheus datasource",

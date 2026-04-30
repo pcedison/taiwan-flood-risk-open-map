@@ -24,7 +24,7 @@ Base checks:
   - docker compose config and Docker daemon availability.
   - postgres, redis, minio, api, and web startup.
   - database migrations.
-  - API /health and /ready.
+  - API /health, /ready, and /metrics.
   - POST /v1/risk/assess, including query_heat presence.
   - Web HTTP 200.
 
@@ -35,9 +35,9 @@ Extended checks are enabled by default:
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
   - MVT smoke: GET seeded query-heat and flood-potential .mvt endpoints.
   - Query heat / tile cache job readiness: run the worker query heat
-    aggregation CLI, refresh flood-potential feature rows, upsert a tile cache
-    smoke row, verify the API can serve the cached tile path, and clean up smoke
-    rows.
+    aggregation and retention CLI paths, refresh flood-potential feature rows,
+    upsert/prune/invalidate tile cache rows, verify the API can serve the cached
+    tile path, and clean up smoke rows.
 
 Options:
   -StartupTimeoutSeconds <int>  Startup wait budget. Default: 180.
@@ -632,7 +632,7 @@ function Invoke-PostgresSqlSmoke {
 }
 
 function Invoke-QueryHeatAndTileCacheJobSmoke {
-    $tileSmokeCleanupSql = "DELETE FROM tile_cache_entries WHERE metadata ->> 'source' = 'runtime-smoke'; DELETE FROM map_layer_features WHERE feature_key = 'runtime-smoke-flood-potential'; DELETE FROM evidence WHERE raw_ref = 'runtime-smoke:tile-cache';"
+    $tileSmokeCleanupSql = "DELETE FROM tile_cache_entries WHERE metadata ->> 'source' = 'runtime-smoke'; DELETE FROM map_layer_features WHERE feature_key IN ('runtime-smoke-flood-potential', 'runtime-smoke-expired-feature'); DELETE FROM evidence WHERE raw_ref = 'runtime-smoke:tile-cache'; DELETE FROM query_heat_buckets WHERE h3_index = 'runtime-smoke-retention';"
     $script:RuntimeSmokeCleanupSql += $tileSmokeCleanupSql
 
     Invoke-ComposeRun `
@@ -643,6 +643,19 @@ function Invoke-QueryHeatAndTileCacheJobSmoke {
     Invoke-PostgresSqlSmoke `
         -Description "Checking query heat materialized buckets" `
         -Sql "DO `$`$ BEGIN IF (SELECT count(*) FROM query_heat_buckets WHERE period IN ('P1D','P7D')) = 0 THEN RAISE EXCEPTION 'query heat aggregation produced no buckets'; END IF; END `$`$;"
+
+    Invoke-PostgresSqlSmoke `
+        -Description "Seeding query heat retention smoke bucket" `
+        -Sql "$tileSmokeCleanupSql INSERT INTO query_heat_buckets (h3_index, period, period_started_at, query_count, unique_approx_count) VALUES ('runtime-smoke-retention', 'P7D', '2000-01-03T00:00:00Z'::timestamptz, 1, 1);"
+
+    Invoke-ComposeRun `
+        -Description "Running query heat retention worker job" `
+        -Service "worker" `
+        -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D --query-heat-retention-days 14"
+
+    Invoke-PostgresSqlSmoke `
+        -Description "Checking query heat retention cleanup" `
+        -Sql "DO `$`$ BEGIN IF EXISTS (SELECT 1 FROM query_heat_buckets WHERE h3_index = 'runtime-smoke-retention') THEN RAISE EXCEPTION 'query heat retention did not prune old smoke bucket'; END IF; END `$`$;"
 
     Invoke-PostgresSqlSmoke `
         -Description "Seeding flood-potential evidence for tile feature refresh smoke" `
@@ -695,6 +708,55 @@ print(f"tile_cache_smoke=ok hash={result.content_hash}")
     }
 
     Invoke-PostgresSqlSmoke `
+        -Description "Seeding expired tile cache rows for prune smoke" `
+        -Sql "DELETE FROM map_layer_features WHERE feature_key = 'runtime-smoke-expired-feature'; DELETE FROM tile_cache_entries WHERE layer_id = 'flood-potential' AND z = 24 AND x = 1 AND y = 1; INSERT INTO map_layer_features (layer_id, feature_key, source_ref, geom, minzoom, maxzoom, properties, generated_at, expires_at, metadata) VALUES ('flood-potential', 'runtime-smoke-expired-feature', 'runtime-smoke-expired', ST_SetSRID(ST_MakePoint(121.5654, 25.033), 4326), 0, 24, '{}'::jsonb, now() - interval '3 days', now() - interval '2 days', '{`"source`":`"runtime-smoke`"}'::jsonb); INSERT INTO tile_cache_entries (layer_id, z, x, y, tile_data, content_hash, generated_at, expires_at, metadata) VALUES ('flood-potential', 24, 1, 1, convert_to('runtime-smoke-expired', 'UTF8'), 'runtime-smoke-expired', now() - interval '3 days', now() - interval '2 days', '{`"source`":`"runtime-smoke`"}'::jsonb);"
+
+    $tileLifecyclePython = @'
+from datetime import UTC, datetime
+
+from app.config import load_worker_settings
+from app.jobs.tile_cache import PostgresTileCacheWriter
+
+settings = load_worker_settings()
+writer = PostgresTileCacheWriter(database_url=settings.database_url)
+prune = writer.prune_expired(
+    expired_before=datetime.now(UTC),
+    layer_id="flood-potential",
+    limit=10,
+)
+if prune.tile_cache_deleted < 1 or prune.features_deleted < 1:
+    raise SystemExit(
+        "expected prune_expired to delete at least one tile cache row and one feature; "
+        f"got tile_cache_deleted={prune.tile_cache_deleted} features_deleted={prune.features_deleted}"
+    )
+
+invalidation = writer.invalidate_layer(
+    layer_id="flood-potential",
+    invalidated_at=datetime.now(UTC),
+    reason="runtime-smoke",
+)
+if invalidation.features_invalidated < 1 or invalidation.tile_cache_deleted < 1:
+    raise SystemExit(
+        "expected invalidate_layer to mark at least one feature and delete at least one cache row; "
+        f"got features_invalidated={invalidation.features_invalidated} "
+        f"tile_cache_deleted={invalidation.tile_cache_deleted}"
+    )
+
+print(
+    "tile_lifecycle_smoke=ok "
+    f"pruned_cache={prune.tile_cache_deleted} "
+    f"pruned_features={prune.features_deleted} "
+    f"invalidated_features={invalidation.features_invalidated} "
+    f"deleted_cache={invalidation.tile_cache_deleted}"
+)
+'@
+
+    Invoke-ComposePythonScript `
+        -Description "Running tile cache prune and invalidation smoke" `
+        -Service "worker" `
+        -PythonSource $tileLifecyclePython
+
+    Invoke-PostgresSqlSmoke `
         -Description "Cleaning query heat/tile cache smoke rows" `
         -Sql $tileSmokeCleanupSql
 
@@ -744,6 +806,15 @@ try {
         Fail-Smoke "Expected /ready status ok, got '$($ready.status)' ($dependencySummary)." "api"
     }
     Write-Host "API ready: database=$($ready.dependencies.database.status), redis=$($ready.dependencies.redis.status)"
+
+    $metrics = Invoke-HttpRequestExpectStatus `
+        -Name "Calling API /metrics" `
+        -Url "$ApiBaseUrl/metrics" `
+        -AcceptStatusCodes @(200)
+    if ([string]$metrics.Content -notmatch "flood_risk_api_up 1") {
+        Fail-Smoke "API /metrics did not include flood_risk_api_up." "api"
+    }
+    Write-Host "API metrics smoke: flood_risk_api_up exported"
 
     $riskPayload = @'
 {

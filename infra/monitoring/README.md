@@ -6,12 +6,41 @@ for operational checks that can run before the full Grafana/pager stack exists.
 ## Files
 
 - `prometheus.yml` scrapes the API metrics endpoint at `api:8000/metrics` and
-  loads `alert-rules.yml`.
+  loads `alert-rules.yml`. It also scrapes the Compose `node-exporter` service
+  for textfile metrics.
 - `alert-rules.yml` defines source freshness, API readiness, and future
   worker/scheduler heartbeat alerts.
 - `flood-risk-runtime-dashboard.json` is an importable Grafana dashboard for
   API readiness, source freshness, worker heartbeat, scheduler heartbeat, and
   worker last-run status.
+- `grafana/provisioning` contains the local Compose datasource and dashboard
+  provider used by the optional monitoring profile.
+
+## Local Compose Profile
+
+The root `docker-compose.yml` includes an optional `monitoring` profile for
+local deployment checks:
+
+```powershell
+docker compose --profile monitoring up prometheus grafana node-exporter
+```
+
+Prometheus is available on `http://localhost:9090` by default. Grafana is
+available on `http://localhost:3001` with `GRAFANA_ADMIN_USER` and
+`GRAFANA_ADMIN_PASSWORD` from `.env` or `.env.example`.
+
+The profile wires:
+
+- Prometheus config and alert rules from this directory.
+- Grafana datasource `Flood Risk Prometheus` pointing at
+  `http://prometheus:9090`.
+- Grafana dashboard provisioning for `flood-risk-runtime-dashboard.json`.
+- Node exporter textfile collector backed by the Compose
+  `monitoring-textfile` volume.
+
+This profile is a local deployment harness, not a production topology. Hosted
+environments should replace service DNS names, credentials, persistence,
+network policy, TLS, and alert routing with environment-specific values.
 
 ## Prometheus Deployment
 
@@ -38,8 +67,9 @@ writes `.prom` files and start it with:
 ```
 
 Prometheus then scrapes node exporter, not the `.prom` files directly. The
-optional `flood-risk-node-exporter` job in `prometheus.yml` documents the target
-shape; uncomment it only after node exporter is deployed.
+local Compose profile already provides the `flood-risk-node-exporter` target.
+External deployments can replace `node-exporter:9100` with their collector DNS
+name or remove the job when another collector owns textfile ingestion.
 
 ## Freshness Metrics
 
@@ -68,16 +98,18 @@ node-exporter textfile collector directory:
   -MetricsPath "/var/lib/node_exporter/textfile_collector/flood-risk-source-freshness.prom"
 ```
 
-The current `docker-compose.yml` does not define a Prometheus service or a
-node-exporter textfile collector. Do not add one here without the runtime owner
-agreeing on the deployment topology. For now, mount this directory into any
-external Prometheus instance and wire the textfile output through node exporter
-or the chosen scheduled monitor.
+The Compose profile's named `monitoring-textfile` volume is easy for worker and
+scheduler containers to share, but a host-run PowerShell freshness job cannot
+write into that named volume directly. For host-run checks, write to a host
+path and expose it through your node exporter, or run the check in a container
+that mounts the same collector directory.
 
 ## Grafana Dashboard
 
-Import `flood-risk-runtime-dashboard.json` into Grafana and select the
-Prometheus datasource when prompted. The dashboard covers:
+With the Compose monitoring profile, Grafana provisions the Prometheus
+datasource and imports `flood-risk-runtime-dashboard.json` automatically. For
+external Grafana instances, import the JSON manually and select the Prometheus
+datasource when prompted. The dashboard covers:
 
 - API metrics scrape status and readiness.
 - Source freshness status and source age.

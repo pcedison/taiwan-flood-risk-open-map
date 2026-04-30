@@ -32,6 +32,22 @@ class TileFeatureRefreshResult:
 
 
 @dataclass(frozen=True)
+class TileCachePruneResult:
+    layer_id: str | None
+    expired_before: datetime
+    tile_cache_deleted: int
+    features_deleted: int
+
+
+@dataclass(frozen=True)
+class TileLayerInvalidationResult:
+    layer_id: str
+    invalidated_at: datetime
+    features_invalidated: int
+    tile_cache_deleted: int
+
+
+@dataclass(frozen=True)
 class TileCacheUpsertResult:
     cache_entry_id: str | None
     layer_id: str
@@ -67,6 +83,7 @@ class PostgresTileCacheWriter:
         layer_id: str = "flood-potential",
         limit: int | None = None,
         expires_at: datetime | None = None,
+        refresh_metadata: dict[str, Any] | None = None,
     ) -> TileFeatureRefreshResult:
         spec = _FEATURE_LAYER_SPECS.get(layer_id)
         if spec is None:
@@ -79,7 +96,12 @@ class PostgresTileCacheWriter:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         _feature_refresh_sql(limit=limit),
-                        _feature_refresh_params(spec=spec, limit=limit, expires_at=expires_at),
+                        _feature_refresh_params(
+                            spec=spec,
+                            limit=limit,
+                            expires_at=expires_at,
+                            refresh_metadata=refresh_metadata,
+                        ),
                     )
                     row = cursor.fetchone()
                     refreshed = _count_from_row(row)
@@ -88,6 +110,89 @@ class PostgresTileCacheWriter:
             raise TileCacheUnavailable(str(exc)) from exc
 
         return TileFeatureRefreshResult(layer_id=layer_id, refreshed=refreshed)
+
+    def prune_expired(
+        self,
+        *,
+        expired_before: datetime,
+        layer_id: str | None = None,
+        limit: int = 1000,
+    ) -> TileCachePruneResult:
+        if limit < 1:
+            raise ValueError("limit must be greater than 0")
+
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        _prune_expired_sql(table_name="tile_cache_entries", layer_id=layer_id),
+                        _prune_expired_params(
+                            expired_before=expired_before,
+                            layer_id=layer_id,
+                            limit=limit,
+                        ),
+                    )
+                    tile_cache_deleted = _count_from_row(cursor.fetchone())
+                    cursor.execute(
+                        _prune_expired_sql(table_name="map_layer_features", layer_id=layer_id),
+                        _prune_expired_params(
+                            expired_before=expired_before,
+                            layer_id=layer_id,
+                            limit=limit,
+                        ),
+                    )
+                    features_deleted = _count_from_row(cursor.fetchone())
+                connection.commit()
+        except Exception as exc:
+            raise TileCacheUnavailable(str(exc)) from exc
+
+        return TileCachePruneResult(
+            layer_id=layer_id,
+            expired_before=expired_before,
+            tile_cache_deleted=tile_cache_deleted,
+            features_deleted=features_deleted,
+        )
+
+    def invalidate_layer(
+        self,
+        *,
+        layer_id: str = "flood-potential",
+        invalidated_at: datetime,
+        reason: str = "manual",
+    ) -> TileLayerInvalidationResult:
+        if layer_id not in _FEATURE_LAYER_SPECS:
+            raise TileLayerUnsupported(layer_id)
+        if not reason:
+            raise ValueError("reason is required")
+
+        metadata = _json(
+            {
+                "invalidated_at": invalidated_at,
+                "invalidated_by": "workers.tile_cache",
+                "invalidation_reason": reason,
+            }
+        )
+
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        _invalidate_layer_features_sql(),
+                        (invalidated_at, invalidated_at, metadata, layer_id),
+                    )
+                    features_invalidated = _count_from_row(cursor.fetchone())
+                    cursor.execute(_delete_layer_tile_cache_sql(), (layer_id,))
+                    tile_cache_deleted = _count_from_row(cursor.fetchone())
+                connection.commit()
+        except Exception as exc:
+            raise TileCacheUnavailable(str(exc)) from exc
+
+        return TileLayerInvalidationResult(
+            layer_id=layer_id,
+            invalidated_at=invalidated_at,
+            features_invalidated=features_invalidated,
+            tile_cache_deleted=tile_cache_deleted,
+        )
 
     def upsert_tile_cache_entry(
         self,
@@ -233,7 +338,7 @@ def _feature_refresh_sql(*, limit: int | None) -> str:
                 requested_layer.maxzoom,
                 source_features.properties,
                 %s,
-                source_features.metadata
+                source_features.metadata || %s::jsonb
             FROM source_features
             CROSS JOIN requested_layer
             ON CONFLICT (layer_id, feature_key) DO UPDATE SET
@@ -264,12 +369,81 @@ def _feature_refresh_params(
     spec: TileLayerFeatureSpec,
     limit: int | None,
     expires_at: datetime | None,
+    refresh_metadata: dict[str, Any] | None,
 ) -> tuple[object, ...]:
     params: list[object] = [spec.layer_id, spec.event_type]
     if limit is not None:
         params.append(limit)
     params.append(expires_at)
+    params.append(_json(refresh_metadata or {"refreshed_by": "workers.tile_cache"}))
     return tuple(params)
+
+
+def _prune_expired_sql(*, table_name: str, layer_id: str | None) -> str:
+    if table_name not in {"tile_cache_entries", "map_layer_features"}:
+        raise ValueError("unsupported tile cache table")
+    layer_clause = "AND layer_id = %s" if layer_id is not None else ""
+    return f"""
+        WITH expired AS (
+            SELECT id
+            FROM {table_name}
+            WHERE
+                expires_at IS NOT NULL
+                AND expires_at <= %s
+                {layer_clause}
+            ORDER BY expires_at ASC, id ASC
+            LIMIT %s
+        ),
+        deleted AS (
+            DELETE FROM {table_name}
+            WHERE id IN (SELECT id FROM expired)
+            RETURNING id
+        )
+        SELECT count(*) FROM deleted
+    """
+
+
+def _prune_expired_params(
+    *,
+    expired_before: datetime,
+    layer_id: str | None,
+    limit: int,
+) -> tuple[object, ...]:
+    params: list[object] = [expired_before]
+    if layer_id is not None:
+        params.append(layer_id)
+    params.append(limit)
+    return tuple(params)
+
+
+def _invalidate_layer_features_sql() -> str:
+    return """
+        WITH invalidated AS (
+            UPDATE map_layer_features
+            SET
+                expires_at = CASE
+                    WHEN %s > generated_at THEN %s
+                    ELSE generated_at + interval '1 microsecond'
+                END,
+                metadata = metadata || %s::jsonb
+            WHERE
+                layer_id = %s
+                AND (expires_at IS NULL OR expires_at > now())
+            RETURNING id
+        )
+        SELECT count(*) FROM invalidated
+    """
+
+
+def _delete_layer_tile_cache_sql() -> str:
+    return """
+        WITH deleted AS (
+            DELETE FROM tile_cache_entries
+            WHERE layer_id = %s
+            RETURNING id
+        )
+        SELECT count(*) FROM deleted
+    """
 
 
 def _count_from_row(row: object) -> int:
@@ -281,10 +455,15 @@ def _count_from_row(row: object) -> int:
 def _validate_tile_coordinate(*, z: int, x: int, y: int) -> None:
     if z < 0 or z > 24:
         raise ValueError("z must be between 0 and 24")
+    max_index = (1 << z) - 1
     if x < 0:
         raise ValueError("x must be greater than or equal to 0")
+    if x > max_index:
+        raise ValueError("x must be within the zoom tile bounds")
     if y < 0:
         raise ValueError("y must be greater than or equal to 0")
+    if y > max_index:
+        raise ValueError("y must be within the zoom tile bounds")
 
 
 def _json(value: dict[str, Any]) -> str:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
 from app.logging import log_event
@@ -40,6 +40,26 @@ class QueryHeatAggregationSummary:
         }
 
 
+@dataclass(frozen=True)
+class QueryHeatRetentionSummary:
+    periods: tuple[QueryHeatPeriod, ...]
+    retention_days: int
+    cutoff: datetime
+    buckets_pruned: int
+    started_at: datetime
+    finished_at: datetime
+
+    def log_fields(self) -> dict[str, object]:
+        return {
+            "periods": self.periods,
+            "retention_days": self.retention_days,
+            "cutoff": self.cutoff,
+            "buckets_pruned": self.buckets_pruned,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+
 class PostgresQueryHeatAggregationJob:
     def __init__(
         self,
@@ -61,6 +81,10 @@ class PostgresQueryHeatAggregationJob:
     ) -> tuple[QueryHeatAggregationSummary, ...]:
         resolved_periods = tuple(
             dict.fromkeys(_validate_period(period) for period in periods)
+        )
+        _validate_created_at_window(
+            created_at_start=created_at_start,
+            created_at_end=created_at_end,
         )
         if not resolved_periods:
             return ()
@@ -92,6 +116,56 @@ class PostgresQueryHeatAggregationJob:
             log_event("query_heat.aggregation.completed", **summary.log_fields())
         return tuple(summaries)
 
+    def prune_retention(
+        self,
+        *,
+        retention_days: int,
+        periods: Iterable[str] = SUPPORTED_QUERY_HEAT_PERIODS,
+        now: datetime | None = None,
+    ) -> QueryHeatRetentionSummary:
+        resolved_periods = tuple(
+            dict.fromkeys(_validate_period(period) for period in periods)
+        )
+        _validate_retention_days(retention_days)
+        resolved_now = _validate_reference_time(now or _now())
+        cutoff = resolved_now - timedelta(days=retention_days)
+        started_at = _now()
+
+        if not resolved_periods:
+            summary = QueryHeatRetentionSummary(
+                periods=(),
+                retention_days=retention_days,
+                cutoff=cutoff,
+                buckets_pruned=0,
+                started_at=started_at,
+                finished_at=_now(),
+            )
+            log_event("query_heat.retention.completed", **summary.log_fields())
+            return summary
+
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    buckets_pruned = _prune_retention(
+                        cursor,
+                        periods=resolved_periods,
+                        cutoff=cutoff,
+                    )
+                connection.commit()
+        except Exception as exc:
+            raise QueryHeatAggregationUnavailable(str(exc)) from exc
+
+        summary = QueryHeatRetentionSummary(
+            periods=resolved_periods,
+            retention_days=retention_days,
+            cutoff=cutoff,
+            buckets_pruned=buckets_pruned,
+            started_at=started_at,
+            finished_at=_now(),
+        )
+        log_event("query_heat.retention.completed", **summary.log_fields())
+        return summary
+
     def _connect(self) -> Any:
         if self._connection_factory is not None:
             return self._connection_factory()
@@ -118,6 +192,25 @@ def run_query_heat_aggregation(
         periods=periods,
         created_at_start=created_at_start,
         created_at_end=created_at_end,
+    )
+
+
+def run_query_heat_retention_cleanup(
+    *,
+    database_url: str | None = None,
+    connection_factory: ConnectionFactory | None = None,
+    retention_days: int,
+    periods: Iterable[str] = SUPPORTED_QUERY_HEAT_PERIODS,
+    now: datetime | None = None,
+) -> QueryHeatRetentionSummary:
+    job = PostgresQueryHeatAggregationJob(
+        database_url=database_url,
+        connection_factory=connection_factory,
+    )
+    return job.prune_retention(
+        periods=periods,
+        retention_days=retention_days,
+        now=now,
     )
 
 
@@ -193,11 +286,69 @@ def _aggregate_period(
     return _bucket_count(cursor.fetchone())
 
 
+def _prune_retention(
+    cursor: Any,
+    *,
+    periods: tuple[QueryHeatPeriod, ...],
+    cutoff: datetime,
+) -> int:
+    cursor.execute(
+        """
+        WITH deleted AS (
+            DELETE FROM query_heat_buckets
+            WHERE
+                period = ANY(%s::text[])
+                AND period_started_at < %s::timestamptz
+            RETURNING id
+        )
+        SELECT COUNT(*)::integer AS bucket_count
+        FROM deleted
+        """,
+        (
+            list(periods),
+            cutoff,
+        ),
+    )
+    return _bucket_count(cursor.fetchone())
+
+
 def _validate_period(period: str) -> QueryHeatPeriod:
     if period in _PERIOD_INTERVALS:
         return cast(QueryHeatPeriod, period)
     supported = ", ".join(SUPPORTED_QUERY_HEAT_PERIODS)
     raise ValueError(f"unsupported query heat period {period!r}; supported: {supported}")
+
+
+def _validate_created_at_window(
+    *,
+    created_at_start: datetime | None,
+    created_at_end: datetime | None,
+) -> None:
+    if created_at_start is not None:
+        _validate_aware_datetime(created_at_start, field_name="created_at_start")
+    if created_at_end is not None:
+        _validate_aware_datetime(created_at_end, field_name="created_at_end")
+    if (
+        created_at_start is not None
+        and created_at_end is not None
+        and created_at_start >= created_at_end
+    ):
+        raise ValueError("created_at_start must be before created_at_end")
+
+
+def _validate_retention_days(retention_days: int) -> None:
+    if retention_days < 1:
+        raise ValueError("query heat retention_days must be positive")
+
+
+def _validate_reference_time(reference_time: datetime) -> datetime:
+    _validate_aware_datetime(reference_time, field_name="now")
+    return reference_time
+
+
+def _validate_aware_datetime(value: datetime, *, field_name: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"query heat {field_name} must be timezone-aware")
 
 
 def _bucket_count(row: object | None) -> int:

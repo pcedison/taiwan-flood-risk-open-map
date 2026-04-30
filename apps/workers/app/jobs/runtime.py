@@ -21,6 +21,7 @@ from app.logging import log_event
 
 
 RuntimeQueueWorkerStatus = Literal["succeeded", "failed", "skipped"]
+RuntimeQueueProducerStatus = Literal["succeeded", "skipped"]
 RuntimeQueue = PostgresRuntimeQueue | NullRuntimeQueue
 
 
@@ -32,6 +33,18 @@ class RuntimeQueueWorkerResult:
     reason: str | None = None
     summary: AdapterBatchRunSummary | None = None
     freshness_checks: tuple[FreshnessCheck, ...] = ()
+
+
+@dataclass(frozen=True)
+class RuntimeQueueProducerResult:
+    status: RuntimeQueueProducerStatus
+    adapter_keys: tuple[str, ...] = ()
+    job_ids: tuple[str, ...] = ()
+    reason: str | None = None
+
+    @property
+    def durable_job_count(self) -> int:
+        return len(self.job_ids)
 
 
 def build_runtime_adapters(
@@ -61,10 +74,35 @@ def enqueue_enabled_runtime_adapter_jobs(
     queue: RuntimeQueue | None = None,
     job_key: str = "runtime.adapter.ingest",
 ) -> tuple[str, ...]:
+    return produce_enabled_runtime_adapter_jobs(
+        settings,
+        queue=queue,
+        job_key=job_key,
+    ).job_ids
+
+
+def produce_enabled_runtime_adapter_jobs(
+    settings: WorkerSettings,
+    *,
+    queue: RuntimeQueue | None = None,
+    job_key: str = "runtime.adapter.ingest",
+) -> RuntimeQueueProducerResult:
     adapter_keys = enabled_adapter_keys(settings)
     if not adapter_keys:
         log_event("runtime.queue.enqueue.noop", reason="no_enabled_adapters")
-        return ()
+        return RuntimeQueueProducerResult(status="skipped", reason="no_enabled_adapters")
+
+    if queue is None and not settings.database_url:
+        log_event(
+            "runtime.queue.enqueue.noop",
+            reason="no_database_url",
+            adapter_count=len(adapter_keys),
+        )
+        return RuntimeQueueProducerResult(
+            status="skipped",
+            adapter_keys=adapter_keys,
+            reason="no_database_url",
+        )
 
     runtime_queue = queue or (
         PostgresRuntimeQueue(database_url=settings.database_url)
@@ -83,14 +121,29 @@ def enqueue_enabled_runtime_adapter_jobs(
                 job_ids.append(job_id)
     except RuntimeQueueUnavailable as exc:
         log_event("runtime.queue.enqueue.unavailable", error=str(exc))
-        return ()
+        return RuntimeQueueProducerResult(
+            status="skipped",
+            adapter_keys=adapter_keys,
+            job_ids=tuple(job_ids),
+            reason="queue_unavailable",
+        )
 
     log_event(
         "runtime.queue.enqueue.completed",
         adapter_count=len(adapter_keys),
         durable_job_count=len(job_ids),
     )
-    return tuple(job_ids)
+    if not job_ids:
+        return RuntimeQueueProducerResult(
+            status="skipped",
+            adapter_keys=adapter_keys,
+            reason="no_durable_jobs",
+        )
+    return RuntimeQueueProducerResult(
+        status="succeeded",
+        adapter_keys=adapter_keys,
+        job_ids=tuple(job_ids),
+    )
 
 
 def dequeue_runtime_adapter_job(

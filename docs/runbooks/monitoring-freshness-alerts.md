@@ -24,11 +24,11 @@ Not covered:
 
 ## Placeholder Boundary
 
-`infra/monitoring` now contains Prometheus config and alert rules, but the
-repository `docker-compose.yml` does not currently run a Prometheus service.
-Use the files with the environment's Prometheus deployment, or run the ops
-script from a scheduled monitor and export its textfile metrics through the
-chosen collector.
+`infra/monitoring` now contains Prometheus config, alert rules, Grafana
+provisioning, and a local Docker Compose `monitoring` profile. The profile is a
+deployment wiring harness for local validation. It is not a full production
+monitoring stack: hosted environments still need environment-specific service
+DNS, credentials, TLS, persistence, scheduler, and alert routing.
 
 Worker and scheduler heartbeat alerts read Prometheus textfile-compatible
 metrics. Set `WORKER_METRICS_TEXTFILE_PATH` or `SCHEDULER_METRICS_TEXTFILE_PATH`
@@ -39,6 +39,13 @@ Dashboard and scrape deployment details live in:
 
 ```text
 docs/runbooks/monitoring-dashboard.md
+```
+
+Local Compose validation:
+
+```powershell
+docker compose --profile monitoring config
+docker compose --profile monitoring up prometheus grafana node-exporter
 ```
 
 ## Alert Policy
@@ -213,6 +220,10 @@ write helper output to node exporter textfile collector paths such as:
 WORKER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-worker.prom
 SCHEDULER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-scheduler.prom
 ```
+
+The local Compose worker and scheduler services mount the shared collector
+directory, but these variables remain empty by default. Set them explicitly in
+`.env` or the shell when validating queue and scheduler dashboard panels.
 
 ## Reading Alerts
 

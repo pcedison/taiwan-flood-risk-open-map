@@ -111,6 +111,17 @@ def test_ready_returns_503_when_dependency_fails(monkeypatch) -> None:
     assert_openapi_schema(payload, "ReadyResponse")
 
 
+def test_metrics_endpoint_exposes_prometheus_text() -> None:
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    text = response.text
+    assert "flood_risk_api_up 1" in text
+    assert 'flood_risk_api_info{service="flood-risk-api",' in text
+    assert 'version="' in text
+
+
 def test_runtime_openapi_exposes_health_and_readiness_schemas() -> None:
     runtime_spec = client.get("/openapi.json").json()
 

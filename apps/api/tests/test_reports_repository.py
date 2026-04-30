@@ -99,6 +99,7 @@ def test_moderate_user_report_updates_status_and_writes_audit_log() -> None:
         database_url="postgresql://example.test/flood",
         report_id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
         status="approved",
+        reason_code="verified_flood_signal",
         actor_ref="admin_api",
         connection_factory=lambda: connection,
     )
@@ -111,8 +112,16 @@ def test_moderate_user_report_updates_status_and_writes_audit_log() -> None:
     assert "INSERT INTO audit_logs" in sql
     assert "user_report.moderated" in sql
     assert "previous_status" in sql
+    assert "reason_code" in sql
+    assert "reviewed_by" in sql
     assert "media_ref" not in sql
-    assert params == ("0d51d545-dc6a-4e4b-8f8e-0e42d454d050", "approved", "admin_api")
+    assert params == (
+        "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+        "approved",
+        "admin_api",
+        "verified_flood_signal",
+        "admin_api",
+    )
     assert report is not None
     assert report.status == "approved"
     assert report.reviewed_at == reviewed_at
@@ -125,6 +134,7 @@ def test_moderate_user_report_returns_none_when_report_is_missing() -> None:
         database_url="postgresql://example.test/flood",
         report_id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
         status="rejected",
+        reason_code="not_flood_related",
         actor_ref="admin_api",
         connection_factory=lambda: connection,
     )
@@ -140,6 +150,23 @@ def test_moderate_user_report_rejects_invalid_status_before_sql() -> None:
             database_url="postgresql://example.test/flood",
             report_id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
             status=cast(Any, "pending"),
+            reason_code="not_flood_related",
+            actor_ref="admin_api",
+            connection_factory=lambda: connection,
+        )
+
+    assert connection.cursor_instance.executions == []
+
+
+def test_moderate_user_report_rejects_reason_for_wrong_status_before_sql() -> None:
+    connection = _FakeConnection(row=None)
+
+    with pytest.raises(ValueError):
+        moderate_user_report(
+            database_url="postgresql://example.test/flood",
+            report_id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            status="spam",
+            reason_code="verified_flood_signal",
             actor_ref="admin_api",
             connection_factory=lambda: connection,
         )

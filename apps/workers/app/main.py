@@ -4,6 +4,7 @@ import argparse
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 
 from app.adapters.registry import enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
@@ -14,6 +15,8 @@ from app.jobs.query_heat import (
     QueryHeatAggregationUnavailable,
 )
 from app.scheduler import (
+    enqueue_enabled_adapters_loop,
+    enqueue_enabled_adapters_once,
     run_enabled_adapters_loop,
     run_enabled_adapters_once,
     run_scheduled_ingestion_cycle,
@@ -62,6 +65,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Consume durable worker_runtime_jobs. Use --once for one dequeue attempt.",
     )
     parser.add_argument(
+        "--enqueue-runtime-jobs",
+        action="store_true",
+        help=(
+            "Producer path: enqueue durable worker_runtime_jobs for configured runtime adapters. "
+            "Combine with --scheduler for a lease-guarded loop."
+        ),
+    )
+    parser.add_argument(
         "--aggregate-query-heat",
         action="store_true",
         help="Materialize query heat buckets from location_queries into query_heat_buckets.",
@@ -70,6 +81,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--query-heat-periods",
         default=",".join(SUPPORTED_QUERY_HEAT_PERIODS),
         help="Comma-separated periods for --aggregate-query-heat. Defaults to P1D,P7D.",
+    )
+    parser.add_argument(
+        "--query-heat-created-at-start",
+        type=_parse_query_heat_datetime,
+        help="Inclusive ISO-8601 created_at lower bound for --aggregate-query-heat.",
+    )
+    parser.add_argument(
+        "--query-heat-created-at-end",
+        type=_parse_query_heat_datetime,
+        help="Exclusive ISO-8601 created_at upper bound for --aggregate-query-heat.",
+    )
+    parser.add_argument(
+        "--query-heat-retention-days",
+        type=int,
+        help="Prune query_heat_buckets older than this many days after aggregation.",
     )
     parser.add_argument(
         "--refresh-tile-features",
@@ -119,10 +145,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.work_runtime_queue:
         return _work_runtime_queue(settings=settings, once=args.once, max_ticks=args.max_ticks)
 
+    if args.enqueue_runtime_jobs:
+        return _enqueue_runtime_jobs(
+            settings=settings,
+            scheduler=args.scheduler,
+            once=args.once,
+            max_ticks=args.max_ticks,
+        )
+
     if args.aggregate_query_heat:
         return _aggregate_query_heat(
             settings=settings,
             periods=_parse_query_heat_periods(args.query_heat_periods),
+            created_at_start=args.query_heat_created_at_start,
+            created_at_end=args.query_heat_created_at_end,
+            retention_days=args.query_heat_retention_days,
         )
 
     if args.refresh_tile_features:
@@ -220,14 +257,45 @@ def _work_runtime_queue(
     return 1 if had_failure else 0
 
 
-def _aggregate_query_heat(*, settings: WorkerSettings, periods: tuple[str, ...]) -> int:
+def _enqueue_runtime_jobs(
+    *,
+    settings: WorkerSettings,
+    scheduler: bool,
+    once: bool,
+    max_ticks: int | None,
+) -> int:
+    if not scheduler:
+        enqueue_enabled_adapters_once(settings=settings)
+        return 0
+
+    tick_limit = 1 if once else max(1, max_ticks) if max_ticks is not None else None
+    enqueue_enabled_adapters_loop(settings=settings, max_ticks=tick_limit)
+    return 0
+
+
+def _aggregate_query_heat(
+    *,
+    settings: WorkerSettings,
+    periods: tuple[str, ...],
+    created_at_start: datetime | None = None,
+    created_at_end: datetime | None = None,
+    retention_days: int | None = None,
+) -> int:
     if not settings.database_url:
         log_event("query_heat.aggregation.noop", reason="no_database_url", periods=periods)
         return 0
 
     try:
-        summaries = PostgresQueryHeatAggregationJob(database_url=settings.database_url).aggregate(
-            periods=periods
+        job = PostgresQueryHeatAggregationJob(database_url=settings.database_url)
+        summaries = job.aggregate(
+            periods=periods,
+            created_at_start=created_at_start,
+            created_at_end=created_at_end,
+        )
+        retention_summary = (
+            job.prune_retention(periods=periods, retention_days=retention_days)
+            if retention_days is not None
+            else None
         )
     except (QueryHeatAggregationUnavailable, ValueError) as exc:
         log_event("query_heat.aggregation.failed", error=str(exc), periods=periods)
@@ -237,6 +305,8 @@ def _aggregate_query_heat(*, settings: WorkerSettings, periods: tuple[str, ...])
         "query_heat.aggregation.cli.completed",
         periods=tuple(summary.period for summary in summaries),
         buckets_upserted=sum(summary.buckets_upserted for summary in summaries),
+        retention_days=retention_days,
+        buckets_pruned=retention_summary.buckets_pruned if retention_summary else 0,
     )
     return 0
 
@@ -274,6 +344,19 @@ def _refresh_tile_features(
 def _parse_query_heat_periods(raw: str) -> tuple[str, ...]:
     periods = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
     return periods or SUPPORTED_QUERY_HEAT_PERIODS
+
+
+def _parse_query_heat_datetime(raw: str) -> datetime:
+    normalized = f"{raw[:-1]}+00:00" if raw.endswith("Z") else raw
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "query heat timestamps must be valid ISO-8601 datetimes"
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise argparse.ArgumentTypeError("query heat timestamps must include a timezone")
+    return parsed
 
 
 if __name__ == "__main__":

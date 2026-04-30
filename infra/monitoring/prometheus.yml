@@ -13,18 +13,14 @@ scrape_configs:
     static_configs:
       - targets: ["api:8000"]
 
-  # Optional node exporter scrape for textfile collector metrics emitted by the
-  # freshness script and worker/scheduler runtimes. Enable this only when
-  # node_exporter is deployed with:
+  # Textfile collector metrics emitted by the freshness script and
+  # worker/scheduler runtimes. The Compose monitoring profile provides
+  # node-exporter with:
   #
   #   --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
   #
-  # Then write .prom files into that directory, such as:
-  #
-  #   flood-risk-source-freshness.prom
-  #   flood-risk-worker.prom
-  #   flood-risk-scheduler.prom
-  #
-  # - job_name: flood-risk-node-exporter
-  #   static_configs:
-  #     - targets: ["node-exporter:9100"]
+  # Hosted environments can replace this target with their node-exporter DNS
+  # name or remove it when another collector owns textfile ingestion.
+  - job_name: flood-risk-node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]

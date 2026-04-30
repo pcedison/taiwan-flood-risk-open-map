@@ -23,9 +23,10 @@ from app.jobs.runtime import (
     enqueue_enabled_runtime_adapter_jobs,
     mark_runtime_adapter_job_failed,
     mark_runtime_adapter_job_succeeded,
+    produce_enabled_runtime_adapter_jobs,
     work_runtime_queue_once,
 )
-from app.scheduler import run_enabled_adapters_loop
+from app.scheduler import enqueue_enabled_adapters_loop, run_enabled_adapters_loop
 
 
 def test_scheduler_lease_acquire_release_sql_supports_expired_lease() -> None:
@@ -164,6 +165,37 @@ def test_enqueue_enabled_runtime_adapter_jobs_noops_without_database_url() -> No
     assert enqueue_enabled_runtime_adapter_jobs(settings) == ()
 
 
+def test_produce_enabled_runtime_adapter_jobs_reports_no_database_url() -> None:
+    settings = load_worker_settings(
+        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall"}
+    )
+
+    result = produce_enabled_runtime_adapter_jobs(settings)
+
+    assert result.status == "skipped"
+    assert result.reason == "no_database_url"
+    assert result.adapter_keys == ("official.cwa.rainfall",)
+    assert result.job_ids == ()
+
+
+def test_produce_enabled_runtime_adapter_jobs_reports_no_enabled_adapters() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "SOURCE_CWA_ENABLED": "false",
+        }
+    )
+    queue = _RecordingProducerQueue()
+
+    result = produce_enabled_runtime_adapter_jobs(settings, queue=queue)
+
+    assert result.status == "skipped"
+    assert result.reason == "no_enabled_adapters"
+    assert result.adapter_keys == ()
+    assert result.job_ids == ()
+    assert queue.enqueued == []
+
+
 def test_enqueue_enabled_runtime_adapter_jobs_uses_durable_queue_when_available() -> None:
     settings = load_worker_settings(
         {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level"}
@@ -174,6 +206,38 @@ def test_enqueue_enabled_runtime_adapter_jobs_uses_durable_queue_when_available(
 
     assert job_ids == ("job-1", "job-2")
     assert queue.adapter_keys == ["official.cwa.rainfall", "official.wra.water_level"]
+
+
+def test_produce_enabled_runtime_adapter_jobs_records_payloads_and_job_key() -> None:
+    settings = load_worker_settings(
+        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level"}
+    )
+    queue = _RecordingProducerQueue()
+
+    result = produce_enabled_runtime_adapter_jobs(
+        settings,
+        queue=queue,
+        job_key="test.enqueue.runtime",
+    )
+
+    assert result.status == "succeeded"
+    assert result.reason is None
+    assert result.adapter_keys == ("official.cwa.rainfall", "official.wra.water_level")
+    assert result.job_ids == ("job-1", "job-2")
+    assert queue.enqueued == [
+        (
+            "official.cwa.rainfall",
+            "test.enqueue.runtime",
+            "runtime-adapters",
+            {"adapter_key": "official.cwa.rainfall"},
+        ),
+        (
+            "official.wra.water_level",
+            "test.enqueue.runtime",
+            "runtime-adapters",
+            {"adapter_key": "official.wra.water_level"},
+        ),
+    ]
 
 
 def test_dequeue_runtime_adapter_job_noops_without_database_url() -> None:
@@ -352,6 +416,24 @@ def test_scheduler_loop_falls_back_when_database_lease_is_unavailable(monkeypatc
     assert len(results) == 1
 
 
+def test_scheduler_enqueue_loop_skips_when_database_lease_is_held(monkeypatch) -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood",
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "WORKER_INSTANCE": "worker-a",
+        }
+    )
+    queue = _RecordingProducerQueue()
+
+    monkeypatch.setattr("app.scheduler.PostgresRuntimeQueue", _LeaseHeldQueue)
+
+    results = enqueue_enabled_adapters_loop(settings=settings, queue=queue, max_ticks=1)
+
+    assert results == ()
+    assert queue.enqueued == []
+
+
 class _FakeConnection:
     def __init__(self, *, fetch_rows: list[tuple[Any, ...] | None]) -> None:
         self.cursor_instance = _FakeCursor(fetch_rows=fetch_rows)
@@ -414,6 +496,26 @@ class _CollectingQueue(NullRuntimeQueue):
         del job_key, queue_name, payload, priority, max_attempts, run_after
         self.adapter_keys.append(adapter_key)
         return f"job-{len(self.adapter_keys)}"
+
+
+class _RecordingProducerQueue(NullRuntimeQueue):
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[str, str, str, Mapping[str, Any] | None]] = []
+
+    def enqueue_adapter_job(
+        self,
+        *,
+        adapter_key: str,
+        job_key: str = "runtime.adapter.ingest",
+        queue_name: str = "runtime-adapters",
+        payload: Mapping[str, Any] | None = None,
+        priority: int = 0,
+        max_attempts: int = 3,
+        run_after: datetime | None = None,
+    ) -> str:
+        del priority, max_attempts, run_after
+        self.enqueued.append((adapter_key, job_key, queue_name, payload))
+        return f"job-{len(self.enqueued)}"
 
 
 class _DequeuingQueue(NullRuntimeQueue):
@@ -557,3 +659,18 @@ class _UnavailableQueue:
     ) -> bool:
         del lease_key, holder_id, ttl_seconds
         raise RuntimeQueueUnavailable("database unavailable")
+
+
+class _LeaseHeldQueue:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    def acquire_scheduler_lease(
+        self,
+        *,
+        lease_key: str,
+        holder_id: str,
+        ttl_seconds: int,
+    ) -> bool:
+        del lease_key, holder_id, ttl_seconds
+        return False

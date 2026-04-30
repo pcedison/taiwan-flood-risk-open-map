@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RiskLevel = Literal["低", "中", "高", "極高", "未知"]
 ConfidenceLevel = Literal["低", "中", "高", "未知"]
@@ -116,6 +116,27 @@ class UserReportCreateResponse(ContractModel):
 
 UserReportStatus = Literal["pending", "approved", "rejected", "spam"]
 UserReportModerationStatus = Literal["approved", "rejected", "spam"]
+UserReportModerationReason = Literal[
+    "verified_flood_signal",
+    "duplicate",
+    "not_flood_related",
+    "insufficient_detail",
+    "abuse_or_spam",
+    "out_of_scope",
+]
+
+_MODERATION_REASONS_BY_STATUS: dict[
+    UserReportModerationStatus, set[UserReportModerationReason]
+] = {
+    "approved": {"verified_flood_signal"},
+    "rejected": {
+        "duplicate",
+        "not_flood_related",
+        "insufficient_detail",
+        "out_of_scope",
+    },
+    "spam": {"abuse_or_spam"},
+}
 
 
 class AdminUserReport(ContractModel):
@@ -133,6 +154,14 @@ class AdminUserReportsResponse(ContractModel):
 
 class UserReportModerationRequest(ContractModel):
     status: UserReportModerationStatus
+    reason_code: UserReportModerationReason
+
+    @model_validator(mode="after")
+    def reason_matches_status(self) -> Self:
+        allowed_reasons = _MODERATION_REASONS_BY_STATUS[self.status]
+        if self.reason_code not in allowed_reasons:
+            raise ValueError("reason_code is not allowed for moderation status")
+        return self
 
 
 class UserReportModerationResponse(ContractModel):

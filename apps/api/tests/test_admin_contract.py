@@ -263,7 +263,7 @@ def test_admin_report_moderation_contract(monkeypatch: pytest.MonkeyPatch) -> No
 
     response = client.patch(
         "/admin/v1/reports/0d51d545-dc6a-4e4b-8f8e-0e42d454d050/moderation",
-        json={"status": "approved"},
+        json={"status": "approved", "reason_code": "verified_flood_signal"},
         headers={"Authorization": "Bearer test-admin-token"},
     )
 
@@ -276,6 +276,7 @@ def test_admin_report_moderation_contract(monkeypatch: pytest.MonkeyPatch) -> No
             "database_url": get_settings().database_url,
             "report_id": "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
             "status": "approved",
+            "reason_code": "verified_flood_signal",
             "actor_ref": "admin_api",
         }
     ]
@@ -305,6 +306,34 @@ def test_admin_report_moderation_rejects_invalid_status(
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "bad_request"
+    assert called is False
+
+
+def test_admin_report_moderation_rejects_reason_for_wrong_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    called = False
+
+    def moderate_report(**_kwargs: object) -> UserReportModerationRecord:
+        nonlocal called
+        called = True
+        raise AssertionError("moderation repository should not be called")
+
+    monkeypatch.setattr(admin_route, "moderate_user_report", moderate_report)
+    client = TestClient(create_app())
+
+    response = client.patch(
+        "/admin/v1/reports/0d51d545-dc6a-4e4b-8f8e-0e42d454d050/moderation",
+        json={"status": "approved", "reason_code": "abuse_or_spam"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["error"]["code"] == "bad_request"
+    assert "reason_code" in str(payload["error"]["details"])
     assert called is False
 
 

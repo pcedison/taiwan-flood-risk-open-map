@@ -17,7 +17,12 @@ from app.jobs.ingestion import (
 )
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
-from app.jobs.runtime import build_runtime_adapters
+from app.jobs.runtime import (
+    RuntimeQueue,
+    RuntimeQueueProducerResult,
+    build_runtime_adapters,
+    produce_enabled_runtime_adapter_jobs,
+)
 from app.jobs.sample import run_sample_job
 from app.logging import log_event
 from app.metrics import (
@@ -143,9 +148,75 @@ def run_enabled_adapters_loop(
     return tuple(results)
 
 
+def enqueue_enabled_adapters_once(
+    *,
+    settings: WorkerSettings | None = None,
+    queue: RuntimeQueue | None = None,
+    job_key: str = "scheduler.enqueue.enabled_adapters",
+) -> RuntimeQueueProducerResult:
+    resolved_settings = settings or load_worker_settings()
+    result = produce_enabled_runtime_adapter_jobs(
+        resolved_settings,
+        queue=queue,
+        job_key=job_key,
+    )
+    log_event(
+        "scheduler.queue_producer.tick_completed",
+        status=result.status,
+        reason=result.reason,
+        adapter_count=len(result.adapter_keys),
+        durable_job_count=result.durable_job_count,
+    )
+    return result
+
+
+def enqueue_enabled_adapters_loop(
+    *,
+    settings: WorkerSettings | None = None,
+    queue: RuntimeQueue | None = None,
+    max_ticks: int | None = None,
+    sleep: Callable[[int], object] = time.sleep,
+) -> tuple[RuntimeQueueProducerResult, ...]:
+    resolved_settings = settings or load_worker_settings()
+    tick_limit = max_ticks if max_ticks is not None else resolved_settings.scheduler_max_ticks
+    results: list[RuntimeQueueProducerResult] = []
+    tick = 0
+    lease_holder = resolved_settings.metrics_instance
+    lease_acquired = _acquire_scheduler_lease(settings=resolved_settings, holder_id=lease_holder)
+    if lease_acquired is False:
+        log_event(
+            "scheduler.queue_producer.lease_skipped",
+            lease_key="scheduler.enabled-adapters",
+            holder_id=lease_holder,
+        )
+        return ()
+
+    try:
+        while tick_limit is None or tick < tick_limit:
+            result = enqueue_enabled_adapters_once(
+                settings=resolved_settings,
+                queue=queue,
+            )
+            results.append(result)
+            tick += 1
+            if tick_limit is not None and tick >= tick_limit:
+                break
+            sleep(resolved_settings.scheduler_interval_seconds)
+    finally:
+        if lease_acquired is True:
+            _release_scheduler_lease(settings=resolved_settings, holder_id=lease_holder)
+
+    return tuple(results)
+
+
 def main(argv: tuple[str, ...] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Flood Risk worker scheduler")
     parser.add_argument("--once", action="store_true", help="Run one scheduler tick and exit.")
+    parser.add_argument(
+        "--enqueue-runtime-jobs",
+        action="store_true",
+        help="Enqueue durable runtime adapter jobs selected by WORKER_ENABLED_ADAPTER_KEYS/config gates.",
+    )
     parser.add_argument(
         "--run-enabled-adapters",
         action="store_true",
@@ -170,6 +241,13 @@ def main(argv: tuple[str, ...] | None = None) -> int:
         enabled_adapters=enabled_adapter_keys(settings),
         max_ticks=max_ticks,
     )
+    if args.enqueue_runtime_jobs:
+        enqueue_enabled_adapters_loop(
+            settings=settings,
+            max_ticks=1 if args.once else max_ticks,
+        )
+        return 0
+
     tick = 0
     while True:
         if args.run_enabled_adapters:

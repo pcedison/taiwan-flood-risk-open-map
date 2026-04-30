@@ -10,12 +10,18 @@ smoke paths.
   `WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --run-enabled-adapters`
 - Run configured runtime adapters on a bounded scheduler loop:
   `WORKER_RUNTIME_FIXTURES_ENABLED=true SCHEDULER_MAX_TICKS=2 python -m app.main --scheduler`
+- Enqueue configured runtime adapter jobs into the durable queue:
+  `WORKER_DATABASE_URL=postgresql://... WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --enqueue-runtime-jobs`
+- Enqueue configured runtime adapter jobs on a lease-guarded scheduler loop:
+  `WORKER_DATABASE_URL=postgresql://... WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --enqueue-runtime-jobs --scheduler --max-ticks 2`
 - Consume one durable runtime adapter job from `worker_runtime_jobs`:
   `WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_DATABASE_URL=postgresql://... python -m app.main --work-runtime-queue --once`
 - Consume durable runtime adapter jobs in a bounded worker loop:
   `WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_DATABASE_URL=postgresql://... python -m app.main --work-runtime-queue --max-ticks 2`
 - Materialize Query Heat buckets:
   `WORKER_DATABASE_URL=postgresql://... python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D`
+- Materialize a bounded Query Heat window and prune old buckets:
+  `WORKER_DATABASE_URL=postgresql://... python -m app.main --aggregate-query-heat --query-heat-created-at-start 2026-04-23T00:00:00Z --query-heat-created-at-end 2026-04-30T00:00:00Z --query-heat-retention-days 90`
 - Refresh worker-generated tile layer features:
   `WORKER_DATABASE_URL=postgresql://... python -m app.main --refresh-tile-features --tile-layer-id flood-potential`
 - Official adapter demo ingestion + freshness check: `python -m app.main --run-official-demo`
@@ -24,6 +30,8 @@ smoke paths.
 - Scheduler loop smoke path: `python -m app.scheduler`
 - Scheduler runtime adapter path:
   `WORKER_RUNTIME_FIXTURES_ENABLED=true python -m app.scheduler --run-enabled-adapters --once`
+- Scheduler queue producer tick:
+  `WORKER_DATABASE_URL=postgresql://... WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.scheduler --enqueue-runtime-jobs --once`
 - Scheduler official demo tick: `python -m app.scheduler --official-demo --once`
 - Worker heartbeat textfile metrics:
   `WORKER_METRICS_TEXTFILE_PATH=./tmp/worker.prom python -m app.main --run-enabled-adapters`
@@ -47,14 +55,18 @@ running a duplicate tick; if the DB is unavailable, it logs the failure and
 falls back to the existing local safe loop. Runtime adapter jobs can also be
 enqueued/dequeued through the durable `worker_runtime_jobs` table, including
 expired lease recovery and succeeded/failed completion updates. The
-`--work-runtime-queue` path safely no-ops when no database URL is configured,
-when the database is unavailable, or when there is no ready job. When a job is
-claimed, the worker resolves the job's `adapter_key`, runs that single adapter
-through the fixture-gated ingestion/freshness path, marks the job succeeded on
-success, and marks it failed with the error for unknown adapters or failed
-adapter runs. Adapter construction still remains fixture-gated by
-`WORKER_RUNTIME_FIXTURES_ENABLED=true`, so no external API calls are made by
-default.
+`--enqueue-runtime-jobs` producer path selects adapters from
+`WORKER_ENABLED_ADAPTER_KEYS` plus source gates, skips safely when no database
+URL or no adapters are configured, and writes one durable
+`runtime.adapter.ingest` job per configured adapter with the adapter key in the
+payload. The `--work-runtime-queue` path safely no-ops when no database URL is
+configured, when the database is unavailable, or when there is no ready job.
+When a job is claimed, the worker resolves the job's `adapter_key`, runs that
+single adapter through the fixture-gated ingestion/freshness path, marks the
+job succeeded on success, and marks it failed with the error for unknown
+adapters or failed adapter runs. Adapter construction still remains
+fixture-gated by `WORKER_RUNTIME_FIXTURES_ENABLED=true`, so no external API
+calls are made by default.
 
 ## Current scope
 
@@ -62,9 +74,12 @@ default.
 - Official CWA rainfall, WRA water-level, and flood-potential fixture parsers.
 - Worker CLI/scheduler demo path for enabled official adapters.
 - Configurable run-once and bounded scheduler path for enabled runtime adapters.
-- DB-backed runtime job queue and singleton scheduler lease groundwork.
+- DB-backed runtime job queue producer/consumer and singleton scheduler lease
+  groundwork.
 - DB-backed Query Heat aggregation job materializes `P1D` and `P7D` buckets
-  from `location_queries` into `query_heat_buckets`.
+  from `location_queries` into `query_heat_buckets`, supports explicit
+  `created_at` bounds for cadence/backfill windows, and can prune old
+  aggregate buckets by retention age.
 - Lightweight freshness checks that emit alerts for stale or failed adapter runs.
 - L2 news/public-web sample adapter and source allowlist validation.
 - Raw snapshot, staging, validation, promotion, and PostGIS writer groundwork.

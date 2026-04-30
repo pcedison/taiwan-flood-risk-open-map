@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Response
+from fastapi.responses import PlainTextResponse
 
 from app.api.schemas import DependencyReadiness, HealthResponse, ReadyResponse
 from app.core.config import get_settings
@@ -38,8 +39,33 @@ async def ready(response: Response) -> ReadyResponse:
     )
 
 
+@router.get("/metrics", include_in_schema=False)
+async def metrics() -> PlainTextResponse:
+    settings = get_settings()
+    content = "\n".join(
+        (
+            "# HELP flood_risk_api_up API process liveness.",
+            "# TYPE flood_risk_api_up gauge",
+            "flood_risk_api_up 1",
+            "# HELP flood_risk_api_info API build metadata.",
+            "# TYPE flood_risk_api_info gauge",
+            (
+                "flood_risk_api_info"
+                f'{{service="{_prometheus_label_value(settings.service_id)}",'
+                f'version="{_prometheus_label_value(settings.app_version)}"}} 1'
+            ),
+            "",
+        )
+    )
+    return PlainTextResponse(content, media_type="text/plain; version=0.0.4")
+
+
 def _now_utc() -> datetime:
     return datetime.now(UTC)
+
+
+def _prometheus_label_value(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
 def _check_database(database_url: str) -> DependencyReadiness:

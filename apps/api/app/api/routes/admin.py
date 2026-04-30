@@ -93,6 +93,7 @@ async def moderate_admin_report(
             database_url=settings.database_url,
             report_id=str(report_id),
             status=request.status,
+            reason_code=request.reason_code,
             actor_ref=admin_actor,
         )
     except UserReportRepositoryUnavailable as exc:

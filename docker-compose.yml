@@ -74,8 +74,10 @@ services:
     environment:
       <<: *python-env
       WORKER_IDLE_SECONDS: ${WORKER_IDLE_SECONDS:-60}
+      WORKER_METRICS_TEXTFILE_PATH: ${WORKER_METRICS_TEXTFILE_PATH:-}
     volumes:
       - .:/workspace
+      - monitoring-textfile:/var/lib/node_exporter/textfile_collector
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,8 +96,10 @@ services:
     environment:
       <<: *python-env
       SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-300}
+      SCHEDULER_METRICS_TEXTFILE_PATH: ${SCHEDULER_METRICS_TEXTFILE_PATH:-}
     volumes:
       - .:/workspace
+      - monitoring-textfile:/var/lib/node_exporter/textfile_collector
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,9 +169,61 @@ services:
     volumes:
       - minio-data:/data
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+      - node-exporter
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-local}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/flood-risk-runtime-dashboard.json:/var/lib/grafana/dashboards/flood-risk-runtime-dashboard.json:ro
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --collector.disable-defaults
+      - --collector.textfile
+      - --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    volumes:
+      - monitoring-textfile:/var/lib/node_exporter/textfile_collector:ro
+    profiles:
+      - monitoring
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
   web-next-cache:
   web-node-modules:
+  prometheus-data:
+  grafana-data:
+  monitoring-textfile:

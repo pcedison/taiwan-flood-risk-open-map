@@ -618,8 +618,8 @@ paths:
       summary: Mark a user report as approved, rejected, or spam.
       description: >
         Updates moderation status and records an audit log entry with the admin
-        actor reference and previous/new statuses. The operation does not alter
-        media references or add reporter personal data.
+        actor reference, previous/new statuses, and a required reason code. The
+        operation does not alter media references or add reporter personal data.
       security:
         - AdminBearerAuth: []
       x-required-roles:
@@ -641,6 +641,15 @@ paths:
               approve:
                 value:
                   status: approved
+                  reason_code: verified_flood_signal
+              reject:
+                value:
+                  status: rejected
+                  reason_code: insufficient_detail
+              spam:
+                value:
+                  status: spam
+                  reason_code: abuse_or_spam
       responses:
         "200":
           description: Moderation status was updated.
@@ -911,6 +920,21 @@ components:
         - rejected
         - spam
 
+    UserReportModerationReason:
+      type: string
+      description: >
+        Required non-personal moderation reason code. `approved` accepts
+        `verified_flood_signal`; `rejected` accepts `duplicate`,
+        `not_flood_related`, `insufficient_detail`, or `out_of_scope`; `spam`
+        accepts `abuse_or_spam`.
+      enum:
+        - verified_flood_signal
+        - duplicate
+        - not_flood_related
+        - insufficient_detail
+        - abuse_or_spam
+        - out_of_scope
+
     AdminUserReport:
       type: object
       required:
@@ -955,9 +979,12 @@ components:
       type: object
       required:
         - status
+        - reason_code
       properties:
         status:
           $ref: "#/components/schemas/UserReportModerationStatus"
+        reason_code:
+          $ref: "#/components/schemas/UserReportModerationReason"
       additionalProperties: false
 
     UserReportModerationResponse:

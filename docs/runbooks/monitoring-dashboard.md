@@ -13,9 +13,35 @@ Risk runtime monitoring.
 | `infra/monitoring/prometheus.yml` | Seed Prometheus scrape config and alert rule loader. |
 | `infra/monitoring/alert-rules.yml` | Alert rules for API readiness, freshness, heartbeats, and worker failures. |
 | `infra/monitoring/flood-risk-runtime-dashboard.json` | Grafana dashboard JSON. |
+| `infra/monitoring/grafana/provisioning/datasources/prometheus.yml` | Local Compose Grafana datasource provisioning. |
+| `infra/monitoring/grafana/provisioning/dashboards/flood-risk.yml` | Local Compose Grafana dashboard provider. |
 | `docs/runbooks/monitoring-freshness-alerts.md` | Alert triage and freshness metric contract. |
 
+## Local Compose Monitoring Profile
+
+For local deployment wiring checks, start the runtime and monitoring profile:
+
+```powershell
+docker compose --profile monitoring up
+```
+
+The profile exposes:
+
+| Service | Default URL | Notes |
+|---|---|---|
+| Prometheus | `http://localhost:9090` | Loads `infra/monitoring/prometheus.yml` and `alert-rules.yml`. |
+| Grafana | `http://localhost:3001` | Uses `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`; defaults are local only. |
+| Node exporter | `http://localhost:9100` | Only textfile collector is enabled in this profile. |
+
+Grafana provisions the `Flood Risk Prometheus` datasource and imports the
+runtime dashboard automatically. This proves that the dashboard JSON is
+importable in the local profile, but it does not prove hosted alert routing,
+TLS, authentication, persistent storage policy, or production DNS.
+
 ## Grafana Import
+
+In the Compose profile, no manual import is required. For an external Grafana
+instance:
 
 1. Open Grafana Dashboards, then import
    `infra/monitoring/flood-risk-runtime-dashboard.json`.
@@ -63,6 +89,8 @@ metrics are textfile-compatible. Prometheus does not scrape those `.prom` files
 directly. Instead:
 
 1. Deploy node exporter on the host or sidecar that can read the metrics files.
+   The local Compose profile already provides `node-exporter:9100` with a
+   shared `monitoring-textfile` volume.
 2. Start node exporter with:
 
    ```text
@@ -71,7 +99,7 @@ directly. Instead:
 
 3. Configure the freshness script and worker runtimes to write files into that
    directory.
-4. Add or uncomment a Prometheus node exporter scrape job:
+4. Keep or adapt the Prometheus node exporter scrape job:
 
    ```yaml
    - job_name: flood-risk-node-exporter
@@ -109,6 +137,33 @@ Schedule that command with the platform scheduler or cron equivalent. Keep
 `-WarnOnly` enabled for monitoring export jobs so a stale source does not stop
 the next metrics write.
 
+When running the PowerShell freshness script on the host, `.\tmp\*.prom` is
+useful for validation, but it is not automatically visible to the Compose
+node-exporter named volume. Either run node exporter against that host path or
+run the freshness check in a container that mounts the same collector directory.
+
+## Source Freshness And Worker Queue Panels
+
+Use the dashboard panels as deployment acceptance signals:
+
+| Surface | Panels | Required metric path |
+|---|---|---|
+| Source freshness | `Stale Sources`, `Source Freshness Status`, `Source Freshness Age` | Scheduled `ops-source-freshness-check.ps1` with `-MetricsPath`, exported through node exporter. |
+| Worker queue health | `Worker Heartbeat Age`, `Worker Last Run Failed`, `Worker Last Run Status` | Worker process writes `WORKER_METRICS_TEXTFILE_PATH` into the collector directory. |
+| Scheduler health | `Scheduler Heartbeat Age` | Scheduler process writes `SCHEDULER_METRICS_TEXTFILE_PATH` into the collector directory. |
+
+For local Compose, set these paths when you want worker/scheduler textfile
+metrics:
+
+```text
+WORKER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-worker.prom
+SCHEDULER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-scheduler.prom
+```
+
+The panels intentionally show missing metrics as deployment gaps until those
+producers are enabled. A clean dashboard import alone is not evidence that
+freshness jobs, queue heartbeats, or scheduler heartbeats are running.
+
 ## Validation
 
 Run YAML and JSON syntax validation from the repository root:
@@ -128,6 +183,7 @@ Optionally run the freshness script dry-run to prove the textfile writer path:
 ## Reviewer Checklist
 
 - Grafana dashboard imports without JSON errors.
+- Local profile validates with `docker compose --profile monitoring config`.
 - `flood-risk-api` target is up in Prometheus.
 - Node exporter scrape target is up when textfile metrics are deployed.
 - Freshness script writes `flood-risk-source-freshness.prom`.
