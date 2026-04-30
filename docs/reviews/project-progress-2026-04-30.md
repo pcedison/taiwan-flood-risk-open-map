@@ -1,15 +1,15 @@
 # 專案進度盤點報告（2026-04-30）
 
-本文件依 `docs/PROJECT_WORK_PLAN.md`、根目錄與各 app README，以及本輪 subagent hardening 結果整理目前狀態。結論：專案已超過 Phase 0 skeleton；Phase 1 核心查詢流程、Phase 2 ingestion groundwork、Phase 3 scoring v0 都已有實作與測試證據，且本輪已完成 local Compose runtime smoke、worker 官方 demo DB persistence、query heat persistence、DB-backed MVT tile endpoint、worker/scheduler heartbeat textfile metrics 與 Phase 4/5 governance gates。但仍不應宣稱 MVP 完成，因為 durable production queue、real external source clients、production tile tables/cache、public reports implementation、production monitoring dashboard 等仍是後續工作。
+本文件依 `docs/PROJECT_WORK_PLAN.md`、根目錄與各 app README，以及本輪 subagent hardening 結果整理目前狀態。結論：專案已超過 Phase 0 skeleton；Phase 1 核心查詢流程、Phase 2 ingestion groundwork、Phase 3 scoring v0 都已有實作與測試證據，且本輪已完成 local Compose runtime smoke、worker 官方 demo DB persistence、query heat persistence/materialization smoke、DB-backed MVT tile endpoint、worker tile feature/cache smoke、worker/scheduler heartbeat textfile metrics 與 Phase 4/5 governance gates。但仍不應宣稱 MVP 完成，因為 durable production queue、real external source clients、production tile hosting/cache strategy、public reports product UX/governance、production monitoring dashboard 等仍是後續工作。
 
 ## 2026-04-30 Hardening 結果
 
 - WP1 文件狀態與 placeholder 邊界：已完成。根 README、work plan、app README 與本報告已區分 fallback、phase-delayed、pending implementation。
 - WP2 前端測試可信度：已完成。`npm test` 已改成真實 Node unit tests，並保留 Playwright desktop/mobile smoke。
-- WP3 Runtime smoke：已完成。`scripts/runtime-smoke.ps1 -StopOnExit` 已啟動 local Compose stack、跑 migration、檢查 API/Web、送出風險查詢並正常收尾。
+- WP3 Runtime smoke：已完成擴充版腳本與 runbook。`scripts/runtime-smoke.ps1` 現在納入 base API/Web、query heat、queue live smoke、reports default-disabled/enabled smoke、MVT smoke，以及 query heat materialization / tile feature-cache smoke；整合修正後已重跑完整 `-StopOnExit` 並通過。
 - WP4 Data realism / Phase 2 demo：已完成一輪可測 groundwork。Worker 批次流程會使用 `WORKER_ENABLED_ADAPTER_KEYS`；官方 WRA demo path 可用 runtime command 寫入 raw snapshot -> staging -> promotion -> PostGIS geometry；API query heat 由 DB helper 優先計算，DB 不可用時明確回傳 limited bucket。
 - WP5 Monitoring / backup-restore：已完成 checkpoint 等級驗收。Prometheus source freshness/API availability alert rules 已新增；backup/restore drill 支援 Docker client fallback 並驗證非 scratch restore guard。
-- WP6 Query heat / tile / scheduler：已完成 checkpoint 等級推進。`/v1/risk/assess` 會寫入 query/assessment snapshot；`/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt` 可從 DB 產 MVT；worker 有 safe run-once / bounded scheduler path。
+- WP6 Query heat / tile / scheduler：已完成 checkpoint 等級推進。`/v1/risk/assess` 會寫入 query/assessment snapshot；worker CLI 可 materialize `P1D`/`P7D` query heat buckets；`/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt` 可從 DB 或 smoke cache 產生 response；worker 有 safe run-once / bounded scheduler / queue consume path。
 - WP7 Heartbeat / governance gates：已完成 checkpoint 等級推進。Worker/scheduler heartbeat textfile metrics 已接上 alert rules；Phase 4/5 public discussion / user report legal/privacy gates 已文件化。
 
 ## 已完成或已有明確實作證據
@@ -50,16 +50,16 @@
 ## 開發到一半或仍有 placeholder 的部分
 
 - API 與 Web 仍保留 placeholder server 檔案：`apps/api/app/placeholder_server.py`、`apps/web/server-placeholder.mjs`。目前只能算 fallback，不是主要 runtime。
-- Worker scheduler 已有單程序 run-once / bounded-loop path，但 durable queue、singleton coordination、real source clients 尚未完成。
-- Query heat 已有 persisted query/assessment history，但尚未有 materialized heat bucket pipeline；目前是最小可測真實度。
+- Worker scheduler 已有單程序 run-once / bounded-loop path 與 durable queue consume smoke，但 production source clients、queue producer、singleton coordination 尚未完成。
+- Query heat 已有 persisted query/assessment history 與 `P1D`/`P7D` materialization smoke；production refresh cadence 與 retention 尚未完成。
 - PTT / Dcard / user_report 仍是 phase-delayed/pending implementation：`apps/workers/app/adapters/ptt/__init__.py`、`apps/workers/app/adapters/dcard/__init__.py`、`apps/workers/app/adapters/user_report/__init__.py`。
 - `packages/geo`、`packages/shared` 仍以 placeholder / baseline 為主。`infra/monitoring` 已有 Prometheus scrape config、alert rules 與 heartbeat metric contract，但 dashboard 尚未完成。
 
 ## 尚未開發或尚未驗證
 
-- Query heat materialized heat buckets 尚未完成。
+- Query heat production refresh cadence 與 retention 尚未完成。
 - Durable production worker queue / singleton scheduler 尚未完成。
-- Production tile tables/cache/hosting 尚未完成；目前是 DB-backed MVT 最小可驗證 path。
+- Production tile generation/cache expiry/invalidation/hosting 尚未完成；目前是 DB-backed MVT 加 worker feature/cache smoke path。
 - Phase 4 forum/public discussion expansion 尚未完成。
 - Phase 5 public reports and governance 尚未完成。
 - Phase 6 production hardening 尚未完成。
@@ -72,6 +72,38 @@
 3. 補 production monitoring dashboards，接上 freshness、heartbeat、worker last-run status。
 4. Phase 4/5 public discussion / user reports 只能依新 governance gate checklist 開發。
 5. 對本 checkpoint 做 final diff check、commit、push、更新 draft PR。
+
+## WP5 Runtime smoke / phase readiness hardening（2026-04-30）
+
+本輪 WP5 原本只改 runtime smoke、runbook、README 與 review/work-plan 文件；後續整合已加入 worker/API runtime path 與測試。下一個 phase 的驗收標準另記於 `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md`。
+
+### 已完成
+
+- `scripts/runtime-smoke.ps1` 新增 `-Help`，並將 extended smoke 設為預設：queue live smoke、reports default-disabled/enabled smoke、MVT smoke、query heat materialization、tile feature refresh、tile cache API-read smoke。
+- `docs/runbooks/runtime-smoke.md` 已補齊實際執行步驟、手動除錯 commands、安全注意事項，以及哪些 smoke 會寫入 local DB rows。
+- README、work plan、本報告已連到 next-phase readiness checklist。
+
+### 開發中
+
+- Queue：已有 `worker_runtime_jobs`、worker consume path 與 fixture-backed smoke；production source clients、queue producer CLI、singleton scheduler 驗收仍在後續。
+- Reports：default-disabled 與 enabled-path smoke 已可驗證；Phase 5 UX、moderation、abuse prevention、deletion/retention 與 governance approval 尚未完成。
+- MVT：seeded `query-heat` / `flood-potential` endpoint 可 smoke；worker CLI 可 refresh `flood-potential` features，runtime smoke 也會寫入一筆 cache row 並確認 API 回傳同一份 smoke cache bytes；production tile generation/expiry/invalidation/hosting 尚未完成。
+- Query heat：API persisted history fallback 可 smoke；worker CLI 可 materialize privacy-preserving `P1D`/`P7D` buckets；production refresh cadence 與 retention 尚未完成。
+
+### 尚未完成
+
+- Query heat production refresh cadence / retention strategy。
+- Full tile cache generation、expiry、invalidation、hosting strategy。
+- Public reports product readiness。
+- Production queue producer、real source clients、singleton scheduler rollout。
+
+### 下一個 phase 驗收底線
+
+1. Runtime smoke 預設必須涵蓋 base API/Web、queue、reports、MVT、query heat materialization 與 tile feature/cache readiness。
+2. Queue 不得只靠 fixture smoke 宣稱 production-ready；必須有 producer command、lease/singleton 驗證、success/retry/failure observability。
+3. Reports 必須維持 default disabled；enabled smoke 只代表 repository/gate path 可運作，不代表 Phase 5 可上線。
+4. MVT endpoint HTTP 200 只是最低門檻；production tile cache generation、expiry、refresh/invalidation 與 hosting 必須另行驗收。
+5. Query heat 已有 local materialized bucket smoke；production readiness 仍需 refresh cadence、retention 與隱私分桶策略驗收。
 ---
 
 ## WP-E placeholder boundary / ops runbooks update - 2026-04-30
@@ -91,8 +123,9 @@ scripts. No app code was changed.
 - Keep as baseline placeholders: `packages/geo` and `packages/shared`.
   `infra/monitoring` now has scrape config, alert rules, and heartbeat metric
   contract, while dashboards remain pending.
-- Convert to explicit known limitation: query heat has persisted history, but
-  heat bucket materialization is still pending.
+- Convert to explicit known limitation: query heat has persisted history and
+  local bucket materialization smoke, but production cadence/retention is still
+  pending.
 
 ### Five-point status update
 
@@ -141,8 +174,9 @@ had happened at the documentation checkpoint moment.
 - Test matrix: backend contract/domain tests, frontend unit and Playwright smoke
   tests, worker adapter/freshness/demo tests, ops dry-run scripts, and CI hard
   gate wiring.
-- Known risks: query heat materialized buckets pending; durable production
-  queue/singleton scheduler pending; production tile tables/cache pending;
+- Known risks: query heat production cadence/retention pending; durable
+  production queue/singleton scheduler pending; production tile cache
+  generation/expiry/hosting pending;
   monitoring dashboards pending; placeholders remain fallback-only or
   phase-delayed; final diff check should be run before staging.
 - Rollback notes: roll back by reverting the eventual checkpoint commit and use

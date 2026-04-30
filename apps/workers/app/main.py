@@ -8,12 +8,19 @@ from dataclasses import dataclass
 from app.adapters.registry import enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.official_demo import build_official_demo_adapters
+from app.jobs.query_heat import (
+    SUPPORTED_QUERY_HEAT_PERIODS,
+    PostgresQueryHeatAggregationJob,
+    QueryHeatAggregationUnavailable,
+)
 from app.scheduler import (
     run_enabled_adapters_loop,
     run_enabled_adapters_once,
     run_scheduled_ingestion_cycle,
 )
+from app.jobs.runtime import work_runtime_queue_once
 from app.jobs.sample import run_sample_job
+from app.jobs.tile_cache import PostgresTileCacheWriter, TileCacheUnavailable, TileLayerUnsupported
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.postgres_writer import PostgresStagingBatchWriter
@@ -50,9 +57,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run configured runtime adapters in a scheduler loop.",
     )
     parser.add_argument(
+        "--work-runtime-queue",
+        action="store_true",
+        help="Consume durable worker_runtime_jobs. Use --once for one dequeue attempt.",
+    )
+    parser.add_argument(
+        "--aggregate-query-heat",
+        action="store_true",
+        help="Materialize query heat buckets from location_queries into query_heat_buckets.",
+    )
+    parser.add_argument(
+        "--query-heat-periods",
+        default=",".join(SUPPORTED_QUERY_HEAT_PERIODS),
+        help="Comma-separated periods for --aggregate-query-heat. Defaults to P1D,P7D.",
+    )
+    parser.add_argument(
+        "--refresh-tile-features",
+        action="store_true",
+        help="Refresh worker-generated map_layer_features for supported tile layers.",
+    )
+    parser.add_argument(
+        "--tile-layer-id",
+        default="flood-potential",
+        help="Tile layer for --refresh-tile-features. Defaults to flood-potential.",
+    )
+    parser.add_argument(
+        "--tile-feature-limit",
+        type=int,
+        help="Optional positive row limit for --refresh-tile-features.",
+    )
+    parser.add_argument(
         "--max-ticks",
         type=int,
-        help="Bound --scheduler ticks. Defaults to SCHEDULER_MAX_TICKS when set.",
+        help=(
+            "Bound --scheduler or --work-runtime-queue ticks. "
+            "Defaults to SCHEDULER_MAX_TICKS for --scheduler."
+        ),
     )
     parser.add_argument(
         "--persist",
@@ -75,6 +115,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         for adapter_key in enabled_adapter_keys(settings):
             print(adapter_key)
         return 0
+
+    if args.work_runtime_queue:
+        return _work_runtime_queue(settings=settings, once=args.once, max_ticks=args.max_ticks)
+
+    if args.aggregate_query_heat:
+        return _aggregate_query_heat(
+            settings=settings,
+            periods=_parse_query_heat_periods(args.query_heat_periods),
+        )
+
+    if args.refresh_tile_features:
+        return _refresh_tile_features(
+            settings=settings,
+            layer_id=args.tile_layer_id,
+            limit=args.tile_feature_limit,
+        )
 
     if args.once:
         run_sample_job(enabled_adapters=enabled_adapter_keys(settings))
@@ -143,6 +199,81 @@ def _build_demo_persistence_writers(
         run_writer=PostgresIngestionRunWriter(database_url=resolved_database_url),
         promotion_writer=PostgresEvidencePromotionWriter(database_url=resolved_database_url),
     )
+
+
+def _work_runtime_queue(
+    *,
+    settings: WorkerSettings,
+    once: bool,
+    max_ticks: int | None,
+) -> int:
+    tick_limit = 1 if once else max(1, max_ticks) if max_ticks is not None else None
+    had_failure = False
+    tick = 0
+    while tick_limit is None or tick < tick_limit:
+        result = work_runtime_queue_once(settings=settings)
+        had_failure = had_failure or result.status == "failed"
+        tick += 1
+        if tick_limit is not None and tick >= tick_limit:
+            break
+        time.sleep(settings.worker_idle_seconds)
+    return 1 if had_failure else 0
+
+
+def _aggregate_query_heat(*, settings: WorkerSettings, periods: tuple[str, ...]) -> int:
+    if not settings.database_url:
+        log_event("query_heat.aggregation.noop", reason="no_database_url", periods=periods)
+        return 0
+
+    try:
+        summaries = PostgresQueryHeatAggregationJob(database_url=settings.database_url).aggregate(
+            periods=periods
+        )
+    except (QueryHeatAggregationUnavailable, ValueError) as exc:
+        log_event("query_heat.aggregation.failed", error=str(exc), periods=periods)
+        return 1
+
+    log_event(
+        "query_heat.aggregation.cli.completed",
+        periods=tuple(summary.period for summary in summaries),
+        buckets_upserted=sum(summary.buckets_upserted for summary in summaries),
+    )
+    return 0
+
+
+def _refresh_tile_features(
+    *,
+    settings: WorkerSettings,
+    layer_id: str,
+    limit: int | None,
+) -> int:
+    if limit is not None and limit < 1:
+        log_event("tile.features.refresh.failed", error="tile feature limit must be positive")
+        return 1
+    if not settings.database_url:
+        log_event("tile.features.refresh.noop", reason="no_database_url", layer_id=layer_id)
+        return 0
+
+    try:
+        result = PostgresTileCacheWriter(database_url=settings.database_url).refresh_layer_features(
+            layer_id=layer_id,
+            limit=limit,
+        )
+    except (TileCacheUnavailable, TileLayerUnsupported, ValueError) as exc:
+        log_event("tile.features.refresh.failed", layer_id=layer_id, error=str(exc))
+        return 1
+
+    log_event(
+        "tile.features.refresh.cli.completed",
+        layer_id=result.layer_id,
+        refreshed=result.refreshed,
+    )
+    return 0
+
+
+def _parse_query_heat_periods(raw: str) -> tuple[str, ...]:
+    periods = tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
+    return periods or SUPPORTED_QUERY_HEAT_PERIODS
 
 
 if __name__ == "__main__":

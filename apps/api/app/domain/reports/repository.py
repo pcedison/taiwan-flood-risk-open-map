@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal, cast
 
 import psycopg
 from psycopg.rows import dict_row
@@ -10,6 +11,9 @@ from psycopg.types.json import Jsonb
 
 
 ConnectionFactory = Callable[[], Any]
+UserReportStatus = Literal["pending", "approved", "rejected", "spam"]
+UserReportModerationStatus = Literal["approved", "rejected", "spam"]
+VALID_MODERATION_STATUSES: set[str] = {"approved", "rejected", "spam"}
 
 
 class UserReportRepositoryUnavailable(RuntimeError):
@@ -19,7 +23,18 @@ class UserReportRepositoryUnavailable(RuntimeError):
 @dataclass(frozen=True)
 class PendingUserReport:
     id: str
-    status: str
+    status: Literal["pending"]
+
+
+@dataclass(frozen=True)
+class UserReportModerationRecord:
+    id: str
+    status: UserReportStatus
+    summary: str
+    lat: float
+    lng: float
+    created_at: datetime
+    reviewed_at: datetime | None
 
 
 def create_pending_user_report(
@@ -83,10 +98,124 @@ def create_pending_user_report(
 
     if row is None:
         raise UserReportRepositoryUnavailable("user report insert returned no row")
-    return PendingUserReport(id=str(row["id"]), status=str(row["status"]))
+    return PendingUserReport(id=str(row["id"]), status="pending")
+
+
+def list_pending_user_reports(
+    *,
+    database_url: str,
+    limit: int = 100,
+    connection_factory: ConnectionFactory | None = None,
+) -> list[UserReportModerationRecord]:
+    sql = """
+        SELECT
+            id::text AS id,
+            status,
+            summary,
+            ST_Y(geom::geometry) AS lat,
+            ST_X(geom::geometry) AS lng,
+            created_at,
+            reviewed_at
+        FROM user_reports
+        WHERE status = 'pending'
+        ORDER BY created_at ASC, id ASC
+        LIMIT %s
+    """
+    try:
+        with _connect(database_url, connection_factory) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, (limit,))
+                rows = cursor.fetchall()
+    except (OSError, psycopg.Error) as exc:
+        raise UserReportRepositoryUnavailable(str(exc)) from exc
+
+    return [_moderation_record_from_row(row) for row in rows]
+
+
+def moderate_user_report(
+    *,
+    database_url: str,
+    report_id: str,
+    status: UserReportModerationStatus,
+    actor_ref: str,
+    connection_factory: ConnectionFactory | None = None,
+) -> UserReportModerationRecord | None:
+    if status not in VALID_MODERATION_STATUSES:
+        raise ValueError(f"invalid moderation status: {status}")
+
+    sql = """
+        WITH target_report AS (
+            SELECT id, status AS previous_status
+            FROM user_reports
+            WHERE id = %s::uuid
+            FOR UPDATE
+        ),
+        updated_report AS (
+            UPDATE user_reports
+            SET
+                status = %s,
+                reviewed_at = now()
+            FROM target_report
+            WHERE user_reports.id = target_report.id
+            RETURNING
+                user_reports.id::text AS id,
+                user_reports.status,
+                target_report.previous_status,
+                user_reports.summary,
+                ST_Y(user_reports.geom::geometry) AS lat,
+                ST_X(user_reports.geom::geometry) AS lng,
+                user_reports.created_at,
+                user_reports.reviewed_at
+        ),
+        inserted_audit AS (
+            INSERT INTO audit_logs (
+                actor_ref,
+                action,
+                subject_type,
+                subject_id,
+                metadata
+            )
+            SELECT
+                %s,
+                'user_report.moderated',
+                'user_report',
+                updated_report.id,
+                jsonb_build_object(
+                    'previous_status', updated_report.previous_status,
+                    'status', updated_report.status
+                )
+            FROM updated_report
+        )
+        SELECT id, status, summary, lat, lng, created_at, reviewed_at
+        FROM updated_report
+    """
+    params = (report_id, status, actor_ref)
+    try:
+        with _connect(database_url, connection_factory) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                row = cursor.fetchone()
+    except (OSError, psycopg.Error) as exc:
+        raise UserReportRepositoryUnavailable(str(exc)) from exc
+
+    if row is None:
+        return None
+    return _moderation_record_from_row(row)
 
 
 def _connect(database_url: str, connection_factory: ConnectionFactory | None) -> Any:
     if connection_factory is not None:
         return connection_factory()
     return psycopg.connect(database_url, connect_timeout=2, row_factory=dict_row)
+
+
+def _moderation_record_from_row(row: dict[str, Any]) -> UserReportModerationRecord:
+    return UserReportModerationRecord(
+        id=str(row["id"]),
+        status=cast(UserReportStatus, row["status"]),
+        summary=str(row["summary"]),
+        lat=float(row["lat"]),
+        lng=float(row["lng"]),
+        created_at=cast(datetime, row["created_at"]),
+        reviewed_at=cast(datetime | None, row["reviewed_at"]),
+    )

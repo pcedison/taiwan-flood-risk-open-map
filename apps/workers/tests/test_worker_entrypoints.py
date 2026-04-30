@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import load_worker_settings
-from app.jobs.runtime import build_runtime_adapters
 from app.jobs.official_demo import build_official_demo_adapters
+from app.jobs.runtime import RuntimeQueueWorkerResult, build_runtime_adapters
 from app.main import main
 from app.scheduler import (
     ScheduledIngestionCycleResult,
@@ -28,7 +28,7 @@ def test_official_demo_builder_covers_default_official_adapter_keys() -> None:
 
 
 def test_scheduler_official_demo_cycle_runs_ingestion_and_freshness() -> None:
-    fetched_at = datetime(2026, 4, 30, 4, 0, tzinfo=UTC)
+    fetched_at = datetime.now(UTC)
     result = run_scheduled_ingestion_cycle(
         build_official_demo_adapters(fetched_at=fetched_at),
         settings=load_worker_settings({"FRESHNESS_MAX_AGE_SECONDS": "21600"}),
@@ -77,6 +77,22 @@ def test_main_scheduler_can_run_bounded_runtime_loop(monkeypatch) -> None:
 
     assert exit_code == 0
     assert captured["max_ticks"] == 2
+
+
+def test_main_work_runtime_queue_once_is_a_cli_entrypoint(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_work_once(*args: object, **kwargs: object) -> RuntimeQueueWorkerResult:
+        del args
+        captured["settings"] = kwargs["settings"]
+        return RuntimeQueueWorkerResult(status="skipped", reason="no_job")
+
+    monkeypatch.setattr("app.main.work_runtime_queue_once", fake_work_once)
+
+    exit_code = main(["--work-runtime-queue", "--once"])
+
+    assert exit_code == 0
+    assert captured["settings"] is not None
 
 
 def test_main_run_official_demo_does_not_persist_by_default(monkeypatch) -> None:
@@ -250,6 +266,86 @@ def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeyp
     )
 
 
+def test_main_aggregate_query_heat_uses_configured_periods(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeQueryHeatAggregationJob:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def aggregate(self, *, periods: tuple[str, ...]) -> tuple[object, ...]:
+            captured["periods"] = periods
+            return (_QueryHeatSummary(period="P7D", buckets_upserted=2),)
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresQueryHeatAggregationJob", FakeQueryHeatAggregationJob)
+
+    exit_code = main(["--aggregate-query-heat", "--query-heat-periods", "P7D,P1D,P7D"])
+
+    assert exit_code == 0
+    assert captured == {
+        "database_url": "postgresql://worker:test@localhost/flood",
+        "periods": ("P7D", "P1D"),
+    }
+
+
+def test_main_aggregate_query_heat_noops_without_database_url(monkeypatch) -> None:
+    def fail_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("query heat aggregation should no-op without a database URL")
+
+    monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("app.main.PostgresQueryHeatAggregationJob", fail_constructor)
+
+    assert main(["--aggregate-query-heat"]) == 0
+
+
+def test_main_refresh_tile_features_uses_layer_and_limit(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeTileCacheWriter:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def refresh_layer_features(self, *, layer_id: str, limit: int | None = None) -> object:
+            captured["layer_id"] = layer_id
+            captured["limit"] = limit
+            return _TileRefreshResult(layer_id=layer_id, refreshed=3)
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresTileCacheWriter", FakeTileCacheWriter)
+
+    exit_code = main(
+        [
+            "--refresh-tile-features",
+            "--tile-layer-id",
+            "flood-potential",
+            "--tile-feature-limit",
+            "25",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "database_url": "postgresql://worker:test@localhost/flood",
+        "layer_id": "flood-potential",
+        "limit": 25,
+    }
+
+
+def test_main_refresh_tile_features_noops_without_database_url(monkeypatch) -> None:
+    def fail_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("tile feature refresh should no-op without a database URL")
+
+    monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr("app.main.PostgresTileCacheWriter", fail_constructor)
+
+    assert main(["--refresh-tile-features"]) == 0
+
+
 class _FakeStagingWriter:
     def __init__(self, *, database_url: str) -> None:
         self.database_url = database_url
@@ -268,3 +364,15 @@ class _FakePromotionWriter:
 class _PromotionResult:
     promoted = 1
     evidence_ids = ("evidence-1",)
+
+
+class _QueryHeatSummary:
+    def __init__(self, *, period: str, buckets_upserted: int) -> None:
+        self.period = period
+        self.buckets_upserted = buckets_upserted
+
+
+class _TileRefreshResult:
+    def __init__(self, *, layer_id: str, refreshed: int) -> None:
+        self.layer_id = layer_id
+        self.refreshed = refreshed

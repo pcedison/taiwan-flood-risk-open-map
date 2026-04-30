@@ -114,6 +114,31 @@ class UserReportCreateResponse(ContractModel):
     status: Literal["pending"]
 
 
+UserReportStatus = Literal["pending", "approved", "rejected", "spam"]
+UserReportModerationStatus = Literal["approved", "rejected", "spam"]
+
+
+class AdminUserReport(ContractModel):
+    report_id: str
+    status: UserReportStatus
+    point: LatLng
+    summary: str
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+class AdminUserReportsResponse(ContractModel):
+    reports: list[AdminUserReport]
+
+
+class UserReportModerationRequest(ContractModel):
+    status: UserReportModerationStatus
+
+
+class UserReportModerationResponse(ContractModel):
+    report: AdminUserReport
+
+
 class RiskAssessRequest(ContractModel):
     point: LatLng
     radius_m: int = Field(default=500, ge=50, le=2000)

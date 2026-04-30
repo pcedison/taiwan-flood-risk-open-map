@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
+from app.adapters.contracts import (
+    AdapterMetadata,
+    AdapterRunResult,
+    NormalizedEvidence,
+    RawSourceItem,
+    SourceFamily,
+)
 from app.config import load_worker_settings
 from app.jobs.queue import (
     NullRuntimeQueue,
@@ -16,6 +23,7 @@ from app.jobs.runtime import (
     enqueue_enabled_runtime_adapter_jobs,
     mark_runtime_adapter_job_failed,
     mark_runtime_adapter_job_succeeded,
+    work_runtime_queue_once,
 )
 from app.scheduler import run_enabled_adapters_loop
 
@@ -206,6 +214,128 @@ def test_runtime_adapter_job_completion_helpers_use_worker_identity() -> None:
     assert queue.failed == [("failed", "job-2", "worker-a", "source timeout", 120)]
 
 
+def test_work_runtime_queue_once_noops_without_database_url() -> None:
+    result = work_runtime_queue_once(settings=load_worker_settings({}))
+
+    assert result.status == "skipped"
+    assert result.reason == "no_database_url"
+
+
+def test_work_runtime_queue_once_noops_when_no_job() -> None:
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=None)
+
+    result = work_runtime_queue_once(settings=settings, queue=queue)
+
+    assert result.status == "skipped"
+    assert result.reason == "no_job"
+    assert queue.completed == []
+    assert queue.failed == []
+
+
+def test_work_runtime_queue_once_runs_adapter_and_marks_succeeded() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_INSTANCE": "worker-a",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "FRESHNESS_MAX_AGE_SECONDS": "21600",
+        }
+    )
+    queue = _RuntimeWorkerQueue(
+        job=_runtime_job(adapter_key="official.cwa.rainfall"),
+    )
+
+    result = work_runtime_queue_once(settings=settings, queue=queue)
+
+    assert result.status == "succeeded"
+    assert result.adapter_key == "official.cwa.rainfall"
+    assert result.summary is not None
+    assert result.summary.status == "succeeded"
+    assert queue.completed == [("succeeded", "job-1", "worker-a")]
+    assert queue.failed == []
+
+
+def test_work_runtime_queue_once_fails_when_completion_row_is_not_updated() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_INSTANCE": "worker-a",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "FRESHNESS_MAX_AGE_SECONDS": "21600",
+        }
+    )
+    queue = _LostCompletionQueue(job=_runtime_job(adapter_key="official.cwa.rainfall"))
+
+    result = work_runtime_queue_once(settings=settings, queue=queue)
+
+    assert result.status == "failed"
+    assert result.adapter_key == "official.cwa.rainfall"
+    assert result.reason == "queue_completion_not_updated"
+    assert result.summary is not None
+    assert result.summary.status == "succeeded"
+    assert queue.completed == [("succeeded", "job-1", "worker-a")]
+    assert queue.failed == []
+
+
+def test_work_runtime_queue_once_marks_unknown_adapter_failed() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_INSTANCE": "worker-a",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
+    )
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key="unknown.adapter"))
+
+    result = work_runtime_queue_once(settings=settings, queue=queue)
+
+    assert result.status == "failed"
+    assert result.adapter_key == "unknown.adapter"
+    assert result.reason == "unknown runtime adapter_key: unknown.adapter"
+    assert queue.completed == []
+    assert queue.failed == [
+        (
+            "failed",
+            "job-1",
+            "worker-a",
+            "unknown runtime adapter_key: unknown.adapter",
+            60,
+        )
+    ]
+
+
+def test_work_runtime_queue_once_marks_adapter_exception_failed() -> None:
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key="official.cwa.rainfall"))
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        adapter_by_key={"official.cwa.rainfall": _FailingAdapter()},
+    )
+
+    assert result.status == "failed"
+    assert result.adapter_key == "official.cwa.rainfall"
+    assert result.summary is not None
+    assert result.summary.status == "failed"
+    assert result.reason == "source timeout"
+    assert queue.completed == []
+    assert queue.failed == [("failed", "job-1", "worker-a", "source timeout", 60)]
+
+
+def test_work_runtime_queue_once_noops_when_database_unavailable() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood",
+            "WORKER_INSTANCE": "worker-a",
+        }
+    )
+    queue = _UnavailableDequeueQueue()
+
+    result = work_runtime_queue_once(settings=settings, queue=queue)
+
+    assert result.status == "skipped"
+    assert result.reason == "queue_unavailable"
+
+
 def test_scheduler_loop_falls_back_when_database_lease_is_unavailable(monkeypatch) -> None:
     settings = load_worker_settings(
         {
@@ -328,6 +458,90 @@ class _CompletingQueue(NullRuntimeQueue):
     ) -> bool:
         self.failed.append(("failed", job_id, worker_id, error, retry_delay_seconds))
         return True
+
+
+class _RuntimeWorkerQueue(NullRuntimeQueue):
+    def __init__(self, *, job: RuntimeQueueJob | None) -> None:
+        self.job = job
+        self.dequeue_args: tuple[str, str, int] | None = None
+        self.completed: list[tuple[str, str, str]] = []
+        self.failed: list[tuple[str, str, str, str, int]] = []
+
+    def dequeue_adapter_job(
+        self,
+        *,
+        queue_name: str,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> RuntimeQueueJob | None:
+        self.dequeue_args = (queue_name, worker_id, lease_seconds)
+        job = self.job
+        self.job = None
+        return job
+
+    def mark_job_succeeded(self, *, job_id: str, worker_id: str) -> bool:
+        self.completed.append(("succeeded", job_id, worker_id))
+        return True
+
+    def mark_job_failed(
+        self,
+        *,
+        job_id: str,
+        worker_id: str,
+        error: str,
+        retry_delay_seconds: int = 60,
+    ) -> bool:
+        self.failed.append(("failed", job_id, worker_id, error, retry_delay_seconds))
+        return True
+
+
+class _LostCompletionQueue(_RuntimeWorkerQueue):
+    def mark_job_succeeded(self, *, job_id: str, worker_id: str) -> bool:
+        self.completed.append(("succeeded", job_id, worker_id))
+        return False
+
+
+class _UnavailableDequeueQueue(NullRuntimeQueue):
+    def dequeue_adapter_job(
+        self,
+        *,
+        queue_name: str,
+        worker_id: str,
+        lease_seconds: int,
+    ) -> RuntimeQueueJob | None:
+        del queue_name, worker_id, lease_seconds
+        raise RuntimeQueueUnavailable("database unavailable")
+
+
+class _FailingAdapter:
+    metadata = AdapterMetadata(
+        key="official.cwa.rainfall",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=True,
+        display_name="Failing rainfall adapter",
+    )
+
+    def fetch(self) -> Iterable[RawSourceItem]:
+        return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
+    def run(self) -> AdapterRunResult:
+        raise RuntimeError("source timeout")
+
+
+def _runtime_job(*, adapter_key: str | None) -> RuntimeQueueJob:
+    return RuntimeQueueJob(
+        id="job-1",
+        queue_name="runtime-adapters",
+        job_key="runtime.adapter.ingest",
+        adapter_key=adapter_key,
+        payload={"adapter_key": adapter_key} if adapter_key is not None else {},
+        attempts=1,
+        max_attempts=3,
+    )
 
 
 class _UnavailableQueue:

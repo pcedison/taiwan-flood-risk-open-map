@@ -23,6 +23,7 @@ Desktop.ini
 coverage/
 playwright-report/
 test-results/
+.runtime-smoke/
 
 # Python
 __pycache__/

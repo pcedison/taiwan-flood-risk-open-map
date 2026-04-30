@@ -552,6 +552,131 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/reports/pending:
+    get:
+      tags:
+        - Admin
+      operationId: listPendingAdminReports
+      summary: List pending user reports for moderation.
+      description: >
+        Lists default-redacted, pending user report submissions for admin
+        moderation. Responses expose the submitted point and summary needed for
+        review, but do not include media references, contact details, account
+        identifiers, IP addresses, or other reporter personal data.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        "200":
+          description: Pending user reports.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserReportsResponse"
+              examples:
+                pending_reports:
+                  value:
+                    reports:
+                      - report_id: "0d51d545-dc6a-4e4b-8f8e-0e42d454d050"
+                        status: pending
+                        point:
+                          lat: 25.033
+                          lng: 121.5654
+                        summary: "Water at ankle depth."
+                        created_at: "2026-04-29T12:00:00Z"
+                        reviewed_at: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: User report moderation storage is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/reports/{report_id}/moderation:
+    patch:
+      tags:
+        - Admin
+      operationId: moderateAdminReport
+      summary: Mark a user report as approved, rejected, or spam.
+      description: >
+        Updates moderation status and records an audit log entry with the admin
+        actor reference and previous/new statuses. The operation does not alter
+        media references or add reporter personal data.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserReportModerationRequest"
+            examples:
+              approve:
+                value:
+                  status: approved
+      responses:
+        "200":
+          description: Moderation status was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserReportModerationResponse"
+              examples:
+                approved:
+                  value:
+                    report:
+                      report_id: "0d51d545-dc6a-4e4b-8f8e-0e42d454d050"
+                      status: approved
+                      point:
+                        lat: 25.033
+                        lng: 121.5654
+                      summary: "Water at ankle depth."
+                      created_at: "2026-04-29T12:00:00Z"
+                      reviewed_at: "2026-04-29T12:05:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: User report moderation storage is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     AdminBearerAuth:
@@ -769,6 +894,79 @@ components:
           type: string
           enum:
             - pending
+      additionalProperties: false
+
+    UserReportStatus:
+      type: string
+      enum:
+        - pending
+        - approved
+        - rejected
+        - spam
+
+    UserReportModerationStatus:
+      type: string
+      enum:
+        - approved
+        - rejected
+        - spam
+
+    AdminUserReport:
+      type: object
+      required:
+        - report_id
+        - status
+        - point
+        - summary
+        - created_at
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/UserReportStatus"
+        point:
+          $ref: "#/components/schemas/LatLng"
+        summary:
+          type: string
+          description: Submitted report summary for moderation review.
+        created_at:
+          type: string
+          format: date-time
+        reviewed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      additionalProperties: false
+
+    AdminUserReportsResponse:
+      type: object
+      required:
+        - reports
+      properties:
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserReport"
+      additionalProperties: false
+
+    UserReportModerationRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: "#/components/schemas/UserReportModerationStatus"
+      additionalProperties: false
+
+    UserReportModerationResponse:
+      type: object
+      required:
+        - report
+      properties:
+        report:
+          $ref: "#/components/schemas/AdminUserReport"
       additionalProperties: false
 
     PlaceCandidate:
