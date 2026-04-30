@@ -49,6 +49,14 @@ class RuntimeQueueDeadLetterJob:
     dedupe_key: str | None
 
 
+@dataclass(frozen=True)
+class RuntimeQueueRequeueResult:
+    job_id: str
+    requeued: bool
+    reset_attempts: bool
+    attempts: int | None = None
+
+
 class NullRuntimeQueue:
     def acquire_scheduler_lease(
         self,
@@ -111,6 +119,20 @@ class NullRuntimeQueue:
     ) -> tuple[RuntimeQueueDeadLetterJob, ...]:
         del queue_name, limit
         return ()
+
+    def requeue_failed_job(
+        self,
+        *,
+        job_id: str,
+        reset_attempts: bool = True,
+        run_after: datetime | None = None,
+    ) -> RuntimeQueueRequeueResult:
+        del run_after
+        return RuntimeQueueRequeueResult(
+            job_id=job_id,
+            requeued=False,
+            reset_attempts=reset_attempts,
+        )
 
 
 class PostgresRuntimeQueue:
@@ -468,6 +490,58 @@ class PostgresRuntimeQueue:
                 dedupe_key=str(row[9]) if row[9] is not None else None,
             )
             for row in rows
+        )
+
+    def requeue_failed_job(
+        self,
+        *,
+        job_id: str,
+        reset_attempts: bool = True,
+        run_after: datetime | None = None,
+    ) -> RuntimeQueueRequeueResult:
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        UPDATE worker_runtime_jobs
+                        SET
+                            status = 'queued',
+                            attempts = CASE
+                                WHEN %s THEN 0
+                                ELSE attempts
+                            END,
+                            run_after = COALESCE(%s::timestamptz, now()),
+                            leased_by = NULL,
+                            lease_expires_at = NULL,
+                            final_failed_at = NULL,
+                            finished_at = NULL,
+                            last_error = NULL,
+                            updated_at = now()
+                        WHERE
+                            id = %s
+                            AND status = 'failed'
+                        RETURNING id, attempts
+                        """,
+                        (reset_attempts, run_after, job_id),
+                    )
+                    row = cursor.fetchone()
+                connection.commit()
+        except Exception as exc:
+            raise RuntimeQueueUnavailable(str(exc)) from exc
+
+        if row is None:
+            return RuntimeQueueRequeueResult(
+                job_id=job_id,
+                requeued=False,
+                reset_attempts=reset_attempts,
+            )
+
+        return RuntimeQueueRequeueResult(
+            job_id=str(row[0]),
+            requeued=True,
+            reset_attempts=reset_attempts,
+            attempts=int(row[1]),
         )
 
     def _connect(self) -> Any:

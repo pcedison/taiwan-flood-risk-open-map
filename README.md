@@ -38,10 +38,13 @@ hardening pass across docs/status, Web evidence UX, runtime smoke, and
 worker/API ingestion wiring. Runtime smoke now covers the base API/Web path,
 query heat, durable queue smoke with active-job dedupe and final-failed
 visibility, default-disabled and enabled-path report smoke, seeded MVT
-endpoints, query heat materialization, and a tile feature/cache smoke path.
-Public report product UX, production source-client rollout, production
-queue/DLQ operations, tile cache hosting/expiry, and governance remain
-next-phase work.
+endpoints, query heat materialization, and a tile feature/cache smoke path. The
+worker official-adapter path is partial: `--run-official-demo --persist` can
+write staging, ingestion-run, and evidence rows from demo payloads, and CWA
+rainfall has an explicit live-client gate. WRA water level, flood-potential
+runtime clients, reviewed credentials, and cadence are still pending. Public
+report product UX, production source-client rollout, production queue/DLQ
+operations, tile cache hosting/expiry, and governance remain next-phase work.
 
 Current placeholder boundaries:
 
@@ -53,6 +56,11 @@ Current placeholder boundaries:
   fixture jobs, active-job dedupe, and final-failed visibility, but production
   source clients, DLQ/replay policy, and deployed singleton scheduling are
   still pending.
+- Official data currently has two different paths that should not be conflated:
+  the API realtime bridge can fetch CWA/WRA observations for risk responses,
+  while the worker official-adapter path has demo persistence plus a gated CWA
+  rainfall live client. WRA water level and flood-potential runtime clients are
+  not yet real-source worker paths.
 - PTT, Dcard, and user report adapters are phase-delayed/pending
   implementation and must remain disabled until the required legal, privacy, and
   governance work lands.
@@ -92,7 +100,8 @@ not production readiness.
 | Area | Current status | Production boundary |
 |---|---|---|
 | Runtime smoke | Completed for local Compose API/Web, `/metrics`, risk query, reports gates, seeded MVT, query heat, queue smoke, and tile feature/cache smoke. | Passing local smoke does not prove hosted source credentials, scheduler cadence, alert routing, TLS, persistent storage, or public abuse controls. |
-| Worker queue | Partially complete. Postgres queue tables, enqueue/dequeue CLIs, row leases, active-job `dedupe_key`, retry-to-`failed`, `final_failed_at`, and local fixture-backed smoke exist. | Dedupe is scoped to active queue/job/adapter rows. There is no dedicated DLQ table, replay command, or poison-job routing policy; exhausted jobs remain `failed` in `worker_runtime_jobs`. Real source success/retry/failure must still be proven. |
+| Worker queue | Partially complete. Postgres queue tables, enqueue/dequeue CLIs, row leases, active-job `dedupe_key`, retry-to-`failed`, `final_failed_at`, list/requeue commands, and local fixture-backed smoke exist. | Dedupe is scoped to active queue/job/adapter rows. There is no dedicated DLQ table, poison-job routing policy, alert ownership, or accepted production replay procedure; exhausted jobs remain `failed` in `worker_runtime_jobs` until explicitly requeued. Real source success/retry/failure must still be proven. |
+| Official ingestion paths | Partially complete. The API has a realtime official bridge for CWA/WRA risk evidence; the worker has fixture parsers, `--run-official-demo --persist` for staging/run/evidence persistence, and a gated CWA rainfall live client. | The API bridge is not auditable worker ingestion. CWA worker live mode is explicit opt-in; WRA water level and flood-potential live worker clients, reviewed credentials, raw snapshot storage policy, and cadence are pending. |
 | Scheduler and maintenance cadence | Partially complete. Bounded scheduler, queue producer, and maintenance commands exist, and queue/maintenance loops can acquire DB-backed leases. | Production scheduler deployment, singleton operating model, per-source cadence, maintenance windows, and ownership/runbook for retries are pending. |
 | Monitoring | Partially complete. Local `monitoring` profile, Prometheus rules, Grafana dashboard JSON, API scrape, freshness script, and opt-in worker/scheduler textfile metrics exist. | Hosted Prometheus/Grafana or equivalent still needs real service DNS, credentials, TLS/auth, persistent storage, Alertmanager/pager routing, and scheduled freshness jobs. |
 | Public reports and public discussion sources | Groundwork only. Reports are default-disabled; Phase 4/5 gates are documented. | Abuse governance, moderation UX, deletion/retention flows, upload handling, legal/source review, and forum/public source launch approval are pending. |
@@ -114,6 +123,22 @@ docker compose run --rm `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
   worker sh -c "pip install -e . && python -m app.main --work-runtime-queue --once"
 
+# Persist the official demo path to staging, ingestion runs, and evidence.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --run-official-demo --persist"
+
+# Run the gated CWA rainfall live adapter once.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall `
+  -e SOURCE_CWA_ENABLED=true `
+  -e SOURCE_CWA_API_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
+
+# Inspect exhausted jobs with dead-letter-equivalent visibility.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
+
+# Requeue one failed job by id; use only after confirming payload/idempotency.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
+
 # Run one lease-guarded scheduler producer tick.
 docker compose run --rm `
   -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
@@ -132,13 +157,16 @@ python infra/scripts/validate_monitoring_assets.py
 
 Production pending checklist:
 
-- Replace fixture-backed runtime adapters with reviewed real source clients and
-  real source credentials.
+- Harden the gated CWA rainfall worker client and add reviewed WRA water-level
+  and flood-potential runtime clients with real source credentials.
+- Decide whether the current API realtime official bridge remains a temporary
+  direct-fetch bridge or is replaced by persisted worker-ingested evidence for
+  public risk responses.
 - Deploy a singleton scheduler and documented maintenance cadence for
   ingestion, query heat materialization, tile refresh, and retention.
-- Harden the current queue active-job dedupe/final-failed visibility into an
-  accepted DLQ/replay, poison-job, alerting, and operational ownership policy
-  before scaling workers.
+- Harden the current queue active-job dedupe, final-failed visibility, and
+  row-level requeue command into an accepted DLQ/replay, poison-job, alerting,
+  and operational ownership policy before scaling workers.
 - Add hosted alert routing, TLS/auth, durable Prometheus/Grafana storage, and
   scheduled freshness checks.
 - Finish tile cache generation, expiry, invalidation, and hosting strategy.

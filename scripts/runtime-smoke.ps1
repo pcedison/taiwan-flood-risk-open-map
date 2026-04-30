@@ -6,6 +6,7 @@ param(
     [switch]$StopOnExit,
     [switch]$SkipExtendedSmoke,
     [switch]$SkipQueueSmoke,
+    [switch]$SkipAdapterFixtureSmoke,
     [switch]$SkipReportsEnabledSmoke,
     [switch]$Help
 )
@@ -31,7 +32,10 @@ Base checks:
 Extended checks are enabled by default:
   - Queue live smoke: verify idempotent enqueue/dedupe for the same adapter
     producer, consume one durable worker_runtime_jobs item, and verify final
-    failed/dead-letter-equivalent visibility for an exhausted queue job.
+    failed/dead-letter-equivalent list and requeue/dequeue visibility for an
+    exhausted queue job.
+  - Official adapter fixture dry run: run --run-official-demo in a one-off
+    worker container without external API credentials.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
   - MVT smoke: GET seeded query-heat and flood-potential .mvt endpoints.
@@ -50,6 +54,7 @@ Options:
   -StopOnExit                   Stop runtime services after the smoke.
   -SkipExtendedSmoke            Run only base API/Web smoke.
   -SkipQueueSmoke               Skip only the durable queue live smoke.
+  -SkipAdapterFixtureSmoke      Skip only the official adapter fixture dry run.
   -SkipReportsEnabledSmoke      Skip only the reports enabled-path smoke.
   -Help                         Print this help and exit without touching Docker.
 "@
@@ -730,6 +735,37 @@ try:
             "expected exhausted failed job to be visible through list_dead_letter_jobs"
         )
 
+    requeue_result = queue.requeue_failed_job(job_id=failed_job_id)
+    if not requeue_result.requeued:
+        raise SystemExit(
+            "expected exhausted failed job to be requeued through PostgresRuntimeQueue"
+        )
+    if requeue_result.attempts != 0:
+        raise SystemExit(
+            "expected requeue helper to reset attempts, "
+            f"got attempts={requeue_result.attempts}"
+        )
+
+    dead_letters_after_requeue = queue.list_dead_letter_jobs(queue_name=SMOKE_QUEUE_NAME, limit=5)
+    if any(job.id == failed_job_id for job in dead_letters_after_requeue):
+        raise SystemExit("expected requeued job to disappear from list_dead_letter_jobs")
+
+    requeued_job = queue.dequeue_adapter_job(
+        queue_name=SMOKE_QUEUE_NAME,
+        worker_id="runtime-smoke-requeue-consumer",
+        lease_seconds=settings.runtime_job_lease_seconds,
+    )
+    if requeued_job is None or requeued_job.id != failed_job_id:
+        raise SystemExit(
+            "expected requeued failed job to be available through live dequeue path, "
+            f"got {requeued_job!r}"
+        )
+    if requeued_job.attempts != 1:
+        raise SystemExit(
+            "expected requeued job attempts to reset before dequeue, "
+            f"got attempts={requeued_job.attempts}"
+        )
+
     print(
         "queue_smoke=ok "
         f"dedupe_active_count={active_count} "
@@ -737,7 +773,8 @@ try:
         f"adapter_key={result.adapter_key} "
         f"failed_job_id={failed_job_id} "
         f"failed_status={status} "
-        "dead_letter_visible=true"
+        "dead_letter_visible=true "
+        "dead_letter_requeued=true"
     )
 finally:
     cleanup(settings.database_url)
@@ -758,6 +795,20 @@ finally:
         Invoke-BestEffortPostgresSql -Sql $queueSmokeCleanupSql
         $script:RuntimeSmokeCleanupSql = @($script:RuntimeSmokeCleanupSql | Where-Object { $_ -ne $queueSmokeCleanupSql })
     }
+}
+
+function Invoke-AdapterFixtureDryRunSmoke {
+    Invoke-ComposeRun `
+        -Description "Running official adapter fixture dry-run smoke" `
+        -Service "worker" `
+        -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --run-official-demo" `
+        -Environment @(
+            "WORKER_RUNTIME_FIXTURES_ENABLED=true",
+            "WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.wra.water_level,official.flood_potential.geojson",
+            "FRESHNESS_MAX_AGE_SECONDS=21600",
+            "WORKER_INSTANCE=runtime-smoke-adapter-fixture"
+        )
+    Write-Host "Official adapter fixture dry-run smoke: --run-official-demo completed without external API credentials."
 }
 
 function Invoke-SchedulerBoundedTickSmoke {
@@ -1068,6 +1119,13 @@ try {
     if (-not $SkipExtendedSmoke) {
         Invoke-ReportsDisabledSmoke -ApiBaseUrl $ApiBaseUrl
         Invoke-MvtSmoke -ApiBaseUrl $ApiBaseUrl
+
+        if ($SkipAdapterFixtureSmoke) {
+            Write-Host "Official adapter fixture dry-run smoke skipped by -SkipAdapterFixtureSmoke."
+        }
+        else {
+            Invoke-AdapterFixtureDryRunSmoke
+        }
 
         if ($SkipQueueSmoke) {
             Write-Host "Queue live smoke skipped by -SkipQueueSmoke."

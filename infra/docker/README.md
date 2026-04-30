@@ -22,11 +22,16 @@ Completed for local Compose:
 Partially complete:
 
 - Worker queue persistence uses Postgres, row locks, leases, active-job
-  `dedupe_key`, retries, and `final_failed_at` visibility, but there is no
-  dedicated DLQ table, replay command, or poison-job routing policy.
+  `dedupe_key`, retries, `final_failed_at` visibility, and row-level
+  list/requeue commands, but there is no dedicated DLQ table, poison-job
+  routing policy, alert ownership, or accepted production replay procedure.
 - The scheduler service defaults to `python -m app.scheduler`, which is still a
   placeholder/sample loop unless flags such as `--enqueue-runtime-jobs` or
   `--run-enabled-adapters` or `--maintenance` are supplied.
+- The worker container can run `--run-official-demo --persist` against the
+  Compose database, and can run the CWA rainfall live adapter when
+  `SOURCE_CWA_API_ENABLED=true` is explicitly supplied. WRA water-level and
+  flood-potential worker live clients are not deployed yet.
 - Maintenance jobs such as query heat materialization and tile feature/cache
   cleanup have manual and bounded scheduler commands, not a deployed production
   cadence.
@@ -35,7 +40,10 @@ Partially complete:
 
 Pending before production:
 
-- Real source credentials and reviewed source-client rollout.
+- Harden the gated CWA rainfall source-client path and add reviewed WRA
+  water-level and flood-potential worker source clients.
+- A decision on how the API realtime official bridge is replaced or reconciled
+  with persisted worker-ingested official evidence.
 - Singleton scheduler deployment and documented ingestion/maintenance cadence.
 - Alertmanager or equivalent routing, TLS/auth, persistent monitoring storage,
   and backup/retention policy.
@@ -64,6 +72,20 @@ docker compose run --rm `
   -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
   worker sh -c "pip install -e . && python -m app.main --work-runtime-queue --once"
+
+# Official demo persistence path.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --run-official-demo --persist"
+
+# Explicit CWA rainfall live adapter path.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall `
+  -e SOURCE_CWA_ENABLED=true `
+  -e SOURCE_CWA_API_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
+
+# Inspect final-failed queue rows and requeue one by id after review.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
 
 # Lease-guarded scheduler producer tick.
 docker compose run --rm `

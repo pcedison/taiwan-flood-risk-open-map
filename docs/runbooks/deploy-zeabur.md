@@ -176,6 +176,7 @@ Adapter and source variables:
 | Variable | Service | Notes |
 |---|---|---|
 | `SOURCE_CWA_ENABLED` | worker, scheduler | Optional override for `official.cwa.rainfall`; unset defaults to enabled, `false` disables it |
+| `SOURCE_CWA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker CWA rainfall runtime adapter; keep `false` until credentials, cadence, and operator ownership are ready |
 | `SOURCE_WRA_ENABLED` | worker, scheduler | Optional override for `official.wra.water_level`; unset defaults to enabled, `false` disables it |
 | `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Optional override for `official.flood_potential.geojson`; unset defaults to enabled, `false` disables it |
 | `SOURCE_NEWS_ENABLED` | worker, scheduler | Enables reviewed L2 news/public-web adapters only; default `false` |
@@ -184,6 +185,9 @@ Adapter and source variables:
 | `SOURCE_DCARD_ENABLED` | worker, scheduler | Source-level Dcard gate; also requires `SOURCE_FORUM_ENABLED=true` and terms acknowledgement |
 | `SOURCE_TERMS_REVIEW_ACK` | worker, scheduler | Required to enable adapters marked `terms_review_required`, including GDELT backfill and future forum sources |
 | `SOURCE_SAMPLE_DATA_ENABLED` | worker, scheduler | Enables sample fixture adapters for demos/tests only; keep `false` outside local experiments |
+| `CWA_API_AUTHORIZATION` | api, worker | CWA open-data token used by the API realtime bridge and, when `SOURCE_CWA_API_ENABLED=true`, by the worker CWA rainfall live adapter |
+| `CWA_API_URL` | worker | Optional override for the worker CWA rainfall endpoint; leave blank for the default CWA O-A0002-001 datastore |
+| `CWA_API_TIMEOUT_SECONDS` | worker | Worker CWA rainfall request timeout; default `8` seconds |
 
 Future or phase-specific variables:
 
@@ -191,7 +195,6 @@ Future or phase-specific variables:
 |---|---|---|
 | `SECRET_KEY` | api | Future auth/session secret; not loaded by the current skeleton FastAPI settings |
 | `SCORE_VERSION` | api, worker | Future risk scoring release variable; initial intended value `risk-v0` |
-| `CWA_API_KEY` | worker | Future official adapter credential, required only when that adapter reads it |
 | `WRA_SOURCE_MODE` | worker | Future WRA adapter mode selector, required only when the adapter supports multiple modes |
 | `TGOS_API_KEY` | api, worker | Future geocoding fallback credential |
 | `TILE_BASE_URL` | web, api | Future self-hosted tile endpoint variable; add to web/API config when map runtime consumes it |

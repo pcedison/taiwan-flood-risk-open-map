@@ -2,8 +2,16 @@
 
 This runbook verifies the local Docker Compose runtime without deleting Docker
 volumes. It now covers the Phase 2 runtime-demo readiness path: API/Web, risk
-query, query heat, durable worker queue, user reports gates, MVT tiles, and the
-documented query-heat materialization plus tile feature/cache smoke path.
+query, query heat, durable worker queue with DLQ-equivalent list/requeue
+visibility, official adapter fixture dry-run, user reports gates, MVT tiles,
+and the documented query-heat materialization plus tile feature/cache smoke path.
+
+The smoke is intentionally local. A passing run means the Compose services,
+migrations, fixture-backed worker paths, queue primitives, and monitoring
+entrypoints are runnable together. It does not prove production source
+credentials, real upstream official worker ingestion, hosted monitoring,
+scheduler cadence, DLQ/replay operations, tile hosting, or public report
+launch readiness.
 
 ## Requirements
 
@@ -35,7 +43,10 @@ The script performs these checks:
 10. Verifies seeded MVT endpoints:
     - `/v1/tiles/query-heat/8/215/107.mvt`
     - `/v1/tiles/flood-potential/8/215/107.mvt`
-11. Runs a queue live smoke in a one-off `worker` container:
+11. Runs `python -m app.main --run-official-demo` in a one-off `worker`
+    container to prove the safe official adapter fixture parse/dry-run path
+    without external API credentials or persistence.
+12. Runs a queue live smoke in a one-off `worker` container:
     - enables fixture runtime adapters with
       `WORKER_RUNTIME_FIXTURES_ENABLED=true`
     - verifies active-job producer dedupe for the same adapter
@@ -43,19 +54,22 @@ The script performs these checks:
     - marks the consumed job `succeeded`
     - verifies an exhausted unknown-adapter job remains visible as
       `failed`/`final_failed_at`
+    - verifies that `list_dead_letter_jobs` can see the exhausted row
+    - requeues that row through `PostgresRuntimeQueue.requeue_failed_job`
+      against the live DB table and verifies it can be dequeued again
     - deletes the smoke queue rows
-12. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
+13. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
     path with `--maintenance --scheduler --max-ticks 1`.
-13. Runs a reports enabled-path smoke in a one-off `api` container with
+14. Runs a reports enabled-path smoke in a one-off `api` container with
     `USER_REPORTS_ENABLED=true`; this inserts a minimized pending row in
     `user_reports`, verifies moderation/audit rows, then deletes the smoke rows
-14. Runs a query heat and tile cache job smoke:
+15. Runs a query heat and tile cache job smoke:
     - materializes `P1D` and `P7D` query heat buckets
     - refreshes `flood-potential` map features from accepted evidence
     - writes one smoke tile cache row
     - verifies the API serves the same cached tile payload bytes
     - deletes synthetic tile/evidence/cache rows
-15. Polls the web runtime until it responds at `http://localhost:3000`
+16. Polls the web runtime until it responds at `http://localhost:3000`
 
 By default, services are left running for debugging or follow-up manual testing. To stop the runtime containers after the smoke finishes, without removing volumes:
 
@@ -86,6 +100,7 @@ Skip individual extended checks:
 
 ```powershell
 .\scripts\runtime-smoke.ps1 -SkipQueueSmoke
+.\scripts\runtime-smoke.ps1 -SkipAdapterFixtureSmoke
 .\scripts\runtime-smoke.ps1 -SkipReportsEnabledSmoke
 ```
 
@@ -101,7 +116,8 @@ Query heat smoke: period=P7D, query_count_bucket=..., unique_approx_count_bucket
 Reports default-disabled smoke: HTTP 404 feature_disabled
 MVT smoke: layer=query-heat, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 MVT smoke: layer=flood-potential, HTTP 200, content-type=application/vnd.mapbox-vector-tile
-queue_smoke=ok dedupe_active_count=1 consumed_job_id=... adapter_key=official.wra.water_level failed_job_id=... failed_status=failed
+Official adapter fixture dry-run smoke: --run-official-demo completed without external API credentials.
+queue_smoke=ok dedupe_active_count=1 consumed_job_id=... adapter_key=official.wra.water_level failed_job_id=... failed_status=failed dead_letter_visible=true dead_letter_requeued=true
 Maintenance scheduler bounded tick smoke: --maintenance --scheduler --max-ticks 1 completed.
 reports_enabled_smoke=ok report_id=... status=pending
 Query heat/tile cache job smoke: aggregation, feature refresh, cache write, API cache read, and cleanup passed.
@@ -113,10 +129,20 @@ Runtime smoke passed.
 
 These are the underlying commands to run a focused check while debugging.
 
-Queue producer and worker smoke. Standalone CLIs exist for both enqueue and
-consume. The full smoke script still uses a small Python helper so it can
-capture the generated job id and delete the synthetic queue row after the
-check.
+Official adapter fixture dry-run. This exercises the current safe fixture parser
+path and does not persist rows or call external official APIs:
+
+```powershell
+docker compose run --rm `
+  -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --run-official-demo"
+```
+
+Queue producer and worker smoke. Standalone CLIs exist for enqueue, consume,
+dead-letter listing, and requeue. The full smoke script still uses a small
+Python helper so it can capture the generated job id, verify DLQ-equivalent
+list/requeue/dequeue against the live `worker_runtime_jobs` table, and delete
+the synthetic queue row after the check.
 
 Producer:
 
@@ -146,7 +172,29 @@ docker compose run --rm `
 Use `.\scripts\runtime-smoke.ps1` for the full cleanup-aware queue check. The
 script uses smoke-isolated queue names so active dedupe and final-failed
 visibility can be verified without leaving durable jobs behind on successful
-runs.
+runs. The requeue check only requeues a synthetic smoke row; no accepted
+production replay policy or dedicated DLQ table exists yet.
+
+Inspect final-failed queue rows:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
+```
+
+Requeue one failed row after confirming payload/idempotency and incident
+context:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
+```
+
+Official demo persistence path. This proves fixture/demo official adapters can
+write staging, ingestion-run, promotion, and evidence rows; it does not fetch
+real CWA/WRA upstream data from the worker runtime:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --run-official-demo --persist"
+```
 
 Reports default-disabled live HTTP check:
 
@@ -219,6 +267,21 @@ print(result)
 PY"
 ```
 
+## Pending Checklist
+
+- Harden the gated CWA rainfall worker client, add WRA/flood-potential worker
+  source clients, credentials, and non-fixture runtime queue smoke before
+  claiming production ingestion readiness.
+- Promote the row-level list/requeue commands into an accepted DLQ/poison-job
+  policy; current smoke only proves synthetic final-failed
+  list/requeue/dequeue visibility.
+- Deploy a singleton scheduler cadence for ingestion, query heat, tile refresh,
+  retention, and freshness export.
+- Wire hosted monitoring with alert routing, TLS/auth, and persistent storage.
+- Finish production tile generation, expiry, invalidation, and hosting.
+- Keep public reports and public discussion sources disabled until governance
+  gates are accepted.
+
 ## Common Failures
 
 - `docker compose config --quiet` fails: the Compose file or environment interpolation is invalid.
@@ -228,6 +291,9 @@ PY"
 - Migration fails: inspect the migration output and confirm Postgres is healthy.
 - Queue smoke fails: inspect `docker compose logs --tail=80 worker` and confirm
   migration `0006_worker_runtime_queue.sql` has been applied.
+- Official adapter fixture dry-run fails: inspect the one-off worker output.
+  This path should use in-repo fixtures only and should not require external
+  API credentials.
 - Reports enabled smoke fails: inspect the one-off API container output and
   confirm migration tables `user_reports` and `audit_logs` exist.
 - MVT smoke fails: inspect `docker compose logs --tail=80 api` and confirm

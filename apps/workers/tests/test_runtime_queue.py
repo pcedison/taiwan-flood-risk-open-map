@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from app.adapters.contracts import (
     AdapterMetadata,
@@ -11,15 +15,18 @@ from app.adapters.contracts import (
     RawSourceItem,
     SourceFamily,
 )
+from app.adapters.cwa import CwaRainfallConfigurationError
 from app.config import load_worker_settings
 from app.jobs.queue import (
     NullRuntimeQueue,
     PostgresRuntimeQueue,
     RuntimeQueueEnqueueResult,
     RuntimeQueueJob,
+    RuntimeQueueRequeueResult,
     RuntimeQueueUnavailable,
 )
 from app.jobs.runtime import (
+    build_runtime_adapters,
     dequeue_runtime_adapter_job,
     enqueue_enabled_runtime_adapter_jobs,
     mark_runtime_adapter_job_failed,
@@ -28,6 +35,9 @@ from app.jobs.runtime import (
     work_runtime_queue_once,
 )
 from app.scheduler import enqueue_enabled_adapters_loop, run_enabled_adapters_loop
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def test_scheduler_lease_acquire_release_sql_supports_expired_lease() -> None:
@@ -233,6 +243,66 @@ def test_runtime_queue_lists_final_failed_jobs_for_dead_letter_visibility() -> N
     assert params == ("runtime-adapters", "runtime-adapters", 25)
 
 
+def test_runtime_queue_requeues_failed_job_resetting_attempts_by_default() -> None:
+    connection = _FakeConnection(fetch_rows=[("job-1", 0)])
+    queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
+
+    result = queue.requeue_failed_job(job_id="job-1")
+
+    assert result == RuntimeQueueRequeueResult(
+        job_id="job-1",
+        requeued=True,
+        reset_attempts=True,
+        attempts=0,
+    )
+    sql, params = connection.cursor_instance.executions[0]
+    assert "UPDATE worker_runtime_jobs" in sql
+    assert "status = 'queued'" in sql
+    assert "attempts = CASE" in sql
+    assert "WHEN %s THEN 0" in sql
+    assert "run_after = COALESCE(%s::timestamptz, now())" in sql
+    assert "leased_by = NULL" in sql
+    assert "lease_expires_at = NULL" in sql
+    assert "final_failed_at = NULL" in sql
+    assert "finished_at = NULL" in sql
+    assert "last_error = NULL" in sql
+    assert "AND status = 'failed'" in sql
+    assert params == (True, None, "job-1")
+
+
+def test_runtime_queue_requeues_failed_job_can_keep_attempts() -> None:
+    run_after = datetime(2026, 4, 30, 9, 0, tzinfo=UTC)
+    connection = _FakeConnection(fetch_rows=[("job-1", 3)])
+    queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
+
+    result = queue.requeue_failed_job(
+        job_id="job-1",
+        reset_attempts=False,
+        run_after=run_after,
+    )
+
+    assert result == RuntimeQueueRequeueResult(
+        job_id="job-1",
+        requeued=True,
+        reset_attempts=False,
+        attempts=3,
+    )
+    _, params = connection.cursor_instance.executions[0]
+    assert params == (False, run_after, "job-1")
+
+
+def test_runtime_queue_requeue_reports_not_updated_for_non_failed_job() -> None:
+    queue = PostgresRuntimeQueue(connection_factory=lambda: _FakeConnection(fetch_rows=[None]))
+
+    result = queue.requeue_failed_job(job_id="job-running")
+
+    assert result == RuntimeQueueRequeueResult(
+        job_id="job-running",
+        requeued=False,
+        reset_attempts=True,
+    )
+
+
 def test_runtime_queue_unavailable_raises_for_db_errors() -> None:
     queue = PostgresRuntimeQueue(connection_factory=lambda: _BrokenConnection())
 
@@ -254,6 +324,82 @@ def test_enqueue_enabled_runtime_adapter_jobs_noops_without_database_url() -> No
     )
 
     assert enqueue_enabled_runtime_adapter_jobs(settings) == ()
+
+
+def test_build_runtime_adapters_noops_without_fixture_or_cwa_api_gate() -> None:
+    settings = load_worker_settings(
+        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall"}
+    )
+
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_build_runtime_adapters_respects_cwa_source_gate_even_with_api_gate() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "SOURCE_CWA_ENABLED": "false",
+            "SOURCE_CWA_API_ENABLED": "true",
+            "CWA_API_AUTHORIZATION": "test-token",
+        }
+    )
+
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_build_runtime_adapters_constructs_cwa_api_adapter_with_configured_client() -> None:
+    captured: dict[str, object] = {}
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        captured["url"] = url
+        captured["timeout_seconds"] = timeout_seconds
+        return _load_cwa_api_payload()
+
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "SOURCE_CWA_API_ENABLED": "true",
+            "CWA_API_AUTHORIZATION": "test-token",
+            "CWA_API_URL": "https://example.test/cwa/rainfall",
+            "CWA_API_TIMEOUT_SECONDS": "4",
+        }
+    )
+
+    adapters = build_runtime_adapters(
+        settings,
+        fetched_at=datetime(2026, 4, 28, 8, 10, tzinfo=UTC),
+        cwa_fetch_json=fetch_json,
+    )
+    result = adapters["official.cwa.rainfall"].run()
+
+    assert tuple(adapters) == ("official.cwa.rainfall",)
+    assert captured["timeout_seconds"] == 4
+    assert "Authorization=test-token" in str(captured["url"])
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+
+
+def test_build_runtime_adapters_missing_cwa_auth_fails_without_fetch_call() -> None:
+    called = False
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        nonlocal called
+        del url, timeout_seconds
+        called = True
+        return _load_cwa_api_payload()
+
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "SOURCE_CWA_API_ENABLED": "true",
+        }
+    )
+
+    adapters = build_runtime_adapters(settings, cwa_fetch_json=fetch_json)
+
+    with pytest.raises(CwaRainfallConfigurationError, match="CWA_API_AUTHORIZATION"):
+        adapters["official.cwa.rainfall"].run()
+    assert called is False
 
 
 def test_produce_enabled_runtime_adapter_jobs_reports_no_database_url() -> None:
@@ -812,6 +958,10 @@ def _runtime_job(*, adapter_key: str | None) -> RuntimeQueueJob:
         attempts=1,
         max_attempts=3,
     )
+
+
+def _load_cwa_api_payload() -> dict[str, Any]:
+    return json.loads((FIXTURES / "cwa_rainfall_api_sample.json").read_text(encoding="utf-8"))
 
 
 class _UnavailableQueue:

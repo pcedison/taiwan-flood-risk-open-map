@@ -25,6 +25,10 @@ Partially complete:
 - Worker queue panels observe heartbeats and last-run status; they do not yet
   prove real-source retries, accepted DLQ/replay handling, poison-job routing,
   or production scheduler singleton behavior.
+- There is no queue DLQ/replay panel yet. Exhausted runtime jobs are currently
+  inspectable through `--list-runtime-dead-letter-jobs`, and requeue is a
+  row-level CLI action; neither is wired into dashboard alerts or poison-job
+  routing.
 - The local profile proves wiring and syntax, not production uptime,
   persistence, access control, or incident response.
 
@@ -225,6 +229,9 @@ docker compose run --rm `
   -e SCHEDULER_METRICS_TEXTFILE_PATH=/var/lib/node_exporter/textfile_collector/flood-risk-scheduler.prom `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
   scheduler sh -c "pip install -e . && python -m app.scheduler --run-enabled-adapters --once"
+
+# Inspect final-failed queue rows outside the dashboard.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
 ```
 
 ## Validation
@@ -254,3 +261,13 @@ Optionally run the freshness script dry-run to prove the textfile writer path:
   set.
 - Dashboard panels show API readiness, source freshness, worker heartbeat,
   scheduler heartbeat, and worker last-run status.
+
+## Pending Checklist
+
+- Add a first-class DLQ/replay metric or panel only after the queue policy is
+  accepted.
+- Add alert labels for exhausted jobs and poison-job quarantine before treating
+  row-level requeue as production replay.
+- Wire hosted scrape targets, TLS/auth, persistent storage, and pager routing.
+- Schedule source freshness export and worker/scheduler heartbeat emission in
+  the target environment.

@@ -23,7 +23,7 @@ Not covered:
 - Hosted TLS/auth/storage setup.
 - Production scheduler or cron deployment.
 - Adapter retry/DLQ governance beyond current queue `failed`/`final_failed_at`
-  visibility.
+  visibility and row-level list/requeue commands.
 
 ## Current Phase Status
 
@@ -43,8 +43,14 @@ Partially complete:
 - Freshness export is a script and metric contract, not a deployed production
   monitor. A scheduler/cron owner still has to run it at the target cadence.
 - Queue failure visibility is limited to heartbeat/last-run metrics and the
-  `worker_runtime_jobs` terminal `failed`/`final_failed_at` state. There is no
-  DLQ metric, replay command, or poison-job escalation policy yet.
+  `worker_runtime_jobs` terminal `failed`/`final_failed_at` state plus
+  row-level list/requeue commands. There is no DLQ metric, poison-job
+  escalation policy, or accepted production replay procedure yet.
+- Official worker freshness is partial: demo/fixture-backed adapter runs are
+  safe by default, and CWA rainfall can run through an explicit live-client
+  gate. WRA water-level and flood-potential worker freshness still need real
+  source clients. The API realtime official bridge may fetch CWA/WRA data, but
+  that does not create persisted worker ingestion freshness evidence.
 - Heartbeat alerts prove that textfile metrics are present and recent; they do
   not prove real-source credentials, idempotent job handling, or production
   singleton scheduler behavior.
@@ -85,6 +91,26 @@ Local Compose validation:
 docker compose --profile monitoring config
 docker compose --profile monitoring up prometheus grafana node-exporter
 ```
+
+## Queue Replay Boundary
+
+Current queue monitoring can detect worker last-run failures and inspect
+exhausted rows, but it does not expose a DLQ panel or replay alert workflow.
+Use this CLI during triage:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-limit 20"
+```
+
+To requeue one failed row:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
+```
+
+Do not treat the row-level command as a complete replay operating model. Replay
+still needs policy for payload safety, source idempotency, backoff,
+poison-job quarantine, alert labels, and incident ownership.
 
 ## Alert Policy
 

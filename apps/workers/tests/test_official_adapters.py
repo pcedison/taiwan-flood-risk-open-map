@@ -4,9 +4,18 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
 
 from app.adapters.contracts import EventType, SourceFamily
-from app.adapters.cwa import CwaRainfallAdapter
+from app.adapters.cwa import (
+    CwaRainfallAdapter,
+    CwaRainfallApiAdapter,
+    CwaRainfallFetchError,
+    CwaRainfallPayloadError,
+    parse_cwa_rainfall_api_payload,
+)
 from app.adapters.flood_potential import FloodPotentialGeoJsonAdapter
 from app.adapters.wra import WraWaterLevelAdapter
 from app.pipelines.validation import validate_evidence_for_promotion
@@ -36,6 +45,83 @@ def test_cwa_rainfall_adapter_normalizes_fixture_records() -> None:
     assert first.location_text == "Taipei City Zhongzheng District Taipei Station"
     assert first.confidence == 0.93
     assert "42.5 mm in 1 hour" in first.summary
+
+
+def test_cwa_rainfall_api_adapter_fetches_and_normalizes_official_payload() -> None:
+    captured: dict[str, object] = {}
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        captured["url"] = url
+        captured["timeout_seconds"] = timeout_seconds
+        return _load_mapping("cwa_rainfall_api_sample.json")
+
+    adapter = CwaRainfallApiAdapter(
+        authorization="test-token",
+        api_url=(
+            "https://example.test/cwa/rainfall?"
+            "Authorization=old-token&station=all&format=XML"
+        ),
+        timeout_seconds=3,
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+        raw_snapshot_key="raw/cwa/rainfall/api-sample.json",
+    )
+
+    result = adapter.run()
+
+    request_url = str(captured["url"])
+    request_params = parse_qs(urlsplit(request_url).query)
+    assert captured["timeout_seconds"] == 3
+    assert request_params["Authorization"] == ["test-token"]
+    assert request_params["format"] == ["JSON"]
+    assert request_params["station"] == ["all"]
+    assert "old-token" not in request_url
+
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+    assert result.rejected == ()
+
+    raw = result.fetched[0]
+    assert raw.source_url == "https://example.test/cwa/rainfall?station=all&format=JSON"
+    assert "test-token" not in raw.source_url
+    assert raw.payload["rainfall_mm_10m"] == 7.5
+    assert raw.payload["geometry"] == {
+        "type": "Point",
+        "coordinates": [121.514, 25.0375],
+    }
+
+    evidence = result.normalized[0]
+    assert evidence.source_timestamp == datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc)
+    assert evidence.location_text == "Taipei City Zhongzheng District Taipei Station"
+    assert "42.5 mm in 1 hour" in evidence.summary
+    assert "156.0 mm in 24 hours" in evidence.summary
+
+
+def test_cwa_rainfall_api_payload_shape_errors_are_explicit() -> None:
+    with pytest.raises(CwaRainfallPayloadError, match="records object"):
+        parse_cwa_rainfall_api_payload({}, source_url="https://example.test/cwa/rainfall")
+
+    with pytest.raises(CwaRainfallPayloadError, match="Station list"):
+        parse_cwa_rainfall_api_payload(
+            {"records": {"Station": {}}},
+            source_url="https://example.test/cwa/rainfall",
+        )
+
+
+def test_cwa_rainfall_api_adapter_wraps_injected_fetch_errors() -> None:
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        del url, timeout_seconds
+        raise TimeoutError("timed out")
+
+    adapter = CwaRainfallApiAdapter(
+        authorization="test-token",
+        api_url="https://example.test/cwa/rainfall",
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+    )
+
+    with pytest.raises(CwaRainfallFetchError, match="timed out"):
+        adapter.run()
 
 
 def test_wra_water_level_adapter_normalizes_fixture_records() -> None:
@@ -110,6 +196,13 @@ def _load_records(name: str) -> list[dict[str, Any]]:
 
 
 def _load_feature_collection(name: str) -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8")),
+    )
+
+
+def _load_mapping(name: str) -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8")),

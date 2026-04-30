@@ -12,7 +12,8 @@ Completed for local/runtime smoke:
 - Row-level dequeue locking, worker leases, expired lease recovery, and retry
   to terminal `failed` status after `max_attempts`.
 - Deterministic runtime queue `dedupe_key` handling for active producer jobs
-  and `final_failed_at` visibility for exhausted retries.
+  plus CLI/API visibility and row-level requeue for dead-letter-equivalent
+  exhausted retries.
 - Bounded scheduler and queue producer paths that can acquire the DB scheduler
   lease when a database URL is configured.
 - Manual query heat aggregation/retention, `flood-potential` tile feature
@@ -26,11 +27,17 @@ Partially complete, not production-ready:
   It is not a complete production idempotency contract for all job side effects
   or future job families.
 - Exhausted jobs remain in `worker_runtime_jobs` with `status='failed'`; there
-  is dead-letter-equivalent visibility through `final_failed_at`, but no
-  dedicated DLQ table, replay command, or poison-job routing policy yet.
-- Runtime adapter execution is still fixture-backed unless
-  `WORKER_RUNTIME_FIXTURES_ENABLED=true` is set. Reviewed real source clients
-  and credentials are pending.
+  is dead-letter-equivalent visibility and row-level requeue through the
+  runtime queue CLI, but no dedicated DLQ table, poison-job routing policy,
+  alert ownership, or accepted production replay procedure yet.
+- Runtime adapter execution is fixture-backed by default. CWA rainfall has
+  a gated live API client path behind `SOURCE_CWA_API_ENABLED=true` plus
+  `CWA_API_AUTHORIZATION`, `CWA_API_URL`, and `CWA_API_TIMEOUT_SECONDS`; WRA
+  water-level and flood-potential runtime adapters are still fixture/demo only.
+- The deployable official path is partial: `--run-official-demo --persist`
+  proves raw snapshot, staging, ingestion-run, promotion, and evidence
+  persistence using bundled demo payloads, while the CWA runtime adapter can
+  fetch upstream only when the explicit live-client gate is enabled.
 - `python -m app.scheduler` without flags is a placeholder maintenance/sample
   loop. Production deployment cadence for ingestion, query heat, tile cache,
   freshness export, and operator ownership is still pending.
@@ -53,6 +60,14 @@ Partially complete, not production-ready:
   `WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_DATABASE_URL=postgresql://... python -m app.main --work-runtime-queue --once`
 - Consume durable runtime adapter jobs in a bounded worker loop:
   `WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_DATABASE_URL=postgresql://... python -m app.main --work-runtime-queue --max-ticks 2`
+- List dead-letter-equivalent failed runtime jobs:
+  `WORKER_DATABASE_URL=postgresql://... python -m app.main --list-runtime-dead-letter-jobs --dead-letter-queue-name runtime-adapters --dead-letter-limit 25`
+- Requeue a failed runtime job and reset its attempts to `0`:
+  `WORKER_DATABASE_URL=postgresql://... python -m app.main --requeue-runtime-job <job-id>`
+- Requeue a failed runtime job while keeping its current attempts count:
+  `WORKER_DATABASE_URL=postgresql://... python -m app.main --requeue-runtime-job <job-id> --requeue-keep-attempts`
+- Run gated CWA rainfall live client once:
+  `SOURCE_CWA_ENABLED=true SOURCE_CWA_API_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --run-enabled-adapters`
 - Materialize Query Heat buckets:
   `WORKER_DATABASE_URL=postgresql://... python -m app.main --aggregate-query-heat --query-heat-periods P1D,P7D`
 - Materialize a bounded Query Heat window and prune old buckets:
@@ -66,6 +81,8 @@ Partially complete, not production-ready:
 - Official adapter demo ingestion + freshness check: `python -m app.main --run-official-demo`
 - Official adapter demo with DB persistence and evidence promotion:
   `python -m app.main --run-official-demo --persist --database-url postgresql://...`
+- List adapter keys selected by config gates:
+  `WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --list-adapters`
 - Scheduler loop smoke path: `python -m app.scheduler`
 - Scheduler runtime adapter path:
   `WORKER_RUNTIME_FIXTURES_ENABLED=true python -m app.scheduler --run-enabled-adapters --once`
@@ -99,6 +116,24 @@ docker compose run --rm `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
   worker sh -c "pip install -e . && python -m app.main --work-runtime-queue --once"
 
+# Official demo persistence path: writes staging, ingestion runs, and evidence.
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --run-official-demo --persist"
+
+# CWA live adapter path: explicit opt-in, one adapter, no WRA/flood-potential.
+docker compose run --rm `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall `
+  -e SOURCE_CWA_ENABLED=true `
+  -e SOURCE_CWA_API_ENABLED=true `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters"
+
+# Queue ops: list exhausted failed jobs and requeue one by id.
+docker compose run --rm `
+  worker sh -c "pip install -e . && python -m app.main --list-runtime-dead-letter-jobs --dead-letter-queue-name runtime-adapters --dead-letter-limit 25"
+
+# Confirm payload/idempotency and incident context before requeueing.
+docker compose run --rm `
+  worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
+
 # Scheduler producer: run one DB-lease-guarded enqueue tick.
 docker compose run --rm `
   -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
@@ -120,12 +155,20 @@ docker compose run --rm `
 
 The runtime adapter path is config-driven and safe by default: it selects
 adapters with `WORKER_ENABLED_ADAPTER_KEYS` plus source gates, but no runtime
-adapter is constructed unless `WORKER_RUNTIME_FIXTURES_ENABLED=true` opts into
-local fixture-backed adapters. That makes disabled or unavailable adapters a
-graceful no-op and avoids accidental calls to external APIs.
+adapter that can call an external API is constructed unless an explicit source
+client gate is enabled. `WORKER_RUNTIME_FIXTURES_ENABLED=true` still opts into
+local fixture-backed adapters. For the first live official-source path, set
+`SOURCE_CWA_ENABLED=true`, `SOURCE_CWA_API_ENABLED=true`, provide `CWA_API_AUTHORIZATION`, optionally
+override `CWA_API_URL`, and tune `CWA_API_TIMEOUT_SECONDS`. Disabled or
+unavailable adapters remain a graceful no-op and tests inject fetchers instead
+of calling external APIs.
 The official demo only writes to Postgres when `--persist` is supplied; the
 database URL can come from `--database-url`, `WORKER_DATABASE_URL`, or
-`DATABASE_URL`.
+`DATABASE_URL`. This exercises the same staging/run/promotion writers a
+deployment would use, but it is still demo-data backed. The CWA rainfall
+runtime adapter is the first explicit live-source worker path. The API's
+realtime official bridge is a separate direct-fetch path and should not be
+counted as worker ingestion completion.
 Heartbeat textfile metrics are opt-in. They are only written when
 `WORKER_METRICS_TEXTFILE_PATH` or `SCHEDULER_METRICS_TEXTFILE_PATH` is set.
 When `WORKER_DATABASE_URL` or `DATABASE_URL` is present, the bounded scheduler
@@ -148,11 +191,21 @@ When a job is claimed, the worker resolves the job's `adapter_key`, runs that
 single adapter through the fixture-gated ingestion/freshness path, marks the
 job succeeded on success, and marks it failed with the error for unknown
 adapters or failed adapter runs. Final failures are visible when a job reaches
-`max_attempts` via `final_failed_at` and the dead-letter query:
-`SELECT id, queue_name, job_key, adapter_key, attempts, max_attempts, last_error, final_failed_at FROM worker_runtime_jobs WHERE status = 'failed' AND attempts >= max_attempts ORDER BY COALESCE(final_failed_at, finished_at, updated_at) DESC;`
-Adapter construction still remains fixture-gated by
-`WORKER_RUNTIME_FIXTURES_ENABLED=true`, so no external API calls are made by
-default.
+`max_attempts` via `final_failed_at` and `python -m app.main
+--list-runtime-dead-letter-jobs`. The list command prints JSON lines with job
+id, queue/job/adapter keys, payload, attempts, max attempts, last error,
+`final_failed_at`, and dedupe key. `python -m app.main --requeue-runtime-job
+<job-id>` moves a failed job back to `queued`, clears its lease,
+`final_failed_at`, `finished_at`, and `last_error`, and resets `attempts` to
+`0` by default. Add `--requeue-keep-attempts` when an operator wants the next
+run to preserve the existing attempt count.
+Treat replay as a controlled operator action, not an automated production DLQ
+system. The missing pieces are poison-job quarantine, per-source idempotency
+checks, approval/incident workflow, and alert labels for exhausted jobs.
+Adapter construction remains safe by default. Fixture adapters require
+`WORKER_RUNTIME_FIXTURES_ENABLED=true`; the CWA rainfall live adapter requires
+`SOURCE_CWA_API_ENABLED=true` and CWA client config, so no external API calls
+are made by default.
 The maintenance scheduler path is bounded by `--once`, `--max-ticks`, or
 `SCHEDULER_MAX_TICKS`, and defaults to a single tick when no bound is supplied.
 Each tick runs Query Heat aggregation, Query Heat retention pruning, tile
@@ -165,6 +218,7 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
 
 - Adapter contract and registry groundwork.
 - Official CWA rainfall, WRA water-level, and flood-potential fixture parsers.
+- Gated CWA rainfall API runtime client with injected-fetcher test coverage.
 - Worker CLI/scheduler demo path for enabled official adapters.
 - Configurable run-once and bounded scheduler path for enabled runtime adapters.
 - DB-backed runtime job queue producer/consumer and singleton scheduler lease
@@ -181,13 +235,30 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
 - `WORKER_ENABLED_ADAPTER_KEYS` configuration groundwork for explicit adapter
   enablement.
 
+## Production pending checklist
+
+- Harden the CWA live client path and replace WRA/flood-potential demo adapters
+  with reviewed network source clients, credentials, attribution, and raw
+  snapshot storage.
+- Promote the current row-level list/requeue commands into an accepted DLQ
+  operating model with poison-job quarantine, alert labels, idempotency checks,
+  and documented retry windows.
+- Deploy exactly one scheduler producer/maintenance cadence per environment and
+  document owner, cadence, and retry windows.
+- Mount worker/scheduler heartbeat textfiles into a real node exporter or
+  replace them with an HTTP metrics exporter.
+- Keep forum/public-report ingestion disabled until governance, moderation,
+  retention/deletion, and legal/privacy gates are accepted.
+
 ## Placeholder boundary
 
-- Runtime scheduling has durable queue/lease primitives, but adapter execution
-  is still fixture-backed until production source clients are selected.
-- Queue jobs have retry, active-job enqueue idempotency, and terminal
-  `failed`/`final_failed_at` visibility, but a dedicated DLQ/replay policy and
-  poison-job alerting are pending.
+- Runtime scheduling has durable queue/lease primitives. CWA rainfall has the
+  first gated live source client path, but WRA/flood-potential runtime source
+  clients, production credential validation, and source-operation runbooks are
+  still pending.
+- Queue jobs have retry, active-job enqueue idempotency, terminal
+  `failed`/`final_failed_at` visibility, and row-level requeue tooling, but a
+  dedicated DLQ/replay policy and poison-job alerting are pending.
 - Maintenance jobs have manual CLIs, local smoke coverage, and a bounded
   scheduler command path, but production deployment and operator ownership are
   pending.

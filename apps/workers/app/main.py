@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -26,6 +27,11 @@ from app.scheduler import (
     run_enabled_adapters_loop,
     run_enabled_adapters_once,
     run_scheduled_ingestion_cycle,
+)
+from app.jobs.queue import (
+    PostgresRuntimeQueue,
+    RuntimeQueueDeadLetterJob,
+    RuntimeQueueUnavailable,
 )
 from app.jobs.runtime import work_runtime_queue_once
 from app.jobs.sample import run_sample_job
@@ -82,6 +88,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Producer path: enqueue durable worker_runtime_jobs for configured runtime adapters. "
             "Combine with --scheduler for a lease-guarded loop."
         ),
+    )
+    parser.add_argument(
+        "--list-runtime-dead-letter-jobs",
+        action="store_true",
+        help="Print dead-letter-equivalent failed worker_runtime_jobs as JSON lines.",
+    )
+    parser.add_argument(
+        "--dead-letter-queue-name",
+        help="Optional queue_name filter for --list-runtime-dead-letter-jobs.",
+    )
+    parser.add_argument(
+        "--dead-letter-limit",
+        type=int,
+        default=100,
+        help="Maximum dead-letter-equivalent jobs to print. Defaults to 100.",
+    )
+    parser.add_argument(
+        "--requeue-runtime-job",
+        metavar="JOB_ID",
+        help="Requeue a failed worker_runtime_jobs row by id, resetting attempts by default.",
+    )
+    parser.add_argument(
+        "--requeue-keep-attempts",
+        action="store_true",
+        help="Keep the existing attempts value for --requeue-runtime-job instead of resetting to 0.",
     )
     parser.add_argument(
         "--aggregate-query-heat",
@@ -147,7 +178,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument(
         "--database-url",
-        help="Postgres URL for --run-official-demo --persist. Defaults to WORKER_DATABASE_URL/DATABASE_URL.",
+        help=(
+            "Postgres URL for DB-backed commands. Defaults to "
+            "WORKER_DATABASE_URL/DATABASE_URL."
+        ),
     )
     parser.add_argument(
         "--list-adapters",
@@ -161,6 +195,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         for adapter_key in enabled_adapter_keys(settings):
             print(adapter_key)
         return 0
+
+    if args.list_runtime_dead_letter_jobs:
+        return _list_runtime_dead_letter_jobs(
+            settings=settings,
+            database_url=args.database_url,
+            queue_name=args.dead_letter_queue_name,
+            limit=args.dead_letter_limit,
+        )
+
+    if args.requeue_runtime_job:
+        return _requeue_runtime_job(
+            settings=settings,
+            database_url=args.database_url,
+            job_id=args.requeue_runtime_job,
+            reset_attempts=not args.requeue_keep_attempts,
+        )
 
     if args.work_runtime_queue:
         return _work_runtime_queue(settings=settings, once=args.once, max_ticks=args.max_ticks)
@@ -306,6 +356,79 @@ def _enqueue_runtime_jobs(
     return 0
 
 
+def _list_runtime_dead_letter_jobs(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    queue_name: str | None,
+    limit: int,
+) -> int:
+    resolved_database_url = database_url or settings.database_url
+    if not resolved_database_url:
+        log_event("runtime.queue.dead_letter.list.noop", reason="no_database_url")
+        return 0
+
+    try:
+        jobs = PostgresRuntimeQueue(database_url=resolved_database_url).list_dead_letter_jobs(
+            queue_name=queue_name,
+            limit=limit,
+        )
+    except RuntimeQueueUnavailable as exc:
+        log_event("runtime.queue.dead_letter.list.failed", error=str(exc))
+        return 1
+
+    for job in jobs:
+        print(_runtime_dead_letter_job_json(job))
+    return 0
+
+
+def _requeue_runtime_job(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    job_id: str,
+    reset_attempts: bool,
+) -> int:
+    resolved_database_url = database_url or settings.database_url
+    if not resolved_database_url:
+        log_event(
+            "runtime.queue.requeue.failed",
+            reason="no_database_url",
+            job_id=job_id,
+        )
+        return 1
+
+    try:
+        result = PostgresRuntimeQueue(database_url=resolved_database_url).requeue_failed_job(
+            job_id=job_id,
+            reset_attempts=reset_attempts,
+        )
+    except RuntimeQueueUnavailable as exc:
+        log_event("runtime.queue.requeue.failed", job_id=job_id, error=str(exc))
+        return 1
+
+    print(
+        json.dumps(
+            {
+                "job_id": result.job_id,
+                "requeued": result.requeued,
+                "reset_attempts": result.reset_attempts,
+                "attempts": result.attempts,
+            },
+            sort_keys=True,
+        )
+    )
+    if not result.requeued:
+        log_event(
+            "runtime.queue.requeue.not_updated",
+            job_id=job_id,
+            reset_attempts=reset_attempts,
+        )
+        return 1
+
+    return 0
+
+
 def _run_maintenance(
     *,
     settings: WorkerSettings,
@@ -419,6 +542,26 @@ def _refresh_tile_features(
         refreshed=result.refreshed,
     )
     return 0
+
+
+def _runtime_dead_letter_job_json(job: RuntimeQueueDeadLetterJob) -> str:
+    return json.dumps(
+        {
+            "id": job.id,
+            "queue_name": job.queue_name,
+            "job_key": job.job_key,
+            "adapter_key": job.adapter_key,
+            "payload": dict(job.payload),
+            "attempts": job.attempts,
+            "max_attempts": job.max_attempts,
+            "last_error": job.last_error,
+            "final_failed_at": (
+                job.final_failed_at.isoformat() if job.final_failed_at is not None else None
+            ),
+            "dedupe_key": job.dedupe_key,
+        },
+        sort_keys=True,
+    )
 
 
 def _parse_query_heat_periods(raw: str) -> tuple[str, ...]:

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from app.adapters.contracts import DataSourceAdapter
+from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
 from app.adapters.registry import enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
@@ -62,21 +63,41 @@ def build_runtime_adapters(
     settings: WorkerSettings,
     *,
     fetched_at: datetime | None = None,
+    cwa_fetch_json: FetchJson | None = None,
 ) -> Mapping[str, DataSourceAdapter]:
-    if not settings.runtime_fixtures_enabled:
+    if settings.runtime_fixtures_enabled:
+        fixture_adapters = build_official_demo_adapters(
+            fetched_at=fetched_at or datetime.now(UTC)
+        )
+        log_event(
+            "runtime.adapters.fixture_mode.enabled",
+            available_adapter_keys=tuple(fixture_adapters),
+        )
+        return fixture_adapters
+
+    enabled_keys = enabled_adapter_keys(settings)
+    live_adapters: dict[str, DataSourceAdapter] = {}
+    if settings.source_cwa_api_enabled and "official.cwa.rainfall" in enabled_keys:
+        cwa_adapter = CwaRainfallApiAdapter(
+            authorization=settings.cwa_api_authorization,
+            api_url=settings.cwa_api_url,
+            timeout_seconds=settings.cwa_api_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=cwa_fetch_json,
+        )
+        live_adapters[cwa_adapter.metadata.key] = cwa_adapter
+
+    if not live_adapters:
         log_event(
             "runtime.adapters.noop",
-            reason="fixture_runtime_disabled",
-            enabled_adapter_keys=settings.enabled_adapter_keys,
+            reason="runtime_sources_disabled",
+            enabled_adapter_keys=enabled_keys,
+            cwa_api_enabled=settings.source_cwa_api_enabled,
         )
         return {}
 
-    adapters = build_official_demo_adapters(fetched_at=fetched_at or datetime.now(UTC))
-    log_event(
-        "runtime.adapters.fixture_mode.enabled",
-        available_adapter_keys=tuple(adapters),
-    )
-    return adapters
+    log_event("runtime.adapters.live_mode.enabled", available_adapter_keys=tuple(live_adapters))
+    return live_adapters
 
 
 def enqueue_enabled_runtime_adapter_jobs(

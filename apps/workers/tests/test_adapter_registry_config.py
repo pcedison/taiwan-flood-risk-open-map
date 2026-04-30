@@ -28,6 +28,31 @@ def test_official_source_flags_can_disable_individual_adapters() -> None:
     assert enabled_adapter_keys(settings) == ("official.wra.water_level",)
 
 
+def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
+    settings = load_worker_settings({})
+
+    assert settings.source_cwa_api_enabled is False
+    assert settings.cwa_api_authorization is None
+    assert settings.cwa_api_url is None
+    assert settings.cwa_api_timeout_seconds == 8
+
+
+def test_cwa_api_runtime_client_config_reads_env() -> None:
+    settings = load_worker_settings(
+        {
+            "SOURCE_CWA_API_ENABLED": "true",
+            "CWA_API_AUTHORIZATION": "test-token",
+            "CWA_API_URL": "https://example.test/cwa/rainfall",
+            "CWA_API_TIMEOUT_SECONDS": "4",
+        }
+    )
+
+    assert settings.source_cwa_api_enabled is True
+    assert settings.cwa_api_authorization == "test-token"
+    assert settings.cwa_api_url == "https://example.test/cwa/rainfall"
+    assert settings.cwa_api_timeout_seconds == 4
+
+
 def test_reviewed_news_adapter_requires_family_flag_and_terms_ack() -> None:
     without_ack = load_worker_settings({"SOURCE_NEWS_ENABLED": "true"})
     with_ack = load_worker_settings(

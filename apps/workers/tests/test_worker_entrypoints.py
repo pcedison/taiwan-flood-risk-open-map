@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
 from app import scheduler as scheduler_module
 from app.config import load_worker_settings
 from app.jobs.official_demo import build_official_demo_adapters
+from app.jobs.queue import RuntimeQueueDeadLetterJob, RuntimeQueueRequeueResult
 from app.jobs.runtime import (
     RuntimeQueueProducerResult,
     RuntimeQueueWorkerResult,
@@ -140,6 +142,163 @@ def test_main_scheduler_enqueue_runtime_jobs_can_be_bounded(monkeypatch) -> None
 
     assert exit_code == 0
     assert captured["max_ticks"] == 2
+
+
+def test_main_list_runtime_dead_letter_jobs_prints_json_lines(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+    final_failed_at = datetime(2026, 4, 30, 8, 0, tzinfo=UTC)
+
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def list_dead_letter_jobs(
+            self,
+            *,
+            queue_name: str | None = None,
+            limit: int = 100,
+        ) -> tuple[RuntimeQueueDeadLetterJob, ...]:
+            captured["queue_name"] = queue_name
+            captured["limit"] = limit
+            return (
+                RuntimeQueueDeadLetterJob(
+                    id="job-1",
+                    queue_name="runtime-adapters",
+                    job_key="runtime.adapter.ingest",
+                    adapter_key="official.cwa.rainfall",
+                    payload={"adapter_key": "official.cwa.rainfall"},
+                    attempts=3,
+                    max_attempts=3,
+                    last_error="source timeout",
+                    final_failed_at=final_failed_at,
+                    dedupe_key="runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall",
+                ),
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--list-runtime-dead-letter-jobs",
+            "--dead-letter-queue-name",
+            "runtime-adapters",
+            "--dead-letter-limit",
+            "25",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "database_url": "postgresql://worker:test@localhost/flood",
+        "queue_name": "runtime-adapters",
+        "limit": 25,
+    }
+    output = capsys.readouterr().out.strip().splitlines()
+    assert len(output) == 1
+    row = json.loads(output[0])
+    assert row["id"] == "job-1"
+    assert row["attempts"] == 3
+    assert row["max_attempts"] == 3
+    assert row["last_error"] == "source timeout"
+    assert row["final_failed_at"] == "2026-04-30T08:00:00+00:00"
+    assert row["payload"] == {"adapter_key": "official.cwa.rainfall"}
+
+
+def test_main_requeue_runtime_job_resets_attempts_by_default(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def requeue_failed_job(
+            self,
+            *,
+            job_id: str,
+            reset_attempts: bool = True,
+        ) -> RuntimeQueueRequeueResult:
+            captured["job_id"] = job_id
+            captured["reset_attempts"] = reset_attempts
+            return RuntimeQueueRequeueResult(
+                job_id=job_id,
+                requeued=True,
+                reset_attempts=reset_attempts,
+                attempts=0,
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(["--requeue-runtime-job", "job-1"])
+
+    assert exit_code == 0
+    assert captured == {
+        "database_url": "postgresql://worker:test@localhost/flood",
+        "job_id": "job-1",
+        "reset_attempts": True,
+    }
+    assert json.loads(capsys.readouterr().out) == {
+        "attempts": 0,
+        "job_id": "job-1",
+        "requeued": True,
+        "reset_attempts": True,
+    }
+
+
+def test_main_requeue_runtime_job_can_keep_attempts_and_database_override(
+    monkeypatch,
+    capsys,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def requeue_failed_job(
+            self,
+            *,
+            job_id: str,
+            reset_attempts: bool = True,
+        ) -> RuntimeQueueRequeueResult:
+            captured["job_id"] = job_id
+            captured["reset_attempts"] = reset_attempts
+            return RuntimeQueueRequeueResult(
+                job_id=job_id,
+                requeued=True,
+                reset_attempts=reset_attempts,
+                attempts=3,
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--requeue-runtime-job",
+            "job-1",
+            "--requeue-keep-attempts",
+            "--database-url",
+            "postgresql://override:test@localhost/flood",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "database_url": "postgresql://override:test@localhost/flood",
+        "job_id": "job-1",
+        "reset_attempts": False,
+    }
+    assert json.loads(capsys.readouterr().out) == {
+        "attempts": 3,
+        "job_id": "job-1",
+        "requeued": True,
+        "reset_attempts": False,
+    }
 
 
 def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) -> None:
