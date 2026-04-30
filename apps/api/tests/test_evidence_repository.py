@@ -103,6 +103,7 @@ def test_fetch_query_heat_snapshot_buckets_nearby_location_queries() -> None:
 
     sql, params = connection.cursor_instance.executions[0]
     assert "FROM location_queries lq" in sql
+    assert "JOIN risk_assessments ra ON ra.query_id = lq.id" in sql
     assert "ST_DWithin" in sql
     assert params == (121.5654, 25.033, "7 days", 500)
     assert snapshot.period == "P7D"
@@ -149,6 +150,12 @@ def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -
             historical_level="擃?",
             explanation={"summary": "Stored assessment"},
             data_freshness=[{"source_id": "db-evidence", "health_status": "healthy"}],
+            result_snapshot={
+                "assessment_id": "d315d0e6-9c1e-475a-9118-f299d12d5c62",
+                "location": {"lat": 25.033, "lng": 121.5654},
+                "radius_m": 500,
+                "score_version": "risk-v0.1.0",
+            },
             evidence_ids=("b3f22a36-7316-4e2a-92b6-c6f6443c8528",),
             created_at=created_at,
             expires_at=expires_at,
@@ -158,11 +165,17 @@ def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -
 
     sql, params = connection.cursor_instance.executions[0]
     assert "INSERT INTO location_queries" in sql
+    assert "lat" in sql
+    assert "lng" in sql
     assert "INSERT INTO risk_assessments" in sql
+    assert "risk_level" in sql
+    assert "result_snapshot" in sql
     assert "INSERT INTO risk_assessment_evidence" in sql
     assert "JOIN evidence ON evidence.id = ANY" in sql
-    assert params[0:7] == (
+    assert params[0:9] == (
         "Taipei 101",
+        25.033,
+        121.5654,
         121.5654,
         25.033,
         500,
@@ -170,8 +183,8 @@ def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -
         "25.03,121.57",
         created_at,
     )
-    assert params[7] == "d315d0e6-9c1e-475a-9118-f299d12d5c62"
-    assert params[12:14] == ("low", "high")
+    assert params[9] == "d315d0e6-9c1e-475a-9118-f299d12d5c62"
+    assert params[14:17] == ("low", "high", "high")
     assert params[-1] == ["b3f22a36-7316-4e2a-92b6-c6f6443c8528"]
 
 

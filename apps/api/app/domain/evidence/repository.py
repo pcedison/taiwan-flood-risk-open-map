@@ -67,6 +67,7 @@ class RiskAssessmentPersistence:
     historical_level: str
     explanation: dict[str, Any]
     data_freshness: list[dict[str, Any]]
+    result_snapshot: dict[str, Any]
     evidence_ids: tuple[str, ...]
     created_at: datetime
     expires_at: datetime
@@ -83,6 +84,8 @@ def persist_risk_assessment(
             INSERT INTO location_queries (
                 input_type,
                 raw_input,
+                lat,
+                lng,
                 geom,
                 radius_m,
                 privacy_bucket,
@@ -91,6 +94,8 @@ def persist_risk_assessment(
             )
             VALUES (
                 'map_click',
+                %s,
+                %s,
                 %s,
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326),
                 %s,
@@ -110,8 +115,10 @@ def persist_risk_assessment(
                 confidence_score,
                 risk_level_realtime,
                 risk_level_historical,
+                risk_level,
                 explanation,
                 data_freshness,
+                result_snapshot,
                 created_at,
                 expires_at
             )
@@ -124,6 +131,8 @@ def persist_risk_assessment(
                 %s,
                 %s,
                 %s,
+                %s,
+                %s::jsonb,
                 %s::jsonb,
                 %s::jsonb,
                 %s,
@@ -152,6 +161,8 @@ def persist_risk_assessment(
     privacy_bucket = _privacy_bucket(assessment.lat, assessment.lng)
     params = (
         assessment.location_text,
+        assessment.lat,
+        assessment.lng,
         assessment.lng,
         assessment.lat,
         assessment.radius_m,
@@ -165,8 +176,10 @@ def persist_risk_assessment(
         assessment.confidence_score,
         _storage_risk_level(assessment.realtime_level),
         _storage_risk_level(assessment.historical_level),
+        _max_storage_risk_level(assessment.realtime_level, assessment.historical_level),
         Jsonb(assessment.explanation),
         Jsonb(assessment.data_freshness),
+        Jsonb(assessment.result_snapshot),
         assessment.created_at,
         assessment.expires_at,
         assessment.created_at,
@@ -250,6 +263,7 @@ def fetch_query_heat_snapshot(
         nearby_queries AS (
             SELECT lq.id, lq.privacy_bucket, lq.h3_index, lq.created_at
             FROM location_queries lq
+            JOIN risk_assessments ra ON ra.query_id = lq.id
             CROSS JOIN query_point qp
             WHERE lq.geom IS NOT NULL
                 AND lq.created_at >= now() - (%s::interval)
@@ -435,3 +449,9 @@ def _storage_risk_level(level: str) -> str:
     if level == "璆菟?":
         return "severe"
     return "unknown"
+
+
+def _max_storage_risk_level(*levels: str) -> str:
+    rank = {"unknown": 0, "low": 1, "medium": 2, "high": 3, "severe": 4}
+    storage_levels = [_storage_risk_level(level) for level in levels]
+    return max(storage_levels, key=lambda level: rank[level], default="unknown")

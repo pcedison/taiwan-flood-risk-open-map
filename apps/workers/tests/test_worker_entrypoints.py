@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from app.config import load_worker_settings
+from app.jobs.runtime import build_runtime_adapters
 from app.jobs.official_demo import build_official_demo_adapters
 from app.main import main
-from app.scheduler import ScheduledIngestionCycleResult, run_scheduled_ingestion_cycle
+from app.scheduler import (
+    ScheduledIngestionCycleResult,
+    run_enabled_adapters_loop,
+    run_enabled_adapters_once,
+    run_scheduled_ingestion_cycle,
+)
 
 
 def test_official_demo_builder_covers_default_official_adapter_keys() -> None:
@@ -47,6 +54,31 @@ def test_main_run_official_demo_is_a_cli_entrypoint() -> None:
     assert exit_code == 0
 
 
+def test_main_run_enabled_adapters_noops_without_runtime_fixtures() -> None:
+    exit_code = main(["--run-enabled-adapters"])
+
+    assert exit_code == 0
+
+
+def test_main_scheduler_can_run_bounded_runtime_loop(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_loop(*args: object, **kwargs: object) -> tuple[ScheduledIngestionCycleResult, ...]:
+        del args
+        captured["max_ticks"] = kwargs["max_ticks"]
+        return (
+            ScheduledIngestionCycleResult(summaries=(), freshness_checks=()),
+            ScheduledIngestionCycleResult(summaries=(), freshness_checks=()),
+        )
+
+    monkeypatch.setattr("app.main.run_enabled_adapters_loop", fake_loop)
+
+    exit_code = main(["--scheduler", "--max-ticks", "2"])
+
+    assert exit_code == 0
+    assert captured["max_ticks"] == 2
+
+
 def test_main_run_official_demo_does_not_persist_by_default(monkeypatch) -> None:
     def fail_constructor(*args: object, **kwargs: object) -> object:
         del args, kwargs
@@ -59,6 +91,116 @@ def test_main_run_official_demo_does_not_persist_by_default(monkeypatch) -> None
     exit_code = main(["--run-official-demo"])
 
     assert exit_code == 0
+
+
+def test_runtime_adapters_require_fixture_mode() -> None:
+    settings = load_worker_settings({})
+
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_runtime_adapters_fixture_mode_supplies_official_adapters() -> None:
+    settings = load_worker_settings({"WORKER_RUNTIME_FIXTURES_ENABLED": "true"})
+
+    assert set(build_runtime_adapters(settings)) == {
+        "official.cwa.rainfall",
+        "official.wra.water_level",
+        "official.flood_potential.geojson",
+    }
+
+
+def test_run_enabled_adapters_once_uses_configured_adapter_selection() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.wra.water_level",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "FRESHNESS_MAX_AGE_SECONDS": "21600",
+        }
+    )
+
+    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.run_once")
+
+    assert [summary.adapter_key for summary in result.summaries] == [
+        "official.wra.water_level"
+    ]
+    assert [check.adapter_key for check in result.freshness_checks] == [
+        "official.wra.water_level"
+    ]
+
+
+def test_run_enabled_adapters_once_writes_worker_heartbeat_textfile(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "worker.prom"
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "WORKER_INSTANCE": "test-worker",
+            "WORKER_METRICS_TEXTFILE_PATH": str(metrics_path),
+            "FRESHNESS_MAX_AGE_SECONDS": "21600",
+        }
+    )
+
+    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.metrics")
+
+    assert not result.has_alerts
+    text = metrics_path.read_text(encoding="utf-8")
+    assert "flood_risk_worker_heartbeat_timestamp_seconds" in text
+    assert 'instance="test-worker"' in text
+    assert 'queue="official.cwa.rainfall"' in text
+    assert 'job="test.runtime.metrics"' in text
+    assert 'status="succeeded"} 1' in text
+
+
+def test_run_enabled_adapters_once_gracefully_noops_disabled_adapter() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "news.public_web.sample",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
+    )
+
+    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.noop")
+
+    assert result.summaries == ()
+    assert result.freshness_checks == ()
+    assert not result.has_alerts
+
+
+def test_run_enabled_adapters_loop_can_be_bounded() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
+    )
+    sleeps: list[int] = []
+
+    results = run_enabled_adapters_loop(settings=settings, max_ticks=2, sleep=sleeps.append)
+
+    assert len(results) == 2
+    assert sleeps == [settings.scheduler_interval_seconds]
+
+
+def test_run_enabled_adapters_loop_writes_scheduler_heartbeat_textfile(tmp_path: Path) -> None:
+    metrics_path = tmp_path / "scheduler.prom"
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "WORKER_INSTANCE": "test-scheduler",
+            "SCHEDULER_METRICS_TEXTFILE_PATH": str(metrics_path),
+            "FRESHNESS_MAX_AGE_SECONDS": "21600",
+        }
+    )
+
+    results = run_enabled_adapters_loop(settings=settings, max_ticks=1)
+
+    assert len(results) == 1
+    text = metrics_path.read_text(encoding="utf-8")
+    assert "flood_risk_scheduler_heartbeat_timestamp_seconds" in text
+    assert 'instance="test-scheduler"' in text
+    assert 'scheduler="enabled-adapters"' in text
+    assert 'status="succeeded"} 1' in text
 
 
 def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeypatch) -> None:

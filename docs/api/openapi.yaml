@@ -340,6 +340,62 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/tiles/{layer_id}/{z}/{x}/{y}.mvt:
+    get:
+      tags:
+        - Public
+      operationId: getVectorTile
+      summary: Return a Mapbox Vector Tile for a seeded map layer.
+      parameters:
+        - $ref: "#/components/parameters/LayerId"
+        - name: z
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 24
+          description: Tile zoom.
+        - name: x
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Tile x coordinate.
+        - name: y
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+          description: Tile y coordinate.
+      responses:
+        "200":
+          description: Mapbox Vector Tile binary payload.
+          headers:
+            X-Tile-Layer:
+              description: Layer id used to produce the tile.
+              schema:
+                type: string
+            Cache-Control:
+              description: Tile cache policy.
+              schema:
+                type: string
+          content:
+            application/vnd.mapbox-vector-tile:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Tile storage unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /admin/v1/jobs:
     get:
       tags:

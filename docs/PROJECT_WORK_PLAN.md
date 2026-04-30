@@ -298,6 +298,18 @@ Phase 5 驗收：
 - 管理者可審核回報。
 - 可疑回報不會直接成為高權重 evidence。
 
+Phase 4/5 legal and privacy gates:
+
+- Public web, PTT, Dcard, generic forum adapters, and user_report ingestion
+  must satisfy `docs/privacy/public-discussion-user-report-gates.md` before
+  development can be accepted or launched.
+- These gates are Phase 4/5 prerequisites and cannot be used to satisfy Phase 2
+  acceptance.
+- Future PR reviewers should use
+  `docs/reviews/phase4-5-public-discussion-governance-gates-2026-04-30.md` as
+  the acceptance checklist for development, launch, rollback, and disable
+  conditions.
+
 ### Phase 6：Production Hardening
 
 目標：
@@ -1096,13 +1108,18 @@ As of 2026-04-30:
 - Worker adapters：Phase 2 adapter contract now includes official CWA rainfall, WRA water-level, flood-potential GeoJSON fixture parsers, plus L2 news/public-web sample tests.
 - Evidence UI：evidence drawer groundwork has landed beyond the original inline-only summary and is now covered by unit plus desktop/mobile Playwright smoke tests.
 - Worker adapter config：`WORKER_ENABLED_ADAPTER_KEYS` groundwork has landed so enabled adapters can be controlled by configuration; production data-source rollout still needs validation against source allowlist and legal/privacy gates.
-- Placeholder boundary：PTT, Dcard, and user_report adapters are phase-delayed/pending implementation; `packages/geo` and `packages/shared` remain placeholder/baseline areas until dedicated implementation work lands; `infra/monitoring` now has scrape config and alert rules, with dashboards and worker heartbeat metrics still pending.
+- Placeholder boundary：PTT, Dcard, and user_report adapters are phase-delayed/pending implementation; `packages/geo` and `packages/shared` remain placeholder/baseline areas until dedicated implementation work lands; `infra/monitoring` now has scrape config, alert rules, and heartbeat textfile metric contracts, with dashboards still pending.
 - Implementation：Phase 0 foundation is accepted; Phase 1-3 groundwork exists with tests and fixtures, but the project is now in a hardening sprint rather than a completed MVP acceptance state.
 - Current hardening status：
   - WP1 文件狀態與 placeholder 邊界：Done.
   - WP2 Web tests / evidence UX：Done, including Node unit tests and desktop/mobile Playwright smoke.
   - WP3 Runtime smoke：Done. `scripts/runtime-smoke.ps1 -StopOnExit` passed against the local Compose stack.
   - WP4 Worker/API ingestion：Done for this hardening pass, including enabled-adapter batch selection, official WRA demo runtime command with DB persistence, DB-first evidence/query heat helper, and seeded layer metadata.
+  - WP5 Query heat persistence：Done for this checkpoint. `/v1/risk/assess` persists query/assessment snapshots and heat reads completed assessment history.
+  - WP6 Worker runtime scheduler：Done for this checkpoint. Config-driven run-once and bounded scheduler paths exist, safe by default and fixture-backed until real source clients/queue are selected.
+  - WP7 Tile endpoint：Done for this checkpoint. `/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt` serves DB-backed MVT for seeded layers.
+  - WP8 Monitoring heartbeat：Done for this checkpoint. Worker/scheduler heartbeat textfile metrics are opt-in through env vars and alert rules are no longer non-firing placeholders.
+  - WP9 Phase 4/5 gates：Done as governance checklist. Forum/public discussion/user reports remain disabled until source-specific legal/privacy gates are accepted.
 
 Completed execution order:
 
@@ -1153,14 +1170,20 @@ Completed execution order:
 45. Add DB-backed `/v1/layers` metadata with migration seed and fallback behavior.
 46. Add Prometheus source freshness and API availability alert rules.
 47. Verify API, Web, Workers, validators, ops scripts, runtime smoke, and worker DB demo persistence.
+48. Persist `/v1/risk/assess` query/assessment snapshots and query heat history via migration `0005_query_heat_persistence.sql`.
+49. Add config-driven worker run-once and bounded scheduler runtime paths.
+50. Add DB-backed MVT endpoint for seeded `flood-potential` and `query-heat` layers.
+51. Add worker/scheduler heartbeat textfile metrics and active Prometheus alert rules.
+52. Add Phase 4/5 public discussion and user report legal/privacy gate checklists.
+53. Verify migration 0005, MVT tile smoke, query persistence, worker DB demo, and heartbeat textfile output against local Compose.
 
 Next execution order:
 
-1. Persist location queries / risk assessments from `/v1/risk/assess` so query heat can move beyond read-only nearby-query aggregation.
-2. Implement production worker scheduler/queue behavior beyond the official demo command.
-3. Build tile generation/hosting for the seeded layer metadata.
-4. Add real worker/scheduler heartbeat metrics behind the Prometheus alert placeholders.
-5. Prepare the checkpoint branch for review: final diff check, commit, push, and draft PR.
+1. Replace fixture-backed worker runtime adapters with reviewed real source clients and a durable queue/singleton scheduler.
+2. Move tile generation from evidence/query fallback SQL to dedicated production layer tables and hosting/cache strategy.
+3. Add monitoring dashboards and production scrape deployment around the new heartbeat/freshness metrics.
+4. Implement Phase 4/5 sources only through the new legal/privacy gate checklist.
+5. Prepare this checkpoint update for PR review: final diff check, commit, push, and CI confirmation.
 
 ---
 
@@ -1216,11 +1239,10 @@ parallel hardening work without changing app code.
 - Keep PTT, Dcard, and user_report adapters phase-delayed and disabled until
   legal/source/privacy gates are complete.
 - Keep `packages/geo` and `packages/shared` marked as baseline/placeholder
-  areas until tile pipeline and shared rules land. `infra/monitoring` now has
-  scrape config and alert rules, but dashboards and worker heartbeat metrics
-  remain pending.
-- Treat query heat as partial: DB-first read helper exists, but risk assessment
-  persistence and materialized heat buckets are still pending.
+  areas until production tile pipeline and shared rules land. API MVT serving
+  now exists as a minimum verifiable path.
+- Treat query heat as improved but not complete: persisted query/assessment
+  history exists, but materialized heat buckets are still pending.
 
 ### Five-point hardening alignment
 
@@ -1229,8 +1251,9 @@ parallel hardening work without changing app code.
    explicitly fallback-only, phase-delayed, or known limitations.
 3. Runtime smoke: Done. Cross-linked from README and ops docs; verified with
    `scripts/runtime-smoke.ps1 -StopOnExit`.
-4. Worker/API data realism: Done for this checkpoint. WP-E still records query
-   heat persistence and production scheduler/queue as known limitations.
+4. Worker/API data realism: Done for this checkpoint. Query persistence and a
+   safe runtime scheduler path exist; real source clients, durable queue, and
+   production singleton behavior remain future work.
 5. Ops runbooks: Monitoring freshness alerts and backup/restore drill now have
    runbooks plus CI/manual script entrypoints:
    `docs/runbooks/monitoring-freshness-alerts.md`,
@@ -1245,7 +1268,7 @@ parallel hardening work without changing app code.
 | WP1 Docs/status and placeholder boundary | README, work plan, app README, progress report | Done; WP-E added fallback ownership and ops cross-links. |
 | WP2 Web evidence UX/tests | Web UI and frontend tests | Done by owning subagent; WP-E did not modify app code. |
 | WP3 Runtime smoke | Compose smoke script/runbook | Done; local Compose runtime smoke passed. |
-| WP4 Worker/API ingestion realism | Adapter selection, WRA demo path, query heat helper | Done for this checkpoint, including DB-persisted official demo; production scheduler/queue and persisted query heat remain pending. |
+| WP4 Worker/API ingestion realism | Adapter selection, WRA demo path, query heat helper | Done for this checkpoint, including DB-persisted official demo, query persistence, MVT tiles, and opt-in heartbeat metrics; durable queue and production layer pipeline remain pending. |
 
 ### Verification entrypoints
 
@@ -1271,12 +1294,12 @@ part of the checkpoint documentation pass.
    non-scratch restore guard were checked.
 3. Runtime smoke acceptance: Done. `.\scripts\runtime-smoke.ps1 -StopOnExit`
    passed against the local Compose stack.
-4. Query heat and worker runtime realism: Partially done. DB-first query heat
-   helper and worker official demo DB persistence exist, but persisted query
-   heat and production scheduler/queue wiring remain pending.
+4. Query heat and worker runtime realism: Done for this checkpoint. Persisted
+   query/assessment history, safe runtime scheduler commands, DB-backed MVT
+   tiles, and heartbeat textfile metrics exist.
 5. Next implementation wave planning: Done at checkpoint level. Next wave is
-   persisted query heat, production worker runtime, tile hosting, worker
-   heartbeat metrics, and review/PR publication.
+   real source clients plus durable queue, production tile tables/cache,
+   dashboards, and Phase 4/5 gated implementations.
 
 ### Checkpoint acceptance criteria
 

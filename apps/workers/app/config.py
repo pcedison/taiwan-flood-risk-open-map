@@ -24,7 +24,12 @@ class WorkerSettings:
     enabled_adapter_keys: tuple[str, ...] | None
     worker_idle_seconds: int
     scheduler_interval_seconds: int
+    scheduler_max_ticks: int | None
     freshness_max_age_seconds: int
+    runtime_fixtures_enabled: bool
+    metrics_instance: str
+    worker_metrics_textfile_path: str | None
+    scheduler_metrics_textfile_path: str | None
 
 
 def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings:
@@ -43,11 +48,21 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         enabled_adapter_keys=env_list(values, "WORKER_ENABLED_ADAPTER_KEYS"),
         worker_idle_seconds=env_int(values, "WORKER_IDLE_SECONDS", default=60),
         scheduler_interval_seconds=env_int(values, "SCHEDULER_INTERVAL_SECONDS", default=300),
+        scheduler_max_ticks=env_optional_int(values, "SCHEDULER_MAX_TICKS"),
         freshness_max_age_seconds=env_int(
             values,
             "FRESHNESS_MAX_AGE_SECONDS",
             default=6 * 60 * 60,
         ),
+        runtime_fixtures_enabled=env_flag(values, "WORKER_RUNTIME_FIXTURES_ENABLED"),
+        metrics_instance=(
+            env_str(values, "WORKER_INSTANCE")
+            or env_str(values, "HOSTNAME")
+            or env_str(values, "COMPUTERNAME")
+            or "local"
+        ),
+        worker_metrics_textfile_path=env_str(values, "WORKER_METRICS_TEXTFILE_PATH"),
+        scheduler_metrics_textfile_path=env_str(values, "SCHEDULER_METRICS_TEXTFILE_PATH"),
     )
 
 
@@ -80,6 +95,16 @@ def env_int(env: Mapping[str, str], name: str, *, default: int) -> int:
         return max(1, int(raw))
     except ValueError:
         return default
+
+
+def env_optional_int(env: Mapping[str, str], name: str) -> int | None:
+    raw = env.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
 
 
 def env_list(env: Mapping[str, str], name: str) -> tuple[str, ...] | None:

@@ -1,6 +1,6 @@
 # 專案進度盤點報告（2026-04-30）
 
-本文件依 `docs/PROJECT_WORK_PLAN.md`、根目錄與各 app README，以及本輪 subagent hardening 結果整理目前狀態。結論：專案已超過 Phase 0 skeleton；Phase 1 核心查詢流程、Phase 2 ingestion groundwork、Phase 3 scoring v0 都已有實作與測試證據，且本輪已完成 local Compose runtime smoke 與 worker 官方 demo DB persistence 驗證。但仍不應宣稱 MVP 完成，因為 production worker scheduler/queue、query heat persistence、tile hosting、public reports、production monitoring dashboard 等仍是後續工作。
+本文件依 `docs/PROJECT_WORK_PLAN.md`、根目錄與各 app README，以及本輪 subagent hardening 結果整理目前狀態。結論：專案已超過 Phase 0 skeleton；Phase 1 核心查詢流程、Phase 2 ingestion groundwork、Phase 3 scoring v0 都已有實作與測試證據，且本輪已完成 local Compose runtime smoke、worker 官方 demo DB persistence、query heat persistence、DB-backed MVT tile endpoint、worker/scheduler heartbeat textfile metrics 與 Phase 4/5 governance gates。但仍不應宣稱 MVP 完成，因為 durable production queue、real external source clients、production tile tables/cache、public reports implementation、production monitoring dashboard 等仍是後續工作。
 
 ## 2026-04-30 Hardening 結果
 
@@ -9,6 +9,8 @@
 - WP3 Runtime smoke：已完成。`scripts/runtime-smoke.ps1 -StopOnExit` 已啟動 local Compose stack、跑 migration、檢查 API/Web、送出風險查詢並正常收尾。
 - WP4 Data realism / Phase 2 demo：已完成一輪可測 groundwork。Worker 批次流程會使用 `WORKER_ENABLED_ADAPTER_KEYS`；官方 WRA demo path 可用 runtime command 寫入 raw snapshot -> staging -> promotion -> PostGIS geometry；API query heat 由 DB helper 優先計算，DB 不可用時明確回傳 limited bucket。
 - WP5 Monitoring / backup-restore：已完成 checkpoint 等級驗收。Prometheus source freshness/API availability alert rules 已新增；backup/restore drill 支援 Docker client fallback 並驗證非 scratch restore guard。
+- WP6 Query heat / tile / scheduler：已完成 checkpoint 等級推進。`/v1/risk/assess` 會寫入 query/assessment snapshot；`/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt` 可從 DB 產 MVT；worker 有 safe run-once / bounded scheduler path。
+- WP7 Heartbeat / governance gates：已完成 checkpoint 等級推進。Worker/scheduler heartbeat textfile metrics 已接上 alert rules；Phase 4/5 public discussion / user report legal/privacy gates 已文件化。
 
 ## 已完成或已有明確實作證據
 
@@ -24,8 +26,9 @@
 - FastAPI entrypoint、router、health/readiness、public risk/evidence/layers routes 已存在：`apps/api/app/main.py`、`apps/api/app/api/router.py`、`apps/api/app/api/routes/health.py`、`apps/api/app/api/routes/public.py`。
 - Admin routes 與 admin auth contract skeleton 已存在：`apps/api/app/api/routes/admin.py`、`apps/api/tests/test_admin_contract.py`。
 - Risk scoring v0 有實作與 golden fixtures：`apps/api/app/domain/risk/scoring.py`、`apps/api/tests/test_scoring.py`、`apps/api/tests/fixtures/scoring/`。
-- Query heat 已從固定 bucket 推進為 DB-first helper，DB 不可用時明確標示 limited；polygon evidence 也透過 safe centroid 回傳：`apps/api/app/domain/evidence/repository.py`、`apps/api/tests/test_evidence_repository.py`、`apps/api/tests/test_public_contract.py`。
+- Query heat 已從固定 bucket 推進為 DB-first helper 與 persisted query/assessment history，DB 不可用時明確標示 limited；polygon evidence 也透過 safe centroid 回傳：`apps/api/app/domain/evidence/repository.py`、`apps/api/tests/test_evidence_repository.py`、`apps/api/tests/test_public_contract.py`、`infra/migrations/0005_query_heat_persistence.sql`。
 - `/v1/layers` 已改為 DB-first 讀取 seeded `map_layers` metadata，DB 不可用時才走 deterministic fallback：`apps/api/app/domain/layers/repository.py`、`infra/migrations/0004_seed_map_layers.sql`。
+- `/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt` 已提供 seeded layer 的最小可驗證 DB-backed MVT endpoint：`apps/api/app/api/routes/tiles.py`、`apps/api/app/domain/tiles/repository.py`、`apps/api/tests/test_tiles_contract.py`。
 
 ### Web Phase 1 flow
 
@@ -41,20 +44,22 @@
 - `WORKER_ENABLED_ADAPTER_KEYS` 可限制啟用 adapter，且不繞過 terms/sample gates：`apps/workers/app/config.py`、`apps/workers/app/adapters/registry.py`、`apps/workers/tests/test_adapter_registry_config.py`。
 - `run_enabled_adapter_batches()` 已讓 worker 批次流程實際使用 enabled adapter config：`apps/workers/app/jobs/ingestion.py`、`apps/workers/tests/test_ingestion_job_runner.py`。
 - 官方 WRA demo path 已有 raw snapshot -> staging -> promotion payload 測試，也可用 `python -m app.main --run-official-demo --persist --database-url ...` 寫入 PostGIS：`apps/workers/tests/test_official_demo_path.py`。
+- Worker runtime 現在有 safe run-once / bounded scheduler path，預設不打外部 API，fixture mode opt-in：`apps/workers/app/jobs/runtime.py`、`apps/workers/app/scheduler.py`、`apps/workers/tests/test_worker_entrypoints.py`。
+- Worker/scheduler heartbeat textfile metrics 已可由 env opt-in 輸出：`apps/workers/app/metrics.py`、`apps/workers/tests/test_heartbeat_metrics.py`、`infra/monitoring/alert-rules.yml`。
 
 ## 開發到一半或仍有 placeholder 的部分
 
 - API 與 Web 仍保留 placeholder server 檔案：`apps/api/app/placeholder_server.py`、`apps/web/server-placeholder.mjs`。目前只能算 fallback，不是主要 runtime。
-- Worker scheduler/sample 仍是 smoke/fallback path：`apps/workers/app/scheduler.py`、`apps/workers/app/jobs/sample.py`。production queue/scheduler 尚未完成；目前可演示的是 official demo runtime command。
-- Query heat 已有 DB helper，但尚未有完整 query persistence / heat bucket materialization flow；目前是最小可測真實度。
+- Worker scheduler 已有單程序 run-once / bounded-loop path，但 durable queue、singleton coordination、real source clients 尚未完成。
+- Query heat 已有 persisted query/assessment history，但尚未有 materialized heat bucket pipeline；目前是最小可測真實度。
 - PTT / Dcard / user_report 仍是 phase-delayed/pending implementation：`apps/workers/app/adapters/ptt/__init__.py`、`apps/workers/app/adapters/dcard/__init__.py`、`apps/workers/app/adapters/user_report/__init__.py`。
-- `packages/geo`、`packages/shared` 仍以 placeholder / baseline 為主。`infra/monitoring` 已有 Prometheus scrape config 與 alert rules，但 dashboard 與 worker heartbeat metrics 尚未完成。
+- `packages/geo`、`packages/shared` 仍以 placeholder / baseline 為主。`infra/monitoring` 已有 Prometheus scrape config、alert rules 與 heartbeat metric contract，但 dashboard 尚未完成。
 
 ## 尚未開發或尚未驗證
 
-- Query heat persistence 與 materialized heat buckets 尚未完成。
-- Production worker scheduler/queue 尚未完成。
-- Tile generation/hosting 尚未完成；目前只有 layer metadata。
+- Query heat materialized heat buckets 尚未完成。
+- Durable production worker queue / singleton scheduler 尚未完成。
+- Production tile tables/cache/hosting 尚未完成；目前是 DB-backed MVT 最小可驗證 path。
 - Phase 4 forum/public discussion expansion 尚未完成。
 - Phase 5 public reports and governance 尚未完成。
 - Phase 6 production hardening 尚未完成。
@@ -62,11 +67,11 @@
 
 ## 下一步建議
 
-1. 讓 `/v1/risk/assess` 寫入 `location_queries` / `risk_assessments`，把 query heat 從即時計算 helper 推進到可累積的 privacy-preserving flow。
-2. 補 worker production scheduler/queue 行為，讓 official adapters 能在 demo command 之外穩定排程執行。
-3. 建 tile generation/hosting，接上目前已 seeded 的 layer metadata。
-4. 將 worker/scheduler heartbeat metrics 接到 Prometheus alert placeholders。
-5. 對本 checkpoint 做 final diff check、commit、push、draft PR。
+1. 用 reviewed real source clients 取代 fixture-backed worker runtime adapters，並加入 durable queue / singleton scheduler。
+2. 將 MVT source 從 evidence/query fallback SQL 推進到 production layer tables、tile cache 與 hosting 策略。
+3. 補 production monitoring dashboards，接上 freshness、heartbeat、worker last-run status。
+4. Phase 4/5 public discussion / user reports 只能依新 governance gate checklist 開發。
+5. 對本 checkpoint 做 final diff check、commit、push、更新 draft PR。
 ---
 
 ## WP-E placeholder boundary / ops runbooks update - 2026-04-30
@@ -84,11 +89,10 @@ scripts. No app code was changed.
 - Keep as phase-delayed: PTT, Dcard, and user_report adapters. They remain
   blocked by legal/source/privacy review and must stay disabled.
 - Keep as baseline placeholders: `packages/geo` and `packages/shared`.
-  `infra/monitoring` now has scrape config and alert rules, while dashboards
-  and worker heartbeat metrics remain pending.
-- Convert to explicit known limitation: query heat has DB-first read groundwork,
-  but `/v1/risk/assess` persistence and heat bucket materialization are still
-  pending.
+  `infra/monitoring` now has scrape config, alert rules, and heartbeat metric
+  contract, while dashboards remain pending.
+- Convert to explicit known limitation: query heat has persisted history, but
+  heat bucket materialization is still pending.
 
 ### Five-point status update
 
@@ -98,8 +102,8 @@ scripts. No app code was changed.
 3. Runtime smoke is complete for this checkpoint; runbook/script are linked
    from README and `scripts/runtime-smoke.ps1 -StopOnExit` passed locally.
 4. Worker/API ingestion realism remains WP-D owned; official demo DB
-   persistence is verified, while production scheduler and persisted query heat
-   remain limitations.
+   persistence, safe runtime scheduler commands, and query persistence are
+   verified, while durable queue and real source clients remain limitations.
 5. Ops monitoring/backup now has runbooks and dry-run script entrypoints:
    `docs/runbooks/monitoring-freshness-alerts.md`,
    `docs/runbooks/backup-restore-drill.md`,
@@ -131,15 +135,16 @@ had happened at the documentation checkpoint moment.
 ### PR-ready summary
 
 - Functional scope: docs/status alignment, runtime smoke readiness, Web evidence
-  UX hardening, API query heat and layer-domain groundwork, Worker adapter/demo
-  realism, monitoring baseline, and ops runbooks.
+  UX hardening, persisted API query heat history, layer metadata, MVT tile
+  endpoint, Worker adapter/demo/runtime realism, monitoring heartbeat baseline,
+  and ops runbooks.
 - Test matrix: backend contract/domain tests, frontend unit and Playwright smoke
   tests, worker adapter/freshness/demo tests, ops dry-run scripts, and CI hard
   gate wiring.
-- Known risks: query heat persistence/materialized buckets pending; production
-  scheduler/queue pending; tile hosting pending; worker/scheduler heartbeat
-  metrics pending; placeholders remain fallback-only or phase-delayed; final
-  diff check should be run before staging.
+- Known risks: query heat materialized buckets pending; durable production
+  queue/singleton scheduler pending; production tile tables/cache pending;
+  monitoring dashboards pending; placeholders remain fallback-only or
+  phase-delayed; final diff check should be run before staging.
 - Rollback notes: roll back by reverting the eventual checkpoint commit and use
   `WORKER_ENABLED_ADAPTER_KEYS` to limit adapter execution during repair.
 

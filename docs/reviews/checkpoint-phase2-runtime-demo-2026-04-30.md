@@ -2,10 +2,8 @@
 
 Branch: `codex/phase2-runtime-demo`
 
-This checkpoint records the integrated Phase 1-3 hardening pass after the
-second subagent wave and main-agent verification. The branch has not been
-staged, committed, pushed, or opened as a PR at the time this document is
-written.
+This checkpoint records the integrated Phase 1-3 hardening pass and the
+follow-up five-point implementation wave on PR #1.
 
 ## Functional Scope
 
@@ -21,25 +19,34 @@ written.
 - Frontend evidence UX and tests: the map-first UI has richer evidence display,
   desktop/mobile Playwright smoke coverage, and Node unit tests for display
   helpers.
-- API query heat and evidence realism: evidence repository helpers use DB-first
-  nearby evidence and safe geometry centroids for polygon evidence; limited
+- API query heat and evidence realism: `/v1/risk/assess` persists
+  query/assessment snapshots, evidence repository helpers use DB-first nearby
+  evidence and safe geometry centroids for polygon evidence, and limited
   fallback behavior remains explicit when DB access is unavailable.
 - API layers: `/v1/layers` now reads seeded `map_layers` metadata from PostGIS
   through a layer repository, with a deterministic fallback if DB data is
   unavailable.
+- API tiles: `/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt` serves DB-backed Mapbox
+  Vector Tiles for seeded `flood-potential` and `query-heat` layers.
 - Worker demo persistence: `python -m app.main --run-official-demo --persist
   --database-url ...` writes official demo evidence through raw snapshot,
   staging, promotion, and PostGIS geometry paths.
+- Worker runtime scheduler: config-driven run-once and bounded-loop worker
+  commands exist and remain safe by default because fixture adapters require
+  explicit opt-in.
 - Monitoring and ops: Prometheus scrape config and alert rules cover API
-  availability and source freshness; backup/restore and source freshness
-  scripts have dry-run and Docker-client paths.
+  availability, source freshness, and worker/scheduler heartbeats;
+  backup/restore and source freshness scripts have dry-run and Docker-client
+  paths.
+- Phase 4/5 gates: public discussion/forum/user-report legal and privacy gates
+  are documented and must be accepted before those sources are enabled.
 
 ## Verification Completed
 
-- API: `python -m pytest` passed, 45 tests.
+- API: `python -m pytest` passed, 51 tests.
 - API: `python -m ruff check .` passed.
 - API: `python -m mypy .` passed.
-- Workers: `python -m pytest` passed, 57 tests.
+- Workers: `python -m pytest` passed, 70 tests.
 - Workers: `python -m ruff check .` passed.
 - Workers: `python -m mypy .` passed.
 - Web: `npm test` passed, 8 tests.
@@ -59,18 +66,22 @@ written.
 - Worker DB demo: official demo persistence completed against PostGIS, and API
   risk assessment returned persisted flood-potential evidence near the demo
   polygon.
+- Runtime follow-up smoke: migration `0005_query_heat_persistence.sql` applied
+  on PostGIS, persisted query/assessment snapshots were counted, the query-heat
+  MVT endpoint returned HTTP 200, and worker/scheduler heartbeat textfiles were
+  written.
 
 ## Known Risks
 
-- Query heat is still partial: DB-first read helpers exist, but
-  `/v1/risk/assess` does not yet persist `location_queries` /
-  `risk_assessments`, and materialized heat buckets are still pending.
-- Worker production execution is still partial: the official demo has a runtime
-  command, but durable production scheduler/queue behavior remains pending.
-- Tile/layer production pipeline is still partial: layer metadata is now real,
-  but real tile generation/hosting is not implemented.
-- Monitoring is alert-rule ready, but real worker/scheduler heartbeat metrics
-  are future placeholders until production worker runtime is implemented.
+- Query heat is still partial: persisted history exists, but materialized heat
+  buckets remain pending.
+- Worker production execution is still partial: safe run-once and bounded-loop
+  commands exist, but durable queue/singleton scheduler behavior remains
+  pending.
+- Tile/layer production pipeline is still partial: real MVT serving exists, but
+  dedicated production layer tables, cache, and hosting remain pending.
+- Monitoring is heartbeat-ready, but production dashboards and scrape
+  deployment remain pending.
 - Placeholder servers and sample scheduler paths still exist as fallback/smoke
   tools and must not be counted as product runtime acceptance.
 - PTT, Dcard, and user report adapters remain phase-delayed and disabled until
@@ -79,12 +90,12 @@ written.
 ## Suggested Commit Message
 
 ```text
-feat: checkpoint phase 2 runtime demo hardening
+feat: advance phase 2 runtime demo hardening
 
 - document Phase 1-3 hardening status and placeholder boundaries
-- add runtime smoke, backup/restore, freshness checks, and Prometheus alerts
-- wire API layers, DB-first evidence queries, and worker official demo persistence
-- harden web evidence display and expand API/web/worker verification coverage
+- persist query heat history and serve DB-backed MVT tiles
+- add safe worker runtime scheduler paths and heartbeat metrics
+- document Phase 4/5 governance gates and expand verification
 ```
 
 ## PR Body Draft
@@ -92,10 +103,10 @@ feat: checkpoint phase 2 runtime demo hardening
 ```markdown
 ## Summary
 
-This checkpoint moves `codex/phase2-runtime-demo` from skeleton hardening into a
-verified runtime-demo state. It keeps the remaining product risks explicit while
-proving the local API/Web/PostGIS path, worker official demo persistence, and
-ops smoke scripts.
+This update advances `codex/phase2-runtime-demo` from a verified runtime-demo
+checkpoint into a stronger Phase 2 demo: query heat persists, MVT tiles are
+served from DB-backed SQL, worker runtime commands are configurable, heartbeat
+metrics are real textfile outputs, and Phase 4/5 gates are explicit.
 
 ## Scope
 
@@ -104,25 +115,33 @@ ops smoke scripts.
   alert-rule entrypoints.
 - Harden Web evidence display and frontend tests.
 - Add DB-first evidence/layer API behavior with seeded `map_layers` metadata.
+- Add persisted query/assessment snapshots and DB-backed query heat history.
+- Add DB-backed MVT endpoint for seeded flood-potential and query-heat layers.
 - Add worker official demo persistence through raw snapshot, staging,
   promotion, and PostGIS geometry paths.
+- Add safe worker run-once / bounded scheduler commands and heartbeat textfile
+  metrics.
+- Add public discussion / user report governance gates.
 
 ## Verification
 
-- API pytest/ruff/mypy passed.
-- Worker pytest/ruff/mypy passed.
+- API pytest/ruff/mypy passed: 51 tests.
+- Worker pytest/ruff/mypy passed: 70 tests.
 - Web test/lint/typecheck/e2e passed.
 - OpenAPI, migration, contract fixture, and source allowlist validators passed.
 - Runtime smoke passed with `scripts/runtime-smoke.ps1 -StopOnExit`.
 - Worker DB demo persisted official flood-potential evidence and API risk
   assessment returned that evidence.
+- Follow-up runtime smoke confirmed migration 0005, MVT tile HTTP 200,
+  persisted query/assessment snapshots, and heartbeat textfile output.
 - Backup/restore Docker client path and non-scratch restore guard were checked.
 
 ## Remaining Risks
 
-- Persisted query heat and heat bucket materialization remain pending.
-- Production worker scheduler/queue remains pending.
-- Tile generation/hosting remains pending beyond real layer metadata.
-- Worker/scheduler heartbeat alerts need real production metrics.
+- Materialized query heat buckets remain pending.
+- Durable production queue/singleton scheduler remains pending.
+- Production tile tables/cache/hosting remain pending beyond the DB-backed MVT
+  smoke path.
+- Production monitoring dashboards remain pending.
 - Forum/user-report adapters remain disabled pending legal/source/privacy gates.
 ```

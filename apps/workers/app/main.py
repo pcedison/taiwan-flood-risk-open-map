@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from app.adapters.registry import enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.official_demo import build_official_demo_adapters
-from app.scheduler import run_scheduled_ingestion_cycle
+from app.scheduler import (
+    run_enabled_adapters_loop,
+    run_enabled_adapters_once,
+    run_scheduled_ingestion_cycle,
+)
 from app.jobs.sample import run_sample_job
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
@@ -36,6 +40,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run enabled official demo adapters once through ingestion and freshness checks.",
     )
     parser.add_argument(
+        "--run-enabled-adapters",
+        action="store_true",
+        help="Run configured runtime adapters once, selected by WORKER_ENABLED_ADAPTER_KEYS/config gates.",
+    )
+    parser.add_argument(
+        "--scheduler",
+        action="store_true",
+        help="Run configured runtime adapters in a scheduler loop.",
+    )
+    parser.add_argument(
+        "--max-ticks",
+        type=int,
+        help="Bound --scheduler ticks. Defaults to SCHEDULER_MAX_TICKS when set.",
+    )
+    parser.add_argument(
         "--persist",
         action="store_true",
         help="Persist --run-official-demo output to Postgres staging, ingestion runs, and evidence.",
@@ -60,6 +79,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.once:
         run_sample_job(enabled_adapters=enabled_adapter_keys(settings))
         return 0
+
+    if args.run_enabled_adapters:
+        result = run_enabled_adapters_once(settings=settings, job_key="worker.runtime.run_once")
+        return 1 if result.has_alerts else 0
+
+    if args.scheduler:
+        results = run_enabled_adapters_loop(
+            settings=settings,
+            max_ticks=max(1, args.max_ticks) if args.max_ticks is not None else None,
+        )
+        return 1 if any(result.has_alerts for result in results) else 0
 
     if args.run_official_demo:
         adapters = build_official_demo_adapters()

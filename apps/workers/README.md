@@ -6,23 +6,39 @@ smoke paths.
 ## Entry points
 
 - Single sample job: `python -m app.main --once`
+- Run configured runtime adapters once:
+  `WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --run-enabled-adapters`
+- Run configured runtime adapters on a bounded scheduler loop:
+  `WORKER_RUNTIME_FIXTURES_ENABLED=true SCHEDULER_MAX_TICKS=2 python -m app.main --scheduler`
 - Official adapter demo ingestion + freshness check: `python -m app.main --run-official-demo`
 - Official adapter demo with DB persistence and evidence promotion:
   `python -m app.main --run-official-demo --persist --database-url postgresql://...`
 - Scheduler loop smoke path: `python -m app.scheduler`
+- Scheduler runtime adapter path:
+  `WORKER_RUNTIME_FIXTURES_ENABLED=true python -m app.scheduler --run-enabled-adapters --once`
 - Scheduler official demo tick: `python -m app.scheduler --official-demo --once`
+- Worker heartbeat textfile metrics:
+  `WORKER_METRICS_TEXTFILE_PATH=./tmp/worker.prom python -m app.main --run-enabled-adapters`
+- Scheduler heartbeat textfile metrics:
+  `SCHEDULER_METRICS_TEXTFILE_PATH=./tmp/scheduler.prom python -m app.main --scheduler --max-ticks 1`
 
-The current implementation keeps the sample and scheduler paths lightweight so
-they can run before production queue dependencies are selected.
+The runtime adapter path is config-driven and safe by default: it selects
+adapters with `WORKER_ENABLED_ADAPTER_KEYS` plus source gates, but no runtime
+adapter is constructed unless `WORKER_RUNTIME_FIXTURES_ENABLED=true` opts into
+local fixture-backed adapters. That makes disabled or unavailable adapters a
+graceful no-op and avoids accidental calls to external APIs.
 The official demo only writes to Postgres when `--persist` is supplied; the
 database URL can come from `--database-url`, `WORKER_DATABASE_URL`, or
 `DATABASE_URL`.
+Heartbeat textfile metrics are opt-in. They are only written when
+`WORKER_METRICS_TEXTFILE_PATH` or `SCHEDULER_METRICS_TEXTFILE_PATH` is set.
 
 ## Current scope
 
 - Adapter contract and registry groundwork.
 - Official CWA rainfall, WRA water-level, and flood-potential fixture parsers.
 - Worker CLI/scheduler demo path for enabled official adapters.
+- Configurable run-once and bounded scheduler path for enabled runtime adapters.
 - Lightweight freshness checks that emit alerts for stale or failed adapter runs.
 - L2 news/public-web sample adapter and source allowlist validation.
 - Raw snapshot, staging, validation, promotion, and PostGIS writer groundwork.
@@ -31,8 +47,11 @@ database URL can come from `--database-url`, `WORKER_DATABASE_URL`, or
 
 ## Placeholder boundary
 
-- `app.scheduler` and `app.jobs.sample` are smoke/fallback paths, not completed
-  production scheduler/queue behavior.
+- Runtime scheduling is still single-process and fixture-backed until production
+  queue dependencies and real source clients are selected.
 - PTT and Dcard adapters are phase-delayed and must remain disabled until legal
-  and privacy review work lands.
-- User report ingestion is pending Phase 5 governance/API implementation.
+  and privacy review work lands. Future PRs must satisfy
+  `docs/privacy/public-discussion-user-report-gates.md` before enabling them.
+- User report ingestion is pending Phase 5 governance/API implementation and
+  must satisfy `docs/privacy/public-discussion-user-report-gates.md` before any
+  public intake path is enabled.

@@ -470,6 +470,12 @@ def test_risk_assess_persists_before_query_heat_snapshot(monkeypatch) -> None:
     assert getattr(assessment, "location_text") == "Tainan Annan"
     assert getattr(assessment, "explanation")["summary"]
     assert getattr(assessment, "data_freshness")
+    assert getattr(assessment, "result_snapshot")["location"] == {
+        "lat": 23.038818,
+        "lng": 120.213493,
+    }
+    assert getattr(assessment, "result_snapshot")["radius_m"] == 300
+    assert getattr(assessment, "result_snapshot")["levels"]["historical"]
     assert payload["query_heat"]["query_count_bucket"] == "1-9"
 
 

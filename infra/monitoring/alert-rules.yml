@@ -60,38 +60,35 @@ groups:
 
   - name: flood-risk-runtime-heartbeats
     rules:
-      # Future metric placeholder:
-      # Workers should eventually publish flood_risk_worker_heartbeat_timestamp_seconds
-      # with labels such as service="worker", instance, and queue. When that metric
-      # exists, replace the non-firing expression below with:
-      # absent(flood_risk_worker_heartbeat_timestamp_seconds)
-      #   or (time() - max by (service, instance, queue) (flood_risk_worker_heartbeat_timestamp_seconds) > 300)
       - alert: FloodRiskWorkerHeartbeatMissing
-        expr: vector(0) == 1
+        expr: absent(flood_risk_worker_heartbeat_timestamp_seconds) or (time() - max by (service, instance, queue) (flood_risk_worker_heartbeat_timestamp_seconds) > 300)
         for: 10m
         labels:
           severity: warning
           service: worker
-          lifecycle: future_metric
         annotations:
-          summary: "Worker heartbeat metric is not wired yet"
-          description: "Placeholder alert for the future worker heartbeat metric. Keep non-firing until workers publish heartbeat timestamps."
+          summary: "Worker heartbeat is missing"
+          description: "No worker heartbeat metric is present, or the latest worker heartbeat for {{ $labels.instance }} queue={{ $labels.queue }} is older than 300 seconds. Check worker logs and the textfile collector output."
           runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
 
-      # Future metric placeholder:
-      # The singleton scheduler should eventually publish
-      # flood_risk_scheduler_heartbeat_timestamp_seconds. When that metric exists,
-      # replace the non-firing expression below with:
-      # absent(flood_risk_scheduler_heartbeat_timestamp_seconds)
-      #   or (time() - max by (service, instance) (flood_risk_scheduler_heartbeat_timestamp_seconds) > 600)
       - alert: FloodRiskSchedulerHeartbeatMissing
-        expr: vector(0) == 1
+        expr: absent(flood_risk_scheduler_heartbeat_timestamp_seconds) or (time() - max by (service, instance, scheduler) (flood_risk_scheduler_heartbeat_timestamp_seconds) > 600)
         for: 10m
         labels:
           severity: warning
           service: scheduler
-          lifecycle: future_metric
         annotations:
-          summary: "Scheduler heartbeat metric is not wired yet"
-          description: "Placeholder alert for the future scheduler heartbeat metric. Keep non-firing until the singleton scheduler publishes heartbeat timestamps."
+          summary: "Scheduler heartbeat is missing"
+          description: "No scheduler heartbeat metric is present, or the latest scheduler heartbeat for {{ $labels.instance }} scheduler={{ $labels.scheduler }} is older than 600 seconds. Check scheduler logs and the textfile collector output."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskWorkerLastRunFailed
+        expr: flood_risk_worker_last_run_status{status="failed"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: worker
+        annotations:
+          summary: "Worker last run failed for {{ $labels.job }}"
+          description: "The latest observed worker run for {{ $labels.job }} on {{ $labels.instance }} queue={{ $labels.queue }} reported failed status. Inspect ingestion/freshness logs before restarting the worker."
           runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
