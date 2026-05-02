@@ -43,8 +43,10 @@ Partially complete, not production-ready:
 - The deployable official path is partial: `--run-official-demo --persist`,
   `--run-enabled-adapters --persist`, and `--work-runtime-queue --persist`
   prove raw snapshot, staging, ingestion-run, promotion, and evidence
-  persistence for demo or explicitly gated runtime adapters. Production beta
-  still needs real credential review, hosted cadence, alert routing,
+  persistence for demo, fixture-backed managed runtime, or explicitly gated
+  runtime adapters. The managed runtime persist smoke is a local fixture/DB
+  acceptance boundary, not production source readiness. Production beta still
+  needs real credential review, hosted cadence, alert routing,
   WRA/CWA/flood-potential production egress verification, and operator
   ownership.
 - `python -m app.scheduler` without flags is a placeholder maintenance/sample
@@ -144,6 +146,17 @@ docker compose run --rm `
 # Official demo persistence path: writes staging, ingestion runs, and evidence.
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --run-official-demo --persist"
 
+# Managed runtime persistence smoke: fixture-backed, no external source calls.
+# Manual runs leave rows for raw/official-demo/wra-water-level.json; the
+# runtime-smoke runbook includes the cleanup SQL used by the full smoke.
+docker compose run --rm `
+  -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e SOURCE_CWA_API_ENABLED=false `
+  -e SOURCE_WRA_API_ENABLED=false `
+  -e SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters --persist"
+
 # CWA live adapter path: explicit opt-in, one adapter, no WRA/flood-potential.
 docker compose run --rm `
   -e WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall `
@@ -198,11 +211,15 @@ override `WRA_API_URL`, optionally provide `WRA_API_TOKEN`, and tune
 no-op and tests inject fetchers instead of calling external APIs.
 The official demo, managed runtime path, and queue worker only write to
 Postgres when `--persist` is supplied; the database URL can come from
-`--database-url`, `WORKER_DATABASE_URL`, or `DATABASE_URL`. This exercises the
-same staging/run/promotion writers a deployment would use, but production
-source readiness still depends on reviewed credentials and cadence. The CWA
-rainfall, WRA water-level, and flood-potential GeoJSON runtime adapters are
-explicit gated live-source worker paths.
+`--database-url`, `WORKER_DATABASE_URL`, or `DATABASE_URL`. The local managed
+runtime persist smoke runs `--run-enabled-adapters --persist` with
+`WORKER_RUNTIME_FIXTURES_ENABLED=true`, verifies raw/staging/run and promoted
+evidence rows for `raw/official-demo/wra-water-level.json`, then deletes those
+smoke rows. This exercises the same staging/run/promotion writers a deployment
+would use, but production source readiness still depends on reviewed
+credentials, source egress verification, hosted cadence, alert routing, and
+operator ownership. The CWA rainfall, WRA water-level, and flood-potential
+GeoJSON runtime adapters are explicit gated live-source worker paths.
 The API's
 realtime official bridge is a separate direct-fetch path and should not be
 counted as worker ingestion completion.

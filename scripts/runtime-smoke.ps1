@@ -7,6 +7,7 @@ param(
     [switch]$SkipExtendedSmoke,
     [switch]$SkipQueueSmoke,
     [switch]$SkipAdapterFixtureSmoke,
+    [switch]$SkipManagedRuntimePersistSmoke,
     [switch]$SkipReportsEnabledSmoke,
     [switch]$Help
 )
@@ -43,6 +44,9 @@ Extended checks are enabled by default:
     connection.
   - Official adapter fixture dry run: run --run-official-demo in a one-off
     worker container without external API credentials.
+  - Managed runtime persist smoke: run --run-enabled-adapters --persist with
+    fixture adapters against the Compose database, verify raw/staging/run and
+    promoted evidence rows, and clean up the smoke rows.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
   - MVT smoke: GET seeded query-heat and flood-potential .mvt endpoints.
@@ -62,6 +66,8 @@ Options:
   -SkipExtendedSmoke            Run only base API/Web smoke.
   -SkipQueueSmoke               Skip the queue CLI surface and durable queue live smoke.
   -SkipAdapterFixtureSmoke      Skip only the official adapter fixture dry run.
+  -SkipManagedRuntimePersistSmoke
+                                Skip only the managed runtime persist smoke.
   -SkipReportsEnabledSmoke      Skip only the reports enabled-path smoke.
   -Help                         Print this help and exit without touching Docker.
 "@
@@ -1019,6 +1025,157 @@ function Invoke-AdapterFixtureDryRunSmoke {
     Write-Host "Official adapter fixture dry-run smoke: --run-official-demo completed without external API credentials."
 }
 
+function Invoke-ManagedRuntimePersistSmoke {
+    $managedRuntimePersistCleanupSql = @'
+WITH smoke_jobs AS (
+    SELECT DISTINCT ingestion_job_id
+    FROM adapter_runs
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+        AND ingestion_job_id IS NOT NULL
+),
+deleted_risk_links AS (
+    DELETE FROM risk_assessment_evidence
+    WHERE evidence_id IN (
+        SELECT id
+        FROM evidence
+        WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    )
+    RETURNING 1
+),
+deleted_evidence AS (
+    DELETE FROM evidence
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    RETURNING 1
+),
+deleted_staging AS (
+    DELETE FROM staging_evidence
+    WHERE raw_snapshot_id IN (
+            SELECT id
+            FROM raw_snapshots
+            WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+        )
+        OR payload ->> 'raw_ref' = 'raw/official-demo/wra-water-level.json'
+    RETURNING 1
+),
+deleted_adapter_runs AS (
+    DELETE FROM adapter_runs
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    RETURNING 1
+)
+DELETE FROM ingestion_jobs
+WHERE id IN (SELECT ingestion_job_id FROM smoke_jobs);
+
+DELETE FROM raw_snapshots
+WHERE raw_ref = 'raw/official-demo/wra-water-level.json';
+'@
+    $script:RuntimeSmokeCleanupSql += $managedRuntimePersistCleanupSql
+
+    $managedRuntimePersistVerificationSql = @'
+DO $$
+DECLARE
+    raw_count integer;
+    staging_count integer;
+    ingestion_job_count integer;
+    adapter_run_count integer;
+    evidence_count integer;
+BEGIN
+    SELECT count(*)
+    INTO raw_count
+    FROM raw_snapshots
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+        AND adapter_key = 'official.wra.water_level';
+
+    SELECT count(*)
+    INTO staging_count
+    FROM staging_evidence
+    WHERE validation_status = 'accepted'
+        AND payload ->> 'adapter_key' = 'official.wra.water_level'
+        AND payload ->> 'raw_ref' = 'raw/official-demo/wra-water-level.json';
+
+    SELECT count(*)
+    INTO adapter_run_count
+    FROM adapter_runs
+    WHERE adapter_key = 'official.wra.water_level'
+        AND raw_ref = 'raw/official-demo/wra-water-level.json'
+        AND status = 'succeeded';
+
+    SELECT count(*)
+    INTO ingestion_job_count
+    FROM ingestion_jobs ij
+    WHERE ij.job_key = 'worker.runtime.managed_run_once'
+        AND ij.adapter_key = 'official.wra.water_level'
+        AND ij.status = 'succeeded'
+        AND EXISTS (
+            SELECT 1
+            FROM adapter_runs ar
+            WHERE ar.ingestion_job_id = ij.id
+                AND ar.raw_ref = 'raw/official-demo/wra-water-level.json'
+        );
+
+    SELECT count(*)
+    INTO evidence_count
+    FROM evidence
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+        AND source_type = 'official'
+        AND event_type = 'water_level'
+        AND ingestion_status = 'accepted';
+
+    IF raw_count < 1 THEN
+        RAISE EXCEPTION 'managed runtime persist smoke wrote no raw_snapshots row';
+    END IF;
+    IF staging_count < 1 THEN
+        RAISE EXCEPTION 'managed runtime persist smoke wrote no accepted staging_evidence row';
+    END IF;
+    IF adapter_run_count < 1 THEN
+        RAISE EXCEPTION 'managed runtime persist smoke wrote no succeeded adapter_runs row';
+    END IF;
+    IF ingestion_job_count < 1 THEN
+        RAISE EXCEPTION 'managed runtime persist smoke wrote no succeeded ingestion_jobs row';
+    END IF;
+    IF evidence_count < 1 THEN
+        RAISE EXCEPTION 'managed runtime persist smoke promoted no evidence row';
+    END IF;
+
+    RAISE NOTICE 'managed runtime persist smoke counts: raw=%, staging=%, ingestion_jobs=%, adapter_runs=%, evidence=%',
+        raw_count,
+        staging_count,
+        ingestion_job_count,
+        adapter_run_count,
+        evidence_count;
+END $$;
+'@
+
+    Invoke-PostgresSqlSmoke `
+        -Description "Cleaning pre-existing managed runtime persist smoke rows" `
+        -Sql $managedRuntimePersistCleanupSql
+
+    try {
+        Invoke-ComposeRun `
+            -Description "Running managed runtime persist smoke with fixture adapters" `
+            -Service "worker" `
+            -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --run-enabled-adapters --persist" `
+            -Environment @(
+                "WORKER_RUNTIME_FIXTURES_ENABLED=true",
+                "WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level",
+                "FRESHNESS_MAX_AGE_SECONDS=21600",
+                "WORKER_INSTANCE=runtime-smoke-managed-persist",
+                "SOURCE_CWA_API_ENABLED=false",
+                "SOURCE_WRA_API_ENABLED=false",
+                "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false"
+            )
+
+        Invoke-PostgresSqlSmoke `
+            -Description "Checking managed runtime persist smoke rows" `
+            -Sql $managedRuntimePersistVerificationSql
+    }
+    finally {
+        Invoke-BestEffortPostgresSql -Sql $managedRuntimePersistCleanupSql
+        $script:RuntimeSmokeCleanupSql = @($script:RuntimeSmokeCleanupSql | Where-Object { $_ -ne $managedRuntimePersistCleanupSql })
+    }
+
+    Write-Host "Managed runtime persist smoke: --run-enabled-adapters --persist wrote raw/staging/run and promoted evidence rows, then cleanup completed."
+}
+
 function Invoke-SchedulerBoundedTickSmoke {
     $schedulerSmokeCleanupSql = "DELETE FROM worker_scheduler_leases WHERE lease_key = 'scheduler.maintenance' AND holder_id = 'runtime-smoke-maintenance';"
     $script:RuntimeSmokeCleanupSql += $schedulerSmokeCleanupSql
@@ -1333,6 +1490,13 @@ try {
         }
         else {
             Invoke-AdapterFixtureDryRunSmoke
+        }
+
+        if ($SkipManagedRuntimePersistSmoke) {
+            Write-Host "Managed runtime persist smoke skipped by -SkipManagedRuntimePersistSmoke."
+        }
+        else {
+            Invoke-ManagedRuntimePersistSmoke
         }
 
         if ($SkipQueueSmoke) {

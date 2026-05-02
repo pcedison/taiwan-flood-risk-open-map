@@ -5,15 +5,16 @@ volumes. It now covers the Phase 2 runtime-demo readiness path: API/Web, risk
 query, query heat, worker queue ops CLI surface, queue metrics export surface,
 live-gate no-network boundaries, durable worker queue with DLQ-equivalent
 list/requeue visibility and replay audit IDs, official adapter fixture
-dry-run, user reports gates, MVT tiles, and the documented query-heat
-materialization plus tile feature/cache smoke path.
+dry-run, managed runtime fixture persistence, user reports gates, MVT tiles,
+and the documented query-heat materialization plus tile feature/cache smoke
+path.
 
 The smoke is intentionally local. A passing run means the Compose services,
-migrations, fixture-backed worker paths, queue primitives, and monitoring
-entrypoints are runnable together. It does not prove production source
-credentials, real upstream official worker ingestion, hosted monitoring,
-scheduler cadence, DLQ/replay operations, tile hosting, or public report
-launch readiness.
+migrations, fixture-backed worker paths, managed persistence writers, queue
+primitives, and monitoring entrypoints are runnable together. It does not
+prove production source credentials, real upstream official worker ingestion,
+source egress, hosted monitoring, scheduler cadence, DLQ/replay operations,
+tile hosting, or public report launch readiness.
 
 ## Requirements
 
@@ -48,7 +49,17 @@ The script performs these checks:
 11. Runs `python -m app.main --run-official-demo` in a one-off `worker`
     container to prove the safe official adapter fixture parse/dry-run path
     without external API credentials or persistence.
-12. Runs a queue ops CLI surface smoke in a one-off `worker` container:
+12. Runs `python -m app.main --run-enabled-adapters --persist` in a one-off
+    `worker` container with `WORKER_RUNTIME_FIXTURES_ENABLED=true` and only
+    `official.wra.water_level` selected:
+    - uses the Compose database and fixture adapter data only
+    - keeps all live source API gates disabled
+    - verifies the managed runtime CLI path wrote raw snapshot, accepted
+      staging evidence, ingestion job, adapter run, and promoted evidence rows
+    - deletes rows tied to `raw/official-demo/wra-water-level.json` after the
+      verification
+    - does not prove CWA/WRA/flood-potential production source readiness
+13. Runs a queue ops CLI surface smoke in a one-off `worker` container:
     - executes `python -m app.main --help`
     - verifies the enqueue, consume, queue metrics export, queue summary/list,
       requeue, live-run, and adapter-list flags are present
@@ -56,7 +67,7 @@ The script performs these checks:
       `official.flood_potential.geojson` even when the GeoJSON live gate is on
     - verifies the flood-potential GeoJSON gate and URL settings are present
     - does not connect to the database and does not require CWA/WRA credentials
-13. Runs a safe live-gate no-network boundary smoke in a one-off `worker`
+14. Runs a safe live-gate no-network boundary smoke in a one-off `worker`
     container:
     - calls `--run-enabled-adapters` with CWA/WRA/flood-potential selected
       but live API gates disabled
@@ -64,7 +75,7 @@ The script performs these checks:
       the no-op path tries to connect externally
     - does not require external credentials and does not prove production
       official ingestion readiness
-14. Runs a queue live smoke in a one-off `worker` container:
+15. Runs a queue live smoke in a one-off `worker` container:
     - enables fixture runtime adapters with
       `WORKER_RUNTIME_FIXTURES_ENABLED=true`
     - verifies active-job producer dedupe for the same adapter
@@ -76,18 +87,18 @@ The script performs these checks:
     - requeues that row through the audited `--requeue-runtime-job` CLI against
       the live DB table and verifies it can be dequeued again
     - deletes the smoke queue rows
-15. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
+16. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
     path with `--maintenance --scheduler --max-ticks 1`.
-16. Runs a reports enabled-path smoke in a one-off `api` container with
+17. Runs a reports enabled-path smoke in a one-off `api` container with
     `USER_REPORTS_ENABLED=true`; this inserts a minimized pending row in
     `user_reports`, verifies moderation/audit rows, then deletes the smoke rows
-17. Runs a query heat and tile cache job smoke:
+18. Runs a query heat and tile cache job smoke:
     - materializes `P1D` and `P7D` query heat buckets
     - refreshes `flood-potential` map features from accepted evidence
     - writes one smoke tile cache row
     - verifies the API serves the same cached tile payload bytes
     - deletes synthetic tile/evidence/cache rows
-18. Polls the web runtime until it responds at `http://localhost:3000`
+19. Polls the web runtime until it responds at `http://localhost:3000`
 
 By default, services are left running for debugging or follow-up manual testing. To stop the runtime containers after the smoke finishes, without removing volumes:
 
@@ -119,6 +130,7 @@ Skip individual extended checks:
 ```powershell
 .\scripts\runtime-smoke.ps1 -SkipQueueSmoke
 .\scripts\runtime-smoke.ps1 -SkipAdapterFixtureSmoke
+.\scripts\runtime-smoke.ps1 -SkipManagedRuntimePersistSmoke
 .\scripts\runtime-smoke.ps1 -SkipReportsEnabledSmoke
 ```
 
@@ -135,6 +147,7 @@ Reports default-disabled smoke: HTTP 404 feature_disabled
 MVT smoke: layer=query-heat, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 MVT smoke: layer=flood-potential, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 Official adapter fixture dry-run smoke: --run-official-demo completed without external API credentials.
+Managed runtime persist smoke: --run-enabled-adapters --persist wrote raw/staging/run and promoted evidence rows, then cleanup completed.
 queue_cli_surface_smoke=ok enqueue=true work=true queue_metrics_export=true queue_summary=true queue_list=true requeue=true flood_potential_geojson_gate=true
 live_gate_no_network_boundary_smoke=ok run_enabled_adapters_noop=true network_attempts=0
 queue_smoke=ok dedupe_active_count=1 consumed_job_id=... adapter_key=official.wra.water_level failed_job_id=... failed_status=failed dead_letter_visible=true dead_letter_requeued=true
@@ -244,6 +257,74 @@ real CWA/WRA upstream data from the worker runtime:
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --run-official-demo --persist"
 ```
 
+Managed runtime persistence path. This is the focused smoke equivalent for
+`--run-enabled-adapters --persist`: it uses fixture adapters and the Compose
+database, verifies evidence side effects, then should be cleaned up. It proves
+the managed runtime CLI/persistence path, not production source readiness:
+
+```powershell
+docker compose run --rm `
+  -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e SOURCE_CWA_API_ENABLED=false `
+  -e SOURCE_WRA_API_ENABLED=false `
+  -e SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters --persist"
+```
+
+Verification can stay narrow by checking the WRA fixture raw ref:
+
+```sql
+SELECT count(*) FROM evidence
+WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+  AND source_type = 'official'
+  AND event_type = 'water_level'
+  AND ingestion_status = 'accepted';
+```
+
+Cleanup SQL for that focused smoke:
+
+```sql
+WITH smoke_jobs AS (
+    SELECT DISTINCT ingestion_job_id
+    FROM adapter_runs
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+      AND ingestion_job_id IS NOT NULL
+),
+deleted_risk_links AS (
+    DELETE FROM risk_assessment_evidence
+    WHERE evidence_id IN (
+        SELECT id FROM evidence
+        WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    )
+    RETURNING 1
+),
+deleted_evidence AS (
+    DELETE FROM evidence
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    RETURNING 1
+),
+deleted_staging AS (
+    DELETE FROM staging_evidence
+    WHERE raw_snapshot_id IN (
+        SELECT id FROM raw_snapshots
+        WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    )
+    OR payload ->> 'raw_ref' = 'raw/official-demo/wra-water-level.json'
+    RETURNING 1
+),
+deleted_adapter_runs AS (
+    DELETE FROM adapter_runs
+    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    RETURNING 1
+)
+DELETE FROM ingestion_jobs
+WHERE id IN (SELECT ingestion_job_id FROM smoke_jobs);
+
+DELETE FROM raw_snapshots
+WHERE raw_ref = 'raw/official-demo/wra-water-level.json';
+```
+
 Reports default-disabled live HTTP check:
 
 ```powershell
@@ -318,8 +399,9 @@ PY"
 ## Pending Checklist
 
 - Harden the gated CWA/WRA/flood-potential worker live clients with source
-  review, credentials, attribution, managed persistence, and non-fixture
-  runtime queue smoke before claiming production ingestion readiness.
+  review, credentials, attribution, production egress verification, hosted
+  cadence, and non-fixture runtime queue smoke before claiming production
+  ingestion readiness.
 - Promote the row-level list/requeue commands and audit/quarantine primitives
   into an accepted DLQ/poison-job policy; current smoke only proves synthetic
   final-failed list/requeue/dequeue visibility.
@@ -342,6 +424,10 @@ PY"
 - Official adapter fixture dry-run fails: inspect the one-off worker output.
   This path should use in-repo fixtures only and should not require external
   API credentials.
+- Managed runtime persist smoke fails: inspect the one-off worker output and
+  confirm migrations have created `raw_snapshots`, `staging_evidence`,
+  `ingestion_jobs`, `adapter_runs`, and `evidence`. This path is fixture-backed
+  and should not require external API credentials.
 - Reports enabled smoke fails: inspect the one-off API container output and
   confirm migration tables `user_reports` and `audit_logs` exist.
 - MVT smoke fails: inspect `docker compose logs --tail=80 api` and confirm
@@ -355,10 +441,10 @@ PY"
 The script does not run `docker compose down -v`, `docker volume rm`, or any volume cleanup. With `-StopOnExit`, it only runs `docker compose stop` for the services it started.
 
 The extended smoke writes limited local verification rows. On successful runs,
-it deletes the synthetic queue, report/audit, tile cache, map feature, and
-evidence smoke rows before exit; tile/evidence/cache cleanup is also registered
-as best-effort cleanup if a later assertion fails. Rows that may remain as
-useful local evidence are:
+it deletes the synthetic managed-runtime persistence, queue, report/audit, tile
+cache, map feature, and evidence smoke rows before exit; managed-runtime and
+tile/evidence/cache cleanup are also registered as best-effort cleanup if a
+later assertion fails. Rows that may remain as useful local evidence are:
 
 - one or more risk/query assessment rows from `/v1/risk/assess`
 - materialized `query_heat_buckets` rows generated from local query history

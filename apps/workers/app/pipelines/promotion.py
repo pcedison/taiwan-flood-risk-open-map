@@ -96,11 +96,16 @@ def promote_accepted_staging(
     limit: int | None = None,
     adapter_keys: tuple[str, ...] | None = None,
 ) -> PromotionResult:
-    evidence_ids = tuple(
-        writer.write_evidence(build_evidence_promotion_payload(candidate))
-        for candidate in writer.fetch_accepted_staging(limit=limit, adapter_keys=adapter_keys)
-    )
-    return PromotionResult(promoted=len(evidence_ids), evidence_ids=evidence_ids)
+    evidence_ids: list[str] = []
+    seen_keys: set[tuple[str, str | None]] = set()
+    for candidate in writer.fetch_accepted_staging(limit=limit, adapter_keys=adapter_keys):
+        promotion_key = (candidate.source_id, candidate.raw_ref)
+        if promotion_key in seen_keys:
+            continue
+        seen_keys.add(promotion_key)
+        evidence_ids.append(writer.write_evidence(build_evidence_promotion_payload(candidate)))
+
+    return PromotionResult(promoted=len(evidence_ids), evidence_ids=tuple(evidence_ids))
 
 
 class PostgresEvidencePromotionWriter:
@@ -169,6 +174,9 @@ class PostgresEvidencePromotionWriter:
                         'accepted',
                         %s::jsonb
                     )
+                    ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique
+                    DO UPDATE SET
+                        updated_at = evidence.updated_at
                     RETURNING id
                     """,
                     (

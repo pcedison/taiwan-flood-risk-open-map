@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+from pathlib import Path
 
 from app.pipelines.promotion import (
     EvidencePromotionPayload,
@@ -59,6 +60,34 @@ def test_promote_accepted_staging_uses_writer_protocol() -> None:
     assert writer.payloads[0].source_id == "sample-news-001"
 
 
+def test_promote_accepted_staging_deduplicates_duplicate_source_raw_ref_candidates() -> None:
+    writer = _MemoryPromotionWriter(
+        [
+            _candidate(staging_evidence_id="staging-id-1"),
+            _candidate(staging_evidence_id="staging-id-2"),
+            _candidate(
+                staging_evidence_id="staging-id-3",
+                source_id="sample-news-002",
+                raw_ref=None,
+            ),
+            _candidate(
+                staging_evidence_id="staging-id-4",
+                source_id="sample-news-002",
+                raw_ref=None,
+            ),
+        ]
+    )
+
+    result = promote_accepted_staging(writer)
+
+    assert result.promoted == 2
+    assert result.evidence_ids == ("evidence-1", "evidence-2")
+    assert [payload.properties["staging_evidence_id"] for payload in writer.payloads] == [
+        "staging-id-1",
+        "staging-id-3",
+    ]
+
+
 def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() -> None:
     connection = _FakeConnection(
         rows=[
@@ -105,6 +134,9 @@ def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() 
     assert "NOT EXISTS" in select_sql
     assert select_params == (5,)
     assert "INSERT INTO evidence" in insert_sql
+    assert "ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique" in insert_sql
+    assert "DO UPDATE SET" in insert_sql
+    assert "updated_at = evidence.updated_at" in insert_sql
     assert "ST_GeomFromGeoJSON" in insert_sql
     assert "SELECT id FROM data_sources WHERE adapter_key = %s" in insert_sql
     assert insert_params[1] == "news.public_web.sample"
@@ -150,6 +182,18 @@ def test_postgres_promotion_writer_inserts_geojson_geometry_when_present() -> No
     assert insert_params[11] == insert_params[12]
 
 
+def test_promotion_idempotency_migration_handles_null_raw_ref_uniqueness() -> None:
+    migration_sql = (
+        Path(__file__).resolve().parents[3]
+        / "infra"
+        / "migrations"
+        / "0010_promotion_evidence_idempotency.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "evidence_source_raw_ref_unique" in migration_sql
+    assert "UNIQUE NULLS NOT DISTINCT (source_id, raw_ref)" in migration_sql
+
+
 def test_postgres_promotion_writer_can_filter_accepted_rows_by_adapter_key() -> None:
     connection = _FakeConnection(rows=[], evidence_id="unused")
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
@@ -176,15 +220,18 @@ def test_postgres_promotion_writer_requires_database_url_or_connection_factory()
 
 def _candidate(
     *,
+    staging_evidence_id: str = "staging-id",
+    raw_ref: str | None = "raw/news-public-web/sample.json",
+    source_id: str = "sample-news-001",
     validation_status: str = "accepted",
     payload: dict[str, object] | None = None,
 ) -> PromotionCandidate:
     return PromotionCandidate(
-        staging_evidence_id="staging-id",
+        staging_evidence_id=staging_evidence_id,
         raw_snapshot_id="raw-snapshot-id",
-        raw_ref="raw/news-public-web/sample.json",
+        raw_ref=raw_ref,
         data_source_id="data-source-id",
-        source_id="sample-news-001",
+        source_id=source_id,
         source_type="news",
         event_type="flood_report",
         title="Heavy rain reported near riverside district",
