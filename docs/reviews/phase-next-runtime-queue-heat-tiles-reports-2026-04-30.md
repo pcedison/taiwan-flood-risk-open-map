@@ -30,7 +30,7 @@ Acceptance standard for the next phase:
 
 ### 2. Durable Queue Smoke
 
-Status: In development.
+Status: In development with producer/consumer CLIs and replay-audit primitives.
 
 What exists now:
 
@@ -38,15 +38,18 @@ What exists now:
 - Worker code can enqueue/dequeue/complete runtime adapter jobs.
 - Runtime smoke exercises one durable job through a one-off worker container
   with fixture adapters enabled.
-- A `--work-runtime-queue --once` consume CLI is integrated.
+- `--enqueue-runtime-jobs`, `--work-runtime-queue --once`, and
+  `--work-runtime-queue --persist` CLIs are integrated.
+- `--requeue-runtime-job` requires operator identity/reason, records replay
+  audit rows, and refuses active poison-quarantined jobs.
 
 Not complete yet:
 
 - Reviewed real source clients are not the default runtime path.
 - A production singleton scheduler and durable queue operating model are not
   accepted yet.
-- A standalone enqueue CLI is not integrated; the smoke uses the runtime helper
-  API to seed one job before consuming it.
+- Replay audit/quarantine tables are primitives only; production routing,
+  alerting, source idempotency review, and approval workflow are not accepted.
 
 Acceptance standard for the next phase:
 

@@ -47,8 +47,9 @@ Pending for production:
   official-source paths.
 - Worker/scheduler deployment with heartbeat paths mounted into a real
   collector.
-- Queue replay audit, poison-job quarantine/routing, auto replay policy,
-  alert routing, and incident ownership for exhausted jobs.
+- Accepted replay policy around the queue replay audit and poison-quarantine
+  primitives, plus routing/escalation, alert routing, and incident ownership
+  for exhausted jobs.
 
 ## Files
 

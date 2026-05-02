@@ -3,10 +3,10 @@
 This runbook verifies the local Docker Compose runtime without deleting Docker
 volumes. It now covers the Phase 2 runtime-demo readiness path: API/Web, risk
 query, query heat, worker queue ops CLI surface, queue metrics export surface,
-live-gate no-network boundaries, durable worker queue with
-DLQ-equivalent list/requeue visibility, official adapter fixture dry-run, user
-reports gates, MVT tiles, and the documented query-heat materialization plus
-tile feature/cache smoke path.
+live-gate no-network boundaries, durable worker queue with DLQ-equivalent
+list/requeue visibility and replay audit IDs, official adapter fixture
+dry-run, user reports gates, MVT tiles, and the documented query-heat
+materialization plus tile feature/cache smoke path.
 
 The smoke is intentionally local. A passing run means the Compose services,
 migrations, fixture-backed worker paths, queue primitives, and monitoring
@@ -73,8 +73,8 @@ The script performs these checks:
     - verifies an exhausted unknown-adapter job remains visible as
       `failed`/`final_failed_at`
     - verifies that `list_dead_letter_jobs` can see the exhausted row
-    - requeues that row through `PostgresRuntimeQueue.requeue_failed_job`
-      against the live DB table and verifies it can be dequeued again
+    - requeues that row through the audited `--requeue-runtime-job` CLI against
+      the live DB table and verifies it can be dequeued again
     - deletes the smoke queue rows
 15. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
     path with `--maintenance --scheduler --max-ticks 1`.
@@ -176,11 +176,12 @@ docker compose run --rm worker sh -c "pip install -e . >/tmp/worker-install.log 
 Expected landed flags include `--enqueue-runtime-jobs`, `--work-runtime-queue`,
 `--list-runtime-dead-letter-jobs`,
 `--summarize-runtime-dead-letter-jobs`, `--dead-letter-queue-name`,
-`--dead-letter-limit`, `--requeue-runtime-job`, and
-`--requeue-keep-attempts`. Queue metrics export is also required through
-`--export-runtime-queue-metrics`, `--runtime-queue-metrics-format`, and
-`--runtime-queue-metrics-path`. The current smoke also expects
-`--run-enabled-adapters` and `--list-adapters`.
+`--dead-letter-limit`, `--requeue-runtime-job`, `--requeue-keep-attempts`,
+`--requeue-requested-by`, and `--requeue-reason`. Queue metrics export is also
+required through `--export-runtime-queue-metrics`,
+`--runtime-queue-metrics-format`, and `--runtime-queue-metrics-path`. The
+current smoke also expects `--run-enabled-adapters`, `--persist`, and
+`--list-adapters`.
 
 Live-gate no-network boundary. This focused check is safe to run without
 credentials. It selects the official live adapters but leaves the CWA/WRA API
@@ -232,7 +233,7 @@ Requeue one failed row after confirming payload/idempotency and incident
 context:
 
 ```powershell
-docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id> --requeue-requested-by <operator> --requeue-reason '<why-safe-to-retry>'"
 ```
 
 Official demo persistence path. This proves fixture/demo official adapters can
@@ -319,9 +320,9 @@ PY"
 - Harden the gated CWA/WRA/flood-potential worker live clients with source
   review, credentials, attribution, managed persistence, and non-fixture
   runtime queue smoke before claiming production ingestion readiness.
-- Promote the row-level list/requeue commands into an accepted DLQ/poison-job
-  policy; current smoke only proves synthetic final-failed
-  list/requeue/dequeue visibility.
+- Promote the row-level list/requeue commands and audit/quarantine primitives
+  into an accepted DLQ/poison-job policy; current smoke only proves synthetic
+  final-failed list/requeue/dequeue visibility.
 - Deploy a singleton scheduler cadence for ingestion, query heat, tile refresh,
   retention, and freshness export.
 - Wire hosted monitoring with alert routing, TLS/auth, and persistent storage.

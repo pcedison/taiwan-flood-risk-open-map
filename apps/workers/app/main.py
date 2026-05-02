@@ -35,25 +35,34 @@ from app.jobs.queue import (
     RuntimeQueueMetricsSnapshot,
     RuntimeQueueUnavailable,
 )
-from app.jobs.runtime import work_runtime_queue_once
+from app.jobs.replay_audit import PostgresRuntimeQueueReplayAudit
+from app.jobs.runtime import (
+    build_runtime_adapters,
+    build_runtime_persistence_writers,
+    work_runtime_queue_once,
+)
+from app.jobs.runtime_managed import run_managed_runtime_ingestion_cycle
 from app.jobs.sample import run_sample_job
 from app.jobs.tile_cache import PostgresTileCacheWriter, TileCacheUnavailable, TileLayerUnsupported
 from app.logging import log_event
 from app.metrics import render_runtime_queue_metrics, write_prometheus_textfile
+from app.jobs.ingestion import IngestionRunSummaryWriter
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.postgres_writer import PostgresStagingBatchWriter
 from app.pipelines.promotion import (
+    EvidencePromotionWriter,
     PostgresEvidencePromotionWriter,
     PromotionResult,
     promote_accepted_staging,
 )
+from app.pipelines.staging import StagingBatchWriter
 
 
 @dataclass(frozen=True)
 class DemoPersistenceWriters:
-    staging_writer: PostgresStagingBatchWriter
-    run_writer: PostgresIngestionRunWriter
-    promotion_writer: PostgresEvidencePromotionWriter
+    staging_writer: StagingBatchWriter
+    run_writer: IngestionRunSummaryWriter
+    promotion_writer: EvidencePromotionWriter
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -138,6 +147,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Keep the existing attempts value for --requeue-runtime-job instead of resetting to 0.",
     )
     parser.add_argument(
+        "--requeue-requested-by",
+        help="Operator or automation identity required for --requeue-runtime-job audit.",
+    )
+    parser.add_argument(
+        "--requeue-reason",
+        help="Short operator reason required for --requeue-runtime-job audit.",
+    )
+    parser.add_argument(
         "--aggregate-query-heat",
         action="store_true",
         help="Materialize query heat buckets from location_queries into query_heat_buckets.",
@@ -197,7 +214,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--persist",
         action="store_true",
-        help="Persist --run-official-demo output to Postgres staging, ingestion runs, and evidence.",
+        help=(
+            "Persist supported worker output to Postgres staging, ingestion runs, "
+            "and evidence."
+        ),
     )
     parser.add_argument(
         "--database-url",
@@ -249,10 +269,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             database_url=args.database_url,
             job_id=args.requeue_runtime_job,
             reset_attempts=not args.requeue_keep_attempts,
+            requested_by=args.requeue_requested_by,
+            reason=args.requeue_reason,
         )
 
     if args.work_runtime_queue:
-        return _work_runtime_queue(settings=settings, once=args.once, max_ticks=args.max_ticks)
+        return _work_runtime_queue(
+            settings=settings,
+            once=args.once,
+            max_ticks=args.max_ticks,
+            persist=args.persist,
+            database_url=args.database_url,
+        )
 
     if args.enqueue_runtime_jobs:
         return _enqueue_runtime_jobs(
@@ -296,6 +324,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.run_enabled_adapters:
+        if args.persist:
+            return _run_managed_enabled_adapters(
+                settings=settings,
+                database_url=args.database_url,
+            )
         result = run_enabled_adapters_once(settings=settings, job_key="worker.runtime.run_once")
         return 1 if result.has_alerts else 0
 
@@ -360,23 +393,79 @@ def _build_demo_persistence_writers(
     )
 
 
+def _build_runtime_persistence_writers(
+    settings: WorkerSettings,
+    *,
+    database_url: str | None = None,
+) -> DemoPersistenceWriters:
+    resolved_database_url = database_url or settings.database_url
+    if not resolved_database_url:
+        raise SystemExit(
+            "--persist requires --database-url, WORKER_DATABASE_URL, or DATABASE_URL"
+        )
+
+    staging_writer, run_writer, promotion_writer = build_runtime_persistence_writers(
+        resolved_database_url
+    )
+    return DemoPersistenceWriters(
+        staging_writer=staging_writer,
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+    )
+
+
 def _work_runtime_queue(
     *,
     settings: WorkerSettings,
     once: bool,
     max_ticks: int | None,
+    persist: bool,
+    database_url: str | None,
 ) -> int:
     tick_limit = 1 if once else max(1, max_ticks) if max_ticks is not None else None
+    persistence = (
+        _build_runtime_persistence_writers(settings, database_url=database_url)
+        if persist
+        else None
+    )
     had_failure = False
     tick = 0
     while tick_limit is None or tick < tick_limit:
-        result = work_runtime_queue_once(settings=settings)
+        result = work_runtime_queue_once(
+            settings=settings,
+            writer=persistence.staging_writer if persistence else None,
+            run_writer=persistence.run_writer if persistence else None,
+            promotion_writer=persistence.promotion_writer if persistence else None,
+            promote=persistence is not None,
+        )
         had_failure = had_failure or result.status == "failed"
         tick += 1
         if tick_limit is not None and tick >= tick_limit:
             break
         time.sleep(settings.worker_idle_seconds)
     return 1 if had_failure else 0
+
+
+def _run_managed_enabled_adapters(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+) -> int:
+    result = run_managed_runtime_ingestion_cycle(
+        settings=settings,
+        database_url=database_url,
+        adapter_builder=build_runtime_adapters,
+        promote=True,
+        job_key="worker.runtime.managed_run_once",
+    )
+    log_event(
+        "worker.runtime.managed_run_once.completed",
+        status=result.status,
+        reason=result.reason,
+        promoted=result.promoted,
+        evidence_ids=result.evidence_ids,
+    )
+    return 1 if result.failed or result.has_alerts else 0
 
 
 def _enqueue_runtime_jobs(
@@ -545,6 +634,8 @@ def _requeue_runtime_job(
     database_url: str | None,
     job_id: str,
     reset_attempts: bool,
+    requested_by: str | None,
+    reason: str | None,
 ) -> int:
     resolved_database_url = database_url or settings.database_url
     if not resolved_database_url:
@@ -554,10 +645,25 @@ def _requeue_runtime_job(
             job_id=job_id,
         )
         return 1
+    resolved_requested_by = (requested_by or "").strip()
+    resolved_reason = (reason or "").strip()
+    if not resolved_requested_by or not resolved_reason:
+        log_event(
+            "runtime.queue.requeue.failed",
+            reason="missing_audit_context",
+            job_id=job_id,
+            requested_by_provided=bool(resolved_requested_by),
+            requeue_reason_provided=bool(resolved_reason),
+        )
+        return 1
 
     try:
-        result = PostgresRuntimeQueue(database_url=resolved_database_url).requeue_failed_job(
+        result = PostgresRuntimeQueueReplayAudit(
+            database_url=resolved_database_url
+        ).requeue_failed_job_with_audit(
             job_id=job_id,
+            requested_by=resolved_requested_by,
+            reason=resolved_reason,
             reset_attempts=reset_attempts,
         )
     except RuntimeQueueUnavailable as exc:
@@ -568,19 +674,18 @@ def _requeue_runtime_job(
         json.dumps(
             {
                 "job_id": result.job_id,
+                "outcome_audit_id": result.outcome_audit_id,
+                "requested_audit_id": result.requested_audit_id,
                 "requeued": result.requeued,
                 "reset_attempts": result.reset_attempts,
-                "attempts": result.attempts,
+                "attempts": result.attempts_after,
+                "attempts_before": result.attempts_before,
+                "reason": result.reason,
             },
             sort_keys=True,
         )
     )
     if not result.requeued:
-        log_event(
-            "runtime.queue.requeue.not_updated",
-            job_id=job_id,
-            reset_attempts=reset_attempts,
-        )
         return 1
 
     return 0

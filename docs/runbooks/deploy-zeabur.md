@@ -202,12 +202,13 @@ Boundary notes:
   API credentials are configured. That direct-fetch path is separate from
   persisted worker ingestion evidence.
 - Worker official-source live paths are deployable only behind explicit gates.
-  CWA rainfall and WRA water-level have gated worker live paths; flood-potential
-  remains pending.
+  CWA rainfall, WRA water-level, and flood-potential GeoJSON have gated worker
+  live paths.
 - Gated live paths do not imply production beta readiness until real credential
-  review, real upstream URL/license review, WRA/CWA production egress
+  review, real upstream URL/license review, WRA/CWA/flood-potential production egress
   verification, hosted scheduler cadence, alert routing, raw snapshot policy,
-  poison-job quarantine/replay audit, and operator ownership are accepted.
+  replay policy around the audit/quarantine primitives, and operator ownership
+  are accepted.
 
 Future or phase-specific variables:
 
@@ -314,8 +315,8 @@ Operational rules:
 - Raw snapshots are retained according to `RAW_SNAPSHOT_RETENTION_DAYS`.
 - Job handlers should be idempotent before scaling workers above one replica.
 - Row-level failed-job list/requeue commands are not a complete DLQ. Do not
-  scale worker replay operations until a replay policy, poison-job quarantine,
-  replay audit, alert routing, and incident ownership are accepted.
+  scale worker replay operations until a replay policy, poison-job routing,
+  alert routing, and incident ownership are accepted.
 
 ## Rollback
 
@@ -379,7 +380,7 @@ Smoke checks after deploy:
 - Confirm worker and scheduler service definitions are present.
 - Confirm rollback target is known.
 - Confirm monitoring or manual source freshness checks are available.
-- Confirm real credential review, hosted cadence, alert routing, poison-job
-  quarantine/replay audit, real upstream URL/license review, and production
-  egress verification are either accepted or explicitly documented as pending
-  for the environment.
+- Confirm real credential review, hosted cadence, alert routing, accepted
+  replay policy, real upstream URL/license review, and production egress
+  verification are either accepted or explicitly documented as pending for the
+  environment.

@@ -543,15 +543,20 @@ asyncio.run(main())
 }
 
 function Invoke-QueueLiveSmoke {
-    $queueSmokeCleanupSql = "DELETE FROM worker_runtime_jobs WHERE queue_name = 'runtime-smoke-adapters' OR job_key LIKE 'runtime-smoke.queue.%';"
+    $queueSmokeCleanupSql = "DELETE FROM worker_runtime_queue_replay_audit WHERE job_id IN (SELECT id FROM worker_runtime_jobs WHERE queue_name = 'runtime-smoke-adapters' OR job_key LIKE 'runtime-smoke.queue.%'); DELETE FROM worker_runtime_queue_poison_quarantine WHERE job_id IN (SELECT id FROM worker_runtime_jobs WHERE queue_name = 'runtime-smoke-adapters' OR job_key LIKE 'runtime-smoke.queue.%'); DELETE FROM worker_runtime_jobs WHERE queue_name = 'runtime-smoke-adapters' OR job_key LIKE 'runtime-smoke.queue.%';"
     $script:RuntimeSmokeCleanupSql += $queueSmokeCleanupSql
 
     $queueSmokePython = @'
+import contextlib
+import io
+import json
+
 import psycopg
 
 from app.config import load_worker_settings
 from app.jobs.queue import PostgresRuntimeQueue
 from app.jobs.runtime import produce_enabled_runtime_adapter_jobs, work_runtime_queue_once
+from app.main import main as worker_main
 
 SMOKE_QUEUE_NAME = "runtime-smoke-adapters"
 DEDUPE_JOB_KEY = "runtime-smoke.queue.dedupe"
@@ -589,6 +594,32 @@ class SmokeRuntimeQueue(PostgresRuntimeQueue):
 def cleanup(database_url: str) -> None:
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH smoke_jobs AS (
+                    SELECT id
+                    FROM worker_runtime_jobs
+                    WHERE queue_name = %s
+                        OR job_key IN (%s, %s)
+                )
+                DELETE FROM worker_runtime_queue_replay_audit
+                WHERE job_id IN (SELECT id FROM smoke_jobs)
+                """,
+                (SMOKE_QUEUE_NAME, DEDUPE_JOB_KEY, FAILED_JOB_KEY),
+            )
+            cur.execute(
+                """
+                WITH smoke_jobs AS (
+                    SELECT id
+                    FROM worker_runtime_jobs
+                    WHERE queue_name = %s
+                        OR job_key IN (%s, %s)
+                )
+                DELETE FROM worker_runtime_queue_poison_quarantine
+                WHERE job_id IN (SELECT id FROM smoke_jobs)
+                """,
+                (SMOKE_QUEUE_NAME, DEDUPE_JOB_KEY, FAILED_JOB_KEY),
+            )
             cur.execute(
                 """
                 DELETE FROM worker_runtime_jobs
@@ -742,15 +773,33 @@ try:
             "expected exhausted failed job to be visible through list_dead_letter_jobs"
         )
 
-    requeue_result = queue.requeue_failed_job(job_id=failed_job_id)
-    if not requeue_result.requeued:
-        raise SystemExit(
-            "expected exhausted failed job to be requeued through PostgresRuntimeQueue"
+    requeue_output = io.StringIO()
+    with contextlib.redirect_stdout(requeue_output):
+        requeue_exit_code = worker_main(
+            [
+                "--requeue-runtime-job",
+                failed_job_id,
+                "--requeue-requested-by",
+                "runtime-smoke",
+                "--requeue-reason",
+                "smoke replay of exhausted adapter job",
+                "--database-url",
+                settings.database_url,
+            ]
         )
-    if requeue_result.attempts != 0:
+    if requeue_exit_code != 0:
+        raise SystemExit(f"expected CLI requeue exit 0, got {requeue_exit_code}")
+    requeue_result = json.loads(requeue_output.getvalue())
+    if not requeue_result["requeued"]:
+        raise SystemExit(
+            "expected exhausted failed job to be requeued through CLI replay audit path"
+        )
+    if not requeue_result["requested_audit_id"] or not requeue_result["outcome_audit_id"]:
+        raise SystemExit(f"expected replay audit ids in CLI output, got {requeue_result!r}")
+    if requeue_result["attempts"] != 0:
         raise SystemExit(
             "expected requeue helper to reset attempts, "
-            f"got attempts={requeue_result.attempts}"
+            f"got attempts={requeue_result['attempts']}"
         )
 
     dead_letters_after_requeue = queue.list_dead_letter_jobs(queue_name=SMOKE_QUEUE_NAME, limit=5)
@@ -821,10 +870,13 @@ required_flags = [
     "--dead-letter-limit",
     "--requeue-runtime-job",
     "--requeue-keep-attempts",
+    "--requeue-requested-by",
+    "--requeue-reason",
     "--export-runtime-queue-metrics",
     "--runtime-queue-metrics-format",
     "--runtime-queue-metrics-path",
     "--run-enabled-adapters",
+    "--persist",
     "--list-adapters",
 ]
 

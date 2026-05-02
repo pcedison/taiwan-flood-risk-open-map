@@ -11,9 +11,9 @@ from app.jobs.queue import (
     RuntimeQueueDeadLetterJob,
     RuntimeQueueDeadLetterSummary,
     RuntimeQueueMetricsSnapshot,
-    RuntimeQueueRequeueResult,
     RuntimeQueueUnavailable,
 )
+from app.jobs.replay_audit import AuditedRuntimeQueueRequeueResult
 from app.jobs.runtime import (
     RuntimeQueueProducerResult,
     RuntimeQueueWorkerResult,
@@ -109,6 +109,49 @@ def test_main_work_runtime_queue_once_is_a_cli_entrypoint(monkeypatch) -> None:
 
     assert exit_code == 0
     assert captured["settings"] is not None
+
+
+def test_main_work_runtime_queue_persist_wires_runtime_writers(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    persistence = (
+        _FakeStagingWriter(database_url="postgresql://worker:test@localhost/flood"),
+        _FakeRunWriter(database_url="postgresql://worker:test@localhost/flood"),
+        _FakePromotionWriter(database_url="postgresql://worker:test@localhost/flood"),
+    )
+
+    def fake_build_writers(database_url: str) -> tuple[object, object, object]:
+        captured["writer_database_url"] = database_url
+        return persistence
+
+    def fake_work_once(*args: object, **kwargs: object) -> RuntimeQueueWorkerResult:
+        del args
+        captured["writer"] = kwargs["writer"]
+        captured["run_writer"] = kwargs["run_writer"]
+        captured["promotion_writer"] = kwargs["promotion_writer"]
+        captured["promote"] = kwargs["promote"]
+        return RuntimeQueueWorkerResult(status="succeeded", promoted=1)
+
+    monkeypatch.setattr("app.main.build_runtime_persistence_writers", fake_build_writers)
+    monkeypatch.setattr("app.main.work_runtime_queue_once", fake_work_once)
+
+    exit_code = main(
+        [
+            "--work-runtime-queue",
+            "--once",
+            "--persist",
+            "--database-url",
+            "postgresql://worker:test@localhost/flood",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "writer_database_url": "postgresql://worker:test@localhost/flood",
+        "writer": persistence[0],
+        "run_writer": persistence[1],
+        "promotion_writer": persistence[2],
+        "promote": True,
+    }
 
 
 def test_main_enqueue_runtime_jobs_is_a_cli_entrypoint(monkeypatch) -> None:
@@ -564,40 +607,61 @@ def test_main_export_runtime_queue_metrics_reports_database_unavailable(
 def test_main_requeue_runtime_job_resets_attempts_by_default(monkeypatch, capsys) -> None:
     captured: dict[str, object] = {}
 
-    class FakeRuntimeQueue:
+    class FakeReplayAudit:
         def __init__(self, *, database_url: str) -> None:
-            captured["database_url"] = database_url
+            captured["audit_database_url"] = database_url
 
-        def requeue_failed_job(
+        def requeue_failed_job_with_audit(
             self,
             *,
             job_id: str,
+            requested_by: str,
+            reason: str,
             reset_attempts: bool = True,
-        ) -> RuntimeQueueRequeueResult:
+        ) -> AuditedRuntimeQueueRequeueResult:
             captured["job_id"] = job_id
+            captured["requested_by"] = requested_by
+            captured["reason"] = reason
             captured["reset_attempts"] = reset_attempts
-            return RuntimeQueueRequeueResult(
+            return AuditedRuntimeQueueRequeueResult(
                 job_id=job_id,
                 requeued=True,
                 reset_attempts=reset_attempts,
-                attempts=0,
+                requested_audit_id="audit-requested",
+                outcome_audit_id="audit-completed",
+                attempts_before=3,
+                attempts_after=0,
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", _fail_constructor)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
     monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
 
-    exit_code = main(["--requeue-runtime-job", "job-1"])
+    exit_code = main(
+        [
+            "--requeue-runtime-job",
+            "job-1",
+            "--requeue-requested-by",
+            "operator@example.test",
+            "--requeue-reason",
+            "manual retry",
+        ]
+    )
 
     assert exit_code == 0
-    assert captured == {
-        "database_url": "postgresql://worker:test@localhost/flood",
-        "job_id": "job-1",
-        "reset_attempts": True,
-    }
+    assert captured["audit_database_url"] == "postgresql://worker:test@localhost/flood"
+    assert captured["job_id"] == "job-1"
+    assert captured["requested_by"] == "operator@example.test"
+    assert captured["reason"] == "manual retry"
+    assert captured["reset_attempts"] is True
     assert json.loads(capsys.readouterr().out) == {
         "attempts": 0,
+        "attempts_before": 3,
         "job_id": "job-1",
+        "outcome_audit_id": "audit-completed",
+        "reason": None,
+        "requested_audit_id": "audit-requested",
         "requeued": True,
         "reset_attempts": True,
     }
@@ -609,27 +673,35 @@ def test_main_requeue_runtime_job_can_keep_attempts_and_database_override(
 ) -> None:
     captured: dict[str, object] = {}
 
-    class FakeRuntimeQueue:
+    class FakeReplayAudit:
         def __init__(self, *, database_url: str) -> None:
-            captured["database_url"] = database_url
+            captured["audit_database_url"] = database_url
 
-        def requeue_failed_job(
+        def requeue_failed_job_with_audit(
             self,
             *,
             job_id: str,
+            requested_by: str,
+            reason: str,
             reset_attempts: bool = True,
-        ) -> RuntimeQueueRequeueResult:
+        ) -> AuditedRuntimeQueueRequeueResult:
             captured["job_id"] = job_id
+            captured["requested_by"] = requested_by
+            captured["reason"] = reason
             captured["reset_attempts"] = reset_attempts
-            return RuntimeQueueRequeueResult(
+            return AuditedRuntimeQueueRequeueResult(
                 job_id=job_id,
                 requeued=True,
                 reset_attempts=reset_attempts,
-                attempts=3,
+                requested_audit_id="audit-requested",
+                outcome_audit_id="audit-completed",
+                attempts_before=3,
+                attempts_after=3,
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", _fail_constructor)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
     monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
@@ -637,22 +709,113 @@ def test_main_requeue_runtime_job_can_keep_attempts_and_database_override(
             "--requeue-runtime-job",
             "job-1",
             "--requeue-keep-attempts",
+            "--requeue-requested-by",
+            "operator@example.test",
+            "--requeue-reason",
+            "keep attempts after inspection",
             "--database-url",
             "postgresql://override:test@localhost/flood",
         ]
     )
 
     assert exit_code == 0
-    assert captured == {
-        "database_url": "postgresql://override:test@localhost/flood",
-        "job_id": "job-1",
-        "reset_attempts": False,
-    }
+    assert captured["audit_database_url"] == "postgresql://override:test@localhost/flood"
+    assert captured["job_id"] == "job-1"
+    assert captured["requested_by"] == "operator@example.test"
+    assert captured["reason"] == "keep attempts after inspection"
+    assert captured["reset_attempts"] is False
     assert json.loads(capsys.readouterr().out) == {
         "attempts": 3,
+        "attempts_before": 3,
         "job_id": "job-1",
+        "outcome_audit_id": "audit-completed",
+        "reason": None,
+        "requested_audit_id": "audit-requested",
         "requeued": True,
         "reset_attempts": False,
+    }
+
+
+def test_main_requeue_runtime_job_requires_audit_context(monkeypatch) -> None:
+    def fail_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("requeue must not touch DB without audit context")
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", fail_constructor)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(["--requeue-runtime-job", "job-1"])
+
+    assert exit_code == 1
+
+
+def test_main_requeue_runtime_job_refuses_active_poison_quarantine(
+    monkeypatch,
+    capsys,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fail_queue_constructor(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("poison-quarantined jobs must not be requeued")
+
+    class FakeReplayAudit:
+        def __init__(self, *, database_url: str) -> None:
+            captured["audit_database_url"] = database_url
+
+        def requeue_failed_job_with_audit(
+            self,
+            *,
+            job_id: str,
+            requested_by: str,
+            reason: str,
+            reset_attempts: bool = True,
+        ) -> AuditedRuntimeQueueRequeueResult:
+            captured["job_id"] = job_id
+            captured["requested_by"] = requested_by
+            captured["reason"] = reason
+            captured["reset_attempts"] = reset_attempts
+            return AuditedRuntimeQueueRequeueResult(
+                job_id=job_id,
+                requeued=False,
+                reset_attempts=reset_attempts,
+                requested_audit_id="audit-requested",
+                outcome_audit_id="audit-failed",
+                attempts_before=5,
+                attempts_after=5,
+                reason="poison_quarantine_active",
+            )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_queue_constructor)
+    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
+
+    exit_code = main(
+        [
+            "--requeue-runtime-job",
+            "job-1",
+            "--requeue-requested-by",
+            "operator@example.test",
+            "--requeue-reason",
+            "manual retry",
+        ]
+    )
+
+    assert exit_code == 1
+    assert captured["job_id"] == "job-1"
+    assert captured["requested_by"] == "operator@example.test"
+    assert captured["reason"] == "manual retry"
+    assert json.loads(capsys.readouterr().out) == {
+        "attempts": 5,
+        "attempts_before": 5,
+        "job_id": "job-1",
+        "outcome_audit_id": "audit-failed",
+        "reason": "poison_quarantine_active",
+        "requested_audit_id": "audit-requested",
+        "requeued": False,
+        "reset_attempts": True,
     }
 
 
@@ -1019,6 +1182,38 @@ def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeyp
     )
 
 
+def test_main_run_enabled_adapters_persist_uses_managed_runtime(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_managed_cycle(*args: object, **kwargs: object) -> object:
+        del args
+        captured.update(kwargs)
+        return _ManagedRuntimeResult(
+            status="succeeded",
+            reason=None,
+            promoted=2,
+            evidence_ids=("evidence-1", "evidence-2"),
+        )
+
+    monkeypatch.setattr("app.main.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--run-enabled-adapters",
+            "--persist",
+            "--database-url",
+            "postgresql://worker:test@localhost/flood",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["database_url"] == "postgresql://worker:test@localhost/flood"
+    assert captured["adapter_builder"] is build_runtime_adapters
+    assert captured["promote"] is True
+    assert captured["job_key"] == "worker.runtime.managed_run_once"
+
+
 def test_main_aggregate_query_heat_uses_configured_periods(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -1151,6 +1346,28 @@ class _FakePromotionWriter:
 class _PromotionResult:
     promoted = 1
     evidence_ids = ("evidence-1",)
+
+
+def _fail_constructor(*args: object, **kwargs: object) -> object:
+    del args, kwargs
+    raise AssertionError("unexpected constructor call")
+
+
+class _ManagedRuntimeResult:
+    def __init__(
+        self,
+        *,
+        status: str,
+        reason: str | None,
+        promoted: int,
+        evidence_ids: tuple[str, ...],
+    ) -> None:
+        self.status = status
+        self.reason = reason
+        self.promoted = promoted
+        self.evidence_ids = evidence_ids
+        self.failed = status == "failed"
+        self.has_alerts = False
 
 
 class _QueryHeatSummary:

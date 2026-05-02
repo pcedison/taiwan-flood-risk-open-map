@@ -37,6 +37,8 @@ from app.jobs.runtime import (
     produce_enabled_runtime_adapter_jobs,
     work_runtime_queue_once,
 )
+from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
+from app.pipelines.staging import AdapterStagingBatch
 from app.scheduler import enqueue_enabled_adapters_loop, run_enabled_adapters_loop
 
 
@@ -645,7 +647,10 @@ def test_build_runtime_adapters_missing_cwa_auth_fails_without_fetch_call() -> N
 
 def test_produce_enabled_runtime_adapter_jobs_reports_no_database_url() -> None:
     settings = load_worker_settings(
-        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall"}
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
     )
 
     result = produce_enabled_runtime_adapter_jobs(settings)
@@ -676,7 +681,10 @@ def test_produce_enabled_runtime_adapter_jobs_reports_no_enabled_adapters() -> N
 
 def test_enqueue_enabled_runtime_adapter_jobs_uses_durable_queue_when_available() -> None:
     settings = load_worker_settings(
-        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level"}
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
     )
     queue = _CollectingQueue()
 
@@ -688,7 +696,10 @@ def test_enqueue_enabled_runtime_adapter_jobs_uses_durable_queue_when_available(
 
 def test_produce_enabled_runtime_adapter_jobs_records_payloads_and_job_key() -> None:
     settings = load_worker_settings(
-        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level"}
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
     )
     queue = _RecordingProducerQueue()
 
@@ -728,7 +739,10 @@ def test_produce_enabled_runtime_adapter_jobs_records_payloads_and_job_key() -> 
 
 def test_produce_enabled_runtime_adapter_jobs_reports_deduped_existing_jobs() -> None:
     settings = load_worker_settings(
-        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level"}
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall,official.wra.water_level",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
     )
     queue = _RecordingProducerQueue(
         results=[
@@ -852,6 +866,45 @@ def test_work_runtime_queue_once_runs_adapter_and_marks_succeeded() -> None:
     assert result.adapter_key == "official.cwa.rainfall"
     assert result.summary is not None
     assert result.summary.status == "succeeded"
+    assert queue.completed == [("succeeded", "job-1", "worker-a")]
+    assert queue.failed == []
+
+
+def test_work_runtime_queue_once_persists_and_promotes_when_configured() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_INSTANCE": "worker-a",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "FRESHNESS_MAX_AGE_SECONDS": "21600",
+        }
+    )
+    queue = _RuntimeWorkerQueue(
+        job=_runtime_job(adapter_key="official.cwa.rainfall"),
+    )
+    staging_writer = _MemoryStagingWriter()
+    run_writer = _MemoryRunWriter()
+    promotion_writer = _MemoryPromotionWriter([_promotion_candidate()])
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        writer=staging_writer,
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+        promote=True,
+    )
+
+    assert result.status == "succeeded"
+    assert result.promoted == 1
+    assert result.evidence_ids == ("evidence-1",)
+    assert len(staging_writer.batches) == 1
+    assert staging_writer.batches[0].adapter_key == "official.cwa.rainfall"
+    assert run_writer.calls[0][0] == result.summary
+    assert run_writer.calls[0][1] == "runtime.adapter.ingest"
+    parameters = run_writer.calls[0][2]
+    assert parameters is not None
+    assert parameters["runtime_queue_job_id"] == "job-1"
+    assert promotion_writer.requested_adapter_keys == ("official.cwa.rainfall",)
     assert queue.completed == [("succeeded", "job-1", "worker-a")]
     assert queue.failed == []
 
@@ -1189,6 +1242,49 @@ class _FailingAdapter:
         raise RuntimeError("source timeout")
 
 
+class _MemoryStagingWriter:
+    def __init__(self) -> None:
+        self.batches: list[AdapterStagingBatch] = []
+
+    def write_batch(self, batch: AdapterStagingBatch) -> None:
+        self.batches.append(batch)
+
+
+class _MemoryRunWriter:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, str, dict[str, Any] | None]] = []
+
+    def write_summary(
+        self,
+        summary: object,
+        *,
+        job_key: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        self.calls.append((summary, job_key, parameters))
+
+
+class _MemoryPromotionWriter:
+    def __init__(self, candidates: list[PromotionCandidate]) -> None:
+        self._candidates = tuple(candidates)
+        self.requested_adapter_keys: tuple[str, ...] | None = None
+        self.payloads: list[EvidencePromotionPayload] = []
+
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        del limit
+        self.requested_adapter_keys = adapter_keys
+        return self._candidates
+
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+        self.payloads.append(payload)
+        return f"evidence-{len(self.payloads)}"
+
+
 def _runtime_job(*, adapter_key: str | None) -> RuntimeQueueJob:
     return RuntimeQueueJob(
         id="job-1",
@@ -1198,6 +1294,27 @@ def _runtime_job(*, adapter_key: str | None) -> RuntimeQueueJob:
         payload={"adapter_key": adapter_key} if adapter_key is not None else {},
         attempts=1,
         max_attempts=3,
+    )
+
+
+def _promotion_candidate() -> PromotionCandidate:
+    observed_at = datetime(2026, 4, 30, 4, 0, tzinfo=UTC)
+    return PromotionCandidate(
+        staging_evidence_id="staging-id",
+        raw_snapshot_id="raw-snapshot-id",
+        raw_ref="raw/official/cwa-rainfall/demo.json",
+        data_source_id="data-source-id",
+        source_id="rainfall-demo-001",
+        source_type="rainfall_station",
+        event_type="rainfall_observation",
+        title="Rainfall observation",
+        summary="Fixture rainfall observation.",
+        url="https://example.test/rainfall-demo-001",
+        occurred_at=observed_at,
+        observed_at=observed_at,
+        confidence=0.9,
+        validation_status="accepted",
+        payload={"adapter_key": "official.cwa.rainfall"},
     )
 
 

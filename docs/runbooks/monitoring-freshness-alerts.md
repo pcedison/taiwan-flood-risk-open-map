@@ -48,14 +48,14 @@ Partially complete:
 - Queue failure visibility is limited to heartbeat/last-run metrics,
   operator-exported queue metrics, and the `worker_runtime_jobs` terminal
   `failed`/`final_failed_at` state plus row-level list/requeue commands. This
-  is final-failed row visibility, not a complete DLQ. There is no replay audit,
-  poison-job quarantine/escalation policy, or accepted production replay
-  procedure yet.
+  is final-failed row visibility, not a complete DLQ. Replay audit and
+  poison-quarantine tables exist, but there is no quarantine/escalation policy
+  or accepted production replay procedure yet.
 - Official worker freshness is partial: demo/fixture-backed adapter runs are
-  safe by default, and CWA rainfall plus WRA water-level can run through
-  explicit live-client gates. Flood-potential worker freshness still needs a
-  real source client. The API realtime official bridge may fetch CWA/WRA data,
-  but that does not create persisted worker ingestion freshness evidence.
+  safe by default, and CWA rainfall, WRA water-level, and flood-potential
+  GeoJSON can run through explicit live-client gates. The API realtime official
+  bridge may fetch CWA/WRA data, but that does not create persisted worker
+  ingestion freshness evidence.
 - Heartbeat alerts prove that textfile metrics are present and recent; they do
   not prove real-source credentials, idempotent job handling, or production
   singleton scheduler behavior.
@@ -65,14 +65,15 @@ Partially complete:
 Pending for production:
 
 - Real source credentials, credential review, deployed source clients,
-  WRA/CWA production egress verification, and per-source freshness thresholds.
+  WRA/CWA/flood-potential production egress verification, and per-source
+  freshness thresholds.
 - Alert routing, TLS/auth, durable monitoring storage, retention, and incident
   ownership.
 - Hosted scheduler/cadence deployment for freshness export plus
   worker/scheduler heartbeat emission.
-- Queue replay audit, poison-job quarantine, alert routing, and
-  abuse-governance alerts for future public reports/public discussion
-  ingestion.
+- Queue replay operating policy around the audit/quarantine primitives, alert
+  routing, and abuse-governance alerts for future public reports/public
+  discussion ingestion.
 
 ## Placeholder Boundary
 
@@ -122,17 +123,18 @@ To write Prometheus textfile metrics:
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path /var/lib/node_exporter/textfile_collector/flood-risk-runtime-queue.prom"
 ```
 
-To requeue one failed row:
+To requeue one failed row with audit context:
 
 ```powershell
-docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id>"
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --requeue-runtime-job <job-id> --requeue-requested-by <operator> --requeue-reason '<why-safe-to-retry>'"
 ```
 
 Do not treat the row-level list/requeue commands or metrics summary as a
-complete DLQ or replay operating model. Replay still needs audit records,
-payload safety review, source idempotency, backoff, poison-job quarantine,
-alert routing, alert labels, and incident ownership. There is no purge,
-quarantine, or auto replay in this phase.
+complete DLQ or replay operating model. Requeue now writes replay audit records
+and refuses active poison-quarantined jobs, but replay still needs payload
+safety review, source idempotency, backoff, quarantine escalation, alert
+routing, alert labels, and incident ownership. There is no purge or auto replay
+in this phase.
 
 ## Alert Policy
 

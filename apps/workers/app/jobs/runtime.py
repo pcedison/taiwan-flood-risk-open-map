@@ -14,7 +14,11 @@ from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import WraWaterLevelApiAdapter
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
-from app.jobs.ingestion import AdapterBatchRunSummary, run_adapter_batch
+from app.jobs.ingestion import (
+    AdapterBatchRunSummary,
+    IngestionRunSummaryWriter,
+    run_adapter_batch,
+)
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import (
     NullRuntimeQueue,
@@ -23,6 +27,15 @@ from app.jobs.queue import (
     RuntimeQueueUnavailable,
 )
 from app.logging import log_event
+from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
+from app.pipelines.postgres_writer import PostgresStagingBatchWriter
+from app.pipelines.promotion import (
+    EvidencePromotionWriter,
+    PostgresEvidencePromotionWriter,
+    PromotionResult,
+    promote_accepted_staging,
+)
+from app.pipelines.staging import StagingBatchWriter
 
 
 RuntimeQueueWorkerStatus = Literal["succeeded", "failed", "skipped"]
@@ -38,6 +51,8 @@ class RuntimeQueueWorkerResult:
     reason: str | None = None
     summary: AdapterBatchRunSummary | None = None
     freshness_checks: tuple[FreshnessCheck, ...] = ()
+    promoted: int = 0
+    evidence_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -150,10 +165,17 @@ def produce_enabled_runtime_adapter_jobs(
     job_key: str = "runtime.adapter.ingest",
     queue_name: str = "runtime-adapters",
 ) -> RuntimeQueueProducerResult:
-    adapter_keys = enabled_adapter_keys(settings)
+    runnable_adapters = build_runtime_adapters(settings)
+    enabled_keys = enabled_adapter_keys(settings)
+    adapter_keys = tuple(key for key in enabled_keys if key in runnable_adapters)
     if not adapter_keys:
-        log_event("runtime.queue.enqueue.noop", reason="no_enabled_adapters")
-        return RuntimeQueueProducerResult(status="skipped", reason="no_enabled_adapters")
+        reason = "no_enabled_adapters" if not enabled_keys else "no_runnable_adapters"
+        log_event(
+            "runtime.queue.enqueue.noop",
+            reason=reason,
+            enabled_adapter_keys=enabled_keys,
+        )
+        return RuntimeQueueProducerResult(status="skipped", reason=reason)
 
     if queue is None and not settings.database_url:
         log_event(
@@ -325,6 +347,10 @@ def work_runtime_queue_once(
     settings: WorkerSettings | None = None,
     queue: RuntimeQueue | None = None,
     adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
+    writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
+    promotion_writer: EvidencePromotionWriter | None = None,
+    promote: bool = False,
     queue_name: str = "runtime-adapters",
     worker_id: str | None = None,
     retry_delay_seconds: int = 60,
@@ -403,6 +429,8 @@ def work_runtime_queue_once(
         summary = run_adapter_batch(
             adapter,
             job_key=job.job_key,
+            writer=writer,
+            run_writer=run_writer,
             parameters={
                 "runtime_queue_job_id": job.id,
                 "runtime_queue_name": job.queue_name,
@@ -425,6 +453,12 @@ def work_runtime_queue_once(
                 retry_delay_seconds=retry_delay_seconds,
                 summary=summary,
                 freshness_checks=freshness_checks,
+            )
+        promotion = PromotionResult(promoted=0, evidence_ids=())
+        if promote:
+            promotion = promote_accepted_staging(
+                _runtime_promotion_writer(promotion_writer),
+                adapter_keys=(adapter_key,),
             )
     except Exception as exc:
         return _fail_runtime_queue_job(
@@ -458,6 +492,8 @@ def work_runtime_queue_once(
             reason="queue_completion_not_updated",
             summary=summary,
             freshness_checks=freshness_checks,
+            promoted=promotion.promoted,
+            evidence_ids=promotion.evidence_ids,
         )
     log_event(
         "runtime.queue.worker.completed",
@@ -465,6 +501,7 @@ def work_runtime_queue_once(
         adapter_key=adapter_key,
         status="succeeded",
         updated=updated,
+        promoted=promotion.promoted,
     )
     return RuntimeQueueWorkerResult(
         status="succeeded",
@@ -472,6 +509,18 @@ def work_runtime_queue_once(
         adapter_key=adapter_key,
         summary=summary,
         freshness_checks=freshness_checks,
+        promoted=promotion.promoted,
+        evidence_ids=promotion.evidence_ids,
+    )
+
+
+def build_runtime_persistence_writers(
+    database_url: str,
+) -> tuple[StagingBatchWriter, IngestionRunSummaryWriter, EvidencePromotionWriter]:
+    return (
+        PostgresStagingBatchWriter(database_url=database_url),
+        PostgresIngestionRunWriter(database_url=database_url),
+        PostgresEvidencePromotionWriter(database_url=database_url),
     )
 
 
@@ -504,6 +553,14 @@ def _runtime_cycle_failure_reason(
     if alert is not None:
         return alert.reason or f"freshness check {alert.status}"
     return None
+
+
+def _runtime_promotion_writer(
+    promotion_writer: EvidencePromotionWriter | None,
+) -> EvidencePromotionWriter:
+    if promotion_writer is None:
+        raise RuntimeError("promotion_writer is required when promote=True")
+    return promotion_writer
 
 
 def _fail_runtime_queue_job(
