@@ -11,6 +11,9 @@ ALLOWLIST = REPO_ROOT / "docs" / "data-sources" / "news" / "l2-source-allowlist.
 FORUM_MANIFEST = (
     REPO_ROOT / "docs" / "data-sources" / "forum" / "source-approval-manifest.yaml"
 )
+FORUM_APPROVAL_EXAMPLE = (
+    REPO_ROOT / "docs" / "data-sources" / "forum" / "source-approval-request.example.yaml"
+)
 REQUIRED_SOURCE_FIELDS = {
     "key",
     "adapter_key",
@@ -44,19 +47,82 @@ REQUIRED_FORUM_PROHIBITIONS = {
     "scraping",
     "http_fetch",
 }
+REQUIRED_APPROVAL_DISALLOWED_OPERATIONS = {
+    "real_crawling",
+    "scraping",
+    "http_fetch",
+    "login_bypass",
+    "anti_bot_circumvention",
+    "private_content_access",
+    "raw_content_storage",
+    "identity_storage",
+}
+REQUIRED_APPROVAL_SCHEMA_FIELDS = {
+    "required_request_fields",
+    "required_evidence_categories",
+    "disallowed_requested_operations",
+    "required_boundary_attestations",
+}
+REQUIRED_APPROVAL_REQUEST_FIELDS = {
+    "source_key",
+    "platform",
+    "requested_acceptance",
+    "proposed_collection",
+    "evidence",
+    "governance",
+    "boundary",
+}
+REQUIRED_APPROVAL_EVIDENCE = {
+    "terms",
+    "privacy",
+    "retention",
+    "moderation",
+    "opt_out",
+    "rate_limit",
+}
+REQUIRED_BOUNDARY_ATTESTATIONS = {
+    "implementation_included",
+    "fetcher_included",
+    "crawler_included",
+    "scraper_included",
+    "http_fetch_included",
+}
+ALLOWED_APPROVAL_DECISIONS = {"blocked", "rejected", "pending_review", "accepted"}
 
 
-def main() -> int:
-    payload = yaml.safe_load(ALLOWLIST.read_text(encoding="utf-8"))
-    forum_payload = yaml.safe_load(FORUM_MANIFEST.read_text(encoding="utf-8"))
+def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    approval_request_paths = [Path(arg) for arg in argv] if argv else None
+    errors = validate_all(approval_request_paths=approval_request_paths)
+
+    if errors:
+        for error in errors:
+            print(error, file=sys.stderr)
+        return 1
+
+    payload = _load_yaml(ALLOWLIST)
+    forum_payload = _load_yaml(FORUM_MANIFEST)
+    sources = payload.get("sources", []) if isinstance(payload, dict) else []
+    forum_sources = forum_payload.get("sources", []) if isinstance(forum_payload, dict) else []
+    print(f"Source allowlist valid. news_sources={len(sources)} forum_sources={len(forum_sources)}")
+    return 0
+
+
+def validate_all(
+    allowlist_path: Path = ALLOWLIST,
+    forum_manifest_path: Path = FORUM_MANIFEST,
+    approval_request_paths: list[Path] | None = None,
+) -> list[str]:
+    payload = _load_yaml(allowlist_path)
+    forum_payload = _load_yaml(forum_manifest_path)
     errors: list[str] = []
 
     if not isinstance(payload, dict):
-        print("Allowlist must be a YAML object.", file=sys.stderr)
-        return 1
+        return ["Allowlist must be a YAML object."]
     if not isinstance(forum_payload, dict):
-        print("Forum source approval manifest must be a YAML object.", file=sys.stderr)
-        return 1
+        return ["Forum source approval manifest must be a YAML object."]
 
     policy = payload.get("policy", {})
     allowed_legal_basis = set(policy.get("allowed_legal_basis", ()))
@@ -113,13 +179,24 @@ def main() -> int:
     else:
         _validate_forum_sources(forum_sources, errors)
 
-    if errors:
-        for error in errors:
-            print(error, file=sys.stderr)
-        return 1
+    _validate_approval_schema(forum_payload, errors)
 
-    print(f"Source allowlist valid. news_sources={len(sources)} forum_sources={len(forum_sources)}")
-    return 0
+    if approval_request_paths is None:
+        approval_request_paths = [FORUM_APPROVAL_EXAMPLE] if FORUM_APPROVAL_EXAMPLE.exists() else []
+    for request_path in approval_request_paths:
+        request_payload = _load_yaml(request_path)
+        validate_forum_approval_request(
+            request_payload,
+            forum_payload,
+            errors,
+            label=_display_path(request_path),
+        )
+
+    return errors
+
+
+def _load_yaml(path: Path) -> object:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _validate_forum_sources(sources: list[object], errors: list[str]) -> None:
@@ -161,6 +238,222 @@ def _validate_forum_sources(sources: list[object], errors: list[str]) -> None:
             errors.append(
                 f"forum {key}: prohibited_until_accepted missing {sorted(missing_prohibitions)}"
             )
+
+
+def _validate_approval_schema(forum_payload: dict[object, object], errors: list[str]) -> None:
+    schema = forum_payload.get("approval_request_schema")
+    if not isinstance(schema, dict):
+        errors.append("forum manifest: approval_request_schema is required")
+        return
+
+    missing = REQUIRED_APPROVAL_SCHEMA_FIELDS - set(schema)
+    if missing:
+        errors.append(f"forum manifest: approval_request_schema missing {sorted(missing)}")
+
+    request_fields = _string_set(schema.get("required_request_fields"))
+    missing_request_fields = REQUIRED_APPROVAL_REQUEST_FIELDS - request_fields
+    if missing_request_fields:
+        errors.append(
+            "forum manifest: approval_request_schema.required_request_fields missing "
+            f"{sorted(missing_request_fields)}"
+        )
+
+    evidence_categories = _string_set(schema.get("required_evidence_categories"))
+    missing_evidence = REQUIRED_APPROVAL_EVIDENCE - evidence_categories
+    if missing_evidence:
+        errors.append(
+            "forum manifest: approval_request_schema.required_evidence_categories missing "
+            f"{sorted(missing_evidence)}"
+        )
+
+    disallowed_operations = _string_set(schema.get("disallowed_requested_operations"))
+    missing_disallowed = REQUIRED_APPROVAL_DISALLOWED_OPERATIONS - disallowed_operations
+    if missing_disallowed:
+        errors.append(
+            "forum manifest: approval_request_schema.disallowed_requested_operations missing "
+            f"{sorted(missing_disallowed)}"
+        )
+
+    boundary_attestations = _string_set(schema.get("required_boundary_attestations"))
+    missing_attestations = REQUIRED_BOUNDARY_ATTESTATIONS - boundary_attestations
+    if missing_attestations:
+        errors.append(
+            "forum manifest: approval_request_schema.required_boundary_attestations missing "
+            f"{sorted(missing_attestations)}"
+        )
+
+
+def validate_forum_approval_request(
+    payload: object,
+    forum_payload: dict[object, object],
+    errors: list[str],
+    label: str = "forum approval request",
+) -> None:
+    if not isinstance(payload, dict):
+        errors.append(f"{label}: request must be a YAML object")
+        return
+
+    request = payload.get("request", payload)
+    if not isinstance(request, dict):
+        errors.append(f"{label}: request must be an object")
+        return
+
+    missing = REQUIRED_APPROVAL_REQUEST_FIELDS - set(request)
+    if missing:
+        errors.append(f"{label}: missing request fields {sorted(missing)}")
+        return
+
+    source_key = str(request.get("source_key", ""))
+    source = _forum_source_by_key(forum_payload, source_key)
+    if source is None:
+        errors.append(f"{label}: source_key {source_key!r} is not listed in forum manifest")
+    elif source.get("accepted") is not False:
+        errors.append(f"{label}: manifest source {source_key} must remain accepted=false")
+
+    requested_acceptance = request.get("requested_acceptance")
+    if not isinstance(requested_acceptance, dict):
+        errors.append(f"{label}: requested_acceptance must be an object")
+        return
+
+    accepted = requested_acceptance.get("accepted")
+    decision = requested_acceptance.get("decision")
+    if not isinstance(accepted, bool):
+        errors.append(f"{label}: requested_acceptance.accepted must be boolean")
+    if decision not in ALLOWED_APPROVAL_DECISIONS:
+        errors.append(
+            f"{label}: requested_acceptance.decision must be one of {sorted(ALLOWED_APPROVAL_DECISIONS)}"
+        )
+    if accepted and decision != "accepted":
+        errors.append(f"{label}: accepted=true requires requested_acceptance.decision=accepted")
+    if not accepted and decision == "accepted":
+        errors.append(f"{label}: decision=accepted requires requested_acceptance.accepted=true")
+
+    _validate_collection_boundary(request, errors, label)
+    _validate_disallowed_flag_fields(request, errors, label, path="request")
+
+    evidence = request.get("evidence")
+    if not isinstance(evidence, dict):
+        errors.append(f"{label}: evidence must be an object")
+        return
+
+    missing_evidence = REQUIRED_APPROVAL_EVIDENCE - set(evidence)
+    if missing_evidence:
+        errors.append(f"{label}: evidence missing categories {sorted(missing_evidence)}")
+
+    if accepted is True:
+        for category in sorted(REQUIRED_APPROVAL_EVIDENCE):
+            _validate_complete_evidence(evidence.get(category), errors, label, category)
+
+
+def _validate_collection_boundary(
+    request: dict[object, object],
+    errors: list[str],
+    label: str,
+) -> None:
+    proposed_collection = request.get("proposed_collection")
+    if not isinstance(proposed_collection, dict):
+        errors.append(f"{label}: proposed_collection must be an object")
+        return
+
+    for field in ("allowed_operations", "requested_operations"):
+        operations = _string_set(proposed_collection.get(field, []))
+        prohibited = operations & REQUIRED_APPROVAL_DISALLOWED_OPERATIONS
+        if prohibited:
+            errors.append(f"{label}: {field} must not include {sorted(prohibited)}")
+
+    acknowledged = _string_set(proposed_collection.get("prohibited_operations_ack"))
+    missing_ack = REQUIRED_APPROVAL_DISALLOWED_OPERATIONS - acknowledged
+    if missing_ack:
+        errors.append(f"{label}: prohibited_operations_ack missing {sorted(missing_ack)}")
+
+    boundary = request.get("boundary")
+    if not isinstance(boundary, dict):
+        errors.append(f"{label}: boundary must be an object")
+        return
+
+    missing_attestations = REQUIRED_BOUNDARY_ATTESTATIONS - set(boundary)
+    if missing_attestations:
+        errors.append(f"{label}: boundary missing {sorted(missing_attestations)}")
+
+    for field in sorted(REQUIRED_BOUNDARY_ATTESTATIONS):
+        if boundary.get(field) is not False:
+            errors.append(f"{label}: boundary.{field} must be false for approval-only requests")
+
+
+def _validate_disallowed_flag_fields(
+    value: object,
+    errors: list[str],
+    label: str,
+    *,
+    path: str,
+) -> None:
+    if isinstance(value, dict):
+        for raw_key, item in value.items():
+            key = str(raw_key)
+            item_path = f"{path}.{key}"
+            if key in REQUIRED_APPROVAL_DISALLOWED_OPERATIONS and item not in (False, None, "", ()):
+                errors.append(f"{label}: {item_path} must not enable {key}")
+            _validate_disallowed_flag_fields(item, errors, label, path=item_path)
+        return
+
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_disallowed_flag_fields(item, errors, label, path=f"{path}[{index}]")
+
+
+def _validate_complete_evidence(
+    evidence: object,
+    errors: list[str],
+    label: str,
+    category: str,
+) -> None:
+    if not isinstance(evidence, dict):
+        errors.append(f"{label}: accepted=true requires {category} evidence object")
+        return
+
+    if evidence.get("status") != "approved":
+        errors.append(f"{label}: accepted=true requires evidence.{category}.status=approved")
+    if evidence.get("reviewed") is not True:
+        errors.append(f"{label}: accepted=true requires evidence.{category}.reviewed=true")
+    if not _nonempty_string(evidence.get("reviewed_by")):
+        errors.append(f"{label}: accepted=true requires evidence.{category}.reviewed_by")
+    if not _nonempty_string(evidence.get("reviewed_on")):
+        errors.append(f"{label}: accepted=true requires evidence.{category}.reviewed_on")
+    if not _nonempty_string(evidence.get("summary")):
+        errors.append(f"{label}: accepted=true requires evidence.{category}.summary")
+    references = evidence.get("references")
+    if not isinstance(references, list) or not references:
+        errors.append(f"{label}: accepted=true requires evidence.{category}.references")
+
+
+def _forum_source_by_key(
+    forum_payload: dict[object, object],
+    source_key: str,
+) -> dict[object, object] | None:
+    sources = forum_payload.get("sources", [])
+    if not isinstance(sources, list):
+        return None
+    for source in sources:
+        if isinstance(source, dict) and source.get("key") == source_key:
+            return source
+    return None
+
+
+def _string_set(value: object) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {str(item) for item in value}
+
+
+def _nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 if __name__ == "__main__":

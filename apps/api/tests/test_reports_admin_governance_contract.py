@@ -48,6 +48,37 @@ def test_user_reports_feature_flag_defaults_disabled(monkeypatch: pytest.MonkeyP
     assert get_settings().user_reports_enabled is False
 
 
+def test_user_report_rate_limit_defaults_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("USER_REPORTS_RATE_LIMIT_ENABLED", raising=False)
+    monkeypatch.delenv("USER_REPORTS_RATE_LIMIT_MAX_REQUESTS", raising=False)
+    monkeypatch.delenv("USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS", raising=False)
+    get_settings.cache_clear()
+
+    settings = get_settings()
+    assert settings.user_reports_rate_limit_enabled is True
+    assert settings.user_reports_rate_limit_backend == "redis"
+    assert settings.user_reports_rate_limit_max_requests == 5
+    assert settings.user_reports_rate_limit_window_seconds == 60
+
+
+def test_user_report_rate_limit_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("USER_REPORTS_RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("USER_REPORTS_RATE_LIMIT_BACKEND", "memory")
+    monkeypatch.setenv("USER_REPORTS_RATE_LIMIT_MAX_REQUESTS", "2")
+    monkeypatch.setenv("USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS", "30")
+    monkeypatch.setenv("USER_REPORTS_RATE_LIMIT_CLIENT_HEADER", "x-forwarded-for")
+    monkeypatch.setenv("ABUSE_HASH_SALT", "test-abuse-salt")
+    get_settings.cache_clear()
+
+    settings = get_settings()
+    assert settings.user_reports_rate_limit_enabled is False
+    assert settings.user_reports_rate_limit_backend == "memory"
+    assert settings.user_reports_rate_limit_max_requests == 2
+    assert settings.user_reports_rate_limit_window_seconds == 30
+    assert settings.user_reports_rate_limit_client_header == "x-forwarded-for"
+    assert settings.abuse_hash_salt == "test-abuse-salt"
+
+
 def test_pending_report_admin_endpoint_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client_with_admin_token(monkeypatch)
 

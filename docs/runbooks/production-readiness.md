@@ -24,6 +24,7 @@ example values that resemble tokens.
 | Variable | Owner | Required for production beta | Storage | Notes |
 |---|---|---:|---|---|
 | `ADMIN_BEARER_TOKEN` | API/operator owner | yes | Zeabur secret env | Required before admin endpoints or freshness checks are used. |
+| `ABUSE_HASH_SALT` | privacy/governance owner | yes before public reports launch | Zeabur secret env | Hashes public report abuse/rate-limit client signals; keep blank in `.env.example`. |
 | `DATABASE_URL` | platform owner | yes | Zeabur secret env | Must point to the production-beta database only. |
 | `REDIS_URL` | platform owner | yes | Zeabur secret env | Must point to the production-beta Redis only. |
 | `MINIO_ROOT_USER` | platform owner | yes when MinIO is used | Zeabur secret env | Local defaults are not acceptable for hosted environments. |
@@ -48,6 +49,11 @@ Non-secret flags still have owners because they control production behavior.
 | `SOURCE_DCARD_ENABLED` | governance owner | `false` | Requires `SOURCE_FORUM_ENABLED=true` and terms acknowledgement. |
 | `SOURCE_TERMS_REVIEW_ACK` | governance owner | `false` until review record exists | Required for terms-reviewed adapters such as GDELT backfill and future forums. |
 | `USER_REPORTS_ENABLED` | privacy/governance owner | `false` | Keep disabled until moderation, retention, abuse, and deletion gates are accepted. |
+| `USER_REPORTS_RATE_LIMIT_ENABLED` | privacy/governance owner | `true` when intake is enabled | Public report abuse guard; keep enabled for any reviewed launch. |
+| `USER_REPORTS_RATE_LIMIT_BACKEND` | privacy/governance owner | `redis` | Shared backend required for multi-replica launch; memory is local/test-only. |
+| `USER_REPORTS_RATE_LIMIT_MAX_REQUESTS` | privacy/governance owner | reviewed numeric policy | Tune with abuse-prevention review. |
+| `USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS` | privacy/governance owner | reviewed numeric policy | Tune with abuse-prevention review. |
+| `USER_REPORTS_RATE_LIMIT_CLIENT_HEADER` | privacy/governance owner | blank unless trusted edge proxy overwrites it | Avoid spoofable client signals. |
 
 ## Zeabur Environment Ownership
 
@@ -103,6 +109,7 @@ Run this drill for staging first. Repeat for production beta before launch.
 
    ```powershell
    python infra/scripts/validate_monitoring_assets.py
+   python infra/scripts/validate_production_readiness_evidence.py
    ```
 
 3. Run PowerShell parser/help checks:
@@ -124,7 +131,11 @@ Run this drill for staging first. Repeat for production beta before launch.
     available.
 11. Practice rollback order: stop scheduler, drain worker, roll back API/web,
     restart worker, restart scheduler last.
-12. Record launch blockers, skipped checks, owner handoff, and next action.
+12. Copy the schema shape from
+    `docs/runbooks/production-readiness-evidence.example.yaml`, replace the
+    placeholders with private evidence references, and validate the record with
+    `python infra/scripts/validate_production_readiness_evidence.py <path>`.
+13. Record launch blockers, skipped checks, owner handoff, and next action.
 
 ## Rollback Drill
 

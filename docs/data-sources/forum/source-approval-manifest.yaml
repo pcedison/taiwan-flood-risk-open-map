@@ -8,6 +8,49 @@ status: draft
 default: disabled
 global_enable_flag: SOURCE_FORUM_ENABLED
 terms_ack_flag: SOURCE_TERMS_REVIEW_ACK
+approval_request_schema:
+  description: >-
+    Approval-only request format for moving a forum/social source toward
+    acceptance. This schema does not authorize or implement crawling,
+    scraping, HTTP fetching, login bypass, anti-bot circumvention, raw content
+    storage, or identity storage.
+  required_request_fields:
+    - source_key
+    - platform
+    - requested_acceptance
+    - proposed_collection
+    - evidence
+    - governance
+    - boundary
+  required_evidence_categories:
+    - terms
+    - privacy
+    - retention
+    - moderation
+    - opt_out
+    - rate_limit
+  evidence_requirements_when_accepted:
+    status: approved
+    reviewed: true
+    reviewed_by: required
+    reviewed_on: required
+    summary: required
+    references: non_empty_list
+  disallowed_requested_operations:
+    - real_crawling
+    - scraping
+    - http_fetch
+    - login_bypass
+    - anti_bot_circumvention
+    - private_content_access
+    - raw_content_storage
+    - identity_storage
+  required_boundary_attestations:
+    - implementation_included
+    - fetcher_included
+    - crawler_included
+    - scraper_included
+    - http_fetch_included
 sources:
   - key: ptt
     platform: PTT

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from hashlib import sha256
 from typing import Any, Callable, Iterable, Mapping
@@ -21,6 +22,7 @@ from app.classifiers.taiwan_locations import extract_taiwan_location_terms
 
 
 FetchJson = Callable[[str], Mapping[str, Any]]
+Sleep = Callable[[float], None]
 
 GDELT_MAX_RECORDS_PER_QUERY = 250
 _GDELT_METADATA_FIELDS = frozenset(
@@ -134,7 +136,9 @@ class GdeltPublicNewsBackfillAdapter:
         start_datetime: datetime,
         end_datetime: datetime,
         max_records_per_query: int = 250,
+        request_cadence_seconds: int = 0,
         fetch_json: FetchJson | None = None,
+        sleep: Sleep | None = None,
         raw_snapshot_key: str | None = None,
     ) -> None:
         self._queries = tuple(query for query in queries if query.strip())
@@ -142,13 +146,17 @@ class GdeltPublicNewsBackfillAdapter:
         self._start_datetime = start_datetime
         self._end_datetime = end_datetime
         self._max_records_per_query = _clamp_gdelt_max_records(max_records_per_query)
+        self._request_cadence_seconds = max(0, request_cadence_seconds)
         self._fetch_json = fetch_json or _fetch_json
+        self._sleep = sleep or time.sleep
         self._raw_snapshot_key = raw_snapshot_key
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         raw_items: list[RawSourceItem] = []
         seen_urls: set[str] = set()
-        for query in self._queries:
+        for index, query in enumerate(self._queries):
+            if index > 0 and self._request_cadence_seconds > 0:
+                self._sleep(float(self._request_cadence_seconds))
             url = _gdelt_url(
                 self.endpoint,
                 query=query,

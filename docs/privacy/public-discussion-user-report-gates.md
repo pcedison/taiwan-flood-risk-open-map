@@ -68,6 +68,14 @@ Before production launch:
 Current forum/social approval manifest:
 `docs/data-sources/forum/source-approval-manifest.yaml`.
 
+Approval requests must use the review-only schema declared in that manifest.
+The checked-in example request,
+`docs/data-sources/forum/source-approval-request.example.yaml`, intentionally
+remains `accepted: false` / `rejected`. A future request that sets
+`accepted: true` must include approved evidence for terms, privacy, retention,
+moderation, opt-out/delete handling, and rate-limit/backoff before the
+validator will pass.
+
 PTT and Dcard are currently `blocked` / non-accepted. Registry enablement is
 still disabled by default, and even an explicit adapter key must be accompanied
 by all three gates: `SOURCE_FORUM_ENABLED=true`, the source-specific flag
@@ -171,6 +179,14 @@ circumvention, raw content storage, or identity storage.
   `USER_REPORTS_ENABLED=false` blocks public submissions, while
   admin-protected moderation/cleanup endpoints remain available for existing
   records behind `ADMIN_BEARER_TOKEN`.
+- [x] API-level intake rate limiting is enabled by default and configurable:
+  `USER_REPORTS_RATE_LIMIT_ENABLED`, `USER_REPORTS_RATE_LIMIT_MAX_REQUESTS`,
+  `USER_REPORTS_RATE_LIMIT_BACKEND`, and
+  `USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS` protect `POST /v1/reports`
+  before storage. The default backend is shared Redis; memory mode is local/test
+  only. The client signal defaults to the request client address and can use a
+  trusted edge-proxy header only when `USER_REPORTS_RATE_LIMIT_CLIENT_HEADER`
+  is configured.
 - [ ] Legal source: reporter consent text explains purpose, public visibility,
   retention, moderation, deletion, and limits of emergency response.
 - [ ] Robots/ToS: not applicable to submitted first-party reports, but upload
@@ -186,18 +202,19 @@ circumvention, raw content storage, or identity storage.
 - [ ] Moderation: reports stay pending until reviewed or until an approved
   low-risk auto-triage rule marks them low confidence; suspicious reports
   cannot directly become high-weight evidence.
-- [ ] Abuse prevention: rate limits by IP/session/device signal, CAPTCHA or
-  equivalent challenge, duplicate media/report detection, spam scoring, ban or
-  cooldown workflow, and emergency report intake disable flag.
+- [ ] Abuse prevention: rate-limit metrics, CAPTCHA or equivalent challenge,
+  duplicate media/report detection, spam scoring, ban or cooldown workflow, and
+  emergency report intake disable flag.
 - [ ] Audit log: submission, metadata stripping, moderation decision, media
   redaction, promotion to evidence, admin access, abuse action, and deletion
   are logged.
 - [ ] Opt-out/delete: reporter or affected person can request deletion by report
   ID, URL, or approximate submission details; deletion hides media and derived
   evidence while preserving minimal abuse/audit tombstones.
-- [ ] Launch blockers remain: CAPTCHA/equivalent challenge, rate limits,
-  deletion request workflow, media redaction/EXIF stripping, and media deletion
-  must be implemented and reviewed before formal launch.
+- [ ] Launch blockers remain: CAPTCHA/equivalent challenge, production-observed
+  rate-limit metrics, deletion request workflow, media redaction/EXIF
+  stripping, and media deletion must be implemented and reviewed before formal
+  launch.
 
 ## Rollback and Disable Conditions
 

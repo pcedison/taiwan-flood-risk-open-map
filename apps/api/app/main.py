@@ -44,7 +44,7 @@ def create_app() -> FastAPI:
             content = {"error": exc.detail}
         else:
             content = error_payload(str(exc.status_code), str(exc.detail))
-        return JSONResponse(status_code=exc.status_code, content=content)
+        return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
 
     return application
 

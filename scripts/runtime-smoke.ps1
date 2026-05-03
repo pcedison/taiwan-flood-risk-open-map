@@ -494,6 +494,7 @@ import asyncio
 from app.api.routes.reports import create_user_report
 from app.api.schemas import LatLng, UserReportCreateRequest
 from app.core.config import get_settings
+from starlette.requests import Request
 
 get_settings.cache_clear()
 
@@ -503,7 +504,8 @@ async def main() -> None:
         UserReportCreateRequest(
             point=LatLng(lat=25.033, lng=121.5654),
             summary="Runtime smoke enabled report path.",
-        )
+        ),
+        Request({"type": "http", "headers": [], "client": ("runtime-smoke", 0)}),
     )
     if response.status != "pending" or not response.report_id:
         raise SystemExit("expected a pending report_id from enabled reports path")

@@ -86,6 +86,11 @@ Ops runbooks and dry-run checks:
 - [Backup and Restore Drill](docs/runbooks/backup-restore-drill.md) and
   `scripts/backup-restore-drill.ps1` for non-destructive drill planning,
   backup creation, and explicit scratch restore verification.
+- [Production Readiness and On-Call Drill](docs/runbooks/production-readiness.md),
+  `docs/runbooks/production-readiness-evidence.example.yaml`, and
+  `infra/scripts/validate_production_readiness_evidence.py` for validating the
+  evidence record shape. This is a schema/tooling check, not proof that real
+  Zeabur production env, secrets, alert routing, or on-call drill are complete.
 - [Next Phase Runtime Readiness Queue](docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md)
   for the five acceptance standards around queue, reports, MVT, query heat, and
   tile cache readiness.
@@ -189,6 +194,7 @@ docker compose run --rm worker sh -c "pip install -e . && python -m app.schedule
 # Local monitoring profile.
 docker compose --profile monitoring up prometheus grafana node-exporter
 python infra/scripts/validate_monitoring_assets.py
+python infra/scripts/validate_production_readiness_evidence.py
 ```
 
 Production pending checklist:

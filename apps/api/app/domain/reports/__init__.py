@@ -1,5 +1,13 @@
 """User report intake repository."""
 
+from app.domain.reports.abuse import (
+    InMemoryUserReportRateLimiter,
+    RedisUserReportRateLimiter,
+    UserReportRateLimitExceeded,
+    UserReportRateLimitPolicy,
+    UserReportRateLimitUnavailable,
+    check_user_report_intake_rate_limit,
+)
 from app.domain.reports.repository import (
     PendingUserReport,
     UserReportRepositoryUnavailable,
@@ -13,12 +21,18 @@ from app.domain.reports.repository import (
 )
 
 __all__ = [
+    "InMemoryUserReportRateLimiter",
     "PendingUserReport",
+    "RedisUserReportRateLimiter",
+    "UserReportRateLimitExceeded",
+    "UserReportRateLimitPolicy",
+    "UserReportRateLimitUnavailable",
     "UserReportRepositoryUnavailable",
     "UserReportModerationRecord",
     "UserReportModerationReason",
     "UserReportModerationStatus",
     "UserReportStatus",
+    "check_user_report_intake_rate_limit",
     "create_pending_user_report",
     "list_pending_user_reports",
     "moderate_user_report",

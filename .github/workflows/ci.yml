@@ -127,6 +127,9 @@ jobs:
       - name: Validate monitoring assets
         run: python infra/scripts/validate_monitoring_assets.py
 
+      - name: Validate production readiness evidence
+        run: python infra/scripts/validate_production_readiness_evidence.py
+
       - name: Validate Docker Compose config
         run: docker compose config --quiet
 

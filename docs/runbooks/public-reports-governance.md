@@ -7,6 +7,21 @@ disabled by default until all launch gates are approved.
 
 - Public report intake is feature-flagged behind `USER_REPORTS_ENABLED`; the
   default remains disabled.
+- When intake is enabled, `POST /v1/reports` also applies an API-level
+  sliding-window abuse guard before storage. The guard is enabled by default
+  through `USER_REPORTS_RATE_LIMIT_ENABLED=true`, uses the shared Redis backend
+  by default through `USER_REPORTS_RATE_LIMIT_BACKEND=redis`, and is tuned with
+  `USER_REPORTS_RATE_LIMIT_MAX_REQUESTS` and
+  `USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS`.
+- `USER_REPORTS_RATE_LIMIT_BACKEND=memory` is local/test-only. It must not be
+  used for multi-replica production launch because each process has separate
+  counters.
+- The rate-limit client signal defaults to the request client address. Set
+  `USER_REPORTS_RATE_LIMIT_CLIENT_HEADER` only when the deployment has a
+  trusted edge proxy that overwrites the configured header; the stored limiter
+  key is hashed with `ABUSE_HASH_SALT` when provided.
+- Rate-limited submissions return `429 rate_limited` with `Retry-After` and do
+  not create user-report or audit rows.
 - `USER_REPORTS_ENABLED=false` disables public intake only. Admin moderation
   and cleanup endpoints remain available behind `ADMIN_BEARER_TOKEN` so
   operators can review or close already-stored reports during rollback,
@@ -36,6 +51,9 @@ Before using the moderation API in a sandbox:
 - [ ] Confirm `ADMIN_BEARER_TOKEN` is set only for operators who need admin
   access.
 - [ ] Confirm `USER_REPORTS_ENABLED=true` is set only in the reviewed sandbox.
+- [ ] Confirm the default rate-limit guard is enabled, tune the allowed
+  request count/window for the sandbox, and verify a `429 rate_limited`
+  response before storage is touched.
 - [ ] Verify `GET /admin/v1/reports/pending` returns only redacted fields.
 - [ ] Verify invalid moderation status/reason pairs return a clear `400`
   validation error before storage is touched.
@@ -48,7 +66,10 @@ Before using the moderation API in a sandbox:
 Do not launch public user reports until these items are complete and reviewed:
 
 - [ ] CAPTCHA or equivalent challenge is implemented and reviewed.
-- [ ] Rate limiting by IP/session/device signal is implemented and observable.
+- [x] API-level rate limiting is implemented and enabled by default for intake.
+- [x] Rate limiting is backed by shared Redis infrastructure by default rather
+  than per-process memory.
+- [ ] Rate limiting metrics and dashboards are observable in production.
 - [ ] Deletion request handling exists for report ID, approximate submission
   details, affected-person requests, derived evidence, media, and tombstones.
 - [ ] Media ingestion, EXIF stripping, face/license-plate/private-interior

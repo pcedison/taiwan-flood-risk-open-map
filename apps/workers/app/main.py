@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from app.adapters.registry import enabled_adapter_keys
-from app.config import WorkerSettings, load_worker_settings
+from app.config import WorkerSettings, env_flag, env_int, env_list, load_worker_settings
+from app.jobs.historical_news_backfill import (
+    DEFAULT_GDELT_REHEARSAL_CADENCE_SECONDS,
+    DEFAULT_GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY,
+    DEFAULT_TAIWAN_FLOOD_NEWS_QUERIES,
+    HistoricalNewsBackfillConfig,
+    run_historical_news_backfill_rehearsal,
+)
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.query_heat import (
     SUPPORTED_QUERY_HEAT_PERIODS,
@@ -77,6 +85,65 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--run-enabled-adapters",
         action="store_true",
         help="Run configured runtime adapters once, selected by WORKER_ENABLED_ADAPTER_KEYS/config gates.",
+    )
+    parser.add_argument(
+        "--rehearse-gdelt-news-backfill",
+        action="store_true",
+        help=(
+            "Run the explicit GDELT public-news egress rehearsal. "
+            "Requires GDELT_SOURCE_ENABLED, GDELT_BACKFILL_ENABLED, "
+            "SOURCE_NEWS_ENABLED, and SOURCE_TERMS_REVIEW_ACK gates."
+        ),
+    )
+    parser.add_argument(
+        "--gdelt-rehearsal-mode",
+        choices=("dry-run", "staging-batch"),
+        default="dry-run",
+        help="GDELT rehearsal output mode. Defaults to fetch/normalize dry-run.",
+    )
+    parser.add_argument(
+        "--gdelt-source-enabled",
+        action="store_true",
+        help="Open the GDELT-specific source rehearsal gate for this command only.",
+    )
+    parser.add_argument(
+        "--gdelt-backfill-enabled",
+        action="store_true",
+        help="Open the GDELT backfill rehearsal gate for this command only.",
+    )
+    parser.add_argument(
+        "--gdelt-start",
+        type=_parse_query_heat_datetime,
+        help="Inclusive ISO-8601 start timestamp for bounded GDELT rehearsal.",
+    )
+    parser.add_argument(
+        "--gdelt-end",
+        type=_parse_query_heat_datetime,
+        help="Exclusive ISO-8601 end timestamp for bounded GDELT rehearsal.",
+    )
+    parser.add_argument(
+        "--gdelt-query",
+        action="append",
+        help=(
+            "Override default Taiwan flood-news queries. May be supplied multiple times. "
+            "GDELT_REHEARSAL_QUERIES can also provide comma-separated queries."
+        ),
+    )
+    parser.add_argument(
+        "--gdelt-max-records",
+        type=int,
+        help=(
+            "Per-query GDELT maxrecords for rehearsal. "
+            f"Default: {DEFAULT_GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY}; adapter clamps at 250."
+        ),
+    )
+    parser.add_argument(
+        "--gdelt-cadence-seconds",
+        type=int,
+        help=(
+            "Minimum seconds between GDELT query requests during rehearsal. "
+            f"Default: {DEFAULT_GDELT_REHEARSAL_CADENCE_SECONDS}."
+        ),
     )
     parser.add_argument(
         "--scheduler",
@@ -239,6 +306,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(adapter_key)
         return 0
 
+    if args.rehearse_gdelt_news_backfill:
+        return _rehearse_gdelt_news_backfill(args=args, settings=settings)
+
     if args.list_runtime_dead_letter_jobs:
         return _list_runtime_dead_letter_jobs(
             settings=settings,
@@ -391,6 +461,103 @@ def _build_demo_persistence_writers(
         run_writer=PostgresIngestionRunWriter(database_url=resolved_database_url),
         promotion_writer=PostgresEvidencePromotionWriter(database_url=resolved_database_url),
     )
+
+
+def _rehearse_gdelt_news_backfill(
+    *,
+    args: argparse.Namespace,
+    settings: WorkerSettings,
+) -> int:
+    if args.gdelt_start is None or args.gdelt_end is None:
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "reason": "missing_bounded_window",
+                    "message": "--gdelt-start and --gdelt-end are required",
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
+    if args.gdelt_start >= args.gdelt_end:
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "reason": "invalid_bounded_window",
+                    "message": "--gdelt-start must be earlier than --gdelt-end",
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
+
+    env_queries = env_list(os.environ, "GDELT_REHEARSAL_QUERIES")
+    queries = tuple(args.gdelt_query or ()) or env_queries
+    max_records = (
+        args.gdelt_max_records
+        if args.gdelt_max_records is not None
+        else env_int(
+            os.environ,
+            "GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY",
+            default=DEFAULT_GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY,
+        )
+    )
+    cadence_seconds = args.gdelt_cadence_seconds
+    if cadence_seconds is None:
+        cadence_seconds = env_int(
+            os.environ,
+            "GDELT_REHEARSAL_CADENCE_SECONDS",
+            default=DEFAULT_GDELT_REHEARSAL_CADENCE_SECONDS,
+        )
+
+    config = HistoricalNewsBackfillConfig(
+        start_datetime=args.gdelt_start,
+        end_datetime=args.gdelt_end,
+        fetched_at=datetime.now(UTC),
+        queries=queries if queries is not None else DEFAULT_TAIWAN_FLOOD_NEWS_QUERIES,
+        max_records_per_query=max_records,
+        request_cadence_seconds=cadence_seconds,
+        gdelt_source_enabled=args.gdelt_source_enabled
+        or env_flag(os.environ, "GDELT_SOURCE_ENABLED"),
+        gdelt_backfill_enabled=args.gdelt_backfill_enabled
+        or env_flag(os.environ, "GDELT_BACKFILL_ENABLED"),
+        source_news_enabled=settings.source_news_enabled is True,
+        source_terms_review_ack=settings.source_terms_review_ack,
+    )
+
+    try:
+        result = run_historical_news_backfill_rehearsal(
+            config,
+            mode=args.gdelt_rehearsal_mode,
+        )
+    except RuntimeError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "skipped",
+                    "reason": str(exc),
+                    "network_allowed": False,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    except ValueError as exc:
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "reason": str(exc),
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
+
+    print(json.dumps(result.as_payload(), sort_keys=True))
+    return 0
 
 
 def _build_runtime_persistence_writers(

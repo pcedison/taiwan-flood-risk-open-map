@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app import scheduler as scheduler_module
 from app.config import load_worker_settings
+from app.jobs.historical_news_backfill import HistoricalNewsBackfillConfig
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import (
     RuntimeQueueDeadLetterJob,
@@ -74,6 +75,98 @@ def test_main_run_enabled_adapters_noops_without_runtime_fixtures() -> None:
     exit_code = main(["--run-enabled-adapters"])
 
     assert exit_code == 0
+
+
+def test_main_gdelt_rehearsal_skips_without_all_gates_and_does_not_fetch(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fail_fetch(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("GDELT rehearsal must not fetch when gates are missing")
+
+    monkeypatch.delenv("GDELT_SOURCE_ENABLED", raising=False)
+    monkeypatch.delenv("GDELT_BACKFILL_ENABLED", raising=False)
+    monkeypatch.delenv("SOURCE_NEWS_ENABLED", raising=False)
+    monkeypatch.delenv("SOURCE_TERMS_REVIEW_ACK", raising=False)
+    monkeypatch.setattr("app.adapters.news.public_web._fetch_json", fail_fetch)
+
+    exit_code = main(
+        [
+            "--rehearse-gdelt-news-backfill",
+            "--gdelt-start",
+            "2025-08-01T00:00:00Z",
+            "--gdelt-end",
+            "2025-08-02T00:00:00Z",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "skipped"
+    assert payload["network_allowed"] is False
+    assert "GDELT_SOURCE_ENABLED=true" in payload["reason"]
+
+
+def test_main_gdelt_rehearsal_wires_env_and_argv_without_network(
+    monkeypatch,
+    capsys,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeRehearsalResult:
+        def as_payload(self) -> dict[str, object]:
+            return {
+                "status": "succeeded",
+                "adapter_key": "news.public_web.gdelt_backfill",
+                "fetched_count": 1,
+                "metadata": {"metadata_only": True},
+            }
+
+    def fake_rehearsal(
+        config: HistoricalNewsBackfillConfig,
+        *,
+        mode: str,
+    ) -> FakeRehearsalResult:
+        captured["config"] = config
+        captured["mode"] = mode
+        return FakeRehearsalResult()
+
+    monkeypatch.setenv("GDELT_SOURCE_ENABLED", "true")
+    monkeypatch.setenv("GDELT_BACKFILL_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
+    monkeypatch.setenv("GDELT_REHEARSAL_CADENCE_SECONDS", "45")
+    monkeypatch.setattr("app.main.run_historical_news_backfill_rehearsal", fake_rehearsal)
+
+    exit_code = main(
+        [
+            "--rehearse-gdelt-news-backfill",
+            "--gdelt-rehearsal-mode",
+            "staging-batch",
+            "--gdelt-start",
+            "2025-08-01T00:00:00Z",
+            "--gdelt-end",
+            "2025-08-02T00:00:00Z",
+            "--gdelt-query",
+            "台南淹水",
+            "--gdelt-max-records",
+            "5",
+        ]
+    )
+
+    assert exit_code == 0
+    config = captured["config"]
+    assert isinstance(config, HistoricalNewsBackfillConfig)
+    assert config.gdelt_source_enabled is True
+    assert config.gdelt_backfill_enabled is True
+    assert config.source_news_enabled is True
+    assert config.source_terms_review_ack is True
+    assert config.queries == ("台南淹水",)
+    assert config.max_records_per_query == 5
+    assert config.request_cadence_seconds == 45
+    assert captured["mode"] == "staging-batch"
+    assert json.loads(capsys.readouterr().out)["status"] == "succeeded"
 
 
 def test_main_scheduler_can_run_bounded_runtime_loop(monkeypatch) -> None:

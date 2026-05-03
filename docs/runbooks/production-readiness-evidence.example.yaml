@@ -1,0 +1,258 @@
+schema_version: production-readiness-evidence/v1
+production_complete: false
+readiness_state: not-production-complete
+
+environment:
+  provider: zeabur
+  project: zeabur-production-beta-placeholder
+  deployment_sha: replace-with-reviewed-deployment-sha
+  captured_at: "2026-05-03T00:00:00+08:00"
+
+required_env:
+  - name: APP_ENV
+    owner: platform-owner
+    expected: production-beta
+    status: placeholder-only
+    evidence: set only in the reviewed Zeabur production-beta project
+  - name: ADMIN_BEARER_TOKEN
+    owner: api-operator-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: real token missing from this template
+  - name: ABUSE_HASH_SALT
+    owner: privacy-governance-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: required before public report abuse/rate-limit signals are enabled
+  - name: DATABASE_URL
+    owner: platform-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: real database URL missing from this template
+  - name: REDIS_URL
+    owner: platform-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: real Redis URL missing from this template
+  - name: MINIO_ROOT_USER
+    owner: platform-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: required only if hosted MinIO is used
+  - name: MINIO_ROOT_PASSWORD
+    owner: platform-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: real hosted MinIO password missing from this template
+  - name: CWA_API_AUTHORIZATION
+    owner: source-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: required before CWA live paths are enabled
+  - name: WRA_API_TOKEN
+    owner: source-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: optional unless upstream requires a token
+  - name: GRAFANA_ADMIN_PASSWORD
+    owner: observability-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: real hosted Grafana password missing from this template
+  - name: SOURCE_CWA_ENABLED
+    owner: source-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until live-source review is accepted
+  - name: SOURCE_WRA_ENABLED
+    owner: source-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until live-source review is accepted
+  - name: SOURCE_FLOOD_POTENTIAL_ENABLED
+    owner: source-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until URL/license/cadence review is accepted
+  - name: SOURCE_CWA_API_ENABLED
+    owner: source-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until CWA credential and egress review are accepted
+  - name: SOURCE_WRA_API_ENABLED
+    owner: source-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until WRA credential and egress review are accepted
+  - name: SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED
+    owner: source-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until upstream URL/license/cadence review is accepted
+  - name: SOURCE_NEWS_ENABLED
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until allowlist and citation policy are accepted
+  - name: SOURCE_FORUM_ENABLED
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until forum governance is accepted
+  - name: SOURCE_PTT_ENABLED
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until forum family gate and terms review are accepted
+  - name: SOURCE_DCARD_ENABLED
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until forum family gate and terms review are accepted
+  - name: SOURCE_TERMS_REVIEW_ACK
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep false until source terms review record exists
+  - name: SOURCE_SAMPLE_DATA_ENABLED
+    owner: platform-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep false for hosted environments
+  - name: USER_REPORTS_ENABLED
+    owner: privacy-governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until intake governance is accepted
+  - name: USER_REPORTS_RATE_LIMIT_ENABLED
+    owner: privacy-governance-owner
+    expected: true
+    status: placeholder-only
+    evidence: keep enabled whenever public report intake is enabled
+  - name: USER_REPORTS_RATE_LIMIT_BACKEND
+    owner: privacy-governance-owner
+    expected: redis
+    status: placeholder-only
+    evidence: memory backend is local/test-only and not acceptable for multi-replica launch
+  - name: USER_REPORTS_RATE_LIMIT_MAX_REQUESTS
+    owner: privacy-governance-owner
+    expected: reviewed numeric policy
+    status: placeholder-only
+    evidence: tune during abuse-prevention review
+  - name: USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS
+    owner: privacy-governance-owner
+    expected: reviewed numeric policy
+    status: placeholder-only
+    evidence: tune during abuse-prevention review
+  - name: USER_REPORTS_RATE_LIMIT_CLIENT_HEADER
+    owner: privacy-governance-owner
+    expected: blank unless trusted edge proxy overwrites the header
+    status: placeholder-only
+    evidence: document edge proxy ownership before setting
+
+slos:
+  - name: API availability
+    owner: platform-owner
+    sli: up{job="flood-risk-api"} or flood_risk_api_ready
+    target: 99.5% over 7 days
+    evidence_ref: docs/runbooks/production-readiness.md#slo-and-sli-targets
+  - name: Source freshness
+    owner: source-owner
+    sli: enabled sources with flood_risk_source_freshness_stale == 0
+    target: 95% of checks over 7 days
+    evidence_ref: docs/runbooks/production-readiness.md#slo-and-sli-targets
+  - name: Worker heartbeat
+    owner: worker-owner
+    sli: worker heartbeat age under 300 seconds
+    target: 99% of checks over 7 days
+    evidence_ref: docs/runbooks/production-readiness.md#slo-and-sli-targets
+  - name: Scheduler heartbeat
+    owner: platform-owner
+    sli: scheduler heartbeat age under 600 seconds and one scheduler replica
+    target: 99% of checks over 7 days
+    evidence_ref: docs/runbooks/production-readiness.md#slo-and-sli-targets
+  - name: Queue visibility
+    owner: worker-owner
+    sli: queue exporter available
+    target: 99% of checks over 7 days
+    evidence_ref: docs/runbooks/production-readiness.md#slo-and-sli-targets
+  - name: Backup restore
+    owner: database-owner
+    sli: latest backup can be inspected and restored to scratch
+    target: one successful drill per release candidate
+    evidence_ref: docs/runbooks/backup-restore-drill.md
+
+alert_routing:
+  - alert_family: API readiness
+    primary_owner: platform-owner
+    backup_owner: backend-owner
+    route: incident-channel-placeholder
+    evidence_ref: infra/monitoring/alert-rules.yml
+  - alert_family: Source freshness
+    primary_owner: source-owner
+    backup_owner: worker-owner
+    route: incident-channel-placeholder
+    evidence_ref: infra/monitoring/alert-rules.yml
+  - alert_family: Worker heartbeat/last run
+    primary_owner: worker-owner
+    backup_owner: platform-owner
+    route: incident-channel-placeholder
+    evidence_ref: infra/monitoring/alert-rules.yml
+  - alert_family: Scheduler heartbeat
+    primary_owner: platform-owner
+    backup_owner: worker-owner
+    route: incident-channel-placeholder
+    evidence_ref: infra/monitoring/alert-rules.yml
+  - alert_family: Runtime queue rows
+    primary_owner: worker-owner
+    backup_owner: backend-owner
+    route: incident-channel-placeholder
+    evidence_ref: infra/monitoring/alert-rules.yml
+  - alert_family: Backup/restore drill
+    primary_owner: platform-owner
+    backup_owner: database-owner
+    route: incident-channel-placeholder
+    evidence_ref: docs/runbooks/backup-restore-drill.md
+
+runbook_drills:
+  - name: on-call drill
+    timestamp: "2026-05-03T00:00:00+08:00"
+    operator: drill-operator-placeholder
+    result: template-only-not-run
+    evidence_refs:
+      - docs/runbooks/production-readiness.md#on-call-drill
+    blockers:
+      - real Zeabur production-beta env has not been reviewed
+      - alert routing has not been proven to reach owners
+  - name: rollback drill
+    timestamp: "2026-05-03T00:00:00+08:00"
+    operator: drill-operator-placeholder
+    result: template-only-not-run
+    evidence_refs:
+      - docs/runbooks/production-readiness.md#rollback-drill
+    blockers:
+      - no production-beta rollback exercise has been recorded
+  - name: backup restore drill
+    timestamp: "2026-05-03T00:00:00+08:00"
+    operator: drill-operator-placeholder
+    result: template-only-not-run
+    evidence_refs:
+      - docs/runbooks/backup-restore-drill.md
+    blockers:
+      - no hosted backup archive and scratch restore evidence has been recorded
+
+pending_production_gaps:
+  - real Zeabur env variables have not been reviewed against this evidence record
+  - real Zeabur secrets have not been configured or verified by named owners
+  - on-call drill has not been executed against staging or production beta
+  - hosted alert routing has not been proven
+  - backup restore drill has not been executed against a hosted backup artifact

@@ -30,9 +30,13 @@ The project must not rely on manually adding one road segment after a user finds
 Current GDELT acceptance boundary:
 
 - candidate enablement requires both `SOURCE_NEWS_ENABLED=true` and `SOURCE_TERMS_REVIEW_ACK=true`; an explicit `WORKER_ENABLED_ADAPTER_KEYS=news.public_web.gdelt_backfill` does not bypass those gates;
-- the backfill helper is separately disabled by default and refuses to fetch unless its explicit backfill, news, and terms gates are all true;
+- the backfill helper is separately disabled by default and refuses to fetch unless its explicit GDELT source, backfill, news, and terms gates are all true;
+- the worker CLI exposes a bounded live-egress rehearsal only through `python -m app.main --rehearse-gdelt-news-backfill --gdelt-start <iso> --gdelt-end <iso>`; missing any gate returns a no-network `skipped` payload;
+- the rehearsal gates are `GDELT_SOURCE_ENABLED=true`, `GDELT_BACKFILL_ENABLED=true`, `SOURCE_NEWS_ENABLED=true`, and `SOURCE_TERMS_REVIEW_ACK=true`. These are operator rehearsal controls, not proof that production legal/source approval is complete;
+- rehearsal defaults to fetch/normalize `dry-run`; `--gdelt-rehearsal-mode staging-batch` builds an in-memory staging batch but does not persist or promote evidence;
+- rehearsal fetches are bounded by explicit start/end timestamps, per-query `maxrecords` default `10` with adapter clamp `250`, and a request cadence default of `60` seconds between queries;
 - tests cover deterministic GDELT DOC URL construction, `maxrecords` clamping to 250, URL-level dedupe, source country/domain/location extraction, metadata-only raw payloads, no normalized full-text redistribution, and rejection of missing titles or invalid dates;
-- runtime adapter construction still does not expose a GDELT live fetch path, so the verified boundary is adapter/backfill preflight and injected-fetcher fixture execution.
+- runtime adapter construction still does not expose a GDELT live fetch path, so the verified boundary is adapter/backfill preflight, injected-fetcher fixture execution, and explicit operator rehearsal.
 
 Still pending before production approval:
 

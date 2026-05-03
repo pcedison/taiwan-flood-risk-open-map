@@ -4,6 +4,11 @@ from typing import Any, cast
 import pytest
 
 from app.domain.reports import (
+    InMemoryUserReportRateLimiter,
+    RedisUserReportRateLimiter,
+    UserReportRateLimitExceeded,
+    UserReportRateLimitPolicy,
+    UserReportRateLimitUnavailable,
     create_pending_user_report,
     list_pending_user_reports,
     moderate_user_report,
@@ -178,6 +183,74 @@ def test_moderate_user_report_rejects_reason_for_wrong_status_before_sql() -> No
     assert connection.cursor_instance.executions == []
 
 
+def test_user_report_rate_limiter_allows_configured_window() -> None:
+    clock = _FakeClock(100.0)
+    limiter = InMemoryUserReportRateLimiter(clock=clock.now)
+    policy = UserReportRateLimitPolicy(max_requests=2, window_seconds=60)
+
+    limiter.check(client_key="client-a", policy=policy)
+    limiter.check(client_key="client-a", policy=policy)
+
+    with pytest.raises(UserReportRateLimitExceeded) as exc_info:
+        limiter.check(client_key="client-a", policy=policy)
+
+    assert exc_info.value.retry_after_seconds == 60
+    assert exc_info.value.policy == policy
+
+
+def test_user_report_rate_limiter_is_per_client_and_prunes_old_entries() -> None:
+    clock = _FakeClock(100.0)
+    limiter = InMemoryUserReportRateLimiter(clock=clock.now)
+    policy = UserReportRateLimitPolicy(max_requests=1, window_seconds=60)
+
+    limiter.check(client_key="client-a", policy=policy)
+    limiter.check(client_key="client-b", policy=policy)
+
+    clock.advance(61.0)
+    limiter.check(client_key="client-a", policy=policy)
+
+
+def test_redis_user_report_rate_limiter_maps_script_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_redis = _FakeRedis(eval_result=[0, 41000])
+    monkeypatch.setattr("app.domain.reports.abuse.redis.Redis.from_url", lambda *_, **__: fake_redis)
+    limiter = RedisUserReportRateLimiter(redis_url="redis://example.test:6379/0", clock=lambda: 100.0)
+    policy = UserReportRateLimitPolicy(max_requests=2, window_seconds=60)
+
+    with pytest.raises(UserReportRateLimitExceeded) as exc_info:
+        limiter.check(client_key="client-a", policy=policy)
+
+    assert exc_info.value.retry_after_seconds == 41
+    assert fake_redis.closed is True
+    assert fake_redis.eval_calls[0][1:4] == (
+        2,
+        "flood-risk:user-report-rate:client-a",
+        "flood-risk:user-report-rate-seq:client-a",
+    )
+
+
+def test_redis_user_report_rate_limiter_fails_closed_when_redis_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import redis
+
+    def unavailable(*_args: object, **_kwargs: object) -> object:
+        raise redis.RedisError("redis down")
+
+    fake_redis = _FakeRedis(eval_side_effect=unavailable)
+    monkeypatch.setattr("app.domain.reports.abuse.redis.Redis.from_url", lambda *_, **__: fake_redis)
+    limiter = RedisUserReportRateLimiter(redis_url="redis://example.test:6379/0", clock=lambda: 100.0)
+
+    with pytest.raises(UserReportRateLimitUnavailable):
+        limiter.check(
+            client_key="client-a",
+            policy=UserReportRateLimitPolicy(max_requests=2, window_seconds=60),
+        )
+
+    assert fake_redis.closed is True
+
+
 class _FakeConnection:
     def __init__(
         self,
@@ -222,3 +295,36 @@ class _FakeCursor:
 
     def fetchall(self) -> list[dict[str, object]]:
         return self._rows
+
+
+class _FakeClock:
+    def __init__(self, now: float) -> None:
+        self._now = now
+
+    def now(self) -> float:
+        return self._now
+
+    def advance(self, seconds: float) -> None:
+        self._now += seconds
+
+
+class _FakeRedis:
+    def __init__(
+        self,
+        *,
+        eval_result: list[int] | None = None,
+        eval_side_effect: object | None = None,
+    ) -> None:
+        self.eval_result = eval_result or [1, 0]
+        self.eval_side_effect = eval_side_effect
+        self.eval_calls: list[tuple[object, ...]] = []
+        self.closed = False
+
+    def eval(self, *args: object) -> list[int]:
+        self.eval_calls.append(args)
+        if callable(self.eval_side_effect):
+            self.eval_side_effect(*args)
+        return self.eval_result
+
+    def close(self) -> None:
+        self.closed = True

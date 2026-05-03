@@ -64,10 +64,12 @@ Partially complete, not production-ready:
   runtime client, and feature/cache smoke only until real upstream URL/license
   review, credential review, hosted cadence, alert routing, and production
   egress verification are complete.
-- GDELT public-news backfill is acceptance-preflight only. The candidate
-  adapter and historical backfill helper require explicit news and terms gates,
-  tests use injected fetchers rather than live network calls, and runtime
-  adapter construction still does not expose a GDELT live fetch path.
+- GDELT public-news backfill is acceptance-preflight plus explicit live-egress
+  rehearsal only. The candidate adapter and historical backfill helper require
+  explicit GDELT source, backfill, news, and terms gates. Tests use injected
+  fetchers rather than live network calls, runtime adapter construction still
+  does not expose a GDELT live fetch path, and rehearsal gates are not
+  production legal/source approval.
 
 ## Entry points
 
@@ -96,10 +98,14 @@ Partially complete, not production-ready:
   `WORKER_DATABASE_URL=postgresql://... WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level python -m app.main --run-enabled-adapters --persist`
 - Persist the gated Phase 2 L2 public-web sample fixture through managed ingestion:
   `WORKER_DATABASE_URL=postgresql://... WORKER_RUNTIME_FIXTURES_ENABLED=true SOURCE_SAMPLE_DATA_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=news.public_web.sample python -m app.main --run-enabled-adapters --persist`
-- GDELT backfill candidate preflight remains code/test only. Do not run it as
-  production ingestion until `SOURCE_NEWS_ENABLED=true`,
-  `SOURCE_TERMS_REVIEW_ACK=true`, source/legal approval, rate limits,
-  geocoding QA, hosted cadence, and operator ownership are accepted.
+- GDELT backfill live-egress rehearsal, dry-run only by default:
+  `GDELT_SOURCE_ENABLED=true GDELT_BACKFILL_ENABLED=true SOURCE_NEWS_ENABLED=true SOURCE_TERMS_REVIEW_ACK=true python -m app.main --rehearse-gdelt-news-backfill --gdelt-start 2025-08-01T00:00:00Z --gdelt-end 2025-08-02T00:00:00Z`
+- GDELT backfill staging-batch rehearsal, still no persistence or promotion:
+  `GDELT_SOURCE_ENABLED=true GDELT_BACKFILL_ENABLED=true SOURCE_NEWS_ENABLED=true SOURCE_TERMS_REVIEW_ACK=true python -m app.main --rehearse-gdelt-news-backfill --gdelt-rehearsal-mode staging-batch --gdelt-start 2025-08-01T00:00:00Z --gdelt-end 2025-08-02T00:00:00Z --gdelt-max-records 10`
+- Do not run GDELT rehearsal as production ingestion. The gates only permit a
+  bounded operator rehearsal; source/legal approval, rate limits, geocoding QA,
+  hosted cadence, persistence/promotion approval, and operator ownership still
+  need acceptance.
 - Run gated CWA rainfall live client once:
   `SOURCE_CWA_ENABLED=true SOURCE_CWA_API_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --run-enabled-adapters`
 - Run gated WRA water-level live client once:
@@ -225,7 +231,16 @@ override `CWA_API_URL`, and tune `CWA_API_TIMEOUT_SECONDS`. For WRA live mode,
 set `SOURCE_WRA_ENABLED=true`, `SOURCE_WRA_API_ENABLED=true`, optionally
 override `WRA_API_URL`, optionally provide `WRA_API_TOKEN`, and tune
 `WRA_API_TIMEOUT_SECONDS`. Disabled or unavailable adapters remain a graceful
-no-op and tests inject fetchers instead of calling external APIs.
+no-op and tests inject fetchers instead of calling external APIs. GDELT public
+news is intentionally outside runtime adapter construction; the only live
+egress path is the explicit rehearsal CLI, which requires
+`GDELT_SOURCE_ENABLED=true`, `GDELT_BACKFILL_ENABLED=true`,
+`SOURCE_NEWS_ENABLED=true`, and `SOURCE_TERMS_REVIEW_ACK=true`. Missing any
+gate returns a JSON `skipped` payload with `network_allowed=false`. The
+rehearsal requires explicit `--gdelt-start` and `--gdelt-end` bounds, defaults
+to `--gdelt-rehearsal-mode dry-run`, uses metadata-only GDELT article fields,
+defaults to `GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY=10`, clamps at 250, and
+defaults to `GDELT_REHEARSAL_CADENCE_SECONDS=60` between query requests.
 The official demo, managed runtime path, and queue worker only write to
 Postgres when `--persist` is supplied; the database URL can come from
 `--database-url`, `WORKER_DATABASE_URL`, or `DATABASE_URL`. The local managed
@@ -336,10 +351,12 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
   retention/deletion, and legal/privacy gates are accepted.
 - Keep production news ingestion disabled until source approval, attribution,
   retention, hosted cadence, and legal/privacy gates are accepted.
-- Keep `news.public_web.gdelt_backfill` out of live runtime/CLI production
-  paths until GDELT terms/source approval, production egress/rate-limit
-  verification, canonical/event dedupe, geocoding promotion QA, and operator
-  runbooks are accepted.
+- Keep `news.public_web.gdelt_backfill` out of live runtime production paths.
+  The bounded CLI rehearsal may be used only when all explicit gates are open
+  and must not be described as production/legal approval. Production ingestion
+  still waits for GDELT terms/source approval, production egress/rate-limit
+  verification, canonical/event dedupe, geocoding promotion QA, persistence
+  approval, and operator runbooks.
 
 ## Placeholder boundary
 
