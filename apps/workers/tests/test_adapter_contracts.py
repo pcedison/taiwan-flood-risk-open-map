@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from app.adapters.contracts import DataSourceAdapter, EventType, IngestionStatus, SourceFamily
 from app.adapters.news import GdeltPublicNewsBackfillAdapter, SamplePublicWebNewsAdapter
@@ -81,6 +82,107 @@ def test_gdelt_backfill_adapter_normalizes_public_news_articles() -> None:
     assert evidence.location_text is not None
     assert "長溪路二段" in evidence.location_text
     assert evidence.confidence >= 0.8
+    assert evidence.attribution == "example.test"
+
+
+def test_gdelt_backfill_url_construction_and_max_records_clamp() -> None:
+    captured_urls: list[str] = []
+
+    def fetch_json(url: str) -> dict[str, object]:
+        captured_urls.append(url)
+        return {"articles": []}
+
+    adapter = GdeltPublicNewsBackfillAdapter(
+        ("積淹水 sourcecountry:TW",),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, 1, 2, 3, tzinfo=timezone.utc),
+        end_datetime=datetime(2025, 8, 5, 4, 5, 6, tzinfo=timezone.utc),
+        max_records_per_query=999,
+        fetch_json=fetch_json,
+    )
+
+    assert adapter.fetch() == ()
+
+    parsed = urlparse(captured_urls[0])
+    params = parse_qs(parsed.query)
+    assert parsed.scheme == "https"
+    assert parsed.netloc == "api.gdeltproject.org"
+    assert params["query"] == ["積淹水 sourcecountry:TW"]
+    assert params["mode"] == ["ArtList"]
+    assert params["format"] == ["json"]
+    assert params["maxrecords"] == ["250"]
+    assert params["startdatetime"] == ["20250801010203"]
+    assert params["enddatetime"] == ["20250805040506"]
+
+
+def test_gdelt_backfill_dedupes_by_url_and_keeps_metadata_only() -> None:
+    adapter = GdeltPublicNewsBackfillAdapter(
+        ("台南市安南區積淹水", "台南市安南區豪雨"),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, tzinfo=timezone.utc),
+        end_datetime=datetime(2025, 8, 5, tzinfo=timezone.utc),
+        fetch_json=lambda _url: {
+            "articles": [
+                {
+                    "url": "https://example.test/news/duplicate",
+                    "title": "台南市安南區積淹水",
+                    "seendate": "20250802T012800Z",
+                    "domain": "example.test",
+                    "sourcecountry": "TW",
+                    "body": "full article text must not be redistributed",
+                    "content": "full article text must not be redistributed",
+                    "description": "long article excerpt must not be redistributed",
+                }
+            ]
+        },
+    )
+
+    result = adapter.run()
+
+    assert len(result.fetched) == 1
+    assert result.rejected == ()
+    raw_payload = result.fetched[0].payload
+    assert raw_payload["url"] == "https://example.test/news/duplicate"
+    assert raw_payload["domain"] == "example.test"
+    assert raw_payload["sourcecountry"] == "TW"
+    assert "body" not in raw_payload
+    assert "content" not in raw_payload
+    assert "description" not in raw_payload
+    evidence = result.normalized[0]
+    assert "full article text" not in evidence.summary
+    assert evidence.location_text is not None
+    assert "安南區" in evidence.location_text
+
+
+def test_gdelt_backfill_rejects_invalid_title_and_date() -> None:
+    adapter = GdeltPublicNewsBackfillAdapter(
+        ("台灣豪雨",),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, tzinfo=timezone.utc),
+        end_datetime=datetime(2025, 8, 5, tzinfo=timezone.utc),
+        fetch_json=lambda _url: {
+            "articles": [
+                {
+                    "url": "https://example.test/news/no-title",
+                    "title": " ",
+                    "seendate": "20250802T012800Z",
+                    "domain": "example.test",
+                },
+                {
+                    "url": "https://example.test/news/no-date",
+                    "title": "台北市豪雨積水",
+                    "seendate": "not-a-date",
+                    "domain": "example.test",
+                },
+            ]
+        },
+    )
+
+    result = adapter.run()
+
+    assert len(result.fetched) == 2
+    assert result.normalized == ()
+    assert result.rejected == tuple(item.source_id for item in result.fetched)
 
 
 def test_pipeline_validation_rejects_out_of_range_confidence() -> None:

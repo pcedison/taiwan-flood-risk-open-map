@@ -68,7 +68,9 @@ def test_list_pending_user_reports_reads_pending_reports_without_media_ref() -> 
     assert "FROM user_reports" in sql
     assert "WHERE status = 'pending'" in sql
     assert "ORDER BY created_at ASC, id ASC" in sql
+    assert "email" not in sql
     assert "media_ref" not in sql
+    assert "private" not in sql.lower()
     assert params == (25,)
     assert len(reports) == 1
     assert reports[0].id == "0d51d545-dc6a-4e4b-8f8e-0e42d454d050"
@@ -114,7 +116,9 @@ def test_moderate_user_report_updates_status_and_writes_audit_log() -> None:
     assert "previous_status" in sql
     assert "reason_code" in sql
     assert "reviewed_by" in sql
+    assert "email" not in sql
     assert "media_ref" not in sql
+    assert "private" not in sql.lower()
     assert params == (
         "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
         "approved",

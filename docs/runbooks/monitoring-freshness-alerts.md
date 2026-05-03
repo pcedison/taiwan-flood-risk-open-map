@@ -150,6 +150,17 @@ Start with these thresholds:
 For the current script, use `-MaxAgeMinutes 60` for a conservative smoke alert.
 Move to per-source thresholds when a dashboard or monitor config exists.
 
+These alert thresholds support the production beta SLO surfaces in
+[production-readiness.md](production-readiness.md):
+
+| SLO surface | Alert signal | Response expectation |
+|---|---|---|
+| API availability/readiness | `FloodRiskApiReadyDown` | Critical owner triage starts immediately after routing fires. |
+| Source freshness | freshness failed/degraded/unknown/stale alerts | Source owner decides disable, upstream wait, or credential fix. |
+| Worker heartbeat/latest run | worker heartbeat and last-run alerts | Worker owner confirms process, queue, and textfile collector health. |
+| Scheduler heartbeat | scheduler heartbeat alert | Platform owner confirms singleton scheduler and recent heartbeat. |
+| Queue visibility/final-failed rows | queue metrics unavailable, final-failed rows, expired leases | Worker owner inspects rows; no bulk replay without accepted policy. |
+
 ## Prometheus Rules
 
 Rule file:

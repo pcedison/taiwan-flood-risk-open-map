@@ -65,6 +65,17 @@ Before production launch:
 
 ## Source-Specific Gates
 
+Current forum/social approval manifest:
+`docs/data-sources/forum/source-approval-manifest.yaml`.
+
+PTT and Dcard are currently `blocked` / non-accepted. Registry enablement is
+still disabled by default, and even an explicit adapter key must be accompanied
+by all three gates: `SOURCE_FORUM_ENABLED=true`, the source-specific flag
+(`SOURCE_PTT_ENABLED=true` or `SOURCE_DCARD_ENABLED=true`), and
+`SOURCE_TERMS_REVIEW_ACK=true`. These flags are only configuration gates; they
+do not approve crawling, scraping, HTTP fetching, login bypass, anti-bot
+circumvention, raw content storage, or identity storage.
+
 ### Public Web / News-Like Public Pages
 
 - [ ] Legal source: page is public without login, scraping ban, paywall bypass,
@@ -152,6 +163,14 @@ Before production launch:
 
 ### User Report
 
+- [x] API moderation groundwork: admin-protected pending-list and moderation
+  decision endpoints exist for review workflows, with schema-limited statuses
+  and reason codes, redacted response fields, audit logging, and
+  `USER_REPORTS_ENABLED` still disabled by default.
+- [x] Public intake kill switch semantics are explicit:
+  `USER_REPORTS_ENABLED=false` blocks public submissions, while
+  admin-protected moderation/cleanup endpoints remain available for existing
+  records behind `ADMIN_BEARER_TOKEN`.
 - [ ] Legal source: reporter consent text explains purpose, public visibility,
   retention, moderation, deletion, and limits of emergency response.
 - [ ] Robots/ToS: not applicable to submitted first-party reports, but upload
@@ -176,6 +195,9 @@ Before production launch:
 - [ ] Opt-out/delete: reporter or affected person can request deletion by report
   ID, URL, or approximate submission details; deletion hides media and derived
   evidence while preserving minimal abuse/audit tombstones.
+- [ ] Launch blockers remain: CAPTCHA/equivalent challenge, rate limits,
+  deletion request workflow, media redaction/EXIF stripping, and media deletion
+  must be implemented and reviewed before formal launch.
 
 ## Rollback and Disable Conditions
 

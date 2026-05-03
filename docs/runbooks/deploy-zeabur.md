@@ -4,6 +4,11 @@
 
 This runbook defines the expected Zeabur deployment path for Flood Risk staging and production beta. For the current public preview, use the single Zeabur Docker service described first. The longer split-service topology remains the future production target. A deployable preview is not the same as production beta readiness for workers, source credentials, monitoring, or queue replay.
 
+Use [production-readiness.md](production-readiness.md) before any production
+beta launch decision. This deployment runbook proves how to deploy; it does not
+prove secrets ownership, alert routing, SLO evidence, backup restore evidence,
+source governance, or on-call readiness.
+
 ## Scope
 
 This runbook covers:
@@ -34,6 +39,10 @@ You do not need to create PostgreSQL, Redis, MinIO, worker, scheduler, or migrat
 The preview does not run worker ingestion. Real upstream URL/license review,
 credential review, hosted cadence, alert routing, poison-job
 quarantine/replay audit, and production egress verification remain pending.
+
+Do not copy placeholder credentials from `.env.example` into Zeabur. Blank
+secret values in `.env.example` mean "set this only in Zeabur or the secret
+manager when the owning operator has approved it."
 
 ### Create The Zeabur Service
 
@@ -375,6 +384,8 @@ Smoke checks after deploy:
 
 - Confirm GitHub commit SHA matches the Zeabur deployment.
 - Confirm required environment variables are set.
+- Confirm production readiness checklist was run for production beta:
+  `python infra/scripts/validate_monitoring_assets.py`.
 - Confirm migration completed once.
 - Confirm health checks pass.
 - Confirm worker and scheduler service definitions are present.

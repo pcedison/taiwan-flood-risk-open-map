@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.adapters.news import GdeltPublicNewsBackfillAdapter
+from app.adapters.news.public_web import FetchJson, GdeltPublicNewsBackfillAdapter
 from app.pipelines.staging import AdapterStagingBatch, build_staging_batch
 
 
@@ -20,16 +20,31 @@ class HistoricalNewsBackfillConfig:
     fetched_at: datetime
     queries: tuple[str, ...] = DEFAULT_TAIWAN_FLOOD_NEWS_QUERIES
     max_records_per_query: int = 250
+    gdelt_backfill_enabled: bool = False
+    source_news_enabled: bool = False
+    source_terms_review_ack: bool = False
+    fetch_json: FetchJson | None = None
 
 
 def build_historical_news_backfill_batch(
     config: HistoricalNewsBackfillConfig,
 ) -> AdapterStagingBatch:
+    _ensure_historical_news_backfill_gates(config)
     adapter = GdeltPublicNewsBackfillAdapter(
         config.queries,
         fetched_at=config.fetched_at,
         start_datetime=config.start_datetime,
         end_datetime=config.end_datetime,
         max_records_per_query=config.max_records_per_query,
+        fetch_json=config.fetch_json,
     )
     return build_staging_batch(adapter.run())
+
+
+def _ensure_historical_news_backfill_gates(config: HistoricalNewsBackfillConfig) -> None:
+    if not config.gdelt_backfill_enabled:
+        raise RuntimeError("GDELT backfill is disabled by default")
+    if not config.source_news_enabled:
+        raise RuntimeError("GDELT backfill requires SOURCE_NEWS_ENABLED=true")
+    if not config.source_terms_review_ack:
+        raise RuntimeError("GDELT backfill requires SOURCE_TERMS_REVIEW_ACK=true")

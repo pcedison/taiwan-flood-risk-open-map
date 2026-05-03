@@ -26,3 +26,18 @@ The project must not rely on manually adding one road segment after a user finds
 - record coverage gaps clearly in the public API so "not imported yet" is never presented as "safe."
 
 `news.public_web.gdelt_backfill` is the first candidate adapter for this shape. It is disabled by default until terms review, source QA, rate limiting, and geocoding promotion are completed.
+
+Current GDELT acceptance boundary:
+
+- candidate enablement requires both `SOURCE_NEWS_ENABLED=true` and `SOURCE_TERMS_REVIEW_ACK=true`; an explicit `WORKER_ENABLED_ADAPTER_KEYS=news.public_web.gdelt_backfill` does not bypass those gates;
+- the backfill helper is separately disabled by default and refuses to fetch unless its explicit backfill, news, and terms gates are all true;
+- tests cover deterministic GDELT DOC URL construction, `maxrecords` clamping to 250, URL-level dedupe, source country/domain/location extraction, metadata-only raw payloads, no normalized full-text redistribution, and rejection of missing titles or invalid dates;
+- runtime adapter construction still does not expose a GDELT live fetch path, so the verified boundary is adapter/backfill preflight and injected-fetcher fixture execution.
+
+Still pending before production approval:
+
+- legal/source terms approval for GDELT and any downstream publisher citation/cache policy;
+- production egress/rate-limit verification and hosted cadence ownership;
+- canonical URL and event-time dedupe beyond the adapter batch boundary;
+- geocoding QA and promotion rules for extracted Taiwan locations;
+- operator runbook, monitoring, alert routing, takedown, and disablement procedure.

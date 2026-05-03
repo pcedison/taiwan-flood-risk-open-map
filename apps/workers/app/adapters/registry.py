@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from app.adapters.contracts import AdapterMetadata, SourceFamily
+from app.adapters.dcard import METADATA as DCARD_METADATA
+from app.adapters.ptt import METADATA as PTT_METADATA
 from app.config import WorkerSettings, load_worker_settings
 
 
@@ -39,20 +41,8 @@ ADAPTER_REGISTRY = MappingProxyType(
             enabled_by_default=True,
             display_name="Flood potential GeoJSON import adapter",
         ),
-        "ptt": AdapterMetadata(
-            key="ptt",
-            family=SourceFamily.FORUM,
-            enabled_by_default=False,
-            display_name="PTT adapter placeholder",
-            terms_review_required=True,
-        ),
-        "dcard": AdapterMetadata(
-            key="dcard",
-            family=SourceFamily.FORUM,
-            enabled_by_default=False,
-            display_name="Dcard adapter placeholder",
-            terms_review_required=True,
-        ),
+        PTT_METADATA.key: PTT_METADATA,
+        DCARD_METADATA.key: DCARD_METADATA,
     }
 )
 
@@ -102,6 +92,8 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
 def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
     if _is_sample_adapter(metadata) and not settings.source_sample_data_enabled:
         return False
+    if _is_reviewed_news_adapter(metadata) and settings.source_news_enabled is not True:
+        return False
     if metadata.terms_review_required and not settings.source_terms_review_ack:
         return False
     return True
@@ -115,17 +107,11 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
     if metadata.key == "official.flood_potential.geojson":
         return settings.source_flood_potential_enabled is not False
     if metadata.key == "ptt":
-        return (
-            settings.source_forum_enabled is not False
-            and settings.source_ptt_enabled is not False
-        )
+        return settings.source_forum_enabled is True and settings.source_ptt_enabled is True
     if metadata.key == "dcard":
-        return (
-            settings.source_forum_enabled is not False
-            and settings.source_dcard_enabled is not False
-        )
+        return settings.source_forum_enabled is True and settings.source_dcard_enabled is True
     if metadata.family is SourceFamily.NEWS:
-        return settings.source_news_enabled is not False
+        return settings.source_news_enabled is True or _is_sample_adapter(metadata)
     return True
 
 
@@ -142,3 +128,7 @@ def _with_optional_override(default: bool, override: bool | None) -> bool:
 
 def _is_sample_adapter(metadata: AdapterMetadata) -> bool:
     return metadata.key.endswith(".sample")
+
+
+def _is_reviewed_news_adapter(metadata: AdapterMetadata) -> bool:
+    return metadata.family is SourceFamily.NEWS and metadata.terms_review_required

@@ -2,7 +2,19 @@ from __future__ import annotations
 
 import pytest
 
-from app.adapters.registry import enabled_adapter_keys
+from app.adapters.dcard import (
+    ADAPTER_DISABLED_REASON as DCARD_DISABLED_REASON,
+    METADATA as DCARD_METADATA,
+    REQUIRED_ACCEPTANCE_FIELDS as DCARD_REQUIRED_ACCEPTANCE_FIELDS,
+    SOURCE_APPROVAL_STATUS as DCARD_SOURCE_APPROVAL_STATUS,
+)
+from app.adapters.ptt import (
+    ADAPTER_DISABLED_REASON as PTT_DISABLED_REASON,
+    METADATA as PTT_METADATA,
+    REQUIRED_ACCEPTANCE_FIELDS as PTT_REQUIRED_ACCEPTANCE_FIELDS,
+    SOURCE_APPROVAL_STATUS as PTT_SOURCE_APPROVAL_STATUS,
+)
+from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
 
 
@@ -139,6 +151,56 @@ def test_forum_sources_require_family_source_and_terms_flags() -> None:
     assert "dcard" not in enabled_adapter_keys(explicit_ptt)
 
 
+def test_forum_adapter_modules_expose_blocked_approval_boundaries() -> None:
+    assert ADAPTER_REGISTRY["ptt"] == PTT_METADATA
+    assert ADAPTER_REGISTRY["dcard"] == DCARD_METADATA
+    assert PTT_SOURCE_APPROVAL_STATUS == "blocked"
+    assert DCARD_SOURCE_APPROVAL_STATUS == "blocked"
+    assert "blocked pending source approval" in PTT_DISABLED_REASON
+    assert "blocked pending source approval" in DCARD_DISABLED_REASON
+    assert "approved_board_allowlist" in PTT_REQUIRED_ACCEPTANCE_FIELDS
+    assert "approved_forum_allowlist" in DCARD_REQUIRED_ACCEPTANCE_FIELDS
+
+
+@pytest.mark.parametrize(
+    ("adapter_key", "specific_flag"),
+    (("ptt", "SOURCE_PTT_ENABLED"), ("dcard", "SOURCE_DCARD_ENABLED")),
+)
+@pytest.mark.parametrize(
+    "env",
+    (
+        {},
+        {"SOURCE_TERMS_REVIEW_ACK": "true"},
+        {"SOURCE_FORUM_ENABLED": "true", "SOURCE_TERMS_REVIEW_ACK": "true"},
+        {"SOURCE_PTT_ENABLED": "true", "SOURCE_DCARD_ENABLED": "true"},
+        {
+            "SOURCE_FORUM_ENABLED": "true",
+            "SOURCE_PTT_ENABLED": "true",
+            "SOURCE_DCARD_ENABLED": "true",
+        },
+    ),
+)
+def test_explicit_forum_allowlist_requires_family_specific_and_terms_flags(
+    adapter_key: str,
+    specific_flag: str,
+    env: dict[str, str],
+) -> None:
+    settings = load_worker_settings({"WORKER_ENABLED_ADAPTER_KEYS": adapter_key, **env})
+
+    assert enabled_adapter_keys(settings) == ()
+
+    accepted_settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": adapter_key,
+            "SOURCE_FORUM_ENABLED": "true",
+            specific_flag: "true",
+            "SOURCE_TERMS_REVIEW_ACK": "true",
+        }
+    )
+
+    assert enabled_adapter_keys(accepted_settings) == (adapter_key,)
+
+
 def test_explicit_adapter_allowlist_limits_enabled_adapters() -> None:
     settings = load_worker_settings(
         {
@@ -158,11 +220,23 @@ def test_explicit_adapter_allowlist_can_enable_news_after_terms_ack() -> None:
     settings = load_worker_settings(
         {
             "WORKER_ENABLED_ADAPTER_KEYS": "news.public_web.gdelt_backfill",
+            "SOURCE_NEWS_ENABLED": "true",
             "SOURCE_TERMS_REVIEW_ACK": "true",
         }
     )
 
     assert enabled_adapter_keys(settings) == ("news.public_web.gdelt_backfill",)
+
+
+def test_explicit_adapter_allowlist_does_not_bypass_news_family_gate() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "news.public_web.gdelt_backfill",
+            "SOURCE_TERMS_REVIEW_ACK": "true",
+        }
+    )
+
+    assert enabled_adapter_keys(settings) == ()
 
 
 def test_explicit_adapter_allowlist_does_not_bypass_terms_ack() -> None:

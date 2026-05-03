@@ -1,0 +1,75 @@
+# Forum/social source approval manifest.
+#
+# This file is an acceptance boundary, not a crawl allowlist. Sources listed as
+# blocked or non_accepted must not fetch, crawl, scrape, or normalize real
+# content.
+version: 1
+status: draft
+default: disabled
+global_enable_flag: SOURCE_FORUM_ENABLED
+terms_ack_flag: SOURCE_TERMS_REVIEW_ACK
+sources:
+  - key: ptt
+    platform: PTT
+    family: forum
+    registry_key: ptt
+    source_specific_flag: SOURCE_PTT_ENABLED
+    acceptance_status: blocked
+    accepted: false
+    disabled_reason: >-
+      PTT ingestion is blocked pending source approval, legal/terms review,
+      board allowlist, privacy minimization, retention, moderation, opt-out,
+      and rate-limit acceptance.
+    missing_acceptance_fields:
+      - approved_board_allowlist
+      - approved_access_method
+      - robots_and_terms_review_links
+      - no_login_or_over18_bypass_attestation
+      - stored_field_inventory
+      - username_handling_policy
+      - raw_snapshot_retention_limit
+      - moderation_rejection_rules
+      - rate_limit_and_backoff_policy
+      - audit_log_events
+      - opt_out_delete_workflow
+      - emergency_disable_owner
+    prohibited_until_accepted:
+      - real_crawling
+      - scraping
+      - http_fetch
+      - login_bypass
+      - anti_bot_circumvention
+      - raw_post_storage
+      - username_storage
+  - key: dcard
+    platform: Dcard
+    family: forum
+    registry_key: dcard
+    source_specific_flag: SOURCE_DCARD_ENABLED
+    acceptance_status: blocked
+    accepted: false
+    disabled_reason: >-
+      Dcard ingestion is blocked pending source approval, legal/terms/API
+      review, forum allowlist, privacy minimization, retention, moderation,
+      opt-out, and rate-limit acceptance.
+    missing_acceptance_fields:
+      - approved_forum_allowlist
+      - approved_access_method_or_authorized_api
+      - robots_terms_api_review_links
+      - no_login_hidden_content_or_antibot_bypass_attestation
+      - stored_field_inventory
+      - user_identity_exclusion_policy
+      - raw_body_retention_limit
+      - moderation_rejection_rules
+      - rate_limit_quota_and_backoff_policy
+      - audit_log_events
+      - opt_out_delete_workflow
+      - emergency_disable_owner
+    prohibited_until_accepted:
+      - real_crawling
+      - scraping
+      - http_fetch
+      - login_only_content
+      - anti_bot_circumvention
+      - raw_body_storage
+      - user_identity_storage

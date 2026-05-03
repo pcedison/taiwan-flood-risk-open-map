@@ -64,6 +64,10 @@ Partially complete, not production-ready:
   runtime client, and feature/cache smoke only until real upstream URL/license
   review, credential review, hosted cadence, alert routing, and production
   egress verification are complete.
+- GDELT public-news backfill is acceptance-preflight only. The candidate
+  adapter and historical backfill helper require explicit news and terms gates,
+  tests use injected fetchers rather than live network calls, and runtime
+  adapter construction still does not expose a GDELT live fetch path.
 
 ## Entry points
 
@@ -92,6 +96,10 @@ Partially complete, not production-ready:
   `WORKER_DATABASE_URL=postgresql://... WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level python -m app.main --run-enabled-adapters --persist`
 - Persist the gated Phase 2 L2 public-web sample fixture through managed ingestion:
   `WORKER_DATABASE_URL=postgresql://... WORKER_RUNTIME_FIXTURES_ENABLED=true SOURCE_SAMPLE_DATA_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=news.public_web.sample python -m app.main --run-enabled-adapters --persist`
+- GDELT backfill candidate preflight remains code/test only. Do not run it as
+  production ingestion until `SOURCE_NEWS_ENABLED=true`,
+  `SOURCE_TERMS_REVIEW_ACK=true`, source/legal approval, rate limits,
+  geocoding QA, hosted cadence, and operator ownership are accepted.
 - Run gated CWA rainfall live client once:
   `SOURCE_CWA_ENABLED=true SOURCE_CWA_API_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --run-enabled-adapters`
 - Run gated WRA water-level live client once:
@@ -328,6 +336,10 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
   retention/deletion, and legal/privacy gates are accepted.
 - Keep production news ingestion disabled until source approval, attribution,
   retention, hosted cadence, and legal/privacy gates are accepted.
+- Keep `news.public_web.gdelt_backfill` out of live runtime/CLI production
+  paths until GDELT terms/source approval, production egress/rate-limit
+  verification, canonical/event dedupe, geocoding promotion QA, and operator
+  runbooks are accepted.
 
 ## Placeholder boundary
 

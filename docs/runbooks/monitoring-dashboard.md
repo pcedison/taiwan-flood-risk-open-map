@@ -51,6 +51,24 @@ Pending for production:
   primitives, plus routing/escalation, alert routing, and incident ownership
   for exhausted jobs.
 
+## SLO Alignment
+
+Production beta SLOs are defined in
+[production-readiness.md](production-readiness.md). The dashboard and alerts are
+the first measurable signals for those SLOs, but they become launch evidence
+only after hosted scrape targets, alert routing, persistence, and owners are
+configured.
+
+| SLO surface | Dashboard panel | Alert | Launch evidence needed |
+|---|---|---|---|
+| API availability/readiness | `API Metrics Scrape`, `API Readiness` | `FloodRiskApiReadyDown` | Hosted API scrape target and `/ready` interpretation documented. |
+| Source freshness | `Stale Sources`, `Source Freshness Status`, `Source Freshness Age` | `FloodRiskSourceFreshnessFailed`, `FloodRiskSourceFreshnessDegraded`, `FloodRiskSourceFreshnessUnknown`, `FloodRiskSourceFreshnessStale` | Scheduled freshness export for enabled sources with source owners. |
+| Worker heartbeat and latest run | `Worker Heartbeat Age`, `Worker Last Run Failed`, `Worker Last Run Status` | `FloodRiskWorkerHeartbeatMissing`, `FloodRiskWorkerLastRunFailed` | Worker textfile path mounted and owner receives alerts. |
+| Scheduler singleton health | `Scheduler Heartbeat Age` | `FloodRiskSchedulerHeartbeatMissing` | Exactly one scheduler replica and heartbeat textfile emission. |
+| Queue visibility | `Queue Metrics Available`, `Runtime Queue Counts` | `FloodRiskRuntimeQueueMetricsUnavailable` | Scheduled queue metrics export and DB access evidence. |
+| Final-failed row triage | `Queue Final-Failed Rows`, `Queue Oldest Final-Failed Age` | `FloodRiskRuntimeQueueFinalFailedRowsPresent` | Owner handoff and replay/quarantine policy; row visibility is not a DLQ. |
+| Expired leases | `Queue Expired Leases` | `FloodRiskRuntimeQueueExpiredLeases` | Worker health and retry behavior documented for the environment. |
+
 ## Files
 
 | File | Purpose |
@@ -262,6 +280,11 @@ Run YAML and JSON syntax validation from the repository root:
 ```powershell
 python infra/scripts/validate_monitoring_assets.py
 ```
+
+The validator also performs a dry readiness check for production-facing docs
+and `.env.example`: required readiness sections must exist, real-secret example
+values must be blank, and production-sensitive source/public-report gates must
+default to `false`.
 
 Optionally run the freshness script dry-run to prove the textfile writer path:
 

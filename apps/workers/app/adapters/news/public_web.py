@@ -22,6 +22,19 @@ from app.classifiers.taiwan_locations import extract_taiwan_location_terms
 
 FetchJson = Callable[[str], Mapping[str, Any]]
 
+GDELT_MAX_RECORDS_PER_QUERY = 250
+_GDELT_METADATA_FIELDS = frozenset(
+    {
+        "url",
+        "title",
+        "seendate",
+        "published_at",
+        "domain",
+        "sourcecountry",
+        "language",
+    }
+)
+
 
 class SamplePublicWebNewsAdapter:
     metadata = AdapterMetadata(
@@ -128,7 +141,7 @@ class GdeltPublicNewsBackfillAdapter:
         self._fetched_at = fetched_at
         self._start_datetime = start_datetime
         self._end_datetime = end_datetime
-        self._max_records_per_query = max_records_per_query
+        self._max_records_per_query = _clamp_gdelt_max_records(max_records_per_query)
         self._fetch_json = fetch_json or _fetch_json
         self._raw_snapshot_key = raw_snapshot_key
 
@@ -152,12 +165,17 @@ class GdeltPublicNewsBackfillAdapter:
                 if not article_url or article_url in seen_urls:
                     continue
                 seen_urls.add(article_url)
+                article_payload = _metadata_only_article_payload(article)
                 raw_items.append(
                     RawSourceItem(
                         source_id=_source_id(article_url),
                         source_url=article_url,
                         fetched_at=self._fetched_at,
-                        payload={**article, "backfill_query": query, "query_url": url},
+                        payload={
+                            **article_payload,
+                            "backfill_query": query,
+                            "query_url": url,
+                        },
                         raw_snapshot_key=self._raw_snapshot_key,
                     )
                 )
@@ -174,10 +192,7 @@ class GdeltPublicNewsBackfillAdapter:
             return None
 
         location_terms = extract_taiwan_location_terms(
-            " ".join(
-                str(payload.get(key, ""))
-                for key in ("title", "backfill_query", "domain", "sourcecountry")
-            )
+            _location_extraction_text(payload)
         )
         summary = _summary_from_article(payload, location_terms)
         if not summary:
@@ -234,7 +249,7 @@ def _gdelt_url(
             "query": query,
             "mode": "ArtList",
             "format": "json",
-            "maxrecords": max(1, min(max_records, 250)),
+            "maxrecords": _clamp_gdelt_max_records(max_records),
             "startdatetime": start_datetime.strftime("%Y%m%d%H%M%S"),
             "enddatetime": end_datetime.strftime("%Y%m%d%H%M%S"),
         }
@@ -258,6 +273,32 @@ def _fetch_json(url: str) -> Mapping[str, Any]:
 
 def _source_id(url: str) -> str:
     return "gdelt_" + sha256(url.encode("utf-8")).hexdigest()[:24]
+
+
+def _clamp_gdelt_max_records(max_records: int) -> int:
+    return max(1, min(max_records, GDELT_MAX_RECORDS_PER_QUERY))
+
+
+def _metadata_only_article_payload(article: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: article[key]
+        for key in _GDELT_METADATA_FIELDS
+        if key in article and optional_str(article.get(key)) is not None
+    }
+
+
+def _location_extraction_text(payload: Mapping[str, Any]) -> str:
+    country_hint = "台灣" if str(payload.get("sourcecountry", "")).upper() == "TW" else ""
+    return " ".join(
+        part
+        for part in (
+            str(payload.get("title", "")),
+            str(payload.get("backfill_query", "")),
+            str(payload.get("domain", "")),
+            country_hint,
+        )
+        if part
+    )
 
 
 def _summary_from_article(
