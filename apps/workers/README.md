@@ -45,10 +45,11 @@ Partially complete, not production-ready:
   prove raw snapshot, staging, ingestion-run, promotion, and evidence
   persistence for demo, fixture-backed managed runtime, or explicitly gated
   runtime adapters. The managed runtime persist smoke is a local fixture/DB
-  acceptance boundary, not production source readiness. Production beta still
-  needs real credential review, hosted cadence, alert routing,
-  WRA/CWA/flood-potential production egress verification, and operator
-  ownership.
+  acceptance boundary, and now includes the gated Phase 2 L2 public-web sample
+  evidence fixture. It is not production source readiness or production news
+  ingestion. Production beta still needs real credential review, hosted
+  cadence, alert routing, WRA/CWA/flood-potential production egress
+  verification, and operator ownership.
 - `python -m app.scheduler` without flags is a placeholder maintenance/sample
   loop. Production deployment cadence for ingestion, query heat, tile cache,
   freshness export, and operator ownership is still pending.
@@ -89,6 +90,8 @@ Partially complete, not production-ready:
   `WORKER_DATABASE_URL=postgresql://... python -m app.main --requeue-runtime-job <job-id> --requeue-keep-attempts --requeue-requested-by <operator> --requeue-reason "<why-safe-to-retry>"`
 - Persist configured runtime adapters through managed ingestion:
   `WORKER_DATABASE_URL=postgresql://... WORKER_RUNTIME_FIXTURES_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level python -m app.main --run-enabled-adapters --persist`
+- Persist the gated Phase 2 L2 public-web sample fixture through managed ingestion:
+  `WORKER_DATABASE_URL=postgresql://... WORKER_RUNTIME_FIXTURES_ENABLED=true SOURCE_SAMPLE_DATA_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=news.public_web.sample python -m app.main --run-enabled-adapters --persist`
 - Run gated CWA rainfall live client once:
   `SOURCE_CWA_ENABLED=true SOURCE_CWA_API_ENABLED=true WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall python -m app.main --run-enabled-adapters`
 - Run gated WRA water-level live client once:
@@ -147,11 +150,14 @@ docker compose run --rm `
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --run-official-demo --persist"
 
 # Managed runtime persistence smoke: fixture-backed, no external source calls.
-# Manual runs leave rows for raw/official-demo/wra-water-level.json; the
-# runtime-smoke runbook includes the cleanup SQL used by the full smoke.
+# Manual runs leave rows for raw/official-demo/wra-water-level.json and
+# raw/news-public-web/sample.json; the runtime-smoke runbook includes the
+# cleanup/data-source restore SQL used by the full smoke. This accepts fixture
+# persistence only, not production news ingestion.
 docker compose run --rm `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
-  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e SOURCE_SAMPLE_DATA_ENABLED=true `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level,news.public_web.sample `
   -e SOURCE_CWA_API_ENABLED=false `
   -e SOURCE_WRA_API_ENABLED=false `
   -e SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false `
@@ -202,7 +208,10 @@ The runtime adapter path is config-driven and safe by default: it selects
 adapters with `WORKER_ENABLED_ADAPTER_KEYS` plus source gates, but no runtime
 adapter that can call an external API is constructed unless an explicit source
 client gate is enabled. `WORKER_RUNTIME_FIXTURES_ENABLED=true` still opts into
-local fixture-backed adapters. For CWA live mode, set `SOURCE_CWA_ENABLED=true`,
+local fixture-backed adapters. `news.public_web.sample` is available in
+fixture mode only when explicitly selected and `SOURCE_SAMPLE_DATA_ENABLED=true`
+passes the sample-data gate; it uses in-repo sample records and does not make
+network calls. For CWA live mode, set `SOURCE_CWA_ENABLED=true`,
 `SOURCE_CWA_API_ENABLED=true`, provide `CWA_API_AUTHORIZATION`, optionally
 override `CWA_API_URL`, and tune `CWA_API_TIMEOUT_SECONDS`. For WRA live mode,
 set `SOURCE_WRA_ENABLED=true`, `SOURCE_WRA_API_ENABLED=true`, optionally
@@ -214,11 +223,14 @@ Postgres when `--persist` is supplied; the database URL can come from
 `--database-url`, `WORKER_DATABASE_URL`, or `DATABASE_URL`. The local managed
 runtime persist smoke runs `--run-enabled-adapters --persist` with
 `WORKER_RUNTIME_FIXTURES_ENABLED=true`, verifies raw/staging/run and promoted
-evidence rows for `raw/official-demo/wra-water-level.json`, then deletes those
-smoke rows. This exercises the same staging/run/promotion writers a deployment
-would use, but production source readiness still depends on reviewed
-credentials, source egress verification, hosted cadence, alert routing, and
-operator ownership. The CWA rainfall, WRA water-level, and flood-potential
+evidence rows for `raw/official-demo/wra-water-level.json` and
+`raw/news-public-web/sample.json`, then deletes those smoke rows and restores
+the affected `data_sources` health/timestamp state. This
+exercises the same staging/run/promotion writers a deployment would use and
+covers Phase 2 L2 public evidence fixture/persistence acceptance, but
+production source readiness still depends on reviewed credentials, source
+egress verification, hosted cadence, alert routing, and operator ownership.
+It is not production news ingestion. The CWA rainfall, WRA water-level, and flood-potential
 GeoJSON runtime adapters are explicit gated live-source worker paths.
 The API's
 realtime official bridge is a separate direct-fetch path and should not be
@@ -288,7 +300,8 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
   `created_at` bounds for cadence/backfill windows, and can prune old
   aggregate buckets by retention age.
 - Lightweight freshness checks that emit alerts for stale or failed adapter runs.
-- L2 news/public-web sample adapter and source allowlist validation.
+- L2 news/public-web sample adapter, source allowlist validation, and gated
+  fixture-mode managed runtime persistence acceptance.
 - Raw snapshot, staging, validation, promotion, and PostGIS writer groundwork.
 - DB-backed `flood-potential` tile feature refresh and tile cache upsert
   helpers for production layer/cache tables.
@@ -313,6 +326,8 @@ periods, 90 retention days, `flood-potential`, 1000 refreshed features, and
   replace them with an HTTP metrics exporter.
 - Keep forum/public-report ingestion disabled until governance, moderation,
   retention/deletion, and legal/privacy gates are accepted.
+- Keep production news ingestion disabled until source approval, attribution,
+  retention, hosted cadence, and legal/privacy gates are accepted.
 
 ## Placeholder boundary
 

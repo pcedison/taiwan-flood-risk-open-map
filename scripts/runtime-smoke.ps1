@@ -45,8 +45,9 @@ Extended checks are enabled by default:
   - Official adapter fixture dry run: run --run-official-demo in a one-off
     worker container without external API credentials.
   - Managed runtime persist smoke: run --run-enabled-adapters --persist with
-    fixture adapters against the Compose database, verify raw/staging/run and
-    promoted evidence rows, and clean up the smoke rows.
+    WRA official and gated news public-web sample fixture adapters against the
+    Compose database, verify raw/staging/run and promoted evidence rows, and
+    clean up the smoke rows while restoring data source health state.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
   - MVT smoke: GET seeded query-heat and flood-potential .mvt endpoints.
@@ -1026,11 +1027,14 @@ function Invoke-AdapterFixtureDryRunSmoke {
 }
 
 function Invoke-ManagedRuntimePersistSmoke {
-    $managedRuntimePersistCleanupSql = @'
+    $managedRuntimePersistRowCleanupSql = @'
 WITH smoke_jobs AS (
     SELECT DISTINCT ingestion_job_id
     FROM adapter_runs
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    WHERE raw_ref IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
         AND ingestion_job_id IS NOT NULL
 ),
 deleted_risk_links AS (
@@ -1038,13 +1042,19 @@ deleted_risk_links AS (
     WHERE evidence_id IN (
         SELECT id
         FROM evidence
-        WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+        WHERE raw_ref IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
     )
     RETURNING 1
 ),
 deleted_evidence AS (
     DELETE FROM evidence
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
     RETURNING 1
 ),
 deleted_staging AS (
@@ -1052,103 +1062,261 @@ deleted_staging AS (
     WHERE raw_snapshot_id IN (
             SELECT id
             FROM raw_snapshots
-            WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+            WHERE raw_ref IN (
+                'raw/official-demo/wra-water-level.json',
+                'raw/news-public-web/sample.json'
+            )
         )
-        OR payload ->> 'raw_ref' = 'raw/official-demo/wra-water-level.json'
+        OR payload ->> 'raw_ref' IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
     RETURNING 1
 ),
 deleted_adapter_runs AS (
     DELETE FROM adapter_runs
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
     RETURNING 1
 )
 DELETE FROM ingestion_jobs
 WHERE id IN (SELECT ingestion_job_id FROM smoke_jobs);
 
 DELETE FROM raw_snapshots
-WHERE raw_ref = 'raw/official-demo/wra-water-level.json';
+WHERE raw_ref IN (
+    'raw/official-demo/wra-water-level.json',
+    'raw/news-public-web/sample.json'
+);
+'@
+
+    $managedRuntimePersistSnapshotSql = @'
+DROP TABLE IF EXISTS runtime_smoke_data_source_snapshot;
+CREATE TABLE runtime_smoke_data_source_snapshot AS
+SELECT
+    adapter_key,
+    last_success_at,
+    last_failure_at,
+    health_status,
+    source_timestamp_min,
+    source_timestamp_max,
+    updated_at
+FROM data_sources
+WHERE adapter_key IN (
+    'official.wra.water_level',
+    'news.public_web.sample'
+);
+'@
+
+    $managedRuntimePersistCleanupSql = @'
+CREATE TABLE IF NOT EXISTS runtime_smoke_data_source_snapshot (
+    adapter_key text PRIMARY KEY,
+    last_success_at timestamptz,
+    last_failure_at timestamptz,
+    health_status text,
+    source_timestamp_min timestamptz,
+    source_timestamp_max timestamptz,
+    updated_at timestamptz
+);
+
+WITH smoke_jobs AS (
+    SELECT DISTINCT ingestion_job_id
+    FROM adapter_runs
+    WHERE raw_ref IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
+        AND ingestion_job_id IS NOT NULL
+),
+deleted_risk_links AS (
+    DELETE FROM risk_assessment_evidence
+    WHERE evidence_id IN (
+        SELECT id
+        FROM evidence
+        WHERE raw_ref IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
+    )
+    RETURNING 1
+),
+deleted_evidence AS (
+    DELETE FROM evidence
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
+    RETURNING 1
+),
+deleted_staging AS (
+    DELETE FROM staging_evidence
+    WHERE raw_snapshot_id IN (
+            SELECT id
+            FROM raw_snapshots
+            WHERE raw_ref IN (
+                'raw/official-demo/wra-water-level.json',
+                'raw/news-public-web/sample.json'
+            )
+        )
+        OR payload ->> 'raw_ref' IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
+    RETURNING 1
+),
+deleted_adapter_runs AS (
+    DELETE FROM adapter_runs
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
+    RETURNING 1
+),
+deleted_ingestion_jobs AS (
+    DELETE FROM ingestion_jobs
+    WHERE id IN (SELECT ingestion_job_id FROM smoke_jobs)
+    RETURNING 1
+),
+deleted_raw_snapshots AS (
+    DELETE FROM raw_snapshots
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
+    RETURNING 1
+),
+restored_data_sources AS (
+    UPDATE data_sources ds
+    SET
+        last_success_at = snapshot.last_success_at,
+        last_failure_at = snapshot.last_failure_at,
+        health_status = snapshot.health_status,
+        source_timestamp_min = snapshot.source_timestamp_min,
+        source_timestamp_max = snapshot.source_timestamp_max,
+        updated_at = snapshot.updated_at
+    FROM runtime_smoke_data_source_snapshot snapshot
+    WHERE ds.adapter_key = snapshot.adapter_key
+    RETURNING 1
+)
+SELECT
+    (SELECT count(*) FROM deleted_risk_links) AS deleted_risk_links,
+    (SELECT count(*) FROM deleted_evidence) AS deleted_evidence,
+    (SELECT count(*) FROM deleted_staging) AS deleted_staging,
+    (SELECT count(*) FROM deleted_adapter_runs) AS deleted_adapter_runs,
+    (SELECT count(*) FROM deleted_ingestion_jobs) AS deleted_ingestion_jobs,
+    (SELECT count(*) FROM deleted_raw_snapshots) AS deleted_raw_snapshots,
+    (SELECT count(*) FROM restored_data_sources) AS restored_data_sources;
+
+DROP TABLE IF EXISTS runtime_smoke_data_source_snapshot;
 '@
     $script:RuntimeSmokeCleanupSql += $managedRuntimePersistCleanupSql
 
     $managedRuntimePersistVerificationSql = @'
 DO $$
 DECLARE
+    adapter record;
     raw_count integer;
     staging_count integer;
     ingestion_job_count integer;
     adapter_run_count integer;
     evidence_count integer;
 BEGIN
-    SELECT count(*)
-    INTO raw_count
-    FROM raw_snapshots
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
-        AND adapter_key = 'official.wra.water_level';
+    FOR adapter IN
+        SELECT *
+        FROM (
+            VALUES
+                (
+                    'official.wra.water_level',
+                    'raw/official-demo/wra-water-level.json',
+                    'official',
+                    'water_level'
+                ),
+                (
+                    'news.public_web.sample',
+                    'raw/news-public-web/sample.json',
+                    'news',
+                    'flood_report'
+                )
+        ) AS adapters(adapter_key, raw_ref, source_type, event_type)
+    LOOP
+        SELECT count(*)
+        INTO raw_count
+        FROM raw_snapshots
+        WHERE raw_ref = adapter.raw_ref
+            AND adapter_key = adapter.adapter_key;
 
-    SELECT count(*)
-    INTO staging_count
-    FROM staging_evidence
-    WHERE validation_status = 'accepted'
-        AND payload ->> 'adapter_key' = 'official.wra.water_level'
-        AND payload ->> 'raw_ref' = 'raw/official-demo/wra-water-level.json';
+        SELECT count(*)
+        INTO staging_count
+        FROM staging_evidence
+        WHERE validation_status = 'accepted'
+            AND payload ->> 'adapter_key' = adapter.adapter_key
+            AND payload ->> 'raw_ref' = adapter.raw_ref;
 
-    SELECT count(*)
-    INTO adapter_run_count
-    FROM adapter_runs
-    WHERE adapter_key = 'official.wra.water_level'
-        AND raw_ref = 'raw/official-demo/wra-water-level.json'
-        AND status = 'succeeded';
+        SELECT count(*)
+        INTO adapter_run_count
+        FROM adapter_runs
+        WHERE adapter_key = adapter.adapter_key
+            AND raw_ref = adapter.raw_ref
+            AND status = 'succeeded';
 
-    SELECT count(*)
-    INTO ingestion_job_count
-    FROM ingestion_jobs ij
-    WHERE ij.job_key = 'worker.runtime.managed_run_once'
-        AND ij.adapter_key = 'official.wra.water_level'
-        AND ij.status = 'succeeded'
-        AND EXISTS (
-            SELECT 1
-            FROM adapter_runs ar
-            WHERE ar.ingestion_job_id = ij.id
-                AND ar.raw_ref = 'raw/official-demo/wra-water-level.json'
-        );
+        SELECT count(*)
+        INTO ingestion_job_count
+        FROM ingestion_jobs ij
+        WHERE ij.job_key = 'worker.runtime.managed_run_once'
+            AND ij.adapter_key = adapter.adapter_key
+            AND ij.status = 'succeeded'
+            AND EXISTS (
+                SELECT 1
+                FROM adapter_runs ar
+                WHERE ar.ingestion_job_id = ij.id
+                    AND ar.raw_ref = adapter.raw_ref
+            );
 
-    SELECT count(*)
-    INTO evidence_count
-    FROM evidence
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
-        AND source_type = 'official'
-        AND event_type = 'water_level'
-        AND ingestion_status = 'accepted';
+        SELECT count(*)
+        INTO evidence_count
+        FROM evidence
+        WHERE raw_ref = adapter.raw_ref
+            AND source_type = adapter.source_type
+            AND event_type = adapter.event_type
+            AND ingestion_status = 'accepted';
 
-    IF raw_count < 1 THEN
-        RAISE EXCEPTION 'managed runtime persist smoke wrote no raw_snapshots row';
-    END IF;
-    IF staging_count < 1 THEN
-        RAISE EXCEPTION 'managed runtime persist smoke wrote no accepted staging_evidence row';
-    END IF;
-    IF adapter_run_count < 1 THEN
-        RAISE EXCEPTION 'managed runtime persist smoke wrote no succeeded adapter_runs row';
-    END IF;
-    IF ingestion_job_count < 1 THEN
-        RAISE EXCEPTION 'managed runtime persist smoke wrote no succeeded ingestion_jobs row';
-    END IF;
-    IF evidence_count < 1 THEN
-        RAISE EXCEPTION 'managed runtime persist smoke promoted no evidence row';
-    END IF;
+        IF raw_count < 1 THEN
+            RAISE EXCEPTION 'managed runtime persist smoke wrote no raw_snapshots row for %', adapter.adapter_key;
+        END IF;
+        IF staging_count < 1 THEN
+            RAISE EXCEPTION 'managed runtime persist smoke wrote no accepted staging_evidence row for %', adapter.adapter_key;
+        END IF;
+        IF adapter_run_count < 1 THEN
+            RAISE EXCEPTION 'managed runtime persist smoke wrote no succeeded adapter_runs row for %', adapter.adapter_key;
+        END IF;
+        IF ingestion_job_count < 1 THEN
+            RAISE EXCEPTION 'managed runtime persist smoke wrote no succeeded ingestion_jobs row for %', adapter.adapter_key;
+        END IF;
+        IF evidence_count < 1 THEN
+            RAISE EXCEPTION 'managed runtime persist smoke promoted no evidence row for %', adapter.adapter_key;
+        END IF;
 
-    RAISE NOTICE 'managed runtime persist smoke counts: raw=%, staging=%, ingestion_jobs=%, adapter_runs=%, evidence=%',
-        raw_count,
-        staging_count,
-        ingestion_job_count,
-        adapter_run_count,
-        evidence_count;
+        RAISE NOTICE 'managed runtime persist smoke counts for %: raw=%, staging=%, ingestion_jobs=%, adapter_runs=%, evidence=%',
+            adapter.adapter_key,
+            raw_count,
+            staging_count,
+            ingestion_job_count,
+            adapter_run_count,
+            evidence_count;
+    END LOOP;
 END $$;
 '@
 
     Invoke-PostgresSqlSmoke `
         -Description "Cleaning pre-existing managed runtime persist smoke rows" `
-        -Sql $managedRuntimePersistCleanupSql
+        -Sql $managedRuntimePersistRowCleanupSql
 
+    Invoke-PostgresSqlSmoke `
+        -Description "Snapshotting managed runtime data source state" `
+        -Sql $managedRuntimePersistSnapshotSql
+
+    $managedRuntimePersistCleanupCompleted = $false
     try {
         Invoke-ComposeRun `
             -Description "Running managed runtime persist smoke with fixture adapters" `
@@ -1156,24 +1324,36 @@ END $$;
             -ShellScript "pip install -e . >/tmp/worker-install.log && python -m app.main --run-enabled-adapters --persist" `
             -Environment @(
                 "WORKER_RUNTIME_FIXTURES_ENABLED=true",
-                "WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level",
-                "FRESHNESS_MAX_AGE_SECONDS=21600",
+                "SOURCE_SAMPLE_DATA_ENABLED=true",
+                "WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level,news.public_web.sample",
+                "FRESHNESS_MAX_AGE_SECONDS=604800",
                 "WORKER_INSTANCE=runtime-smoke-managed-persist",
                 "SOURCE_CWA_API_ENABLED=false",
                 "SOURCE_WRA_API_ENABLED=false",
-                "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false"
+                "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false",
+                "SOURCE_CWA_ENABLED=false",
+                "SOURCE_WRA_ENABLED=true",
+                "SOURCE_FLOOD_POTENTIAL_ENABLED=false",
+                "SOURCE_NEWS_ENABLED=true"
             )
 
         Invoke-PostgresSqlSmoke `
             -Description "Checking managed runtime persist smoke rows" `
             -Sql $managedRuntimePersistVerificationSql
+
+        Invoke-PostgresSqlSmoke `
+            -Description "Cleaning managed runtime persist smoke rows and restoring data source state" `
+            -Sql $managedRuntimePersistCleanupSql
+        $managedRuntimePersistCleanupCompleted = $true
     }
     finally {
-        Invoke-BestEffortPostgresSql -Sql $managedRuntimePersistCleanupSql
+        if (-not $managedRuntimePersistCleanupCompleted) {
+            Invoke-BestEffortPostgresSql -Sql $managedRuntimePersistCleanupSql
+        }
         $script:RuntimeSmokeCleanupSql = @($script:RuntimeSmokeCleanupSql | Where-Object { $_ -ne $managedRuntimePersistCleanupSql })
     }
 
-    Write-Host "Managed runtime persist smoke: --run-enabled-adapters --persist wrote raw/staging/run and promoted evidence rows, then cleanup completed."
+    Write-Host "Managed runtime persist smoke: --run-enabled-adapters --persist wrote WRA official and news public-web sample raw/staging/run and promoted evidence rows, then cleanup and data source restore completed."
 }
 
 function Invoke-SchedulerBoundedTickSmoke {

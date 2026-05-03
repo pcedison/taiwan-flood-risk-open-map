@@ -20,6 +20,7 @@ from app.jobs.ingestion import (
     run_adapter_batch,
 )
 from app.jobs.official_demo import build_official_demo_adapters
+from app.jobs.public_web_sample import build_public_web_sample_adapters
 from app.jobs.queue import (
     NullRuntimeQueue,
     PostgresRuntimeQueue,
@@ -87,9 +88,18 @@ def build_runtime_adapters(
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
 ) -> Mapping[str, DataSourceAdapter]:
     if settings.runtime_fixtures_enabled:
-        fixture_adapters = build_official_demo_adapters(
-            fetched_at=fetched_at or datetime.now(UTC)
+        resolved_fetched_at = fetched_at or datetime.now(UTC)
+        fixture_adapters = dict(
+            build_official_demo_adapters(fetched_at=resolved_fetched_at)
         )
+        if (
+            settings.enabled_adapter_keys is not None
+            and "news.public_web.sample" in settings.enabled_adapter_keys
+            and "news.public_web.sample" in enabled_adapter_keys(settings)
+        ):
+            fixture_adapters.update(
+                build_public_web_sample_adapters(fetched_at=resolved_fetched_at)
+            )
         log_event(
             "runtime.adapters.fixture_mode.enabled",
             available_adapter_keys=tuple(fixture_adapters),

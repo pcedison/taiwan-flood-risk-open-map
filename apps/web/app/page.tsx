@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
+  buildUserReportPayload,
   evidenceSourceUrl,
   evidenceTimeSummary,
   formatConfidence,
@@ -12,11 +13,13 @@ import {
   formatDateTime,
   formatDistance,
   getEvidenceDisplayState,
+  getUserReportSubmissionDisplayState,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } from "./lib/risk-display";
-import type { EvidenceItem, EvidencePreview, EvidenceStatus } from "./lib/risk-display";
+import type { EvidenceItem, EvidencePreview, EvidenceStatus, UserReportSubmissionStatus } from "./lib/risk-display";
 import type { LayerContractItem } from "./lib/risk-display";
+import { postUserReport, UserReportSubmitError } from "./lib/user-reports";
 
 type CoordinateSource = "default" | "map" | "search";
 
@@ -352,6 +355,8 @@ export default function HomePage() {
   const [isMapReady, setIsMapReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [locationLabel, setLocationLabel] = useState(text.taipeiMainStation);
+  const [reportSummary, setReportSummary] = useState("");
+  const [reportStatus, setReportStatus] = useState<UserReportSubmissionStatus>("idle");
 
   const statusText = isMapReady ? text.mapStatusReady : text.mapStatusLoading;
   const displayedEvidence = assessment
@@ -375,6 +380,12 @@ export default function HomePage() {
         : `${text.selectedPrefix}：${sourceLabels[coordinate.source]}`,
     [coordinate.source, locationLabel],
   );
+  const userReportPayload = useMemo(
+    () => buildUserReportPayload(coordinate, reportSummary),
+    [coordinate, reportSummary],
+  );
+  const reportDisplayState = getUserReportSubmissionDisplayState(reportStatus);
+  const isReportLoading = reportStatus === "loading";
 
   useEffect(() => {
     let disposed = false;
@@ -604,6 +615,34 @@ export default function HomePage() {
     }
   }
 
+  async function handleUserReportSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const report = buildUserReportPayload(coordinate, reportSummary);
+    if (!report.isValid) {
+      setReportStatus("idle");
+      return;
+    }
+
+    setReportStatus("loading");
+    try {
+      const response = await postUserReport(API_BASE_URL, report.payload);
+      if (response.status === "pending") {
+        setReportStatus("success");
+        setReportSummary("");
+      } else {
+        setReportStatus("error");
+      }
+    } catch (error) {
+      if (error instanceof UserReportSubmitError && error.code === "feature_disabled") {
+        setReportStatus("feature_disabled");
+      } else if (error instanceof UserReportSubmitError && error.code === "repository_unavailable") {
+        setReportStatus("repository_unavailable");
+      } else {
+        setReportStatus("error");
+      }
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="map-workspace" aria-label={text.appLabel}>
@@ -690,6 +729,47 @@ export default function HomePage() {
             </div>
           </dl>
         </section>
+
+        <form className="panel-section user-report-panel" onSubmit={handleUserReportSubmit}>
+          <div className="section-heading">
+            <span className="section-kicker">Public report</span>
+            <strong>Share local flood signal</strong>
+          </div>
+          <div className="report-location">
+            <span>Report location</span>
+            <strong>
+              {formatCoordinate(coordinate.lat)}, {formatCoordinate(coordinate.lng)}
+            </strong>
+          </div>
+          <label className="field">
+            <span>Observation</span>
+            <textarea
+              value={reportSummary}
+              onChange={(event) => {
+                setReportSummary(event.target.value);
+                if (reportStatus !== "loading") setReportStatus("idle");
+              }}
+              placeholder="Briefly describe visible flooding, water depth, or road impact."
+              maxLength={500}
+              rows={4}
+            />
+          </label>
+          {!userReportPayload.isValid && reportSummary.length > 0 ? (
+            <p className="form-error">Add a short observation before submitting.</p>
+          ) : null}
+          <button
+            className="primary-action"
+            type="submit"
+            disabled={isReportLoading || !userReportPayload.isValid}
+          >
+            {isReportLoading ? reportDisplayState.submitLabel : "Submit report"}
+          </button>
+          {reportDisplayState.message ? (
+            <p className={`report-state report-state-${reportDisplayState.kind}`} role="status">
+              {reportDisplayState.message}
+            </p>
+          ) : null}
+        </form>
 
         <section className="panel-section layer-panel">
           <div className="section-heading">

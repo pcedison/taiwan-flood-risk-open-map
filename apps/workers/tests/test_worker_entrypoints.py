@@ -1041,6 +1041,42 @@ def test_runtime_adapters_fixture_mode_supplies_official_adapters() -> None:
     }
 
 
+def test_runtime_adapters_fixture_mode_supplies_selected_public_web_sample() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "news.public_web.sample",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "SOURCE_SAMPLE_DATA_ENABLED": "true",
+        }
+    )
+
+    adapters = build_runtime_adapters(settings)
+
+    assert "news.public_web.sample" in adapters
+    assert adapters["news.public_web.sample"].run().fetched[0].raw_snapshot_key == (
+        "raw/news-public-web/sample.json"
+    )
+
+
+def test_runtime_adapters_fixture_mode_requires_explicit_public_web_sample() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "SOURCE_NEWS_ENABLED": "true",
+            "SOURCE_SAMPLE_DATA_ENABLED": "true",
+        }
+    )
+
+    adapters = build_runtime_adapters(settings)
+
+    assert "news.public_web.sample" not in adapters
+    assert set(adapters) == {
+        "official.cwa.rainfall",
+        "official.wra.water_level",
+        "official.flood_potential.geojson",
+    }
+
+
 def test_run_enabled_adapters_once_uses_configured_adapter_selection() -> None:
     settings = load_worker_settings(
         {
@@ -1095,6 +1131,28 @@ def test_run_enabled_adapters_once_gracefully_noops_disabled_adapter() -> None:
 
     assert result.summaries == ()
     assert result.freshness_checks == ()
+    assert not result.has_alerts
+
+
+def test_run_enabled_adapters_once_runs_public_web_sample_fixture() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "news.public_web.sample",
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "SOURCE_SAMPLE_DATA_ENABLED": "true",
+            "FRESHNESS_MAX_AGE_SECONDS": "604800",
+        }
+    )
+
+    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.news")
+
+    assert [summary.adapter_key for summary in result.summaries] == [
+        "news.public_web.sample"
+    ]
+    assert result.summaries[0].raw_ref == "raw/news-public-web/sample.json"
+    assert [check.adapter_key for check in result.freshness_checks] == [
+        "news.public_web.sample"
+    ]
     assert not result.has_alerts
 
 

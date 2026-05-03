@@ -5,16 +5,17 @@ volumes. It now covers the Phase 2 runtime-demo readiness path: API/Web, risk
 query, query heat, worker queue ops CLI surface, queue metrics export surface,
 live-gate no-network boundaries, durable worker queue with DLQ-equivalent
 list/requeue visibility and replay audit IDs, official adapter fixture
-dry-run, managed runtime fixture persistence, user reports gates, MVT tiles,
-and the documented query-heat materialization plus tile feature/cache smoke
-path.
+dry-run, managed runtime fixture persistence for WRA official plus the gated
+L2 public-web sample evidence adapter, user reports gates, MVT tiles, and the
+documented query-heat materialization plus tile feature/cache smoke path.
 
 The smoke is intentionally local. A passing run means the Compose services,
 migrations, fixture-backed worker paths, managed persistence writers, queue
 primitives, and monitoring entrypoints are runnable together. It does not
 prove production source credentials, real upstream official worker ingestion,
-source egress, hosted monitoring, scheduler cadence, DLQ/replay operations,
-tile hosting, or public report launch readiness.
+production news ingestion, source egress, hosted monitoring, scheduler
+cadence, DLQ/replay operations, tile hosting, or public report launch
+readiness.
 
 ## Requirements
 
@@ -50,15 +51,20 @@ The script performs these checks:
     container to prove the safe official adapter fixture parse/dry-run path
     without external API credentials or persistence.
 12. Runs `python -m app.main --run-enabled-adapters --persist` in a one-off
-    `worker` container with `WORKER_RUNTIME_FIXTURES_ENABLED=true` and only
-    `official.wra.water_level` selected:
+    `worker` container with `WORKER_RUNTIME_FIXTURES_ENABLED=true`,
+    `SOURCE_SAMPLE_DATA_ENABLED=true`, and only
+    `official.wra.water_level,news.public_web.sample` selected:
     - uses the Compose database and fixture adapter data only
     - keeps all live source API gates disabled
     - verifies the managed runtime CLI path wrote raw snapshot, accepted
       staging evidence, ingestion job, adapter run, and promoted evidence rows
-    - deletes rows tied to `raw/official-demo/wra-water-level.json` after the
-      verification
-    - does not prove CWA/WRA/flood-potential production source readiness
+      for both the WRA official fixture and L2 public-web sample fixture
+    - deletes rows tied to `raw/official-demo/wra-water-level.json` and
+      `raw/news-public-web/sample.json` after the verification, and restores
+      the pre-smoke `data_sources` health/timestamp fields for both adapters
+    - accepts Phase 2 L2 public evidence fixture/persistence only; it does not
+      prove CWA/WRA/flood-potential production source readiness or production
+      news ingestion
 13. Runs a queue ops CLI surface smoke in a one-off `worker` container:
     - executes `python -m app.main --help`
     - verifies the enqueue, consume, queue metrics export, queue summary/list,
@@ -147,7 +153,7 @@ Reports default-disabled smoke: HTTP 404 feature_disabled
 MVT smoke: layer=query-heat, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 MVT smoke: layer=flood-potential, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 Official adapter fixture dry-run smoke: --run-official-demo completed without external API credentials.
-Managed runtime persist smoke: --run-enabled-adapters --persist wrote raw/staging/run and promoted evidence rows, then cleanup completed.
+Managed runtime persist smoke: --run-enabled-adapters --persist wrote WRA official and news public-web sample raw/staging/run and promoted evidence rows, then cleanup and data source restore completed.
 queue_cli_surface_smoke=ok enqueue=true work=true queue_metrics_export=true queue_summary=true queue_list=true requeue=true flood_potential_geojson_gate=true
 live_gate_no_network_boundary_smoke=ok run_enabled_adapters_noop=true network_attempts=0
 queue_smoke=ok dedupe_active_count=1 consumed_job_id=... adapter_key=official.wra.water_level failed_job_id=... failed_status=failed dead_letter_visible=true dead_letter_requeued=true
@@ -260,25 +266,36 @@ docker compose run --rm worker sh -c "pip install -e . && python -m app.main --r
 Managed runtime persistence path. This is the focused smoke equivalent for
 `--run-enabled-adapters --persist`: it uses fixture adapters and the Compose
 database, verifies evidence side effects, then should be cleaned up. It proves
-the managed runtime CLI/persistence path, not production source readiness:
+the managed runtime CLI/persistence path and Phase 2 L2 public evidence
+fixture/persistence acceptance, not production source readiness or production
+news ingestion. The full smoke snapshots and restores the affected
+`data_sources` health/timestamp fields around this fixture run:
 
 ```powershell
 docker compose run --rm `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
-  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
+  -e SOURCE_SAMPLE_DATA_ENABLED=true `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level,news.public_web.sample `
   -e SOURCE_CWA_API_ENABLED=false `
   -e SOURCE_WRA_API_ENABLED=false `
   -e SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false `
   worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters --persist"
 ```
 
-Verification can stay narrow by checking the WRA fixture raw ref:
+Verification can stay narrow by checking the WRA and public-web sample fixture
+raw refs:
 
 ```sql
 SELECT count(*) FROM evidence
 WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
   AND source_type = 'official'
   AND event_type = 'water_level'
+  AND ingestion_status = 'accepted';
+
+SELECT count(*) FROM evidence
+WHERE raw_ref = 'raw/news-public-web/sample.json'
+  AND source_type = 'news'
+  AND event_type = 'flood_report'
   AND ingestion_status = 'accepted';
 ```
 
@@ -288,41 +305,62 @@ Cleanup SQL for that focused smoke:
 WITH smoke_jobs AS (
     SELECT DISTINCT ingestion_job_id
     FROM adapter_runs
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
       AND ingestion_job_id IS NOT NULL
 ),
 deleted_risk_links AS (
     DELETE FROM risk_assessment_evidence
     WHERE evidence_id IN (
         SELECT id FROM evidence
-        WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+        WHERE raw_ref IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
     )
     RETURNING 1
 ),
 deleted_evidence AS (
     DELETE FROM evidence
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
     RETURNING 1
 ),
 deleted_staging AS (
     DELETE FROM staging_evidence
     WHERE raw_snapshot_id IN (
         SELECT id FROM raw_snapshots
-        WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+        WHERE raw_ref IN (
+            'raw/official-demo/wra-water-level.json',
+            'raw/news-public-web/sample.json'
+        )
     )
-    OR payload ->> 'raw_ref' = 'raw/official-demo/wra-water-level.json'
+    OR payload ->> 'raw_ref' IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
     RETURNING 1
 ),
 deleted_adapter_runs AS (
     DELETE FROM adapter_runs
-    WHERE raw_ref = 'raw/official-demo/wra-water-level.json'
+    WHERE raw_ref IN (
+        'raw/official-demo/wra-water-level.json',
+        'raw/news-public-web/sample.json'
+    )
     RETURNING 1
 )
 DELETE FROM ingestion_jobs
 WHERE id IN (SELECT ingestion_job_id FROM smoke_jobs);
 
 DELETE FROM raw_snapshots
-WHERE raw_ref = 'raw/official-demo/wra-water-level.json';
+WHERE raw_ref IN (
+    'raw/official-demo/wra-water-level.json',
+    'raw/news-public-web/sample.json'
+);
 ```
 
 Reports default-disabled live HTTP check:

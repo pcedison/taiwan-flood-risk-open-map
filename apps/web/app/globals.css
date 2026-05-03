@@ -37,7 +37,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -231,13 +232,20 @@ button {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
   background: #ffffff;
   color: var(--foreground);
+}
+
+.field textarea {
+  min-height: 104px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .field span,
@@ -313,6 +321,53 @@ button {
   color: #b42318;
   font-size: 0.9rem;
   line-height: 1.4;
+}
+
+.user-report-panel {
+  background: #fbfcf8;
+}
+
+.report-location {
+  display: grid;
+  gap: 4px;
+  border-left: 3px solid rgba(20, 125, 100, 0.44);
+  padding-left: 10px;
+}
+
+.report-location span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.report-location strong {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 0.92rem;
+}
+
+.report-state {
+  margin: 0;
+  border: 1px solid rgba(20, 125, 100, 0.24);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--accent-strong);
+  background: rgba(20, 125, 100, 0.08);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.report-state-warning {
+  border-color: rgba(198, 106, 33, 0.3);
+  color: #75410f;
+  background: rgba(198, 106, 33, 0.08);
+}
+
+.report-state-error {
+  border-color: rgba(180, 35, 24, 0.24);
+  color: #9f2a1f;
+  background: rgba(180, 35, 24, 0.08);
 }
 
 .coordinate-panel dl {

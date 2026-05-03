@@ -75,6 +75,42 @@ export type LayerDisplayState = {
   hasTileContract: boolean;
 };
 
+export type UserReportPayload = {
+  point: {
+    lat: number;
+    lng: number;
+  };
+  summary: string;
+};
+
+export type UserReportPayloadState =
+  | {
+      isValid: true;
+      payload: UserReportPayload;
+      summary: string;
+      validationMessage: null;
+    }
+  | {
+      isValid: false;
+      payload: null;
+      summary: string;
+      validationMessage: "summary_required";
+    };
+
+export type UserReportSubmissionStatus =
+  | "idle"
+  | "loading"
+  | "success"
+  | "feature_disabled"
+  | "repository_unavailable"
+  | "error";
+
+export type UserReportSubmissionDisplayState = {
+  kind: "neutral" | "loading" | "success" | "warning" | "error";
+  message: string | null;
+  submitLabel: string;
+};
+
 export function formatCoordinate(value: number) {
   return value.toFixed(5);
 }
@@ -152,6 +188,84 @@ export function buildRiskAssessmentPayload(
     radius_m: radius,
     time_context: "now",
     location_text: locationText,
+  };
+}
+
+export function buildUserReportPayload(
+  coordinate: Coordinate,
+  summary: string,
+): UserReportPayloadState {
+  const trimmedSummary = summary.trim();
+  if (!trimmedSummary) {
+    return {
+      isValid: false,
+      payload: null,
+      summary: trimmedSummary,
+      validationMessage: "summary_required",
+    };
+  }
+
+  return {
+    isValid: true,
+    payload: {
+      point: {
+        lat: coordinate.lat,
+        lng: coordinate.lng,
+      },
+      summary: trimmedSummary,
+    },
+    summary: trimmedSummary,
+    validationMessage: null,
+  };
+}
+
+export function getUserReportSubmissionDisplayState(
+  status: UserReportSubmissionStatus,
+): UserReportSubmissionDisplayState {
+  if (status === "loading") {
+    return {
+      kind: "loading",
+      message: "Submitting report...",
+      submitLabel: "Submitting",
+    };
+  }
+
+  if (status === "success") {
+    return {
+      kind: "success",
+      message: "Report received as pending review.",
+      submitLabel: "Submit report",
+    };
+  }
+
+  if (status === "feature_disabled") {
+    return {
+      kind: "warning",
+      message: "Public report intake is disabled in this environment.",
+      submitLabel: "Submit report",
+    };
+  }
+
+  if (status === "repository_unavailable") {
+    return {
+      kind: "error",
+      message: "Report intake is temporarily unavailable.",
+      submitLabel: "Submit report",
+    };
+  }
+
+  if (status === "error") {
+    return {
+      kind: "error",
+      message: "Report could not be submitted.",
+      submitLabel: "Submit report",
+    };
+  }
+
+  return {
+    kind: "neutral",
+    message: null,
+    submitLabel: "Submit report",
   };
 }
 

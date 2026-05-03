@@ -7,6 +7,7 @@ const riskDisplayModulePath = "../../app/lib/risk-display.ts";
 const {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
+  buildUserReportPayload,
   evidencePublishedAt,
   evidenceSourceUrl,
   formatConfidence,
@@ -14,6 +15,7 @@ const {
   formatDateTime,
   formatDistance,
   getEvidenceDisplayState,
+  getUserReportSubmissionDisplayState,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } = (await import(riskDisplayModulePath)) as typeof import("../../app/lib/risk-display");
@@ -53,6 +55,56 @@ test("buildRiskAssessmentPayload shapes the risk API request", () => {
       time_context: "now",
     },
   );
+});
+
+test("buildUserReportPayload trims summary and shapes the public report request", () => {
+  assert.deepEqual(buildUserReportPayload({ lat: 25.033, lng: 121.5654 }, "  Water over curb.  "), {
+    isValid: true,
+    payload: {
+      point: {
+        lat: 25.033,
+        lng: 121.5654,
+      },
+      summary: "Water over curb.",
+    },
+    summary: "Water over curb.",
+    validationMessage: null,
+  });
+});
+
+test("buildUserReportPayload marks blank summaries invalid", () => {
+  assert.deepEqual(buildUserReportPayload({ lat: 25.033, lng: 121.5654 }, "   "), {
+    isValid: false,
+    payload: null,
+    summary: "",
+    validationMessage: "summary_required",
+  });
+});
+
+test("user report display state covers success and disabled/error gates", () => {
+  assert.deepEqual(getUserReportSubmissionDisplayState("success"), {
+    kind: "success",
+    message: "Report received as pending review.",
+    submitLabel: "Submit report",
+  });
+
+  assert.deepEqual(getUserReportSubmissionDisplayState("feature_disabled"), {
+    kind: "warning",
+    message: "Public report intake is disabled in this environment.",
+    submitLabel: "Submit report",
+  });
+
+  assert.deepEqual(getUserReportSubmissionDisplayState("repository_unavailable"), {
+    kind: "error",
+    message: "Report intake is temporarily unavailable.",
+    submitLabel: "Submit report",
+  });
+
+  assert.deepEqual(getUserReportSubmissionDisplayState("error"), {
+    kind: "error",
+    message: "Report could not be submitted.",
+    submitLabel: "Submit report",
+  });
 });
 
 test("evidence URL and published-at shaping prefer full-list fields", () => {
