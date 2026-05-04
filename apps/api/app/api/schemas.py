@@ -1,11 +1,19 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 RiskLevel = Literal["低", "中", "高", "極高", "未知"]
 ConfidenceLevel = Literal["低", "中", "高", "未知"]
 AttentionLevel = Literal["低", "中", "高", "未知"]
+GeocodePrecision = Literal[
+    "exact_address",
+    "road_or_lane",
+    "poi",
+    "admin_area",
+    "map_click",
+    "unknown",
+]
 
 
 class ContractModel(BaseModel):
@@ -16,6 +24,7 @@ class HealthResponse(ContractModel):
     status: Literal["ok"]
     service: str
     version: str
+    deployment_sha: str | None = None
     checked_at: datetime
 
 
@@ -29,6 +38,7 @@ class ReadyResponse(ContractModel):
     status: Literal["ok", "down"]
     service: str
     version: str
+    deployment_sha: str | None = None
     checked_at: datetime
     dependencies: dict[str, DependencyReadiness]
 
@@ -96,10 +106,103 @@ class PlaceCandidate(ContractModel):
     admin_code: str | None = None
     source: str
     confidence: float = Field(ge=0, le=1)
+    precision: GeocodePrecision = "unknown"
+    matched_query: str | None = None
+    requires_confirmation: bool = False
+    limitations: list[str] = Field(default_factory=list)
 
 
 class GeocodeResponse(ContractModel):
     candidates: list[PlaceCandidate]
+
+
+class UserReportCreateRequest(ContractModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    point: LatLng
+    summary: str = Field(min_length=1, max_length=500)
+    challenge_token: str | None = Field(default=None, min_length=1, max_length=4096)
+
+
+class UserReportCreateResponse(ContractModel):
+    report_id: str
+    status: Literal["pending"]
+
+
+UserReportStatus = Literal["pending", "approved", "rejected", "spam", "deleted"]
+UserReportModerationStatus = Literal["approved", "rejected", "spam"]
+UserReportModerationReason = Literal[
+    "verified_flood_signal",
+    "duplicate",
+    "not_flood_related",
+    "insufficient_detail",
+    "abuse_or_spam",
+    "out_of_scope",
+]
+UserReportPrivacyRedactionReason = Literal[
+    "reporter_request",
+    "affected_person_request",
+    "private_data_exposure",
+    "retention_expiry",
+    "operator_error",
+]
+
+_MODERATION_REASONS_BY_STATUS: dict[
+    UserReportModerationStatus, set[UserReportModerationReason]
+] = {
+    "approved": {"verified_flood_signal"},
+    "rejected": {
+        "duplicate",
+        "not_flood_related",
+        "insufficient_detail",
+        "out_of_scope",
+    },
+    "spam": {"abuse_or_spam"},
+}
+
+
+class AdminUserReport(ContractModel):
+    report_id: str
+    status: UserReportStatus
+    point: LatLng
+    summary: str
+    created_at: datetime
+    reviewed_at: datetime | None = None
+
+
+class AdminUserReportsResponse(ContractModel):
+    reports: list[AdminUserReport]
+
+
+class UserReportModerationRequest(ContractModel):
+    status: UserReportModerationStatus
+    reason_code: UserReportModerationReason
+
+    @model_validator(mode="after")
+    def reason_matches_status(self) -> Self:
+        allowed_reasons = _MODERATION_REASONS_BY_STATUS[self.status]
+        if self.reason_code not in allowed_reasons:
+            raise ValueError("reason_code is not allowed for moderation status")
+        return self
+
+
+class UserReportModerationResponse(ContractModel):
+    report: AdminUserReport
+
+
+class UserReportPrivacyRedactionRequest(ContractModel):
+    reason_code: UserReportPrivacyRedactionReason
+
+
+class AdminUserReportPrivacyRedaction(ContractModel):
+    report_id: str
+    status: Literal["deleted"]
+    privacy_level: Literal["redacted"]
+    redacted_at: datetime
+
+
+class UserReportPrivacyRedactionResponse(ContractModel):
+    redaction: AdminUserReportPrivacyRedaction
 
 
 class RiskAssessRequest(ContractModel):

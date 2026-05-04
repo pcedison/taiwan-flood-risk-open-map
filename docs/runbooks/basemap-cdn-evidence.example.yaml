@@ -1,0 +1,67 @@
+# Template/demo evidence record for docs and CI.
+#
+# This file is intentionally not a claim that the Flood Risk production CDN is
+# live. It uses public demo/sample references so the schema can be validated in
+# the repository without pretending that an operator-owned R2/S3/CDN URL exists.
+# For production, copy this shape into an ops-controlled evidence location,
+# replace every demo/template reference with the real operator-provided URLs and
+# artifacts, set production_complete: true, then run:
+#
+#   python infra/scripts/validate_basemap_cdn_evidence.py --production-complete <private-evidence.yaml>
+
+schema_version: basemap-cdn-evidence/v1
+production_complete: false
+demo_mode: true
+
+basemap_kind: pmtiles
+style_url: https://raw.githubusercontent.com/wipfli/foursquare-os-places-pmtiles/refs/heads/main/style.json
+style_url_source: public PMTiles/MapLibre demo style; replace with operator-owned production style URL
+pmtiles_url: https://r2-public.protomaps.com/protomaps-sample-datasets/nz-buildings-v3.pmtiles
+pmtiles_url_source: public Protomaps sample dataset; replace with operator-owned production PMTiles CDN URL
+attribution: Demo PMTiles sample. Production must show the selected provider and OpenStreetMap attribution required by the accepted license.
+
+provider:
+  name: Protomaps public sample dataset
+  owner: basemap-owner
+  evidence_ref: https://docs.protomaps.com/pmtiles/openlayers
+
+license:
+  name: demo/sample license review pending for production
+  owner: license-owner
+  evidence_ref: docs/runbooks/open-basemap-pmtiles.md#source-selection-checklist
+
+cadence:
+  update_frequency: demo only; production cadence must be reviewed per published basemap version
+  owner: data-owner
+  last_reviewed_at: "2026-05-04T00:00:00+08:00"
+
+range_request:
+  method: GET
+  request_header: "Range: bytes=0-16383"
+  status: 206
+  content_range: "bytes 0-16383/123456"
+  accept_ranges: bytes
+  evidence_ref: demo fixture; run --probe against the operator PMTiles URL for production
+
+cors:
+  request_origin: https://flood-risk.example.invalid
+  access_control_allow_origin: "*"
+  validated: true
+  evidence_ref: demo fixture; run --probe or browser network capture for production
+
+cache_control:
+  header: public, max-age=31536000, immutable
+  validated: true
+  evidence_ref: demo fixture; confirm CDN/object-store headers for production
+
+browser_network_log_ref: docs/runbooks/open-basemap-pmtiles.md#browser-smoke
+desktop_screenshot_ref: docs/runbooks/open-basemap-pmtiles.md#browser-smoke
+mobile_screenshot_ref: docs/runbooks/open-basemap-pmtiles.md#browser-smoke
+
+no_public_osm_tile_request:
+  validated: true
+  production_request_log_ref: docs/runbooks/open-basemap-pmtiles.md#browser-smoke
+  observed_hosts:
+    - raw.githubusercontent.com
+    - r2-public.protomaps.com
+  notes: Production capture must prove no request used the public OSM community tile endpoint.

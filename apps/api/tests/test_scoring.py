@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -52,12 +53,12 @@ def _signal_from_fixture(payload: dict[str, object]) -> RiskEvidenceSignal:
     return RiskEvidenceSignal(
         source_type=str(payload["source_type"]),
         event_type=str(payload["event_type"]),
-        confidence=float(payload["confidence"]),
-        distance_to_query_m=float(payload["distance_to_query_m"])
+        confidence=float(cast(Any, payload["confidence"])),
+        distance_to_query_m=float(cast(Any, payload["distance_to_query_m"]))
         if payload.get("distance_to_query_m") is not None
         else None,
-        freshness_score=float(payload["freshness_score"]),
-        source_weight=float(payload["source_weight"]),
-        risk_factor=float(payload.get("risk_factor", 1.0)),
+        freshness_score=float(cast(Any, payload["freshness_score"])),
+        source_weight=float(cast(Any, payload["source_weight"])),
+        risk_factor=float(cast(Any, payload.get("risk_factor", 1.0))),
         observed_at=datetime.fromisoformat(str(observed_at)) if observed_at else None,
     )

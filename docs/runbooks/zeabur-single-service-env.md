@@ -14,6 +14,13 @@ Use this checklist when filling Zeabur environment variables for the current sin
 
 Do not use `/ready` as the first health check. `/ready` checks PostgreSQL and Redis, so it can fail before those services exist.
 
+This checklist is for a deployable single-service preview only. It does not
+accept worker ingestion, queue replay, queue metrics, hosted scheduler cadence,
+or flood-potential live ingestion. Real upstream URL/license review,
+credential review, hosted cadence, alert routing, poison-job
+quarantine/replay audit, and production egress verification remain pending
+unless a separate environment handoff says otherwise.
+
 ## Required Variables
 
 | Variable | Zeabur value |
@@ -21,11 +28,20 @@ Do not use `/ready` as the first health check. `/ready` checks PostgreSQL and Re
 | `APP_ENV` | `staging` |
 | `LOG_LEVEL` | `info` |
 | `NEXT_PUBLIC_API_BASE_URL` | Leave empty |
+| `NEXT_PUBLIC_BASEMAP_STYLE_URL` | Reviewed open basemap style URL, or blank for local/dev fallback only |
+| `NEXT_PUBLIC_BASEMAP_KIND` | `pmtiles`, `raster`, or blank |
+| `NEXT_PUBLIC_BASEMAP_PMTILES_URL` | Reviewed PMTiles URL when `NEXT_PUBLIC_BASEMAP_KIND=pmtiles` |
+| `NEXT_PUBLIC_BASEMAP_RASTER_TILES` | Reviewed raster tile template only for temporary fallback |
+| `NEXT_PUBLIC_BASEMAP_ATTRIBUTION` | Reviewed attribution text for the selected basemap |
 | `NEXT_TELEMETRY_DISABLED` | `1` |
 | `REALTIME_OFFICIAL_ENABLED` | `true` |
 | `CWA_API_AUTHORIZATION` | Paste the CWA authorization token |
 
 ## Optional Variables
+
+`NEXT_PUBLIC_BASEMAP_*` values are client build-time inputs for the Dockerfile
+image. Set them before Zeabur builds, and rebuild the service after changing the
+public basemap.
 
 | Variable | Zeabur value | Use when |
 |---|---|---|
@@ -43,16 +59,16 @@ Do not add these variables for the first single-service preview unless an engine
 | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT` | Redis is not part of the first preview. |
 | `MINIO_*` | Object storage is not part of the first preview. |
 | `SOURCE_*_ENABLED` | These are worker and scheduler flags; there is no worker or scheduler in this service. |
+| `SOURCE_CWA_API_ENABLED`, `CWA_API_URL`, `CWA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
+| `SOURCE_WRA_API_ENABLED`, `WRA_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
+| `WORKER_METRICS_TEXTFILE_PATH`, `SCHEDULER_METRICS_TEXTFILE_PATH` | Queue/heartbeat metric knobs for worker or scheduler services; this single-service preview has neither. |
 | `S3_*` | The current runtime does not read these names. |
-| `TGOS_API_KEY` | Reserved for future TGOS geocoding support; not read by the current runtime. |
+| `TGOS_API_KEY` | Reserved for future optional TGOS support; not read by the current runtime. |
 | `API_HOST`, `API_PORT`, `WEB_HOST`, `WEB_PORT` | Zeabur and the Dockerfile already choose the correct runtime ports. |
 
-## TGOS Domain
+## TGOS Optional Provider
 
-When TGOS asks for the app domain, use the public Zeabur domain exactly as users open it, for example:
-
-```text
-https://your-service.zeabur.app
-```
-
-Do not submit `localhost`, `127.0.0.1`, an internal Zeabur address, or a health-check path such as `/health`. Keep this domain stable during review.
+TGOS is not required for the single-service preview. Keep `TGOS_API_KEY` unset
+until the runtime supports it and the IP/domain constraints have a reviewed
+solution. The current preview should prove the MapLibre open basemap path through
+`NEXT_PUBLIC_BASEMAP_*` instead.

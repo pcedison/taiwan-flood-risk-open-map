@@ -37,7 +37,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -231,13 +232,20 @@ button {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px;
   background: #ffffff;
   color: var(--foreground);
+}
+
+.field textarea {
+  min-height: 104px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .field span,
@@ -315,6 +323,65 @@ button {
   line-height: 1.4;
 }
 
+.form-notice {
+  margin: 0;
+  border: 1px solid rgba(20, 125, 100, 0.24);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--accent-strong);
+  background: rgba(20, 125, 100, 0.08);
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.user-report-panel {
+  background: #fbfcf8;
+}
+
+.report-location {
+  display: grid;
+  gap: 4px;
+  border-left: 3px solid rgba(20, 125, 100, 0.44);
+  padding-left: 10px;
+}
+
+.report-location span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.report-location strong {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 0.92rem;
+}
+
+.report-state {
+  margin: 0;
+  border: 1px solid rgba(20, 125, 100, 0.24);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--accent-strong);
+  background: rgba(20, 125, 100, 0.08);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.report-state-warning {
+  border-color: rgba(198, 106, 33, 0.3);
+  color: #75410f;
+  background: rgba(198, 106, 33, 0.08);
+}
+
+.report-state-error {
+  border-color: rgba(180, 35, 24, 0.24);
+  color: #9f2a1f;
+  background: rgba(180, 35, 24, 0.08);
+}
+
 .coordinate-panel dl {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -348,11 +415,87 @@ button {
   gap: 4px;
 }
 
+.layer-panel p,
 .risk-summary p,
 .freshness-panel p,
 .evidence-panel li {
   color: var(--muted);
   line-height: 1.55;
+}
+
+.layer-contract-status {
+  width: fit-content;
+  border: 1px solid rgba(20, 125, 100, 0.24);
+  border-radius: 8px;
+  padding: 5px 9px;
+  color: var(--accent-strong);
+  background: rgba(20, 125, 100, 0.1);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.layer-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer-list li {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.layer-list li > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.layer-list strong {
+  color: var(--foreground);
+}
+
+.layer-list span {
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.layer-list dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.layer-list dl div {
+  min-width: 0;
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--surface-soft);
+}
+
+.layer-list dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.layer-list dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.layer-list p {
+  margin: 0;
 }
 
 .risk-meter {
@@ -509,6 +652,23 @@ button {
   padding-left: 18px;
   color: #6a625a;
   line-height: 1.45;
+}
+
+.evidence-state {
+  border: 1px solid rgba(20, 125, 100, 0.24);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--accent-strong);
+  background: rgba(20, 125, 100, 0.08);
+  font-size: 0.86rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.evidence-state-error {
+  border-color: rgba(180, 35, 24, 0.24);
+  color: #9f2a1f;
+  background: rgba(180, 35, 24, 0.08);
 }
 
 .freshness-strip {
@@ -712,6 +872,7 @@ button {
   }
 
   .freshness-strip,
+  .layer-list dl,
   .evidence-meta {
     grid-template-columns: 1fr;
   }

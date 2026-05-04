@@ -1,12 +1,11 @@
 import json
-import re
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -37,13 +36,37 @@ from app.core.config import get_settings
 from app.domain.evidence import (
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
+    EvidenceUpsert,
     fetch_assessment_evidence,
+    fetch_query_heat_snapshot,
+    persist_risk_assessment,
     query_nearby_evidence,
+    RiskAssessmentPersistence,
+    upsert_public_evidence,
+)
+from app.domain.geocoding import (
+    build_open_data_geocoder,
+    candidate_type_for_precision,
+    geocode_limitations,
+    nominatim_precision,
+    requires_geocode_confirmation,
+    stable_uuid,
+    within_taiwan_bounds,
 )
 from app.domain.history import (
     HistoricalFloodRecord,
     historical_record_matches_location_text,
     nearby_historical_flood_records,
+)
+from app.domain.history.news_enrichment import (
+    OnDemandNewsSearchResult,
+    search_public_flood_news,
+)
+from app.domain.layers import (
+    LayerRecord,
+    LayerRepositoryUnavailable,
+    fetch_map_layer,
+    fetch_map_layers,
 )
 from app.domain.realtime import (
     OfficialRealtimeBundle,
@@ -51,7 +74,7 @@ from app.domain.realtime import (
     OfficialRealtimeSourceStatus,
     fetch_official_realtime_bundle,
 )
-from app.domain.risk import RiskEvidenceSignal, score_risk
+from app.domain.risk import RiskEvidenceSignal, RiskScoringResult, score_risk
 
 router = APIRouter(prefix="/v1", tags=["Public"])
 
@@ -60,158 +83,12 @@ NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 WIKIMEDIA_API_URL = "https://zh.wikipedia.org/w/api.php"
 NOMINATIM_USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
+LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test"}
 _ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
-KNOWN_GEOCODE_POINTS: tuple[tuple[tuple[str, ...], float, float, str], ...] = (
-    (
-        ("台北火車站", "台北車站", "臺北車站", "taipei main station", "taipei station"),
-        25.04776,
-        121.51706,
-        "63000000",
-    ),
-    (("台北101", "台北 101", "臺北101", "taipei 101"), 25.03396, 121.56447, "63000000"),
-    (("台北市政府", "臺北市政府", "taipei city hall"), 25.03752, 121.56368, "63000000"),
-    (("西門町", "ximending"), 25.04208, 121.50777, "63000000"),
-    (("板橋車站", "banqiao station"), 25.01433, 121.46386, "65000000"),
-    (("桃園機場", "桃園國際機場", "taoyuan airport"), 25.07965, 121.23422, "68000000"),
-    (("新竹車站", "hsinchu station"), 24.80158, 120.9717, "10018000"),
-    (("台中車站", "臺中車站", "taichung station"), 24.13716, 120.68686, "66000000"),
-    (("台南車站", "臺南車站", "tainan station"), 22.99713, 120.21295, "67000000"),
-    (("高雄車站", "kaohsiung station"), 22.63937, 120.30203, "64000000"),
-    (("花蓮車站", "hualien station"), 23.9928, 121.60195, "10015000"),
-    (("國立臺灣大學", "國立台灣大學", "台灣大學", "臺灣大學", "ntu"), 25.01682, 121.53846, "63000000"),
-    (("國立成功大學", "成功大學", "成大", "ncku"), 22.9997, 120.21972, "67000000"),
-    (("奇美博物館", "chimei museum"), 22.93486, 120.22688, "67000000"),
-    (("台南七股鹽山", "臺南七股鹽山", "七股鹽山", "七股鹽場", "cigu salt mountain"), 23.152758, 120.102489, "67000000"),
-    (("四草綠色隧道", "台南四草綠色隧道", "臺南四草綠色隧道"), 23.01916, 120.13554, "67000000"),
-    (("安平古堡", "台南安平古堡", "臺南安平古堡"), 23.00155, 120.16056, "67000000"),
-    (("赤崁樓", "台南赤崁樓", "臺南赤崁樓"), 22.99743, 120.20256, "67000000"),
-    (("億載金城", "台南億載金城", "臺南億載金城"), 22.98718, 120.15981, "67000000"),
-    (("台南孔廟", "臺南孔廟", "全臺首學"), 22.99032, 120.20401, "67000000"),
-    (("神農街", "台南神農街", "臺南神農街"), 22.99753, 120.19625, "67000000"),
-    (("國立故宮博物院", "故宮", "台北故宮", "taipei palace museum"), 25.10236, 121.54849, "63000000"),
-    (("士林夜市", "shilin night market"), 25.08808, 121.52418, "63000000"),
-    (("國立自然科學博物館", "科博館", "台中科博館"), 24.15752, 120.66602, "66000000"),
-    (("逢甲夜市", "fengjia night market"), 24.17509, 120.64554, "66000000"),
-    (("高鐵台南站", "高鐵臺南站", "台南高鐵站", "tainan hsr"), 22.92508, 120.28572, "67000000"),
-    (("高鐵左營站", "左營高鐵站", "zuoying hsr"), 22.68739, 120.30748, "64000000"),
-    (("松山機場", "台北松山機場", "taipei songshan airport"), 25.06972, 121.5525, "63000000"),
-)
 
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
-
-
-def _stable_uuid(*parts: object) -> str:
-    return str(uuid5(NAMESPACE_URL, ":".join(str(part) for part in parts)))
-
-
-def _normalize_query(query: str) -> str:
-    return query.casefold().replace(" ", "").replace("臺", "台")
-
-
-def _local_geocode_candidates(request: GeocodeRequest) -> list[PlaceCandidate]:
-    normalized_query = _normalize_query(request.query)
-    for aliases, lat, lng, admin_code in KNOWN_GEOCODE_POINTS:
-        if any(_normalize_query(alias) in normalized_query for alias in aliases):
-            return [
-                PlaceCandidate(
-                    place_id=_stable_uuid("place", request.query, request.input_type, index),
-                    name=request.query if index == 0 else f"{request.query}候選地點 {index + 1}",
-                    type=request.input_type,
-                    point=LatLng(lat=lat + (index * 0.001), lng=lng + (index * 0.001)),
-                    admin_code=admin_code,
-                    source="local-taiwan-gazetteer",
-                    confidence=max(0.5, 0.96 - (index * 0.08)),
-                )
-                for index in range(request.limit)
-            ]
-    return []
-
-
-def _nominatim_candidates(request: GeocodeRequest) -> list[PlaceCandidate]:
-    candidates = list(_cached_nominatim_candidates(request.query, request.input_type, request.limit))
-    if candidates:
-        return candidates
-
-    for fallback_query in _geocode_fallback_queries(request.query):
-        fallback_candidates = list(
-            _cached_nominatim_candidates(fallback_query, request.input_type, request.limit)
-        )
-        if fallback_candidates:
-            fallback_kind = "address-fallback" if _looks_like_address_fallback(fallback_query, request.query) else "taiwan-fallback"
-            return [
-                candidate.model_copy(
-                    update={
-                        "name": _fallback_candidate_name(candidate.name, fallback_kind),
-                        "source": f"{candidate.source}-{fallback_kind}",
-                        "confidence": min(candidate.confidence, 0.78 if fallback_kind == "address-fallback" else 0.82),
-                    }
-                )
-                for candidate in fallback_candidates
-            ]
-    wikimedia_candidates = list(_cached_wikimedia_candidates(request.query, request.limit))
-    if wikimedia_candidates:
-        return wikimedia_candidates
-    return []
-
-
-def _geocode_fallback_queries(query: str) -> tuple[str, ...]:
-    normalized = query.strip()
-    if not normalized:
-        return ()
-
-    candidates: list[str] = list(_address_fallback_queries(normalized))
-    candidates.extend(_taiwan_context_fallback_queries(normalized))
-
-    deduplicated: list[str] = []
-    for candidate in candidates:
-        if candidate != normalized and candidate not in deduplicated:
-            deduplicated.append(candidate)
-    return tuple(deduplicated[:8])
-
-
-def _address_fallback_queries(query: str) -> tuple[str, ...]:
-    normalized = query.strip()
-    if not normalized:
-        return ()
-
-    candidates: list[str] = []
-    lane_match = re.search(r"(.+?\d+巷)(?:\d+(?:之\d+)?號?)?$", normalized)
-    if lane_match:
-        candidates.append(lane_match.group(1))
-
-    road_match = re.search(r"(.+?(?:路|街|大道|巷))\d+(?:之\d+)?號?$", normalized)
-    if road_match:
-        candidates.append(road_match.group(1))
-
-    expanded: list[str] = []
-    for candidate in candidates:
-        expanded.append(candidate)
-        if not any(city in candidate for city in ("台南", "臺南", "安南區")):
-            expanded.append(f"台南市安南區{candidate}")
-
-    deduplicated: list[str] = []
-    for candidate in expanded:
-        if candidate != normalized and candidate not in deduplicated:
-            deduplicated.append(candidate)
-    return tuple(deduplicated[:4])
-
-
-def _taiwan_context_fallback_queries(query: str) -> tuple[str, ...]:
-    if any(token in query.casefold() for token in ("taiwan", "臺灣", "台灣")):
-        return ()
-    return (f"{query} 台灣", f"臺灣 {query}")
-
-
-def _looks_like_address_fallback(fallback_query: str, original_query: str) -> bool:
-    return fallback_query in _address_fallback_queries(original_query.strip())
-
-
-def _fallback_candidate_name(name: str, fallback_kind: str) -> str:
-    if fallback_kind == "address-fallback":
-        return f"{name}（由門牌定位到巷道）"
-    return name
 
 
 @lru_cache(maxsize=512)
@@ -257,15 +134,21 @@ def _cached_nominatim_candidates(
         if lat is None or lng is None:
             continue
         display_name = item.get("display_name")
+        precision = nominatim_precision(item, input_type)
+        confidence = max(0.5, 0.9 - (index * 0.08))
         candidates.append(
             PlaceCandidate(
-                place_id=_stable_uuid("nominatim", item.get("osm_type"), item.get("osm_id"), index),
+                place_id=stable_uuid("nominatim", item.get("osm_type"), item.get("osm_id"), index),
                 name=str(item.get("name") or query or display_name),
-                type=input_type,
+                type=candidate_type_for_precision(input_type, precision),
                 point=LatLng(lat=lat, lng=lng),
                 admin_code=None,
                 source="openstreetmap-nominatim",
-                confidence=max(0.5, 0.9 - (index * 0.08)),
+                confidence=confidence,
+                precision=precision,
+                matched_query=query,
+                requires_confirmation=requires_geocode_confirmation(precision, confidence),
+                limitations=geocode_limitations(precision),
             )
         )
     return tuple(candidates)
@@ -325,18 +208,22 @@ def _cached_wikimedia_candidates(query: str, limit: int) -> tuple[PlaceCandidate
             continue
         lat = _float_from_payload(coordinate.get("lat"))
         lng = _float_from_payload(coordinate.get("lon"))
-        if lat is None or lng is None or not _within_taiwan_bounds(lat, lng):
+        if lat is None or lng is None or not within_taiwan_bounds(lat, lng):
             continue
         title = str(page.get("title") or query)
         candidates.append(
             PlaceCandidate(
-                place_id=_stable_uuid("wikimedia", page_id, index),
+                place_id=stable_uuid("wikimedia", page_id, index),
                 name=title,
                 type="landmark",
                 point=LatLng(lat=lat, lng=lng),
                 admin_code=None,
                 source="wikimedia-coordinates",
                 confidence=max(0.66, 0.84 - (index * 0.06)),
+                precision="poi",
+                matched_query=query,
+                requires_confirmation=False,
+                limitations=geocode_limitations("poi"),
             )
         )
         if len(candidates) >= limit:
@@ -368,15 +255,20 @@ def _float_from_payload(value: object) -> float | None:
         return None
 
 
-def _within_taiwan_bounds(lat: float, lng: float) -> bool:
-    return 21.7 <= lat <= 25.5 and 119.2 <= lng <= 122.3
+def _build_geocoder():
+    settings = get_settings()
+    return build_open_data_geocoder(
+        nominatim_lookup=_cached_nominatim_candidates,
+        wikimedia_lookup=_cached_wikimedia_candidates,
+        open_data_paths=settings.geocoder_open_data_paths,
+    )
 
 
 def _official_realtime_evidence(
     observation: OfficialRealtimeObservation,
 ) -> Evidence:
     return Evidence(
-        id=_stable_uuid("official-realtime", observation.source_id),
+        id=stable_uuid("official-realtime", observation.source_id),
         source_id=observation.source_id,
         source_type="official",
         event_type=observation.event_type,
@@ -403,7 +295,7 @@ def _historical_record_evidence(
     distance_to_query_m: float,
 ) -> Evidence:
     return Evidence(
-        id=_stable_uuid("historical-flood-record", record.source_id),
+        id=stable_uuid("historical-flood-record", record.source_id),
         source_id=record.source_id,
         source_type=record.source_type,
         event_type=record.event_type,
@@ -424,8 +316,25 @@ def _historical_record_evidence(
     )
 
 
+def _fallback_historical_records(
+    request: RiskAssessRequest,
+) -> tuple[tuple[HistoricalFloodRecord, float], ...]:
+    return nearby_historical_flood_records(
+        lat=request.point.lat,
+        lng=request.point.lng,
+        radius_m=request.radius_m,
+        location_text=request.location_text,
+    )
+
+
+def _use_local_historical_fallback(app_env: str) -> bool:
+    return app_env.strip().lower() in LOCAL_HISTORICAL_FALLBACK_ENVS
+
+
 def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | None:
     settings = get_settings()
+    if not settings.evidence_repository_enabled:
+        return None
     try:
         records = query_nearby_evidence(
             database_url=settings.database_url,
@@ -535,7 +444,7 @@ def _signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
     )
 
 
-def _layers(now: datetime) -> list[MapLayer]:
+def _legacy_static_layers(now: datetime) -> list[MapLayer]:
     return [
         MapLayer(
             id="flood-potential",
@@ -564,19 +473,115 @@ def _layers(now: datetime) -> list[MapLayer]:
     ]
 
 
+def _static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
+    return (
+        LayerRecord(
+            id="flood-potential",
+            name="Flood potential",
+            description="Static fallback for official flood potential polygons.",
+            category="flood_potential",
+            status="disabled",
+            minzoom=8,
+            maxzoom=18,
+            attribution="Government open data",
+            tilejson_url="/v1/layers/flood-potential/tilejson",
+            updated_at=now,
+            metadata={
+                "version": "static-fallback",
+                "tiles": [
+                    "https://tiles.placeholder.flood-risk.local/flood-potential/{z}/{x}/{y}.pbf"
+                ],
+                "bounds": [119.3, 21.8, 122.1, 25.4],
+                "vector_layers": [
+                    {
+                        "id": "flood_potential",
+                        "fields": {"source_id": "String", "category": "String"},
+                    }
+                ],
+            },
+        ),
+        LayerRecord(
+            id="query-heat",
+            name="Query heat",
+            description="Static fallback for privacy-preserving query density.",
+            category="query_heat",
+            status="disabled",
+            minzoom=8,
+            maxzoom=14,
+            attribution="Flood Risk aggregated analytics",
+            tilejson_url="/v1/layers/query-heat/tilejson",
+            updated_at=now,
+            metadata={
+                "version": "static-fallback",
+                "tiles": [
+                    "https://tiles.placeholder.flood-risk.local/query-heat/{z}/{x}/{y}.pbf"
+                ],
+                "bounds": [119.3, 21.8, 122.1, 25.4],
+                "vector_layers": [
+                    {
+                        "id": "query_heat",
+                        "fields": {"query_count_bucket": "String", "period": "String"},
+                    }
+                ],
+            },
+        ),
+    )
+
+
+def _map_layer_from_record(record: LayerRecord) -> MapLayer:
+    return MapLayer(
+        id=record.id,
+        name=record.name,
+        description=record.description,
+        category=cast(Any, record.category),
+        status=cast(Any, record.status),
+        minzoom=record.minzoom,
+        maxzoom=record.maxzoom,
+        attribution=record.attribution,
+        tilejson_url=record.tilejson_url,
+        updated_at=record.updated_at,
+    )
+
+
+def _layer_records(now: datetime) -> tuple[LayerRecord, ...]:
+    try:
+        records = fetch_map_layers(database_url=get_settings().database_url)
+    except LayerRepositoryUnavailable:
+        return _static_layer_records(now)
+    return records or _static_layer_records(now)
+
+
+def _static_layer_by_id(layer_id: str, now: datetime) -> LayerRecord | None:
+    return {layer.id: layer for layer in _static_layer_records(now)}.get(layer_id)
+
+
+def _layer_record(layer_id: str, now: datetime) -> LayerRecord | None:
+    try:
+        records = fetch_map_layers(database_url=get_settings().database_url)
+    except LayerRepositoryUnavailable:
+        return _static_layer_by_id(layer_id, now)
+    if not records:
+        return _static_layer_by_id(layer_id, now)
+    try:
+        return fetch_map_layer(database_url=get_settings().database_url, layer_id=layer_id)
+    except LayerRepositoryUnavailable:
+        return _static_layer_by_id(layer_id, now)
+
+
+def _layers(now: datetime) -> list[MapLayer]:
+    return [_map_layer_from_record(record) for record in _layer_records(now)]
+
+
 @router.post("/geocode", response_model=GeocodeResponse)
 async def geocode(request: GeocodeRequest) -> GeocodeResponse:
-    local_candidates = _local_geocode_candidates(request)
-    if local_candidates:
-        return GeocodeResponse(candidates=local_candidates)
-    return GeocodeResponse(candidates=_nominatim_candidates(request))
+    return GeocodeResponse(candidates=_build_geocoder().geocode(request))
 
 
 @router.post("/risk/assess", response_model=RiskAssessmentResponse)
 async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
     settings = get_settings()
     created_at = _now()
-    assessment_id = _stable_uuid(
+    assessment_id = stable_uuid(
         "assessment",
         request.point.lat,
         request.point.lng,
@@ -589,39 +594,94 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         radius_m=request.radius_m,
         cwa_authorization=settings.cwa_api_authorization,
         enabled=settings.realtime_official_enabled,
+        cwa_enabled=settings.source_cwa_api_enabled,
+        wra_enabled=settings.source_wra_api_enabled,
         now=created_at,
     )
     db_evidence_items = _nearby_db_evidence(request)
+    on_demand_news = OnDemandNewsSearchResult(
+        attempted=False,
+        source_id="on-demand-public-news",
+        message="未啟動公開新聞補查。",
+        records=(),
+    )
     if db_evidence_items is None:
-        historical_records = nearby_historical_flood_records(
-            lat=request.point.lat,
-            lng=request.point.lng,
-            radius_m=request.radius_m,
-            location_text=request.location_text,
-        )
+        historical_records = _fallback_historical_records(request)
+        if not historical_records:
+            on_demand_news = _on_demand_public_news_result(request, now=created_at)
         historical_evidence_items = [
             _historical_record_evidence(record, distance_to_query_m=distance_m)
             for record, distance_m in historical_records
         ]
-        historical_signals = tuple(
-            _signal_from_historical_record(
-                record,
-                distance_to_query_m=_historical_scoring_distance(
-                    record=record,
-                    distance_to_query_m=distance_m,
-                    radius_m=request.radius_m,
-                    location_text=request.location_text,
-                ),
-            )
-            for record, distance_m in historical_records
+        historical_evidence_items.extend(
+            _evidence_from_upsert(record) for record in on_demand_news.records
+        )
+        historical_signals = (
+            *tuple(
+                _signal_from_historical_record(
+                    record,
+                    distance_to_query_m=_historical_scoring_distance(
+                        record=record,
+                        distance_to_query_m=distance_m,
+                        radius_m=request.radius_m,
+                        location_text=request.location_text,
+                    ),
+                )
+                for record, distance_m in historical_records
+            ),
+            *tuple(
+                _signal_from_evidence(item)
+                for item in historical_evidence_items[len(historical_records) :]
+            ),
+        )
+        historical_freshness_db_items = (
+            tuple(historical_evidence_items) if on_demand_news.records else None
         )
     else:
-        historical_records = ()
-        historical_evidence_items = list(db_evidence_items)
-        historical_signals = tuple(_signal_from_evidence(item) for item in db_evidence_items)
+        historical_records = (
+            _fallback_historical_records(request)
+            if not db_evidence_items and _use_local_historical_fallback(settings.app_env)
+            else ()
+        )
+        if historical_records:
+            historical_evidence_items = [
+                _historical_record_evidence(record, distance_to_query_m=distance_m)
+                for record, distance_m in historical_records
+            ]
+            historical_signals = tuple(
+                _signal_from_historical_record(
+                    record,
+                    distance_to_query_m=_historical_scoring_distance(
+                        record=record,
+                        distance_to_query_m=distance_m,
+                        radius_m=request.radius_m,
+                        location_text=request.location_text,
+                    ),
+                )
+                for record, distance_m in historical_records
+            )
+            historical_freshness_db_items = None
+        else:
+            if not db_evidence_items:
+                on_demand_news = search_public_flood_news(
+                    location_text=request.location_text,
+                    lat=request.point.lat,
+                    lng=request.point.lng,
+                    radius_m=request.radius_m,
+                    now=created_at,
+                    max_records=settings.historical_news_on_demand_max_records,
+                    timeout_seconds=settings.historical_news_on_demand_timeout_seconds,
+                ) if _use_on_demand_public_news(settings) else on_demand_news
+            on_demand_evidence_items = _persist_or_build_on_demand_evidence(
+                on_demand_news,
+                writeback_enabled=settings.historical_news_on_demand_writeback_enabled,
+            )
+            historical_evidence_items = [*db_evidence_items, *on_demand_evidence_items]
+            historical_signals = tuple(_signal_from_evidence(item) for item in historical_evidence_items)
+            historical_freshness_db_items = tuple(historical_evidence_items)
     historical_freshness = _historical_data_freshness(
         historical_records=historical_records,
-        db_evidence_items=db_evidence_items,
+        db_evidence_items=historical_freshness_db_items,
         now=created_at,
     )
     evidence_items = [
@@ -636,6 +696,39 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         now=created_at,
     )
     _cache_assessment_evidence(assessment_id, evidence_items)
+    expires_at = created_at + timedelta(minutes=10)
+    explanation = Explanation(
+        summary=scoring.explanation_summary,
+        main_reasons=list(scoring.main_reasons),
+        missing_sources=_visible_source_limitations(
+            realtime_bundle,
+            historical_records,
+            historical_freshness_db_items,
+            on_demand_news,
+        ),
+    )
+    data_freshness = [
+        *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
+        DataFreshness(
+            source_id=historical_freshness.source_id,
+            name="歷史淹水紀錄與公開新聞",
+            health_status=historical_freshness.health_status,
+            observed_at=historical_freshness.observed_at,
+            ingested_at=historical_freshness.ingested_at,
+            message=historical_freshness.message,
+        ),
+        *_on_demand_data_freshness(on_demand_news, now=created_at),
+    ]
+    _persist_assessment(
+        assessment_id=assessment_id,
+        request=request,
+        scoring=scoring,
+        explanation=explanation,
+        data_freshness=data_freshness,
+        evidence_items=evidence_items,
+        created_at=created_at,
+        expires_at=expires_at,
+    )
     return RiskAssessmentResponse(
         assessment_id=assessment_id,
         location=request.point,
@@ -646,42 +739,199 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         realtime=RiskLevelBlock(level=scoring.realtime_level),
         historical=RiskLevelBlock(level=scoring.historical_level),
         confidence=ConfidenceBlock(level=scoring.confidence_level),
-        explanation=Explanation(
-            summary=scoring.explanation_summary,
-            main_reasons=list(scoring.main_reasons),
-            missing_sources=_visible_source_limitations(
-                realtime_bundle,
-                historical_records,
-                db_evidence_items,
-            ),
-        ),
+        explanation=explanation,
         evidence=[_evidence_preview(item) for item in evidence_items],
-        data_freshness=[
-            *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
-            DataFreshness(
-                source_id=historical_freshness.source_id,
-                name="歷史淹水紀錄與公開新聞",
-                health_status=historical_freshness.health_status,
-                observed_at=historical_freshness.observed_at,
-                ingested_at=historical_freshness.ingested_at,
-                message=historical_freshness.message,
-            )
-        ],
-        query_heat=QueryHeat(
-            period="P7D",
-            attention_level=LOW_ATTENTION,
-            query_count_bucket="1-9",
-            unique_approx_count_bucket="1-9",
-            updated_at=created_at,
-        ),
+        data_freshness=data_freshness,
+        query_heat=_query_heat(request, now=created_at),
     )
 
 
+def _on_demand_public_news_result(
+    request: RiskAssessRequest,
+    *,
+    now: datetime,
+) -> OnDemandNewsSearchResult:
+    settings = get_settings()
+    if not _use_on_demand_public_news(settings):
+        return OnDemandNewsSearchResult(
+            attempted=False,
+            source_id="on-demand-public-news",
+            message="公開新聞即時補查未啟用。",
+            records=(),
+        )
+    return search_public_flood_news(
+        location_text=request.location_text,
+        lat=request.point.lat,
+        lng=request.point.lng,
+        radius_m=request.radius_m,
+        now=now,
+        max_records=settings.historical_news_on_demand_max_records,
+        timeout_seconds=settings.historical_news_on_demand_timeout_seconds,
+    )
+
+
+def _use_on_demand_public_news(settings: Any) -> bool:
+    if not settings.historical_news_on_demand_enabled:
+        return False
+    if settings.app_env.strip().lower() in {"production", "staging", "production-beta"}:
+        return settings.source_news_enabled and settings.source_terms_review_ack
+    return True
+
+
+def _persist_or_build_on_demand_evidence(
+    result: OnDemandNewsSearchResult,
+    *,
+    writeback_enabled: bool,
+) -> tuple[Evidence, ...]:
+    if not result.records:
+        return ()
+    if writeback_enabled:
+        try:
+            inserted = upsert_public_evidence(
+                database_url=get_settings().database_url,
+                records=result.records,
+            )
+            if inserted:
+                return tuple(_evidence_from_record(record) for record in inserted)
+        except EvidenceRepositoryUnavailable:
+            pass
+    return tuple(_evidence_from_upsert(record) for record in result.records)
+
+
+def _evidence_from_upsert(record: EvidenceUpsert) -> Evidence:
+    return Evidence(
+        id=record.id,
+        source_id=record.source_id,
+        source_type=cast(Any, record.source_type),
+        event_type=cast(Any, record.event_type),
+        title=record.title,
+        summary=record.summary,
+        url=record.url,
+        occurred_at=record.occurred_at,
+        observed_at=record.observed_at,
+        ingested_at=record.ingested_at,
+        point=LatLng(lat=record.lat, lng=record.lng),
+        geometry=GeoJsonGeometry(type="Point", coordinates=[record.lng, record.lat]),
+        distance_to_query_m=record.distance_to_query_m,
+        confidence=record.confidence,
+        freshness_score=record.freshness_score,
+        source_weight=record.source_weight,
+        privacy_level=cast(Any, record.privacy_level),
+        raw_ref=record.raw_ref,
+    )
+
+
+def _on_demand_data_freshness(
+    result: OnDemandNewsSearchResult,
+    *,
+    now: datetime,
+) -> list[DataFreshness]:
+    if not result.attempted:
+        return []
+    return [
+        DataFreshness(
+            source_id=result.source_id,
+            name="公開新聞即時補查",
+            health_status="healthy" if result.records else "unknown",
+            observed_at=max(
+                (record.observed_at for record in result.records if record.observed_at is not None),
+                default=None,
+            ),
+            ingested_at=now,
+            message=result.message,
+        )
+    ]
 def _cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence]) -> None:
     _ASSESSMENT_EVIDENCE_CACHE[assessment_id] = evidence_items
     while len(_ASSESSMENT_EVIDENCE_CACHE) > 256:
         oldest_key = next(iter(_ASSESSMENT_EVIDENCE_CACHE))
         del _ASSESSMENT_EVIDENCE_CACHE[oldest_key]
+
+
+def _persist_assessment(
+    *,
+    assessment_id: str,
+    request: RiskAssessRequest,
+    scoring: RiskScoringResult,
+    explanation: Explanation,
+    data_freshness: list[DataFreshness],
+    evidence_items: list[Evidence],
+    created_at: datetime,
+    expires_at: datetime,
+) -> None:
+    settings = get_settings()
+    if not settings.evidence_repository_enabled:
+        return
+    try:
+        persist_risk_assessment(
+            database_url=settings.database_url,
+            assessment=RiskAssessmentPersistence(
+                assessment_id=assessment_id,
+                lat=request.point.lat,
+                lng=request.point.lng,
+                radius_m=request.radius_m,
+                location_text=request.location_text,
+                score_version=scoring.score_version,
+                realtime_score=scoring.realtime_score,
+                historical_score=scoring.historical_score,
+                confidence_score=scoring.confidence_score,
+                realtime_level=scoring.realtime_level,
+                historical_level=scoring.historical_level,
+                explanation=explanation.model_dump(mode="json"),
+                data_freshness=[item.model_dump(mode="json") for item in data_freshness],
+                result_snapshot=_assessment_result_snapshot(
+                    assessment_id=assessment_id,
+                    request=request,
+                    scoring=scoring,
+                    explanation=explanation,
+                    data_freshness=data_freshness,
+                    evidence_items=evidence_items,
+                    created_at=created_at,
+                    expires_at=expires_at,
+                ),
+                evidence_ids=tuple(item.id for item in evidence_items),
+                created_at=created_at,
+                expires_at=expires_at,
+            ),
+        )
+    except EvidenceRepositoryUnavailable:
+        return
+
+
+def _assessment_result_snapshot(
+    *,
+    assessment_id: str,
+    request: RiskAssessRequest,
+    scoring: RiskScoringResult,
+    explanation: Explanation,
+    data_freshness: list[DataFreshness],
+    evidence_items: list[Evidence],
+    created_at: datetime,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    return {
+        "assessment_id": assessment_id,
+        "location": request.point.model_dump(mode="json"),
+        "radius_m": request.radius_m,
+        "location_text": request.location_text,
+        "score_version": scoring.score_version,
+        "scores": {
+            "realtime": scoring.realtime_score,
+            "historical": scoring.historical_score,
+            "confidence": scoring.confidence_score,
+        },
+        "levels": {
+            "realtime": scoring.realtime_level,
+            "historical": scoring.historical_level,
+            "confidence": scoring.confidence_level,
+        },
+        "explanation": explanation.model_dump(mode="json"),
+        "evidence_ids": [item.id for item in evidence_items],
+        "evidence_count": len(evidence_items),
+        "data_freshness": [item.model_dump(mode="json") for item in data_freshness],
+        "created_at": created_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+    }
 
 
 def _historical_freshness_message(
@@ -692,6 +942,42 @@ def _historical_freshness_message(
     return (
         f"查詢半徑內找到 {len(historical_records)} 筆已匯入歷史淹水公開紀錄；"
         "目前完整新聞回填仍在 Phase 2 管線建置中。"
+    )
+
+
+def _query_heat(request: RiskAssessRequest, *, now: datetime) -> QueryHeat:
+    settings = get_settings()
+    if not settings.evidence_repository_enabled:
+        return QueryHeat(
+            period="P7D",
+            attention_level=LOW_ATTENTION,
+            query_count_bucket="limited-db-disabled",
+            unique_approx_count_bucket="limited-db-disabled",
+            updated_at=now,
+        )
+    try:
+        snapshot = fetch_query_heat_snapshot(
+            database_url=settings.database_url,
+            lat=request.point.lat,
+            lng=request.point.lng,
+            radius_m=request.radius_m,
+            period="P7D",
+        )
+    except EvidenceRepositoryUnavailable:
+        return QueryHeat(
+            period="P7D",
+            attention_level=LOW_ATTENTION,
+            query_count_bucket="limited-db-unavailable",
+            unique_approx_count_bucket="limited-db-unavailable",
+            updated_at=now,
+        )
+
+    return QueryHeat(
+        period=snapshot.period,
+        attention_level=LOW_ATTENTION,
+        query_count_bucket=snapshot.query_count_bucket,
+        unique_approx_count_bucket=snapshot.unique_approx_count_bucket,
+        updated_at=snapshot.updated_at,
     )
 
 
@@ -763,6 +1049,7 @@ def _visible_source_limitations(
     bundle: OfficialRealtimeBundle,
     historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
     db_evidence_items: tuple[Evidence, ...] | None,
+    on_demand_news: OnDemandNewsSearchResult,
 ) -> list[str]:
     limitations: list[str] = []
     observation_types = {observation.event_type for observation in bundle.observations}
@@ -778,6 +1065,11 @@ def _visible_source_limitations(
             limitations.append(water_level.message or "即時水位資料目前沒有可用測站。")
     if not historical_records and not db_evidence_items:
         limitations.append("查詢半徑內尚未匯入歷史淹水紀錄；目前不應把即時低風險解讀為購屋安全。")
+    if on_demand_news.attempted and not on_demand_news.records and on_demand_news.message:
+        limitations.append(
+            f"公開新聞補查未取得可用事件：{on_demand_news.message}。"
+            "這代表資料仍不足，不代表該地點沒有淹水紀錄。"
+        )
     return limitations
 
 
@@ -812,6 +1104,89 @@ def _assessment_db_evidence(assessment_id: str, *, page_size: int) -> tuple[Evid
     return tuple(_evidence_from_record(record) for record in records)
 
 
+def _tilejson_from_layer_record(record: LayerRecord) -> TileJson:
+    metadata = record.metadata
+    return TileJson(
+        tilejson=str(metadata.get("tilejson", "3.0.0")),
+        name=str(metadata.get("name", record.name)),
+        version=_optional_str(metadata.get("version")),
+        attribution=_optional_str(metadata.get("attribution")) or record.attribution,
+        scheme=cast(Any, metadata.get("scheme", "xyz")),
+        tiles=_string_list(
+            metadata.get("tiles"),
+            fallback=[
+                "https://tiles.placeholder.flood-risk.local/"
+                f"{record.id}/{{z}}/{{x}}/{{y}}.pbf"
+            ],
+        ),
+        minzoom=_optional_int(metadata.get("minzoom")) if "minzoom" in metadata else record.minzoom,
+        maxzoom=_optional_int(metadata.get("maxzoom")) if "maxzoom" in metadata else record.maxzoom,
+        bounds=_number_list(metadata.get("bounds"), expected_length=4),
+        center=_number_list(metadata.get("center"), expected_length=3),
+        vector_layers=_tilejson_vector_layers(record),
+    )
+
+
+def _tilejson_vector_layers(record: LayerRecord) -> list[TileJsonVectorLayer]:
+    vector_layers = record.metadata.get("vector_layers")
+    if isinstance(vector_layers, list) and vector_layers:
+        return [
+            TileJsonVectorLayer(
+                id=str(item.get("id", record.id.replace("-", "_"))),
+                description=_optional_str(item.get("description")),
+                minzoom=_optional_int(item.get("minzoom")),
+                maxzoom=_optional_int(item.get("maxzoom")),
+                fields=_string_dict(item.get("fields")),
+            )
+            for item in vector_layers
+            if isinstance(item, dict)
+        ]
+    return [
+        TileJsonVectorLayer(
+            id=record.id.replace("-", "_"),
+            fields={"source_id": "String", "category": "String"},
+        )
+    ]
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(cast(Any, value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_list(value: object, *, fallback: list[str]) -> list[str]:
+    if isinstance(value, list):
+        items = [str(item) for item in value if item]
+        if items:
+            return items
+    return fallback
+
+
+def _number_list(value: object, *, expected_length: int) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != expected_length:
+        return None
+    try:
+        return [float(cast(Any, item)) for item in value]
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_dict(value: object) -> dict[str, str] | None:
+    if not isinstance(value, dict):
+        return None
+    return {str(key): str(item) for key, item in value.items()}
+
+
 @router.get("/layers", response_model=LayersResponse)
 async def list_layers() -> LayersResponse:
     return LayersResponse(layers=_layers(_now()))
@@ -819,29 +1194,10 @@ async def list_layers() -> LayersResponse:
 
 @router.get("/layers/{layer_id}/tilejson", response_model=TileJson, response_model_exclude_none=True)
 async def get_layer_tilejson(layer_id: str) -> TileJson:
-    layer_by_id = {layer.id: layer for layer in _layers(_now())}
-    layer = layer_by_id.get(layer_id)
+    layer = _layer_record(layer_id, _now())
     if layer is None:
         raise HTTPException(
             status_code=404,
             detail=error_payload("not_found", f"Layer '{layer_id}' was not found.")["error"],
         )
-
-    vector_layer_id = layer_id.replace("-", "_")
-    return TileJson(
-        tilejson="3.0.0",
-        name=layer.name,
-        version="2026-04-28",
-        attribution=layer.attribution,
-        scheme="xyz",
-        tiles=[f"https://tiles.example.test/{layer_id}/{{z}}/{{x}}/{{y}}.pbf"],
-        minzoom=layer.minzoom,
-        maxzoom=layer.maxzoom,
-        bounds=[119.3, 21.8, 122.1, 25.4],
-        vector_layers=[
-            TileJsonVectorLayer(
-                id=vector_layer_id,
-                fields={"source_id": "String", "category": "String"},
-            )
-        ],
-    )
+    return _tilejson_from_layer_record(layer)

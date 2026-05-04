@@ -9,12 +9,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "tsc --noEmit",
-    "test": "echo \"No frontend tests configured yet\""
+    "typecheck": "tsc --noEmit --incremental false",
+    "test": "node --test --experimental-strip-types \"tests/unit/**/*.test.ts\""
   },
   "dependencies": {
     "maplibre-gl": "^5.0.0",
     "next": "^15.0.0",
+    "pmtiles": "^4.4.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

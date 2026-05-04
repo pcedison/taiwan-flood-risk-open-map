@@ -21,7 +21,7 @@ Validate migration filenames and basic SQL shape locally:
 python infra/scripts/validate_migrations.py
 ```
 
-CI runs both `validate_migrations.py` and a PostGIS smoke check that applies the migrations and verifies the 13 core SDD tables exist.
+CI runs both `validate_migrations.py` and a PostGIS smoke check that applies the migrations and verifies the core SDD plus runtime tables exist.
 
 ## Local initialization
 

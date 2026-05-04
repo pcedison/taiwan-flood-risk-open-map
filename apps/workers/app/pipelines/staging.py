@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -74,12 +75,25 @@ def build_staging_batch(result: AdapterRunResult, *, raw_ref: str | None = None)
 
     validation = validate_evidence_for_promotion(result.normalized)
     raw_snapshot = build_raw_snapshot(result, raw_ref=raw_ref)
+    raw_by_source_id = {item.source_id: item for item in result.fetched}
     accepted = tuple(
-        _to_staging_upsert(evidence, raw_snapshot.raw_ref, "accepted", None)
+        _to_staging_upsert(
+            evidence,
+            raw_snapshot.raw_ref,
+            "accepted",
+            None,
+            raw_by_source_id.get(evidence.source_id),
+        )
         for evidence in validation.accepted
     )
     rejected = tuple(
-        _to_staging_upsert(evidence, raw_snapshot.raw_ref, "rejected", "; ".join(errors))
+        _to_staging_upsert(
+            evidence,
+            raw_snapshot.raw_ref,
+            "rejected",
+            "; ".join(errors),
+            raw_by_source_id.get(evidence.source_id),
+        )
         for evidence, errors in validation.rejected
     )
 
@@ -128,6 +142,7 @@ def _to_staging_upsert(
     raw_ref: str,
     validation_status: ValidationStatus,
     rejection_reason: str | None,
+    raw_item: Any | None,
 ) -> StagingEvidenceUpsert:
     return StagingEvidenceUpsert(
         raw_ref=raw_ref,
@@ -146,10 +161,21 @@ def _to_staging_upsert(
         rejection_reason=rejection_reason,
         payload={
             "location_text": evidence.location_text,
+            **_location_payload(raw_item),
             "attribution": evidence.attribution,
             "tags": list(evidence.tags),
         },
     )
+
+
+def _location_payload(raw_item: Any | None) -> dict[str, Any]:
+    if raw_item is None or not isinstance(raw_item.payload, Mapping):
+        return {}
+
+    geometry = raw_item.payload.get("geometry")
+    if isinstance(geometry, Mapping):
+        return {"location_payload": {"geometry": dict(geometry)}}
+    return {}
 
 
 def _content_hash(result: AdapterRunResult) -> str:

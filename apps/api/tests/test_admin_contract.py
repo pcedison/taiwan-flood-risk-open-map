@@ -1,21 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 import warnings
 
 from fastapi.testclient import TestClient
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from app.api.routes import admin as admin_route
 from app.core.config import get_settings
+from app.domain.reports import (
+    UserReportModerationRecord,
+    UserReportPrivacyRedactionRecord,
+    UserReportRepositoryUnavailable,
+)
 from app.main import create_app
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
-    from jsonschema import RefResolver
+    from jsonschema import RefResolver  # type: ignore[import-untyped]
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -77,6 +82,17 @@ def test_admin_endpoints_require_bearer_token(monkeypatch: pytest.MonkeyPatch) -
     client = TestClient(create_app())
 
     response = client.get("/admin/v1/jobs")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "unauthorized"
+
+
+def test_admin_report_moderation_requires_bearer_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    client = TestClient(create_app())
+
+    response = client.get("/admin/v1/reports/pending")
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "unauthorized"
@@ -185,6 +201,207 @@ def test_admin_sources_contract_filters_and_null_serialization(
     assert source["update_frequency"] == ""
     assert cursor.params == ["unknown"]
     assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
+def test_admin_pending_reports_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    calls: list[dict[str, object]] = []
+
+    def list_reports(**kwargs: object) -> list[UserReportModerationRecord]:
+        calls.append(kwargs)
+        return [
+            UserReportModerationRecord(
+                id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+                status="pending",
+                summary="Water at ankle depth.",
+                lat=25.033,
+                lng=121.5654,
+                created_at=datetime(2026, 4, 29, 12, 0, tzinfo=UTC),
+                reviewed_at=None,
+            )
+        ]
+
+    monkeypatch.setattr(admin_route, "list_pending_user_reports", list_reports)
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/reports/pending",
+        params={"limit": 25},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["reports"]) == 1
+    report = payload["reports"][0]
+    assert set(report) == {"report_id", "status", "point", "summary", "created_at", "reviewed_at"}
+    assert report["report_id"] == "0d51d545-dc6a-4e4b-8f8e-0e42d454d050"
+    assert report["status"] == "pending"
+    assert report["point"] == {"lat": 25.033, "lng": 121.5654}
+    assert report["summary"] == "Water at ankle depth."
+    assert report["reviewed_at"] is None
+    assert calls == [{"database_url": get_settings().database_url, "limit": 25}]
+    assert_openapi_schema(payload, "AdminUserReportsResponse")
+
+
+def test_admin_report_moderation_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    calls: list[dict[str, object]] = []
+
+    def moderate_report(**kwargs: object) -> UserReportModerationRecord:
+        calls.append(kwargs)
+        return UserReportModerationRecord(
+            id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            status="approved",
+            summary="Water at ankle depth.",
+            lat=25.033,
+            lng=121.5654,
+            created_at=datetime(2026, 4, 29, 12, 0, tzinfo=UTC),
+            reviewed_at=datetime(2026, 4, 29, 12, 5, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(admin_route, "moderate_user_report", moderate_report)
+    client = TestClient(create_app())
+
+    response = client.patch(
+        "/admin/v1/reports/0d51d545-dc6a-4e4b-8f8e-0e42d454d050/moderation",
+        json={"status": "approved", "reason_code": "verified_flood_signal"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["report"]["status"] == "approved"
+    assert payload["report"]["reviewed_at"] == "2026-04-29T12:05:00Z"
+    assert calls == [
+        {
+            "database_url": get_settings().database_url,
+            "report_id": "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            "status": "approved",
+            "reason_code": "verified_flood_signal",
+            "actor_ref": "admin_api",
+        }
+    ]
+    assert_openapi_schema(payload, "UserReportModerationResponse")
+
+
+def test_admin_report_privacy_redaction_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    calls: list[dict[str, object]] = []
+
+    def redact_report(**kwargs: object) -> UserReportPrivacyRedactionRecord:
+        calls.append(kwargs)
+        return UserReportPrivacyRedactionRecord(
+            id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            status="deleted",
+            privacy_level="redacted",
+            redacted_at=datetime(2026, 4, 29, 12, 10, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(admin_route, "redact_user_report_privacy", redact_report)
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/admin/v1/reports/0d51d545-dc6a-4e4b-8f8e-0e42d454d050/privacy-redaction",
+        json={"reason_code": "private_data_exposure"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["redaction"] == {
+        "report_id": "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+        "status": "deleted",
+        "privacy_level": "redacted",
+        "redacted_at": "2026-04-29T12:10:00Z",
+    }
+    assert calls == [
+        {
+            "database_url": get_settings().database_url,
+            "report_id": "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            "reason_code": "private_data_exposure",
+            "actor_ref": "admin_api",
+        }
+    ]
+    assert_openapi_schema(payload, "UserReportPrivacyRedactionResponse")
+
+
+def test_admin_report_moderation_rejects_invalid_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    called = False
+
+    def moderate_report(**_kwargs: object) -> UserReportModerationRecord:
+        nonlocal called
+        called = True
+        raise AssertionError("moderation repository should not be called")
+
+    monkeypatch.setattr(admin_route, "moderate_user_report", moderate_report)
+    client = TestClient(create_app())
+
+    response = client.patch(
+        "/admin/v1/reports/0d51d545-dc6a-4e4b-8f8e-0e42d454d050/moderation",
+        json={"status": "pending"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "bad_request"
+    assert called is False
+
+
+def test_admin_report_moderation_rejects_reason_for_wrong_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    called = False
+
+    def moderate_report(**_kwargs: object) -> UserReportModerationRecord:
+        nonlocal called
+        called = True
+        raise AssertionError("moderation repository should not be called")
+
+    monkeypatch.setattr(admin_route, "moderate_user_report", moderate_report)
+    client = TestClient(create_app())
+
+    response = client.patch(
+        "/admin/v1/reports/0d51d545-dc6a-4e4b-8f8e-0e42d454d050/moderation",
+        json={"status": "approved", "reason_code": "abuse_or_spam"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["error"]["code"] == "bad_request"
+    assert "reason_code" in str(payload["error"]["details"])
+    assert called is False
+
+
+def test_admin_pending_reports_return_503_when_database_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+
+    def unavailable(**_kwargs: object) -> list[UserReportModerationRecord]:
+        raise UserReportRepositoryUnavailable("database unavailable")
+
+    monkeypatch.setattr(admin_route, "list_pending_user_reports", unavailable)
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/reports/pending",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "repository_unavailable"
 
 
 def test_admin_sources_fall_back_to_sample_data_when_database_is_unavailable(

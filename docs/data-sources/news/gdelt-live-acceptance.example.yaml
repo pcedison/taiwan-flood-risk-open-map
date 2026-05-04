@@ -1,0 +1,22 @@
+# Template evidence record for GDELT live acceptance.
+#
+# Keep this checked-in example production_complete: false. It demonstrates the
+# required evidence shape but does not prove legal/source approval, egress,
+# alert routing, hosted cadence, or persistence promotion for true live
+# ingestion.
+
+schema_version: gdelt-live-acceptance/v1
+production_complete: false
+readiness_state: not-production-complete
+
+legal_source_approval_ref: docs/data-sources/news/README.md#gdelt-live-acceptance
+source_owner: source-owner
+egress_owner: egress-owner
+rate_limit_policy: placeholder reviewed rate-limit policy ref
+cadence_seconds: 60
+configured_minimum_cadence_seconds: 60
+alert_owner: alert-owner
+alert_route: incident-channel-placeholder
+production_persistence_evidence_ref: placeholder private promotion evidence ref
+rollback_kill_switch_ref: docs/runbooks/production-readiness.md#source-kill-switch
+last_dry_run_or_prod_candidate_evidence_ref: placeholder dry-run or production-candidate evidence ref

@@ -15,10 +15,47 @@ x-python-env: &python-env
   SOURCE_FORUM_ENABLED: ${SOURCE_FORUM_ENABLED:-false}
   SOURCE_PTT_ENABLED: ${SOURCE_PTT_ENABLED:-false}
   SOURCE_DCARD_ENABLED: ${SOURCE_DCARD_ENABLED:-false}
+  SOURCE_PTT_CANDIDATE_APPROVAL_ACK: ${SOURCE_PTT_CANDIDATE_APPROVAL_ACK:-false}
+  SOURCE_DCARD_CANDIDATE_APPROVAL_ACK: ${SOURCE_DCARD_CANDIDATE_APPROVAL_ACK:-false}
   SOURCE_TERMS_REVIEW_ACK: ${SOURCE_TERMS_REVIEW_ACK:-false}
   SOURCE_SAMPLE_DATA_ENABLED: ${SOURCE_SAMPLE_DATA_ENABLED:-false}
+  GDELT_SOURCE_ENABLED: ${GDELT_SOURCE_ENABLED:-false}
+  GDELT_BACKFILL_ENABLED: ${GDELT_BACKFILL_ENABLED:-false}
+  GDELT_REHEARSAL_QUERIES: ${GDELT_REHEARSAL_QUERIES:-}
+  GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY: ${GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY:-10}
+  GDELT_REHEARSAL_CADENCE_SECONDS: ${GDELT_REHEARSAL_CADENCE_SECONDS:-60}
+  GDELT_PRODUCTION_INGESTION_ENABLED: ${GDELT_PRODUCTION_INGESTION_ENABLED:-false}
+  GDELT_PRODUCTION_APPROVAL_EVIDENCE_PATH: ${GDELT_PRODUCTION_APPROVAL_EVIDENCE_PATH:-}
+  GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK: ${GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK:-false}
+  GDELT_PRODUCTION_QUERIES: ${GDELT_PRODUCTION_QUERIES:-}
+  GDELT_PRODUCTION_MAX_RECORDS_PER_QUERY: ${GDELT_PRODUCTION_MAX_RECORDS_PER_QUERY:-10}
+  GDELT_PRODUCTION_CADENCE_SECONDS: ${GDELT_PRODUCTION_CADENCE_SECONDS:-60}
   REALTIME_OFFICIAL_ENABLED: ${REALTIME_OFFICIAL_ENABLED:-true}
-  CWA_API_AUTHORIZATION: ${CWA_API_AUTHORIZATION:-rdec-key-123-45678-011121314}
+  CWA_API_AUTHORIZATION: ${CWA_API_AUTHORIZATION:-}
+  SOURCE_CWA_API_ENABLED: ${SOURCE_CWA_API_ENABLED:-false}
+  CWA_API_URL: ${CWA_API_URL:-}
+  CWA_API_TIMEOUT_SECONDS: ${CWA_API_TIMEOUT_SECONDS:-8}
+  SOURCE_WRA_API_ENABLED: ${SOURCE_WRA_API_ENABLED:-false}
+  WRA_API_URL: ${WRA_API_URL:-}
+  WRA_API_TOKEN: ${WRA_API_TOKEN:-}
+  WRA_API_TIMEOUT_SECONDS: ${WRA_API_TIMEOUT_SECONDS:-8}
+  SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED: ${SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED:-false}
+  FLOOD_POTENTIAL_GEOJSON_URL: ${FLOOD_POTENTIAL_GEOJSON_URL:-}
+  FLOOD_POTENTIAL_GEOJSON_TIMEOUT_SECONDS: ${FLOOD_POTENTIAL_GEOJSON_TIMEOUT_SECONDS:-8}
+  USER_REPORTS_ENABLED: ${USER_REPORTS_ENABLED:-false}
+  USER_REPORTS_RATE_LIMIT_ENABLED: ${USER_REPORTS_RATE_LIMIT_ENABLED:-true}
+  USER_REPORTS_RATE_LIMIT_BACKEND: ${USER_REPORTS_RATE_LIMIT_BACKEND:-redis}
+  USER_REPORTS_RATE_LIMIT_MAX_REQUESTS: ${USER_REPORTS_RATE_LIMIT_MAX_REQUESTS:-5}
+  USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS: ${USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS:-60}
+  USER_REPORTS_RATE_LIMIT_CLIENT_HEADER: ${USER_REPORTS_RATE_LIMIT_CLIENT_HEADER:-}
+  ABUSE_HASH_SALT: ${ABUSE_HASH_SALT:-}
+  USER_REPORTS_CHALLENGE_REQUIRED: ${USER_REPORTS_CHALLENGE_REQUIRED:-false}
+  USER_REPORTS_CHALLENGE_PROVIDER: ${USER_REPORTS_CHALLENGE_PROVIDER:-turnstile}
+  USER_REPORTS_CHALLENGE_SECRET_KEY: ${USER_REPORTS_CHALLENGE_SECRET_KEY:-}
+  USER_REPORTS_CHALLENGE_STATIC_TOKEN: ${USER_REPORTS_CHALLENGE_STATIC_TOKEN:-}
+  USER_REPORTS_CHALLENGE_VERIFY_URL: ${USER_REPORTS_CHALLENGE_VERIFY_URL:-https://challenges.cloudflare.com/turnstile/v0/siteverify}
+  USER_REPORTS_CHALLENGE_TIMEOUT_SECONDS: ${USER_REPORTS_CHALLENGE_TIMEOUT_SECONDS:-2}
+  USER_REPORTS_CHALLENGE_NON_PRODUCTION_BYPASS: ${USER_REPORTS_CHALLENGE_NON_PRODUCTION_BYPASS:-false}
 
 services:
   web:
@@ -31,6 +68,11 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
       NEXT_TELEMETRY_DISABLED: ${NEXT_TELEMETRY_DISABLED:-1}
+      NEXT_PUBLIC_BASEMAP_STYLE_URL: ${NEXT_PUBLIC_BASEMAP_STYLE_URL:-}
+      NEXT_PUBLIC_BASEMAP_KIND: ${NEXT_PUBLIC_BASEMAP_KIND:-}
+      NEXT_PUBLIC_BASEMAP_PMTILES_URL: ${NEXT_PUBLIC_BASEMAP_PMTILES_URL:-}
+      NEXT_PUBLIC_BASEMAP_RASTER_TILES: ${NEXT_PUBLIC_BASEMAP_RASTER_TILES:-}
+      NEXT_PUBLIC_BASEMAP_ATTRIBUTION: ${NEXT_PUBLIC_BASEMAP_ATTRIBUTION:-}
       WEB_PORT: ${WEB_PORT:-3000}
     ports:
       - "${WEB_PORT:-3000}:3000"
@@ -74,8 +116,10 @@ services:
     environment:
       <<: *python-env
       WORKER_IDLE_SECONDS: ${WORKER_IDLE_SECONDS:-60}
+      WORKER_METRICS_TEXTFILE_PATH: ${WORKER_METRICS_TEXTFILE_PATH:-}
     volumes:
       - .:/workspace
+      - monitoring-textfile:/var/lib/node_exporter/textfile_collector
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,9 +138,13 @@ services:
     environment:
       <<: *python-env
       SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-300}
+      SCHEDULER_METRICS_TEXTFILE_PATH: ${SCHEDULER_METRICS_TEXTFILE_PATH:-}
     volumes:
       - .:/workspace
+      - monitoring-textfile:/var/lib/node_exporter/textfile_collector
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -163,9 +211,61 @@ services:
     volumes:
       - minio-data:/data
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/monitoring/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+      - node-exporter
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-local}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/monitoring/flood-risk-runtime-dashboard.json:/var/lib/grafana/dashboards/flood-risk-runtime-dashboard.json:ro
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - --collector.disable-defaults
+      - --collector.textfile
+      - --collector.textfile.directory=/var/lib/node_exporter/textfile_collector
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    volumes:
+      - monitoring-textfile:/var/lib/node_exporter/textfile_collector:ro
+    profiles:
+      - monitoring
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
   web-next-cache:
   web-node-modules:
+  prometheus-data:
+  grafana-data:
+  monitoring-textfile:

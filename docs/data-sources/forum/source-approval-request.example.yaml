@@ -1,0 +1,85 @@
+version: 1
+request:
+  source_key: ptt
+  platform: PTT
+  requested_acceptance:
+    accepted: false
+    decision: rejected
+    reason: >-
+      Example request remains blocked because required terms, privacy,
+      retention, moderation, opt-out, and rate-limit evidence has not been
+      approved.
+  proposed_collection:
+    access_method: none
+    allowed_operations: []
+    requested_operations: []
+    prohibited_operations_ack:
+      - real_crawling
+      - scraping
+      - http_fetch
+      - login_bypass
+      - anti_bot_circumvention
+      - private_content_access
+      - raw_content_storage
+      - identity_storage
+    no_login_bypass: true
+    no_antibot_circumvention: true
+    no_private_deleted_or_hidden_content: true
+  evidence:
+    terms:
+      status: missing
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: "PTT terms, robots, and board rules have not been approved."
+      references: []
+    privacy:
+      status: missing
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: "Stored field inventory and username handling are not approved."
+      references: []
+    retention:
+      status: missing
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: "Raw snapshot and derived evidence retention limits are not approved."
+      references: []
+    moderation:
+      status: missing
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: "Forum-specific rejection and escalation rules are not approved."
+      references: []
+    opt_out:
+      status: missing
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: "Source URL, author, and affected-person suppression workflow is missing."
+      references: []
+    rate_limit:
+      status: missing
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: "Approved quota, backoff, and emergency disable owner are missing."
+      references: []
+  governance:
+    requested_by: example-only
+    reviewed_by: []
+    review_date: ""
+    public_contact_or_opt_out: ""
+    emergency_disable_owner: ""
+    notes: >-
+      This fixture documents the request shape only. It is not an approval and
+      must remain rejected until evidence is reviewed.
+  boundary:
+    implementation_included: false
+    fetcher_included: false
+    crawler_included: false
+    scraper_included: false
+    http_fetch_included: false

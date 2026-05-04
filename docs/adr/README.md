@@ -18,7 +18,7 @@
 | ADR | Title | Status | Date |
 |---|---|---|---|
 | [0001](0001-sdd-as-source-of-truth.md) | SDD as Source of Truth | Accepted | 2026-04-28 |
-| [0002](0002-maplibre-self-hosted-osm-tiles.md) | MapLibre and Self-Hosted OSM Tiles | Accepted | 2026-04-28 |
+| [0002](0002-maplibre-self-hosted-osm-tiles.md) | MapLibre and Open PMTiles Basemap | Accepted | 2026-04-28 |
 | [0003](0003-fastapi-postgis-backend.md) | FastAPI and PostGIS Backend | Accepted | 2026-04-28 |
 | [0004](0004-adapter-based-data-ingestion.md) | Adapter-Based Data Ingestion | Accepted | 2026-04-28 |
 | [0005](0005-dual-risk-score-model.md) | Dual Risk Score Model | Accepted | 2026-04-28 |

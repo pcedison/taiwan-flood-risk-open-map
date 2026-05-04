@@ -1,7 +1,27 @@
 "use client";
 
 import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
+import { Protocol } from "pmtiles";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { getBasemapStyleConfig } from "./lib/basemap-style";
+import {
+  buildRiskAssessmentPayload,
+  buildLayerDisplayState,
+  buildUserReportPayload,
+  evidenceSourceUrl,
+  evidenceTimeSummary,
+  formatConfidence,
+  formatCoordinate,
+  formatDateTime,
+  formatDistance,
+  getEvidenceDisplayState,
+  getUserReportSubmissionDisplayState,
+  selectEvidenceItems,
+  shouldFetchEvidenceList,
+} from "./lib/risk-display";
+import type { EvidenceItem, EvidencePreview, EvidenceStatus, UserReportSubmissionStatus } from "./lib/risk-display";
+import type { LayerContractItem } from "./lib/risk-display";
+import { postUserReport, UserReportSubmitError } from "./lib/user-reports";
 
 type CoordinateSource = "default" | "map" | "search";
 
@@ -14,16 +34,27 @@ type Coordinate = {
 type GeocodeResponse = {
   candidates: Array<{
     confidence: number;
+    limitations?: string[];
+    matched_query?: string | null;
     name: string;
     point: {
       lat: number;
       lng: number;
     };
+    precision?: "exact_address" | "road_or_lane" | "poi" | "admin_area" | "map_click" | "unknown";
+    requires_confirmation?: boolean;
     source: string;
   }>;
 };
 
+type EvidenceListResponse = {
+  assessment_id: string;
+  items: EvidenceItem[];
+  next_cursor: string | null;
+};
+
 type RiskAssessmentResponse = {
+  assessment_id: string;
   realtime: {
     level: string;
   };
@@ -38,21 +69,7 @@ type RiskAssessmentResponse = {
     main_reasons: string[];
     missing_sources: string[];
   };
-  evidence: Array<{
-    id: string;
-    source_type: string;
-    event_type: string;
-    title: string;
-    summary: string;
-    confidence: number;
-    occurred_at?: string | null;
-    observed_at: string | null;
-    ingested_at: string | null;
-    published_at?: string | null;
-    source_url?: string | null;
-    url?: string | null;
-    distance_to_query_m: number | null;
-  }>;
+  evidence: EvidencePreview[];
   data_freshness: Array<{
     source_id: string;
     name: string;
@@ -65,6 +82,8 @@ type RiskAssessmentResponse = {
     attention_level: string;
     updated_at: string;
   };
+  layers?: LayerContractItem[];
+  map_layers?: LayerContractItem[];
 };
 
 type RadiusFeatureCollection = {
@@ -92,6 +111,7 @@ type MapFeatureCollection = {
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+let activePmtilesProtocol: Protocol | null = null;
 
 const text = {
   appLabel: "台灣淹水風險地圖",
@@ -129,16 +149,30 @@ const text = {
   evidenceOpenSource: "開啟來源",
   evidenceMissingUrl: "未提供連結",
   evidenceEmpty: "本次查詢尚未回傳可列出的資料佐證。",
+  evidenceLoading: "正在載入完整資料佐證。",
+  evidenceError: "完整資料佐證載入失敗，先顯示風險摘要中的預覽資料。",
   limitations: "資料限制",
   evidenceFlood: "尚未查詢附近淹水事件。",
   evidenceRain: "查詢後會顯示雨量、水位與淹水潛勢資料。",
   evidenceTerrain: "公開資料會保留來源與時間，方便回頭查證。",
   freshness: "資料新鮮度",
+  layers: "圖層管線",
+  layerReady: "可顯示",
+  layerLimited: "部分可用",
+  layerEmpty: "無圖層資料",
+  layerPending: "等待查詢",
+  layerContract: "API 圖層合約",
+  layerFallback: "由 freshness / evidence 推導",
+  layerNoTile: "尚未提供 tile URL",
+  layerNoData: "本次查詢未回傳可展示的圖層或資料來源。",
+  layerFeatureCount: "資料筆數",
   offline: "尚未連線",
   online: "已連線",
   loading: "查詢中",
   queryFailed: "查詢失敗，請稍後再試。",
   noGeocodeResult: "找不到這個地點，請換一個關鍵字再試。",
+  geocodeNeedsConfirmation: "定位只到較粗範圍，請改輸入道路或門牌，或直接點選地圖後再查詢。",
+  geocodePrecision: "定位精度",
   lastSync: "最後同步：--",
   freshnessNote: "查詢後會顯示資料來源的最新狀態。",
   defaultSource: "預設位置",
@@ -194,8 +228,6 @@ const TAIWAN_CITY_GEOJSON: MapFeatureCollection = {
   ],
 };
 
-const formatCoordinate = (value: number) => value.toFixed(5);
-
 const healthLabels: Record<string, string> = {
   healthy: "正常",
   degraded: "延遲",
@@ -205,6 +237,39 @@ const healthLabels: Record<string, string> = {
 };
 
 const healthLabel = (value: string) => healthLabels[value] ?? value;
+
+const geocodePrecisionLabels: Record<string, string> = {
+  admin_area: "行政區",
+  exact_address: "門牌",
+  map_click: "地圖點選",
+  poi: "地標 / POI",
+  road_or_lane: "道路 / 巷道",
+  unknown: "未知",
+};
+
+const geocodePrecisionLabel = (value?: string) =>
+  geocodePrecisionLabels[value ?? "unknown"] ?? geocodePrecisionLabels.unknown;
+
+const geocodeCandidateNotice = (candidate: GeocodeResponse["candidates"][number]) => {
+  const parts = [`${text.geocodePrecision}：${geocodePrecisionLabel(candidate.precision)}`];
+  if (candidate.matched_query && candidate.matched_query !== candidate.name) {
+    parts.push(`匹配：${candidate.matched_query}`);
+  }
+  if (candidate.limitations?.length) {
+    parts.push(candidate.limitations.join(" "));
+  }
+  return parts.join("。");
+};
+
+const layerAvailabilityLabels: Record<string, string> = {
+  available: text.layerReady,
+  empty: text.layerEmpty,
+  limited: text.layerLimited,
+  pending: text.layerPending,
+  unavailable: "不可用",
+};
+
+const layerAvailabilityLabel = (value: string) => layerAvailabilityLabels[value] ?? value;
 
 const sourceTypeLabels: Record<string, string> = {
   official: "官方公開資料",
@@ -221,38 +286,6 @@ const riskMeterPosition = (level?: string) => {
   if (level === "高") return "75%";
   if (level === "極高") return "92%";
   return "8%";
-};
-
-const formatConfidence = (value: number) => `${Math.round(value * 100)}%`;
-
-const formatDistance = (value: number | null) =>
-  value === null ? "未提供" : `${Math.round(value).toLocaleString("zh-TW")} m`;
-
-const formatDateTime = (value: string | null) => {
-  if (!value) return "未提供";
-  return new Intl.DateTimeFormat("zh-TW", {
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    month: "2-digit",
-  }).format(new Date(value));
-};
-
-const evidenceSourceUrl = (item: RiskAssessmentResponse["evidence"][number]) =>
-  item.url ?? item.source_url ?? null;
-
-const evidencePublishedAt = (item: RiskAssessmentResponse["evidence"][number]) =>
-  item.published_at ?? item.occurred_at ?? null;
-
-const evidenceTimeSummary = (item: RiskAssessmentResponse["evidence"][number]) => {
-  const observedAt = item.observed_at;
-  const publishedAt = evidencePublishedAt(item);
-
-  if (observedAt && publishedAt) {
-    return `${formatDateTime(observedAt)} / ${formatDateTime(publishedAt)}`;
-  }
-
-  return formatDateTime(observedAt ?? publishedAt ?? null);
 };
 
 const targetZoom = (coordinate: Coordinate, radius: number) => {
@@ -274,6 +307,16 @@ async function postJson<T>(path: string, payload: unknown): Promise<T> {
     },
     method: "POST",
   });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+async function getJson<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`);
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);
@@ -329,20 +372,82 @@ function createMarkerElement() {
   return marker;
 }
 
+function registerPmtilesProtocol(maplibregl: typeof import("maplibre-gl")) {
+  const protocol = new Protocol();
+
+  try {
+    maplibregl.removeProtocol("pmtiles");
+  } catch {
+    // MapLibre does not expose a protocol registry check, so cleanup is best-effort.
+  }
+
+  maplibregl.addProtocol("pmtiles", protocol.tile);
+  activePmtilesProtocol = protocol;
+
+  return () => {
+    if (activePmtilesProtocol !== protocol) return;
+    maplibregl.removeProtocol("pmtiles");
+    activePmtilesProtocol = null;
+  };
+}
+
+function ensureTaiwanCityDots(map: MapLibreMap) {
+  if (!map.getSource("taiwan-cities")) {
+    map.addSource("taiwan-cities", {
+      type: "geojson",
+      data: TAIWAN_CITY_GEOJSON,
+    });
+  }
+
+  if (!map.getLayer("taiwan-city-dots")) {
+    map.addLayer({
+      id: "taiwan-city-dots",
+      type: "circle",
+      source: "taiwan-cities",
+      paint: {
+        "circle-color": "#0d5f4b",
+        "circle-radius": 4,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2,
+      },
+    });
+  }
+}
+
 export default function HomePage() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
+  const requestIdRef = useRef(0);
   const [query, setQuery] = useState(text.taipeiMainStation);
   const [radius, setRadius] = useState(INITIAL_RADIUS);
   const [coordinate, setCoordinate] = useState<Coordinate>(INITIAL_COORDINATE);
   const [assessment, setAssessment] = useState<RiskAssessmentResponse | null>(null);
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([]);
+  const [evidenceStatus, setEvidenceStatus] = useState<EvidenceStatus>("idle");
   const [isLoading, setIsLoading] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [geocodeNotice, setGeocodeNotice] = useState<string | null>(null);
   const [locationLabel, setLocationLabel] = useState(text.taipeiMainStation);
+  const [reportSummary, setReportSummary] = useState("");
+  const [reportStatus, setReportStatus] = useState<UserReportSubmissionStatus>("idle");
 
   const statusText = isMapReady ? text.mapStatusReady : text.mapStatusLoading;
+  const displayedEvidence = assessment
+    ? selectEvidenceItems(assessment.evidence, evidenceItems, evidenceStatus)
+    : [];
+  const evidenceDisplayState = getEvidenceDisplayState(
+    evidenceStatus,
+    displayedEvidence.length,
+  );
+  const layerDisplayState = assessment
+    ? buildLayerDisplayState({
+        dataFreshness: assessment.data_freshness,
+        evidenceItems,
+        layers: assessment.map_layers ?? assessment.layers,
+      })
+    : { hasTileContract: false, items: [], status: "pending" as const };
   const currentSummary = useMemo(
     () =>
       coordinate.source === "search"
@@ -350,13 +455,24 @@ export default function HomePage() {
         : `${text.selectedPrefix}：${sourceLabels[coordinate.source]}`,
     [coordinate.source, locationLabel],
   );
+  const userReportPayload = useMemo(
+    () => buildUserReportPayload(coordinate, reportSummary),
+    [coordinate, reportSummary],
+  );
+  const reportDisplayState = getUserReportSubmissionDisplayState(reportStatus);
+  const isReportLoading = reportStatus === "loading";
 
   useEffect(() => {
     let disposed = false;
+    let unregisterPmtilesProtocol: (() => void) | null = null;
 
     async function mountMap() {
       const maplibregl = await import("maplibre-gl");
       if (disposed || !mapContainerRef.current || mapRef.current) return;
+
+      unregisterPmtilesProtocol = registerPmtilesProtocol(maplibregl);
+      const basemap = getBasemapStyleConfig();
+      basemap.warnings.forEach((warning) => console.warn(warning));
 
       const map = new maplibregl.Map({
         attributionControl: false,
@@ -366,49 +482,7 @@ export default function HomePage() {
           [118.0, 20.5],
           [123.8, 26.8],
         ],
-        style: {
-          version: 8,
-          sources: {
-            osm: {
-              type: "raster",
-              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-              tileSize: 256,
-              attribution: "© OpenStreetMap contributors",
-            },
-            "taiwan-cities": {
-              type: "geojson",
-              data: TAIWAN_CITY_GEOJSON,
-            },
-          },
-          layers: [
-            {
-              id: "base-water",
-              type: "background",
-              paint: {
-                "background-color": "#c9d9d5",
-              },
-            },
-            {
-              id: "osm",
-              type: "raster",
-              source: "osm",
-              paint: {
-                "raster-opacity": 0.88,
-              },
-            },
-            {
-              id: "taiwan-city-dots",
-              type: "circle",
-              source: "taiwan-cities",
-              paint: {
-                "circle-color": "#0d5f4b",
-                "circle-radius": 4,
-                "circle-stroke-color": "#ffffff",
-                "circle-stroke-width": 2,
-              },
-            },
-          ],
-        },
+        style: basemap.style,
         zoom: TAIWAN_OVERVIEW.zoom,
       });
 
@@ -417,6 +491,8 @@ export default function HomePage() {
       map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
       map.on("load", () => {
+        ensureTaiwanCityDots(map);
+
         if (!map.getSource("query-radius")) {
           map.addSource("query-radius", {
             type: "geojson",
@@ -451,8 +527,12 @@ export default function HomePage() {
           source: "map",
         });
         setLocationLabel(sourceLabels.map);
+        requestIdRef.current += 1;
         setAssessment(null);
+        setEvidenceItems([]);
+        setEvidenceStatus("idle");
         setErrorMessage(null);
+        setGeocodeNotice(null);
       });
     }
 
@@ -464,6 +544,7 @@ export default function HomePage() {
       markerRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
+      unregisterPmtilesProtocol?.();
     };
   }, []);
 
@@ -499,8 +580,11 @@ export default function HomePage() {
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setIsLoading(true);
     setErrorMessage(null);
+    setGeocodeNotice(null);
 
     const normalized = query.trim();
     let target = coordinate;
@@ -516,6 +600,8 @@ export default function HomePage() {
         const candidate = geocode.candidates[0];
         if (!candidate || candidate.confidence < MIN_GEOCODE_CONFIDENCE) {
           setAssessment(null);
+          setEvidenceItems([]);
+          setEvidenceStatus("idle");
           setErrorMessage(text.noGeocodeResult);
           return;
         }
@@ -527,7 +613,9 @@ export default function HomePage() {
         };
         setCoordinate(target);
         setLocationLabel(candidate.name);
-        resolvedLocationText = candidate.name;
+        setGeocodeNotice(geocodeCandidateNotice(candidate));
+        resolvedLocationText =
+          normalized === candidate.name ? candidate.name : `${normalized}｜${candidate.name}`;
         mapRef.current?.resize();
         mapRef.current?.flyTo({
           center: [target.lng, target.lat],
@@ -535,22 +623,76 @@ export default function HomePage() {
           essential: true,
           zoom: targetZoom(target, radius),
         });
+
+        if (candidate.requires_confirmation) {
+          setAssessment(null);
+          setEvidenceItems([]);
+          setEvidenceStatus("idle");
+          setGeocodeNotice(`${geocodeCandidateNotice(candidate)}。${text.geocodeNeedsConfirmation}`);
+          return;
+        }
       }
 
-      const risk = await postJson<RiskAssessmentResponse>("/v1/risk/assess", {
-        point: {
-          lat: target.lat,
-          lng: target.lng,
-        },
-        radius_m: radius,
-        time_context: "now",
-        location_text: resolvedLocationText,
-      });
+      const risk = await postJson<RiskAssessmentResponse>(
+        "/v1/risk/assess",
+        buildRiskAssessmentPayload(target, radius, resolvedLocationText),
+      );
+      if (requestIdRef.current !== requestId) return;
       setAssessment(risk);
+      setEvidenceItems(risk.evidence);
+
+      if (shouldFetchEvidenceList(risk.assessment_id)) {
+        setEvidenceStatus("loading");
+        try {
+          const evidence = await getJson<EvidenceListResponse>(
+            `/v1/evidence/${encodeURIComponent(risk.assessment_id)}`,
+          );
+          if (requestIdRef.current !== requestId) return;
+          setEvidenceItems(evidence.items);
+          setEvidenceStatus("ready");
+        } catch {
+          if (requestIdRef.current !== requestId) return;
+          setEvidenceStatus("error");
+        }
+      } else {
+        setEvidenceStatus("ready");
+      }
     } catch {
-      setErrorMessage(text.queryFailed);
+      if (requestIdRef.current === requestId) {
+        setErrorMessage(text.queryFailed);
+      }
     } finally {
-      setIsLoading(false);
+      if (requestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
+    }
+  }
+
+  async function handleUserReportSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const report = buildUserReportPayload(coordinate, reportSummary);
+    if (!report.isValid) {
+      setReportStatus("idle");
+      return;
+    }
+
+    setReportStatus("loading");
+    try {
+      const response = await postUserReport(API_BASE_URL, report.payload);
+      if (response.status === "pending") {
+        setReportStatus("success");
+        setReportSummary("");
+      } else {
+        setReportStatus("error");
+      }
+    } catch (error) {
+      if (error instanceof UserReportSubmitError && error.code === "feature_disabled") {
+        setReportStatus("feature_disabled");
+      } else if (error instanceof UserReportSubmitError && error.code === "repository_unavailable") {
+        setReportStatus("repository_unavailable");
+      } else {
+        setReportStatus("error");
+      }
     }
   }
 
@@ -618,6 +760,7 @@ export default function HomePage() {
             {isLoading ? text.loading : text.assessRisk}
           </button>
           {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+          {geocodeNotice ? <p className="form-notice">{geocodeNotice}</p> : null}
         </form>
 
         <section className="panel-section coordinate-panel">
@@ -639,6 +782,98 @@ export default function HomePage() {
               <dd>{radius.toLocaleString("zh-TW")} m</dd>
             </div>
           </dl>
+        </section>
+
+        <form className="panel-section user-report-panel" onSubmit={handleUserReportSubmit}>
+          <div className="section-heading">
+            <span className="section-kicker">Public report</span>
+            <strong>Share local flood signal</strong>
+          </div>
+          <div className="report-location">
+            <span>Report location</span>
+            <strong>
+              {formatCoordinate(coordinate.lat)}, {formatCoordinate(coordinate.lng)}
+            </strong>
+          </div>
+          <label className="field">
+            <span>Observation</span>
+            <textarea
+              value={reportSummary}
+              onChange={(event) => {
+                setReportSummary(event.target.value);
+                if (reportStatus !== "loading") setReportStatus("idle");
+              }}
+              placeholder="Briefly describe visible flooding, water depth, or road impact."
+              maxLength={500}
+              rows={4}
+            />
+          </label>
+          {!userReportPayload.isValid && reportSummary.length > 0 ? (
+            <p className="form-error">Add a short observation before submitting.</p>
+          ) : null}
+          <button
+            className="primary-action"
+            type="submit"
+            disabled={isReportLoading || !userReportPayload.isValid}
+          >
+            {isReportLoading ? reportDisplayState.submitLabel : "Submit report"}
+          </button>
+          {reportDisplayState.message ? (
+            <p className={`report-state report-state-${reportDisplayState.kind}`} role="status">
+              {reportDisplayState.message}
+            </p>
+          ) : null}
+        </form>
+
+        <section className="panel-section layer-panel">
+          <div className="section-heading">
+            <span className="section-kicker">{text.layers}</span>
+            <strong>
+              {layerDisplayState.status === "ready"
+                ? text.layerReady
+                : layerDisplayState.status === "limited"
+                  ? text.layerLimited
+                  : layerDisplayState.status === "empty"
+                    ? text.layerEmpty
+                    : text.layerPending}
+            </strong>
+          </div>
+          <div className="layer-contract-status">
+            {layerDisplayState.hasTileContract ? text.layerContract : text.layerFallback}
+          </div>
+          {layerDisplayState.items.length ? (
+            <ul className="layer-list">
+              {layerDisplayState.items.map((item) => (
+                <li key={item.id}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{`${item.kind} / ${layerAvailabilityLabel(item.availability)}`}</span>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>{text.freshness}</dt>
+                      <dd>{formatDateTime(item.freshnessAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>{text.layerFeatureCount}</dt>
+                      <dd>{item.featureCount ?? "--"}</dd>
+                    </div>
+                    <div>
+                      <dt>{text.mapStatus}</dt>
+                      <dd>{healthLabel(item.status)}</dd>
+                    </div>
+                    <div>
+                      <dt>Tile</dt>
+                      <dd>{item.tileUrl ? "XYZ" : text.layerNoTile}</dd>
+                    </div>
+                  </dl>
+                  {item.message ? <p>{item.message}</p> : null}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>{assessment ? text.layerNoData : text.freshnessNote}</p>
+          )}
         </section>
 
         <section className="panel-section risk-summary">
@@ -679,7 +914,7 @@ export default function HomePage() {
               <strong>{text.evidenceTitle}</strong>
               {assessment ? (
                 <span>
-                  {assessment.evidence.length} {text.evidenceCountSuffix}
+                  {displayedEvidence.length} {text.evidenceCountSuffix}
                 </span>
               ) : null}
             </summary>
@@ -706,9 +941,21 @@ export default function HomePage() {
                   ))}
                 </div>
 
-                {assessment.evidence.length ? (
+                {evidenceDisplayState.showLoading ? (
+                  <div className="evidence-state" role="status">
+                    {text.evidenceLoading}
+                  </div>
+                ) : null}
+
+                {evidenceDisplayState.showError ? (
+                  <div className="evidence-state evidence-state-error" role="alert">
+                    {text.evidenceError}
+                  </div>
+                ) : null}
+
+                {evidenceDisplayState.showList ? (
                   <ul className="evidence-list">
-                    {assessment.evidence.map((item) => {
+                    {displayedEvidence.map((item) => {
                       const sourceUrl = evidenceSourceUrl(item);
 
                       return (
@@ -748,9 +995,9 @@ export default function HomePage() {
                       );
                     })}
                   </ul>
-                ) : (
+                ) : evidenceDisplayState.showEmpty ? (
                   <div className="evidence-empty">{text.evidenceEmpty}</div>
-                )}
+                ) : null}
               </div>
             ) : (
               <ul className="evidence-placeholder-list">

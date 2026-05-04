@@ -16,7 +16,6 @@ ObservationType = Literal["rainfall", "water_level"]
 CWA_RAINFALL_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001"
 WRA_WATER_LEVEL_URL = "https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0"
 WRA_STATION_URL = "https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92"
-DEFAULT_CWA_AUTHORIZATION = "rdec-key-123-45678-011121314"
 USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 NEARBY_STATION_LIMIT_M = 25_000.0
 TAIPEI_TZ = timezone(timedelta(hours=8))
@@ -91,8 +90,10 @@ def fetch_official_realtime_bundle(
     lat: float,
     lng: float,
     radius_m: int,
-    cwa_authorization: str | None = DEFAULT_CWA_AUTHORIZATION,
+    cwa_authorization: str | None = None,
     enabled: bool = True,
+    cwa_enabled: bool = True,
+    wra_enabled: bool = True,
     now: datetime | None = None,
 ) -> OfficialRealtimeBundle:
     checked_at = now or datetime.now(UTC)
@@ -100,21 +101,17 @@ def fetch_official_realtime_bundle(
         return OfficialRealtimeBundle(
             observations=(),
             source_statuses=(
-                OfficialRealtimeSourceStatus(
-                    source_id="cwa-rainfall",
-                    name="中央氣象署即時雨量",
-                    health_status="degraded",
-                    observed_at=None,
-                    ingested_at=checked_at,
-                    message="即時雨量資料來源目前已停用。",
+                _disabled_realtime_status(
+                    "cwa-rainfall",
+                    "中央氣象署即時雨量",
+                    checked_at,
+                    "即時雨量資料來源目前已停用。",
                 ),
-                OfficialRealtimeSourceStatus(
-                    source_id="wra-water-level",
-                    name="經濟部水利署即時水位",
-                    health_status="degraded",
-                    observed_at=None,
-                    ingested_at=checked_at,
-                    message="即時水位資料來源目前已停用。",
+                _disabled_realtime_status(
+                    "wra-water-level",
+                    "經濟部水利署即時水位",
+                    checked_at,
+                    "即時水位資料來源目前已停用。",
                 ),
             ),
         )
@@ -122,26 +119,62 @@ def fetch_official_realtime_bundle(
     observations: list[OfficialRealtimeObservation] = []
     statuses: list[OfficialRealtimeSourceStatus] = []
 
-    rainfall = _nearest_rainfall_observation(
-        lat=lat,
-        lng=lng,
-        radius_m=radius_m,
-        cwa_authorization=cwa_authorization,
-        checked_at=checked_at,
-    )
-    observations.extend(rainfall[0])
-    statuses.append(rainfall[1])
+    if cwa_enabled:
+        rainfall = _nearest_rainfall_observation(
+            lat=lat,
+            lng=lng,
+            radius_m=radius_m,
+            cwa_authorization=cwa_authorization,
+            checked_at=checked_at,
+        )
+        observations.extend(rainfall[0])
+        statuses.append(rainfall[1])
+    else:
+        statuses.append(
+            _disabled_realtime_status(
+                "cwa-rainfall",
+                "中央氣象署即時雨量",
+                checked_at,
+                "中央氣象署雨量開放資料尚未啟用；可先以本地歷史資料與限制說明完成 MVP。",
+            )
+        )
 
-    water_level = _nearest_water_level_observation(
-        lat=lat,
-        lng=lng,
-        radius_m=radius_m,
-        checked_at=checked_at,
-    )
-    observations.extend(water_level[0])
-    statuses.append(water_level[1])
+    if wra_enabled:
+        water_level = _nearest_water_level_observation(
+            lat=lat,
+            lng=lng,
+            radius_m=radius_m,
+            checked_at=checked_at,
+        )
+        observations.extend(water_level[0])
+        statuses.append(water_level[1])
+    else:
+        statuses.append(
+            _disabled_realtime_status(
+                "wra-water-level",
+                "經濟部水利署即時水位",
+                checked_at,
+                "水利署即時水位開放資料尚未啟用；原始即時資料未品管，啟用後仍需顯示限制。",
+            )
+        )
 
     return OfficialRealtimeBundle(observations=tuple(observations), source_statuses=tuple(statuses))
+
+
+def _disabled_realtime_status(
+    source_id: str,
+    name: str,
+    checked_at: datetime,
+    message: str,
+) -> OfficialRealtimeSourceStatus:
+    return OfficialRealtimeSourceStatus(
+        source_id=source_id,
+        name=name,
+        health_status="degraded",
+        observed_at=None,
+        ingested_at=checked_at,
+        message=message,
+    )
 
 
 def _nearest_rainfall_observation(
@@ -310,8 +343,10 @@ def _nearest_water_level_observation(
 
 
 def _fetch_cwa_rainfall_stations(authorization: str | None) -> tuple[_RainfallStation, ...]:
+    if not authorization:
+        return ()
     params = {
-        "Authorization": authorization or DEFAULT_CWA_AUTHORIZATION,
+        "Authorization": authorization,
         "format": "JSON",
     }
     payload = _fetch_cached_json("cwa-rainfall", f"{CWA_RAINFALL_URL}?{urlencode(params)}", ttl=300)

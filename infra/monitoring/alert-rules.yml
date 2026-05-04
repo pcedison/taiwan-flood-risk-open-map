@@ -1,0 +1,127 @@
+groups:
+  - name: flood-risk-freshness
+    rules:
+      - alert: FloodRiskSourceFreshnessFailed
+        expr: flood_risk_source_freshness_status{status="failed"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: "Source freshness failed for {{ $labels.source_id }}"
+          description: "The source freshness check reported failed status for {{ $labels.source_id }}. Run scripts/ops-source-freshness-check.ps1 against the same environment and inspect worker logs."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskSourceFreshnessDegraded
+        expr: flood_risk_source_freshness_status{status="degraded"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: "Source freshness degraded for {{ $labels.source_id }}"
+          description: "The source freshness check reported degraded status for {{ $labels.source_id }}. Confirm upstream availability, credentials, and recent ingestion results."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskSourceFreshnessUnknown
+        expr: flood_risk_source_freshness_status{status="unknown"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          service: monitoring
+        annotations:
+          summary: "Source freshness unknown for {{ $labels.source_id }}"
+          description: "The source freshness check could not classify {{ $labels.source_id }}. Treat this as degraded until the source is confirmed disabled or healthy."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskSourceFreshnessStale
+        expr: flood_risk_source_freshness_stale == 1
+        for: 10m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: "Source data is stale for {{ $labels.source_id }}"
+          description: "{{ $labels.source_id }} is older than the freshness threshold used by the ops check. Compare source_timestamp_max and last_success_at in the admin source endpoint."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+  - name: flood-risk-api
+    rules:
+      - alert: FloodRiskApiReadyDown
+        expr: (up{job="flood-risk-api"} == 0) or (flood_risk_api_ready == 0)
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "Flood Risk API readiness is down"
+          description: "Prometheus cannot scrape the API metrics target, or a future readiness exporter is reporting /ready down. Check /health, /ready, database, and Redis."
+          runbook_url: "docs/runbooks/runtime-smoke.md"
+
+  - name: flood-risk-runtime-heartbeats
+    rules:
+      - alert: FloodRiskWorkerHeartbeatMissing
+        expr: absent(flood_risk_worker_heartbeat_timestamp_seconds) or (time() - max by (service, instance, queue) (flood_risk_worker_heartbeat_timestamp_seconds) > 300)
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Worker heartbeat is missing"
+          description: "No worker heartbeat metric is present, or the latest worker heartbeat for {{ $labels.instance }} queue={{ $labels.queue }} is older than 300 seconds. Check worker logs and the textfile collector output."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskSchedulerHeartbeatMissing
+        expr: absent(flood_risk_scheduler_heartbeat_timestamp_seconds) or (time() - max by (service, instance, scheduler) (flood_risk_scheduler_heartbeat_timestamp_seconds) > 600)
+        for: 10m
+        labels:
+          severity: warning
+          service: scheduler
+        annotations:
+          summary: "Scheduler heartbeat is missing"
+          description: "No scheduler heartbeat metric is present, or the latest scheduler heartbeat for {{ $labels.instance }} scheduler={{ $labels.scheduler }} is older than 600 seconds. Check scheduler logs and the textfile collector output."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskWorkerLastRunFailed
+        expr: flood_risk_worker_last_run_status{status="failed"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          service: worker
+        annotations:
+          summary: "Worker last run failed for {{ $labels.job }}"
+          description: "The latest observed worker run for {{ $labels.job }} on {{ $labels.instance }} queue={{ $labels.queue }} reported failed status. Inspect ingestion/freshness logs before restarting the worker."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskRuntimeQueueMetricsUnavailable
+        expr: flood_risk_runtime_queue_metrics_available == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Runtime queue metrics are unavailable"
+          description: "The runtime queue metrics exporter could not read worker_runtime_jobs. This is final-failed row visibility, not a complete DLQ; check database connectivity and the textfile collector output."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskRuntimeQueueFinalFailedRowsPresent
+        expr: flood_risk_runtime_queue_final_failed_jobs > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Runtime queue has final-failed rows for {{ $labels.queue_name }}"
+          description: "{{ $labels.queue_name }} has exhausted final-failed rows. Inspect row details with the queue ops CLI before any manual requeue; replay audit and poison policy are not implemented."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskRuntimeQueueExpiredLeases
+        expr: flood_risk_runtime_queue_expired_leases > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Runtime queue has expired leases for {{ $labels.queue_name }}"
+          description: "{{ $labels.queue_name }} has running rows with expired leases. Workers can recover retryable rows on dequeue; inspect worker health and database latency."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"

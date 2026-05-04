@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "responseData": [
+    {
+      "ObservatoryIdentifier": "WRA-1001",
+      "ST_NO": "WRA-1001",
+      "StationName": "Dahan Bridge",
+      "RiverName": "Dahan River",
+      "RecordTime": "2026-04-28T16:05:00+08:00",
+      "WaterLevel": "7.82",
+      "WarningLevel": "8.50",
+      "Latitude": "25.0320",
+      "Longitude": "121.4820"
+    },
+    {
+      "ObservatoryIdentifier": "WRA-BAD",
+      "ST_NO": "WRA-BAD",
+      "StationName": "Malformed Station",
+      "RiverName": "Dahan River",
+      "RecordTime": "2026-04-28T16:05:00+08:00",
+      "WaterLevel": ""
+    }
+  ]
+}

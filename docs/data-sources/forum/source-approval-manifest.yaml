@@ -1,0 +1,144 @@
+# Forum/social source approval manifest.
+#
+# This file is an acceptance boundary, not a crawl allowlist. Sources listed as
+# blocked or non_accepted must not fetch, crawl, scrape, or normalize real
+# content. Candidate adapters may only use synthetic local fixtures.
+version: 1
+status: draft
+default: disabled
+global_enable_flag: SOURCE_FORUM_ENABLED
+terms_ack_flag: SOURCE_TERMS_REVIEW_ACK
+approval_request_schema:
+  description: >-
+    Approval-only request format for moving a forum/social source toward
+    acceptance. This schema does not authorize or implement crawling,
+    scraping, HTTP fetching, login bypass, anti-bot circumvention, raw content
+    storage, or identity storage.
+  required_request_fields:
+    - source_key
+    - platform
+    - requested_acceptance
+    - proposed_collection
+    - evidence
+    - governance
+    - boundary
+  required_evidence_categories:
+    - terms
+    - privacy
+    - retention
+    - moderation
+    - opt_out
+    - rate_limit
+  evidence_requirements_when_accepted:
+    status: approved
+    reviewed: true
+    reviewed_by: required
+    reviewed_on: required
+    summary: required
+    references: non_empty_list
+  disallowed_requested_operations:
+    - real_crawling
+    - scraping
+    - http_fetch
+    - login_bypass
+    - anti_bot_circumvention
+    - private_content_access
+    - raw_content_storage
+    - identity_storage
+  required_boundary_attestations:
+    - implementation_included
+    - fetcher_included
+    - crawler_included
+    - scraper_included
+    - http_fetch_included
+sources:
+  - key: ptt
+    platform: PTT
+    family: forum
+    registry_key: ptt
+    source_specific_flag: SOURCE_PTT_ENABLED
+    candidate_approval_ack_flag: SOURCE_PTT_CANDIDATE_APPROVAL_ACK
+    acceptance_status: blocked
+    accepted: false
+    disabled_reason: >-
+      PTT ingestion is blocked pending source approval, legal/terms review,
+      board allowlist, privacy minimization, retention, moderation, opt-out,
+      and rate-limit acceptance.
+    missing_acceptance_fields:
+      - approved_board_allowlist
+      - approved_access_method
+      - robots_and_terms_review_links
+      - no_login_or_over18_bypass_attestation
+      - stored_field_inventory
+      - username_handling_policy
+      - raw_snapshot_retention_limit
+      - moderation_rejection_rules
+      - rate_limit_and_backoff_policy
+      - audit_log_events
+      - opt_out_delete_workflow
+      - emergency_disable_owner
+    prohibited_until_accepted:
+      - real_crawling
+      - scraping
+      - http_fetch
+      - login_bypass
+      - anti_bot_circumvention
+      - raw_post_storage
+      - username_storage
+    candidate_adapter_contract:
+      runtime_mode: local_fixture_only
+      fixture_records: synthetic_only
+      network_access: disabled
+      real_source_records: false
+      http_fetch: false
+      crawl: false
+      scrape: false
+      login_bypass: false
+      anti_bot_circumvention: false
+      raw_content_storage: false
+      identity_storage: false
+  - key: dcard
+    platform: Dcard
+    family: forum
+    registry_key: dcard
+    source_specific_flag: SOURCE_DCARD_ENABLED
+    candidate_approval_ack_flag: SOURCE_DCARD_CANDIDATE_APPROVAL_ACK
+    acceptance_status: blocked
+    accepted: false
+    disabled_reason: >-
+      Dcard ingestion is blocked pending source approval, legal/terms/API
+      review, forum allowlist, privacy minimization, retention, moderation,
+      opt-out, and rate-limit acceptance.
+    missing_acceptance_fields:
+      - approved_forum_allowlist
+      - approved_access_method_or_authorized_api
+      - robots_terms_api_review_links
+      - no_login_hidden_content_or_antibot_bypass_attestation
+      - stored_field_inventory
+      - user_identity_exclusion_policy
+      - raw_body_retention_limit
+      - moderation_rejection_rules
+      - rate_limit_quota_and_backoff_policy
+      - audit_log_events
+      - opt_out_delete_workflow
+      - emergency_disable_owner
+    prohibited_until_accepted:
+      - real_crawling
+      - scraping
+      - http_fetch
+      - login_only_content
+      - anti_bot_circumvention
+      - raw_body_storage
+      - user_identity_storage
+    candidate_adapter_contract:
+      runtime_mode: local_fixture_only
+      fixture_records: synthetic_only
+      network_access: disabled
+      real_source_records: false
+      http_fetch: false
+      crawl: false
+      scrape: false
+      login_bypass: false
+      anti_bot_circumvention: false
+      raw_content_storage: false
+      identity_storage: false

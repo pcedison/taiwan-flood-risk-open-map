@@ -88,16 +88,7 @@ jobs:
         run: npm run typecheck --prefix apps/web
 
       - name: Frontend unit tests
-        run: |
-          set -euo pipefail
-          if find apps/web -type f \( \
-            -name "*.test.ts" -o -name "*.test.tsx" -o -name "*.spec.ts" -o -name "*.spec.tsx" -o \
-            -name "*.test.js" -o -name "*.test.jsx" -o -name "*.spec.js" -o -name "*.spec.jsx" \
-          \) | grep -q .; then
-            npm test --prefix apps/web
-          else
-            echo "::notice title=Empty frontend test suite::apps/web has no JS/TS test files yet; Phase 1 allows this only through this explicit empty-suite check."
-          fi
+        run: npm test --prefix apps/web
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
@@ -133,6 +124,12 @@ jobs:
       - name: Validate source allowlists
         run: python infra/scripts/validate_source_allowlist.py
 
+      - name: Validate monitoring assets
+        run: python infra/scripts/validate_monitoring_assets.py
+
+      - name: Validate production readiness evidence
+        run: python infra/scripts/validate_production_readiness_evidence.py
+
       - name: Validate Docker Compose config
         run: docker compose config --quiet
 
@@ -143,9 +140,9 @@ jobs:
           docker compose --profile tools run --rm migrate
           table_count="$(
             docker compose exec -T postgres psql -U flood_risk -d flood_risk -tAc \
-              "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('data_sources','raw_snapshots','staging_evidence','evidence','location_queries','risk_assessments','risk_assessment_evidence','query_heat_buckets','map_layers','ingestion_jobs','adapter_runs','user_reports','audit_logs');"
+              "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('data_sources','raw_snapshots','staging_evidence','evidence','location_queries','risk_assessments','risk_assessment_evidence','query_heat_buckets','map_layers','ingestion_jobs','adapter_runs','user_reports','audit_logs','worker_scheduler_leases','worker_runtime_jobs','map_layer_features','tile_cache_entries');"
           )"
-          if [ "$table_count" != "13" ]; then
-            echo "::error title=Migration smoke failed::Expected 13 core tables, got ${table_count}"
+          if [ "$table_count" != "17" ]; then
+            echo "::error title=Migration smoke failed::Expected 17 core/runtime tables, got ${table_count}"
             exit 1
           fi

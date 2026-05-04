@@ -3,7 +3,7 @@
 版本：0.1.0  
 狀態：正式工作進度規劃  
 來源規格：`docs/PROJECT_SDD.md`  
-最後更新：2026-04-28  
+最後更新：2026-04-30
 專案授權決策：Apache-2.0  
 主要部署決策：GitHub repo -> Zeabur VPS auto deploy  
 語系決策：繁體中文 only
@@ -132,7 +132,7 @@ Phase 0 驗收：
 
 主要產物：
 
-- MapLibre/Leaflet 地圖 shell。
+- MapLibre GL JS 地圖 shell。
 - 地址搜尋 UI。
 - 地圖點選 marker。
 - Radius circle。
@@ -298,11 +298,26 @@ Phase 5 驗收：
 - 管理者可審核回報。
 - 可疑回報不會直接成為高權重 evidence。
 
+Phase 4/5 legal and privacy gates:
+
+- Public web, PTT, Dcard, generic forum adapters, and user_report ingestion
+  must satisfy `docs/privacy/public-discussion-user-report-gates.md` before
+  development can be accepted or launched.
+- These gates are Phase 4/5 prerequisites and cannot be used to satisfy Phase 2
+  acceptance.
+- Future PR reviewers should use
+  `docs/reviews/phase4-5-public-discussion-governance-gates-2026-04-30.md` as
+  the acceptance checklist for development, launch, rollback, and disable
+  conditions.
+
 ### Phase 6：Production Hardening
 
 目標：
 
 - 完成 Zeabur production beta、監控、備份、壓測、部署文件與公開限制說明。
+- Basemap launch path is MapLibre GL JS plus PMTiles/Protomaps-compatible
+  OpenStreetMap-derived data served from object storage/CDN. TGOS is future
+  optional and must not block MVP or public-interest launch.
 
 建議工期：
 
@@ -330,6 +345,12 @@ Phase 6 驗收：
 
 - GitHub push 可觸發 Zeabur redeploy。
 - Production beta health check 通過。
+- Browser can load a project-controlled or explicitly licensed MapLibre style
+  without TGOS.
+- Basemap delivery documents OSM/ODbL attribution, range request behavior,
+  cache headers, and rollback.
+- Risk overlays and seeded project MVT/query overlays continue to render above
+  the basemap.
 - 備份與還原流程演練通過。
 - P95 查詢延遲符合 SDD 目標或有清楚風險紀錄。
 - 公開頁面有資料來源、限制與免責說明。
@@ -549,7 +570,7 @@ Dependencies：C1
 
 Tasks:
 
-- Add MapLibre/Leaflet map.
+- Add MapLibre GL JS map.
 - Add Taiwan default viewport.
 - Add click marker.
 - Add radius circle.
@@ -593,7 +614,8 @@ Tasks:
 - Add geocode endpoint.
 - Add provider interface.
 - Add mock provider.
-- Add TGOS fallback placeholder.
+- Keep TGOS as a future optional provider placeholder only; runtime smoke and
+  MVP acceptance must pass without TGOS.
 
 Definition of Done:
 
@@ -1075,7 +1097,7 @@ Integration target:
 
 ## 10. Current Project Status
 
-As of 2026-04-29:
+As of 2026-04-30:
 
 - SDD：Done draft, accepted for planning.
 - Work plan：Created.
@@ -1088,13 +1110,26 @@ As of 2026-04-29:
 - Monorepo folders：Done.
 - Docker Compose base：Done and validated with full `docker compose up` smoke.
 - Zeabur runbook：Done and aligned to current runtime env var names.
-- API/web placeholder runtime：Replaced by Phase 1 FastAPI and Next.js dev runtimes in Compose.
-- Worker/scheduler placeholder runtime：Done and smoke-tested.
+- API/web placeholder runtime：Phase 1 FastAPI and Next.js dev runtimes are used by Compose; legacy placeholder server files are fallback-only and must not be counted as completed product runtime.
+- Worker/scheduler placeholder runtime：sample job, scheduler loop, and local durable queue consume paths exist; production source-client rollout and singleton queue/scheduler behavior remain pending implementation.
 - First commit/push：Done.
 - CI：Hard gates added for backend lint/typecheck/tests, frontend lint/typecheck/tests, contracts, and compose config.
 - E2E：Phase 1 Playwright smoke added for map-first risk query rendering.
 - Worker adapters：Phase 2 adapter contract now includes official CWA rainfall, WRA water-level, flood-potential GeoJSON fixture parsers, plus L2 news/public-web sample tests.
-- Implementation：Phase 0 foundation re-accepted after review; Phase 1 map and core query implementation is near acceptance, Phase 2 adapter groundwork expanded, and Phase 3 scoring golden fixtures started.
+- Evidence UI：evidence drawer groundwork has landed beyond the original inline-only summary and is now covered by unit plus desktop/mobile Playwright smoke tests.
+- Worker adapter config：`WORKER_ENABLED_ADAPTER_KEYS` groundwork has landed so enabled adapters can be controlled by configuration; production data-source rollout still needs validation against source allowlist and legal/privacy gates.
+- Placeholder boundary：PTT, Dcard, and user_report adapters are phase-delayed/pending implementation; `packages/geo` and `packages/shared` remain placeholder/baseline areas until dedicated implementation work lands; `infra/monitoring` now has scrape config, alert rules, and heartbeat textfile metric contracts, with dashboards still pending.
+- Implementation：Phase 0 foundation is accepted; Phase 1-3 groundwork exists with tests and fixtures, but the project is now in a hardening sprint rather than a completed MVP acceptance state.
+- Current hardening status：
+  - WP1 文件狀態與 placeholder 邊界：Done.
+  - WP2 Web tests / evidence UX：Done, including Node unit tests and desktop/mobile Playwright smoke.
+  - WP3 Runtime smoke：Done for expanded script/runbook coverage. The smoke now includes queue live smoke, reports default-disabled/enabled smoke, MVT smoke, query heat validation/materialization, and tile feature/cache smoke. A fresh full `scripts/runtime-smoke.ps1 -StopOnExit` run passed after the API/worker/report integration fixes.
+  - WP4 Worker/API ingestion：Done for this hardening pass, including enabled-adapter batch selection, official WRA demo runtime command with DB persistence, DB-first evidence/query heat helper, durable queue consume smoke, and seeded layer metadata.
+  - WP5 Query heat persistence：Done for this checkpoint. `/v1/risk/assess` persists query/assessment snapshots, heat reads completed assessment history, and worker CLI materializes `P1D`/`P7D` buckets for local smoke.
+  - WP6 Worker runtime scheduler：Done for this checkpoint. Config-driven run-once, bounded scheduler, and queue consume paths exist, safe by default and fixture-backed until real source clients and singleton production rollout are selected.
+  - WP7 Tile endpoint：Done for this checkpoint. `/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt` serves DB-backed MVT for seeded layers, and worker-side tile feature/cache smoke exists for `flood-potential`.
+  - WP8 Monitoring heartbeat：Done for this checkpoint. Worker/scheduler heartbeat textfile metrics are opt-in through env vars and alert rules are no longer non-firing placeholders.
+  - WP9 Phase 4/5 gates：Done as governance checklist. Forum/public discussion/user reports remain disabled until source-specific legal/privacy gates are accepted.
 
 Completed execution order:
 
@@ -1131,11 +1166,39 @@ Completed execution order:
 31. Expand Phase 3 scoring golden fixtures for no-evidence, partial-outage, and conflicting-signal cases.
 32. Add protected admin job/source health API skeleton with 401/403 contract tests.
 33. Add worker PostGIS staging writer with raw snapshot upsert and staging evidence insert tests.
+34. Expand UI evidence drawer beyond inline summary list.
+35. Add `WORKER_ENABLED_ADAPTER_KEYS` groundwork for configurable worker adapter enablement.
+36. Align README, work plan, app READMEs, and progress report around Phase 1-3 groundwork plus placeholder boundaries.
+37. Add frontend Node unit tests for risk/evidence display helpers and make `npm test` a real hard gate.
+38. Add runtime smoke PowerShell script and runbook.
+39. Add worker enabled-adapter batch helper and tests proving config-driven adapter selection.
+40. Add official WRA raw snapshot to staging to promotion demo-path test.
+41. Add DB-first query heat repository helper and API limited fallback behavior.
+42. Add checkpoint scope / PR hygiene artifact for `codex/phase2-runtime-demo`.
+43. Add Docker fallback and safety guards to backup/restore drill.
+44. Wire official demo execution into `python -m app.main --run-official-demo --persist --database-url ...`.
+45. Add DB-backed `/v1/layers` metadata with migration seed and fallback behavior.
+46. Add Prometheus source freshness and API availability alert rules.
+47. Verify API, Web, Workers, validators, ops scripts, runtime smoke, and worker DB demo persistence.
+48. Persist `/v1/risk/assess` query/assessment snapshots and query heat history via migration `0005_query_heat_persistence.sql`.
+49. Add config-driven worker run-once and bounded scheduler runtime paths.
+50. Add DB-backed MVT endpoint for seeded `flood-potential` and `query-heat` layers.
+51. Add worker/scheduler heartbeat textfile metrics and active Prometheus alert rules.
+52. Add Phase 4/5 public discussion and user report legal/privacy gate checklists.
+53. Verify migration 0005, MVT tile smoke, query persistence, worker DB demo, and heartbeat textfile output against local Compose.
 
 Next execution order:
 
-1. Expand UI evidence drawer beyond inline summary list.
-2. Add production data-source configuration wiring for enabled adapters.
+1. Replace fixture-backed worker runtime adapters with reviewed real source clients and a durable queue/singleton scheduler.
+2. Wire the open basemap path in engineering: MapLibre style selection,
+   PMTiles/Protomaps source support, object-storage/CDN URL configuration,
+   attribution display, range request smoke, and rollback. Do not require TGOS.
+3. Move project overlay tile generation from evidence/query fallback SQL to
+   dedicated production layer tables and hosting/cache strategy.
+4. Add monitoring dashboards and production scrape deployment around the new heartbeat/freshness metrics.
+5. Implement Phase 4/5 sources only through the new legal/privacy gate checklist.
+6. Prepare this checkpoint update for PR review: final diff check, commit, push, and CI confirmation.
+7. Meet the next-phase runtime acceptance standards recorded in `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md` before claiming queue, reports, query heat materialization, or tile cache readiness.
 
 ---
 
@@ -1154,6 +1217,10 @@ The project is considered public-beta-ready when:
 
 - Phase 4 is accepted or explicitly deferred by ADR.
 - Phase 6 production hardening essentials are accepted.
+- The open basemap PMTiles/object-storage/CDN path has passed browser smoke,
+  attribution review, range request verification, cache review, and rollback
+  rehearsal.
+- Public beta runtime does not depend on TGOS.
 - Backup/restore and deploy rollback are documented.
 - Monitoring can detect source freshness failure.
 
@@ -1172,3 +1239,165 @@ This work plan is intentionally designed so that implementation can be split acr
 - Integration branch controls convergence.
 
 No individual work package is allowed to redefine the product by accident.
+
+---
+
+## 13. WP-E Placeholder Boundary and Ops Runbooks Update - 2026-04-30
+
+This section records the WP-E docs/ops pass so it can be merged alongside the
+parallel hardening work without changing app code.
+
+### Placeholder boundary decisions
+
+- Keep API and Web placeholder server files as fallback-only diagnostics for
+  now. They are not product runtime and should not be counted toward Phase 1+
+  acceptance. A later cleanup can remove them only after runtime smoke and
+  deploy rollback paths no longer need a stdlib/minimal fallback.
+- Keep Worker scheduler/sample paths as smoke/fallback paths until production
+  source clients and singleton scheduler rollout are accepted. A local durable
+  queue consume smoke path now exists.
+- Keep PTT, Dcard, and user_report adapters phase-delayed and disabled until
+  legal/source/privacy gates are complete.
+- Keep `packages/geo` and `packages/shared` marked as baseline/placeholder
+  areas until production tile pipeline and shared rules land. API MVT serving
+  now exists as a minimum verifiable path.
+- Treat query heat as improved but not complete: persisted query/assessment
+  history and local `P1D`/`P7D` materialization smoke exist, but production
+  cadence and retention are still pending.
+
+### Five-point hardening alignment
+
+1. Docs/status alignment: Done in README, work plan, and progress report.
+2. Placeholder boundary cleanup: Done for docs. Remaining code placeholders are
+   explicitly fallback-only, phase-delayed, or known limitations.
+3. Runtime smoke: Done for coverage. Cross-linked from README and ops docs; a
+   fresh `scripts/runtime-smoke.ps1 -StopOnExit` passed after the
+   API/worker/report integration fixes.
+4. Worker/API data realism: Done for this checkpoint. Query persistence and a
+   safe runtime scheduler/queue path exist; real source clients and production
+   singleton behavior remain future work.
+5. Ops runbooks: Monitoring freshness alerts and backup/restore drill now have
+   runbooks plus CI/manual script entrypoints:
+   `docs/runbooks/monitoring-freshness-alerts.md`,
+   `docs/runbooks/backup-restore-drill.md`,
+   `scripts/ops-source-freshness-check.ps1`, and
+   `scripts/backup-restore-drill.ps1`.
+
+### Current four-package hardening status
+
+| Package | Scope | Status |
+|---|---|---|
+| WP1 Docs/status and placeholder boundary | README, work plan, app README, progress report | Done; WP-E added fallback ownership and ops cross-links. |
+| WP2 Web evidence UX/tests | Web UI and frontend tests | Done by owning subagent; WP-E did not modify app code. |
+| WP3 Runtime smoke | Compose smoke script/runbook | Done; local Compose runtime smoke passed. |
+| WP4 Worker/API ingestion realism | Adapter selection, WRA demo path, query heat helper | Done for this checkpoint, including DB-persisted official demo, query persistence/materialization smoke, durable queue consume smoke, MVT tiles, and opt-in heartbeat metrics; production source clients and production layer pipeline remain pending. |
+
+### Verification entrypoints
+
+- Runtime smoke: `.\scripts\runtime-smoke.ps1 -StopOnExit`
+- Monitoring freshness dry-run: `.\scripts\ops-source-freshness-check.ps1 -DryRun`
+- Backup/restore drill dry-run: `.\scripts\backup-restore-drill.ps1`
+- PowerShell syntax smoke:
+  `powershell -NoProfile -Command "[scriptblock]::Create((Get-Content -Raw .\scripts\ops-source-freshness-check.ps1)) | Out-Null; [scriptblock]::Create((Get-Content -Raw .\scripts\backup-restore-drill.ps1)) | Out-Null"`
+
+## 14. Checkpoint PR Hygiene - 2026-04-30
+
+This section is the PR-body-ready checkpoint for branch
+`codex/phase2-runtime-demo`. It records the integrated result of the current
+five-point next-step sequence. No files were staged, committed, or pushed as
+part of the checkpoint documentation pass.
+
+### Current five-point status
+
+1. Checkpoint scope / PR hygiene: Done. Scope, risks, rollback notes, suggested
+   commit message, and PR body draft are captured in
+   `docs/reviews/checkpoint-phase2-runtime-demo-2026-04-30.md`.
+2. Backup/restore Docker fallback: Done. Docker client verification and
+   non-scratch restore guard were checked.
+3. Runtime smoke acceptance: Done. `.\scripts\runtime-smoke.ps1 -StopOnExit`
+   passed against the local Compose stack.
+4. Query heat and worker runtime realism: Done for this checkpoint. Persisted
+   query/assessment history, safe runtime scheduler commands, DB-backed MVT
+   tiles, and heartbeat textfile metrics exist.
+5. Next implementation wave planning: Done at checkpoint level. Next wave is
+   real source clients plus durable queue, production tile tables/cache,
+   dashboards, and Phase 4/5 gated implementations.
+
+### Checkpoint acceptance criteria
+
+- `git status --porcelain=v1 -uall` has been reviewed and summarized.
+- Staged scope is confirmed empty before any later commit step.
+- Modified and untracked files are grouped by root/config/docs, API, Web,
+  Workers, monitoring, runbooks, and scripts.
+- Functional scope, test matrix, known risks, and rollback/verification notes
+  are documented for PR review.
+- Suggested commit message and PR body draft exist in the checkpoint review doc.
+- Runtime smoke and worker DB demo persistence are verified before commit.
+- This pass records the integrated subagent output; final staging/commit should
+  include one last `git diff --check`.
+
+## 15. WP5 Runtime Phase Readiness Gate - 2026-04-30
+
+This section records the runtime smoke / ops / phase readiness hardening pass.
+It does not change CI, API, or worker code.
+
+### Five acceptance points for the next phase
+
+1. Expanded runtime smoke is the default local gate. It must cover API/Web,
+   query heat, reports default-disabled/enabled behavior, durable queue smoke,
+   seeded MVT endpoints, query heat materialization, and tile feature/cache
+   smoke.
+2. Durable queue readiness requires more than fixture smoke. The next phase
+   must add a documented queue producer/scheduler command, verify one scheduler
+   lease holder, and prove real-source worker success/retry/failure status
+   against PostGIS.
+3. Reports remain disabled by default. Enabled smoke may prove minimized
+   pending-report insertion, but Phase 5 product readiness still requires UX,
+   moderation, abuse controls, retention/deletion behavior, and governance gate
+   approval.
+4. MVT readiness requires both live endpoint smoke and a production layer/cache
+   path. Current DB-backed MVT plus worker feature/cache smoke is acceptable
+   local evidence, but full tile generation, expiry, refresh cadence,
+   invalidation, and hosting are still pending.
+5. Query heat readiness requires materialized, privacy-preserving buckets. The
+   current worker CLI can materialize `P1D`/`P7D` buckets for local smoke, but
+   production cadence and retention are not accepted.
+
+### Status split
+
+Done:
+
+- `scripts/runtime-smoke.ps1` has `-Help` and expanded default checks.
+- `docs/runbooks/runtime-smoke.md` documents queue, reports, MVT, query heat,
+  and tile cache job commands and safety notes.
+- `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md`
+  records the next-phase acceptance checklist.
+- Query heat materialization CLI and tile feature refresh CLI exist and are
+  wired into runtime smoke.
+
+In development:
+
+- Durable queue runtime: one local fixture-backed job can be smoked, but
+  production source clients and singleton scheduler acceptance remain pending.
+- Reports: default-disabled and enabled-path smoke exists, but product and
+  governance readiness remain pending.
+- MVT: endpoint and worker feature/cache smoke exists, but production
+  layer/cache generation remains pending.
+- Query heat: persisted history and `P1D`/`P7D` materialized bucket jobs exist
+  for local smoke, but production cadence/retention remain pending.
+
+Not complete:
+
+- Query heat production refresh cadence and retention.
+- Full tile cache generation, invalidation, expiry, and hosting strategy.
+- Phase 5 public report UX/moderation/abuse/deletion flow.
+- Production queue producer and source-client runtime rollout.
+
+### Verification entrypoints
+
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\runtime-smoke.ps1 -Help`
+- PowerShell parser check for `scripts/runtime-smoke.ps1`
+- Full smoke after concurrent worker/API changes settle:
+  `.\scripts\runtime-smoke.ps1 -StopOnExit`
+- Next-phase readiness checklist:
+  `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md`
