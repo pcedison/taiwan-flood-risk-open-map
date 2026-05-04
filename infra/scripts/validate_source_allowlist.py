@@ -36,16 +36,41 @@ REQUIRED_FORUM_FIELDS = {
     "family",
     "registry_key",
     "source_specific_flag",
+    "candidate_approval_ack_flag",
     "acceptance_status",
     "accepted",
     "disabled_reason",
     "missing_acceptance_fields",
     "prohibited_until_accepted",
+    "candidate_adapter_contract",
 }
 REQUIRED_FORUM_PROHIBITIONS = {
     "real_crawling",
     "scraping",
     "http_fetch",
+}
+REQUIRED_FORUM_CANDIDATE_CONTRACT_FIELDS = {
+    "runtime_mode",
+    "fixture_records",
+    "network_access",
+    "real_source_records",
+    "http_fetch",
+    "crawl",
+    "scrape",
+    "login_bypass",
+    "anti_bot_circumvention",
+    "raw_content_storage",
+    "identity_storage",
+}
+REQUIRED_FORUM_CANDIDATE_FALSE_FIELDS = {
+    "real_source_records",
+    "http_fetch",
+    "crawl",
+    "scrape",
+    "login_bypass",
+    "anti_bot_circumvention",
+    "raw_content_storage",
+    "identity_storage",
 }
 REQUIRED_APPROVAL_DISALLOWED_OPERATIONS = {
     "real_crawling",
@@ -218,6 +243,11 @@ def _validate_forum_sources(sources: list[object], errors: list[str]) -> None:
 
         if source.get("family") != "forum":
             errors.append(f"forum {key}: family must be forum")
+        expected_ack_flag = f"SOURCE_{key.upper()}_CANDIDATE_APPROVAL_ACK"
+        if source.get("candidate_approval_ack_flag") != expected_ack_flag:
+            errors.append(
+                f"forum {key}: candidate_approval_ack_flag must be {expected_ack_flag}"
+            )
         if source.get("accepted") is not False:
             errors.append(f"forum {key}: accepted must remain false until governance approval")
         if source.get("acceptance_status") not in {"blocked", "non_accepted"}:
@@ -237,6 +267,43 @@ def _validate_forum_sources(sources: list[object], errors: list[str]) -> None:
         if missing_prohibitions:
             errors.append(
                 f"forum {key}: prohibited_until_accepted missing {sorted(missing_prohibitions)}"
+            )
+
+        candidate_contract = source.get("candidate_adapter_contract")
+        if not isinstance(candidate_contract, dict):
+            errors.append(f"forum {key}: candidate_adapter_contract must be an object")
+            continue
+        _validate_forum_candidate_contract(key, candidate_contract, errors)
+
+
+def _validate_forum_candidate_contract(
+    key: str,
+    contract: dict[object, object],
+    errors: list[str],
+) -> None:
+    missing = REQUIRED_FORUM_CANDIDATE_CONTRACT_FIELDS - set(contract)
+    if missing:
+        errors.append(
+            f"forum {key}: candidate_adapter_contract missing {sorted(missing)}"
+        )
+
+    if contract.get("runtime_mode") != "local_fixture_only":
+        errors.append(
+            f"forum {key}: candidate_adapter_contract.runtime_mode must be local_fixture_only"
+        )
+    if contract.get("fixture_records") != "synthetic_only":
+        errors.append(
+            f"forum {key}: candidate_adapter_contract.fixture_records must be synthetic_only"
+        )
+    if contract.get("network_access") != "disabled":
+        errors.append(
+            f"forum {key}: candidate_adapter_contract.network_access must be disabled"
+        )
+
+    for field in sorted(REQUIRED_FORUM_CANDIDATE_FALSE_FIELDS):
+        if contract.get(field) is not False:
+            errors.append(
+                f"forum {key}: candidate_adapter_contract.{field} must be false"
             )
 
 

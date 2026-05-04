@@ -22,6 +22,8 @@ class WorkerSettings:
     source_forum_enabled: bool | None
     source_ptt_enabled: bool | None
     source_dcard_enabled: bool | None
+    source_ptt_candidate_approval_ack: bool
+    source_dcard_candidate_approval_ack: bool
     source_terms_review_ack: bool
     source_sample_data_enabled: bool
     enabled_adapter_keys: tuple[str, ...] | None
@@ -62,6 +64,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_forum_enabled=env_bool(values, "SOURCE_FORUM_ENABLED"),
         source_ptt_enabled=env_bool(values, "SOURCE_PTT_ENABLED"),
         source_dcard_enabled=env_bool(values, "SOURCE_DCARD_ENABLED"),
+        source_ptt_candidate_approval_ack=env_flag(
+            values,
+            "SOURCE_PTT_CANDIDATE_APPROVAL_ACK",
+        ),
+        source_dcard_candidate_approval_ack=env_flag(
+            values,
+            "SOURCE_DCARD_CANDIDATE_APPROVAL_ACK",
+        ),
         source_terms_review_ack=env_flag(values, "SOURCE_TERMS_REVIEW_ACK"),
         source_sample_data_enabled=env_flag(values, "SOURCE_SAMPLE_DATA_ENABLED"),
         enabled_adapter_keys=env_list(values, "WORKER_ENABLED_ADAPTER_KEYS"),

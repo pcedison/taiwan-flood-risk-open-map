@@ -6,6 +6,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 RiskLevel = Literal["低", "中", "高", "極高", "未知"]
 ConfidenceLevel = Literal["低", "中", "高", "未知"]
 AttentionLevel = Literal["低", "中", "高", "未知"]
+GeocodePrecision = Literal[
+    "exact_address",
+    "road_or_lane",
+    "poi",
+    "admin_area",
+    "map_click",
+    "unknown",
+]
 
 
 class ContractModel(BaseModel):
@@ -16,6 +24,7 @@ class HealthResponse(ContractModel):
     status: Literal["ok"]
     service: str
     version: str
+    deployment_sha: str | None = None
     checked_at: datetime
 
 
@@ -29,6 +38,7 @@ class ReadyResponse(ContractModel):
     status: Literal["ok", "down"]
     service: str
     version: str
+    deployment_sha: str | None = None
     checked_at: datetime
     dependencies: dict[str, DependencyReadiness]
 
@@ -96,6 +106,10 @@ class PlaceCandidate(ContractModel):
     admin_code: str | None = None
     source: str
     confidence: float = Field(ge=0, le=1)
+    precision: GeocodePrecision = "unknown"
+    matched_query: str | None = None
+    requires_confirmation: bool = False
+    limitations: list[str] = Field(default_factory=list)
 
 
 class GeocodeResponse(ContractModel):
@@ -107,6 +121,7 @@ class UserReportCreateRequest(ContractModel):
 
     point: LatLng
     summary: str = Field(min_length=1, max_length=500)
+    challenge_token: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class UserReportCreateResponse(ContractModel):
@@ -114,7 +129,7 @@ class UserReportCreateResponse(ContractModel):
     status: Literal["pending"]
 
 
-UserReportStatus = Literal["pending", "approved", "rejected", "spam"]
+UserReportStatus = Literal["pending", "approved", "rejected", "spam", "deleted"]
 UserReportModerationStatus = Literal["approved", "rejected", "spam"]
 UserReportModerationReason = Literal[
     "verified_flood_signal",
@@ -123,6 +138,13 @@ UserReportModerationReason = Literal[
     "insufficient_detail",
     "abuse_or_spam",
     "out_of_scope",
+]
+UserReportPrivacyRedactionReason = Literal[
+    "reporter_request",
+    "affected_person_request",
+    "private_data_exposure",
+    "retention_expiry",
+    "operator_error",
 ]
 
 _MODERATION_REASONS_BY_STATUS: dict[
@@ -166,6 +188,21 @@ class UserReportModerationRequest(ContractModel):
 
 class UserReportModerationResponse(ContractModel):
     report: AdminUserReport
+
+
+class UserReportPrivacyRedactionRequest(ContractModel):
+    reason_code: UserReportPrivacyRedactionReason
+
+
+class AdminUserReportPrivacyRedaction(ContractModel):
+    report_id: str
+    status: Literal["deleted"]
+    privacy_level: Literal["redacted"]
+    redacted_at: datetime
+
+
+class UserReportPrivacyRedactionResponse(ContractModel):
+    redaction: AdminUserReportPrivacyRedaction
 
 
 class RiskAssessRequest(ContractModel):

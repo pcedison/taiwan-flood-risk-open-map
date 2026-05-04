@@ -14,6 +14,10 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             name: "台北火車站",
             place_id: "place-test",
             point: { lat: 25.04776, lng: 121.51706 },
+            precision: "poi",
+            requires_confirmation: false,
+            matched_query: "台北火車站",
+            limitations: ["定位結果是地標或 POI 座標，不代表門牌精準位置。"],
             source: "mock-geocoder",
             type: "landmark",
           },
@@ -233,6 +237,35 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("查詢關注度：低")).toBeVisible();
 });
 
+test("live local unknown-address flow assesses precise fixtures and blocks admin-only geocodes", async ({
+  page,
+}) => {
+  let riskCalls = 0;
+  await page.route("http://localhost:8000/v1/risk/assess", async (route) => {
+    riskCalls += 1;
+    await route.continue();
+  });
+
+  await page.goto("/");
+
+  await page.getByLabel("輸入地標、地址或行政區").fill("台南市安南區長溪路二段410巷16弄1號");
+  await page.getByRole("button", { name: "查詢風險" }).click();
+
+  await expect(page.getByText(/定位精度：門牌/)).toBeVisible();
+  await expect(page.getByText("已定位：台南市安南區長溪路二段410巷16弄1號").first()).toBeVisible();
+  await expect(page.getByText(/歷史參考風險為高/)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(() => riskCalls).toBe(1);
+
+  await page.getByLabel("輸入地標、地址或行政區").fill("宜蘭縣礁溪鄉");
+  await page.getByRole("button", { name: "查詢風險" }).click();
+
+  await expect(page.getByText(/定位精度：行政區/)).toBeVisible();
+  await expect(page.getByText(/請改輸入道路或門牌/)).toBeVisible();
+  await expect(page.getByText(/歷史參考風險為高/)).not.toBeVisible();
+  await page.waitForTimeout(300);
+  expect(riskCalls).toBe(1);
+});
+
 test("a failed address lookup clears stale risk results and does not assess old coordinates", async ({
   page,
 }) => {
@@ -252,6 +285,10 @@ test("a failed address lookup clears stale risk results and does not assess old 
                   name: "valid-address",
                   place_id: "place-valid",
                   point: { lat: 23.038818, lng: 120.213493 },
+                  precision: "exact_address",
+                  requires_confirmation: false,
+                  matched_query: "valid-address",
+                  limitations: [],
                   source: "mock-geocoder",
                   type: "address",
                 },
@@ -318,6 +355,116 @@ test("a failed address lookup clears stale risk results and does not assess old 
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText("找不到這個地點，請換一個關鍵字再試。")).toBeVisible();
+  await expect(page.getByText("mock-risk-summary")).not.toBeVisible();
+  expect(riskCalls).toBe(1);
+});
+
+test("an admin-area geocode asks for confirmation and does not assess stale coordinates", async ({
+  page,
+}) => {
+  let riskCalls = 0;
+
+  await page.route("http://localhost:8000/v1/geocode", async (route) => {
+    const body = route.request().postDataJSON() as { query?: string };
+    await route.fulfill({
+      contentType: "application/json",
+      json:
+        body.query === "valid-address"
+          ? {
+              candidates: [
+                {
+                  admin_code: "67000000",
+                  confidence: 0.96,
+                  limitations: [],
+                  matched_query: "valid-address",
+                  name: "valid-address",
+                  place_id: "place-valid",
+                  point: { lat: 23.038818, lng: 120.213493 },
+                  precision: "exact_address",
+                  requires_confirmation: false,
+                  source: "mock-geocoder",
+                  type: "address",
+                },
+              ],
+            }
+          : {
+              candidates: [
+                {
+                  admin_code: "10002000",
+                  confidence: 0.72,
+                  limitations: [
+                    "定位只到行政區代表點，不能直接解讀為該行政區內任一地址風險。",
+                  ],
+                  matched_query: "宜蘭縣礁溪鄉",
+                  name: "宜蘭縣礁溪鄉",
+                  place_id: "admin-area",
+                  point: { lat: 24.827, lng: 121.7706 },
+                  precision: "admin_area",
+                  requires_confirmation: true,
+                  source: "local-taiwan-admin-centroid",
+                  type: "admin_area",
+                },
+              ],
+            },
+    });
+  });
+
+  await page.route("http://localhost:8000/v1/risk/assess", async (route) => {
+    riskCalls += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        assessment_id: "018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+        confidence: { level: "高" },
+        created_at: "2026-04-29T03:00:00Z",
+        data_freshness: [],
+        evidence: [],
+        expires_at: "2026-04-29T03:10:00Z",
+        explanation: {
+          main_reasons: ["mock reason"],
+          missing_sources: [],
+          summary: "mock-risk-summary",
+        },
+        historical: { level: "高" },
+        location: { lat: 23.038818, lng: 120.213493 },
+        query_heat: {
+          attention_level: "低",
+          period: "P7D",
+          query_count_bucket: "1-9",
+          unique_approx_count_bucket: "1-9",
+          updated_at: "2026-04-29T03:00:00Z",
+        },
+        radius_m: 300,
+        realtime: { level: "低" },
+        score_version: "risk-v0.1.0",
+      },
+    });
+  });
+
+  await page.route(
+    "http://localhost:8000/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          assessment_id: "018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+          items: [],
+          next_cursor: null,
+        },
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page.locator("form input").first().fill("valid-address");
+  await page.getByRole("button", { name: "查詢風險" }).click();
+  await expect(page.getByText("mock-risk-summary")).toBeVisible();
+
+  await page.locator("form input").first().fill("宜蘭縣礁溪鄉");
+  await page.getByRole("button", { name: "查詢風險" }).click();
+
+  await expect(page.getByText(/定位精度：行政區/)).toBeVisible();
+  await expect(page.getByText(/請改輸入道路或門牌/)).toBeVisible();
   await expect(page.getByText("mock-risk-summary")).not.toBeVisible();
   expect(riskCalls).toBe(1);
 });

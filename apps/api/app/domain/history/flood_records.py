@@ -131,6 +131,46 @@ _HISTORICAL_FLOOD_RECORDS = (
         source_weight=0.85,
         risk_factor=1.0,
     ),
+    HistoricalFloodRecord(
+        source_id="history-news:kaohsiung-zuoying-2024-07-25:taoziyuan-cna",
+        source_name="中央社：凱米颱風高雄左營桃子園路淹水",
+        source_type="news",
+        event_type="flood_report",
+        title="2024-07-25 高雄左營桃子園路因凱米颱風暴雨嚴重積淹水",
+        summary=(
+            "中央社報導，凱米颱風為南台灣帶來驚人雨量，"
+            "高雄市左營區桃子園路一度宛如黃河，鄰近新大樓地下停車場遭泥水灌入。"
+        ),
+        url="https://www.cna.com.tw/news/aloc/202407250131.aspx",
+        occurred_at=datetime(2024, 7, 25, 10, 0, tzinfo=_TAIWAN_TZ),
+        ingested_at=datetime(2026, 5, 4, 10, 10, tzinfo=UTC),
+        lat=22.6731,
+        lng=120.2862,
+        confidence=0.9,
+        freshness_score=0.95,
+        source_weight=1.0,
+        risk_factor=1.0,
+    ),
+    HistoricalFloodRecord(
+        source_id="history-news:kaohsiung-zuoying-2024-07-25:taoziyuan-mirror",
+        source_name="鏡週刊：左營桃子園路水灌地下停車場",
+        source_type="news",
+        event_type="flood_report",
+        title="2024-07-25 左營桃子園路大樓地下停車場遭暴雨泥水灌入",
+        summary=(
+            "鏡週刊報導，高雄市左營區桃子園路嚴重淹水成河川狀，"
+            "同一路段大樓地下停車場車道被水強灌，居民緊急合力擋水。"
+        ),
+        url="https://www.mirrormedia.mg/story/20240725edi024",
+        occurred_at=datetime(2024, 7, 25, 10, 0, tzinfo=_TAIWAN_TZ),
+        ingested_at=datetime(2026, 5, 4, 10, 10, tzinfo=UTC),
+        lat=22.6731,
+        lng=120.2862,
+        confidence=0.84,
+        freshness_score=0.95,
+        source_weight=0.9,
+        risk_factor=1.0,
+    ),
 )
 
 

@@ -38,8 +38,53 @@ def test_ptt_and_dcard_remain_not_accepted_in_manifest() -> None:
 
     assert sources["ptt"]["accepted"] is False
     assert sources["ptt"]["acceptance_status"] == "blocked"
+    assert sources["ptt"]["candidate_approval_ack_flag"] == (
+        "SOURCE_PTT_CANDIDATE_APPROVAL_ACK"
+    )
+    assert sources["ptt"]["candidate_adapter_contract"]["runtime_mode"] == (
+        "local_fixture_only"
+    )
+    assert sources["ptt"]["candidate_adapter_contract"]["http_fetch"] is False
     assert sources["dcard"]["accepted"] is False
     assert sources["dcard"]["acceptance_status"] == "blocked"
+    assert sources["dcard"]["candidate_approval_ack_flag"] == (
+        "SOURCE_DCARD_CANDIDATE_APPROVAL_ACK"
+    )
+    assert sources["dcard"]["candidate_adapter_contract"]["runtime_mode"] == (
+        "local_fixture_only"
+    )
+    assert sources["dcard"]["candidate_adapter_contract"]["http_fetch"] is False
+
+
+def test_forum_manifest_requires_candidate_approval_ack_flag(tmp_path: Path) -> None:
+    manifest = yaml.safe_load(FORUM_MANIFEST.read_text(encoding="utf-8"))
+    manifest["sources"][0].pop("candidate_approval_ack_flag")
+    manifest_path = _write_yaml(tmp_path, manifest, name="forum-manifest.yaml")
+
+    errors = validate_all(
+        allowlist_path=ALLOWLIST,
+        forum_manifest_path=manifest_path,
+        approval_request_paths=[FORUM_APPROVAL_EXAMPLE],
+    )
+
+    assert any("missing fields ['candidate_approval_ack_flag']" in error for error in errors)
+
+
+def test_forum_manifest_rejects_network_candidate_contract(tmp_path: Path) -> None:
+    manifest = yaml.safe_load(FORUM_MANIFEST.read_text(encoding="utf-8"))
+    manifest["sources"][0]["candidate_adapter_contract"]["http_fetch"] = True
+    manifest_path = _write_yaml(tmp_path, manifest, name="forum-manifest.yaml")
+
+    errors = validate_all(
+        allowlist_path=ALLOWLIST,
+        forum_manifest_path=manifest_path,
+        approval_request_paths=[FORUM_APPROVAL_EXAMPLE],
+    )
+
+    assert any(
+        "forum ptt: candidate_adapter_contract.http_fetch must be false" in error
+        for error in errors
+    )
 
 
 @pytest.mark.parametrize("missing_category", REQUIRED_EVIDENCE)
@@ -194,8 +239,13 @@ def _approved_evidence(category: str) -> dict[str, object]:
     }
 
 
-def _write_yaml(tmp_path: Path, payload: dict[str, object]) -> Path:
-    request_path = tmp_path / "source-approval-request.yaml"
+def _write_yaml(
+    tmp_path: Path,
+    payload: dict[str, object],
+    *,
+    name: str = "source-approval-request.yaml",
+) -> Path:
+    request_path = tmp_path / name
     request_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     return request_path
 

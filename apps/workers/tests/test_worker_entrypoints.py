@@ -169,6 +169,186 @@ def test_main_gdelt_rehearsal_wires_env_and_argv_without_network(
     assert json.loads(capsys.readouterr().out)["status"] == "succeeded"
 
 
+def test_main_gdelt_production_candidate_skips_with_rehearsal_gates_only(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    approval_path = tmp_path / "gdelt-approval.md"
+    approval_path.write_text("external approval evidence placeholder", encoding="utf-8")
+
+    def fail_fetch(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("GDELT production candidate must not fetch without production gate")
+
+    monkeypatch.setenv("GDELT_SOURCE_ENABLED", "true")
+    monkeypatch.setenv("GDELT_BACKFILL_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
+    monkeypatch.delenv("GDELT_PRODUCTION_INGESTION_ENABLED", raising=False)
+    monkeypatch.setattr("app.adapters.news.public_web._fetch_json", fail_fetch)
+    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", _fail_constructor)
+    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", _fail_constructor)
+    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", _fail_constructor)
+
+    exit_code = main(
+        [
+            "--run-gdelt-news-production-candidate",
+            "--persist",
+            "--database-url",
+            "postgresql://worker:test@localhost/flood",
+            "--gdelt-start",
+            "2025-08-01T00:00:00Z",
+            "--gdelt-end",
+            "2025-08-02T00:00:00Z",
+            "--gdelt-approval-evidence-path",
+            str(approval_path),
+            "--gdelt-approval-evidence-ack",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "skipped"
+    assert payload["mode"] == "production-candidate"
+    assert payload["network_allowed"] is False
+    assert "GDELT_PRODUCTION_INGESTION_ENABLED=true" in payload["reason"]
+
+
+def test_main_gdelt_production_candidate_requires_persist_before_writers(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    approval_path = tmp_path / "gdelt-approval.md"
+    approval_path.write_text("external approval evidence placeholder", encoding="utf-8")
+
+    monkeypatch.setenv("GDELT_SOURCE_ENABLED", "true")
+    monkeypatch.setenv("GDELT_BACKFILL_ENABLED", "true")
+    monkeypatch.setenv("GDELT_PRODUCTION_INGESTION_ENABLED", "true")
+    monkeypatch.setenv("GDELT_REHEARSAL_CADENCE_SECONDS", "45")
+    monkeypatch.setenv("GDELT_PRODUCTION_CADENCE_SECONDS", "22")
+    monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
+    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", _fail_constructor)
+    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", _fail_constructor)
+    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", _fail_constructor)
+
+    exit_code = main(
+        [
+            "--run-gdelt-news-production-candidate",
+            "--database-url",
+            "postgresql://worker:test@localhost/flood",
+            "--gdelt-start",
+            "2025-08-01T00:00:00Z",
+            "--gdelt-end",
+            "2025-08-02T00:00:00Z",
+            "--gdelt-approval-evidence-path",
+            str(approval_path),
+            "--gdelt-approval-evidence-ack",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "skipped"
+    assert payload["network_allowed"] is False
+    assert "--persist" in payload["reason"]
+
+
+def test_main_gdelt_production_candidate_wires_persistence_and_gates_without_network(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    approval_path = tmp_path / "gdelt-approval.md"
+    approval_path.write_text("external approval evidence placeholder", encoding="utf-8")
+
+    class FakeProductionCandidateResult:
+        failed = False
+
+        def as_payload(self) -> dict[str, object]:
+            return {
+                "status": "succeeded",
+                "mode": "production-candidate",
+                "adapter_key": "news.public_web.gdelt_backfill",
+                "promoted": 1,
+                "metadata": {"production_candidate": True},
+            }
+
+    def fake_production_candidate(
+        config: HistoricalNewsBackfillConfig,
+        *,
+        staging_writer: object,
+        run_writer: object,
+        promotion_writer: object,
+        promotion_limit: int | None,
+    ) -> FakeProductionCandidateResult:
+        captured["config"] = config
+        captured["staging_writer"] = staging_writer
+        captured["run_writer"] = run_writer
+        captured["promotion_writer"] = promotion_writer
+        captured["promotion_limit"] = promotion_limit
+        return FakeProductionCandidateResult()
+
+    monkeypatch.setenv("GDELT_SOURCE_ENABLED", "true")
+    monkeypatch.setenv("GDELT_BACKFILL_ENABLED", "true")
+    monkeypatch.setenv("GDELT_PRODUCTION_INGESTION_ENABLED", "true")
+    monkeypatch.setenv("GDELT_REHEARSAL_CADENCE_SECONDS", "45")
+    monkeypatch.setenv("GDELT_PRODUCTION_CADENCE_SECONDS", "22")
+    monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
+    monkeypatch.setattr(
+        "app.main.run_historical_news_backfill_production_candidate",
+        fake_production_candidate,
+    )
+    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", _FakeStagingWriter)
+    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", _FakeRunWriter)
+    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", _FakePromotionWriter)
+
+    exit_code = main(
+        [
+            "--run-gdelt-news-production-candidate",
+            "--persist",
+            "--database-url",
+            "postgresql://worker:test@localhost/flood",
+            "--gdelt-start",
+            "2025-08-01T00:00:00Z",
+            "--gdelt-end",
+            "2025-08-02T00:00:00Z",
+            "--gdelt-query",
+            "台南淹水",
+            "--gdelt-max-records",
+            "5",
+            "--gdelt-promotion-limit",
+            "3",
+            "--gdelt-approval-evidence-path",
+            str(approval_path),
+            "--gdelt-approval-evidence-ack",
+        ]
+    )
+
+    assert exit_code == 0
+    config = captured["config"]
+    assert isinstance(config, HistoricalNewsBackfillConfig)
+    assert config.gdelt_production_ingestion_enabled is True
+    assert config.production_persist_intent is True
+    assert config.production_database_url == "postgresql://worker:test@localhost/flood"
+    assert config.gdelt_production_approval_evidence_path == str(approval_path)
+    assert config.gdelt_production_approval_evidence_ack is True
+    assert config.queries == ("台南淹水",)
+    assert config.max_records_per_query == 5
+    assert config.request_cadence_seconds == 22
+    assert isinstance(captured["staging_writer"], _FakeStagingWriter)
+    assert isinstance(captured["run_writer"], _FakeRunWriter)
+    assert isinstance(captured["promotion_writer"], _FakePromotionWriter)
+    assert captured["promotion_limit"] == 3
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "succeeded"
+    assert payload["mode"] == "production-candidate"
+
+
 def test_main_scheduler_can_run_bounded_runtime_loop(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

@@ -14,6 +14,7 @@ from app.api.errors import error_payload
 from app.api.schemas import (
     AdminJobsResponse,
     AdminSourcesResponse,
+    AdminUserReportPrivacyRedaction,
     AdminUserReport,
     AdminUserReportsResponse,
     DataSource,
@@ -23,13 +24,17 @@ from app.api.schemas import (
     LatLng,
     UserReportModerationRequest,
     UserReportModerationResponse,
+    UserReportPrivacyRedactionRequest,
+    UserReportPrivacyRedactionResponse,
 )
 from app.core.config import get_settings
 from app.domain.reports import (
     UserReportModerationRecord,
+    UserReportPrivacyRedactionRecord,
     UserReportRepositoryUnavailable,
     list_pending_user_reports,
     moderate_user_report,
+    redact_user_report_privacy,
 )
 
 
@@ -111,6 +116,42 @@ async def moderate_admin_report(
             detail=error_payload("not_found", "User report was not found.")["error"],
         )
     return UserReportModerationResponse(report=_admin_report_from_record(report))
+
+
+@router.post(
+    "/reports/{report_id}/privacy-redaction",
+    response_model=UserReportPrivacyRedactionResponse,
+)
+async def redact_admin_report_privacy(
+    report_id: UUID,
+    request: UserReportPrivacyRedactionRequest,
+    admin_actor: Annotated[str, Depends(_require_admin)],
+) -> UserReportPrivacyRedactionResponse:
+    settings = get_settings()
+    try:
+        redaction = redact_user_report_privacy(
+            database_url=settings.database_url,
+            report_id=str(report_id),
+            reason_code=request.reason_code,
+            actor_ref=admin_actor,
+        )
+    except UserReportRepositoryUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "repository_unavailable",
+                "User report privacy redaction storage is temporarily unavailable.",
+            )["error"],
+        ) from exc
+
+    if redaction is None:
+        raise HTTPException(
+            status_code=404,
+            detail=error_payload("not_found", "User report was not found.")["error"],
+        )
+    return UserReportPrivacyRedactionResponse(
+        redaction=_privacy_redaction_from_record(redaction)
+    )
 
 
 async def _require_admin(
@@ -248,6 +289,17 @@ def _admin_report_from_record(report: UserReportModerationRecord) -> AdminUserRe
         summary=report.summary,
         created_at=report.created_at,
         reviewed_at=report.reviewed_at,
+    )
+
+
+def _privacy_redaction_from_record(
+    redaction: UserReportPrivacyRedactionRecord,
+) -> AdminUserReportPrivacyRedaction:
+    return AdminUserReportPrivacyRedaction(
+        report_id=redaction.id,
+        status=redaction.status,
+        privacy_level=redaction.privacy_level,
+        redacted_at=redaction.redacted_at,
     )
 
 

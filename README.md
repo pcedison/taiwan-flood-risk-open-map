@@ -13,20 +13,27 @@ The project follows a spec-first SDD workflow. The source of truth is:
 - License: Apache-2.0 for software.
 - Data exports: layered licensing.
 - Deployment path: GitHub repository connected to Zeabur VPS.
+- Basemap launch path: MapLibre GL JS with PMTiles/Protomaps-compatible
+  OpenStreetMap-derived data served from object storage/CDN.
+- TGOS: future optional Taiwan-local provider, not an MVP or public launch
+  blocker.
 - Language: Traditional Chinese first.
 - Risk labels: `低`, `中`, `高`, `極高`, `未知`.
 - AI/NLP v1: rules plus small open-source NLP models; model output is never the only source of truth.
 
 ## Planned Runtime
 
-- Frontend: Next.js and MapLibre/Leaflet.
+- Frontend: Next.js and MapLibre GL JS.
+- Open basemap: PMTiles/Protomaps-compatible OSM-derived data through
+  Cloudflare R2 or another S3-compatible object storage/CDN path.
 - Backend: FastAPI.
 - Spatial database: PostgreSQL with PostGIS.
 - Workers: Python worker service with explicit scheduler.
 - Cache: Redis.
 - Durable worker queue groundwork: PostgreSQL `worker_runtime_jobs`; Redis is
   not the accepted production queue backend yet.
-- Object storage: MinIO.
+- Object storage: MinIO locally; Cloudflare R2 or compatible S3 for low-cost
+  public basemap assets, snapshots, and backups.
 - Local orchestration: Docker Compose.
 
 ## Development Status
@@ -70,9 +77,15 @@ Current placeholder boundaries:
   placeholder or baseline areas, not completed tile, shared-rule, or monitoring
   systems. DB-backed MVT serving and worker-side feature/cache smoke exist, but
   tile cache generation, expiry, and hosting are not production-ready.
+- The basemap launch path is now PMTiles/object-storage/CDN first. A full
+  OpenMapTiles/Tegola/PostGIS tile server is a future higher-operations option,
+  and TGOS remains optional rather than a launch dependency.
 
 Ops runbooks and dry-run checks:
 
+- [Open Basemap PMTiles Runbook](docs/runbooks/open-basemap-pmtiles.md) for
+  MapLibre, PMTiles/Protomaps, object-storage/CDN delivery, OSM/ODbL
+  attribution, range request smoke, cache behavior, and rollback.
 - [Runtime Smoke Runbook](docs/runbooks/runtime-smoke.md) for local Compose
   runtime acceptance, including queue, reports, MVT, and query heat/cache
   job smoke.
@@ -199,6 +212,12 @@ python infra/scripts/validate_production_readiness_evidence.py
 
 Production pending checklist:
 
+- Wire the web runtime to a project-controlled or explicitly licensed
+  MapLibre style backed by PMTiles/Protomaps-compatible OSM-derived data from
+  object storage/CDN.
+- Add release evidence for OSM/ODbL attribution, PMTiles range requests, CDN
+  cache headers, and basemap rollback. Runtime smoke must pass with TGOS unset
+  or disabled.
 - Harden the gated CWA rainfall, WRA water-level, and flood-potential GeoJSON
   worker clients after real upstream URL/license review, credential review,
   hosted cadence, alert routing, and production egress verification are
@@ -217,7 +236,9 @@ Production pending checklist:
   workers. Do not describe the current row-level visibility as a complete DLQ.
 - Add hosted alert routing, TLS/auth, durable Prometheus/Grafana storage, and
   scheduled freshness checks.
-- Finish tile cache generation, expiry, invalidation, and hosting strategy.
+- Finish project overlay tile cache generation, expiry, invalidation, and
+  hosting strategy. Keep the basemap on the lower-ops PMTiles path until a tile
+  server upgrade is explicitly accepted.
 - Keep public reports, forum sources, and public discussion ingestion disabled
   until abuse governance, moderation, retention/deletion, and legal/privacy
   gates are accepted.

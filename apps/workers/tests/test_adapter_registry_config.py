@@ -46,6 +46,8 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.source_cwa_api_enabled is False
     assert settings.source_wra_api_enabled is False
     assert settings.source_flood_potential_geojson_enabled is False
+    assert settings.source_ptt_candidate_approval_ack is False
+    assert settings.source_dcard_candidate_approval_ack is False
     assert settings.cwa_api_authorization is None
     assert settings.cwa_api_url is None
     assert settings.cwa_api_timeout_seconds == 8
@@ -136,7 +138,7 @@ def test_forum_sources_require_family_source_and_terms_flags() -> None:
             "SOURCE_DCARD_ENABLED": "true",
         }
     )
-    explicit_ptt = load_worker_settings(
+    missing_candidate_ack = load_worker_settings(
         {
             "SOURCE_FORUM_ENABLED": "true",
             "SOURCE_PTT_ENABLED": "true",
@@ -144,9 +146,19 @@ def test_forum_sources_require_family_source_and_terms_flags() -> None:
             "SOURCE_TERMS_REVIEW_ACK": "true",
         }
     )
+    explicit_ptt = load_worker_settings(
+        {
+            "SOURCE_FORUM_ENABLED": "true",
+            "SOURCE_PTT_ENABLED": "true",
+            "SOURCE_DCARD_ENABLED": "false",
+            "SOURCE_TERMS_REVIEW_ACK": "true",
+            "SOURCE_PTT_CANDIDATE_APPROVAL_ACK": "true",
+        }
+    )
 
     assert "ptt" not in enabled_adapter_keys(missing_terms)
     assert "dcard" not in enabled_adapter_keys(missing_terms)
+    assert "ptt" not in enabled_adapter_keys(missing_candidate_ack)
     assert "ptt" in enabled_adapter_keys(explicit_ptt)
     assert "dcard" not in enabled_adapter_keys(explicit_ptt)
 
@@ -163,8 +175,11 @@ def test_forum_adapter_modules_expose_blocked_approval_boundaries() -> None:
 
 
 @pytest.mark.parametrize(
-    ("adapter_key", "specific_flag"),
-    (("ptt", "SOURCE_PTT_ENABLED"), ("dcard", "SOURCE_DCARD_ENABLED")),
+    ("adapter_key", "specific_flag", "approval_flag"),
+    (
+        ("ptt", "SOURCE_PTT_ENABLED", "SOURCE_PTT_CANDIDATE_APPROVAL_ACK"),
+        ("dcard", "SOURCE_DCARD_ENABLED", "SOURCE_DCARD_CANDIDATE_APPROVAL_ACK"),
+    ),
 )
 @pytest.mark.parametrize(
     "env",
@@ -178,11 +193,18 @@ def test_forum_adapter_modules_expose_blocked_approval_boundaries() -> None:
             "SOURCE_PTT_ENABLED": "true",
             "SOURCE_DCARD_ENABLED": "true",
         },
+        {
+            "SOURCE_FORUM_ENABLED": "true",
+            "SOURCE_PTT_ENABLED": "true",
+            "SOURCE_DCARD_ENABLED": "true",
+            "SOURCE_TERMS_REVIEW_ACK": "true",
+        },
     ),
 )
 def test_explicit_forum_allowlist_requires_family_specific_and_terms_flags(
     adapter_key: str,
     specific_flag: str,
+    approval_flag: str,
     env: dict[str, str],
 ) -> None:
     settings = load_worker_settings({"WORKER_ENABLED_ADAPTER_KEYS": adapter_key, **env})
@@ -195,6 +217,7 @@ def test_explicit_forum_allowlist_requires_family_specific_and_terms_flags(
             "SOURCE_FORUM_ENABLED": "true",
             specific_flag: "true",
             "SOURCE_TERMS_REVIEW_ACK": "true",
+            approval_flag: "true",
         }
     )
 

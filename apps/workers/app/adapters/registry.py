@@ -96,6 +96,11 @@ def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettin
         return False
     if metadata.terms_review_required and not settings.source_terms_review_ack:
         return False
+    if metadata.family is SourceFamily.FORUM and not _forum_candidate_approval_ack(
+        metadata,
+        settings,
+    ):
+        return False
     return True
 
 
@@ -132,3 +137,11 @@ def _is_sample_adapter(metadata: AdapterMetadata) -> bool:
 
 def _is_reviewed_news_adapter(metadata: AdapterMetadata) -> bool:
     return metadata.family is SourceFamily.NEWS and metadata.terms_review_required
+
+
+def _forum_candidate_approval_ack(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
+    if metadata.key == "ptt":
+        return settings.source_ptt_candidate_approval_ack
+    if metadata.key == "dcard":
+        return settings.source_dcard_candidate_approval_ack
+    return False

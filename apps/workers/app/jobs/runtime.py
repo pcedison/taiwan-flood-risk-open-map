@@ -13,6 +13,7 @@ from app.adapters.registry import enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import WraWaterLevelApiAdapter
 from app.config import WorkerSettings, load_worker_settings
+from app.jobs.forum_candidate import build_forum_candidate_fixture_adapters
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.ingestion import (
     AdapterBatchRunSummary,
@@ -100,6 +101,12 @@ def build_runtime_adapters(
             fixture_adapters.update(
                 build_public_web_sample_adapters(fetched_at=resolved_fetched_at)
             )
+        fixture_adapters.update(
+            build_forum_candidate_fixture_adapters(
+                settings,
+                fetched_at=resolved_fetched_at,
+            )
+        )
         log_event(
             "runtime.adapters.fixture_mode.enabled",
             available_adapter_keys=tuple(fixture_adapters),

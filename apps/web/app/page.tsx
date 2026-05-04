@@ -1,7 +1,9 @@
 "use client";
 
 import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
+import { Protocol } from "pmtiles";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { getBasemapStyleConfig } from "./lib/basemap-style";
 import {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
@@ -32,11 +34,15 @@ type Coordinate = {
 type GeocodeResponse = {
   candidates: Array<{
     confidence: number;
+    limitations?: string[];
+    matched_query?: string | null;
     name: string;
     point: {
       lat: number;
       lng: number;
     };
+    precision?: "exact_address" | "road_or_lane" | "poi" | "admin_area" | "map_click" | "unknown";
+    requires_confirmation?: boolean;
     source: string;
   }>;
 };
@@ -105,6 +111,7 @@ type MapFeatureCollection = {
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+let activePmtilesProtocol: Protocol | null = null;
 
 const text = {
   appLabel: "台灣淹水風險地圖",
@@ -164,6 +171,8 @@ const text = {
   loading: "查詢中",
   queryFailed: "查詢失敗，請稍後再試。",
   noGeocodeResult: "找不到這個地點，請換一個關鍵字再試。",
+  geocodeNeedsConfirmation: "定位只到較粗範圍，請改輸入道路或門牌，或直接點選地圖後再查詢。",
+  geocodePrecision: "定位精度",
   lastSync: "最後同步：--",
   freshnessNote: "查詢後會顯示資料來源的最新狀態。",
   defaultSource: "預設位置",
@@ -228,6 +237,29 @@ const healthLabels: Record<string, string> = {
 };
 
 const healthLabel = (value: string) => healthLabels[value] ?? value;
+
+const geocodePrecisionLabels: Record<string, string> = {
+  admin_area: "行政區",
+  exact_address: "門牌",
+  map_click: "地圖點選",
+  poi: "地標 / POI",
+  road_or_lane: "道路 / 巷道",
+  unknown: "未知",
+};
+
+const geocodePrecisionLabel = (value?: string) =>
+  geocodePrecisionLabels[value ?? "unknown"] ?? geocodePrecisionLabels.unknown;
+
+const geocodeCandidateNotice = (candidate: GeocodeResponse["candidates"][number]) => {
+  const parts = [`${text.geocodePrecision}：${geocodePrecisionLabel(candidate.precision)}`];
+  if (candidate.matched_query && candidate.matched_query !== candidate.name) {
+    parts.push(`匹配：${candidate.matched_query}`);
+  }
+  if (candidate.limitations?.length) {
+    parts.push(candidate.limitations.join(" "));
+  }
+  return parts.join("。");
+};
 
 const layerAvailabilityLabels: Record<string, string> = {
   available: text.layerReady,
@@ -340,6 +372,48 @@ function createMarkerElement() {
   return marker;
 }
 
+function registerPmtilesProtocol(maplibregl: typeof import("maplibre-gl")) {
+  const protocol = new Protocol();
+
+  try {
+    maplibregl.removeProtocol("pmtiles");
+  } catch {
+    // MapLibre does not expose a protocol registry check, so cleanup is best-effort.
+  }
+
+  maplibregl.addProtocol("pmtiles", protocol.tile);
+  activePmtilesProtocol = protocol;
+
+  return () => {
+    if (activePmtilesProtocol !== protocol) return;
+    maplibregl.removeProtocol("pmtiles");
+    activePmtilesProtocol = null;
+  };
+}
+
+function ensureTaiwanCityDots(map: MapLibreMap) {
+  if (!map.getSource("taiwan-cities")) {
+    map.addSource("taiwan-cities", {
+      type: "geojson",
+      data: TAIWAN_CITY_GEOJSON,
+    });
+  }
+
+  if (!map.getLayer("taiwan-city-dots")) {
+    map.addLayer({
+      id: "taiwan-city-dots",
+      type: "circle",
+      source: "taiwan-cities",
+      paint: {
+        "circle-color": "#0d5f4b",
+        "circle-radius": 4,
+        "circle-stroke-color": "#ffffff",
+        "circle-stroke-width": 2,
+      },
+    });
+  }
+}
+
 export default function HomePage() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -354,6 +428,7 @@ export default function HomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [geocodeNotice, setGeocodeNotice] = useState<string | null>(null);
   const [locationLabel, setLocationLabel] = useState(text.taipeiMainStation);
   const [reportSummary, setReportSummary] = useState("");
   const [reportStatus, setReportStatus] = useState<UserReportSubmissionStatus>("idle");
@@ -389,10 +464,15 @@ export default function HomePage() {
 
   useEffect(() => {
     let disposed = false;
+    let unregisterPmtilesProtocol: (() => void) | null = null;
 
     async function mountMap() {
       const maplibregl = await import("maplibre-gl");
       if (disposed || !mapContainerRef.current || mapRef.current) return;
+
+      unregisterPmtilesProtocol = registerPmtilesProtocol(maplibregl);
+      const basemap = getBasemapStyleConfig();
+      basemap.warnings.forEach((warning) => console.warn(warning));
 
       const map = new maplibregl.Map({
         attributionControl: false,
@@ -402,49 +482,7 @@ export default function HomePage() {
           [118.0, 20.5],
           [123.8, 26.8],
         ],
-        style: {
-          version: 8,
-          sources: {
-            osm: {
-              type: "raster",
-              tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-              tileSize: 256,
-              attribution: "© OpenStreetMap contributors",
-            },
-            "taiwan-cities": {
-              type: "geojson",
-              data: TAIWAN_CITY_GEOJSON,
-            },
-          },
-          layers: [
-            {
-              id: "base-water",
-              type: "background",
-              paint: {
-                "background-color": "#c9d9d5",
-              },
-            },
-            {
-              id: "osm",
-              type: "raster",
-              source: "osm",
-              paint: {
-                "raster-opacity": 0.88,
-              },
-            },
-            {
-              id: "taiwan-city-dots",
-              type: "circle",
-              source: "taiwan-cities",
-              paint: {
-                "circle-color": "#0d5f4b",
-                "circle-radius": 4,
-                "circle-stroke-color": "#ffffff",
-                "circle-stroke-width": 2,
-              },
-            },
-          ],
-        },
+        style: basemap.style,
         zoom: TAIWAN_OVERVIEW.zoom,
       });
 
@@ -453,6 +491,8 @@ export default function HomePage() {
       map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
       map.on("load", () => {
+        ensureTaiwanCityDots(map);
+
         if (!map.getSource("query-radius")) {
           map.addSource("query-radius", {
             type: "geojson",
@@ -492,6 +532,7 @@ export default function HomePage() {
         setEvidenceItems([]);
         setEvidenceStatus("idle");
         setErrorMessage(null);
+        setGeocodeNotice(null);
       });
     }
 
@@ -503,6 +544,7 @@ export default function HomePage() {
       markerRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
+      unregisterPmtilesProtocol?.();
     };
   }, []);
 
@@ -542,6 +584,7 @@ export default function HomePage() {
     requestIdRef.current = requestId;
     setIsLoading(true);
     setErrorMessage(null);
+    setGeocodeNotice(null);
 
     const normalized = query.trim();
     let target = coordinate;
@@ -570,7 +613,9 @@ export default function HomePage() {
         };
         setCoordinate(target);
         setLocationLabel(candidate.name);
-        resolvedLocationText = candidate.name;
+        setGeocodeNotice(geocodeCandidateNotice(candidate));
+        resolvedLocationText =
+          normalized === candidate.name ? candidate.name : `${normalized}｜${candidate.name}`;
         mapRef.current?.resize();
         mapRef.current?.flyTo({
           center: [target.lng, target.lat],
@@ -578,6 +623,14 @@ export default function HomePage() {
           essential: true,
           zoom: targetZoom(target, radius),
         });
+
+        if (candidate.requires_confirmation) {
+          setAssessment(null);
+          setEvidenceItems([]);
+          setEvidenceStatus("idle");
+          setGeocodeNotice(`${geocodeCandidateNotice(candidate)}。${text.geocodeNeedsConfirmation}`);
+          return;
+        }
       }
 
       const risk = await postJson<RiskAssessmentResponse>(
@@ -707,6 +760,7 @@ export default function HomePage() {
             {isLoading ? text.loading : text.assessRisk}
           </button>
           {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+          {geocodeNotice ? <p className="form-notice">{geocodeNotice}</p> : null}
         </form>
 
         <section className="panel-section coordinate-panel">

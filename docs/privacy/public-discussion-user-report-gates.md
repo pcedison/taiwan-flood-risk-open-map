@@ -78,11 +78,14 @@ validator will pass.
 
 PTT and Dcard are currently `blocked` / non-accepted. Registry enablement is
 still disabled by default, and even an explicit adapter key must be accompanied
-by all three gates: `SOURCE_FORUM_ENABLED=true`, the source-specific flag
-(`SOURCE_PTT_ENABLED=true` or `SOURCE_DCARD_ENABLED=true`), and
-`SOURCE_TERMS_REVIEW_ACK=true`. These flags are only configuration gates; they
-do not approve crawling, scraping, HTTP fetching, login bypass, anti-bot
-circumvention, raw content storage, or identity storage.
+by all candidate gates: `SOURCE_FORUM_ENABLED=true`, the source-specific flag
+(`SOURCE_PTT_ENABLED=true` or `SOURCE_DCARD_ENABLED=true`),
+`SOURCE_TERMS_REVIEW_ACK=true`, and the source-specific candidate approval ack
+flag (`SOURCE_PTT_CANDIDATE_APPROVAL_ACK=true` or
+`SOURCE_DCARD_CANDIDATE_APPROVAL_ACK=true`). These flags only permit
+no-network synthetic fixture contract testing; they do not approve crawling,
+scraping, HTTP fetching, login bypass, anti-bot circumvention, raw content
+storage, identity storage, or real forum ingestion.
 
 ### Public Web / News-Like Public Pages
 

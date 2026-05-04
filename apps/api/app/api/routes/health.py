@@ -16,6 +16,7 @@ async def health() -> HealthResponse:
         status="ok",
         service=settings.service_id,
         version=settings.app_version,
+        deployment_sha=settings.deployment_sha,
         checked_at=_now_utc(),
     )
 
@@ -34,6 +35,7 @@ async def ready(response: Response) -> ReadyResponse:
         status="ok" if is_ready else "down",
         service=settings.service_id,
         version=settings.app_version,
+        deployment_sha=settings.deployment_sha,
         checked_at=_now_utc(),
         dependencies=dependencies,
     )
@@ -52,7 +54,8 @@ async def metrics() -> PlainTextResponse:
             (
                 "flood_risk_api_info"
                 f'{{service="{_prometheus_label_value(settings.service_id)}",'
-                f'version="{_prometheus_label_value(settings.app_version)}"}} 1'
+                f'version="{_prometheus_label_value(settings.app_version)}",'
+                f'deployment_sha="{_prometheus_label_value(settings.deployment_sha or "unknown")}"}} 1'
             ),
             "",
         )

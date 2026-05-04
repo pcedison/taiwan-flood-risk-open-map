@@ -42,6 +42,7 @@ paths:
                     status: ok
                     service: flood-risk-api
                     version: 0.1.0
+                    deployment_sha: 0123456789abcdef0123456789abcdef01234567
                     checked_at: "2026-04-28T13:00:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
@@ -124,6 +125,10 @@ paths:
                         admin_code: "63000000"
                         source: mock-geocoder
                         confidence: 0.92
+                        precision: exact_address
+                        matched_query: "台北市信義區市府路1號"
+                        requires_confirmation: false
+                        limitations: []
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -220,9 +225,11 @@ paths:
       summary: Submit an anonymous user flood report for moderation.
       description: >
         Default-disabled Phase 5 groundwork. When explicitly enabled, accepts
-        only a point and short summary, stores the report as pending moderation,
-        and does not accept media, EXIF, direct contact, account, or address
-        fields.
+        only a point, short summary, and optional bot-defense challenge token,
+        stores the report as pending moderation, and does not accept media,
+        EXIF, direct contact, account, or address fields. Deployments that set
+        `USER_REPORTS_CHALLENGE_REQUIRED=true` must provide a valid challenge
+        token before storage is touched.
       requestBody:
         required: true
         content:
@@ -236,6 +243,7 @@ paths:
                     lat: 25.033
                     lng: 121.5654
                   summary: "Water is over the curb near the intersection."
+                  challenge_token: "turnstile-or-equivalent-token"
       responses:
         "202":
           description: Report accepted into pending moderation.
@@ -256,8 +264,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Bot-defense challenge verification failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: User report storage is temporarily unavailable.
+          description: User report storage or challenge verification is temporarily unavailable.
           content:
             application/json:
               schema:
@@ -686,6 +700,74 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/reports/{report_id}/privacy-redaction:
+    post:
+      tags:
+        - Admin
+      operationId: redactAdminReportPrivacy
+      summary: Redact and tombstone a user report for privacy deletion handling.
+      description: >
+        Clears report media references, replaces the submitted summary with a
+        redaction marker, sets the report status to `deleted`, and writes an
+        audit log entry with the admin actor and reason code. The response is a
+        minimal tombstone and does not expose point, summary, media references,
+        direct contact fields, or private reporter data.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserReportPrivacyRedactionRequest"
+            examples:
+              reporter_request:
+                value:
+                  reason_code: reporter_request
+              private_data_exposure:
+                value:
+                  reason_code: private_data_exposure
+      responses:
+        "200":
+          description: User report was redacted and tombstoned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserReportPrivacyRedactionResponse"
+              examples:
+                redacted:
+                  value:
+                    redaction:
+                      report_id: "0d51d545-dc6a-4e4b-8f8e-0e42d454d050"
+                      status: deleted
+                      privacy_level: redacted
+                      redacted_at: "2026-04-29T12:10:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: User report privacy redaction storage is temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
   securitySchemes:
     AdminBearerAuth:
@@ -784,6 +866,10 @@ components:
           type: string
         version:
           type: string
+        deployment_sha:
+          type:
+            - string
+            - "null"
         checked_at:
           type: string
           format: date-time
@@ -808,6 +894,10 @@ components:
           type: string
         version:
           type: string
+        deployment_sha:
+          type:
+            - string
+            - "null"
         checked_at:
           type: string
           format: date-time
@@ -888,6 +978,13 @@ components:
           minLength: 1
           maxLength: 500
           description: Short anonymous flood-condition summary; media and direct personal fields are not accepted.
+        challenge_token:
+          type:
+            - string
+            - "null"
+          minLength: 1
+          maxLength: 4096
+          description: Bot-defense challenge response token when required by deployment configuration.
       additionalProperties: false
 
     UserReportCreateResponse:
@@ -912,6 +1009,7 @@ components:
         - approved
         - rejected
         - spam
+        - deleted
 
     UserReportModerationStatus:
       type: string
@@ -996,6 +1094,58 @@ components:
           $ref: "#/components/schemas/AdminUserReport"
       additionalProperties: false
 
+    UserReportPrivacyRedactionReason:
+      type: string
+      description: Required non-personal reason code for privacy redaction and deletion handling.
+      enum:
+        - reporter_request
+        - affected_person_request
+        - private_data_exposure
+        - retention_expiry
+        - operator_error
+
+    UserReportPrivacyRedactionRequest:
+      type: object
+      required:
+        - reason_code
+      properties:
+        reason_code:
+          $ref: "#/components/schemas/UserReportPrivacyRedactionReason"
+      additionalProperties: false
+
+    AdminUserReportPrivacyRedaction:
+      type: object
+      required:
+        - report_id
+        - status
+        - privacy_level
+        - redacted_at
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - deleted
+        privacy_level:
+          type: string
+          enum:
+            - redacted
+        redacted_at:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    UserReportPrivacyRedactionResponse:
+      type: object
+      required:
+        - redaction
+      properties:
+        redaction:
+          $ref: "#/components/schemas/AdminUserReportPrivacyRedaction"
+      additionalProperties: false
+
     PlaceCandidate:
       type: object
       required:
@@ -1031,6 +1181,32 @@ components:
           format: double
           minimum: 0
           maximum: 1
+        precision:
+          type: string
+          enum:
+            - exact_address
+            - road_or_lane
+            - poi
+            - admin_area
+            - map_click
+            - unknown
+          default: unknown
+          description: How precise the candidate location is for risk assessment.
+        matched_query:
+          type:
+            - string
+            - "null"
+          description: Normalized or fallback query that produced this candidate.
+        requires_confirmation:
+          type: boolean
+          default: false
+          description: True when the candidate is too broad for automatic risk assessment.
+        limitations:
+          type: array
+          items:
+            type: string
+          default: []
+          description: User-facing limitations for this geocode candidate.
       additionalProperties: false
 
     RiskAssessRequest:

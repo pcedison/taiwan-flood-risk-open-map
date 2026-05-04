@@ -1,0 +1,51 @@
+# Template evidence record for docs and CI.
+#
+# This file is intentionally not production launch evidence. Keep
+# production_complete: false here. For real public launch review, copy this
+# shape to a private ops location, replace owners and evidence refs with real
+# values, set production_complete: true and readiness_state: production-complete,
+# then run:
+#
+#   python infra/scripts/validate_public_reports_launch_evidence.py --production-complete <private-evidence.yaml>
+
+schema_version: public-reports-launch-evidence/v1
+production_complete: false
+readiness_state: not-production-complete
+captured_at: "2026-05-04T00:00:00+08:00"
+launch_owner: launch-owner
+
+bot_defense:
+  challenge:
+    provider: turnstile-placeholder
+    secret_storage_ref: <set-in-zeabur-secret-env>
+  rate_limit_policy:
+    backend: redis
+    max_requests: 20
+    window_seconds: 60
+    policy_ref: docs/runbooks/public-reports-governance.md#production-launch-evidence
+  abuse_salt:
+    owner: privacy-governance-owner
+    secret_storage_ref: <set-in-zeabur-secret-env>
+
+moderation:
+  sla_minutes: 60
+  owner: moderation-owner
+  backup_owner: moderation-backup-owner
+  queue_review_ref: docs/runbooks/public-reports-governance.md#moderation-sla
+  escalation_ref: docs/runbooks/public-reports-governance.md#rollback
+
+privacy:
+  delete_redaction_procedure_ref: docs/runbooks/public-reports-governance.md#deletion-and-privacy-flow
+  retention_policy: docs/runbooks/public-reports-governance.md#retention-and-takedown
+  opt_out_takedown_path: docs/runbooks/public-reports-governance.md#retention-and-takedown
+  audit_log_review: docs/runbooks/public-reports-governance.md#production-launch-evidence
+  media:
+    enabled: false
+    disabled_media_confirmation: docs/runbooks/public-reports-governance.md#media-and-exif-policy
+
+operations:
+  owner: operations-owner
+  dashboard_ref: docs/runbooks/monitoring-dashboard.md
+  abuse_metrics_ref: docs/runbooks/public-reports-governance.md#operational-measurement
+  moderation_backlog_alert_ref: docs/runbooks/public-reports-governance.md#moderation-sla
+  launch_decision_ref: docs/runbooks/public-reports-governance.md#production-launch-evidence

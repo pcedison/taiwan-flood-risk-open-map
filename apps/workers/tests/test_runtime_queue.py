@@ -460,6 +460,52 @@ def test_build_runtime_adapters_noops_without_fixture_or_cwa_api_gate() -> None:
     assert build_runtime_adapters(settings) == {}
 
 
+def test_build_runtime_adapters_noops_for_forum_candidates_without_fixture_mode() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "ptt,dcard",
+            "SOURCE_FORUM_ENABLED": "true",
+            "SOURCE_PTT_ENABLED": "true",
+            "SOURCE_DCARD_ENABLED": "true",
+            "SOURCE_TERMS_REVIEW_ACK": "true",
+            "SOURCE_PTT_CANDIDATE_APPROVAL_ACK": "true",
+            "SOURCE_DCARD_CANDIDATE_APPROVAL_ACK": "true",
+        }
+    )
+
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_build_runtime_adapters_fixture_mode_supplies_forum_candidate_fixtures() -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+            "WORKER_ENABLED_ADAPTER_KEYS": "ptt,dcard",
+            "SOURCE_FORUM_ENABLED": "true",
+            "SOURCE_PTT_ENABLED": "true",
+            "SOURCE_DCARD_ENABLED": "true",
+            "SOURCE_TERMS_REVIEW_ACK": "true",
+            "SOURCE_PTT_CANDIDATE_APPROVAL_ACK": "true",
+            "SOURCE_DCARD_CANDIDATE_APPROVAL_ACK": "true",
+        }
+    )
+
+    adapters = build_runtime_adapters(
+        settings,
+        fetched_at=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+    )
+
+    assert {"ptt", "dcard"}.issubset(adapters)
+    for adapter_key in ("ptt", "dcard"):
+        result = adapters[adapter_key].run()
+        assert len(result.fetched) == 1
+        assert len(result.normalized) == 1
+        assert result.normalized[0].source_family is SourceFamily.FORUM
+        assert result.fetched[0].payload["governance"]["candidate_contract"][
+            "http_fetch"
+        ] is False
+
+
 def test_build_runtime_adapters_respects_cwa_source_gate_even_with_api_gate() -> None:
     settings = load_worker_settings(
         {

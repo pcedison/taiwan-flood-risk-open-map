@@ -42,6 +42,30 @@ class EvidenceRecord:
 
 
 @dataclass(frozen=True)
+class EvidenceUpsert:
+    id: str
+    adapter_key: str
+    source_id: str
+    source_type: str
+    event_type: str
+    title: str
+    summary: str
+    url: str | None
+    occurred_at: datetime | None
+    observed_at: datetime | None
+    ingested_at: datetime
+    lat: float
+    lng: float
+    distance_to_query_m: float | None
+    confidence: float
+    freshness_score: float
+    source_weight: float
+    privacy_level: str
+    raw_ref: str
+    properties: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class QueryHeatSnapshot:
     period: str
     query_count: int
@@ -247,6 +271,119 @@ def query_nearby_evidence(
     )
 
 
+def upsert_public_evidence(
+    *,
+    database_url: str,
+    records: tuple[EvidenceUpsert, ...],
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[EvidenceRecord, ...]:
+    if not records:
+        return ()
+
+    sql = """
+        INSERT INTO evidence (
+            id,
+            data_source_id,
+            source_id,
+            source_type,
+            event_type,
+            title,
+            summary,
+            url,
+            occurred_at,
+            observed_at,
+            ingested_at,
+            geom,
+            distance_to_query_m,
+            confidence,
+            freshness_score,
+            source_weight,
+            privacy_level,
+            raw_ref,
+            ingestion_status,
+            properties
+        )
+        VALUES (
+            %s::uuid,
+            (SELECT id FROM data_sources WHERE adapter_key = %s),
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            ST_SetSRID(ST_MakePoint(%s, %s), 4326),
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            %s,
+            'accepted',
+            %s::jsonb
+        )
+        ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique
+        DO UPDATE SET
+            title = EXCLUDED.title,
+            summary = EXCLUDED.summary,
+            url = EXCLUDED.url,
+            occurred_at = COALESCE(EXCLUDED.occurred_at, evidence.occurred_at),
+            observed_at = COALESCE(EXCLUDED.observed_at, evidence.observed_at),
+            ingested_at = EXCLUDED.ingested_at,
+            geom = EXCLUDED.geom,
+            distance_to_query_m = EXCLUDED.distance_to_query_m,
+            confidence = GREATEST(evidence.confidence, EXCLUDED.confidence),
+            freshness_score = GREATEST(
+                COALESCE(evidence.freshness_score, 0),
+                COALESCE(EXCLUDED.freshness_score, 0)
+            ),
+            source_weight = GREATEST(
+                COALESCE(evidence.source_weight, 0),
+                COALESCE(EXCLUDED.source_weight, 0)
+            ),
+            privacy_level = EXCLUDED.privacy_level,
+            ingestion_status = 'accepted',
+            properties = evidence.properties || EXCLUDED.properties,
+            updated_at = now()
+        RETURNING
+            id::text AS id,
+            source_id,
+            source_type,
+            event_type,
+            title,
+            summary,
+            url,
+            occurred_at,
+            observed_at,
+            ingested_at,
+            ST_Y(ST_PointOnSurface(geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(geom::geometry)) AS lng,
+            ST_AsGeoJSON(geom::geometry) AS geometry,
+            distance_to_query_m,
+            confidence,
+            COALESCE(freshness_score, 0.8) AS freshness_score,
+            COALESCE(source_weight, CASE WHEN source_type = 'official' THEN 1.0 ELSE 0.85 END)
+                AS source_weight,
+            privacy_level,
+            raw_ref
+    """
+    try:
+        inserted: list[EvidenceRecord] = []
+        with _connect(database_url, connection_factory) as connection:
+            with connection.cursor() as cursor:
+                for record in records:
+                    cursor.execute(sql, _upsert_params(record))
+                    row = cursor.fetchone()
+                    if row is not None:
+                        inserted.append(_record_from_row(row))
+        return tuple(inserted)
+    except (OSError, psycopg.Error) as exc:
+        raise EvidenceRepositoryUnavailable(str(exc)) from exc
+
+
 def fetch_query_heat_snapshot(
     *,
     database_url: str,
@@ -393,6 +530,31 @@ def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
         source_weight=float(row["source_weight"]),
         privacy_level=str(row["privacy_level"]),
         raw_ref=str(row["raw_ref"]) if row.get("raw_ref") is not None else None,
+    )
+
+
+def _upsert_params(record: EvidenceUpsert) -> tuple[object, ...]:
+    return (
+        record.id,
+        record.adapter_key,
+        record.source_id,
+        record.source_type,
+        record.event_type,
+        record.title,
+        record.summary,
+        record.url,
+        record.occurred_at,
+        record.observed_at,
+        record.ingested_at,
+        record.lng,
+        record.lat,
+        record.distance_to_query_m,
+        record.confidence,
+        record.freshness_score,
+        record.source_weight,
+        record.privacy_level,
+        record.raw_ref,
+        Jsonb(record.properties),
     )
 
 

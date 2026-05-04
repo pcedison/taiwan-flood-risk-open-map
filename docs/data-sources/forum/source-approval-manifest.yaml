@@ -2,7 +2,7 @@
 #
 # This file is an acceptance boundary, not a crawl allowlist. Sources listed as
 # blocked or non_accepted must not fetch, crawl, scrape, or normalize real
-# content.
+# content. Candidate adapters may only use synthetic local fixtures.
 version: 1
 status: draft
 default: disabled
@@ -57,6 +57,7 @@ sources:
     family: forum
     registry_key: ptt
     source_specific_flag: SOURCE_PTT_ENABLED
+    candidate_approval_ack_flag: SOURCE_PTT_CANDIDATE_APPROVAL_ACK
     acceptance_status: blocked
     accepted: false
     disabled_reason: >-
@@ -84,11 +85,24 @@ sources:
       - anti_bot_circumvention
       - raw_post_storage
       - username_storage
+    candidate_adapter_contract:
+      runtime_mode: local_fixture_only
+      fixture_records: synthetic_only
+      network_access: disabled
+      real_source_records: false
+      http_fetch: false
+      crawl: false
+      scrape: false
+      login_bypass: false
+      anti_bot_circumvention: false
+      raw_content_storage: false
+      identity_storage: false
   - key: dcard
     platform: Dcard
     family: forum
     registry_key: dcard
     source_specific_flag: SOURCE_DCARD_ENABLED
+    candidate_approval_ack_flag: SOURCE_DCARD_CANDIDATE_APPROVAL_ACK
     acceptance_status: blocked
     accepted: false
     disabled_reason: >-
@@ -116,3 +130,15 @@ sources:
       - anti_bot_circumvention
       - raw_body_storage
       - user_identity_storage
+    candidate_adapter_contract:
+      runtime_mode: local_fixture_only
+      fixture_records: synthetic_only
+      network_access: disabled
+      real_source_records: false
+      http_fetch: false
+      crawl: false
+      scrape: false
+      login_bypass: false
+      anti_bot_circumvention: false
+      raw_content_storage: false
+      identity_storage: false

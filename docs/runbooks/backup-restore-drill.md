@@ -178,6 +178,22 @@ A successful drill records:
 - Post-restore smoke query result, when a scratch API environment exists.
 - Any skipped services or disabled adapters.
 
+## Private Evidence Attachment
+
+Do not commit hosted backup paths, database URLs, or restore transcripts that
+include connection details. Store the drill transcript and artifacts in private
+ops storage, then reference them from the private production readiness evidence:
+
+- Set `drill_preflight.backup_restore_ref` to the private backup inspection and
+  scratch restore evidence bundle.
+- Set the `runbook_drills` entry named `backup restore drill` to
+  `result: passed` or `result: succeeded` and include the same private ref in
+  `evidence_refs`.
+- Include the runtime smoke or post-restore API smoke ref when a scratch API
+  environment was available.
+- Record skipped restore execution as a blocker; production-complete evidence
+  must have no backup restore blockers.
+
 ## Incident Restore Outline
 
 Use this only during a real incident:

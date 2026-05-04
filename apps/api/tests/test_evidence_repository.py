@@ -4,10 +4,12 @@ from datetime import datetime, timezone
 
 from app.domain.layers import fetch_map_layer, fetch_map_layers
 from app.domain.evidence.repository import (
+    EvidenceUpsert,
     RiskAssessmentPersistence,
     fetch_query_heat_snapshot,
     persist_risk_assessment,
     query_nearby_evidence,
+    upsert_public_evidence,
 )
 
 
@@ -127,6 +129,72 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert records == ()
     assert "ST_PointOnSurface(e.geom::geometry)" in sql
     assert params == (121.5654, 25.033, 500, 50)
+
+
+def test_upsert_public_evidence_writes_point_geometry_and_metadata() -> None:
+    ingested_at = datetime(2026, 5, 4, 3, 0, tzinfo=timezone.utc)
+    connection = _FakeConnection(
+        row={
+            "id": "f442ec3f-f013-58d2-8fcb-93f62db8d51c",
+            "source_id": "gdelt-on-demand:test",
+            "source_type": "news",
+            "event_type": "flood_report",
+            "title": "高雄岡山嘉新東路豪雨淹水",
+            "summary": "公開新聞索引標題與查詢地點及淹水關鍵字相符。",
+            "url": "https://example.test/news",
+            "occurred_at": ingested_at,
+            "observed_at": ingested_at,
+            "ingested_at": ingested_at,
+            "lat": 22.8052,
+            "lng": 120.3034,
+            "geometry": '{"type":"Point","coordinates":[120.3034,22.8052]}',
+            "distance_to_query_m": 0,
+            "confidence": 0.9,
+            "freshness_score": 0.95,
+            "source_weight": 1.0,
+            "privacy_level": "public",
+            "raw_ref": "gdelt-doc:test",
+        }
+    )
+
+    records = upsert_public_evidence(
+        database_url="postgresql://example.test/flood",
+        records=(
+            EvidenceUpsert(
+                id="f442ec3f-f013-58d2-8fcb-93f62db8d51c",
+                adapter_key="news.public_web.gdelt_backfill",
+                source_id="gdelt-on-demand:test",
+                source_type="news",
+                event_type="flood_report",
+                title="高雄岡山嘉新東路豪雨淹水",
+                summary="公開新聞索引標題與查詢地點及淹水關鍵字相符。",
+                url="https://example.test/news",
+                occurred_at=ingested_at,
+                observed_at=ingested_at,
+                ingested_at=ingested_at,
+                lat=22.8052,
+                lng=120.3034,
+                distance_to_query_m=0.0,
+                confidence=0.9,
+                freshness_score=0.95,
+                source_weight=1.0,
+                privacy_level="public",
+                raw_ref="gdelt-doc:test",
+                properties={"full_text_stored": False},
+            ),
+        ),
+        connection_factory=lambda: connection,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert "INSERT INTO evidence" in sql
+    assert "ST_SetSRID(ST_MakePoint" in sql
+    assert "ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique" in sql
+    assert params[0] == "f442ec3f-f013-58d2-8fcb-93f62db8d51c"
+    assert params[1] == "news.public_web.gdelt_backfill"
+    assert params[11:13] == (120.3034, 22.8052)
+    assert records[0].source_id == "gdelt-on-demand:test"
+    assert records[0].geometry == {"type": "Point", "coordinates": [120.3034, 22.8052]}
 
 
 def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -> None:

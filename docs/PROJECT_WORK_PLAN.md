@@ -132,7 +132,7 @@ Phase 0 驗收：
 
 主要產物：
 
-- MapLibre/Leaflet 地圖 shell。
+- MapLibre GL JS 地圖 shell。
 - 地址搜尋 UI。
 - 地圖點選 marker。
 - Radius circle。
@@ -315,6 +315,9 @@ Phase 4/5 legal and privacy gates:
 目標：
 
 - 完成 Zeabur production beta、監控、備份、壓測、部署文件與公開限制說明。
+- Basemap launch path is MapLibre GL JS plus PMTiles/Protomaps-compatible
+  OpenStreetMap-derived data served from object storage/CDN. TGOS is future
+  optional and must not block MVP or public-interest launch.
 
 建議工期：
 
@@ -342,6 +345,12 @@ Phase 6 驗收：
 
 - GitHub push 可觸發 Zeabur redeploy。
 - Production beta health check 通過。
+- Browser can load a project-controlled or explicitly licensed MapLibre style
+  without TGOS.
+- Basemap delivery documents OSM/ODbL attribution, range request behavior,
+  cache headers, and rollback.
+- Risk overlays and seeded project MVT/query overlays continue to render above
+  the basemap.
 - 備份與還原流程演練通過。
 - P95 查詢延遲符合 SDD 目標或有清楚風險紀錄。
 - 公開頁面有資料來源、限制與免責說明。
@@ -561,7 +570,7 @@ Dependencies：C1
 
 Tasks:
 
-- Add MapLibre/Leaflet map.
+- Add MapLibre GL JS map.
 - Add Taiwan default viewport.
 - Add click marker.
 - Add radius circle.
@@ -605,7 +614,8 @@ Tasks:
 - Add geocode endpoint.
 - Add provider interface.
 - Add mock provider.
-- Add TGOS fallback placeholder.
+- Keep TGOS as a future optional provider placeholder only; runtime smoke and
+  MVP acceptance must pass without TGOS.
 
 Definition of Done:
 
@@ -1180,11 +1190,15 @@ Completed execution order:
 Next execution order:
 
 1. Replace fixture-backed worker runtime adapters with reviewed real source clients and a durable queue/singleton scheduler.
-2. Move tile generation from evidence/query fallback SQL to dedicated production layer tables and hosting/cache strategy.
-3. Add monitoring dashboards and production scrape deployment around the new heartbeat/freshness metrics.
-4. Implement Phase 4/5 sources only through the new legal/privacy gate checklist.
-5. Prepare this checkpoint update for PR review: final diff check, commit, push, and CI confirmation.
-6. Meet the next-phase runtime acceptance standards recorded in `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md` before claiming queue, reports, query heat materialization, or tile cache readiness.
+2. Wire the open basemap path in engineering: MapLibre style selection,
+   PMTiles/Protomaps source support, object-storage/CDN URL configuration,
+   attribution display, range request smoke, and rollback. Do not require TGOS.
+3. Move project overlay tile generation from evidence/query fallback SQL to
+   dedicated production layer tables and hosting/cache strategy.
+4. Add monitoring dashboards and production scrape deployment around the new heartbeat/freshness metrics.
+5. Implement Phase 4/5 sources only through the new legal/privacy gate checklist.
+6. Prepare this checkpoint update for PR review: final diff check, commit, push, and CI confirmation.
+7. Meet the next-phase runtime acceptance standards recorded in `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md` before claiming queue, reports, query heat materialization, or tile cache readiness.
 
 ---
 
@@ -1203,6 +1217,10 @@ The project is considered public-beta-ready when:
 
 - Phase 4 is accepted or explicitly deferred by ADR.
 - Phase 6 production hardening essentials are accepted.
+- The open basemap PMTiles/object-storage/CDN path has passed browser smoke,
+  attribution review, range request verification, cache review, and rollback
+  rehearsal.
+- Public beta runtime does not depend on TGOS.
 - Backup/restore and deploy rollback are documented.
 - Monitoring can detect source freshness failure.
 

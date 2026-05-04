@@ -6,12 +6,18 @@ import pytest
 from app.domain.reports import (
     InMemoryUserReportRateLimiter,
     RedisUserReportRateLimiter,
+    StaticUserReportChallengeVerifier,
+    TurnstileUserReportChallengeVerifier,
+    UserReportChallengeFailed,
+    UserReportChallengeUnavailable,
     UserReportRateLimitExceeded,
     UserReportRateLimitPolicy,
     UserReportRateLimitUnavailable,
     create_pending_user_report,
     list_pending_user_reports,
     moderate_user_report,
+    redact_user_report_privacy,
+    verify_user_report_challenge,
 )
 
 
@@ -183,6 +189,80 @@ def test_moderate_user_report_rejects_reason_for_wrong_status_before_sql() -> No
     assert connection.cursor_instance.executions == []
 
 
+def test_redact_user_report_privacy_tombstones_report_and_writes_audit_log() -> None:
+    redacted_at = datetime(2026, 4, 29, 12, 10, tzinfo=UTC)
+    connection = _FakeConnection(
+        row={
+            "id": "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            "status": "deleted",
+            "privacy_level": "redacted",
+            "redacted_at": redacted_at,
+        }
+    )
+
+    redaction = redact_user_report_privacy(
+        database_url="postgresql://example.test/flood",
+        report_id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+        reason_code="private_data_exposure",
+        actor_ref="admin_api",
+        connection_factory=lambda: connection,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert "WITH target_report AS" in sql
+    assert "UPDATE user_reports" in sql
+    assert "summary = '[redacted]'" in sql
+    assert "media_ref = NULL" in sql
+    assert "status = 'deleted'" in sql
+    assert "redacted_at = now()" in sql
+    assert "redaction_reason = %s" in sql
+    assert "INSERT INTO audit_logs" in sql
+    assert "user_report.privacy_redacted" in sql
+    assert "previous_status" in sql
+    assert "previous_privacy_level" in sql
+    assert "media_ref_cleared" in sql
+    assert params == (
+        "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+        "private_data_exposure",
+        "admin_api",
+        "private_data_exposure",
+        "admin_api",
+    )
+    assert redaction is not None
+    assert redaction.status == "deleted"
+    assert redaction.privacy_level == "redacted"
+    assert redaction.redacted_at == redacted_at
+
+
+def test_redact_user_report_privacy_returns_none_when_report_is_missing() -> None:
+    connection = _FakeConnection(row=None)
+
+    redaction = redact_user_report_privacy(
+        database_url="postgresql://example.test/flood",
+        report_id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+        reason_code="reporter_request",
+        actor_ref="admin_api",
+        connection_factory=lambda: connection,
+    )
+
+    assert redaction is None
+
+
+def test_redact_user_report_privacy_rejects_invalid_reason_before_sql() -> None:
+    connection = _FakeConnection(row=None)
+
+    with pytest.raises(ValueError):
+        redact_user_report_privacy(
+            database_url="postgresql://example.test/flood",
+            report_id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            reason_code=cast(Any, "not_a_reason"),
+            actor_ref="admin_api",
+            connection_factory=lambda: connection,
+        )
+
+    assert connection.cursor_instance.executions == []
+
+
 def test_user_report_rate_limiter_allows_configured_window() -> None:
     clock = _FakeClock(100.0)
     limiter = InMemoryUserReportRateLimiter(clock=clock.now)
@@ -249,6 +329,78 @@ def test_redis_user_report_rate_limiter_fails_closed_when_redis_unavailable(
         )
 
     assert fake_redis.closed is True
+
+
+def test_static_user_report_challenge_verifier_accepts_expected_token() -> None:
+    verifier = StaticUserReportChallengeVerifier(expected_token="expected-token")
+
+    verifier.verify(token="expected-token", remote_ip="127.0.0.1")
+
+
+def test_static_user_report_challenge_verifier_rejects_wrong_token() -> None:
+    verifier = StaticUserReportChallengeVerifier(expected_token="expected-token")
+
+    with pytest.raises(UserReportChallengeFailed) as exc_info:
+        verifier.verify(token="wrong-token", remote_ip="127.0.0.1")
+
+    assert exc_info.value.error_codes == ("invalid-input-response",)
+
+
+def test_verify_user_report_challenge_rejects_blank_token_before_provider() -> None:
+    class NeverCalledVerifier:
+        def verify(self, *, token: str, remote_ip: str | None = None) -> None:
+            raise AssertionError("verifier should not be called for blank tokens")
+
+    with pytest.raises(UserReportChallengeFailed) as exc_info:
+        verify_user_report_challenge(
+            token="   ",
+            remote_ip=None,
+            provider="static",
+            secret_key=None,
+            static_token="expected-token",
+            verify_url="https://challenge.example.test/siteverify",
+            timeout_seconds=0.5,
+            verifier=NeverCalledVerifier(),
+        )
+
+    assert exc_info.value.error_codes == ("missing-input-response",)
+
+
+def test_turnstile_user_report_challenge_verifier_maps_success_response() -> None:
+    fake_response = _FakeHttpResponse({"success": True})
+    verifier = TurnstileUserReportChallengeVerifier(
+        secret_key="secret",
+        verify_url="https://challenge.example.test/siteverify",
+        timeout_seconds=0.5,
+        opener=lambda *_args, **_kwargs: fake_response,
+    )
+
+    verifier.verify(token="token", remote_ip="127.0.0.1")
+
+    assert fake_response.read_called is True
+
+
+def test_turnstile_user_report_challenge_verifier_maps_failure_response() -> None:
+    verifier = TurnstileUserReportChallengeVerifier(
+        secret_key="secret",
+        verify_url="https://challenge.example.test/siteverify",
+        timeout_seconds=0.5,
+        opener=lambda *_args, **_kwargs: _FakeHttpResponse(
+            {"success": False, "error-codes": ["invalid-input-response"]}
+        ),
+    )
+
+    with pytest.raises(UserReportChallengeFailed) as exc_info:
+        verifier.verify(token="bad-token", remote_ip="127.0.0.1")
+
+    assert exc_info.value.error_codes == ("invalid-input-response",)
+
+
+def test_turnstile_user_report_challenge_verifier_fails_closed_without_secret() -> None:
+    verifier = TurnstileUserReportChallengeVerifier(secret_key=None)
+
+    with pytest.raises(UserReportChallengeUnavailable):
+        verifier.verify(token="token", remote_ip="127.0.0.1")
 
 
 class _FakeConnection:
@@ -328,3 +480,21 @@ class _FakeRedis:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _FakeHttpResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self._payload = payload
+        self.read_called = False
+
+    def __enter__(self) -> "_FakeHttpResponse":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        import json
+
+        self.read_called = True
+        return json.dumps(self._payload).encode("utf-8")

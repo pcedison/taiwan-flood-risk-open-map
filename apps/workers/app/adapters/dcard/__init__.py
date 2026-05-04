@@ -1,14 +1,15 @@
 """Dcard public discussion adapter acceptance boundary.
 
-This module intentionally does not implement fetching, crawling, scraping, or
-normalization. It exists so the registry can expose a reviewed disabled-by-
-default boundary instead of a vague placeholder.
+This module intentionally does not implement live fetching, crawling, or
+scraping. The candidate adapter only normalizes caller-supplied synthetic local
+fixtures so the pipeline contract can be tested without touching Dcard.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
+from app.adapters._forum_candidate import ForumCandidateFixtureAdapter
 from app.adapters.contracts import AdapterMetadata, SourceFamily
 
 
@@ -40,3 +41,26 @@ METADATA: Final[AdapterMetadata] = AdapterMetadata(
     display_name="Dcard public discussion adapter (blocked pending approval)",
     terms_review_required=True,
 )
+
+
+class DcardCandidateFixtureAdapter(ForumCandidateFixtureAdapter):
+    def __init__(self, records, *, fetched_at=None, raw_snapshot_key=None) -> None:
+        super().__init__(
+            records,
+            metadata=METADATA,
+            platform="Dcard",
+            source_approval_status=SOURCE_APPROVAL_STATUS,
+            disabled_reason=ADAPTER_DISABLED_REASON,
+            required_acceptance_fields=REQUIRED_ACCEPTANCE_FIELDS,
+            fetched_at=fetched_at,
+            raw_snapshot_key=raw_snapshot_key,
+        )
+
+
+__all__ = [
+    "ADAPTER_DISABLED_REASON",
+    "DcardCandidateFixtureAdapter",
+    "METADATA",
+    "REQUIRED_ACCEPTANCE_FIELDS",
+    "SOURCE_APPROVAL_STATUS",
+]

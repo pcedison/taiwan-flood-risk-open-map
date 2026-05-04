@@ -11,7 +11,11 @@ import yaml  # type: ignore[import-untyped]
 
 from app.api.routes import admin as admin_route
 from app.core.config import get_settings
-from app.domain.reports import UserReportModerationRecord, UserReportRepositoryUnavailable
+from app.domain.reports import (
+    UserReportModerationRecord,
+    UserReportPrivacyRedactionRecord,
+    UserReportRepositoryUnavailable,
+)
 from app.main import create_app
 
 with warnings.catch_warnings():
@@ -281,6 +285,48 @@ def test_admin_report_moderation_contract(monkeypatch: pytest.MonkeyPatch) -> No
         }
     ]
     assert_openapi_schema(payload, "UserReportModerationResponse")
+
+
+def test_admin_report_privacy_redaction_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    calls: list[dict[str, object]] = []
+
+    def redact_report(**kwargs: object) -> UserReportPrivacyRedactionRecord:
+        calls.append(kwargs)
+        return UserReportPrivacyRedactionRecord(
+            id="0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            status="deleted",
+            privacy_level="redacted",
+            redacted_at=datetime(2026, 4, 29, 12, 10, tzinfo=UTC),
+        )
+
+    monkeypatch.setattr(admin_route, "redact_user_report_privacy", redact_report)
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/admin/v1/reports/0d51d545-dc6a-4e4b-8f8e-0e42d454d050/privacy-redaction",
+        json={"reason_code": "private_data_exposure"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["redaction"] == {
+        "report_id": "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+        "status": "deleted",
+        "privacy_level": "redacted",
+        "redacted_at": "2026-04-29T12:10:00Z",
+    }
+    assert calls == [
+        {
+            "database_url": get_settings().database_url,
+            "report_id": "0d51d545-dc6a-4e4b-8f8e-0e42d454d050",
+            "reason_code": "private_data_exposure",
+            "actor_ref": "admin_api",
+        }
+    ]
+    assert_openapi_schema(payload, "UserReportPrivacyRedactionResponse")
 
 
 def test_admin_report_moderation_rejects_invalid_status(

@@ -1,0 +1,41 @@
+schema_version: flood-potential-import/v1
+production_complete: false
+demo_mode: true
+
+source:
+  name: "DPRC/WRA flood-potential SHP package"
+  download_page_url: "https://www.dprcflood.org.tw/DPRC/02.html"
+  package_url: "https://example.invalid/replace-with-reviewed-shp.zip"
+  license: "Government open data terms to be reviewed before production"
+  attribution: "經濟部水利署 / 水災保全計畫資訊服務網"
+  owner: "data-owner"
+
+retrieval:
+  retrieved_at: "2026-05-04T00:00:00+08:00"
+  retrieved_by: "operator"
+  source_sha256: "replace-with-sha256"
+  archive_ref: "docs/runbooks/flood-potential-import.example.yaml"
+
+scenario:
+  rainfall_duration: "24h"
+  return_period: "100-year"
+  scenario_label: "example scenario, replace before production"
+  county_or_scope: "Taiwan"
+
+processing:
+  input_format: "zip-shp"
+  output_format: "pmtiles"
+  command_ref: "python infra/scripts/import_flood_potential_layer.py docs/runbooks/flood-potential-import.example.yaml --dry-run"
+  output_ref: "s3://replace-with-bucket/flood-potential/example.pmtiles"
+  feature_count: 0
+  source_crs: "TWD97 / TM2"
+  output_crs: "EPSG:4326"
+
+ui:
+  layer_label: "淹水潛勢圖"
+  not_live_warning: "此圖層為規劃/歷史潛勢資料，不是即時淹水警報。"
+  attribution_visible: false
+
+limitations:
+  - "This checked-in file is a template, not production evidence."
+  - "Production import must record source package checksum and scenario notes."

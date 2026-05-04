@@ -1,3 +1,14 @@
+# Template evidence record for docs and CI.
+#
+# This repository intentionally does not include real Zeabur secrets, private
+# alert routes, or production drill artifacts. Keep this file
+# production_complete: false. For private production evidence, copy this shape
+# into an ops-controlled location, replace placeholders with real references,
+# set production_complete: true and readiness_state: production-complete, then
+# run:
+#
+#   python infra/scripts/validate_production_readiness_evidence.py --production-complete <private-evidence.yaml>
+
 schema_version: production-readiness-evidence/v1
 production_complete: false
 readiness_state: not-production-complete
@@ -7,6 +18,54 @@ environment:
   project: zeabur-production-beta-placeholder
   deployment_sha: replace-with-reviewed-deployment-sha
   captured_at: "2026-05-03T00:00:00+08:00"
+
+drill_preflight:
+  schema_version: production-readiness-drill-preflight/v1
+  generated_at: "2026-05-03T00:00:00+08:00"
+  target_env: production-beta-placeholder
+  commit_sha: replace-with-reviewed-deployment-sha
+  operator: drill-operator-placeholder
+  alert_route_refs:
+    API readiness: incident-channel-placeholder
+    Source freshness: incident-channel-placeholder
+    Worker heartbeat/last run: incident-channel-placeholder
+    Scheduler heartbeat: incident-channel-placeholder
+    Runtime queue rows: incident-channel-placeholder
+    Backup/restore drill: incident-channel-placeholder
+  drill_timestamps:
+    on-call drill: "2026-05-03T00:00:00+08:00"
+    rollback drill: "2026-05-03T00:00:00+08:00"
+    backup restore drill: "2026-05-03T00:00:00+08:00"
+  runtime_smoke_ref: docs/runbooks/runtime-smoke.md
+  playwright_ref: replace-with-private-playwright-evidence-ref
+  alert_test_ref: docs/runbooks/production-readiness.md#alert-routing
+  rollback:
+    target: replace-with-known-good-zeabur-deployment-or-commit
+    evidence_ref: docs/runbooks/production-readiness.md#rollback-drill
+  backup_restore_ref: docs/runbooks/backup-restore-drill.md
+  secret_manager_refs:
+    - name: ABUSE_HASH_SALT
+      ref: replace-with-secret-manager-ref
+    - name: ADMIN_BEARER_TOKEN
+      ref: replace-with-secret-manager-ref
+    - name: DATABASE_URL
+      ref: replace-with-secret-manager-ref
+    - name: REDIS_URL
+      ref: replace-with-secret-manager-ref
+    - name: MINIO_ROOT_USER
+      ref: replace-with-secret-manager-ref
+    - name: MINIO_ROOT_PASSWORD
+      ref: replace-with-secret-manager-ref
+    - name: CWA_API_AUTHORIZATION
+      ref: replace-with-secret-manager-ref
+    - name: WRA_API_TOKEN
+      ref: replace-with-secret-manager-ref
+    - name: GRAFANA_ADMIN_PASSWORD
+      ref: replace-with-secret-manager-ref
+    - name: USER_REPORTS_CHALLENGE_SECRET_KEY
+      ref: replace-with-secret-manager-ref
+    - name: USER_REPORTS_CHALLENGE_STATIC_TOKEN
+      ref: replace-with-secret-manager-ref
 
 required_env:
   - name: APP_ENV
@@ -68,6 +127,31 @@ required_env:
     value_status: placeholder-only
     secret_placeholder: <set-in-zeabur-secret-env>
     evidence: real hosted Grafana password missing from this template
+  - name: NEXT_PUBLIC_BASEMAP_STYLE_URL
+    owner: web-owner
+    expected: reviewed open basemap style URL or blank when unused
+    status: placeholder-only
+    evidence: record provider/license review before exposing a hosted style URL
+  - name: NEXT_PUBLIC_BASEMAP_KIND
+    owner: web-owner
+    expected: reviewed basemap kind such as style, pmtiles, or raster
+    status: placeholder-only
+    evidence: match the frontend basemap implementation before hosted launch
+  - name: NEXT_PUBLIC_BASEMAP_PMTILES_URL
+    owner: web-owner
+    expected: reviewed PMTiles URL or blank when unused
+    status: placeholder-only
+    evidence: record tile package source, license, and update cadence before use
+  - name: NEXT_PUBLIC_BASEMAP_RASTER_TILES
+    owner: web-owner
+    expected: reviewed raster tile template or blank when unused
+    status: placeholder-only
+    evidence: record provider terms, attribution, and rate limits before use
+  - name: NEXT_PUBLIC_BASEMAP_ATTRIBUTION
+    owner: web-owner
+    expected: reviewed attribution text for the selected open basemap
+    status: placeholder-only
+    evidence: must match the selected style/tiles provider attribution requirements
   - name: SOURCE_CWA_ENABLED
     owner: source-owner
     expected_default: false
@@ -118,6 +202,16 @@ required_env:
     expected_default: false
     status: placeholder-only
     evidence: keep disabled until forum family gate and terms review are accepted
+  - name: SOURCE_PTT_CANDIDATE_APPROVAL_ACK
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep false until PTT candidate fixture boundary is reviewed
+  - name: SOURCE_DCARD_CANDIDATE_APPROVAL_ACK
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep false until Dcard candidate fixture boundary is reviewed
   - name: SOURCE_TERMS_REVIEW_ACK
     owner: governance-owner
     expected_default: false
@@ -128,11 +222,88 @@ required_env:
     expected_default: false
     status: placeholder-only
     evidence: keep false for hosted environments
+  - name: GDELT_SOURCE_ENABLED
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until GDELT source/legal review, egress cadence, and alert ownership are accepted
+  - name: GDELT_BACKFILL_ENABLED
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until bounded GDELT backfill window and rate-limit policy are accepted
+  - name: GDELT_PRODUCTION_INGESTION_ENABLED
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until a production-candidate persistence run is approved
+  - name: GDELT_PRODUCTION_APPROVAL_EVIDENCE_PATH
+    owner: governance-owner
+    expected: private ops evidence path
+    status: placeholder-only
+    evidence: point to private source/legal/egress approval evidence before production-candidate runs
+  - name: GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK
+    owner: governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: required human acknowledgement; concrete external evidence path/ref is also required
+  - name: GDELT_PRODUCTION_QUERIES
+    owner: governance-owner
+    expected: reviewed bounded Taiwan flood-news queries
+    status: placeholder-only
+    evidence: review query scope before hosted runs
+  - name: GDELT_PRODUCTION_MAX_RECORDS_PER_QUERY
+    owner: governance-owner
+    expected: reviewed numeric policy
+    status: placeholder-only
+    evidence: cap per-query GDELT maxrecords before hosted runs
+  - name: GDELT_PRODUCTION_CADENCE_SECONDS
+    owner: governance-owner
+    expected: reviewed numeric policy
+    status: placeholder-only
+    evidence: enforce minimum request cadence before hosted runs
   - name: USER_REPORTS_ENABLED
     owner: privacy-governance-owner
     expected_default: false
     status: placeholder-only
     evidence: keep disabled until intake governance is accepted
+  - name: USER_REPORTS_CHALLENGE_REQUIRED
+    owner: privacy-governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: keep disabled until provider token issuance and frontend wiring are reviewed
+  - name: USER_REPORTS_CHALLENGE_PROVIDER
+    owner: privacy-governance-owner
+    expected: turnstile or reviewed equivalent
+    status: placeholder-only
+    evidence: static provider is sandbox/test-only
+  - name: USER_REPORTS_CHALLENGE_SECRET_KEY
+    owner: privacy-governance-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <set-in-zeabur-secret-env>
+    evidence: required before USER_REPORTS_CHALLENGE_REQUIRED=true in hosted environments
+  - name: USER_REPORTS_CHALLENGE_STATIC_TOKEN
+    owner: privacy-governance-owner
+    secret: true
+    value_status: placeholder-only
+    secret_placeholder: <sandbox-only-do-not-use-in-production>
+    evidence: static challenge tokens are sandbox/test-only and must not be used for public launch
+  - name: USER_REPORTS_CHALLENGE_VERIFY_URL
+    owner: privacy-governance-owner
+    expected: provider siteverify URL
+    status: placeholder-only
+    evidence: override only for reviewed provider endpoints
+  - name: USER_REPORTS_CHALLENGE_TIMEOUT_SECONDS
+    owner: privacy-governance-owner
+    expected: reviewed numeric policy
+    status: placeholder-only
+    evidence: tune challenge provider timeout before public launch
+  - name: USER_REPORTS_CHALLENGE_NON_PRODUCTION_BYPASS
+    owner: privacy-governance-owner
+    expected_default: false
+    status: placeholder-only
+    evidence: explicit staging/preview-only bypass; production environments still require a configured challenge provider
   - name: USER_REPORTS_RATE_LIMIT_ENABLED
     owner: privacy-governance-owner
     expected: true

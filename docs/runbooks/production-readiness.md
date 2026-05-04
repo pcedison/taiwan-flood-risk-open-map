@@ -15,6 +15,106 @@ backup/restore runbooks. A launch decision still requires named owners,
 environment evidence, and an on-call drill record for the target Zeabur
 project.
 
+## Evidence Validator Modes
+
+The checked-in evidence file
+`docs/runbooks/production-readiness-evidence.example.yaml` is a safe template
+for docs and CI. It intentionally contains placeholders and keeps
+`production_complete: false`; it is not a production launch record.
+
+Validate the template/default mode with:
+
+```powershell
+python infra/scripts/validate_production_readiness_evidence.py
+python infra/scripts/validate_basemap_cdn_evidence.py
+```
+
+Private production evidence can use the same schema in an ops-controlled
+location. Do not commit real secrets, secret previews, private pager routes, or
+private drill artifacts to this repository. Production acceptance requires:
+
+- `production_complete: true` and `readiness_state: production-complete`.
+- Real Zeabur project name and a reviewed 7-40 character deployment commit SHA.
+- Named, non-template owners and alert routes.
+- Secret entries with `value_status: stored-in-secret-manager` and no `value`
+  or `value_preview`.
+- Production source/report gates with `status: accepted` or `status: reviewed`.
+- `drill_preflight` references for runtime smoke, Playwright, alert test,
+  rollback target/evidence, backup restore evidence, and secret manager refs.
+- On-call, rollback, and backup restore drills with `result: passed` or
+  `result: succeeded`, plus at least one production evidence reference outside
+  the runbook instructions.
+- `pending_production_gaps: []`.
+
+Run production-complete acceptance with:
+
+```powershell
+python infra/scripts/validate_production_readiness_evidence.py --production-complete <private-evidence.yaml>
+python infra/scripts/validate_basemap_cdn_evidence.py --production-complete <private-basemap-evidence.yaml>
+```
+
+Public reports have an additional launch evidence validator because external
+intake needs bot-defense, moderation, privacy, deletion, and abuse-measurement
+proof before the fail-closed gate can be opened:
+
+```powershell
+python infra/scripts/validate_public_reports_launch_evidence.py
+python infra/scripts/validate_public_reports_launch_evidence.py --production-complete <private-public-reports-evidence.yaml>
+```
+
+Basemap CDN evidence is intentionally separate from the broader readiness
+record because it must prove CDN behavior, not just environment ownership. The
+basemap record must include the real operator-provided style URL and PMTiles
+URL, 206 Range/`Content-Range` proof, CORS and cache-control headers, browser
+network log and screenshot references, provider/license/cadence owners, and a
+production request capture showing no calls to `tile.openstreetmap.org`.
+
+## Drill Preflight Evidence
+
+Use the no-secret helper to create a JSON `drill_preflight` skeleton. It reads
+the current git commit, records the target environment and operator, and emits
+only evidence references. It does not read Zeabur env values or print secret
+values.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\production-readiness-drill.ps1 `
+  -TargetEnv production-beta `
+  -Operator "operator@example.com" `
+  -RuntimeSmokeRef "private-ops://drills/runtime-smoke/2026-05-04" `
+  -PlaywrightRef "private-ops://drills/playwright/2026-05-04" `
+  -AlertTestRef "private-ops://drills/alert-test/2026-05-04" `
+  -RollbackTarget "known-good-zeabur-deployment-or-commit" `
+  -RollbackRef "private-ops://drills/rollback/2026-05-04" `
+  -BackupRestoreRef "private-ops://drills/backup-restore/2026-05-04" `
+  -AlertRouteRef "API readiness=pagerduty:flood-risk-api" `
+  -SecretManagerRef "DATABASE_URL=zeabur://flood-risk-production-beta/env/DATABASE_URL" `
+  -OutputPath ".\tmp\production-readiness-drill-preflight.json"
+```
+
+For secrets, pass only secret manager references such as `zeabur://`,
+`vault://`, `op://`, or `private-ops://`. Do not pass database URLs, Redis URLs,
+bearer tokens, provider tokens, screenshots that reveal values, or copied
+Zeabur secret contents.
+
+Copy the generated JSON object under `drill_preflight` in the private evidence
+file. Attach results as references:
+
+- Runtime smoke: store the `scripts/runtime-smoke.ps1` transcript or CI job URL
+  in private ops storage, then set `drill_preflight.runtime_smoke_ref`.
+- Playwright: store the report URL, artifact ID, or screenshot bundle ref, then
+  set `drill_preflight.playwright_ref`.
+- Alert test: store the pager route test, incident-channel message, or
+  alertmanager notification evidence, then set `alert_test_ref` and every
+  `alert_route_refs` family.
+- Rollback: record the known-good Zeabur deployment or commit in
+  `rollback.target` and the drill transcript in `rollback.evidence_ref`.
+- Backup restore: store the backup archive inspection, scratch restore, and
+  post-restore smoke result ref in `backup_restore_ref`.
+
+When `production_complete: true`, the validator requires these references to
+point outside the checked-in runbooks and rejects secret-like values in
+`secret_manager_refs`.
+
 ## Secrets Inventory
 
 Secrets must live only in Zeabur environment variables or the selected secret
@@ -45,15 +145,37 @@ Non-secret flags still have owners because they control production behavior.
 | `SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED` | source owner | `false` until accepted | Requires upstream URL/license and cadence review. |
 | `SOURCE_NEWS_ENABLED` | governance owner | `false` until accepted | Requires L2 allowlist and citation policy. |
 | `SOURCE_FORUM_ENABLED` | governance owner | `false` | Requires Phase 4 legal/source review. |
-| `SOURCE_PTT_ENABLED` | governance owner | `false` | Requires `SOURCE_FORUM_ENABLED=true` and terms acknowledgement. |
-| `SOURCE_DCARD_ENABLED` | governance owner | `false` | Requires `SOURCE_FORUM_ENABLED=true` and terms acknowledgement. |
+| `SOURCE_PTT_ENABLED` | governance owner | `false` | Requires `SOURCE_FORUM_ENABLED=true`, terms acknowledgement, and candidate approval ack. |
+| `SOURCE_DCARD_ENABLED` | governance owner | `false` | Requires `SOURCE_FORUM_ENABLED=true`, terms acknowledgement, and candidate approval ack. |
+| `SOURCE_PTT_CANDIDATE_APPROVAL_ACK` | governance owner | `false` | Permits only no-network synthetic PTT candidate fixture testing. |
+| `SOURCE_DCARD_CANDIDATE_APPROVAL_ACK` | governance owner | `false` | Permits only no-network synthetic Dcard candidate fixture testing. |
 | `SOURCE_TERMS_REVIEW_ACK` | governance owner | `false` until review record exists | Required for terms-reviewed adapters such as GDELT backfill and future forums. |
+| `GDELT_SOURCE_ENABLED` | governance owner | `false` until accepted | Required before any GDELT rehearsal or production-candidate egress. |
+| `GDELT_BACKFILL_ENABLED` | governance owner | `false` until accepted | Separate operator gate for bounded backfill windows. |
+| `GDELT_PRODUCTION_INGESTION_ENABLED` | governance owner | `false` until accepted | Required for the persistence/promotion production-candidate command. |
+| `GDELT_PRODUCTION_APPROVAL_EVIDENCE_PATH` | governance owner | private evidence path | Points to non-committed source/legal/egress approval evidence. |
+| `GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK` | governance owner | `false` | Required human acknowledgement for production-candidate runs; it is valid only together with a concrete external evidence path/ref. |
+| `GDELT_PRODUCTION_QUERIES` | governance owner | reviewed bounded query set | Do not reuse rehearsal queries without approval. |
+| `GDELT_PRODUCTION_MAX_RECORDS_PER_QUERY` | governance owner | reviewed numeric policy | Caps GDELT DOC maxrecords per query. |
+| `GDELT_PRODUCTION_CADENCE_SECONDS` | governance owner | reviewed numeric policy | Minimum delay between GDELT requests. |
 | `USER_REPORTS_ENABLED` | privacy/governance owner | `false` | Keep disabled until moderation, retention, abuse, and deletion gates are accepted. |
 | `USER_REPORTS_RATE_LIMIT_ENABLED` | privacy/governance owner | `true` when intake is enabled | Public report abuse guard; keep enabled for any reviewed launch. |
 | `USER_REPORTS_RATE_LIMIT_BACKEND` | privacy/governance owner | `redis` | Shared backend required for multi-replica launch; memory is local/test-only. |
 | `USER_REPORTS_RATE_LIMIT_MAX_REQUESTS` | privacy/governance owner | reviewed numeric policy | Tune with abuse-prevention review. |
 | `USER_REPORTS_RATE_LIMIT_WINDOW_SECONDS` | privacy/governance owner | reviewed numeric policy | Tune with abuse-prevention review. |
 | `USER_REPORTS_RATE_LIMIT_CLIENT_HEADER` | privacy/governance owner | blank unless trusted edge proxy overwrites it | Avoid spoofable client signals. |
+| `USER_REPORTS_CHALLENGE_REQUIRED` | privacy/governance owner | `true` before public reports launch | Fails closed before storage when challenge tokens are missing or invalid. |
+| `USER_REPORTS_CHALLENGE_PROVIDER` | privacy/governance owner | `turnstile` or reviewed equivalent | `static` is sandbox/test-only. |
+| `USER_REPORTS_CHALLENGE_SECRET_KEY` | privacy/governance owner | yes when challenge is required | Store only in secret env; do not commit provider keys. |
+| `USER_REPORTS_CHALLENGE_STATIC_TOKEN` | privacy/governance owner | blank in production | Sandbox/test-only; do not use for public launch. |
+| `USER_REPORTS_CHALLENGE_VERIFY_URL` | privacy/governance owner | provider default unless reviewed | Override only for approved provider endpoint changes. |
+| `USER_REPORTS_CHALLENGE_TIMEOUT_SECONDS` | privacy/governance owner | reviewed numeric policy | Keep low enough to fail closed without exhausting API workers. |
+| `USER_REPORTS_CHALLENGE_NON_PRODUCTION_BYPASS` | privacy/governance owner | `false` | Explicit staging/preview-only bypass; production-like public intake otherwise fails closed without a configured challenge provider. |
+| `NEXT_PUBLIC_BASEMAP_STYLE_URL` | web owner | reviewed URL or blank | Open basemap style URL; record provider/license/attribution evidence before hosted use. |
+| `NEXT_PUBLIC_BASEMAP_KIND` | web owner | reviewed kind or blank | Must match frontend implementation, for example style, pmtiles, or raster. |
+| `NEXT_PUBLIC_BASEMAP_PMTILES_URL` | web owner | reviewed URL or blank | PMTiles source/package must have license, attribution, and update-cadence evidence. |
+| `NEXT_PUBLIC_BASEMAP_RASTER_TILES` | web owner | reviewed tile template or blank | Raster tile provider terms, attribution, and rate limits must be accepted before hosted use. |
+| `NEXT_PUBLIC_BASEMAP_ATTRIBUTION` | web owner | reviewed attribution or blank | Must match the selected open basemap provider requirements. |
 
 ## Zeabur Environment Ownership
 
@@ -110,6 +232,7 @@ Run this drill for staging first. Repeat for production beta before launch.
    ```powershell
    python infra/scripts/validate_monitoring_assets.py
    python infra/scripts/validate_production_readiness_evidence.py
+   python infra/scripts/validate_basemap_cdn_evidence.py
    ```
 
 3. Run PowerShell parser/help checks:
@@ -134,8 +257,12 @@ Run this drill for staging first. Repeat for production beta before launch.
 12. Copy the schema shape from
     `docs/runbooks/production-readiness-evidence.example.yaml`, replace the
     placeholders with private evidence references, and validate the record with
-    `python infra/scripts/validate_production_readiness_evidence.py <path>`.
-13. Record launch blockers, skipped checks, owner handoff, and next action.
+    `python infra/scripts/validate_production_readiness_evidence.py --production-complete <path>`.
+13. Copy the schema shape from
+    `docs/runbooks/basemap-cdn-evidence.example.yaml`, replace the demo URLs and
+    runbook refs with real CDN/browser evidence, and validate it with
+    `python infra/scripts/validate_basemap_cdn_evidence.py --production-complete <path>`.
+14. Record launch blockers, skipped checks, owner handoff, and next action.
 
 ## Rollback Drill
 
@@ -168,7 +295,7 @@ misbehaving, or legally blocked.
 | WRA worker live ingestion | `SOURCE_WRA_API_ENABLED=false` and optionally `SOURCE_WRA_ENABLED=false` |
 | Flood potential GeoJSON | `SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false` and optionally `SOURCE_FLOOD_POTENTIAL_ENABLED=false` |
 | News/public web | `SOURCE_NEWS_ENABLED=false` |
-| Forums | `SOURCE_FORUM_ENABLED=false`, `SOURCE_PTT_ENABLED=false`, `SOURCE_DCARD_ENABLED=false` |
+| Forums | `SOURCE_FORUM_ENABLED=false`, `SOURCE_PTT_ENABLED=false`, `SOURCE_DCARD_ENABLED=false`, `SOURCE_PTT_CANDIDATE_APPROVAL_ACK=false`, `SOURCE_DCARD_CANDIDATE_APPROVAL_ACK=false` |
 | Sample data | `SOURCE_SAMPLE_DATA_ENABLED=false` |
 
 After flipping a kill switch, confirm the source is disabled or no longer
@@ -186,6 +313,18 @@ intake is accidentally enabled:
 4. Preserve any received records for privacy review; do not manually delete
    before the owner decides the retention/deletion path.
 
+Hosted or production-like environments fail closed when `USER_REPORTS_ENABLED`
+is true but no bot-defense provider secret is configured. `preview` and
+`staging` may use `USER_REPORTS_CHALLENGE_NON_PRODUCTION_BYPASS=true` only as a
+recorded non-production exception; production environments must configure the
+real challenge provider instead.
+
+Before any public launch, also validate a private
+`public-reports-launch-evidence` record with `--production-complete`. That
+record must prove real owners, challenge secret storage, moderation SLA,
+delete/redaction and takedown procedures, media/EXIF policy or disabled-media
+confirmation, audit review, dashboards, alerts, and launch owner approval.
+
 ## GDELT and Forum Gates
 
 GDELT backfill and future forum ingestion are not production beta defaults.
@@ -194,9 +333,38 @@ Before enabling either:
 1. Confirm source terms and robots review are recorded.
 2. Set `SOURCE_TERMS_REVIEW_ACK=true` only after review approval.
 3. Keep `SOURCE_FORUM_ENABLED=false` until Phase 4 forum governance is accepted.
-4. For PTT/Dcard, require both family gate and source-level gate.
+4. For PTT/Dcard, require the family gate, source-level gate, terms ack, and candidate approval ack before fixture contract testing.
 5. Confirm no full-text redistribution beyond approved citation/snippet policy.
 6. Add per-source freshness thresholds and alert routing before launch.
+
+For GDELT production-candidate fetch, persist, or promote flows,
+`GDELT_PRODUCTION_APPROVAL_EVIDENCE_PATH` must point to concrete external
+source/legal/egress approval evidence. `GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK`
+must also be true as a second human confirmation. Neither gate can release the
+flow by itself.
+
+### GDELT live acceptance evidence
+
+The worker also exposes a no-network GDELT live acceptance preflight:
+
+```powershell
+cd apps/workers
+python -m app.main --validate-gdelt-live-acceptance ..\..\docs\data-sources\news\gdelt-live-acceptance.example.yaml
+```
+
+The checked-in example is `not-production-complete`; a valid parse returns a
+JSON `skipped` payload with `network_allowed=false`. Private production evidence
+must set `production_complete: true` and `readiness_state:
+production-complete`, then replace every placeholder with real legal/source
+approval, source owner, egress owner, rate-limit policy, hosted cadence,
+alert owner/route, production persistence promotion evidence, rollback or
+kill-switch evidence, and the latest dry-run or production-candidate run
+evidence.
+
+Do not describe GDELT as true live ingestion complete unless this private
+evidence exists and the preflight returns `status: "succeeded"`. The preflight
+does not fetch GDELT, does not schedule live ingestion, and does not replace the
+source/legal approval record.
 
 ## Launch Blockers
 
@@ -216,6 +384,9 @@ the accountable owner:
 - Backup creation, archive inspection, and scratch restore drill are recorded.
 - Runtime smoke, freshness check, and rollback drill have production-beta or
   staging evidence.
+- Basemap CDN evidence is production-complete, including 206 Range, CORS,
+  cache-control, real style/PMTiles URLs, screenshots, browser network log, and
+  proof that no public OSM community tile endpoint is used.
 - Public reports remain disabled unless the privacy/governance owner accepts
   all intake gates.
 - Forum/GDELT gates remain disabled unless governance approval and alerting are

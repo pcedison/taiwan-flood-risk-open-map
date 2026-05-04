@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 
 ConnectionFactory = Callable[[], Any]
-UserReportStatus = Literal["pending", "approved", "rejected", "spam"]
+UserReportStatus = Literal["pending", "approved", "rejected", "spam", "deleted"]
 UserReportModerationStatus = Literal["approved", "rejected", "spam"]
 UserReportModerationReason = Literal[
     "verified_flood_signal",
@@ -20,6 +20,13 @@ UserReportModerationReason = Literal[
     "insufficient_detail",
     "abuse_or_spam",
     "out_of_scope",
+]
+UserReportPrivacyRedactionReason = Literal[
+    "reporter_request",
+    "affected_person_request",
+    "private_data_exposure",
+    "retention_expiry",
+    "operator_error",
 ]
 VALID_MODERATION_STATUSES: set[str] = {"approved", "rejected", "spam"}
 VALID_MODERATION_REASONS: set[str] = {
@@ -39,6 +46,13 @@ MODERATION_REASONS_BY_STATUS: dict[UserReportModerationStatus, set[str]] = {
         "out_of_scope",
     },
     "spam": {"abuse_or_spam"},
+}
+VALID_PRIVACY_REDACTION_REASONS: set[str] = {
+    "reporter_request",
+    "affected_person_request",
+    "private_data_exposure",
+    "retention_expiry",
+    "operator_error",
 }
 
 
@@ -61,6 +75,14 @@ class UserReportModerationRecord:
     lng: float
     created_at: datetime
     reviewed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class UserReportPrivacyRedactionRecord:
+    id: str
+    status: Literal["deleted"]
+    privacy_level: Literal["redacted"]
+    redacted_at: datetime
 
 
 def create_pending_user_report(
@@ -236,6 +258,90 @@ def moderate_user_report(
     return _moderation_record_from_row(row)
 
 
+def redact_user_report_privacy(
+    *,
+    database_url: str,
+    report_id: str,
+    reason_code: UserReportPrivacyRedactionReason,
+    actor_ref: str,
+    connection_factory: ConnectionFactory | None = None,
+) -> UserReportPrivacyRedactionRecord | None:
+    if reason_code not in VALID_PRIVACY_REDACTION_REASONS:
+        raise ValueError(f"invalid privacy redaction reason_code: {reason_code}")
+
+    sql = """
+        WITH target_report AS (
+            SELECT
+                id,
+                status AS previous_status,
+                privacy_level AS previous_privacy_level,
+                media_ref IS NOT NULL AS had_media_ref
+            FROM user_reports
+            WHERE id = %s::uuid
+            FOR UPDATE
+        ),
+        updated_report AS (
+            UPDATE user_reports
+            SET
+                summary = '[redacted]',
+                media_ref = NULL,
+                status = 'deleted',
+                privacy_level = 'redacted',
+                reviewed_at = COALESCE(user_reports.reviewed_at, now()),
+                redacted_at = now(),
+                redaction_reason = %s
+            FROM target_report
+            WHERE user_reports.id = target_report.id
+            RETURNING
+                user_reports.id::text AS id,
+                user_reports.status,
+                user_reports.privacy_level,
+                user_reports.redacted_at,
+                target_report.previous_status,
+                target_report.previous_privacy_level,
+                target_report.had_media_ref
+        ),
+        inserted_audit AS (
+            INSERT INTO audit_logs (
+                actor_ref,
+                action,
+                subject_type,
+                subject_id,
+                metadata
+            )
+            SELECT
+                %s,
+                'user_report.privacy_redacted',
+                'user_report',
+                updated_report.id,
+                jsonb_build_object(
+                    'previous_status', updated_report.previous_status,
+                    'status', updated_report.status,
+                    'previous_privacy_level', updated_report.previous_privacy_level,
+                    'privacy_level', updated_report.privacy_level,
+                    'reason_code', %s,
+                    'redacted_by', %s,
+                    'media_ref_cleared', updated_report.had_media_ref
+                )
+            FROM updated_report
+        )
+        SELECT id, status, privacy_level, redacted_at
+        FROM updated_report
+    """
+    params = (report_id, reason_code, actor_ref, reason_code, actor_ref)
+    try:
+        with _connect(database_url, connection_factory) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql, params)
+                row = cursor.fetchone()
+    except (OSError, psycopg.Error) as exc:
+        raise UserReportRepositoryUnavailable(str(exc)) from exc
+
+    if row is None:
+        return None
+    return _privacy_redaction_record_from_row(row)
+
+
 def _connect(database_url: str, connection_factory: ConnectionFactory | None) -> Any:
     if connection_factory is not None:
         return connection_factory()
@@ -251,4 +357,13 @@ def _moderation_record_from_row(row: dict[str, Any]) -> UserReportModerationReco
         lng=float(row["lng"]),
         created_at=cast(datetime, row["created_at"]),
         reviewed_at=cast(datetime | None, row["reviewed_at"]),
+    )
+
+
+def _privacy_redaction_record_from_row(row: dict[str, Any]) -> UserReportPrivacyRedactionRecord:
+    return UserReportPrivacyRedactionRecord(
+        id=str(row["id"]),
+        status="deleted",
+        privacy_level="redacted",
+        redacted_at=cast(datetime, row["redacted_at"]),
     )

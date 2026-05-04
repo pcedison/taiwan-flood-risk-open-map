@@ -21,6 +21,9 @@ groundwork.
 - `/v1/layers` and `/v1/layers/{layer_id}/tilejson` placeholder layer metadata
   until the tile/layer pipeline lands
 - Protected `/admin/v1/jobs` and `/admin/v1/sources` contract skeleton
+- Default-disabled `/v1/reports` intake groundwork with shared rate limiting,
+  optional required challenge verification, admin moderation, and admin
+  privacy redaction/tombstoning
 - Environment-based settings loader
 - Structured error payload helper
 - Focused public contract tests
@@ -31,4 +34,7 @@ groundwork.
   normal local development should use `app.main:app`.
 - Geocode and layer data remain mock/placeholder surfaces until provider and
   tile pipeline work is implemented.
-- User reports are pending Phase 5 API/governance implementation.
+- User reports remain pre-launch and disabled by default. Do not enable public
+  intake outside a reviewed sandbox until challenge provider configuration,
+  deletion request operations, moderation SLA/metrics, media redaction, consent,
+  and corroboration gates are approved.
