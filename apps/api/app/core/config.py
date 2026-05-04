@@ -177,6 +177,7 @@ def _deployment_sha() -> str | None:
         "GIT_COMMIT_SHA",
         "COMMIT_SHA",
         "SOURCE_COMMIT",
+        "ZEABUR_GIT_COMMIT_SHA",
         "ZB_GIT_COMMIT_SHA",
         "VERCEL_GIT_COMMIT_SHA",
     ):

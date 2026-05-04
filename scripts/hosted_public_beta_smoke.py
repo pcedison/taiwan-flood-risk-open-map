@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
 
     failures.extend(check_geocode_exact(base_url))
     failures.extend(check_geocode_admin_confirmation(base_url))
+    failures.extend(check_uncovered_address_admin_fallback(base_url))
 
     if failures:
         print("HOSTED_PUBLIC_BETA_SMOKE failed")
@@ -124,6 +125,52 @@ def check_geocode_admin_confirmation(base_url: str) -> list[str]:
     print(
         "PASS hosted admin confirmation | "
         f"{query} -> {candidate['name']} | requires_confirmation=true"
+    )
+    return []
+
+
+def check_uncovered_address_admin_fallback(base_url: str) -> list[str]:
+    query = "高雄市苓雅區四維三路2號"
+    result = request_json(
+        "POST",
+        f"{base_url}/v1/geocode",
+        {"query": query, "input_type": "address", "limit": 1},
+    )
+    if result.status_code != 200:
+        return [f"admin fallback geocode returned HTTP {result.status_code}: {result.error or result.payload}"]
+    candidates = result.payload.get("candidates", [])
+    if not candidates:
+        return [f"admin fallback geocode returned no candidates for {query}"]
+    candidate = candidates[0]
+    failures = require_candidate_fields(candidate, "admin fallback geocode")
+    if failures:
+        return failures
+    if candidate.get("source") != "taiwan-admin-centroid-fallback":
+        failures.append(f"admin fallback source should be taiwan-admin-centroid-fallback, got {candidate.get('source')}")
+    if candidate.get("precision") != "admin_area":
+        failures.append(f"admin fallback precision should be admin_area, got {candidate.get('precision')}")
+    if candidate.get("requires_confirmation") is not True:
+        failures.append("admin fallback should require confirmation")
+
+    risk = request_json(
+        "POST",
+        f"{base_url}/v1/risk/assess",
+        {
+            "point": candidate["point"],
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": f"{query}｜{candidate['name']}",
+        },
+    )
+    if risk.status_code != 200:
+        failures.append(f"admin fallback risk assessment returned HTTP {risk.status_code}: {risk.error or risk.payload}")
+    elif not risk.payload.get("explanation", {}).get("summary"):
+        failures.append("admin fallback risk assessment did not return an explanation summary")
+    if failures:
+        return failures
+    print(
+        "PASS hosted admin fallback | "
+        f"{query} -> {candidate['name']} | risk={risk.payload['historical']['level']}"
     )
     return []
 

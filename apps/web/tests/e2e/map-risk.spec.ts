@@ -237,7 +237,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("查詢關注度：低")).toBeVisible();
 });
 
-test("live local unknown-address flow assesses precise fixtures and blocks admin-only geocodes", async ({
+test("live local unknown-address flow assesses precise fixtures and coarse admin geocodes", async ({
   page,
 }) => {
   let riskCalls = 0;
@@ -260,10 +260,9 @@ test("live local unknown-address flow assesses precise fixtures and blocks admin
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText(/定位精度：行政區/)).toBeVisible();
-  await expect(page.getByText(/請改輸入道路或門牌/)).toBeVisible();
-  await expect(page.getByText(/歷史參考風險為高/)).not.toBeVisible();
-  await page.waitForTimeout(300);
-  expect(riskCalls).toBe(1);
+  await expect(page.getByText(/系統會以代表點查詢/)).toBeVisible();
+  await expect(page.getByText(/資料不足/).first()).toBeVisible();
+  await expect.poll(() => riskCalls).toBe(2);
 });
 
 test("a failed address lookup clears stale risk results and does not assess old coordinates", async ({
@@ -359,7 +358,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
   expect(riskCalls).toBe(1);
 });
 
-test("an admin-area geocode asks for confirmation and does not assess stale coordinates", async ({
+test("an admin-area geocode warns and still assesses with data limits", async ({
   page,
 }) => {
   let riskCalls = 0;
@@ -411,22 +410,24 @@ test("an admin-area geocode asks for confirmation and does not assess stale coor
 
   await page.route("http://localhost:8000/v1/risk/assess", async (route) => {
     riskCalls += 1;
+    const body = route.request().postDataJSON() as { point?: { lat?: number } };
+    const isAdminFallback = body.point?.lat === 24.827;
     await route.fulfill({
       contentType: "application/json",
       json: {
         assessment_id: "018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
-        confidence: { level: "高" },
+        confidence: { level: isAdminFallback ? "未知" : "高" },
         created_at: "2026-04-29T03:00:00Z",
         data_freshness: [],
         evidence: [],
         expires_at: "2026-04-29T03:10:00Z",
         explanation: {
-          main_reasons: ["mock reason"],
-          missing_sources: [],
-          summary: "mock-risk-summary",
+          main_reasons: [isAdminFallback ? "目前缺少可採用資料。" : "mock reason"],
+          missing_sources: isAdminFallback ? ["目前資料不足，不能標記為低風險。"] : [],
+          summary: isAdminFallback ? "目前資料不足，無法判定即時或歷史淹水風險。" : "mock-risk-summary",
         },
-        historical: { level: "高" },
-        location: { lat: 23.038818, lng: 120.213493 },
+        historical: { level: isAdminFallback ? "未知" : "高" },
+        location: body.point ?? { lat: 23.038818, lng: 120.213493 },
         query_heat: {
           attention_level: "低",
           period: "P7D",
@@ -435,7 +436,7 @@ test("an admin-area geocode asks for confirmation and does not assess stale coor
           updated_at: "2026-04-29T03:00:00Z",
         },
         radius_m: 300,
-        realtime: { level: "低" },
+        realtime: { level: isAdminFallback ? "未知" : "低" },
         score_version: "risk-v0.1.0",
       },
     });
@@ -464,7 +465,8 @@ test("an admin-area geocode asks for confirmation and does not assess stale coor
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText(/定位精度：行政區/)).toBeVisible();
-  await expect(page.getByText(/請改輸入道路或門牌/)).toBeVisible();
-  await expect(page.getByText("mock-risk-summary")).not.toBeVisible();
-  expect(riskCalls).toBe(1);
+  await expect(page.getByText(/系統會以代表點查詢/)).toBeVisible();
+  await expect(page.getByText("資料不足").first()).toBeVisible();
+  await expect(page.getByText(/無法判定即時或歷史淹水風險/)).toBeVisible();
+  expect(riskCalls).toBe(2);
 });

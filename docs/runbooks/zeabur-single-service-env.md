@@ -26,6 +26,8 @@ unless a separate environment handoff says otherwise.
 | Variable | Zeabur value |
 |---|---|
 | `APP_ENV` | `staging` |
+| `DEPLOYMENT_SHA` | `${ZEABUR_GIT_COMMIT_SHA}` |
+| `API_VERSION` | `public-beta-mvp-2026-05-04` or another release label |
 | `LOG_LEVEL` | `info` |
 | `NEXT_PUBLIC_API_BASE_URL` | Leave empty |
 | `NEXT_PUBLIC_BASEMAP_STYLE_URL` | Reviewed open basemap style URL, or blank for local/dev fallback only |
@@ -34,8 +36,16 @@ unless a separate environment handoff says otherwise.
 | `NEXT_PUBLIC_BASEMAP_RASTER_TILES` | Reviewed raster tile template only for temporary fallback |
 | `NEXT_PUBLIC_BASEMAP_ATTRIBUTION` | Reviewed attribution text for the selected basemap |
 | `NEXT_TELEMETRY_DISABLED` | `1` |
-| `REALTIME_OFFICIAL_ENABLED` | `true` |
-| `CWA_API_AUTHORIZATION` | Paste the CWA authorization token |
+| `REALTIME_OFFICIAL_ENABLED` | `false` for the no-secret public beta smoke |
+| `SOURCE_CWA_API_ENABLED` | `false` until CWA is explicitly enabled |
+| `SOURCE_WRA_API_ENABLED` | `false` until WRA is explicitly enabled |
+| `CWA_API_AUTHORIZATION` | Leave empty until CWA is explicitly enabled |
+| `EVIDENCE_REPOSITORY_ENABLED` | `false` until PostgreSQL is attached and migrated |
+| `HISTORICAL_NEWS_ON_DEMAND_ENABLED` | `false` until source terms are reviewed |
+| `HISTORICAL_NEWS_ON_DEMAND_WRITEBACK_ENABLED` | `false` until database writeback is enabled |
+| `SOURCE_NEWS_ENABLED` | `false` until source terms are reviewed |
+| `SOURCE_TERMS_REVIEW_ACK` | `false` until source terms are reviewed |
+| `USER_REPORTS_ENABLED` | `false` until abuse controls and moderation owner are ready |
 
 ## Optional Variables
 
@@ -58,9 +68,9 @@ Do not add these variables for the first single-service preview unless an engine
 | `DATABASE_URL`, `POSTGRES_*` | PostgreSQL is not part of the first preview. |
 | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT` | Redis is not part of the first preview. |
 | `MINIO_*` | Object storage is not part of the first preview. |
-| `SOURCE_*_ENABLED` | These are worker and scheduler flags; there is no worker or scheduler in this service. |
-| `SOURCE_CWA_API_ENABLED`, `CWA_API_URL`, `CWA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
-| `SOURCE_WRA_API_ENABLED`, `WRA_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
+| `SOURCE_*_ENABLED` not listed above | These are worker and scheduler flags; there is no worker or scheduler in this service. |
+| `CWA_API_URL`, `CWA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
+| `WRA_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
 | `WORKER_METRICS_TEXTFILE_PATH`, `SCHEDULER_METRICS_TEXTFILE_PATH` | Queue/heartbeat metric knobs for worker or scheduler services; this single-service preview has neither. |
 | `S3_*` | The current runtime does not read these names. |
 | `TGOS_API_KEY` | Reserved for future optional TGOS support; not read by the current runtime. |

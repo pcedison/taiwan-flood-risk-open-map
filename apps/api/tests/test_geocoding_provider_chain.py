@@ -136,6 +136,51 @@ def test_provider_chain_caps_house_number_to_lane_fallback_precision() -> None:
     assert candidates[0].requires_confirmation is False
 
 
+def test_provider_chain_falls_back_to_taiwan_admin_centroid_for_unknown_address() -> None:
+    nominatim_calls: list[str] = []
+    wikimedia_calls: list[str] = []
+
+    def nominatim_lookup(query: str, *_args: object) -> tuple[PlaceCandidate, ...]:
+        nominatim_calls.append(query)
+        return ()
+
+    def wikimedia_lookup(query: str, *_args: object) -> tuple[PlaceCandidate, ...]:
+        wikimedia_calls.append(query)
+        return ()
+
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=nominatim_lookup,
+        wikimedia_lookup=wikimedia_lookup,
+    )
+
+    candidates = geocoder.geocode(
+        GeocodeRequest(query="高雄市苓雅區四維三路2號", input_type="address", limit=1),
+    )
+
+    assert nominatim_calls
+    assert wikimedia_calls == []
+    assert candidates[0].source == "taiwan-admin-centroid-fallback"
+    assert candidates[0].name == "高雄市苓雅區（由地址退回行政區代表點）"
+    assert candidates[0].precision == "admin_area"
+    assert candidates[0].matched_query == "高雄市苓雅區"
+    assert candidates[0].requires_confirmation is True
+    assert candidates[0].confidence >= 0.65
+    assert "退回行政區代表點" in " ".join(candidates[0].limitations)
+
+
+def test_provider_chain_does_not_guess_ambiguous_town_name_without_county() -> None:
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=lambda *_args: (),
+        wikimedia_lookup=lambda *_args: (),
+    )
+
+    candidates = geocoder.geocode(
+        GeocodeRequest(query="中正區", input_type="address", limit=1),
+    )
+
+    assert candidates == []
+
+
 def test_provider_chain_uses_wikimedia_only_after_osm_misses() -> None:
     nominatim_calls: list[str] = []
     wikimedia_calls: list[str] = []

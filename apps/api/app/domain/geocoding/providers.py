@@ -50,6 +50,18 @@ class LocalOpenDataPoint:
     source: str
 
 
+@dataclass(frozen=True)
+class TaiwanAdminArea:
+    name: str
+    county: str
+    town: str | None
+    lat: float
+    lng: float
+    admin_code: str | None
+    level: Literal["county", "town"]
+    aliases: tuple[str, ...]
+
+
 LOCAL_TAIWAN_OPEN_DATA_FIXTURES: tuple[LocalFixturePoint, ...] = (
     LocalFixturePoint(
         aliases=("台南市安南區長溪路二段410巷16弄1號",),
@@ -79,6 +91,8 @@ LOCAL_TAIWAN_OPEN_DATA_FIXTURES: tuple[LocalFixturePoint, ...] = (
         place_type="address",
     ),
 )
+
+TAIWAN_ADMIN_CENTROIDS_PATH = Path(__file__).with_name("taiwan_admin_centroids.json")
 
 
 KNOWN_GEOCODE_POINTS: tuple[tuple[tuple[str, ...], float, float, str], ...] = (
@@ -337,6 +351,36 @@ class NominatimDevelopmentFallbackProvider:
         return ()
 
 
+class TaiwanAdminFallbackProvider:
+    provider_key = "taiwan-admin-centroid-fallback"
+
+    def search(self, request: GeocodeRequest) -> tuple[PlaceCandidate, ...]:
+        match = best_admin_area_match(request.query)
+        if match is None:
+            return ()
+
+        area, matched_query = match
+        confidence = 0.68 if area.level == "town" else 0.66
+        return (
+            PlaceCandidate(
+                place_id=stable_uuid("taiwan-admin-centroid-fallback", area.name),
+                name=f"{area.name}（由地址退回行政區代表點）",
+                type="admin_area",
+                point=LatLng(lat=area.lat, lng=area.lng),
+                admin_code=area.admin_code,
+                source=self.provider_key,
+                confidence=confidence,
+                precision="admin_area",
+                matched_query=matched_query,
+                requires_confirmation=True,
+                limitations=merge_limitations(
+                    geocode_limitations("admin_area"),
+                    ["原始查詢無法精準定位到道路或門牌，已退回行政區代表點。"],
+                ),
+            ),
+        )
+
+
 class WikimediaPoiFallbackProvider:
     provider_key = "wikimedia-poi"
 
@@ -360,6 +404,7 @@ def build_open_data_geocoder(
             LocalTaiwanAddressProvider(),
             OpenStreetMapProvider(project_osm_lookup),
             NominatimDevelopmentFallbackProvider(nominatim_lookup),
+            TaiwanAdminFallbackProvider(),
             WikimediaPoiFallbackProvider(wikimedia_lookup),
         )
     )
@@ -530,6 +575,151 @@ def local_open_data_confidence(precision: GeocodePrecision) -> float:
     if precision == "admin_area":
         return 0.72
     return 0.64
+
+
+@lru_cache(maxsize=1)
+def load_taiwan_admin_areas() -> tuple[TaiwanAdminArea, ...]:
+    try:
+        payload = json.loads(TAIWAN_ADMIN_CENTROIDS_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+    towns_payload = payload.get("towns", [])
+    counties_payload = payload.get("counties", [])
+    if not isinstance(towns_payload, list) or not isinstance(counties_payload, list):
+        return ()
+
+    town_names = [
+        str(item.get("town") or "").strip()
+        for item in towns_payload
+        if isinstance(item, dict) and str(item.get("town") or "").strip()
+    ]
+    unique_town_aliases = unique_admin_aliases(town_names)
+    areas: list[TaiwanAdminArea] = []
+    for item in counties_payload:
+        if not isinstance(item, dict):
+            continue
+        county = str(item.get("county") or "").strip()
+        area = admin_area_from_payload(item, county=county, town=None, level="county")
+        if area is not None:
+            areas.append(area)
+    for item in towns_payload:
+        if not isinstance(item, dict):
+            continue
+        county = str(item.get("county") or "").strip()
+        town = str(item.get("town") or "").strip()
+        area = admin_area_from_payload(
+            item,
+            county=county,
+            town=town,
+            level="town",
+            unique_town_aliases=unique_town_aliases,
+        )
+        if area is not None:
+            areas.append(area)
+    return tuple(areas)
+
+
+def admin_area_from_payload(
+    item: dict[str, object],
+    *,
+    county: str,
+    town: str | None,
+    level: Literal["county", "town"],
+    unique_town_aliases: set[str] | None = None,
+) -> TaiwanAdminArea | None:
+    lat = row_float(item, "lat")
+    lng = row_float(item, "lng")
+    if not county or lat is None or lng is None or not within_taiwan_bounds(lat, lng):
+        return None
+    if level == "town" and not town:
+        return None
+    name = county if town is None else f"{county}{town}"
+    return TaiwanAdminArea(
+        name=name,
+        county=county,
+        town=town,
+        lat=lat,
+        lng=lng,
+        admin_code=row_text(item, "code") or None,
+        level=level,
+        aliases=admin_area_aliases(
+            county=county,
+            town=town,
+            unique_town_aliases=unique_town_aliases or set(),
+        ),
+    )
+
+
+def best_admin_area_match(query: str) -> tuple[TaiwanAdminArea, str] | None:
+    normalized_query = normalize_query(query)
+    if not normalized_query:
+        return None
+
+    matches: list[tuple[int, int, TaiwanAdminArea, str]] = []
+    for area in load_taiwan_admin_areas():
+        for alias in area.aliases:
+            normalized_alias = normalize_query(alias)
+            if normalized_alias and normalized_alias in normalized_query:
+                level_priority = 0 if area.level == "town" else 1
+                matches.append((level_priority, -len(normalized_alias), area, alias))
+                break
+    if not matches:
+        return None
+    matches.sort(key=lambda item: (item[0], item[1], item[2].name))
+    _, _, area, alias = matches[0]
+    return area, alias
+
+
+def admin_area_aliases(
+    *,
+    county: str,
+    town: str | None,
+    unique_town_aliases: set[str],
+) -> tuple[str, ...]:
+    county_variants = name_variants(county)
+    county_short_variants = name_variants(strip_admin_suffix(county))
+    aliases: list[str] = []
+    if town is None:
+        aliases.extend(county_variants)
+        aliases.extend(county_short_variants)
+        return dedupe_texts(tuple(aliases), limit=16)
+
+    town_variants = name_variants(town)
+    town_short = strip_admin_suffix(town)
+    town_short_variants = name_variants(town_short) if len(town_short) >= 2 else ()
+    for county_value in (*county_variants, *county_short_variants):
+        for town_value in (*town_variants, *town_short_variants):
+            aliases.append(f"{county_value}{town_value}")
+
+    for town_value in (*town_variants, *town_short_variants):
+        if normalize_query(town_value) in unique_town_aliases:
+            aliases.append(town_value)
+    return dedupe_texts(tuple(aliases), limit=24)
+
+
+def unique_admin_aliases(names: list[str]) -> set[str]:
+    counts: dict[str, int] = {}
+    for name in names:
+        short_name = strip_admin_suffix(name)
+        short_variants = name_variants(short_name) if len(short_name) >= 2 else ()
+        for value in (*name_variants(name), *short_variants):
+            normalized = normalize_query(value)
+            if normalized:
+                counts[normalized] = counts.get(normalized, 0) + 1
+    return {name for name, count in counts.items() if count == 1}
+
+
+def name_variants(name: str) -> tuple[str, ...]:
+    variants = [name]
+    if "臺" in name:
+        variants.append(name.replace("臺", "台"))
+    if "台" in name:
+        variants.append(name.replace("台", "臺"))
+    return dedupe_texts(tuple(variants), limit=4)
+
+
+def strip_admin_suffix(name: str) -> str:
+    return name.removesuffix("縣").removesuffix("市").removesuffix("區").removesuffix("鄉").removesuffix("鎮")
 
 
 def normalize_query(query: str) -> str:

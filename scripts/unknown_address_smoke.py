@@ -47,6 +47,18 @@ def main() -> int:
             "expect_historical": None,
         },
         {
+            "query": "高雄市苓雅區四維三路2號",
+            "expect_precision": "admin_area",
+            "expect_assess": True,
+            "expect_historical": None,
+        },
+        {
+            "query": "新竹市東區光復路二段101號",
+            "expect_precision": "admin_area",
+            "expect_assess": True,
+            "expect_historical": None,
+        },
+        {
             "query": "不存在的測試地點999999",
             "expect_precision": None,
             "expect_assess": False,
@@ -102,9 +114,7 @@ def run_check(client: TestClient, check: dict[str, Any]) -> str | None:
         f"requires_confirmation={candidate['requires_confirmation']}"
     )
 
-    if candidate["requires_confirmation"]:
-        if check["expect_assess"]:
-            return f"{query}: candidate requires confirmation but check expected assessment"
+    if candidate["requires_confirmation"] and not check["expect_assess"]:
         return None
 
     if not check["expect_assess"]:

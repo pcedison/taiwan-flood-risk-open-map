@@ -133,6 +133,7 @@ const text = {
   riskSummary: "風險摘要",
   pendingData: "尚未查詢",
   riskPlaceholder: "搜尋地點或點選地圖後，按下查詢即可整理半徑內公開淹水相關資料。",
+  insufficientData: "資料不足",
   riskMeter: "風險等級",
   realtime: "即時",
   historical: "歷史參考",
@@ -171,7 +172,7 @@ const text = {
   loading: "查詢中",
   queryFailed: "查詢失敗，請稍後再試。",
   noGeocodeResult: "找不到這個地點，請換一個關鍵字再試。",
-  geocodeNeedsConfirmation: "定位只到較粗範圍，請改輸入道路或門牌，或直接點選地圖後再查詢。",
+  geocodeNeedsConfirmation: "定位只到較粗範圍，系統會以代表點查詢並標示資料限制。",
   geocodePrecision: "定位精度",
   lastSync: "最後同步：--",
   freshnessNote: "查詢後會顯示資料來源的最新狀態。",
@@ -287,6 +288,15 @@ const riskMeterPosition = (level?: string) => {
   if (level === "極高") return "92%";
   return "8%";
 };
+
+const hasInsufficientRiskData = (assessment: RiskAssessmentResponse | null) =>
+  Boolean(
+    assessment &&
+      assessment.realtime.level === "未知" &&
+      assessment.historical.level === "未知" &&
+      assessment.confidence.level === "未知" &&
+      assessment.evidence.length === 0,
+  );
 
 const targetZoom = (coordinate: Coordinate, radius: number) => {
   if (coordinate.source === "default") return TAIWAN_OVERVIEW.zoom;
@@ -625,11 +635,7 @@ export default function HomePage() {
         });
 
         if (candidate.requires_confirmation) {
-          setAssessment(null);
-          setEvidenceItems([]);
-          setEvidenceStatus("idle");
           setGeocodeNotice(`${geocodeCandidateNotice(candidate)}。${text.geocodeNeedsConfirmation}`);
-          return;
         }
       }
 
@@ -880,7 +886,9 @@ export default function HomePage() {
           <div className="section-heading">
             <span className="section-kicker">{text.riskSummary}</span>
             <strong>
-              {assessment
+              {hasInsufficientRiskData(assessment)
+                ? text.insufficientData
+                : assessment
                 ? `${assessment.realtime.level} / ${assessment.historical.level}`
                 : text.pendingData}
             </strong>

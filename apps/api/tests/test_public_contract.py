@@ -274,6 +274,26 @@ def test_geocode_returns_admin_area_candidate_that_requires_confirmation() -> No
     assert_openapi_schema(response.json(), "GeocodeResponse")
 
 
+def test_geocode_returns_admin_centroid_for_uncovered_taiwan_address(monkeypatch) -> None:
+    monkeypatch.setattr(public_routes, "_cached_nominatim_candidates", lambda *_args: ())
+    monkeypatch.setattr(public_routes, "_cached_wikimedia_candidates", lambda *_args: ())
+
+    response = client.post(
+        "/v1/geocode",
+        json={"query": "新竹市東區光復路二段101號", "input_type": "address", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    candidate = response.json()["candidates"][0]
+    assert candidate["name"] == "新竹市東區（由地址退回行政區代表點）"
+    assert candidate["source"] == "taiwan-admin-centroid-fallback"
+    assert candidate["precision"] == "admin_area"
+    assert candidate["requires_confirmation"] is True
+    assert candidate["confidence"] >= 0.65
+    assert "退回行政區代表點" in " ".join(candidate["limitations"])
+    assert_openapi_schema(response.json(), "GeocodeResponse")
+
+
 def test_geocode_returns_tainan_cigu_salt_mountain() -> None:
     response = client.post(
         "/v1/geocode",
@@ -418,7 +438,7 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert payload["confidence"]["level"] in CONFIDENCE_LEVELS
     assert len(payload["evidence"]) >= 2
     assert payload["explanation"]["missing_sources"] == [
-        "查詢半徑內尚未匯入歷史淹水紀錄；目前不應把即時低風險解讀為購屋安全。"
+        "查詢半徑內尚未匯入歷史淹水紀錄；目前資料不足，不能標記為低風險或購屋安全。"
     ]
     assert set(payload["evidence"][0]) == {
         "id",
@@ -489,7 +509,7 @@ def test_risk_assess_uses_db_evidence_when_repository_is_available(monkeypatch) 
     assert response.status_code == 200
     payload = response.json()
     assert [item["source_id"] for item in payload["data_freshness"]][-1] == "db-evidence"
-    assert "accepted evidence" in payload["data_freshness"][-1]["message"]
+    assert "已審核歷史資料" in payload["data_freshness"][-1]["message"]
     assert payload["evidence"][0]["id"] == "b3f22a36-7316-4e2a-92b6-c6f6443c8528"
     assert payload["evidence"][0]["source_type"] == "news"
     assert not any("甇瑕" in source for source in payload["explanation"]["missing_sources"])
@@ -709,7 +729,11 @@ def test_risk_assess_does_not_use_local_fallback_when_gate_is_closed(monkeypatch
     assert response.status_code == 200
     payload = response.json()
     assert payload["historical"]["level"] == "未知"
+    assert payload["confidence"]["level"] == "未知"
     assert payload["evidence"] == []
+    assert "資料不足" in payload["explanation"]["summary"]
+    assert "不能判定風險高低" in payload["explanation"]["main_reasons"][0]
+    assert any("資料不足" in item for item in payload["explanation"]["missing_sources"])
     assert payload["data_freshness"][-1]["source_id"] == "db-evidence"
     assert payload["data_freshness"][-1]["health_status"] == "unknown"
     assert_openapi_schema(payload, "RiskAssessmentResponse")

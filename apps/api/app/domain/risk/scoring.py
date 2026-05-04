@@ -201,6 +201,9 @@ def _main_reasons(
     realtime_level: PublicRiskLevel,
     historical_level: PublicRiskLevel,
 ) -> tuple[str, ...]:
+    if not signals:
+        return ("目前缺少可採用的即時或歷史資料，尚不能判定風險高低。",)
+
     event_types = {signal.event_type for signal in signals}
     reasons = []
     if realtime_level in {"高", "極高"}:
@@ -210,7 +213,7 @@ def _main_reasons(
     if "flood_report" in event_types:
         reasons.append("附近有近期公開淹水通報或新聞線索。")
     if not reasons:
-        reasons.append("目前沒有強烈即時淹水訊號。")
+        reasons.append("目前可用資料未形成強烈即時淹水訊號。")
     return tuple(reasons)
 
 
@@ -219,6 +222,12 @@ def _summary(
     historical_level: PublicRiskLevel,
     confidence_level: PublicConfidenceLevel,
 ) -> str:
+    if (
+        realtime_level == "未知"
+        and historical_level == "未知"
+        and confidence_level == "未知"
+    ):
+        return "目前資料不足，無法判定即時或歷史淹水風險；請把結果視為待查證，而不是低風險。"
     return f"即時風險為{realtime_level}，歷史參考風險為{historical_level}，資料信心為{confidence_level}。"
 
 

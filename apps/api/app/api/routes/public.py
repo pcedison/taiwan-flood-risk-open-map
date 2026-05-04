@@ -938,7 +938,7 @@ def _historical_freshness_message(
     historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
 ) -> str:
     if not historical_records:
-        return "查詢半徑內尚未有已匯入的歷史淹水紀錄；購屋判讀不可只依即時雨量或水位。"
+        return "查詢半徑內尚未有已匯入的歷史淹水紀錄；目前屬於資料不足，不能判定為低風險。"
     return (
         f"查詢半徑內找到 {len(historical_records)} 筆已匯入歷史淹水公開紀錄；"
         "目前完整新聞回填仍在 Phase 2 管線建置中。"
@@ -1012,9 +1012,9 @@ def _historical_data_freshness(
         observed_at=latest_observed,
         ingested_at=latest_ingested or now,
         message=(
-            f"Found {len(db_evidence_items)} accepted evidence record(s) in the query radius."
+            f"查詢半徑內找到 {len(db_evidence_items)} 筆已審核歷史資料。"
             if db_evidence_items
-            else "No accepted historical evidence is currently stored in the query radius."
+            else "查詢半徑內目前沒有已審核歷史資料；這是資料不足，不代表沒有淹水風險。"
         ),
     )
 
@@ -1064,7 +1064,7 @@ def _visible_source_limitations(
         if water_level is not None:
             limitations.append(water_level.message or "即時水位資料目前沒有可用測站。")
     if not historical_records and not db_evidence_items:
-        limitations.append("查詢半徑內尚未匯入歷史淹水紀錄；目前不應把即時低風險解讀為購屋安全。")
+        limitations.append("查詢半徑內尚未匯入歷史淹水紀錄；目前資料不足，不能標記為低風險或購屋安全。")
     if on_demand_news.attempted and not on_demand_news.records and on_demand_news.message:
         limitations.append(
             f"公開新聞補查未取得可用事件：{on_demand_news.message}。"
