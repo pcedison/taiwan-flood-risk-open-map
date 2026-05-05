@@ -3,7 +3,8 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 const BASEMAP_ATTRIBUTION = "Example Open Basemap Attribution";
 const BASEMAP_TILE_HOST = "https://basemap.example.test";
 const OSM_TILE_HOST = "https://tile.openstreetmap.org";
-const API_BASE_URL = "http://localhost:8000";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.E2E_API_PORT ?? "8000"}`;
 
 const TILE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFgwJ/lCw9WQAAAABJRU5ErkJggg==";

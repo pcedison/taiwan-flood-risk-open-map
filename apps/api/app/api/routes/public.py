@@ -364,13 +364,14 @@ def _evidence_from_record(record: EvidenceRecord) -> Evidence:
         if record.geometry is not None
         else None
     )
+    title, summary = _localized_evidence_text(record)
     return Evidence(
         id=record.id,
         source_id=record.source_id,
         source_type=cast(Any, record.source_type),
         event_type=cast(Any, record.event_type),
-        title=record.title,
-        summary=record.summary,
+        title=title,
+        summary=summary,
         url=record.url,
         occurred_at=record.occurred_at,
         observed_at=record.observed_at,
@@ -384,6 +385,16 @@ def _evidence_from_record(record: EvidenceRecord) -> Evidence:
         privacy_level=cast(Any, record.privacy_level),
         raw_ref=record.raw_ref,
     )
+
+
+def _localized_evidence_text(record: EvidenceRecord) -> tuple[str, str]:
+    if record.event_type == "flood_potential":
+        return (
+            "官方淹水潛勢規劃圖資",
+            "此筆資料表示查詢範圍與官方淹水潛勢規劃圖資相交，屬於歷史與情境參考；"
+            "不代表目前正在淹水，也不是即時災害警報。",
+        )
+    return (record.title, record.summary)
 
 
 def _evidence_preview(evidence: Evidence) -> EvidencePreview:
@@ -477,13 +488,13 @@ def _static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
     return (
         LayerRecord(
             id="flood-potential",
-            name="Flood potential",
-            description="Static fallback for official flood potential polygons.",
+            name="淹水潛勢規劃圖資",
+            description="官方淹水潛勢規劃圖資的靜態備援圖層。",
             category="flood_potential",
             status="disabled",
             minzoom=8,
             maxzoom=18,
-            attribution="Government open data",
+            attribution="政府開放資料",
             tilejson_url="/v1/layers/flood-potential/tilejson",
             updated_at=now,
             metadata={
@@ -502,13 +513,13 @@ def _static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
         ),
         LayerRecord(
             id="query-heat",
-            name="Query heat",
-            description="Static fallback for privacy-preserving query density.",
+            name="查詢關注度",
+            description="去識別化區域查詢密度的靜態備援圖層。",
             category="query_heat",
             status="disabled",
             minzoom=8,
             maxzoom=14,
-            attribution="Flood Risk aggregated analytics",
+            attribution="本服務去識別化統計",
             tilejson_url="/v1/layers/query-heat/tilejson",
             updated_at=now,
             metadata={
@@ -531,16 +542,38 @@ def _static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
 def _map_layer_from_record(record: LayerRecord) -> MapLayer:
     return MapLayer(
         id=record.id,
-        name=record.name,
-        description=record.description,
+        name=_localized_layer_name(record),
+        description=_localized_layer_description(record),
         category=cast(Any, record.category),
         status=cast(Any, record.status),
         minzoom=record.minzoom,
         maxzoom=record.maxzoom,
-        attribution=record.attribution,
+        attribution=_localized_layer_attribution(record),
         tilejson_url=record.tilejson_url,
         updated_at=record.updated_at,
     )
+
+
+def _localized_layer_name(record: LayerRecord) -> str:
+    if record.id == "flood-potential":
+        return "淹水潛勢規劃圖資"
+    if record.id == "query-heat":
+        return "查詢關注度"
+    return record.name
+
+
+def _localized_layer_description(record: LayerRecord) -> str | None:
+    if record.id == "flood-potential":
+        return "官方淹水潛勢規劃圖資。"
+    if record.id == "query-heat":
+        return "去識別化後的區域查詢關注度。"
+    return record.description
+
+
+def _localized_layer_attribution(record: LayerRecord) -> str | None:
+    if record.id in {"flood-potential", "query-heat"}:
+        return "政府開放資料" if record.id == "flood-potential" else "本服務去識別化統計"
+    return record.attribution
 
 
 def _layer_records(now: datetime) -> tuple[LayerRecord, ...]:
@@ -688,6 +721,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         *(_official_realtime_evidence(observation) for observation in realtime_bundle.observations),
         *historical_evidence_items,
     ]
+    display_evidence_items = _display_evidence_items(evidence_items)
     scoring = score_risk(
         (
             *(_signal_from_official_realtime(observation) for observation in realtime_bundle.observations),
@@ -695,7 +729,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         ),
         now=created_at,
     )
-    _cache_assessment_evidence(assessment_id, evidence_items)
+    _cache_assessment_evidence(assessment_id, display_evidence_items)
     expires_at = created_at + timedelta(minutes=10)
     explanation = Explanation(
         summary=scoring.explanation_summary,
@@ -725,7 +759,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         scoring=scoring,
         explanation=explanation,
         data_freshness=data_freshness,
-        evidence_items=evidence_items,
+        evidence_items=display_evidence_items,
         created_at=created_at,
         expires_at=expires_at,
     )
@@ -740,10 +774,32 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         historical=RiskLevelBlock(level=scoring.historical_level),
         confidence=ConfidenceBlock(level=scoring.confidence_level),
         explanation=explanation,
-        evidence=[_evidence_preview(item) for item in evidence_items],
+        evidence=[_evidence_preview(item) for item in display_evidence_items],
         data_freshness=data_freshness,
         query_heat=_query_heat(request, now=created_at),
     )
+
+
+def _display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
+    flood_potential_items = [
+        item for item in evidence_items if item.event_type == "flood_potential"
+    ]
+    if len(flood_potential_items) <= 1:
+        return evidence_items
+
+    non_flood_potential_items = [
+        item for item in evidence_items if item.event_type != "flood_potential"
+    ]
+    representative = flood_potential_items[0].model_copy(
+        update={
+            "title": "官方淹水潛勢規劃圖資",
+            "summary": (
+                f"查詢範圍與 {len(flood_potential_items)} 筆官方淹水潛勢規劃圖資相交，"
+                "已合併為一筆代表資料顯示；這是歷史與情境參考，不代表目前正在淹水。"
+            ),
+        }
+    )
+    return [*non_flood_potential_items, representative]
 
 
 def _on_demand_public_news_result(
@@ -1005,14 +1061,20 @@ def _historical_data_freshness(
     ]
     latest_observed = max(observed_values, default=None)
     latest_ingested = max((item.ingested_at for item in db_evidence_items), default=None)
+    only_flood_potential = bool(db_evidence_items) and all(
+        item.event_type == "flood_potential" for item in db_evidence_items
+    )
     return DataFreshness(
         source_id="db-evidence",
-        name="Historical flood evidence database",
+        name="淹水潛勢與歷史資料庫" if only_flood_potential else "歷史淹水紀錄與公開新聞",
         health_status="healthy" if db_evidence_items else "unknown",
         observed_at=latest_observed,
         ingested_at=latest_ingested or now,
         message=(
-            f"查詢半徑內找到 {len(db_evidence_items)} 筆已審核歷史資料。"
+            f"查詢半徑內與 {len(db_evidence_items)} 筆淹水潛勢規劃圖資相交；"
+            "這是歷史與情境參考，不代表目前正在淹水或即時災害警報。"
+            if only_flood_potential
+            else f"查詢半徑內找到 {len(db_evidence_items)} 筆已審核歷史資料。"
             if db_evidence_items
             else "查詢半徑內目前沒有已審核歷史資料；這是資料不足，不代表沒有淹水風險。"
         ),
@@ -1108,9 +1170,9 @@ def _tilejson_from_layer_record(record: LayerRecord) -> TileJson:
     metadata = record.metadata
     return TileJson(
         tilejson=str(metadata.get("tilejson", "3.0.0")),
-        name=str(metadata.get("name", record.name)),
+        name=_localized_layer_name(record),
         version=_optional_str(metadata.get("version")),
-        attribution=_optional_str(metadata.get("attribution")) or record.attribution,
+        attribution=_localized_layer_attribution(record),
         scheme=cast(Any, metadata.get("scheme", "xyz")),
         tiles=_string_list(
             metadata.get("tiles"),

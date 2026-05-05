@@ -48,6 +48,27 @@ def test_scoring_returns_unknown_without_evidence() -> None:
     assert result.confidence_level == "未知"
 
 
+def test_overlapping_flood_potential_polygons_do_not_stack_to_extreme() -> None:
+    signals = tuple(
+        RiskEvidenceSignal(
+            source_type="official",
+            event_type="flood_potential",
+            confidence=0.78,
+            distance_to_query_m=0.0,
+            freshness_score=1.0,
+            source_weight=1.0,
+        )
+        for _ in range(31)
+    )
+
+    result = score_risk(signals, now=datetime.fromisoformat("2026-05-05T14:30:00+00:00"))
+
+    assert result.historical_score == 40.0
+    assert result.historical_level == "中"
+    assert result.realtime_level == "未知"
+    assert "情境參考" in result.main_reasons[0]
+
+
 def _signal_from_fixture(payload: dict[str, object]) -> RiskEvidenceSignal:
     observed_at = payload.get("observed_at")
     return RiskEvidenceSignal(

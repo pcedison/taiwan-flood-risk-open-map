@@ -120,7 +120,7 @@ export function formatConfidence(value: number) {
 }
 
 export function formatDistance(value: number | null) {
-  return value === null ? "未提供" : `${Math.round(value).toLocaleString("zh-TW")} m`;
+  return value === null ? "未提供" : `${Math.round(value).toLocaleString("zh-TW")} 公尺`;
 }
 
 export function formatDateTime(value: string | null, options?: { timeZone?: string }) {
@@ -225,47 +225,47 @@ export function getUserReportSubmissionDisplayState(
   if (status === "loading") {
     return {
       kind: "loading",
-      message: "Submitting report...",
-      submitLabel: "Submitting",
+      message: "正在送出通報。",
+      submitLabel: "送出中",
     };
   }
 
   if (status === "success") {
     return {
       kind: "success",
-      message: "Report received as pending review.",
-      submitLabel: "Submit report",
+      message: "通報已收到，等待審核。",
+      submitLabel: "送出通報",
     };
   }
 
   if (status === "feature_disabled") {
     return {
       kind: "warning",
-      message: "Public report intake is disabled in this environment.",
-      submitLabel: "Submit report",
+      message: "此環境目前停用民眾通報功能。",
+      submitLabel: "送出通報",
     };
   }
 
   if (status === "repository_unavailable") {
     return {
       kind: "error",
-      message: "Report intake is temporarily unavailable.",
-      submitLabel: "Submit report",
+      message: "通報收件暫時無法使用。",
+      submitLabel: "送出通報",
     };
   }
 
   if (status === "error") {
     return {
       kind: "error",
-      message: "Report could not be submitted.",
-      submitLabel: "Submit report",
+      message: "通報送出失敗。",
+      submitLabel: "送出通報",
     };
   }
 
   return {
     kind: "neutral",
     message: null,
-    submitLabel: "Submit report",
+    submitLabel: "送出通報",
   };
 }
 
@@ -303,6 +303,17 @@ function layerId(item: LayerContractItem, index: number) {
   return item.id ?? item.layer_id ?? item.source_id ?? `layer-${index + 1}`;
 }
 
+function layerKindLabel(value: string | null | undefined) {
+  const normalized = value?.toLowerCase();
+  if (!normalized) return "圖層";
+  if (normalized === "raster-tile" || normalized === "raster") return "點陣圖磚";
+  if (normalized === "vector-tile" || normalized === "vector" || normalized === "tile") {
+    return "向量圖磚";
+  }
+  if (normalized === "evidence") return "資料";
+  return "圖層";
+}
+
 function evidenceCountForSource(evidenceItems: EvidenceItem[], sourceId: string) {
   return evidenceItems.filter((item) => item.source_id === sourceId).length;
 }
@@ -322,7 +333,7 @@ export function buildLayerDisplayState(input: {
         featureCount: item.feature_count ?? null,
         freshnessAt: item.observed_at ?? item.updated_at ?? item.ingested_at ?? null,
         id: layerId(item, index),
-        kind: item.kind ?? item.type ?? "tile",
+        kind: layerKindLabel(item.kind ?? item.type),
         message: item.message ?? null,
         name: item.name,
         status: item.status ?? item.health_status ?? "unknown",
@@ -333,7 +344,7 @@ export function buildLayerDisplayState(input: {
         featureCount: evidenceCountForSource(evidenceItems, item.source_id),
         freshnessAt: item.observed_at ?? item.ingested_at,
         id: item.source_id,
-        kind: "evidence",
+        kind: "資料",
         message: item.message,
         name: item.name,
         status: item.health_status,

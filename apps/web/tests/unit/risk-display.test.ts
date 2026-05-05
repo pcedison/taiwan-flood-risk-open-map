@@ -84,26 +84,26 @@ test("buildUserReportPayload marks blank summaries invalid", () => {
 test("user report display state covers success and disabled/error gates", () => {
   assert.deepEqual(getUserReportSubmissionDisplayState("success"), {
     kind: "success",
-    message: "Report received as pending review.",
-    submitLabel: "Submit report",
+    message: "通報已收到，等待審核。",
+    submitLabel: "送出通報",
   });
 
   assert.deepEqual(getUserReportSubmissionDisplayState("feature_disabled"), {
     kind: "warning",
-    message: "Public report intake is disabled in this environment.",
-    submitLabel: "Submit report",
+    message: "此環境目前停用民眾通報功能。",
+    submitLabel: "送出通報",
   });
 
   assert.deepEqual(getUserReportSubmissionDisplayState("repository_unavailable"), {
     kind: "error",
-    message: "Report intake is temporarily unavailable.",
-    submitLabel: "Submit report",
+    message: "通報收件暫時無法使用。",
+    submitLabel: "送出通報",
   });
 
   assert.deepEqual(getUserReportSubmissionDisplayState("error"), {
     kind: "error",
-    message: "Report could not be submitted.",
-    submitLabel: "Submit report",
+    message: "通報送出失敗。",
+    submitLabel: "送出通報",
   });
 });
 
@@ -171,7 +171,7 @@ test("layer display state prefers explicit tile contract fields", () => {
     featureCount: 42,
     freshnessAt: "2026-04-30T01:30:00+08:00",
     id: "rainfall-now",
-    kind: "raster-tile",
+    kind: "點陣圖磚",
     message: null,
     name: "Rainfall now",
     status: "healthy",
@@ -212,7 +212,7 @@ test("layer display state exposes an empty state when no layer inputs exist", ()
 test("risk and evidence formatting helpers produce display-ready strings", () => {
   assert.equal(formatCoordinate(25.047761), "25.04776");
   assert.equal(formatConfidence(0.812), "81%");
-  assert.equal(formatDistance(1234.49), "1,234 m");
+  assert.equal(formatDistance(1234.49), "1,234 公尺");
   assert.equal(formatDistance(null), "未提供");
   assert.match(formatDateTime("2026-04-30T01:30:00+08:00", { timeZone: "Asia/Taipei" }), /04\/30/);
   assert.equal(formatDateTime(null), "未提供");

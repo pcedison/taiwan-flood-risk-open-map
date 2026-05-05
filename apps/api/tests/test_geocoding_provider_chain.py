@@ -202,7 +202,7 @@ def test_provider_chain_uses_wikimedia_only_after_osm_misses() -> None:
                 confidence=0.84,
                 precision="poi",
                 matched_query=query,
-                limitations=["定位結果是地標或 POI 座標，不代表門牌精準位置。"],
+                limitations=["定位結果是地標座標，不代表門牌精準位置。"],
             ),
         )
 

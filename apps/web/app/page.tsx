@@ -162,9 +162,9 @@ const text = {
   layerLimited: "部分可用",
   layerEmpty: "無圖層資料",
   layerPending: "等待查詢",
-  layerContract: "API 圖層合約",
-  layerFallback: "由 freshness / evidence 推導",
-  layerNoTile: "尚未提供 tile URL",
+  layerContract: "圖層資料合約",
+  layerFallback: "由資料狀態與證據推導",
+  layerNoTile: "尚未提供圖磚位址",
   layerNoData: "本次查詢未回傳可展示的圖層或資料來源。",
   layerFeatureCount: "資料筆數",
   offline: "尚未連線",
@@ -182,6 +182,17 @@ const text = {
   taipeiMainStation: "台北火車站",
   locatedPrefix: "已定位",
   selectedPrefix: "已選取",
+  publicReportKicker: "民眾通報",
+  publicReportTitle: "回報現地淹水線索",
+  reportLocation: "通報座標",
+  reportObservation: "觀察內容",
+  reportPlaceholder: "簡短描述看見的積水、淹水深度或道路影響。",
+  reportValidation: "請先輸入簡短觀察內容。",
+  reportSubmit: "送出通報",
+  reportDisabledTitle: "民眾通報目前停用",
+  reportDisabledMessage: "此功能會等法律、隱私、審核與治理流程完成後再開放。",
+  provided: "已提供",
+  tileLabel: "圖磚",
 };
 
 const sourceLabels: Record<CoordinateSource, string> = {
@@ -191,6 +202,7 @@ const sourceLabels: Record<CoordinateSource, string> = {
 };
 
 const radiusOptions = [300, 500, 1000, 2000];
+const USER_REPORTS_PUBLIC_ENABLED = process.env.NEXT_PUBLIC_USER_REPORTS_ENABLED === "true";
 const MIN_GEOCODE_CONFIDENCE = 0.65;
 const INITIAL_RADIUS = 500;
 const INITIAL_COORDINATE: Coordinate = {
@@ -208,22 +220,22 @@ const TAIWAN_CITY_GEOJSON: MapFeatureCollection = {
   features: [
     {
       type: "Feature",
-      properties: { name: "Taipei" },
+      properties: { name: "臺北" },
       geometry: { type: "Point", coordinates: [121.51706, 25.04776] },
     },
     {
       type: "Feature",
-      properties: { name: "Taichung" },
+      properties: { name: "臺中" },
       geometry: { type: "Point", coordinates: [120.68686, 24.13716] },
     },
     {
       type: "Feature",
-      properties: { name: "Kaohsiung" },
+      properties: { name: "高雄" },
       geometry: { type: "Point", coordinates: [120.30203, 22.63937] },
     },
     {
       type: "Feature",
-      properties: { name: "Hualien" },
+      properties: { name: "花蓮" },
       geometry: { type: "Point", coordinates: [121.60681, 23.99107] },
     },
   ],
@@ -231,19 +243,19 @@ const TAIWAN_CITY_GEOJSON: MapFeatureCollection = {
 
 const healthLabels: Record<string, string> = {
   healthy: "正常",
-  degraded: "延遲",
+  degraded: "受限",
   failed: "失敗",
   disabled: "停用",
   unknown: "未知",
 };
 
-const healthLabel = (value: string) => healthLabels[value] ?? value;
+const healthLabel = (value: string) => healthLabels[value] ?? "未知";
 
 const geocodePrecisionLabels: Record<string, string> = {
   admin_area: "行政區",
   exact_address: "門牌",
   map_click: "地圖點選",
-  poi: "地標 / POI",
+  poi: "地標",
   road_or_lane: "道路 / 巷道",
   unknown: "未知",
 };
@@ -270,16 +282,18 @@ const layerAvailabilityLabels: Record<string, string> = {
   unavailable: "不可用",
 };
 
-const layerAvailabilityLabel = (value: string) => layerAvailabilityLabels[value] ?? value;
+const layerAvailabilityLabel = (value: string) => layerAvailabilityLabels[value] ?? "未知";
 
 const sourceTypeLabels: Record<string, string> = {
   official: "官方公開資料",
   news: "公開新聞",
   derived: "衍生資料",
+  forum: "公開討論",
+  public_web: "公開網頁",
   user_report: "使用者通報",
 };
 
-const sourceTypeLabel = (value: string) => sourceTypeLabels[value] ?? value;
+const sourceTypeLabel = (value: string) => sourceTypeLabels[value] ?? "其他資料";
 
 const riskMeterPosition = (level?: string) => {
   if (level === "低") return "16%";
@@ -756,7 +770,7 @@ export default function HomePage() {
                     checked={radius === option}
                     onChange={() => setRadius(option)}
                   />
-                  <span>{option >= 1000 ? `${option / 1000} km` : `${option} m`}</span>
+                  <span>{option >= 1000 ? `${option / 1000} 公里` : `${option} 公尺`}</span>
                 </label>
               ))}
             </div>
@@ -785,51 +799,61 @@ export default function HomePage() {
             </div>
             <div>
               <dt>{text.radius}</dt>
-              <dd>{radius.toLocaleString("zh-TW")} m</dd>
+              <dd>{radius.toLocaleString("zh-TW")} 公尺</dd>
             </div>
           </dl>
         </section>
 
-        <form className="panel-section user-report-panel" onSubmit={handleUserReportSubmit}>
-          <div className="section-heading">
-            <span className="section-kicker">Public report</span>
-            <strong>Share local flood signal</strong>
-          </div>
-          <div className="report-location">
-            <span>Report location</span>
-            <strong>
-              {formatCoordinate(coordinate.lat)}, {formatCoordinate(coordinate.lng)}
-            </strong>
-          </div>
-          <label className="field">
-            <span>Observation</span>
-            <textarea
-              value={reportSummary}
-              onChange={(event) => {
-                setReportSummary(event.target.value);
-                if (reportStatus !== "loading") setReportStatus("idle");
-              }}
-              placeholder="Briefly describe visible flooding, water depth, or road impact."
-              maxLength={500}
-              rows={4}
-            />
-          </label>
-          {!userReportPayload.isValid && reportSummary.length > 0 ? (
-            <p className="form-error">Add a short observation before submitting.</p>
-          ) : null}
-          <button
-            className="primary-action"
-            type="submit"
-            disabled={isReportLoading || !userReportPayload.isValid}
-          >
-            {isReportLoading ? reportDisplayState.submitLabel : "Submit report"}
-          </button>
-          {reportDisplayState.message ? (
-            <p className={`report-state report-state-${reportDisplayState.kind}`} role="status">
-              {reportDisplayState.message}
-            </p>
-          ) : null}
-        </form>
+        {USER_REPORTS_PUBLIC_ENABLED ? (
+          <form className="panel-section user-report-panel" onSubmit={handleUserReportSubmit}>
+            <div className="section-heading">
+              <span className="section-kicker">{text.publicReportKicker}</span>
+              <strong>{text.publicReportTitle}</strong>
+            </div>
+            <div className="report-location">
+              <span>{text.reportLocation}</span>
+              <strong>
+                {formatCoordinate(coordinate.lat)}, {formatCoordinate(coordinate.lng)}
+              </strong>
+            </div>
+            <label className="field">
+              <span>{text.reportObservation}</span>
+              <textarea
+                value={reportSummary}
+                onChange={(event) => {
+                  setReportSummary(event.target.value);
+                  if (reportStatus !== "loading") setReportStatus("idle");
+                }}
+                placeholder={text.reportPlaceholder}
+                maxLength={500}
+                rows={4}
+              />
+            </label>
+            {!userReportPayload.isValid && reportSummary.length > 0 ? (
+              <p className="form-error">{text.reportValidation}</p>
+            ) : null}
+            <button
+              className="primary-action"
+              type="submit"
+              disabled={isReportLoading || !userReportPayload.isValid}
+            >
+              {isReportLoading ? reportDisplayState.submitLabel : text.reportSubmit}
+            </button>
+            {reportDisplayState.message ? (
+              <p className={`report-state report-state-${reportDisplayState.kind}`} role="status">
+                {reportDisplayState.message}
+              </p>
+            ) : null}
+          </form>
+        ) : (
+          <section className="panel-section user-report-panel" aria-label={text.reportDisabledTitle}>
+            <div className="section-heading">
+              <span className="section-kicker">{text.publicReportKicker}</span>
+              <strong>{text.reportDisabledTitle}</strong>
+            </div>
+            <p>{text.reportDisabledMessage}</p>
+          </section>
+        )}
 
         <section className="panel-section layer-panel">
           <div className="section-heading">
@@ -853,7 +877,7 @@ export default function HomePage() {
                 <li key={item.id}>
                   <div>
                     <strong>{item.name}</strong>
-                    <span>{`${item.kind} / ${layerAvailabilityLabel(item.availability)}`}</span>
+                    <span>{`${item.kind}：${layerAvailabilityLabel(item.availability)}`}</span>
                   </div>
                   <dl>
                     <div>
@@ -869,8 +893,8 @@ export default function HomePage() {
                       <dd>{healthLabel(item.status)}</dd>
                     </div>
                     <div>
-                      <dt>Tile</dt>
-                      <dd>{item.tileUrl ? "XYZ" : text.layerNoTile}</dd>
+                      <dt>{text.tileLabel}</dt>
+                      <dd>{item.tileUrl ? text.provided : text.layerNoTile}</dd>
                     </div>
                   </dl>
                   {item.message ? <p>{item.message}</p> : null}

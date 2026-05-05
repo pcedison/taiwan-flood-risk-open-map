@@ -22,6 +22,11 @@ HISTORICAL_WEIGHTS = {
     "flood_report": 35.0,
     "road_closure": 15.0,
 }
+EVENT_SCORE_CAPS = {
+    # Flood-potential polygons are correlated planning/reference layers. Multiple
+    # overlapping polygons should not stack into an "active disaster" signal.
+    "flood_potential": 40.0,
+}
 REQUIRED_REALTIME_EVENTS = {"rainfall", "water_level"}
 
 
@@ -100,14 +105,14 @@ def _weighted_score(
     now: datetime | None = None,
     max_age: timedelta | None = None,
 ) -> float:
-    total = 0.0
+    totals_by_event: dict[str, float] = {}
     for signal in signals:
         weight = weights.get(signal.event_type, 0.0)
         if weight == 0:
             continue
         if now is not None and max_age is not None and not _is_recent(signal, now, max_age):
             continue
-        total += (
+        contribution = (
             weight
             * _clamp(signal.confidence)
             * _clamp(signal.freshness_score)
@@ -115,6 +120,12 @@ def _weighted_score(
             * _distance_factor(signal.distance_to_query_m)
             * max(signal.source_weight, 0.0)
         )
+        event_total = totals_by_event.get(signal.event_type, 0.0) + contribution
+        event_cap = EVENT_SCORE_CAPS.get(signal.event_type)
+        totals_by_event[signal.event_type] = (
+            min(event_total, event_cap) if event_cap is not None else event_total
+        )
+    total = sum(totals_by_event.values())
     return min(total, 100.0)
 
 
@@ -209,7 +220,7 @@ def _main_reasons(
     if realtime_level in {"高", "極高"}:
         reasons.append("附近即時雨量或水位資料偏高。")
     if historical_level in {"中", "高", "極高"} and "flood_potential" in event_types:
-        reasons.append("查詢半徑內與淹水潛勢圖資相交。")
+        reasons.append("查詢半徑內與淹水潛勢規劃圖資相交；這是情境參考，不代表即時災害警報。")
     if "flood_report" in event_types:
         reasons.append("附近有近期公開淹水通報或新聞線索。")
     if not reasons:
@@ -228,7 +239,12 @@ def _summary(
         and confidence_level == "未知"
     ):
         return "目前資料不足，無法判定即時或歷史淹水風險；請把結果視為待查證，而不是低風險。"
-    return f"即時風險為{realtime_level}，歷史參考風險為{historical_level}，資料信心為{confidence_level}。"
+    if realtime_level == "未知" and historical_level != "未知":
+        return (
+            f"即時資料不足，無法判定即時風險；"
+            f"歷史與淹水潛勢參考為{historical_level}，資料信心為{confidence_level}。"
+        )
+    return f"即時風險為{realtime_level}，歷史與淹水潛勢參考為{historical_level}，資料信心為{confidence_level}。"
 
 
 def _clamp(value: float) -> float:

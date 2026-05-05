@@ -1,9 +1,12 @@
 import { expect, test } from "@playwright/test";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.E2E_API_PORT ?? "8000"}`;
+
 test("searching a Taiwan landmark moves the map and renders a risk assessment", async ({
   page,
 }) => {
-  await page.route("http://localhost:8000/v1/geocode", async (route) => {
+  await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -17,7 +20,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             precision: "poi",
             requires_confirmation: false,
             matched_query: "台北火車站",
-            limitations: ["定位結果是地標或 POI 座標，不代表門牌精準位置。"],
+            limitations: ["定位結果是地標座標，不代表門牌精準位置。"],
             source: "mock-geocoder",
             type: "landmark",
           },
@@ -26,7 +29,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
     });
   });
 
-  await page.route("http://localhost:8000/v1/risk/assess", async (route) => {
+  await page.route(`${API_BASE_URL}/v1/risk/assess`, async (route) => {
     await route.fulfill({
       contentType: "application/json",
       json: {
@@ -68,7 +71,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             occurred_at: "2026-04-29T01:30:00Z",
             source_type: "forum",
             summary: "Community report summary",
-            title: "Community flood report",
+            title: "公開討論淹水線索",
           },
         ],
         evidence_url: null,
@@ -94,8 +97,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             health_status: "healthy",
             kind: "raster-tile",
             layer_id: "flood-potential-demo",
-            message: "Tile manifest is available for the selected radius.",
-            name: "Flood potential demo layer",
+            message: "已提供本次查詢半徑的圖磚目錄。",
+            name: "淹水潛勢示範圖層",
             observed_at: "2026-04-29T02:50:00Z",
             tile_url: "/v1/tiles/flood-potential/{z}/{x}/{y}.png",
           },
@@ -106,8 +109,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             health_status: "degraded",
             kind: "vector-tile",
             layer_id: "rainfall-limited-demo",
-            message: "Rainfall layer is delayed for part of the selected area.",
-            name: "Rainfall limited layer",
+            message: "選取範圍內部分雨量圖層資料延遲。",
+            name: "雨量受限圖層",
             observed_at: "2026-04-29T01:30:00Z",
             tile_url: null,
           },
@@ -120,7 +123,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   });
 
   await page.route(
-    "http://localhost:8000/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -143,8 +146,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
               source_id: "flood-potential",
               source_type: "official",
               source_weight: 1,
-              summary: "Full endpoint flood potential summary",
-              title: "Full endpoint flood potential",
+              summary: "完整端點回傳的淹水潛勢摘要",
+              title: "完整端點淹水潛勢",
               url: "https://example.test/flood-potential-full",
             },
             {
@@ -163,8 +166,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
               source_id: "community-report",
               source_type: "forum",
               source_weight: 0.7,
-              summary: "Community report summary",
-              title: "Community flood report",
+              summary: "公開討論摘要",
+              title: "公開討論淹水線索",
               url: null,
             },
             {
@@ -183,8 +186,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
               source_id: "cwa-rainfall",
               source_type: "official",
               source_weight: 0.9,
-              summary: "Full endpoint rainfall station summary",
-              title: "Full endpoint rainfall station",
+              summary: "完整端點回傳的雨量站摘要",
+              title: "完整端點雨量站",
               url: "https://example.test/rainfall-full",
             },
           ],
@@ -207,30 +210,30 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("低 / 中")).toBeVisible();
   await expect(page.getByText("即時風險為低，歷史參考風險為中，資料信心為中。")).toBeVisible();
   await expect(page.getByText("資料限制")).toBeVisible();
-  await expect(page.getByText("Full endpoint flood potential", { exact: true })).toBeVisible();
-  await expect(page.getByText("Full endpoint flood potential summary")).toBeVisible();
-  await expect(page.getByText("Full endpoint rainfall station", { exact: true })).toBeVisible();
-  await expect(page.getByText("Full endpoint rainfall station summary")).toBeVisible();
+  await expect(page.getByText("完整端點淹水潛勢", { exact: true })).toBeVisible();
+  await expect(page.getByText("完整端點回傳的淹水潛勢摘要")).toBeVisible();
+  await expect(page.getByText("完整端點雨量站", { exact: true })).toBeVisible();
+  await expect(page.getByText("完整端點回傳的雨量站摘要")).toBeVisible();
   await expect(page.getByText("官方公開資料").first()).toBeVisible();
   await expect(page.getByText("90%")).toBeVisible();
-  await expect(page.getByText("0 m", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 公尺", { exact: true })).toBeVisible();
   await expect(page.getByText("3 筆來源")).toBeVisible();
   await expect(page.getByText("圖層管線")).toBeVisible();
   await expect(page.getByText("部分可用", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("API 圖層合約")).toBeVisible();
-  await expect(page.getByText("Flood potential demo layer")).toBeVisible();
-  await expect(page.getByText("raster-tile / 可顯示")).toBeVisible();
-  await expect(page.getByText("Rainfall limited layer")).toBeVisible();
-  await expect(page.getByText("vector-tile / 部分可用")).toBeVisible();
-  await expect(page.getByText("Rainfall layer is delayed for part of the selected area.")).toBeVisible();
+  await expect(page.getByText("圖層資料合約")).toBeVisible();
+  await expect(page.getByText("淹水潛勢示範圖層")).toBeVisible();
+  await expect(page.getByText("點陣圖磚：可顯示")).toBeVisible();
+  await expect(page.getByText("雨量受限圖層")).toBeVisible();
+  await expect(page.getByText("向量圖磚：部分可用")).toBeVisible();
+  await expect(page.getByText("選取範圍內部分雨量圖層資料延遲。")).toBeVisible();
   await expect(page.getByText("觀測 / 發布").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "開啟來源" }).first()).toHaveAttribute(
     "href",
     "https://example.test/flood-potential-full",
   );
-  await expect(page.getByText("Community flood report")).toBeVisible();
-  await expect(page.getByText("Community report summary")).toBeVisible();
-  await expect(page.getByText("420 m", { exact: true })).toBeVisible();
+  await expect(page.getByText("公開討論淹水線索")).toBeVisible();
+  await expect(page.getByText("公開討論摘要")).toBeVisible();
+  await expect(page.getByText("420 公尺", { exact: true })).toBeVisible();
   await expect(page.getByText("未提供連結")).toBeVisible();
   await expect(page.getByText("淹水潛勢公開資料：正常")).toBeVisible();
   await expect(page.getByText("目前為開發環境示範資料，尚未連接正式即時圖層。")).toBeVisible();
@@ -241,7 +244,7 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
   page,
 }) => {
   let riskCalls = 0;
-  await page.route("http://localhost:8000/v1/risk/assess", async (route) => {
+  await page.route(`${API_BASE_URL}/v1/risk/assess`, async (route) => {
     riskCalls += 1;
     await route.continue();
   });
@@ -253,7 +256,7 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
 
   await expect(page.getByText(/定位精度：門牌/)).toBeVisible();
   await expect(page.getByText("已定位：台南市安南區長溪路二段410巷16弄1號").first()).toBeVisible();
-  await expect(page.getByText(/歷史參考風險為高/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/歷史與淹水潛勢參考為高/)).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => riskCalls).toBe(1);
 
   await page.getByLabel("輸入地標、地址或行政區").fill("宜蘭縣礁溪鄉");
@@ -270,7 +273,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
 }) => {
   let riskCalls = 0;
 
-  await page.route("http://localhost:8000/v1/geocode", async (route) => {
+  await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
     const body = route.request().postDataJSON() as { query?: string };
     await route.fulfill({
       contentType: "application/json",
@@ -297,7 +300,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
     });
   });
 
-  await page.route("http://localhost:8000/v1/risk/assess", async (route) => {
+  await page.route(`${API_BASE_URL}/v1/risk/assess`, async (route) => {
     riskCalls += 1;
     await route.fulfill({
       contentType: "application/json",
@@ -330,7 +333,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
   });
 
   await page.route(
-    "http://localhost:8000/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -363,7 +366,7 @@ test("an admin-area geocode warns and still assesses with data limits", async ({
 }) => {
   let riskCalls = 0;
 
-  await page.route("http://localhost:8000/v1/geocode", async (route) => {
+  await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
     const body = route.request().postDataJSON() as { query?: string };
     await route.fulfill({
       contentType: "application/json",
@@ -408,7 +411,7 @@ test("an admin-area geocode warns and still assesses with data limits", async ({
     });
   });
 
-  await page.route("http://localhost:8000/v1/risk/assess", async (route) => {
+  await page.route(`${API_BASE_URL}/v1/risk/assess`, async (route) => {
     riskCalls += 1;
     const body = route.request().postDataJSON() as { point?: { lat?: number } };
     const isAdminFallback = body.point?.lat === 24.827;
@@ -443,7 +446,7 @@ test("an admin-area geocode warns and still assesses with data limits", async ({
   });
 
   await page.route(
-    "http://localhost:8000/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",

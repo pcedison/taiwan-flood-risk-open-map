@@ -7,6 +7,8 @@ const basemapSmokeEnv = {
   NEXT_PUBLIC_BASEMAP_STYLE_URL: "",
   NEXT_PUBLIC_TGOS_ENABLED: "false",
 };
+const apiPort = process.env.E2E_API_PORT ?? "8000";
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://localhost:${apiPort}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -17,7 +19,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "cd ../api && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
+      command: `cd ../api && python -m uvicorn app.main:app --host 127.0.0.1 --port ${apiPort}`,
       env: {
         APP_ENV: "local",
         CORS_ORIGINS: "http://127.0.0.1:3100,http://localhost:3100",
@@ -28,11 +30,15 @@ export default defineConfig({
       },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
-      url: "http://127.0.0.1:8000/health",
+      url: `http://127.0.0.1:${apiPort}/health`,
     },
     {
       command: "npm run clean:next && npm run dev -- --hostname 127.0.0.1 --port 3100",
-      env: basemapSmokeEnv,
+      env: {
+        ...basemapSmokeEnv,
+        INTERNAL_API_BASE_URL: apiBaseUrl,
+        NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
+      },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
       url: "http://127.0.0.1:3100",

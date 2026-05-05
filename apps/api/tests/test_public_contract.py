@@ -372,7 +372,7 @@ def test_geocode_uses_wikimedia_poi_fallback_when_osm_misses(monkeypatch) -> Non
         confidence=0.84,
         precision="poi",
         matched_query="知名景點",
-        limitations=["定位結果是地標或 POI 座標，不代表門牌精準位置。"],
+        limitations=["定位結果是地標座標，不代表門牌精準位置。"],
     )
     monkeypatch.setattr(public_routes, "_cached_nominatim_candidates", lambda *_args: ())
     monkeypatch.setattr(public_routes, "_cached_wikimedia_candidates", lambda *_args: (wiki_candidate,))

@@ -860,7 +860,7 @@ def geocode_limitations(precision: GeocodePrecision) -> list[str]:
     if precision == "road_or_lane":
         return ["定位精度為道路或巷道，門牌位置可能有偏移。"]
     if precision == "poi":
-        return ["定位結果是地標或 POI 座標，不代表門牌精準位置。"]
+        return ["定位結果是地標座標，不代表門牌精準位置。"]
     if precision == "admin_area":
         return ["定位只到行政區代表點，不能直接解讀為該行政區內任一地址風險。"]
     if precision == "map_click":

@@ -18,6 +18,39 @@ Current official endpoints used by the MVP bridge:
 - WRA realtime water level observations: `https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0`
 - WRA water-level station metadata: `https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92`
 
+Source mapping notes:
+
+- data.gov.tw dataset 9177 maps to the CWA `O-A0002-001` automatic rainfall
+  station endpoint. This is the canonical rainfall source for the current
+  adapter and public MVP bridge because it exposes `RainfallElement` values.
+- CWA `O-A0003-001` is a 10-minute automatic weather station observation
+  endpoint. It is useful as a future supplemental weather source, but it should
+  not replace `O-A0002-001` in the rainfall adapter because its current payload
+  exposes `WeatherElement`, not `RainfallElement`.
+- data.gov.tw dataset 25768 maps to the WRA realtime water-level endpoint used
+  by the worker adapter and public MVP bridge.
+- DPRC flood-potential SHP packages are handled as planning/reference data, not
+  realtime observations. Local all-Taiwan import evidence was recorded on
+  2026-05-05 under `tmp/evidence/flood-potential/`.
+- Protomaps/PMTiles belongs to the basemap delivery path. It is not an evidence
+  source for flood risk by itself, but the web app supports operator-owned
+  PMTiles, raster, or MapLibre style URLs through `NEXT_PUBLIC_BASEMAP_*`.
+
+2026-05-05 automated source smoke evidence:
+
+- `tmp/evidence/official-sources/cwa-o-a0002-rainfall-2026-05-05.json`:
+  1,303 CWA rainfall stations downloaded and parsed by
+  `official.cwa.rainfall`.
+- `tmp/evidence/official-sources/cwa-o-a0003-weather-2026-05-05.json`:
+  362 CWA weather stations downloaded; rainfall parser correctly produced zero
+  records because the payload has no `RainfallElement`.
+- `tmp/evidence/official-sources/wra-water-level-2026-05-05.json`: 372 WRA
+  water-level rows downloaded, parsed, and normalized by
+  `official.wra.water_level`.
+- `tmp/evidence/official-sources/wra-water-stations-2026-05-05.json`: 857 WRA
+  station metadata rows downloaded for bridge context; it is not a water-level
+  observation payload.
+
 Worker live clients are still explicit opt-in paths. CWA uses
 `SOURCE_CWA_API_ENABLED=true` plus `CWA_API_AUTHORIZATION`; WRA uses
 `SOURCE_WRA_API_ENABLED=true` with optional `WRA_API_TOKEN`. These gates prove a

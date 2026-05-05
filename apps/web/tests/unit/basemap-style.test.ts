@@ -97,7 +97,7 @@ test("production default OSM fallback emits an unsafe fallback warning", () => {
   });
 
   assert.equal(config.kind, "dev-osm-raster");
-  assert.match(config.warnings.join("\n"), /OpenStreetMap raster fallback/);
+  assert.match(config.warnings.join("\n"), /公開 OpenStreetMap 點陣底圖備援/);
 
   if (typeof config.style === "string") {
     throw new Error("expected fallback style object");
@@ -116,5 +116,5 @@ test("production raster mode warns that raster is temporary", () => {
   });
 
   assert.equal(config.kind, "raster");
-  assert.match(config.warnings.join("\n"), /temporary recovery/);
+  assert.match(config.warnings.join("\n"), /暫時恢復/);
 });

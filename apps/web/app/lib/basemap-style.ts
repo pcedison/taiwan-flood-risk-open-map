@@ -19,9 +19,9 @@ export type BasemapEnv = {
 
 const PUBLIC_OSM_RASTER_TILES = ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"];
 const DEV_OSM_WARNING =
-  "Using the public OpenStreetMap raster fallback. Configure NEXT_PUBLIC_BASEMAP_STYLE_URL or NEXT_PUBLIC_BASEMAP_KIND=pmtiles before production.";
+  "目前使用公開 OpenStreetMap 點陣底圖備援；正式公開前請設定自有底圖樣式或 PMTiles。";
 const RASTER_WARNING =
-  "Using raster basemap fallback. This is intended for development or temporary recovery, not the production basemap path.";
+  "目前使用點陣底圖備援，適合開發或暫時恢復，不建議作為正式公開底圖。";
 
 const trimValue = (value: string | undefined) => value?.trim() ?? "";
 
@@ -93,7 +93,7 @@ export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): Basem
 
 export function buildPmtilesBasemapStyle(
   pmtilesUrl: string,
-  attribution = "OpenStreetMap contributors",
+  attribution = "OpenStreetMap 貢獻者",
 ): StyleSpecification {
   const sourceUrl = pmtilesUrl.startsWith("pmtiles://") ? pmtilesUrl : `pmtiles://${pmtilesUrl}`;
 
@@ -182,7 +182,7 @@ export function buildPmtilesBasemapStyle(
 
 export function buildRasterBasemapStyle(
   tiles: string[],
-  attribution = "Basemap contributors",
+  attribution = "底圖貢獻者",
 ): StyleSpecification {
   return {
     version: 8,
@@ -223,7 +223,7 @@ function buildDevOsmFallback({
 }): BasemapStyleConfig {
   return {
     kind: "dev-osm-raster",
-    style: buildRasterBasemapStyle(PUBLIC_OSM_RASTER_TILES, "OpenStreetMap contributors"),
+    style: buildRasterBasemapStyle(PUBLIC_OSM_RASTER_TILES, "OpenStreetMap 貢獻者"),
     warnings: isProduction ? [...warnings, DEV_OSM_WARNING] : warnings,
   };
 }
@@ -236,5 +236,5 @@ function parseRasterTiles(value: string | undefined): string[] {
 }
 
 function attributionFromEnv(env: BasemapEnv): string {
-  return trimValue(env.NEXT_PUBLIC_BASEMAP_ATTRIBUTION) || "OpenStreetMap contributors";
+  return trimValue(env.NEXT_PUBLIC_BASEMAP_ATTRIBUTION) || "OpenStreetMap 貢獻者";
 }

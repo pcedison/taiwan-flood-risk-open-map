@@ -17,7 +17,8 @@ CWA_RAINFALL_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-00
 WRA_WATER_LEVEL_URL = "https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0"
 WRA_STATION_URL = "https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92"
 USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
-NEARBY_STATION_LIMIT_M = 25_000.0
+RAINFALL_STATION_LIMIT_M = 10_000.0
+WATER_LEVEL_STATION_LIMIT_M = 3_000.0
 TAIPEI_TZ = timezone(timedelta(hours=8))
 
 
@@ -220,10 +221,23 @@ def _nearest_rainfall_observation(
         health_status="healthy",
         observed_at=station.observed_at,
         ingested_at=checked_at,
-        message=f"採用最近雨量站「{station.station_name}」，距查詢點約 {round(distance):,} m。",
+        message=f"採用最近雨量站「{station.station_name}」，距查詢點約 {round(distance):,} 公尺。",
     )
 
-    if distance > max(radius_m, NEARBY_STATION_LIMIT_M):
+    relevance_limit = _station_relevance_limit(radius_m, RAINFALL_STATION_LIMIT_M)
+    if distance > relevance_limit:
+        status = OfficialRealtimeSourceStatus(
+            source_id="cwa-rainfall",
+            name="中央氣象署即時雨量",
+            health_status="degraded",
+            observed_at=station.observed_at,
+            ingested_at=checked_at,
+            message=(
+                f"已取得即時雨量資料，但最近雨量站「{station.station_name}」距查詢點約 "
+                f"{round(distance):,} 公尺，超過 {round(relevance_limit):,} 公尺參考範圍，"
+                "未納入本次即時風險判斷。"
+            ),
+        )
         return ([], status)
 
     summary = f"最近雨量站「{station.station_name}」1 小時雨量 {station.rainfall_1h:.1f} mm"
@@ -297,21 +311,40 @@ def _nearest_water_level_observation(
         health_status="healthy",
         observed_at=station.observed_at,
         ingested_at=checked_at,
-        message=f"採用最近水位站「{station.station_name}」，距查詢點約 {round(distance):,} m。",
+        message=f"採用最近水位站「{station.station_name}」，距查詢點約 {round(distance):,} 公尺。",
     )
 
-    if distance > max(radius_m, NEARBY_STATION_LIMIT_M):
+    relevance_limit = _station_relevance_limit(radius_m, WATER_LEVEL_STATION_LIMIT_M)
+    if distance > relevance_limit:
+        status = OfficialRealtimeSourceStatus(
+            source_id="wra-water-level",
+            name="經濟部水利署即時水位",
+            health_status="degraded",
+            observed_at=station.observed_at,
+            ingested_at=checked_at,
+            message=(
+                f"已取得水利署即時水位資料，但最近水位站「{station.station_name}」距查詢點約 "
+                f"{round(distance):,} 公尺，超過 {round(relevance_limit):,} 公尺參考範圍，"
+                "未納入本次即時風險判斷。"
+            ),
+        )
         return ([], status)
 
     threshold = station.alert_level_2_m or station.alert_level_1_m
     if threshold is None:
-        summary = f"最近水位站「{station.station_name}」水位 {station.water_level_m:.2f} m"
+        summary = f"最近水位站「{station.station_name}」水位 {station.water_level_m:.2f} 公尺"
     else:
         gap = threshold - station.water_level_m
         summary = (
-            f"最近水位站「{station.station_name}」水位 {station.water_level_m:.2f} m，"
-            f"距警戒水位約 {gap:.2f} m"
+            f"最近水位站「{station.station_name}」水位 {station.water_level_m:.2f} 公尺，"
+            f"距警戒水位約 {gap:.2f} 公尺"
         )
+    if _water_level_risk_factor(
+        water_level_m=station.water_level_m,
+        alert_level_1_m=station.alert_level_1_m,
+        alert_level_2_m=station.alert_level_2_m,
+    ) == 0:
+        summary = f"{summary}，未達警戒門檻，僅作即時水位參考"
     if station.river_name:
         summary = f"{summary}（{station.river_name}）"
 
@@ -502,6 +535,10 @@ def _nearest_station[T](
         if nearest is None or distance < nearest[1]:
             nearest = (station, distance)
     return nearest
+
+
+def _station_relevance_limit(radius_m: int, source_limit_m: float) -> float:
+    return max(float(radius_m), source_limit_m)
 
 
 def _wgs84_coordinate(coordinates: object) -> tuple[float, float] | None:
