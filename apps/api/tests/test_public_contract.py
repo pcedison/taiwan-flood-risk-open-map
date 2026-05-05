@@ -274,6 +274,34 @@ def test_geocode_returns_admin_area_candidate_that_requires_confirmation() -> No
     assert_openapi_schema(response.json(), "GeocodeResponse")
 
 
+def test_geocode_matches_spaced_taiwan_admin_area_before_external_lookup(monkeypatch) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "_cached_nominatim_candidates",
+        lambda *_args: pytest.fail("local admin area should resolve before external lookup"),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "_cached_wikimedia_candidates",
+        lambda *_args: pytest.fail("local admin area should resolve before Wikimedia fallback"),
+    )
+
+    response = client.post(
+        "/v1/geocode",
+        json={"query": "高雄 左營", "input_type": "address", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    candidate = response.json()["candidates"][0]
+    assert candidate["name"] == "高雄市左營區"
+    assert candidate["type"] == "admin_area"
+    assert candidate["source"] == "local-taiwan-admin-centroid"
+    assert candidate["precision"] == "admin_area"
+    assert candidate["matched_query"] in {"高雄左營", "高雄市左營", "高雄左營區", "高雄市左營區"}
+    assert candidate["requires_confirmation"] is True
+    assert "定位只到行政區代表點" in " ".join(candidate["limitations"])
+
+
 def test_geocode_returns_admin_centroid_for_uncovered_taiwan_address(monkeypatch) -> None:
     monkeypatch.setattr(public_routes, "_cached_nominatim_candidates", lambda *_args: ())
     monkeypatch.setattr(public_routes, "_cached_wikimedia_candidates", lambda *_args: ())

@@ -288,6 +288,25 @@ class LocalTaiwanAddressProvider:
         return ()
 
     def _admin_area_candidates(self, request: GeocodeRequest) -> tuple[PlaceCandidate, ...]:
+        exact_match = exact_admin_area_match(request.query)
+        if exact_match is not None:
+            area, matched_query = exact_match
+            return (
+                PlaceCandidate(
+                    place_id=stable_uuid("admin-area", area.name),
+                    name=area.name,
+                    type="admin_area",
+                    point=LatLng(lat=area.lat, lng=area.lng),
+                    admin_code=area.admin_code,
+                    source="local-taiwan-admin-centroid",
+                    confidence=0.72,
+                    precision="admin_area",
+                    matched_query=matched_query,
+                    requires_confirmation=True,
+                    limitations=geocode_limitations("admin_area"),
+                ),
+            )
+
         normalized_query = normalize_query(request.query)
         for aliases, name, lat, lng, admin_code in ADMIN_AREA_POINTS:
             if any(normalize_query(alias) == normalized_query for alias in aliases):
@@ -617,6 +636,26 @@ def load_taiwan_admin_areas() -> tuple[TaiwanAdminArea, ...]:
         if area is not None:
             areas.append(area)
     return tuple(areas)
+
+
+def exact_admin_area_match(query: str) -> tuple[TaiwanAdminArea, str] | None:
+    normalized_query = normalize_query(query)
+    if not normalized_query:
+        return None
+
+    matches: list[tuple[int, int, TaiwanAdminArea, str]] = []
+    for area in load_taiwan_admin_areas():
+        for alias in area.aliases:
+            normalized_alias = normalize_query(alias)
+            if normalized_alias and normalized_alias == normalized_query:
+                level_priority = 0 if area.level == "town" else 1
+                matches.append((level_priority, -len(normalized_alias), area, alias))
+                break
+    if not matches:
+        return None
+    matches.sort(key=lambda item: (item[0], item[1], item[2].name))
+    _, _, area, alias = matches[0]
+    return area, alias
 
 
 def admin_area_from_payload(

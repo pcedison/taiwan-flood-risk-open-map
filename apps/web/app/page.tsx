@@ -263,15 +263,17 @@ const geocodePrecisionLabels: Record<string, string> = {
 const geocodePrecisionLabel = (value?: string) =>
   geocodePrecisionLabels[value ?? "unknown"] ?? geocodePrecisionLabels.unknown;
 
+const trimNoticeSentence = (value: string) => value.trim().replace(/[。．.]+$/u, "");
+
 const geocodeCandidateNotice = (candidate: GeocodeResponse["candidates"][number]) => {
   const parts = [`${text.geocodePrecision}：${geocodePrecisionLabel(candidate.precision)}`];
   if (candidate.matched_query && candidate.matched_query !== candidate.name) {
     parts.push(`匹配：${candidate.matched_query}`);
   }
   if (candidate.limitations?.length) {
-    parts.push(candidate.limitations.join(" "));
+    parts.push(...candidate.limitations);
   }
-  return parts.join("。");
+  return parts.map(trimNoticeSentence).filter(Boolean).join("。");
 };
 
 const layerAvailabilityLabels: Record<string, string> = {
