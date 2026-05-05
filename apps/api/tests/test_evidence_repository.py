@@ -128,6 +128,7 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     sql, params = connection.cursor_instance.executions[0]
     assert records == ()
     assert "ST_PointOnSurface(e.geom::geometry)" in sql
+    assert "ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry" in sql
     assert params == (121.5654, 25.033, 500, 50)
 
 

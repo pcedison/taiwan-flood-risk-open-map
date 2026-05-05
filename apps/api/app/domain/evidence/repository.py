@@ -243,7 +243,7 @@ def query_nearby_evidence(
             e.ingested_at,
             ST_Y(ST_PointOnSurface(e.geom::geometry)) AS lat,
             ST_X(ST_PointOnSurface(e.geom::geometry)) AS lng,
-            ST_AsGeoJSON(e.geom::geometry) AS geometry,
+            ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry,
             ST_Distance(e.geom::geography, qp.geog) AS distance_to_query_m,
             e.confidence,
             COALESCE(e.freshness_score, 0.8) AS freshness_score,
@@ -361,7 +361,7 @@ def upsert_public_evidence(
             ingested_at,
             ST_Y(ST_PointOnSurface(geom::geometry)) AS lat,
             ST_X(ST_PointOnSurface(geom::geometry)) AS lng,
-            ST_AsGeoJSON(geom::geometry) AS geometry,
+            ST_AsGeoJSON(ST_PointOnSurface(geom::geometry)) AS geometry,
             distance_to_query_m,
             confidence,
             COALESCE(freshness_score, 0.8) AS freshness_score,
@@ -455,7 +455,7 @@ def fetch_assessment_evidence(
             e.ingested_at,
             ST_Y(ST_PointOnSurface(e.geom::geometry)) AS lat,
             ST_X(ST_PointOnSurface(e.geom::geometry)) AS lng,
-            ST_AsGeoJSON(e.geom::geometry) AS geometry,
+            ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry,
             CASE
                 WHEN e.geom IS NOT NULL THEN ST_Distance(e.geom::geography, lq.geom::geography)
                 ELSE e.distance_to_query_m
