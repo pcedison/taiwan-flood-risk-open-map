@@ -91,13 +91,29 @@ test("raster fallback uses configured tile templates", () => {
   ]);
 });
 
-test("production default OSM fallback emits an unsafe fallback warning", () => {
+test("production default avoids public OSM tiles when basemap is unconfigured", () => {
   const config = getBasemapStyleConfig({
     NODE_ENV: "production",
   });
 
+  assert.equal(config.kind, "production-unconfigured");
+  assert.match(config.warnings.join("\n"), /Production basemap is not configured/);
+
+  if (typeof config.style === "string") {
+    throw new Error("expected fallback style object");
+  }
+
+  assert.deepEqual(config.style.sources, {});
+  assert.equal(config.style.layers.some((layer) => layer.id === "base-water"), true);
+});
+
+test("development default still allows local OSM raster fallback", () => {
+  const config = getBasemapStyleConfig({
+    NODE_ENV: "development",
+  });
+
   assert.equal(config.kind, "dev-osm-raster");
-  assert.match(config.warnings.join("\n"), /公開 OpenStreetMap 點陣底圖備援/);
+  assert.match(config.warnings.join("\n"), /Development fallback is using public OpenStreetMap/);
 
   if (typeof config.style === "string") {
     throw new Error("expected fallback style object");
@@ -116,5 +132,5 @@ test("production raster mode warns that raster is temporary", () => {
   });
 
   assert.equal(config.kind, "raster");
-  assert.match(config.warnings.join("\n"), /暫時恢復/);
+  assert.match(config.warnings.join("\n"), /Production raster basemap is configured/);
 });

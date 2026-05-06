@@ -32,6 +32,19 @@ function Invoke-GateStep {
   }
 }
 
+function Get-FreeTcpPort {
+  $Listener = [System.Net.Sockets.TcpListener]::new(
+    [System.Net.IPAddress]::Parse("127.0.0.1"),
+    0
+  )
+  try {
+    $Listener.Start()
+    return $Listener.LocalEndpoint.Port
+  } finally {
+    $Listener.Stop()
+  }
+}
+
 $Steps = @(
   @{
     Name = "API tests"
@@ -86,11 +99,43 @@ foreach ($Step in $Steps) {
 }
 
 if (-not $SkipE2E) {
-  Invoke-GateStep `
-    -Name "Web E2E" `
-    -WorkingDirectory $WebRoot `
-    -Command "npm" `
-    -Arguments @("run", "e2e")
+  $PreviousCi = $env:CI
+  $PreviousE2eApiPort = $env:E2E_API_PORT
+  $PreviousE2eWebPort = $env:E2E_WEB_PORT
+  $PreviousPublicApiBaseUrl = $env:NEXT_PUBLIC_API_BASE_URL
+  try {
+    $env:CI = "1"
+    $env:E2E_API_PORT = [string](Get-FreeTcpPort)
+    $env:E2E_WEB_PORT = [string](Get-FreeTcpPort)
+    Remove-Item Env:\NEXT_PUBLIC_API_BASE_URL -ErrorAction SilentlyContinue
+
+    Invoke-GateStep `
+      -Name "Web E2E" `
+      -WorkingDirectory $WebRoot `
+      -Command "npm" `
+      -Arguments @("run", "e2e")
+  } finally {
+    if ($null -eq $PreviousCi) {
+      Remove-Item Env:\CI -ErrorAction SilentlyContinue
+    } else {
+      $env:CI = $PreviousCi
+    }
+    if ($null -eq $PreviousE2eApiPort) {
+      Remove-Item Env:\E2E_API_PORT -ErrorAction SilentlyContinue
+    } else {
+      $env:E2E_API_PORT = $PreviousE2eApiPort
+    }
+    if ($null -eq $PreviousE2eWebPort) {
+      Remove-Item Env:\E2E_WEB_PORT -ErrorAction SilentlyContinue
+    } else {
+      $env:E2E_WEB_PORT = $PreviousE2eWebPort
+    }
+    if ($null -eq $PreviousPublicApiBaseUrl) {
+      Remove-Item Env:\NEXT_PUBLIC_API_BASE_URL -ErrorAction SilentlyContinue
+    } else {
+      $env:NEXT_PUBLIC_API_BASE_URL = $PreviousPublicApiBaseUrl
+    }
+  }
 }
 
 Write-Host ""

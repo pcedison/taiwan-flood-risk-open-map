@@ -9,12 +9,14 @@ const basemapSmokeEnv = {
 };
 const apiPort = process.env.E2E_API_PORT ?? "8000";
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://localhost:${apiPort}`;
+const webPort = process.env.E2E_WEB_PORT ?? "3100";
+const webBaseUrl = `http://127.0.0.1:${webPort}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
   use: {
-    baseURL: "http://127.0.0.1:3100",
+    baseURL: webBaseUrl,
     trace: "on-first-retry",
   },
   webServer: [
@@ -22,7 +24,7 @@ export default defineConfig({
       command: `cd ../api && python -m uvicorn app.main:app --host 127.0.0.1 --port ${apiPort}`,
       env: {
         APP_ENV: "local",
-        CORS_ORIGINS: "http://127.0.0.1:3100,http://localhost:3100",
+        CORS_ORIGINS: `${webBaseUrl},http://localhost:${webPort}`,
         EVIDENCE_REPOSITORY_ENABLED: "false",
         HISTORICAL_NEWS_ON_DEMAND_ENABLED: "false",
         REALTIME_OFFICIAL_ENABLED: "false",
@@ -33,7 +35,7 @@ export default defineConfig({
       url: `http://127.0.0.1:${apiPort}/health`,
     },
     {
-      command: "npm run clean:next && npm run dev -- --hostname 127.0.0.1 --port 3100",
+      command: `npm run clean:next && npm run dev -- --hostname 127.0.0.1 --port ${webPort}`,
       env: {
         ...basemapSmokeEnv,
         INTERNAL_API_BASE_URL: apiBaseUrl,
@@ -41,7 +43,7 @@ export default defineConfig({
       },
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
-      url: "http://127.0.0.1:3100",
+      url: webBaseUrl,
     },
   ],
   projects: [

@@ -1,6 +1,11 @@
 import type { StyleSpecification } from "maplibre-gl";
 
-export type BasemapKind = "style-url" | "pmtiles" | "raster" | "dev-osm-raster";
+export type BasemapKind =
+  | "style-url"
+  | "pmtiles"
+  | "raster"
+  | "dev-osm-raster"
+  | "production-unconfigured";
 
 export type BasemapStyleConfig = {
   kind: BasemapKind;
@@ -19,9 +24,11 @@ export type BasemapEnv = {
 
 const PUBLIC_OSM_RASTER_TILES = ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"];
 const DEV_OSM_WARNING =
-  "目前使用公開 OpenStreetMap 點陣底圖備援；正式公開前請設定自有底圖樣式或 PMTiles。";
+  "Development fallback is using public OpenStreetMap raster tiles. Do not use this fallback for hosted public beta or production traffic.";
+const PRODUCTION_BASEMAP_WARNING =
+  "Production basemap is not configured. Set NEXT_PUBLIC_BASEMAP_STYLE_URL or a reviewed NEXT_PUBLIC_BASEMAP_KIND/PMTiles/raster URL before public map launch.";
 const RASTER_WARNING =
-  "目前使用點陣底圖備援，適合開發或暫時恢復，不建議作為正式公開底圖。";
+  "Production raster basemap is configured. Confirm provider terms, attribution, cache behavior, and rate limits before public traffic.";
 
 const trimValue = (value: string | undefined) => value?.trim() ?? "";
 
@@ -59,7 +66,7 @@ export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): Basem
       };
     }
 
-    return buildDevOsmFallback({
+    return buildUnconfiguredBasemapFallback({
       isProduction,
       warnings: ["NEXT_PUBLIC_BASEMAP_KIND=pmtiles requires NEXT_PUBLIC_BASEMAP_PMTILES_URL."],
     });
@@ -75,20 +82,20 @@ export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): Basem
       };
     }
 
-    return buildDevOsmFallback({
+    return buildUnconfiguredBasemapFallback({
       isProduction,
       warnings: ["NEXT_PUBLIC_BASEMAP_KIND=raster requires NEXT_PUBLIC_BASEMAP_RASTER_TILES."],
     });
   }
 
   if (kind) {
-    return buildDevOsmFallback({
+    return buildUnconfiguredBasemapFallback({
       isProduction,
       warnings: [`Unsupported NEXT_PUBLIC_BASEMAP_KIND="${kind}".`],
     });
   }
 
-  return buildDevOsmFallback({ isProduction, warnings: [] });
+  return buildUnconfiguredBasemapFallback({ isProduction, warnings: [] });
 }
 
 export function buildPmtilesBasemapStyle(
@@ -214,17 +221,41 @@ export function buildRasterBasemapStyle(
   };
 }
 
-function buildDevOsmFallback({
+export function buildNoTileBasemapStyle(): StyleSpecification {
+  return {
+    version: 8,
+    sources: {},
+    layers: [
+      {
+        id: "base-water",
+        type: "background",
+        paint: {
+          "background-color": "#c9d9d5",
+        },
+      },
+    ],
+  };
+}
+
+function buildUnconfiguredBasemapFallback({
   isProduction,
   warnings,
 }: {
   isProduction: boolean;
   warnings: string[];
 }): BasemapStyleConfig {
+  if (isProduction) {
+    return {
+      kind: "production-unconfigured",
+      style: buildNoTileBasemapStyle(),
+      warnings: [...warnings, PRODUCTION_BASEMAP_WARNING],
+    };
+  }
+
   return {
     kind: "dev-osm-raster",
     style: buildRasterBasemapStyle(PUBLIC_OSM_RASTER_TILES, "OpenStreetMap 貢獻者"),
-    warnings: isProduction ? [...warnings, DEV_OSM_WARNING] : warnings,
+    warnings: [...warnings, DEV_OSM_WARNING],
   };
 }
 
