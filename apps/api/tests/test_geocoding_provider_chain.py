@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.api.schemas import GeocodeRequest, LatLng, PlaceCandidate
 from app.domain.geocoding import build_open_data_geocoder
+from app.domain.geocoding.providers import load_taiwan_admin_areas, strip_admin_suffix
 
 
 def test_provider_chain_uses_local_taiwan_provider_before_external_lookup() -> None:
@@ -181,6 +182,45 @@ def test_provider_chain_does_not_guess_ambiguous_town_name_without_county() -> N
     assert candidates == []
 
 
+def test_provider_chain_covers_every_taiwan_admin_area_locally_before_external_lookup() -> None:
+    def external_lookup(query: str, *_args: object) -> tuple[PlaceCandidate, ...]:
+        raise AssertionError(f"local admin query should not reach external lookup: {query}")
+
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=external_lookup,
+        wikimedia_lookup=external_lookup,
+    )
+    areas = load_taiwan_admin_areas()
+    counties = [area for area in areas if area.level == "county"]
+    towns = [area for area in areas if area.level == "town"]
+
+    assert len(counties) >= 20
+    assert len(towns) >= 300
+
+    failures: list[str] = []
+    for area in areas:
+        query = _spoken_admin_query(area.county, area.town)
+        candidates = geocoder.geocode(
+            GeocodeRequest(query=query, input_type="address", limit=1),
+        )
+        if not candidates:
+            failures.append(f"{query} -> no candidate")
+            continue
+        candidate = candidates[0]
+        if (
+            candidate.name != area.name
+            or candidate.source != "local-taiwan-admin-centroid"
+            or candidate.precision != "admin_area"
+            or candidate.type != "admin_area"
+        ):
+            failures.append(
+                f"{query} -> name={candidate.name}, source={candidate.source}, "
+                f"precision={candidate.precision}, type={candidate.type}"
+            )
+
+    assert failures == []
+
+
 def test_provider_chain_uses_wikimedia_only_after_osm_misses() -> None:
     nominatim_calls: list[str] = []
     wikimedia_calls: list[str] = []
@@ -218,3 +258,10 @@ def test_provider_chain_uses_wikimedia_only_after_osm_misses() -> None:
     assert nominatim_calls
     assert wikimedia_calls == ["不在本地清單的知名景點"]
     assert candidates[0].source == "wikimedia-coordinates"
+
+
+def _spoken_admin_query(county: str, town: str | None) -> str:
+    if town is None:
+        return county
+    town_short = strip_admin_suffix(town)
+    return f"{strip_admin_suffix(county)} {town_short if len(town_short) >= 2 else town}"

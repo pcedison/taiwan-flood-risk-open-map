@@ -762,7 +762,7 @@ def strip_admin_suffix(name: str) -> str:
 
 
 def normalize_query(query: str) -> str:
-    return query.casefold().replace(" ", "").replace("臺", "台")
+    return re.sub(r"[\s,，、/／|｜-]+", "", query.casefold()).replace("臺", "台")
 
 
 def stable_uuid(*parts: object) -> str:
