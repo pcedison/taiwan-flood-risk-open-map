@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -8,13 +10,25 @@ from fastapi.responses import JSONResponse
 from app.api.errors import error_payload
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.domain.geocoding.postgis_bootstrap import start_postgis_geocoder_bootstrap
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        start_postgis_geocoder_bootstrap(
+            database_url=settings.database_url,
+            paths=settings.geocoder_open_data_paths,
+            enabled=settings.geocoder_postgis_bootstrap_enabled,
+        )
+        yield
+
     application = FastAPI(
         title=settings.app_title,
         version=settings.app_version,
+        lifespan=lifespan,
     )
     application.add_middleware(
         CORSMiddleware,

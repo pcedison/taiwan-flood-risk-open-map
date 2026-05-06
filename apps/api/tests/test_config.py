@@ -11,6 +11,8 @@ def test_settings_uses_bundled_geocoder_open_data_when_paths_unset(monkeypatch):
 
     assert len(settings.geocoder_open_data_paths) == 3
     assert all(path.endswith(".normalized.jsonl.gz") for path in settings.geocoder_open_data_paths)
+    assert settings.geocoder_postgis_enabled is True
+    assert settings.geocoder_postgis_bootstrap_enabled is True
     get_settings.cache_clear()
 
 
@@ -23,6 +25,8 @@ def test_settings_can_disable_bundled_geocoder_open_data(monkeypatch):
     settings = get_settings()
 
     assert settings.geocoder_open_data_paths == ()
+    assert settings.geocoder_postgis_enabled is True
+    assert settings.geocoder_postgis_bootstrap_enabled is True
     get_settings.cache_clear()
 
 
@@ -35,6 +39,8 @@ def test_settings_does_not_enable_bundled_geocoder_open_data_for_default_local(m
     settings = get_settings()
 
     assert settings.geocoder_open_data_paths == ()
+    assert settings.geocoder_postgis_enabled is False
+    assert settings.geocoder_postgis_bootstrap_enabled is False
     get_settings.cache_clear()
 
 

@@ -38,6 +38,7 @@ class Settings:
     evidence_repository_enabled: bool
     geocoder_open_data_paths: tuple[str, ...]
     geocoder_postgis_enabled: bool
+    geocoder_postgis_bootstrap_enabled: bool
     historical_news_on_demand_enabled: bool
     historical_news_on_demand_writeback_enabled: bool
     historical_news_on_demand_max_records: int
@@ -95,7 +96,14 @@ def get_settings() -> Settings:
         ),
         evidence_repository_enabled=_env_bool("EVIDENCE_REPOSITORY_ENABLED", default=True),
         geocoder_open_data_paths=_geocoder_open_data_paths(app_env),
-        geocoder_postgis_enabled=_env_bool("GEOCODER_POSTGIS_ENABLED", default=False),
+        geocoder_postgis_enabled=_env_bool(
+            "GEOCODER_POSTGIS_ENABLED",
+            default=_hosted_runtime(app_env),
+        ),
+        geocoder_postgis_bootstrap_enabled=_env_bool(
+            "GEOCODER_POSTGIS_BOOTSTRAP_ENABLED",
+            default=_hosted_runtime(app_env),
+        ),
         historical_news_on_demand_enabled=_env_bool(
             "HISTORICAL_NEWS_ON_DEMAND_ENABLED",
             default=non_production_default,
@@ -224,7 +232,7 @@ def _geocoder_open_data_paths(app_env: str) -> tuple[str, ...]:
     if configured_paths:
         return configured_paths
     # Hosted beta should have project-controlled road/POI/admin fallback even before PostGIS import.
-    hosted_default = app_env.strip().lower() in {"staging", "production", "production-beta"}
+    hosted_default = _hosted_runtime(app_env)
     if not _env_bool("GEOCODER_BUNDLED_OPEN_DATA_ENABLED", default=hosted_default):
         return ()
     return tuple(
@@ -235,6 +243,10 @@ def _geocoder_open_data_paths(app_env: str) -> tuple[str, ...]:
         )
         if path.is_file()
     )
+
+
+def _hosted_runtime(app_env: str) -> bool:
+    return app_env.strip().lower() in {"staging", "production", "production-beta"}
 
 
 def _env_int(name: str, *, default: int, minimum: int | None = None) -> int:
