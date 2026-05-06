@@ -1,0 +1,120 @@
+schema_version: geocoding-data-manifest/v1
+status: beta_seed
+production_complete: false
+owner: source-data
+generated_at: "2026-05-06"
+license_policy:
+  accepted_licenses:
+    - 政府資料開放授權條款-第1版
+    - Open Government Data License, version 1.0
+  private_or_unclear_terms_policy: do_not_import
+coverage_targets:
+  required_before_public_beta:
+    - roads
+    - admin_areas
+    - villages
+    - poi
+  precision_labels:
+    exact_address: exact address
+    road_or_lane: road / lane fallback
+    poi: POI
+    admin_area: admin fallback
+datasets:
+  - key: moi-national-road-names
+    name: 全國路名資料
+    category: roads
+    status: ready_for_import_planning
+    landing_url: https://data.gov.tw/dataset/35321
+    provider: 內政部戶政司
+    license: 政府資料開放授權條款-第1版
+    update_frequency: 不定期更新
+    fields:
+      - city
+      - site_id
+      - road
+    target_precision: road_or_lane
+    target_place_type: address
+    import_notes: >
+      Source has road names but no geometry; import as searchable road aliases only
+      after a centroid/road-geometry join is configured from an approved geometry source.
+    attribution: 內政部戶政司，全國路名資料
+  - key: moi-village-boundary-twd97-119
+    name: 村里界圖(TWD97_119分帶)
+    category: villages
+    status: ready_for_geometry_import_planning
+    landing_url: https://data.gov.tw/dataset/7439
+    provider: 內政部國土測繪中心
+    license: Open Government Data License, version 1.0
+    update_frequency: 不定期更新
+    fields:
+      - VILLCODE
+      - COUNTYNAME
+      - TOWNNAME
+      - VILLNAME
+      - COUNTYCODE
+      - TOWNCODE
+    target_precision: admin_area
+    target_place_type: admin_area
+    import_notes: Convert SHP from TWD97_119 to EPSG:4326 and store polygon plus point-on-surface centroid.
+    attribution: 內政部國土測繪中心，村里界圖
+  - key: nfa-evacuation-shelter-locations
+    name: 避難收容處所點位檔
+    category: poi
+    status: ready_for_point_import
+    landing_url: https://data.gov.tw/dataset/73242
+    provider: 內政部消防署
+    license: Open Government Data License, version 1.0
+    update_frequency: 每1年
+    fields:
+      - Shelter address
+      - Longitude
+      - Latitude
+      - Shelter Name
+    target_precision: poi
+    target_place_type: poi
+    import_notes: Import public shelter point coordinates and address/name aliases.
+    attribution: 內政部消防署，避難收容處所點位檔
+  - key: npa-police-station-addresses
+    name: 各縣(市)警察(分)局暨所屬分駐(派出)所地址資料
+    category: poi
+    status: ready_for_point_import
+    landing_url: https://data.gov.tw/dataset/5958
+    provider: 內政部警政署
+    license: 政府資料開放授權條款-第1版
+    update_frequency: 不定期更新
+    fields:
+      - 中文單位名稱
+      - 地址
+      - POINT_X
+      - POINT_Y
+    target_precision: poi
+    target_place_type: poi
+    import_notes: Import public police-office point coordinates and address/name aliases.
+    attribution: 內政部警政署，警察機關地址資料
+  - key: mohw-medical-institutions
+    name: 醫療機構與人員基本資料
+    category: poi
+    status: address_only_candidate
+    landing_url: https://data.gov.tw/dataset/15393
+    provider: 衛生福利部醫事司
+    license: 政府資料開放授權條款-第1版
+    update_frequency: 每1年
+    fields:
+      - 機構代碼
+      - 機構名稱
+      - 縣市區名
+      - 地址
+    target_precision: poi
+    target_place_type: poi
+    import_notes: Address-only source; do not import as point rows until an approved geocoding pass records precision and confidence.
+    attribution: 衛生福利部醫事司，醫療機構與人員基本資料
+smoke_tests:
+  required_categories:
+    - roads
+    - villages
+    - poi
+  required_precision_values:
+    - exact_address
+    - road_or_lane
+    - poi
+    - admin_area
