@@ -98,6 +98,32 @@ export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): Basem
   return buildUnconfiguredBasemapFallback({ isProduction, warnings: [] });
 }
 
+type BasemapConfigFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+export async function loadRuntimeBasemapStyleConfig(
+  fetcher: BasemapConfigFetch = fetch,
+): Promise<BasemapStyleConfig> {
+  try {
+    const response = await fetcher("/basemap-config", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Basemap config request failed with HTTP ${response.status}`);
+    }
+
+    const payload: unknown = await response.json();
+    if (!isBasemapStyleConfig(payload)) {
+      throw new Error("Basemap config response is not valid");
+    }
+
+    return payload;
+  } catch (error) {
+    console.warn("Falling back to build-time basemap config.", error);
+    return getBasemapStyleConfig();
+  }
+}
+
 export function buildPmtilesBasemapStyle(
   pmtilesUrl: string,
   attribution = "OpenStreetMap 貢獻者",
@@ -268,4 +294,17 @@ function parseRasterTiles(value: string | undefined): string[] {
 
 function attributionFromEnv(env: BasemapEnv): string {
   return trimValue(env.NEXT_PUBLIC_BASEMAP_ATTRIBUTION) || "OpenStreetMap 貢獻者";
+}
+
+function isBasemapStyleConfig(value: unknown): value is BasemapStyleConfig {
+  if (!value || typeof value !== "object") return false;
+
+  const candidate = value as Partial<BasemapStyleConfig>;
+  return (
+    typeof candidate.kind === "string" &&
+    (typeof candidate.style === "string" ||
+      (typeof candidate.style === "object" && candidate.style !== null)) &&
+    Array.isArray(candidate.warnings) &&
+    candidate.warnings.every((warning) => typeof warning === "string")
+  );
 }
