@@ -14,6 +14,11 @@ export type BasemapStyleConfig = {
 };
 
 export type BasemapEnv = {
+  BASEMAP_ATTRIBUTION?: string;
+  BASEMAP_KIND?: string;
+  BASEMAP_PMTILES_URL?: string;
+  BASEMAP_RASTER_TILES?: string;
+  BASEMAP_STYLE_URL?: string;
   NEXT_PUBLIC_BASEMAP_ATTRIBUTION?: string;
   NEXT_PUBLIC_BASEMAP_KIND?: string;
   NEXT_PUBLIC_BASEMAP_PMTILES_URL?: string;
@@ -34,17 +39,22 @@ const trimValue = (value: string | undefined) => value?.trim() ?? "";
 
 function readBasemapEnv(): BasemapEnv {
   return {
-    NEXT_PUBLIC_BASEMAP_ATTRIBUTION: process.env.NEXT_PUBLIC_BASEMAP_ATTRIBUTION,
-    NEXT_PUBLIC_BASEMAP_KIND: process.env.NEXT_PUBLIC_BASEMAP_KIND,
-    NEXT_PUBLIC_BASEMAP_PMTILES_URL: process.env.NEXT_PUBLIC_BASEMAP_PMTILES_URL,
-    NEXT_PUBLIC_BASEMAP_RASTER_TILES: process.env.NEXT_PUBLIC_BASEMAP_RASTER_TILES,
-    NEXT_PUBLIC_BASEMAP_STYLE_URL: process.env.NEXT_PUBLIC_BASEMAP_STYLE_URL,
-    NODE_ENV: process.env.NODE_ENV,
+    BASEMAP_ATTRIBUTION: readRuntimeEnv("BASEMAP_ATTRIBUTION"),
+    BASEMAP_KIND: readRuntimeEnv("BASEMAP_KIND"),
+    BASEMAP_PMTILES_URL: readRuntimeEnv("BASEMAP_PMTILES_URL"),
+    BASEMAP_RASTER_TILES: readRuntimeEnv("BASEMAP_RASTER_TILES"),
+    BASEMAP_STYLE_URL: readRuntimeEnv("BASEMAP_STYLE_URL"),
+    NEXT_PUBLIC_BASEMAP_ATTRIBUTION: readRuntimeEnv("NEXT_PUBLIC_BASEMAP_ATTRIBUTION"),
+    NEXT_PUBLIC_BASEMAP_KIND: readRuntimeEnv("NEXT_PUBLIC_BASEMAP_KIND"),
+    NEXT_PUBLIC_BASEMAP_PMTILES_URL: readRuntimeEnv("NEXT_PUBLIC_BASEMAP_PMTILES_URL"),
+    NEXT_PUBLIC_BASEMAP_RASTER_TILES: readRuntimeEnv("NEXT_PUBLIC_BASEMAP_RASTER_TILES"),
+    NEXT_PUBLIC_BASEMAP_STYLE_URL: readRuntimeEnv("NEXT_PUBLIC_BASEMAP_STYLE_URL"),
+    NODE_ENV: readRuntimeEnv("NODE_ENV"),
   };
 }
 
 export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): BasemapStyleConfig {
-  const styleUrl = trimValue(env.NEXT_PUBLIC_BASEMAP_STYLE_URL);
+  const styleUrl = basemapEnvValue(env, "NEXT_PUBLIC_BASEMAP_STYLE_URL", "BASEMAP_STYLE_URL");
   if (styleUrl) {
     return {
       kind: "style-url",
@@ -53,11 +63,15 @@ export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): Basem
     };
   }
 
-  const kind = trimValue(env.NEXT_PUBLIC_BASEMAP_KIND).toLowerCase();
+  const kind = basemapEnvValue(env, "NEXT_PUBLIC_BASEMAP_KIND", "BASEMAP_KIND").toLowerCase();
   const isProduction = env.NODE_ENV === "production";
 
   if (kind === "pmtiles") {
-    const pmtilesUrl = trimValue(env.NEXT_PUBLIC_BASEMAP_PMTILES_URL);
+    const pmtilesUrl = basemapEnvValue(
+      env,
+      "NEXT_PUBLIC_BASEMAP_PMTILES_URL",
+      "BASEMAP_PMTILES_URL",
+    );
     if (pmtilesUrl) {
       return {
         kind: "pmtiles",
@@ -73,7 +87,9 @@ export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): Basem
   }
 
   if (kind === "raster") {
-    const rasterTiles = parseRasterTiles(env.NEXT_PUBLIC_BASEMAP_RASTER_TILES);
+    const rasterTiles = parseRasterTiles(
+      basemapEnvValue(env, "NEXT_PUBLIC_BASEMAP_RASTER_TILES", "BASEMAP_RASTER_TILES"),
+    );
     if (rasterTiles.length > 0) {
       return {
         kind: "raster",
@@ -293,7 +309,23 @@ function parseRasterTiles(value: string | undefined): string[] {
 }
 
 function attributionFromEnv(env: BasemapEnv): string {
-  return trimValue(env.NEXT_PUBLIC_BASEMAP_ATTRIBUTION) || "OpenStreetMap 貢獻者";
+  return (
+    basemapEnvValue(env, "NEXT_PUBLIC_BASEMAP_ATTRIBUTION", "BASEMAP_ATTRIBUTION") ||
+    "OpenStreetMap 貢獻者"
+  );
+}
+
+function basemapEnvValue(
+  env: BasemapEnv,
+  publicKey: keyof BasemapEnv,
+  runtimeKey: keyof BasemapEnv,
+): string {
+  return trimValue(env[publicKey] || env[runtimeKey]);
+}
+
+function readRuntimeEnv(key: string): string | undefined {
+  if (typeof process === "undefined") return undefined;
+  return process.env?.[key];
 }
 
 function isBasemapStyleConfig(value: unknown): value is BasemapStyleConfig {

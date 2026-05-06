@@ -13,6 +13,12 @@ type RasterSourceForTest = {
   type: string;
 };
 
+type VectorSourceForTest = {
+  attribution?: string;
+  type: string;
+  url?: string;
+};
+
 type LayerWithSourceLayerForTest = {
   id?: string;
   "source-layer"?: string;
@@ -70,6 +76,42 @@ test("PMTiles helper does not duplicate pmtiles protocol prefixes", () => {
 
   assert.equal(style.sources.basemap.type, "vector");
   assert.equal(style.sources.basemap.url, "pmtiles://https://cdn.example.test/taiwan.pmtiles");
+});
+
+test("runtime BASEMAP aliases avoid build-time NEXT_PUBLIC inlining", () => {
+  const config = getBasemapStyleConfig({
+    BASEMAP_ATTRIBUTION: "Example runtime env attribution",
+    BASEMAP_KIND: "pmtiles",
+    BASEMAP_PMTILES_URL: "https://cdn.example.test/runtime.pmtiles",
+    NODE_ENV: "production",
+  });
+
+  assert.equal(config.kind, "pmtiles");
+
+  if (typeof config.style === "string") {
+    throw new Error("expected PMTiles style object");
+  }
+
+  assert.equal(
+    (config.style.sources.basemap as VectorSourceForTest).url,
+    "pmtiles://https://cdn.example.test/runtime.pmtiles",
+  );
+  assert.equal(
+    (config.style.sources.basemap as AttributedSourceForTest).attribution,
+    "Example runtime env attribution",
+  );
+});
+
+test("NEXT_PUBLIC basemap values keep backwards compatibility", () => {
+  const config = getBasemapStyleConfig({
+    BASEMAP_KIND: "pmtiles",
+    BASEMAP_PMTILES_URL: "https://cdn.example.test/runtime.pmtiles",
+    NEXT_PUBLIC_BASEMAP_KIND: "raster",
+    NEXT_PUBLIC_BASEMAP_RASTER_TILES: "https://tiles.example.test/{z}/{x}/{y}.png",
+    NODE_ENV: "development",
+  });
+
+  assert.equal(config.kind, "raster");
 });
 
 test("raster fallback uses configured tile templates", () => {
