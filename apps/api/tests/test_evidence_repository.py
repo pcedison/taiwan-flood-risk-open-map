@@ -103,7 +103,10 @@ def test_fetch_query_heat_snapshot_buckets_nearby_location_queries() -> None:
         connection_factory=lambda: connection,
     )
 
-    sql, params = connection.cursor_instance.executions[0]
+    timeout_sql, timeout_params = connection.cursor_instance.executions[0]
+    sql, params = connection.cursor_instance.executions[1]
+    assert timeout_sql == "SET LOCAL statement_timeout = %s"
+    assert timeout_params == ("1200ms",)
     assert "FROM location_queries lq" in sql
     assert "JOIN risk_assessments ra ON ra.query_id = lq.id" in sql
     assert "ST_DWithin" in sql

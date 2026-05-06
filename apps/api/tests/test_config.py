@@ -70,3 +70,36 @@ def test_settings_keeps_explicit_database_and_redis_urls(monkeypatch):
     assert settings.database_url == "postgresql://explicit.example.test/flood"
     assert settings.redis_url == "redis://explicit.example.test:6379/0"
     get_settings.cache_clear()
+
+
+def test_realtime_cwa_bridge_auto_enables_when_token_is_present(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.delenv("SOURCE_CWA_API_ENABLED", raising=False)
+    monkeypatch.setenv("CWA_API_AUTHORIZATION", "test-cwa-token")
+
+    settings = get_settings()
+
+    assert settings.cwa_api_authorization == "test-cwa-token"
+    assert settings.source_cwa_api_enabled is True
+    get_settings.cache_clear()
+
+
+def test_realtime_cwa_bridge_respects_explicit_disable(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("CWA_API_AUTHORIZATION", "test-cwa-token")
+    monkeypatch.setenv("SOURCE_CWA_API_ENABLED", "false")
+
+    settings = get_settings()
+
+    assert settings.source_cwa_api_enabled is False
+    get_settings.cache_clear()
+
+
+def test_realtime_wra_bridge_defaults_to_public_endpoint_enabled(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.delenv("SOURCE_WRA_API_ENABLED", raising=False)
+
+    settings = get_settings()
+
+    assert settings.source_wra_api_enabled is True
+    get_settings.cache_clear()

@@ -218,3 +218,91 @@ test("production-like open raster basemap renders without OSM or TGOS tiles", as
   expect(basemapRequests.osmTiles).toBe(0);
   expect(basemapRequests.tgos).toBe(0);
 });
+
+test("map-click assessment skips stale search geocoding", async ({ page }) => {
+  await mockBasemapTiles(page);
+
+  let geocodeRequests = 0;
+  const riskPayloads: Array<{
+    location_text?: string | null;
+    point?: { lat?: number; lng?: number };
+  }> = [];
+
+  await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
+    geocodeRequests += 1;
+    await route.fulfill({
+      contentType: "application/json",
+      json: { candidates: [] },
+    });
+  });
+
+  await page.route(`${API_BASE_URL}/v1/risk/assess`, async (route) => {
+    riskPayloads.push(
+      route.request().postDataJSON() as {
+        location_text?: string | null;
+        point?: { lat?: number; lng?: number };
+      },
+    );
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        assessment_id: "018f3bd2-6e4a-7b10-8d21-map-click",
+        confidence: { level: "medium" },
+        created_at: "2026-04-29T03:00:00Z",
+        data_freshness: [],
+        evidence: [],
+        expires_at: "2026-04-29T03:10:00Z",
+        explanation: {
+          main_reasons: ["Map click should use the selected coordinate directly."],
+          missing_sources: [],
+          summary: "Map click risk summary",
+        },
+        historical: { level: "medium" },
+        location: { lat: 24.2, lng: 120.7 },
+        map_layers: [],
+        radius_m: 500,
+        query_heat: {
+          attention_level: "low",
+          period: "P7D",
+          query_count_bucket: "1-9",
+          unique_approx_count_bucket: "1-9",
+          updated_at: "2026-04-29T03:00:00Z",
+        },
+        realtime: { level: "low" },
+        score_version: "risk-v0.1.0",
+      },
+    });
+  });
+
+  await page.route(
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-map-click`,
+    async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        json: {
+          assessment_id: "018f3bd2-6e4a-7b10-8d21-map-click",
+          items: [],
+          next_cursor: null,
+        },
+      });
+    },
+  );
+
+  await page.goto("/");
+  const canvas = await expectVisibleMapCanvas(page);
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+
+  await canvas.click({
+    position: { x: Math.round(box!.width / 2), y: Math.round(box!.height / 2) },
+  });
+  await expect(page.locator("form input").first()).toHaveValue("");
+  await page.locator('form button[type="submit"]').first().click();
+
+  await expect(page.getByText("Map click risk summary")).toBeVisible();
+  expect(geocodeRequests).toBe(0);
+  const riskPayload = riskPayloads[0];
+  expect(riskPayload?.location_text).toBeNull();
+  expect(riskPayload?.point?.lat).not.toBe(25.04776);
+  expect(riskPayload?.point?.lng).not.toBe(121.51706);
+});

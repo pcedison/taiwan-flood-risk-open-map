@@ -24,6 +24,7 @@ import type { LayerContractItem } from "./lib/risk-display";
 import { postUserReport, UserReportSubmitError } from "./lib/user-reports";
 
 type CoordinateSource = "default" | "map" | "search";
+type QueryMode = "map" | "search";
 
 type Coordinate = {
   lat: number;
@@ -207,6 +208,8 @@ const sourceLabels: Record<CoordinateSource, string> = {
 const radiusOptions = [300, 500, 1000, 2000];
 const USER_REPORTS_PUBLIC_ENABLED = process.env.NEXT_PUBLIC_USER_REPORTS_ENABLED === "true";
 const MIN_GEOCODE_CONFIDENCE = 0.65;
+const API_REQUEST_TIMEOUT_MS = 15_000;
+const EVIDENCE_REQUEST_TIMEOUT_MS = 8_000;
 const INITIAL_RADIUS = 500;
 const INITIAL_COORDINATE: Coordinate = {
   lat: 25.04776,
@@ -328,30 +331,47 @@ const targetCenter = (coordinate: Coordinate): [number, number] =>
     ? [TAIWAN_OVERVIEW.lng, TAIWAN_OVERVIEW.lat]
     : [coordinate.lng, coordinate.lat];
 
+async function fetchJson<T>(
+  path: string,
+  init: RequestInit = {},
+  timeoutMs = API_REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+
+    return response.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Request timed out");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function postJson<T>(path: string, payload: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  return fetchJson<T>(path, {
     body: JSON.stringify(payload),
     headers: {
       "Content-Type": "application/json",
     },
     method: "POST",
   });
-
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
-
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
-  }
-
-  return response.json() as Promise<T>;
+  return fetchJson<T>(path, {}, EVIDENCE_REQUEST_TIMEOUT_MS);
 }
 
 function createRadiusFeature(coordinate: Coordinate, radiusMeters: number): RadiusFeatureCollection {
@@ -456,6 +476,7 @@ export default function HomePage() {
   const [evidenceStatus, setEvidenceStatus] = useState<EvidenceStatus>("idle");
   const [isLoading, setIsLoading] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
+  const [queryMode, setQueryMode] = useState<QueryMode>("search");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [geocodeNotice, setGeocodeNotice] = useState<string | null>(null);
   const [locationLabel, setLocationLabel] = useState(text.taipeiMainStation);
@@ -557,6 +578,8 @@ export default function HomePage() {
           lng: event.lngLat.lng,
           source: "map",
         });
+        setQuery("");
+        setQueryMode("map");
         setLocationLabel(sourceLabels.map);
         requestIdRef.current += 1;
         setAssessment(null);
@@ -618,11 +641,12 @@ export default function HomePage() {
     setGeocodeNotice(null);
 
     const normalized = query.trim();
+    const shouldResolveSearchQuery = queryMode === "search" && normalized.length > 0;
     let target = coordinate;
-    let resolvedLocationText = normalized || locationLabel;
+    let resolvedLocationText: string | null = shouldResolveSearchQuery ? normalized : null;
 
     try {
-      if (normalized) {
+      if (shouldResolveSearchQuery) {
         const geocode = await postJson<GeocodeResponse>("/v1/geocode", {
           input_type: "address",
           limit: 1,
@@ -667,6 +691,7 @@ export default function HomePage() {
       if (requestIdRef.current !== requestId) return;
       setAssessment(risk);
       setEvidenceItems(risk.evidence);
+      setIsLoading(false);
 
       if (shouldFetchEvidenceList(risk.assessment_id)) {
         setEvidenceStatus("loading");
@@ -764,7 +789,10 @@ export default function HomePage() {
             <span>{text.searchPlace}</span>
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setQueryMode("search");
+              }}
               placeholder={text.searchPlaceholder}
               aria-label={text.searchPlaceholder}
             />

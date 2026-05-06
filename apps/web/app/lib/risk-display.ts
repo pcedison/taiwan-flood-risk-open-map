@@ -178,7 +178,7 @@ export function shouldFetchEvidenceList(assessmentId: string | null | undefined)
 export function buildRiskAssessmentPayload(
   coordinate: Coordinate,
   radius: number,
-  locationText: string,
+  locationText: string | null,
 ) {
   return {
     point: {

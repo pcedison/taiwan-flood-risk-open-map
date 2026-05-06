@@ -68,6 +68,7 @@ def get_settings() -> Settings:
     )
     app_env = os.getenv("APP_ENV", "local")
     non_production_default = app_env.strip().lower() in {"local", "development", "test"}
+    cwa_api_authorization = os.getenv("CWA_API_AUTHORIZATION") or None
     return Settings(
         app_title="Flood Risk API",
         service_id="flood-risk-api",
@@ -86,9 +87,12 @@ def get_settings() -> Settings:
         cors_origins=cors_origins,
         admin_bearer_token=os.getenv("ADMIN_BEARER_TOKEN") or None,
         realtime_official_enabled=_env_bool("REALTIME_OFFICIAL_ENABLED", default=True),
-        cwa_api_authorization=os.getenv("CWA_API_AUTHORIZATION") or None,
-        source_cwa_api_enabled=_env_bool("SOURCE_CWA_API_ENABLED", default=False),
-        source_wra_api_enabled=_env_bool("SOURCE_WRA_API_ENABLED", default=False),
+        cwa_api_authorization=cwa_api_authorization,
+        source_cwa_api_enabled=_env_bool(
+            "SOURCE_CWA_API_ENABLED",
+            default=cwa_api_authorization is not None,
+        ),
+        source_wra_api_enabled=_env_bool("SOURCE_WRA_API_ENABLED", default=True),
         source_news_enabled=_env_bool("SOURCE_NEWS_ENABLED", default=non_production_default),
         source_terms_review_ack=_env_bool(
             "SOURCE_TERMS_REVIEW_ACK",

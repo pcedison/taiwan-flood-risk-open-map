@@ -12,6 +12,7 @@ from psycopg.rows import dict_row
 
 
 ConnectionFactory = Callable[[], Any]
+QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
 
 
 class EvidenceRepositoryUnavailable(RuntimeError):
@@ -391,6 +392,7 @@ def fetch_query_heat_snapshot(
     lng: float,
     radius_m: int,
     period: str = "P7D",
+    statement_timeout_ms: int = QUERY_HEAT_STATEMENT_TIMEOUT_MS,
     connection_factory: ConnectionFactory | None = None,
 ) -> QueryHeatSnapshot:
     sql = """
@@ -416,6 +418,11 @@ def fetch_query_heat_snapshot(
     try:
         with _connect(database_url, connection_factory) as connection:
             with connection.cursor() as cursor:
+                if statement_timeout_ms > 0:
+                    cursor.execute(
+                        "SET LOCAL statement_timeout = %s",
+                        (f"{statement_timeout_ms}ms",),
+                    )
                 cursor.execute(sql, (lng, lat, _period_to_interval(period), radius_m))
                 row = cursor.fetchone()
     except (OSError, psycopg.Error) as exc:

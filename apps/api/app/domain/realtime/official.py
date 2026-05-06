@@ -136,7 +136,7 @@ def fetch_official_realtime_bundle(
                 "cwa-rainfall",
                 "中央氣象署即時雨量",
                 checked_at,
-                "中央氣象署雨量開放資料尚未啟用；可先以本地歷史資料與限制說明完成 MVP。",
+                _cwa_disabled_message(cwa_authorization),
             )
         )
 
@@ -155,7 +155,9 @@ def fetch_official_realtime_bundle(
                 "wra-water-level",
                 "經濟部水利署即時水位",
                 checked_at,
-                "水利署即時水位開放資料尚未啟用；原始即時資料未品管，啟用後仍需顯示限制。",
+                "SOURCE_WRA_API_ENABLED=false，因此尚未啟用水利署即時水位。"
+                "WRA 公開水位端點不使用 CWA token；需另外開啟 WRA 來源旗標。"
+                "原始即時資料未品管，啟用後仍需顯示限制。",
             )
         )
 
@@ -175,6 +177,18 @@ def _disabled_realtime_status(
         observed_at=None,
         ingested_at=checked_at,
         message=message,
+    )
+
+
+def _cwa_disabled_message(cwa_authorization: str | None) -> str:
+    if cwa_authorization:
+        return (
+            "CWA_API_AUTHORIZATION 已載入，但 SOURCE_CWA_API_ENABLED=false，"
+            "因此尚未啟用中央氣象署即時雨量。"
+        )
+    return (
+        "CWA_API_AUTHORIZATION 未載入，且 SOURCE_CWA_API_ENABLED=false，"
+        "因此尚未啟用中央氣象署即時雨量。"
     )
 
 
