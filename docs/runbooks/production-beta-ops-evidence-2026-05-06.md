@@ -2,8 +2,10 @@
 
 Date: 2026-05-06
 Environment: Zeabur `flood_risk`
-Status: public beta candidate after basemap/CDN and alert-route evidence; not
-production-complete until scheduled drills and geocoder coverage are done
+Status: public beta candidate after basemap/CDN, alert-route, hosted geocoder
+bundle, and forward-only rollback evidence; not production-complete until a
+hosted PostGIS backup/scratch-restore drill and production PostGIS geocoder
+import are done
 
 This note records no-secret operational evidence gathered during the public
 beta readiness pass. Private addresses, tokens, secret values, screenshots that
@@ -125,9 +127,23 @@ the service to be paused before backup:
 Please pause this service before backup.
 ```
 
-Because pausing PostGIS causes production downtime, the actual backup drill is
-scheduled for `2026-05-07 23:30-23:45 Asia/Taipei`. The safe public-beta drill
-path is:
+An accelerated 2026-05-06 14:37 Asia/Taipei drill attempted to continue this
+workflow without waiting for the original 2026-05-07 window. Preflight passed:
+
+- `/ready`: `200`, database healthy, Redis healthy
+- hosted public beta smoke: passed
+- Docker fallback PostgreSQL clients available:
+  `pg_dump (PostgreSQL) 16.4`, `pg_restore (PostgreSQL) 16.4`
+
+The drill could not safely execute hosted backup/restore because the current
+automation session could not obtain an authenticated Zeabur operation channel:
+
+- Browser Use Node REPL execution tool was not exposed in this session.
+- Zeabur CLI was available but not logged in; `zeabur auth login` did not
+  complete within the automation window.
+- No production `DATABASE_URL` value was printed or copied into the repository.
+
+The safe public-beta hosted backup drill path remains:
 
 1. Announce a short maintenance window.
 2. Pause PostGIS.
@@ -137,15 +153,37 @@ path is:
 6. Run `/ready` or SQL checks against the scratch target.
 7. Record the private drill transcript and archive ref.
 
-No production restore was attempted during the 2026-05-06 readiness pass.
+No production restore was attempted during the 2026-05-06 accelerated drill.
+This item remains a public-beta launch blocker unless the operator explicitly
+accepts launching with "hosted backup drill pending" risk.
 
 ## Rollback Drill
 
-Application rollback has not yet been executed. Zeabur deployment history is
-available on the app service page, but an actual rollback can change the hosted
-service version and should be performed in a scheduled drill window. The
-rollback drill is scheduled for `2026-05-07 23:45` to `2026-05-08 00:00`
-Asia/Taipei. Before public beta, record:
+Application rollback was exercised during the accelerated 2026-05-06 drill.
+
+First attempt: move GitHub `main` directly back to previous known-good commit
+`55c4a27ff5d5e59f99fcc2ca90a43728272ecadc`, then restore it to
+`ff8f658b56d7816680ad9274d516a743e1e3dbf1`. GitHub accepted the temporary
+branch movement and it was restored, but Zeabur did not deploy the backward
+branch movement within the timeout. The hosted service stayed healthy and was
+verified after restore.
+
+Second attempt: forward-only rollback path using ordinary commits:
+
+- Starting deployment: `ff8f658b56d7816680ad9274d516a743e1e3dbf1`
+- Rollback commit: `37a65bdb0bd32cfd332edfc341b90557b97ef438`
+- Rollback `/ready`: `200`, database healthy, Redis healthy
+- Rollback hosted public beta smoke: passed
+- Forward deploy commit: `fd928bbd79bf7358f6035a2befc04bcd4fe56649`
+- Forward `/ready`: `200`, database healthy, Redis healthy
+- Forward hosted public beta smoke: passed
+
+Result: rollback drill passed for the forward-only GitHub/Zeabur deployment
+path. Zeabur dashboard-level "select previous deployment" rollback still needs
+authenticated UI/CLI access if production-complete evidence requires that exact
+platform action.
+
+Before production-complete status, record:
 
 - current deployment SHA
 - known-good rollback target
@@ -202,10 +240,10 @@ Hosted public checks after Zeabur env restore:
 - `POST /v1/risk/assess`: CWA, WRA, and database evidence healthy for the
   live-smoke radius
 
-Current hosted deployment SHA observed in `/ready`:
+Current hosted deployment SHA observed in `/ready` after the rollback drill:
 
 ```text
-d995e23bd9cd6262277870abd5407929831492d0
+fd928bbd79bf7358f6035a2befc04bcd4fe56649
 ```
 
 ## Public Beta Limitation
@@ -221,10 +259,12 @@ production-complete status by itself.
 
 ## Remaining Blockers
 
-- Execute the scheduled backup/restore drill and record private evidence.
-- Execute the scheduled rollback drill and record private evidence.
+- Execute the hosted PostGIS backup/restore drill with authenticated Zeabur
+  access and record private backup/scratch-restore evidence.
 - Complete production PostGIS ingestion and coverage evidence for the expanded
-  Taiwan geocoder data sources.
+  Taiwan geocoder data sources. The hosted bundled geocoder beta smoke already
+  passes, but `GEOCODER_POSTGIS_ENABLED=true` with imported production rows is
+  still pending.
 - Decide whether controlled public beta can keep the Cloudflare managed
   `r2.dev` host or should wait for a custom CDN/domain.
 - Keep the single-maintainer on-call model explicit until additional humans or
