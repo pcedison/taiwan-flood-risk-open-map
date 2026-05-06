@@ -64,11 +64,14 @@ def get_settings() -> Settings:
         app_version=os.getenv("API_VERSION", "0.1.0-draft"),
         deployment_sha=_deployment_sha(),
         app_env=app_env,
-        database_url=os.getenv(
-            "DATABASE_URL",
-            "postgresql://flood_risk:change-me-local@postgres:5432/flood_risk",
+        database_url=_env_url(
+            ("DATABASE_URL", "POSTGRES_CONNECTION_STRING", "POSTGRES_URI"),
+            default="postgresql://flood_risk:change-me-local@postgres:5432/flood_risk",
         ),
-        redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+        redis_url=_env_url(
+            ("REDIS_URL", "REDIS_CONNECTION_STRING", "REDIS_URI"),
+            default="redis://redis:6379/0",
+        ),
         minio_endpoint=os.getenv("MINIO_ENDPOINT", "http://minio:9000"),
         cors_origins=cors_origins,
         admin_bearer_token=os.getenv("ADMIN_BEARER_TOKEN") or None,
@@ -169,6 +172,18 @@ def _env_str_or_none(name: str) -> str | None:
         return None
     stripped = raw.strip()
     return stripped or None
+
+
+def _env_url(names: tuple[str, ...], *, default: str) -> str:
+    for name in names:
+        value = _env_str_or_none(name)
+        if value is not None and not _looks_like_unresolved_ref(value):
+            return value
+    return default
+
+
+def _looks_like_unresolved_ref(value: str) -> bool:
+    return "${" in value or "}" in value
 
 
 def _deployment_sha() -> str | None:
