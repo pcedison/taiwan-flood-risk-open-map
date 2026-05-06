@@ -608,7 +608,10 @@ def load_taiwan_admin_areas() -> tuple[TaiwanAdminArea, ...]:
         return ()
 
     town_names = [
-        str(item.get("town") or "").strip()
+        modern_admin_town_name(
+            str(item.get("county") or "").strip(),
+            str(item.get("town") or "").strip(),
+        )
         for item in towns_payload
         if isinstance(item, dict) and str(item.get("town") or "").strip()
     ]
@@ -672,6 +675,8 @@ def admin_area_from_payload(
         return None
     if level == "town" and not town:
         return None
+    town = modern_admin_town_name(county, town) if town is not None else None
+    county = modern_admin_county_name(county)
     name = county if town is None else f"{county}{town}"
     return TaiwanAdminArea(
         name=name,
@@ -759,6 +764,18 @@ def name_variants(name: str) -> tuple[str, ...]:
 
 def strip_admin_suffix(name: str) -> str:
     return name.removesuffix("縣").removesuffix("市").removesuffix("區").removesuffix("鄉").removesuffix("鎮")
+
+
+def modern_admin_county_name(county: str) -> str:
+    if county == "桃園縣":
+        return "桃園市"
+    return county
+
+
+def modern_admin_town_name(county: str, town: str) -> str:
+    if modern_admin_county_name(county) == "桃園市":
+        return f"{strip_admin_suffix(town)}區"
+    return town
 
 
 def normalize_query(query: str) -> str:
@@ -971,4 +988,4 @@ def nominatim_precision(item: dict[str, object], input_type: InputType) -> Geoco
 
 
 def within_taiwan_bounds(lat: float, lng: float) -> bool:
-    return 21.7 <= lat <= 25.5 and 119.2 <= lng <= 122.3
+    return 21.7 <= lat <= 26.5 and 118.0 <= lng <= 122.5

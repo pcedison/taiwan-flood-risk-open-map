@@ -194,8 +194,11 @@ def test_provider_chain_covers_every_taiwan_admin_area_locally_before_external_l
     counties = [area for area in areas if area.level == "county"]
     towns = [area for area in areas if area.level == "town"]
 
-    assert len(counties) >= 20
-    assert len(towns) >= 300
+    county_names = {area.name for area in counties}
+    assert len(counties) == 22
+    assert len(towns) >= 370
+    assert {"金門縣", "連江縣", "桃園市"} <= county_names
+    assert "桃園縣" not in county_names
 
     failures: list[str] = []
     for area in areas:
