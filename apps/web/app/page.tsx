@@ -3,7 +3,7 @@
 import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { getBasemapStyleConfig } from "./lib/basemap-style";
+import { loadRuntimeBasemapStyleConfig } from "./lib/basemap-style";
 import {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
@@ -496,11 +496,13 @@ export default function HomePage() {
     let unregisterPmtilesProtocol: (() => void) | null = null;
 
     async function mountMap() {
-      const maplibregl = await import("maplibre-gl");
+      const [maplibregl, basemap] = await Promise.all([
+        import("maplibre-gl"),
+        loadRuntimeBasemapStyleConfig(),
+      ]);
       if (disposed || !mapContainerRef.current || mapRef.current) return;
 
       unregisterPmtilesProtocol = registerPmtilesProtocol(maplibregl);
-      const basemap = getBasemapStyleConfig();
       basemap.warnings.forEach((warning) => console.warn(warning));
 
       const map = new maplibregl.Map({

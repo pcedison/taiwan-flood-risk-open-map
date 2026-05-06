@@ -5,6 +5,7 @@ const basemapModulePath = "../../app/lib/basemap-style.ts";
 const {
   buildPmtilesBasemapStyle,
   getBasemapStyleConfig,
+  loadRuntimeBasemapStyleConfig,
 } = (await import(basemapModulePath)) as typeof import("../../app/lib/basemap-style");
 
 type RasterSourceForTest = {
@@ -15,6 +16,10 @@ type RasterSourceForTest = {
 type LayerWithSourceLayerForTest = {
   id?: string;
   "source-layer"?: string;
+};
+
+type AttributedSourceForTest = {
+  attribution?: string;
 };
 
 const sourceLayerNames = (layers: unknown[]): string[] =>
@@ -133,4 +138,35 @@ test("production raster mode warns that raster is temporary", () => {
 
   assert.equal(config.kind, "raster");
   assert.match(config.warnings.join("\n"), /Production raster basemap is configured/);
+});
+
+test("runtime basemap config loader accepts the public config endpoint payload", async () => {
+  const config = await loadRuntimeBasemapStyleConfig(async (input, init) => {
+    assert.equal(input, "/basemap-config");
+    assert.equal(init?.cache, "no-store");
+
+    return new Response(
+      JSON.stringify({
+        kind: "pmtiles",
+        style: buildPmtilesBasemapStyle(
+          "https://cdn.example.test/taiwan.pmtiles",
+          "Example runtime attribution",
+        ),
+        warnings: [],
+      }),
+      { status: 200 },
+    );
+  });
+
+  assert.equal(config.kind, "pmtiles");
+  assert.deepEqual(config.warnings, []);
+
+  if (typeof config.style === "string") {
+    throw new Error("expected PMTiles style object");
+  }
+
+  assert.equal(
+    (config.style.sources.basemap as AttributedSourceForTest).attribution,
+    "Example runtime attribution",
+  );
 });
