@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol, cast
+from typing import Any, Callable, Literal, Protocol, TextIO, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from app.api.schemas import GeocodePrecision, GeocodeRequest, LatLng, PlaceCandidate
@@ -52,6 +53,12 @@ class LocalOpenDataPoint:
     source: str
     confidence: float | None = None
     limitations: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class LocalOpenDataIndex:
+    points: tuple[LocalOpenDataPoint, ...]
+    alias_matches: dict[str, tuple[tuple[LocalOpenDataPoint, str], ...]]
 
 
 @dataclass(frozen=True)
@@ -193,25 +200,31 @@ class FileBackedTaiwanOpenDataProvider:
     def search(self, request: GeocodeRequest) -> tuple[PlaceCandidate, ...]:
         if not self.paths:
             return ()
-        normalized_query = compact_taiwan_query_key(request.query)
+        index = load_open_data_index(self.paths)
         matches: list[tuple[int, int, str, str, LocalOpenDataPoint, str]] = []
-        for point in load_open_data_points(self.paths):
-            matching_alias = next(
-                (alias for alias in point.aliases if compact_taiwan_query_key(alias) in normalized_query),
-                None,
-            )
-            if matching_alias is None:
-                continue
-            matches.append(
-                (
-                    precision_sort_order(point.precision),
-                    -len(compact_taiwan_query_key(matching_alias)),
-                    point.name,
-                    point.source,
-                    point,
-                    matching_alias,
+        seen: set[tuple[str | None, str, float, float, str]] = set()
+        for query_alias in postgis_query_aliases(request.query):
+            for point, matching_alias in index.alias_matches.get(query_alias, ()):
+                match_key = (point.source_key, point.name, point.lat, point.lng, matching_alias)
+                if match_key in seen:
+                    continue
+                seen.add(match_key)
+                matches.append(open_data_match_sort_key(point, matching_alias))
+
+        if not matches:
+            normalized_query = compact_taiwan_query_key(request.query)
+            for point in index.points:
+                matching_alias = next(
+                    (
+                        alias
+                        for alias in point.aliases
+                        if compact_taiwan_query_key(alias) in normalized_query
+                    ),
+                    None,
                 )
-            )
+                if matching_alias is not None:
+                    matches.append(open_data_match_sort_key(point, matching_alias))
+
         matches.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[5]))
         return tuple(
             local_open_data_candidate(point, matched_query=matched_query)
@@ -466,16 +479,31 @@ def load_open_data_points(paths: tuple[str, ...]) -> tuple[LocalOpenDataPoint, .
         path = Path(raw_path).expanduser()
         if not path.exists() or not path.is_file():
             continue
-        if path.suffix.casefold() == ".jsonl":
+        if open_data_path_kind(path) == "jsonl":
             points.extend(read_open_data_jsonl(path))
         else:
             points.extend(read_open_data_csv(path))
     return tuple(points)
 
 
+@lru_cache(maxsize=8)
+def load_open_data_index(paths: tuple[str, ...]) -> LocalOpenDataIndex:
+    points = load_open_data_points(paths)
+    alias_matches: dict[str, list[tuple[LocalOpenDataPoint, str]]] = {}
+    for point in points:
+        for alias in point.aliases:
+            normalized_alias = compact_taiwan_query_key(alias)
+            if normalized_alias:
+                alias_matches.setdefault(normalized_alias, []).append((point, alias))
+    return LocalOpenDataIndex(
+        points=points,
+        alias_matches={key: tuple(value) for key, value in alias_matches.items()},
+    )
+
+
 def read_open_data_csv(path: Path) -> tuple[LocalOpenDataPoint, ...]:
     try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        with open_text_data(path, encoding="utf-8-sig", newline="") as handle:
             return tuple(
                 point
                 for row in csv.DictReader(handle)
@@ -489,7 +517,7 @@ def read_open_data_csv(path: Path) -> tuple[LocalOpenDataPoint, ...]:
 def read_open_data_jsonl(path: Path) -> tuple[LocalOpenDataPoint, ...]:
     points: list[LocalOpenDataPoint] = []
     try:
-        with path.open("r", encoding="utf-8") as handle:
+        with open_text_data(path, encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
                     continue
@@ -507,6 +535,33 @@ def read_open_data_jsonl(path: Path) -> tuple[LocalOpenDataPoint, ...]:
     return tuple(points)
 
 
+def open_text_data(path: Path, *, encoding: str, newline: str | None = None) -> TextIO:
+    if path.name.casefold().endswith(".gz"):
+        return gzip.open(path, "rt", encoding=encoding, newline=newline)
+    return path.open("r", encoding=encoding, newline=newline)
+
+
+def open_data_path_kind(path: Path) -> Literal["csv", "jsonl"]:
+    name = path.name.casefold()
+    if name.endswith(".jsonl") or name.endswith(".jsonl.gz"):
+        return "jsonl"
+    return "csv"
+
+
+def open_data_match_sort_key(
+    point: LocalOpenDataPoint,
+    matching_alias: str,
+) -> tuple[int, int, str, str, LocalOpenDataPoint, str]:
+    return (
+        precision_sort_order(point.precision),
+        -len(compact_taiwan_query_key(matching_alias)),
+        point.name,
+        point.source,
+        point,
+        matching_alias,
+    )
+
+
 def open_data_point_from_row(row: dict[str, Any], path: Path) -> LocalOpenDataPoint | None:
     name = row_text(row, "name", "address", "road_name", "poi_name")
     lat = row_float(row, "lat", "latitude", "y")
@@ -518,8 +573,9 @@ def open_data_point_from_row(row: dict[str, Any], path: Path) -> LocalOpenDataPo
         row_text(row, "precision", "geocode_precision"),
         default=default_precision_for_place_type(place_type),
     )
+    source_key = row_text(row, "source_key")
     return LocalOpenDataPoint(
-        source_key=row_text(row, "source_key"),
+        source_key=source_key,
         aliases=open_data_aliases(row, name),
         name=name,
         lat=lat,
@@ -527,7 +583,8 @@ def open_data_point_from_row(row: dict[str, Any], path: Path) -> LocalOpenDataPo
         admin_code=row_text(row, "admin_code", "county_code", "city_code"),
         precision=precision,
         place_type=place_type,
-        source=row_text(row, "source") or f"local-open-data-import:{path.name}",
+        source=row_text(row, "source")
+        or (f"local-open-data:{source_key}" if source_key else f"local-open-data-import:{path.name}"),
         confidence=row_float(row, "confidence"),
         limitations=row_list(row, "limitations", "limitation"),
     )

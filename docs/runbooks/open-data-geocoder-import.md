@@ -20,9 +20,15 @@ Supported formats:
 
 - `.csv`: UTF-8 or UTF-8 with BOM.
 - `.jsonl`: one JSON object per line with the same keys as the CSV columns.
+- `.jsonl.gz`: gzip-compressed JSONL for deployable beta data bundles.
 
 Missing or invalid files are ignored so local development does not fail closed
 because a production data package is absent.
+
+When `GEOCODER_OPEN_DATA_PATHS` is unset, the API defaults to the checked-in
+public beta bundle under `apps/api/app/data/geocoder/*.normalized.jsonl.gz`.
+Set `GEOCODER_BUNDLED_OPEN_DATA_ENABLED=false` only when intentionally testing
+without the beta road/POI/admin fallback data.
 
 For production PostGIS lookup, apply migration `0013` and set:
 
@@ -60,7 +66,8 @@ to conservative defaults.
 The API checks providers in this order:
 
 1. PostGIS open-data rows when `GEOCODER_POSTGIS_ENABLED=true`.
-2. File-backed open-data geocoder from `GEOCODER_OPEN_DATA_PATHS`.
+2. File-backed open-data geocoder from `GEOCODER_OPEN_DATA_PATHS`, or the
+   bundled public beta open-data package when paths are unset.
 3. Bundled local Taiwan fixtures/gazetteer/admin centroids.
 4. Project-controlled OSM-compatible lookup when configured in code.
 5. Public Nominatim development fallback.
@@ -185,6 +192,17 @@ The 2026-05-06 local evidence run produced 46,463 normalized rows:
 This satisfies the public beta category smoke for roads, villages, and POI. It
 is still not production-complete doorplate geocoding because no complete
 reviewed national doorplate dataset is imported.
+
+The same rows are committed as compressed runtime data:
+
+```powershell
+apps\api\app\data\geocoder\roads-114.normalized.jsonl.gz
+apps\api\app\data\geocoder\shelters.normalized.jsonl.gz
+apps\api\app\data\geocoder\villages.normalized.jsonl.gz
+```
+
+Bundle coverage evidence is recorded at
+`docs\data-sources\geocoding\beta-coverage-evidence-2026-05-06.json`.
 
 ## Local Verification
 

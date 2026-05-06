@@ -1,0 +1,32 @@
+{
+  "category_counts": {
+    "poi": 5878,
+    "roads": 32874,
+    "villages": 7711
+  },
+  "missing_requirements": [],
+  "precision_counts": {
+    "admin_area": 7711,
+    "poi": 5878,
+    "road_or_lane": 32874
+  },
+  "production_complete": false,
+  "required_categories": [
+    "poi",
+    "roads",
+    "villages"
+  ],
+  "required_precision_values": [
+    "admin_area",
+    "exact_address",
+    "poi",
+    "road_or_lane"
+  ],
+  "row_count": 46463,
+  "schema_version": "geocoder-coverage-smoke/v1",
+  "source_counts": {
+    "moi-national-road-names": 32874,
+    "moi-village-boundary-twd97-geographic": 7711,
+    "nfa-evacuation-shelter-locations": 5878
+  }
+}

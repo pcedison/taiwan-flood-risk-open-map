@@ -1,12 +1,20 @@
 from dataclasses import dataclass
 from functools import lru_cache
 import os
+from pathlib import Path
 from typing import Literal, TypeVar, cast
 
 
 RateLimitBackend = Literal["redis", "memory"]
 ChallengeProvider = Literal["turnstile", "static"]
 ChoiceT = TypeVar("ChoiceT", bound=str)
+APP_ROOT = Path(__file__).resolve().parents[1]
+BUNDLED_GEOCODER_DATA_DIR = APP_ROOT / "data" / "geocoder"
+BUNDLED_GEOCODER_OPEN_DATA_FILENAMES = (
+    "roads-114.normalized.jsonl.gz",
+    "shelters.normalized.jsonl.gz",
+    "villages.normalized.jsonl.gz",
+)
 
 
 @dataclass(frozen=True)
@@ -86,7 +94,7 @@ def get_settings() -> Settings:
             default=non_production_default,
         ),
         evidence_repository_enabled=_env_bool("EVIDENCE_REPOSITORY_ENABLED", default=True),
-        geocoder_open_data_paths=_env_csv("GEOCODER_OPEN_DATA_PATHS"),
+        geocoder_open_data_paths=_geocoder_open_data_paths(app_env),
         geocoder_postgis_enabled=_env_bool("GEOCODER_POSTGIS_ENABLED", default=False),
         historical_news_on_demand_enabled=_env_bool(
             "HISTORICAL_NEWS_ON_DEMAND_ENABLED",
@@ -209,6 +217,23 @@ def _env_csv(name: str) -> tuple[str, ...]:
     if raw is None:
         return ()
     return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
+def _geocoder_open_data_paths(app_env: str) -> tuple[str, ...]:
+    configured_paths = _env_csv("GEOCODER_OPEN_DATA_PATHS")
+    if configured_paths:
+        return configured_paths
+    hosted_default = app_env.strip().lower() in {"staging", "production", "production-beta"}
+    if not _env_bool("GEOCODER_BUNDLED_OPEN_DATA_ENABLED", default=hosted_default):
+        return ()
+    return tuple(
+        str(path)
+        for path in (
+            BUNDLED_GEOCODER_DATA_DIR / filename
+            for filename in BUNDLED_GEOCODER_OPEN_DATA_FILENAMES
+        )
+        if path.is_file()
+    )
 
 
 def _env_int(name: str, *, default: int, minimum: int | None = None) -> int:

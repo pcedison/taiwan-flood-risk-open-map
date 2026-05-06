@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 from pathlib import Path
 import sys
@@ -52,7 +53,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as handle:
+    opener = gzip.open if path.name.casefold().endswith(".gz") else Path.open
+    with opener(path, "rt", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
                 continue

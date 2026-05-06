@@ -1,3 +1,4 @@
+import gzip
 from pathlib import Path
 
 from app.api.schemas import GeocodeRequest, LatLng, PlaceCandidate
@@ -99,6 +100,31 @@ def test_provider_chain_preserves_file_backed_low_confidence_limitations(
     assert candidates[0].confidence == 0.63
     assert candidates[0].requires_confirmation is True
     assert "道路名稱資料未提供道路線形。" in candidates[0].limitations
+
+
+def test_provider_chain_reads_gzipped_file_backed_open_data(tmp_path: Path) -> None:
+    source_path = tmp_path / "taiwan-roads.jsonl.gz"
+    with gzip.open(source_path, "wt", encoding="utf-8") as handle:
+        handle.write(
+            '{"name":"Taipei Daan Xinyi Road Section 3",'
+            '"aliases":["taipei daan xinyi road section 3"],'
+            '"lat":25.026,"lng":121.543,"precision":"road_or_lane","type":"address",'
+            '"source":"local-open-data-road","confidence":0.63}'
+        )
+
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=lambda *_args: (),
+        wikimedia_lookup=lambda *_args: (),
+        open_data_paths=(str(source_path),),
+    )
+
+    candidates = geocoder.geocode(
+        GeocodeRequest(query="taipei daan xinyi road section 3", input_type="address", limit=1),
+    )
+
+    assert candidates[0].source == "local-open-data-road"
+    assert candidates[0].precision == "road_or_lane"
+    assert candidates[0].requires_confirmation is True
 
 
 def test_postgis_query_aliases_include_road_level_fallback() -> None:
