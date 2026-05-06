@@ -2,10 +2,11 @@
 
 Date: 2026-05-06
 Environment: Zeabur `flood_risk`
-Status: public beta candidate after basemap/CDN, alert-route, hosted geocoder
-bundle, production PostGIS geocoder import, and forward-only rollback
-evidence; not production-complete until a hosted PostGIS
-backup/scratch-restore drill is done
+Status: controlled public beta candidate after basemap/CDN, alert-route,
+hosted geocoder bundle, production PostGIS geocoder import, logical PostGIS
+scratch-restore drill, and forward-only rollback evidence. Production-complete
+status still needs Zeabur-managed offsite backup artifact evidence and a
+reviewed long-term backup retention policy.
 
 This note records no-secret operational evidence gathered during the public
 beta readiness pass. Private addresses, tokens, secret values, screenshots that
@@ -119,9 +120,13 @@ Do not commit the backup email address to this public repository.
 
 ## Backup And Restore Drill
 
-Zeabur PostGIS exposes a `Backup/Restore` page and a manual `Backup` action.
-Attempting to trigger the manual backup returned a Zeabur UI message requiring
-the service to be paused before backup:
+Zeabur's public documentation distinguishes stateful volume backups from
+database backups. For database services, Zeabur documents online offsite backup
+support without pausing the database service. It also documents a GraphQL
+`backups(environmentID, serviceID)` query for retrieving backup metadata and
+download URLs.
+
+Earlier Zeabur UI exploration saw a manual backup path return this message:
 
 ```text
 Please pause this service before backup.
@@ -153,9 +158,37 @@ The safe public-beta hosted backup drill path remains:
 6. Run `/ready` or SQL checks against the scratch target.
 7. Record the private drill transcript and archive ref.
 
-No production restore was attempted during the 2026-05-06 accelerated drill.
-This item remains a public-beta launch blocker unless the operator explicitly
-accepts launching with "hosted backup drill pending" risk.
+No production restore was attempted during the 2026-05-06 accelerated UI drill.
+
+A no-secret logical PostGIS scratch-restore drill was completed later in the
+same accelerated window through authenticated Zeabur CLI `service exec` on the
+API container. The drill used the Zeabur-injected `DATABASE_URL` inside the
+container; the connection string was never printed or copied.
+
+Logical scratch-restore result:
+
+- started at: `2026-05-06T09:16:06Z`
+- scratch schema:
+  `backup_restore_drill_20260506_0913z`
+- backup/restore scope:
+  `geocoder_open_data_entries`
+- production rows before restore: `46,457`
+- scratch restored rows: `46,457`
+- source counts matched:
+  - `moi-national-road-names`: `32,868`
+  - `nfa-evacuation-shelter-locations`: `5,878`
+  - `moi-village-boundary-twd97-geographic`: `7,711`
+- scratch cleanup check:
+  `scratch_schema_remaining=0`
+- post-drill `/ready`: `200`, database healthy, Redis healthy
+- post-drill hosted public beta smoke: passed
+
+This satisfies a beta-level application logical backup/restore drill for the
+current production geocoder data. It does not replace a production-complete
+Zeabur-managed offsite backup artifact drill. Before production-complete status,
+capture either a Zeabur dashboard transcript or Public API evidence showing a
+successful provider-managed backup artifact, download URL metadata, and restore
+test to a scratch database or equivalent isolated target.
 
 ## Rollback Drill
 
@@ -311,8 +344,9 @@ production-complete status by itself.
 
 ## Remaining Blockers
 
-- Execute the hosted PostGIS backup/restore drill with authenticated Zeabur
-  access and record private backup/scratch-restore evidence.
+- For production-complete status, capture a Zeabur-managed offsite PostGIS
+  backup artifact and restore evidence through the dashboard or Public API.
+  The beta-level logical scratch-restore drill has passed.
 - Decide whether controlled public beta can keep the Cloudflare managed
   `r2.dev` host or should wait for a custom CDN/domain.
 - Keep the single-maintainer on-call model explicit until additional humans or
