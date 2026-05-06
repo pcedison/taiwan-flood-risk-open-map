@@ -41,9 +41,37 @@ def main(argv: list[str] | None = None) -> int:
                 "/health does not expose deployment_sha; set DEPLOYMENT_SHA or deploy code with the new health contract"
             )
 
-    failures.extend(check_geocode_exact(base_url))
-    failures.extend(check_geocode_admin_confirmation(base_url))
-    failures.extend(check_uncovered_address_admin_fallback(base_url))
+    failures.extend(
+        check_geocode_candidate(
+            base_url,
+            label="road bundle",
+            query="\u81fa\u5317\u5e02\u5927\u5b89\u5340\u4fe1\u7fa9\u8def\u4e09\u6bb5100\u865f",
+            expected_precision="road_or_lane",
+            expected_source="local-open-data:moi-national-road-names",
+            expected_confirmation=True,
+            assess_risk=True,
+        )
+    )
+    failures.extend(
+        check_geocode_candidate(
+            base_url,
+            label="POI bundle",
+            query="\u4e94\u5cf0\u6d3b\u52d5\u4e2d\u5fc3",
+            expected_precision="poi",
+            expected_source="local-open-data:nfa-evacuation-shelter-locations",
+            expected_confirmation=False,
+        )
+    )
+    failures.extend(
+        check_geocode_candidate(
+            base_url,
+            label="admin bundle",
+            query="\u65b0\u5317\u5e02\u65b0\u838a\u5340\u897f\u76db\u91cc",
+            expected_precision="admin_area",
+            expected_source="local-open-data:moi-village-boundary-twd97-geographic",
+            expected_confirmation=True,
+        )
+    )
 
     if failures:
         print("HOSTED_PUBLIC_BETA_SMOKE failed")
@@ -55,122 +83,64 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def check_geocode_exact(base_url: str) -> list[str]:
-    query = "台南市安南區長溪路二段410巷16弄1號"
+def check_geocode_candidate(
+    base_url: str,
+    *,
+    label: str,
+    query: str,
+    expected_precision: str,
+    expected_source: str,
+    expected_confirmation: bool,
+    assess_risk: bool = False,
+) -> list[str]:
     result = request_json(
         "POST",
         f"{base_url}/v1/geocode",
         {"query": query, "input_type": "address", "limit": 1},
     )
     if result.status_code != 200:
-        return [f"exact geocode returned HTTP {result.status_code}: {result.error or result.payload}"]
+        return [f"{label} geocode returned HTTP {result.status_code}: {result.error or result.payload}"]
     candidates = result.payload.get("candidates", [])
     if not candidates:
-        return [f"exact geocode returned no candidates for {query}"]
+        return [f"{label} geocode returned no candidates"]
     candidate = candidates[0]
-    failures = require_candidate_fields(candidate, "exact geocode")
+    failures = require_candidate_fields(candidate, f"{label} geocode")
     if failures:
         return failures
-    if candidate.get("precision") != "exact_address":
-        failures.append(f"exact geocode precision should be exact_address, got {candidate.get('precision')}")
-    if candidate.get("requires_confirmation") is not False:
-        failures.append("exact geocode should not require confirmation")
-    if abs(candidate.get("point", {}).get("lat", 0) - 23.05753) > 0.05:
-        failures.append(f"exact geocode latitude looks wrong: {candidate.get('point')}")
-    if failures:
-        return failures
+    if candidate.get("precision") != expected_precision:
+        failures.append(
+            f"{label} precision should be {expected_precision}, got {candidate.get('precision')}"
+        )
+    if candidate.get("source") != expected_source:
+        failures.append(f"{label} source should be {expected_source}, got {candidate.get('source')}")
+    if candidate.get("requires_confirmation") is not expected_confirmation:
+        failures.append(f"{label} requires_confirmation should be {expected_confirmation}")
+    if expected_confirmation and not candidate.get("limitations"):
+        failures.append(f"{label} should include a visible beta limitation")
 
-    risk = request_json(
-        "POST",
-        f"{base_url}/v1/risk/assess",
-        {
-            "point": candidate["point"],
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": f"{query}｜{candidate['name']}",
-        },
-    )
-    if risk.status_code != 200:
-        return [f"risk assessment returned HTTP {risk.status_code}: {risk.error or risk.payload}"]
-    print(
-        "PASS hosted exact | "
-        f"{query} -> {candidate['name']} | "
-        f"historical={risk.payload['historical']['level']}"
-    )
-    return []
+    if assess_risk:
+        risk = request_json(
+            "POST",
+            f"{base_url}/v1/risk/assess",
+            {
+                "point": candidate["point"],
+                "radius_m": 500,
+                "time_context": "now",
+                "location_text": query,
+            },
+        )
+        if risk.status_code != 200:
+            failures.append(f"{label} risk assessment returned HTTP {risk.status_code}: {risk.error or risk.payload}")
+        elif not risk.payload.get("explanation", {}).get("summary"):
+            failures.append(f"{label} risk assessment did not return an explanation summary")
 
-
-def check_geocode_admin_confirmation(base_url: str) -> list[str]:
-    query = "宜蘭縣礁溪鄉"
-    result = request_json(
-        "POST",
-        f"{base_url}/v1/geocode",
-        {"query": query, "input_type": "address", "limit": 1},
-    )
-    if result.status_code != 200:
-        return [f"admin geocode returned HTTP {result.status_code}: {result.error or result.payload}"]
-    candidates = result.payload.get("candidates", [])
-    if not candidates:
-        return [f"admin geocode returned no candidates for {query}"]
-    candidate = candidates[0]
-    failures = require_candidate_fields(candidate, "admin geocode")
-    if failures:
-        return failures
-    if candidate.get("precision") != "admin_area":
-        failures.append(f"admin geocode precision should be admin_area, got {candidate.get('precision')}")
-    if candidate.get("requires_confirmation") is not True:
-        failures.append("admin geocode should require confirmation")
     if failures:
         return failures
     print(
-        "PASS hosted admin confirmation | "
-        f"{query} -> {candidate['name']} | requires_confirmation=true"
-    )
-    return []
-
-
-def check_uncovered_address_admin_fallback(base_url: str) -> list[str]:
-    query = "高雄市苓雅區四維三路2號"
-    result = request_json(
-        "POST",
-        f"{base_url}/v1/geocode",
-        {"query": query, "input_type": "address", "limit": 1},
-    )
-    if result.status_code != 200:
-        return [f"admin fallback geocode returned HTTP {result.status_code}: {result.error or result.payload}"]
-    candidates = result.payload.get("candidates", [])
-    if not candidates:
-        return [f"admin fallback geocode returned no candidates for {query}"]
-    candidate = candidates[0]
-    failures = require_candidate_fields(candidate, "admin fallback geocode")
-    if failures:
-        return failures
-    if candidate.get("source") != "taiwan-admin-centroid-fallback":
-        failures.append(f"admin fallback source should be taiwan-admin-centroid-fallback, got {candidate.get('source')}")
-    if candidate.get("precision") != "admin_area":
-        failures.append(f"admin fallback precision should be admin_area, got {candidate.get('precision')}")
-    if candidate.get("requires_confirmation") is not True:
-        failures.append("admin fallback should require confirmation")
-
-    risk = request_json(
-        "POST",
-        f"{base_url}/v1/risk/assess",
-        {
-            "point": candidate["point"],
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": f"{query}｜{candidate['name']}",
-        },
-    )
-    if risk.status_code != 200:
-        failures.append(f"admin fallback risk assessment returned HTTP {risk.status_code}: {risk.error or risk.payload}")
-    elif not risk.payload.get("explanation", {}).get("summary"):
-        failures.append("admin fallback risk assessment did not return an explanation summary")
-    if failures:
-        return failures
-    print(
-        "PASS hosted admin fallback | "
-        f"{query} -> {candidate['name']} | risk={risk.payload['historical']['level']}"
+        f"PASS hosted {label} | "
+        f"precision={candidate['precision']} | "
+        f"source={candidate['source']} | "
+        f"requires_confirmation={str(candidate['requires_confirmation']).lower()}"
     )
     return []
 
