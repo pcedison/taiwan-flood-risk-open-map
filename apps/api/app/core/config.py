@@ -223,7 +223,6 @@ def _geocoder_open_data_paths(app_env: str) -> tuple[str, ...]:
     configured_paths = _env_csv("GEOCODER_OPEN_DATA_PATHS")
     if configured_paths:
         return configured_paths
-    # Hosted beta should have project-controlled road/POI/admin fallback even before PostGIS import.
     hosted_default = app_env.strip().lower() in {"staging", "production", "production-beta"}
     if not _env_bool("GEOCODER_BUNDLED_OPEN_DATA_ENABLED", default=hosted_default):
         return ()
