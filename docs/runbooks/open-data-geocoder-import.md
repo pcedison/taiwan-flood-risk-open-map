@@ -1,7 +1,7 @@
 # Open-Data Geocoder Import
 
-Status: local file-backed path implemented
-Date: 2026-05-04
+Status: local file-backed path implemented; manifest/import tooling added
+Date: 2026-05-06
 
 This runbook describes the no-TGOS geocoder expansion path for public-interest
 MVP work. It lets the API read reviewed local CSV or JSONL geocoding rows before
@@ -59,12 +59,72 @@ The API checks providers in this order:
 This keeps TGOS optional and prevents public Nominatim from becoming a hidden
 production dependency.
 
+## Data Manifest
+
+Reviewed geocoding sources are tracked in:
+
+```powershell
+docs\data-sources\geocoding\geocoding-data-manifest.yaml
+```
+
+The manifest records source URL, license, owner, update frequency, intended
+precision, and import status. Public beta may use point sources marked
+`ready_for_point_import`; address-only sources stay as candidates until a
+separate geocoding pass records precision and confidence.
+
+Current beta seed categories:
+
+- roads: Ministry of the Interior national road-name data.
+- villages/admin fallback: MOI village boundary map.
+- POI: NFA shelter points and NPA police office points.
+- address-only POI candidate: MOHW medical institution records.
+
+## PostGIS Import Table
+
+Migration `0013_geocoder_open_data_entries.sql` adds
+`geocoder_open_data_entries` with source evidence, aliases, normalized aliases,
+precision, place type, geometry, centroid, and GIN/GiST indexes. Point imports
+write the same point to `geom` and `centroid`; polygon/line imports should write
+the source geometry plus a safe point-on-surface centroid.
+
+## Import Tooling
+
+Plan available sources:
+
+```powershell
+python infra\scripts\import_geocoder_open_data.py
+```
+
+Normalize a reviewed point CSV to JSONL:
+
+```powershell
+python infra\scripts\import_geocoder_open_data.py `
+  --source-key npa-police-station-addresses `
+  --source-file tmp\reviewed-police-points.csv `
+  --output-jsonl tmp\geocoder-police-points.normalized.jsonl `
+  --dry-run
+```
+
+Apply to PostGIS after migration:
+
+```powershell
+python infra\scripts\import_geocoder_open_data.py `
+  --source-key npa-police-station-addresses `
+  --source-file tmp\reviewed-police-points.csv `
+  --database-url $env:DATABASE_URL
+```
+
+The importer rejects rows outside Taiwan bounds and expands aliases for `臺/台`,
+full-width digits, and road-section variants such as `二段`/`2段`.
+
 ## Local Verification
 
 Run:
 
 ```powershell
 python -m pytest apps\api\tests\test_geocoding_provider_chain.py -q
+python -m pytest apps\api\tests\test_geocoding_normalization.py tests\test_geocoder_open_data_import.py -q
+python infra\scripts\validate_migrations.py
 python scripts\unknown_address_smoke.py
 ```
 

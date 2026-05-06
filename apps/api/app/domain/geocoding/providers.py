@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal, Protocol, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from app.api.schemas import GeocodePrecision, GeocodeRequest, LatLng, PlaceCandidate
+from app.domain.geocoding.normalization import compact_taiwan_query_key, taiwan_address_aliases
 from app.domain.geocoding.taiwan import build_taiwan_geocode_queries
 
 InputType = Literal["address", "landmark", "parcel"]
@@ -189,11 +190,11 @@ class FileBackedTaiwanOpenDataProvider:
     def search(self, request: GeocodeRequest) -> tuple[PlaceCandidate, ...]:
         if not self.paths:
             return ()
-        normalized_query = normalize_query(request.query)
+        normalized_query = compact_taiwan_query_key(request.query)
         matches: list[tuple[int, int, str, str, LocalOpenDataPoint, str]] = []
         for point in load_open_data_points(self.paths):
             matching_alias = next(
-                (alias for alias in point.aliases if normalize_query(alias) in normalized_query),
+                (alias for alias in point.aliases if compact_taiwan_query_key(alias) in normalized_query),
                 None,
             )
             if matching_alias is None:
@@ -201,7 +202,7 @@ class FileBackedTaiwanOpenDataProvider:
             matches.append(
                 (
                     precision_sort_order(point.precision),
-                    -len(normalize_query(matching_alias)),
+                    -len(compact_taiwan_query_key(matching_alias)),
                     point.name,
                     point.source,
                     point,
@@ -505,7 +506,7 @@ def open_data_aliases(row: dict[str, Any], name: str) -> tuple[str, ...]:
     raw_aliases = row_text(row, "aliases", "alias", "matched_query")
     if raw_aliases:
         values.extend(re.split(r"[|;,]", raw_aliases))
-    return dedupe_texts(tuple(values), limit=16)
+    return taiwan_address_aliases(*values, limit=16)
 
 
 def row_text(row: dict[str, Any], *keys: str) -> str | None:
