@@ -3,6 +3,8 @@
 Taiwan Flood Risk Open Map is a public-interest, open-source-first platform for
 querying realtime and historical flood risk in Taiwan.
 
+Public beta limitation statement: 本服務為公開資料與歷史/潛勢圖資整合的淹水風險查詢 beta。結果不可視為即時災害通報或購屋安全保證；地址定位可能因開放資料覆蓋不足而退回道路或行政區精度。
+
 The project follows a spec-first SDD workflow. The source of truth is:
 
 - [Project SDD](docs/PROJECT_SDD.md)

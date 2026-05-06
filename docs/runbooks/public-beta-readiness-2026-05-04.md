@@ -52,6 +52,40 @@ Repeat the hosted no-secret smoke after each Zeabur deployment with:
 python scripts\hosted_public_beta_smoke.py --base-url https://floodrisk.zeabur.app
 ```
 
+## 2026-05-06 Ops Update
+
+Current hosted state is a stronger public beta candidate, but still not
+production-complete.
+
+Completed in the Zeabur project:
+
+- CWA live feed was enabled through Zeabur env and hosted smoke returned
+  `cwa-rainfall` as `healthy`.
+- WRA live status returned `healthy` in the same hosted smoke.
+- The primary email alert route was tested and operator receipt was confirmed
+  in private evidence.
+- A Zeabur MinIO service was added for object-storage work, and a Zeabur
+  subdomain was bound for testing.
+- The public beta limitation statement was added to the public UI and README.
+- The repeatable local public-beta gate passed on 2026-05-06:
+  API 140 tests, worker 247 tests, repository 64 tests, unknown-address smoke,
+  web unit 21 tests, typecheck, lint, and 10 Playwright E2E tests.
+
+Remaining blockers:
+
+- MinIO bucket/object upload and basemap CDN evidence are not production
+  complete yet; the current MinIO test subdomain fails trusted HTTPS validation.
+- Backup/restore drill is pending because Zeabur requires pausing PostGIS
+  before manual backup.
+- Rollback drill is pending a scheduled drill window.
+- Backup alert route and backup human route are still pending.
+- Complete Taiwan address/road/POI import remains broader than the current
+  public beta dataset.
+
+No secret values or private email addresses are recorded in this repository.
+See `docs/runbooks/production-beta-ops-evidence-2026-05-06.md` for the
+sanitized evidence summary.
+
 ## Hosted Public Beta Decision
 
 Blocked.

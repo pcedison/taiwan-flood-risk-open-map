@@ -226,6 +226,27 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+.beta-limit-notice {
+  border: 1px solid rgba(159, 93, 34, 0.28);
+  border-radius: 8px;
+  background: rgba(159, 93, 34, 0.08);
+  color: var(--ink);
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.beta-limit-notice strong {
+  color: #6e421d;
+  font-size: 0.88rem;
+}
+
+.beta-limit-notice p {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
 .field {
   display: grid;
   gap: 8px;

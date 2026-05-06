@@ -125,6 +125,9 @@ const text = {
   panelLabel: "風險查詢面板",
   searchPlace: "搜尋地點",
   searchPlaceholder: "輸入地標、地址或行政區",
+  betaLimitTitle: "Public beta 使用限制",
+  betaLimitMessage:
+    "本服務為公開資料與歷史/潛勢圖資整合的淹水風險查詢 beta。結果不可視為即時災害通報或購屋安全保證；地址定位可能因開放資料覆蓋不足而退回道路或行政區精度。",
   radius: "分析半徑",
   assessRisk: "查詢風險",
   currentCoordinate: "目前座標",
@@ -750,6 +753,11 @@ export default function HomePage() {
 
       <aside className="side-panel" aria-label={text.panelLabel}>
         <form className="panel-section query-panel" onSubmit={handleSearch}>
+          <div className="beta-limit-notice" role="note">
+            <strong>{text.betaLimitTitle}</strong>
+            <p>{text.betaLimitMessage}</p>
+          </div>
+
           <label className="field">
             <span>{text.searchPlace}</span>
             <input
