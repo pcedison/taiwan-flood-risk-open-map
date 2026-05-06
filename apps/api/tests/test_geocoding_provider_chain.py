@@ -2,7 +2,11 @@ from pathlib import Path
 
 from app.api.schemas import GeocodeRequest, LatLng, PlaceCandidate
 from app.domain.geocoding import build_open_data_geocoder
-from app.domain.geocoding.providers import load_taiwan_admin_areas, strip_admin_suffix
+from app.domain.geocoding.providers import (
+    load_taiwan_admin_areas,
+    postgis_query_aliases,
+    strip_admin_suffix,
+)
 
 
 def test_provider_chain_uses_local_taiwan_provider_before_external_lookup() -> None:
@@ -61,6 +65,47 @@ def test_provider_chain_uses_file_backed_open_data_before_bundled_fixtures(
     assert candidates[0].source == "local-open-data-test"
     assert candidates[0].precision == "exact_address"
     assert candidates[0].requires_confirmation is False
+
+
+def test_provider_chain_preserves_file_backed_low_confidence_limitations(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "taiwan-roads.jsonl"
+    source_path.write_text(
+        "\n".join(
+            [
+                (
+                    '{"name":"台北市大安區信義路三段","aliases":["台北市大安區信義路三段"],'
+                    '"lat":25.026,"lng":121.543,"precision":"road_or_lane","type":"address",'
+                    '"source":"local-open-data-road","confidence":0.63,'
+                    '"limitations":["道路名稱資料未提供道路線形。"]}'
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=lambda *_args: (),
+        wikimedia_lookup=lambda *_args: (),
+        open_data_paths=(str(source_path),),
+    )
+
+    candidates = geocoder.geocode(
+        GeocodeRequest(query="台北市大安區信義路三段100號", input_type="address", limit=1),
+    )
+
+    assert candidates[0].source == "local-open-data-road"
+    assert candidates[0].confidence == 0.63
+    assert candidates[0].requires_confirmation is True
+    assert "道路名稱資料未提供道路線形。" in candidates[0].limitations
+
+
+def test_postgis_query_aliases_include_road_level_fallback() -> None:
+    aliases = postgis_query_aliases("台北市大安區信義路三段100號")
+
+    assert "台北市大安區信義路3段100號" in aliases
+    assert "台北市大安區信義路3段" in aliases
 
 
 def test_provider_chain_prefers_project_controlled_osm_before_public_nominatim() -> None:

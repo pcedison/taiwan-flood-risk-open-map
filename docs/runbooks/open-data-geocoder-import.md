@@ -1,12 +1,12 @@
 # Open-Data Geocoder Import
 
-Status: local file-backed path implemented; manifest/import tooling added
+Status: PostGIS/file-backed path implemented; official beta seed import tooling added
 Date: 2026-05-06
 
 This runbook describes the no-TGOS geocoder expansion path for public-interest
-MVP work. It lets the API read reviewed local CSV or JSONL geocoding rows before
-falling back to bundled fixtures, project-controlled OSM, public Nominatim, or
-Wikimedia POI lookup.
+MVP work. It lets the API read reviewed PostGIS rows or local CSV/JSONL
+geocoding rows before falling back to bundled fixtures, project-controlled OSM,
+public Nominatim, or Wikimedia POI lookup.
 
 ## Runtime Configuration
 
@@ -23,6 +23,15 @@ Supported formats:
 
 Missing or invalid files are ignored so local development does not fail closed
 because a production data package is absent.
+
+For production PostGIS lookup, apply migration `0013` and set:
+
+```powershell
+$env:GEOCODER_POSTGIS_ENABLED="true"
+```
+
+The PostGIS provider fails open to the remaining providers if the table is not
+available.
 
 ## Required Columns Or Keys
 
@@ -50,11 +59,12 @@ to conservative defaults.
 
 The API checks providers in this order:
 
-1. File-backed open-data geocoder from `GEOCODER_OPEN_DATA_PATHS`.
-2. Bundled local Taiwan fixtures/gazetteer/admin centroids.
-3. Project-controlled OSM-compatible lookup when configured in code.
-4. Public Nominatim development fallback.
-5. Wikimedia POI fallback.
+1. PostGIS open-data rows when `GEOCODER_POSTGIS_ENABLED=true`.
+2. File-backed open-data geocoder from `GEOCODER_OPEN_DATA_PATHS`.
+3. Bundled local Taiwan fixtures/gazetteer/admin centroids.
+4. Project-controlled OSM-compatible lookup when configured in code.
+5. Public Nominatim development fallback.
+6. Wikimedia POI fallback.
 
 This keeps TGOS optional and prevents public Nominatim from becoming a hidden
 production dependency.
@@ -74,9 +84,13 @@ separate geocoding pass records precision and confidence.
 
 Current beta seed categories:
 
-- roads: Ministry of the Interior national road-name data.
-- villages/admin fallback: MOI village boundary map.
-- POI: NFA shelter points and NPA police office points.
+- roads: Ministry of the Interior national road-name data. This source has no
+  road geometry, so beta rows are imported as road search aliases with township
+  representative coordinates, low confidence, and a required limitation.
+- villages/admin fallback: NLSC village boundary map `TWD97經緯度`, extracted as
+  representative village fallback points.
+- POI: NFA shelter points.
+- POI candidate requiring coordinate transform: NPA police office points.
 - address-only POI candidate: MOHW medical institution records.
 
 ## PostGIS Import Table
@@ -105,17 +119,72 @@ python infra\scripts\import_geocoder_open_data.py `
   --dry-run
 ```
 
+Fetch and normalize the current beta seed sources:
+
+```powershell
+curl.exe -L --output tmp\geocoder-data\roads-114.csv `
+  "https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/E2EDC47D-2D3F-4EB1-878A-4DEB6160FD4C/resource/6E8E059B-9E8E-403F-B3B7-BC6B95074C18/download"
+
+curl.exe -L --output tmp\geocoder-data\shelters.csv `
+  "https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/ED6CF735-6C03-4573-A882-72C1BEC799CB/resource/54550E2F-4567-4C8F-BD2E-E54E9D0386B8/download"
+
+curl.exe -L --output tmp\geocoder-data\villages-1150407.zip `
+  "https://www.tgos.tw/tgos/VirtualDir/Product/a04697c8-64db-450a-a105-3eb471c45abd/村(里)界(TWD97經緯度)1150407.zip"
+
+python infra\scripts\extract_village_centroids.py `
+  tmp\geocoder-data\villages-1150407.zip `
+  tmp\geocoder-data\villages-centroids.csv
+
+python infra\scripts\import_geocoder_open_data.py `
+  --source-key moi-national-road-names `
+  --source-file tmp\geocoder-data\roads-114.csv `
+  --output-jsonl tmp\geocoder-data\roads-114.normalized.jsonl `
+  --evidence-json tmp\geocoder-data\roads-114.evidence.json
+
+python infra\scripts\import_geocoder_open_data.py `
+  --source-key nfa-evacuation-shelter-locations `
+  --source-file tmp\geocoder-data\shelters.csv `
+  --output-jsonl tmp\geocoder-data\shelters.normalized.jsonl `
+  --evidence-json tmp\geocoder-data\shelters.evidence.json
+
+python infra\scripts\import_geocoder_open_data.py `
+  --source-key moi-village-boundary-twd97-geographic `
+  --source-file tmp\geocoder-data\villages-centroids.csv `
+  --output-jsonl tmp\geocoder-data\villages.normalized.jsonl `
+  --evidence-json tmp\geocoder-data\villages.evidence.json
+```
+
 Apply to PostGIS after migration:
 
 ```powershell
 python infra\scripts\import_geocoder_open_data.py `
-  --source-key npa-police-station-addresses `
-  --source-file tmp\reviewed-police-points.csv `
+  --source-key moi-national-road-names `
+  --source-file tmp\geocoder-data\roads-114.csv `
   --database-url $env:DATABASE_URL
 ```
 
 The importer rejects rows outside Taiwan bounds and expands aliases for `臺/台`,
 full-width digits, and road-section variants such as `二段`/`2段`.
+
+Validate beta coverage evidence:
+
+```powershell
+python infra\scripts\geocoder_coverage_smoke.py `
+  --input-jsonl tmp\geocoder-data\roads-114.normalized.jsonl `
+  --input-jsonl tmp\geocoder-data\shelters.normalized.jsonl `
+  --input-jsonl tmp\geocoder-data\villages.normalized.jsonl `
+  --evidence-json tmp\geocoder-data\coverage.evidence.json
+```
+
+The 2026-05-06 local evidence run produced 46,463 normalized rows:
+
+- roads: 32,874
+- POI shelters: 5,878
+- village/admin fallback: 7,711
+
+This satisfies the public beta category smoke for roads, villages, and POI. It
+is still not production-complete doorplate geocoding because no complete
+reviewed national doorplate dataset is imported.
 
 ## Local Verification
 
@@ -125,6 +194,7 @@ Run:
 python -m pytest apps\api\tests\test_geocoding_provider_chain.py -q
 python -m pytest apps\api\tests\test_geocoding_normalization.py tests\test_geocoder_open_data_import.py -q
 python infra\scripts\validate_migrations.py
+python infra\scripts\geocoder_coverage_smoke.py --input-jsonl tmp\geocoder-data\roads-114.normalized.jsonl --input-jsonl tmp\geocoder-data\shelters.normalized.jsonl --input-jsonl tmp\geocoder-data\villages.normalized.jsonl
 python scripts\unknown_address_smoke.py
 ```
 

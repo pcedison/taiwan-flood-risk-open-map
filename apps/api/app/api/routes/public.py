@@ -261,6 +261,8 @@ def _build_geocoder():
         nominatim_lookup=_cached_nominatim_candidates,
         wikimedia_lookup=_cached_wikimedia_candidates,
         open_data_paths=settings.geocoder_open_data_paths,
+        database_url=settings.database_url,
+        postgis_enabled=settings.geocoder_postgis_enabled,
     )
 
 

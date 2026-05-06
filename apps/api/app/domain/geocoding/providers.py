@@ -10,7 +10,7 @@ from typing import Any, Callable, Literal, Protocol, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from app.api.schemas import GeocodePrecision, GeocodeRequest, LatLng, PlaceCandidate
-from app.domain.geocoding.normalization import compact_taiwan_query_key, taiwan_address_aliases
+from app.domain.geocoding.normalization import compact_taiwan_query_key, normalized_aliases, taiwan_address_aliases
 from app.domain.geocoding.taiwan import build_taiwan_geocode_queries
 
 InputType = Literal["address", "landmark", "parcel"]
@@ -41,6 +41,7 @@ class LocalFixturePoint:
 
 @dataclass(frozen=True)
 class LocalOpenDataPoint:
+    source_key: str | None
     aliases: tuple[str, ...]
     name: str
     lat: float
@@ -49,6 +50,8 @@ class LocalOpenDataPoint:
     precision: GeocodePrecision
     place_type: PlaceType
     source: str
+    confidence: float | None = None
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -209,11 +212,34 @@ class FileBackedTaiwanOpenDataProvider:
                     matching_alias,
                 )
             )
-        matches.sort()
+        matches.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[5]))
         return tuple(
             local_open_data_candidate(point, matched_query=matched_query)
             for _, _, _, _, point, matched_query in matches[: request.limit]
         )
+
+
+class PostgisTaiwanOpenDataProvider:
+    provider_key = "postgis-taiwan-open-data"
+
+    def __init__(self, database_url: str | None, *, enabled: bool = False) -> None:
+        self.database_url = database_url
+        self.enabled = enabled
+
+    def search(self, request: GeocodeRequest) -> tuple[PlaceCandidate, ...]:
+        if not self.enabled or not self.database_url:
+            return ()
+        query_aliases = postgis_query_aliases(request.query)
+        if not query_aliases:
+            return ()
+        try:
+            return fetch_postgis_open_data_candidates(
+                self.database_url,
+                request,
+                query_aliases=query_aliases,
+            )
+        except Exception:
+            return ()
 
 
 class LocalTaiwanAddressProvider:
@@ -417,9 +443,12 @@ def build_open_data_geocoder(
     wikimedia_lookup: WikimediaLookup,
     project_osm_lookup: NominatimLookup | None = None,
     open_data_paths: tuple[str, ...] = (),
+    database_url: str | None = None,
+    postgis_enabled: bool = False,
 ) -> GeocoderChain:
     return GeocoderChain(
         providers=(
+            PostgisTaiwanOpenDataProvider(database_url, enabled=postgis_enabled),
             FileBackedTaiwanOpenDataProvider(open_data_paths),
             LocalTaiwanAddressProvider(),
             OpenStreetMapProvider(project_osm_lookup),
@@ -490,6 +519,7 @@ def open_data_point_from_row(row: dict[str, Any], path: Path) -> LocalOpenDataPo
         default=default_precision_for_place_type(place_type),
     )
     return LocalOpenDataPoint(
+        source_key=row_text(row, "source_key"),
         aliases=open_data_aliases(row, name),
         name=name,
         lat=lat,
@@ -498,14 +528,20 @@ def open_data_point_from_row(row: dict[str, Any], path: Path) -> LocalOpenDataPo
         precision=precision,
         place_type=place_type,
         source=row_text(row, "source") or f"local-open-data-import:{path.name}",
+        confidence=row_float(row, "confidence"),
+        limitations=row_list(row, "limitations", "limitation"),
     )
 
 
 def open_data_aliases(row: dict[str, Any], name: str) -> tuple[str, ...]:
     values = [name]
-    raw_aliases = row_text(row, "aliases", "alias", "matched_query")
-    if raw_aliases:
-        values.extend(re.split(r"[|;,]", raw_aliases))
+    aliases = row.get("aliases")
+    if isinstance(aliases, list):
+        values.extend(str(value) for value in aliases)
+    else:
+        raw_aliases = row_text(row, "aliases", "alias", "matched_query")
+        if raw_aliases:
+            values.extend(re.split(r"[|;,]", raw_aliases))
     return taiwan_address_aliases(*values, limit=16)
 
 
@@ -518,6 +554,20 @@ def row_text(row: dict[str, Any], *keys: str) -> str | None:
         if text:
             return text
     return None
+
+
+def row_list(row: dict[str, Any], *keys: str) -> tuple[str, ...]:
+    raw: object | None = None
+    for key in keys:
+        if row.get(key) is not None:
+            raw = row.get(key)
+            break
+    if isinstance(raw, list):
+        return tuple(str(part).strip() for part in raw if str(part).strip())
+    value = str(raw).strip() if raw is not None else None
+    if not value:
+        return ()
+    return tuple(part.strip() for part in value.replace(";", "|").split("|") if part.strip())
 
 
 def row_float(row: dict[str, Any], *keys: str) -> float | None:
@@ -569,7 +619,7 @@ def local_open_data_candidate(
     *,
     matched_query: str,
 ) -> PlaceCandidate:
-    confidence = local_open_data_confidence(point.precision)
+    confidence = point.confidence if point.confidence is not None else local_open_data_confidence(point.precision)
     return PlaceCandidate(
         place_id=stable_uuid("local-open-data-import", point.source, point.name, point.lat, point.lng),
         name=point.name,
@@ -581,8 +631,98 @@ def local_open_data_candidate(
         precision=point.precision,
         matched_query=matched_query,
         requires_confirmation=requires_geocode_confirmation(point.precision, confidence),
-        limitations=geocode_limitations(point.precision),
+        limitations=merge_limitations(geocode_limitations(point.precision), list(point.limitations)),
     )
+
+
+def postgis_query_aliases(query: str) -> tuple[str, ...]:
+    return normalized_aliases(
+        query,
+        *geocode_candidate_queries(query),
+        *address_fallback_queries(query),
+        limit=32,
+    )
+
+
+def fetch_postgis_open_data_candidates(
+    database_url: str,
+    request: GeocodeRequest,
+    *,
+    query_aliases: tuple[str, ...],
+) -> tuple[PlaceCandidate, ...]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    sql = """
+        SELECT
+            id::text AS id,
+            source_key,
+            name,
+            normalized_aliases,
+            admin_code,
+            precision,
+            place_type,
+            ST_Y(centroid) AS lat,
+            ST_X(centroid) AS lng,
+            confidence,
+            metadata
+        FROM geocoder_open_data_entries
+        WHERE normalized_aliases && %(query_aliases)s::text[]
+        ORDER BY
+            CASE precision
+                WHEN 'exact_address' THEN 0
+                WHEN 'road_or_lane' THEN 1
+                WHEN 'poi' THEN 2
+                WHEN 'map_click' THEN 3
+                WHEN 'admin_area' THEN 4
+                ELSE 5
+            END,
+            confidence DESC NULLS LAST,
+            name ASC
+        LIMIT %(limit)s
+    """
+    candidates: list[PlaceCandidate] = []
+    with psycopg.connect(database_url, connect_timeout=2, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql,
+                {
+                    "query_aliases": list(query_aliases),
+                    "limit": max(1, min(request.limit, 20)),
+                },
+            )
+            rows = cursor.fetchall()
+
+    for row in rows:
+        precision = parse_precision(str(row["precision"]), default="unknown")
+        place_type = parse_place_type(str(row["place_type"]), default="address")
+        confidence = float(row["confidence"]) if row.get("confidence") is not None else local_open_data_confidence(precision)
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        limitations = metadata.get("limitations") if isinstance(metadata, dict) else None
+        normalized_row_aliases = row.get("normalized_aliases") or ()
+        matched_query = next(
+            (alias for alias in query_aliases if alias in normalized_row_aliases),
+            request.query.strip(),
+        )
+        candidates.append(
+            PlaceCandidate(
+                place_id=str(row["id"]),
+                name=str(row["name"]),
+                type=place_type,
+                point=LatLng(lat=float(row["lat"]), lng=float(row["lng"])),
+                admin_code=cast(str | None, row.get("admin_code")),
+                source=f"postgis-open-data:{row['source_key']}",
+                confidence=confidence,
+                precision=precision,
+                matched_query=matched_query,
+                requires_confirmation=requires_geocode_confirmation(precision, confidence),
+                limitations=merge_limitations(
+                    geocode_limitations(precision),
+                    [str(item) for item in limitations] if isinstance(limitations, list) else [],
+                ),
+            )
+        )
+    return tuple(candidates)
 
 
 def local_open_data_confidence(precision: GeocodePrecision) -> float:
@@ -815,7 +955,11 @@ def address_fallback_queries(query: str) -> tuple[str, ...]:
     if lane_match:
         candidates.append(lane_match.group(1))
 
-    road_match = re.search(r"(.+?(?:路|街|大道|巷))\d+(?:之\d+)?號?$", normalized)
+    road_match = re.search(
+        r"(.+?(?:路|街|大道)(?:[一二三四五六七八九十0-9]+段)?(?:\d+巷)?|.+?巷)"
+        r"\d+(?:之\d+)?號?$",
+        normalized,
+    )
     if road_match:
         candidates.append(road_match.group(1))
 

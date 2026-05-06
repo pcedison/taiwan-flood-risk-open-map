@@ -34,14 +34,18 @@ datasets:
       - road
     target_precision: road_or_lane
     target_place_type: address
+    coordinate_policy: taiwan_admin_centroid_from_site_id
     import_notes: >
-      Source has road names but no geometry; import as searchable road aliases only
-      after a centroid/road-geometry join is configured from an approved geometry source.
+      Source has road names but no geometry. For public beta, import as
+      searchable road aliases using the bundled Taiwan township/district
+      centroid as a conservative coordinate fallback. Returned candidates must
+      require confirmation and carry a limitation that the point is not the
+      actual road segment or doorplate.
     attribution: 內政部戶政司，全國路名資料
   - key: moi-village-boundary-twd97-119
     name: 村里界圖(TWD97_119分帶)
     category: villages
-    status: ready_for_geometry_import_planning
+    status: coordinate_transform_candidate
     landing_url: https://data.gov.tw/dataset/7439
     provider: 內政部國土測繪中心
     license: Open Government Data License, version 1.0
@@ -55,8 +59,32 @@ datasets:
       - TOWNCODE
     target_precision: admin_area
     target_place_type: admin_area
+    coordinate_policy: polygon_point_on_surface
     import_notes: Convert SHP from TWD97_119 to EPSG:4326 and store polygon plus point-on-surface centroid.
     attribution: 內政部國土測繪中心，村里界圖
+  - key: moi-village-boundary-twd97-geographic
+    name: 村里界圖(TWD97經緯度)
+    category: villages
+    status: ready_for_centroid_import
+    landing_url: https://data.gov.tw/dataset/7438
+    provider: 內政部國土測繪中心
+    license: Open Government Data License, version 1.0
+    update_frequency: 不定期更新
+    fields:
+      - VILLCODE
+      - COUNTYNAME
+      - TOWNNAME
+      - VILLNAME
+      - COUNTYCODE
+      - TOWNCODE
+    target_precision: admin_area
+    target_place_type: admin_area
+    coordinate_policy: polygon_bbox_centroid_from_twd97_geographic
+    import_notes: >
+      Extract searchable village fallback rows from the SHP bounding box center.
+      Treat coordinates as representative admin fallback points only; do not use
+      them as doorplate or road coordinates.
+    attribution: 內政部國土測繪中心，村里界圖(TWD97經緯度)
   - key: nfa-evacuation-shelter-locations
     name: 避難收容處所點位檔
     category: poi
@@ -72,6 +100,7 @@ datasets:
       - Shelter Name
     target_precision: poi
     target_place_type: poi
+    coordinate_policy: source_wgs84_point
     import_notes: Import public shelter point coordinates and address/name aliases.
     attribution: 內政部消防署，避難收容處所點位檔
   - key: npa-police-station-addresses
@@ -89,6 +118,7 @@ datasets:
       - POINT_Y
     target_precision: poi
     target_place_type: poi
+    coordinate_policy: twd97_tm2_point_transform_required
     import_notes: Import public police-office point coordinates and address/name aliases.
     attribution: 內政部警政署，警察機關地址資料
   - key: mohw-medical-institutions
@@ -106,6 +136,7 @@ datasets:
       - 地址
     target_precision: poi
     target_place_type: poi
+    coordinate_policy: address_geocoding_required
     import_notes: Address-only source; do not import as point rows until an approved geocoding pass records precision and confidence.
     attribution: 衛生福利部醫事司，醫療機構與人員基本資料
 smoke_tests:

@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass
+import io
 import json
 from pathlib import Path
 import sys
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import yaml
 
@@ -20,6 +23,7 @@ if str(API_APP_PATH) not in sys.path:
     sys.path.insert(0, str(API_APP_PATH))
 
 from app.domain.geocoding.normalization import normalized_aliases, taiwan_address_aliases  # noqa: E402
+from app.domain.geocoding.providers import load_taiwan_admin_areas  # noqa: E402
 
 
 GEOCODE_PRECISION_VALUES = {
@@ -43,6 +47,7 @@ class ImportSource:
     source_url: str
     target_precision: str
     target_place_type: str
+    coordinate_policy: str
 
 
 @dataclass(frozen=True)
@@ -61,6 +66,7 @@ class GeocoderImportRow:
     license: str
     attribution: str
     confidence: float | None
+    limitations: tuple[str, ...]
     metadata: dict[str, Any]
 
 
@@ -71,7 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST_PATH))
     parser.add_argument("--source-key", help="Dataset key from geocoding-data-manifest.yaml.")
     parser.add_argument("--source-file", action="append", default=[])
+    parser.add_argument("--source-url", action="append", default=[])
     parser.add_argument("--output-jsonl", help="Write normalized rows to this JSONL path.")
+    parser.add_argument("--evidence-json", help="Write a no-secret import evidence summary to this path.")
     parser.add_argument("--database-url", help="Optional PostGIS URL for direct upsert.")
     parser.add_argument("--dry-run", action="store_true", help="Validate and print summary only.")
     parser.add_argument("--limit", type=int, default=0, help="Optional per-run row limit.")
@@ -83,12 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"source key not found in manifest: {args.source_key}", file=sys.stderr)
         return 1
 
-    if not args.source_file:
+    if not args.source_file and not args.source_url:
         print_manifest_summary(sources, manifest)
         return 0
 
     if not args.source_key:
-        print("--source-key is required when --source-file is used", file=sys.stderr)
+        print("--source-key is required when --source-file or --source-url is used", file=sys.stderr)
         return 1
 
     rows: list[GeocoderImportRow] = []
@@ -101,11 +109,20 @@ def main(argv: list[str] | None = None) -> int:
         if args.limit and len(rows) >= args.limit:
             rows = rows[: args.limit]
             break
+    for source_url in args.source_url:
+        parsed_rows, parsed_skipped = read_source_url(source_url, source)
+        rows.extend(parsed_rows)
+        skipped += parsed_skipped
+        if args.limit and len(rows) >= args.limit:
+            rows = rows[: args.limit]
+            break
 
     if args.output_jsonl:
         write_jsonl(Path(args.output_jsonl), rows)
     if args.database_url and not args.dry_run:
         upsert_rows(args.database_url, rows)
+    if args.evidence_json:
+        write_evidence_json(Path(args.evidence_json), source, rows, skipped)
 
     print(f"geocoder import rows={len(rows)} skipped={skipped} source={source.key}")
     return 0
@@ -141,6 +158,7 @@ def manifest_sources(manifest: dict[str, Any]) -> dict[str, ImportSource]:
             source_url=str(dataset.get("landing_url") or ""),
             target_precision=precision if precision in GEOCODE_PRECISION_VALUES else "unknown",
             target_place_type=place_type if place_type in PLACE_TYPE_VALUES else "poi",
+            coordinate_policy=str(dataset.get("coordinate_policy") or "source_wgs84_point"),
         )
     return sources
 
@@ -151,39 +169,72 @@ def read_source_file(path: Path, source: ImportSource) -> tuple[list[GeocoderImp
     return read_csv(path, source)
 
 
+def read_source_url(url: str, source: ImportSource) -> tuple[list[GeocoderImportRow], int]:
+    request = Request(
+        url,
+        headers={
+            "Accept": "text/csv, application/json, application/jsonl, */*",
+            "User-Agent": "FloodRiskTaiwanGeocoderImporter/0.1",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=30) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type", "")
+    except (HTTPError, URLError, TimeoutError) as exc:
+        raise SystemExit(f"failed to fetch source URL {url}: {exc}") from exc
+
+    text = body.decode("utf-8-sig")
+    if "json" in content_type or url.lower().endswith((".json", ".jsonl")):
+        return read_jsonl_stream(io.StringIO(text), source)
+    return read_csv_stream(io.StringIO(text), source)
+
+
 def read_csv(path: Path, source: ImportSource) -> tuple[list[GeocoderImportRow], int]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return read_csv_stream(handle, source)
+
+
+def read_csv_stream(handle: Any, source: ImportSource) -> tuple[list[GeocoderImportRow], int]:
     rows: list[GeocoderImportRow] = []
     skipped = 0
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        for row in csv.DictReader(handle):
-            parsed = geocoder_row_from_mapping(row, source)
-            if parsed is None:
-                skipped += 1
-                continue
-            rows.append(parsed)
+    for row in csv.DictReader(handle):
+        parsed = geocoder_row_from_mapping(row, source)
+        if parsed is None:
+            skipped += 1
+            continue
+        rows.append(parsed)
     return rows, skipped
 
 
 def read_jsonl(path: Path, source: ImportSource) -> tuple[list[GeocoderImportRow], int]:
+    with path.open("r", encoding="utf-8") as handle:
+        return read_jsonl_stream(handle, source)
+
+
+def read_jsonl_stream(handle: Any, source: ImportSource) -> tuple[list[GeocoderImportRow], int]:
     rows: list[GeocoderImportRow] = []
     skipped = 0
-    with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            payload = json.loads(line)
-            if not isinstance(payload, dict):
-                skipped += 1
-                continue
-            parsed = geocoder_row_from_mapping(payload, source)
-            if parsed is None:
-                skipped += 1
-                continue
-            rows.append(parsed)
+    for line in handle:
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not isinstance(payload, dict):
+            skipped += 1
+            continue
+        parsed = geocoder_row_from_mapping(payload, source)
+        if parsed is None:
+            skipped += 1
+            continue
+        rows.append(parsed)
     return rows, skipped
 
 
 def geocoder_row_from_mapping(row: dict[str, Any], source: ImportSource) -> GeocoderImportRow | None:
+    if source.coordinate_policy == "taiwan_admin_centroid_from_site_id":
+        return road_row_from_mapping(row, source)
+
     name = row_text(
         row,
         "name",
@@ -214,7 +265,7 @@ def geocoder_row_from_mapping(row: dict[str, Any], source: ImportSource) -> Geoc
     place_type = row_text(row, "type", "place_type") or source.target_place_type
     return GeocoderImportRow(
         source_key=source.key,
-        source_record_id=row_text(row, "id", "source_record_id", "編號", "Serial number", "機構代碼"),
+        source_record_id=row_text(row, "id", "source_record_id", "編號", "序號", "Serial number", "機構代碼"),
         name=name,
         aliases=taiwan_address_aliases(*alias_values, limit=24),
         normalized_aliases=normalized_aliases(*alias_values, limit=24),
@@ -227,7 +278,56 @@ def geocoder_row_from_mapping(row: dict[str, Any], source: ImportSource) -> Geoc
         license=row_text(row, "license") or source.license,
         attribution=row_text(row, "attribution") or source.attribution,
         confidence=row_float(row, "confidence"),
-        metadata={"raw": {key: value for key, value in row.items() if value not in (None, "")}},
+        limitations=row_list(row, "limitations", "limitation"),
+        metadata={
+            "coordinate_policy": source.coordinate_policy,
+            "raw": {key: value for key, value in row.items() if value not in (None, "")},
+        },
+    )
+
+
+def road_row_from_mapping(row: dict[str, Any], source: ImportSource) -> GeocoderImportRow | None:
+    city = row_text(row, "city", "縣市名稱")
+    site_id = row_text(row, "site_id", "行政區域名稱")
+    road = row_text(row, "road", "路名")
+    if not city or not site_id or not road:
+        return None
+
+    centroid = admin_centroid_for_name(site_id)
+    if centroid is None:
+        return None
+    admin_name, admin_code, lat, lng = centroid
+    name = f"{site_id}{road}"
+    alias_values = [name, f"{admin_name}{road}"]
+    if site_id.startswith(city):
+        town = site_id.removeprefix(city)
+        if town:
+            alias_values.append(f"{city}{town}{road}")
+
+    limitations = (
+        "道路名稱資料未提供道路線形或門牌座標；目前以行政區代表點回應，需確認實際路段位置。",
+    )
+    return GeocoderImportRow(
+        source_key=source.key,
+        source_record_id=f"{site_id}:{road}",
+        name=name,
+        aliases=taiwan_address_aliases(*alias_values, limit=24),
+        normalized_aliases=normalized_aliases(*alias_values, limit=24),
+        lat=lat,
+        lng=lng,
+        admin_code=admin_code,
+        precision="road_or_lane",
+        place_type="address",
+        source_url=source.source_url,
+        license=source.license,
+        attribution=source.attribution,
+        confidence=0.63,
+        limitations=limitations,
+        metadata={
+            "coordinate_policy": source.coordinate_policy,
+            "coordinate_precision": "admin_area_centroid",
+            "raw": {key: value for key, value in row.items() if value not in (None, "")},
+        },
     )
 
 
@@ -240,6 +340,13 @@ def row_text(row: dict[str, Any], *keys: str) -> str | None:
         if text:
             return text
     return None
+
+
+def row_list(row: dict[str, Any], *keys: str) -> tuple[str, ...]:
+    value = row_text(row, *keys)
+    if value is None:
+        return ()
+    return tuple(part.strip() for part in value.replace(";", "|").split("|") if part.strip())
 
 
 def row_float(row: dict[str, Any], *keys: str) -> float | None:
@@ -256,12 +363,48 @@ def within_taiwan_bounds(lat: float, lng: float) -> bool:
     return TAIWAN_LAT_RANGE[0] <= lat <= TAIWAN_LAT_RANGE[1] and TAIWAN_LNG_RANGE[0] <= lng <= TAIWAN_LNG_RANGE[1]
 
 
+def admin_centroid_for_name(name: str) -> tuple[str, str | None, float, float] | None:
+    normalized_name = name.replace("臺", "台").strip()
+    for area in load_taiwan_admin_areas():
+        if area.name.replace("臺", "台") == normalized_name:
+            return area.name, area.admin_code, area.lat, area.lng
+    return None
+
+
 def write_jsonl(path: Path, rows: list[GeocoderImportRow]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as handle:
         for row in rows:
             handle.write(json.dumps(row_to_payload(row), ensure_ascii=False, sort_keys=True))
             handle.write("\n")
+
+
+def write_evidence_json(
+    path: Path,
+    source: ImportSource,
+    rows: list[GeocoderImportRow],
+    skipped: int,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    precision_counts: dict[str, int] = {}
+    place_type_counts: dict[str, int] = {}
+    for row in rows:
+        precision_counts[row.precision] = precision_counts.get(row.precision, 0) + 1
+        place_type_counts[row.place_type] = place_type_counts.get(row.place_type, 0) + 1
+    payload = {
+        "schema_version": "geocoder-import-evidence/v1",
+        "source_key": source.key,
+        "source_url": source.source_url,
+        "license": source.license,
+        "attribution": source.attribution,
+        "coordinate_policy": source.coordinate_policy,
+        "row_count": len(rows),
+        "skipped_row_count": skipped,
+        "precision_counts": precision_counts,
+        "place_type_counts": place_type_counts,
+        "sample_names": [row.name for row in rows[:5]],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def upsert_rows(database_url: str, rows: list[GeocoderImportRow]) -> None:
@@ -307,7 +450,12 @@ def upsert_rows(database_url: str, rows: list[GeocoderImportRow]) -> None:
                         **row_to_payload(row),
                         "aliases": list(row.aliases),
                         "normalized_aliases": list(row.normalized_aliases),
-                        "metadata": Jsonb(row.metadata),
+                        "metadata": Jsonb(
+                            {
+                                **row.metadata,
+                                "limitations": list(row.limitations),
+                            }
+                        ),
                     }
                     for row in rows
                 ],
@@ -330,6 +478,7 @@ def row_to_payload(row: GeocoderImportRow) -> dict[str, Any]:
         "license": row.license,
         "attribution": row.attribution,
         "confidence": row.confidence,
+        "limitations": list(row.limitations),
         "metadata": row.metadata,
     }
 

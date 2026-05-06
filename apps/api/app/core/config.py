@@ -29,6 +29,7 @@ class Settings:
     source_terms_review_ack: bool
     evidence_repository_enabled: bool
     geocoder_open_data_paths: tuple[str, ...]
+    geocoder_postgis_enabled: bool
     historical_news_on_demand_enabled: bool
     historical_news_on_demand_writeback_enabled: bool
     historical_news_on_demand_max_records: int
@@ -86,6 +87,7 @@ def get_settings() -> Settings:
         ),
         evidence_repository_enabled=_env_bool("EVIDENCE_REPOSITORY_ENABLED", default=True),
         geocoder_open_data_paths=_env_csv("GEOCODER_OPEN_DATA_PATHS"),
+        geocoder_postgis_enabled=_env_bool("GEOCODER_POSTGIS_ENABLED", default=False),
         historical_news_on_demand_enabled=_env_bool(
             "HISTORICAL_NEWS_ON_DEMAND_ENABLED",
             default=non_production_default,
