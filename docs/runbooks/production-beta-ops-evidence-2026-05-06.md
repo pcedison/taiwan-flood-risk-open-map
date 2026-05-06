@@ -3,9 +3,9 @@
 Date: 2026-05-06
 Environment: Zeabur `flood_risk`
 Status: public beta candidate after basemap/CDN, alert-route, hosted geocoder
-bundle, and forward-only rollback evidence; not production-complete until a
-hosted PostGIS backup/scratch-restore drill and production PostGIS geocoder
-import are done
+bundle, production PostGIS geocoder import, and forward-only rollback
+evidence; not production-complete until a hosted PostGIS
+backup/scratch-restore drill is done
 
 This note records no-secret operational evidence gathered during the public
 beta readiness pass. Private addresses, tokens, secret values, screenshots that
@@ -231,20 +231,72 @@ store upload tokens in this repository.
 
 ## Runtime Smoke
 
-Hosted public checks after Zeabur env restore:
+Hosted public checks after Zeabur env restore and production PostGIS geocoder
+bootstrap:
 
 - `GET /health`: `200`
 - `GET /ready`: `200`, database healthy, Redis healthy
 - `GET /basemap-config`: R2 style URL returned with no warnings
-- `POST /v1/geocode`: sample query returned POI precision with limitations
+- `GET /v1/geocoder/open-data/status`: `healthy`, `46,457` production
+  PostGIS rows
+- `POST /v1/geocode`: road, POI, and admin samples returned
+  `postgis-open-data:*` sources
 - `POST /v1/risk/assess`: CWA, WRA, and database evidence healthy for the
   live-smoke radius
 
-Current hosted deployment SHA observed in `/ready` after the rollback drill:
+Verification deployment SHA observed in `/ready` after the production geocoder
+bootstrap:
 
 ```text
-fd928bbd79bf7358f6035a2befc04bcd4fe56649
+4996acb5bc3855e5c08e7d8803c95b2112db3760
 ```
+
+## Production PostGIS Geocoder Import
+
+Production PostGIS geocoder import is complete for the beta road / POI /
+village bundle.
+
+Runtime bootstrap behavior:
+
+- Hosted app uses Zeabur-injected `DATABASE_URL`; no connection string or
+  password was printed, copied, or committed.
+- `GEOCODER_POSTGIS_ENABLED=true` and
+  `GEOCODER_POSTGIS_BOOTSTRAP_ENABLED=true` are active by hosted default.
+- On startup, the API creates/updates `geocoder_open_data_entries` and
+  `geocoder_open_data_import_runs`, then imports the bundled open-data files.
+- The bootstrap avoids extra extension privileges by using stable app-generated
+  UUIDs.
+
+Hosted no-secret status at `2026-05-06T08:51:50Z`:
+
+- status: `healthy`
+- bundled path count: `3`
+- production PostGIS rows: `46,457`
+- source counts:
+  - `moi-national-road-names`: `32,868`
+  - `nfa-evacuation-shelter-locations`: `5,878`
+  - `moi-village-boundary-twd97-geographic`: `7,711`
+
+The raw bundled coverage input contains `46,463` rows. Production unique-key
+import collapses six duplicate road `source_record_id` rows, resulting in
+`46,457` stored rows.
+
+Hosted smoke after the import:
+
+- road sample: `precision=road_or_lane`,
+  `source=postgis-open-data:moi-national-road-names`,
+  `requires_confirmation=true`
+- POI sample: `precision=poi`,
+  `source=postgis-open-data:nfa-evacuation-shelter-locations`,
+  `requires_confirmation=false`
+- admin sample: `precision=admin_area`,
+  `source=postgis-open-data:moi-village-boundary-twd97-geographic`,
+  `requires_confirmation=true`
+
+This closes the previous public-beta blocker for "production PostGIS geocoder
+import and coverage evidence." It does not mean the service has complete
+Taiwan doorplate coverage; exact national address/doorplate coverage remains a
+post-beta data-expansion track.
 
 ## Public Beta Limitation
 
@@ -261,10 +313,6 @@ production-complete status by itself.
 
 - Execute the hosted PostGIS backup/restore drill with authenticated Zeabur
   access and record private backup/scratch-restore evidence.
-- Complete production PostGIS ingestion and coverage evidence for the expanded
-  Taiwan geocoder data sources. The hosted bundled geocoder beta smoke already
-  passes, but `GEOCODER_POSTGIS_ENABLED=true` with imported production rows is
-  still pending.
 - Decide whether controlled public beta can keep the Cloudflare managed
   `r2.dev` host or should wait for a custom CDN/domain.
 - Keep the single-maintainer on-call model explicit until additional humans or
