@@ -1,7 +1,7 @@
 import gzip
 import json
 
-from app.domain.geocoding.postgis_bootstrap import import_row_from_payload, iter_import_rows
+from app.domain.geocoding.postgis_bootstrap import file_sha256, import_row_from_payload, iter_import_rows
 
 
 def test_import_row_from_payload_preserves_source_metadata() -> None:
@@ -26,9 +26,30 @@ def test_import_row_from_payload_preserves_source_metadata() -> None:
     assert row is not None
     assert row["source_key"] == "moi-national-road-names"
     assert row["source_record_id"] == "taipei:road"
+    assert row["id"]
     assert row["precision"] == "road_or_lane"
     assert row["place_type"] == "address"
     assert row["metadata"]["limitations"] == ["road geometry is not provided"]
+
+
+def test_import_row_from_payload_generates_source_record_id_when_missing() -> None:
+    row = import_row_from_payload(
+        {
+            "source_key": "moi-national-road-names",
+            "name": "Taipei Test Road",
+            "aliases": ["Taipei Test Road"],
+            "normalized_aliases": ["taipeitestroad"],
+            "lat": 25.0,
+            "lng": 121.5,
+            "precision": "road_or_lane",
+            "place_type": "address",
+        },
+        jsonb=lambda value: value,
+    )
+
+    assert row is not None
+    assert row["source_record_id"]
+    assert row["id"]
 
 
 def test_iter_import_rows_reads_gzipped_jsonl(tmp_path) -> None:
@@ -53,3 +74,13 @@ def test_iter_import_rows_reads_gzipped_jsonl(tmp_path) -> None:
     assert len(rows) == 1
     assert rows[0]["source_key"] == "nfa-evacuation-shelter-locations"
     assert rows[0]["normalized_aliases"] == ["shelter"]
+
+
+def test_file_sha256_changes_with_file_content(tmp_path) -> None:
+    path = tmp_path / "bundle.jsonl.gz"
+    path.write_bytes(b"first")
+    first = file_sha256(path)
+
+    path.write_bytes(b"second")
+
+    assert file_sha256(path) != first

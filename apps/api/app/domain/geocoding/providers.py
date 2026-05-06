@@ -710,6 +710,7 @@ def fetch_postgis_open_data_candidates(
     import psycopg
     from psycopg.rows import dict_row
 
+    normalized_query = compact_taiwan_query_key(request.query)
     sql = """
         SELECT
             id::text AS id,
@@ -724,8 +725,19 @@ def fetch_postgis_open_data_candidates(
             confidence,
             metadata
         FROM geocoder_open_data_entries
-        WHERE normalized_aliases && %(query_aliases)s::text[]
+        WHERE
+            normalized_aliases && %(query_aliases)s::text[]
+            OR EXISTS (
+                SELECT 1
+                FROM unnest(normalized_aliases) AS candidate_alias(alias)
+                WHERE length(candidate_alias.alias) >= 4
+                    AND position(candidate_alias.alias IN %(normalized_query)s) > 0
+            )
         ORDER BY
+            CASE
+                WHEN normalized_aliases && %(query_aliases)s::text[] THEN 0
+                ELSE 1
+            END,
             CASE precision
                 WHEN 'exact_address' THEN 0
                 WHEN 'road_or_lane' THEN 1
@@ -745,6 +757,7 @@ def fetch_postgis_open_data_candidates(
                 sql,
                 {
                     "query_aliases": list(query_aliases),
+                    "normalized_query": normalized_query,
                     "limit": max(1, min(request.limit, 20)),
                 },
             )

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import threading
 from pathlib import Path
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 
 SCHEMA_SQL = """
-CREATE EXTENSION IF NOT EXISTS postgis;
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE TABLE IF NOT EXISTS geocoder_open_data_entries (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    id uuid PRIMARY KEY,
     source_key text NOT NULL,
     source_record_id text,
     name text NOT NULL,
@@ -73,12 +72,12 @@ CREATE TABLE IF NOT EXISTS geocoder_open_data_import_runs (
 
 UPSERT_SQL = """
 INSERT INTO geocoder_open_data_entries (
-    source_key, source_record_id, name, aliases, normalized_aliases,
+    id, source_key, source_record_id, name, aliases, normalized_aliases,
     admin_code, precision, place_type, geom, centroid, confidence,
     source_url, license, attribution, metadata
 )
 VALUES (
-    %(source_key)s, %(source_record_id)s, %(name)s, %(aliases)s, %(normalized_aliases)s,
+    %(id)s, %(source_key)s, %(source_record_id)s, %(name)s, %(aliases)s, %(normalized_aliases)s,
     %(admin_code)s, %(precision)s, %(place_type)s,
     ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326),
     ST_SetSRID(ST_MakePoint(%(lng)s, %(lat)s), 4326),
@@ -144,16 +143,35 @@ def bootstrap_postgis_geocoder(*, database_url: str, paths: tuple[str, ...]) -> 
                 cursor.execute(SCHEMA_SQL)
                 connection.commit()
                 for path in paths:
-                    rows = list(iter_import_rows(Path(path), jsonb=Jsonb))
+                    source_path = Path(path)
+                    rows = list(iter_import_rows(source_path, jsonb=Jsonb))
                     if not rows:
                         continue
                     source_key = str(rows[0]["source_key"])
+                    path_fingerprint = file_sha256(source_path)
                     cursor.execute(
-                        "SELECT count(*) FROM geocoder_open_data_entries WHERE source_key = %s",
-                        (source_key,),
+                        """
+                        SELECT
+                            count(*)::int AS row_count,
+                            (
+                                SELECT metadata->>'sha256'
+                                FROM geocoder_open_data_import_runs
+                                WHERE source_key = %s
+                            ) AS imported_sha256
+                        FROM geocoder_open_data_entries
+                        WHERE source_key = %s
+                        """,
+                        (source_key, source_key),
                     )
-                    existing_count = int(cursor.fetchone()[0])
-                    if existing_count < len(rows):
+                    existing = cursor.fetchone()
+                    existing_count = int(existing[0]) if existing is not None else 0
+                    imported_sha256 = str(existing[1]) if existing is not None and existing[1] else None
+                    if existing_count < len(rows) or imported_sha256 != path_fingerprint:
+                        cursor.execute(
+                            "DELETE FROM geocoder_open_data_entries WHERE source_key = %s",
+                            (source_key,),
+                        )
+                        connection.commit()
                         for batch in batched(rows, size=500):
                             cursor.executemany(UPSERT_SQL, batch)
                             connection.commit()
@@ -162,13 +180,75 @@ def bootstrap_postgis_geocoder(*, database_url: str, paths: tuple[str, ...]) -> 
                         {
                             "source_key": source_key,
                             "row_count": len(rows),
-                            "metadata": Jsonb({"path": Path(path).name, "mode": "bundled-runtime-bootstrap"}),
+                            "metadata": Jsonb(
+                                {
+                                    "path": source_path.name,
+                                    "sha256": path_fingerprint,
+                                    "mode": "bundled-runtime-bootstrap",
+                                }
+                            ),
                         },
                     )
                     connection.commit()
             finally:
                 cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", ("flood-risk-geocoder-bootstrap",))
                 connection.commit()
+
+
+def fetch_postgis_geocoder_summary(database_url: str) -> dict[str, Any]:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(database_url, connect_timeout=3, row_factory=dict_row) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT source_key, count(*)::int AS row_count
+                FROM geocoder_open_data_entries
+                GROUP BY source_key
+                ORDER BY source_key
+                """
+            )
+            source_counts = [dict(row) for row in cursor.fetchall()]
+            cursor.execute(
+                """
+                SELECT source_key, row_count, imported_at, metadata
+                FROM geocoder_open_data_import_runs
+                ORDER BY source_key
+                """
+            )
+            import_runs = [dict(row) for row in cursor.fetchall()]
+    return {
+        "row_count": sum(int(row["row_count"]) for row in source_counts),
+        "source_counts": source_counts,
+        "import_runs": import_runs,
+    }
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def stable_open_data_id(payload: dict[str, Any], *, source_key: str, source_record_id: str) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            "|".join(
+                (
+                    "flood-risk-geocoder-open-data",
+                    source_key,
+                    source_record_id,
+                    str(payload.get("name") or ""),
+                    str(payload.get("lat") or ""),
+                    str(payload.get("lng") or ""),
+                )
+            ),
+        )
+    )
 
 
 def iter_import_rows(path: Path, *, jsonb: Any) -> list[dict[str, Any]]:
@@ -197,9 +277,13 @@ def import_row_from_payload(payload: dict[str, Any], *, jsonb: Any) -> dict[str,
         return None
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
     limitations = text_list(payload.get("limitations"))
+    source_record_id = text_or_none(payload.get("source_record_id"))
+    if source_record_id is None:
+        source_record_id = str(uuid5(NAMESPACE_URL, f"{source_key}|{name}|{lat}|{lng}"))
     return {
+        "id": stable_open_data_id(payload, source_key=source_key, source_record_id=source_record_id),
         "source_key": source_key,
-        "source_record_id": text_or_none(payload.get("source_record_id")),
+        "source_record_id": source_record_id,
         "name": name,
         "aliases": text_list(payload.get("aliases")) or [name],
         "normalized_aliases": normalized_aliases,

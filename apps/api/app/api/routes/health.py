@@ -5,6 +5,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.api.schemas import DependencyReadiness, HealthResponse, ReadyResponse
 from app.core.config import get_settings
+from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
 
 router = APIRouter(tags=["health"])
 
@@ -57,6 +58,7 @@ async def metrics() -> PlainTextResponse:
                 f'version="{_prometheus_label_value(settings.app_version)}",'
                 f'deployment_sha="{_prometheus_label_value(settings.deployment_sha or "unknown")}"}} 1'
             ),
+            *_geocoder_open_data_metrics(settings),
             "",
         )
     )
@@ -69,6 +71,48 @@ def _now_utc() -> datetime:
 
 def _prometheus_label_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+
+
+def _geocoder_open_data_metrics(settings: object) -> tuple[str, ...]:
+    database_url = getattr(settings, "database_url", "")
+    postgis_enabled = bool(getattr(settings, "geocoder_postgis_enabled", False))
+    if not postgis_enabled or not database_url:
+        return (
+            "# HELP flood_risk_geocoder_open_data_ready PostGIS open-data geocoder import readiness.",
+            "# TYPE flood_risk_geocoder_open_data_ready gauge",
+            "flood_risk_geocoder_open_data_ready 0",
+            "# HELP flood_risk_geocoder_open_data_rows Imported PostGIS open-data geocoder rows.",
+            "# TYPE flood_risk_geocoder_open_data_rows gauge",
+            "flood_risk_geocoder_open_data_rows 0",
+        )
+    try:
+        summary = fetch_postgis_geocoder_summary(database_url)
+    except Exception:
+        return (
+            "# HELP flood_risk_geocoder_open_data_ready PostGIS open-data geocoder import readiness.",
+            "# TYPE flood_risk_geocoder_open_data_ready gauge",
+            "flood_risk_geocoder_open_data_ready 0",
+            "# HELP flood_risk_geocoder_open_data_rows Imported PostGIS open-data geocoder rows.",
+            "# TYPE flood_risk_geocoder_open_data_rows gauge",
+            "flood_risk_geocoder_open_data_rows 0",
+        )
+
+    row_count = int(summary.get("row_count") or 0)
+    lines = [
+        "# HELP flood_risk_geocoder_open_data_ready PostGIS open-data geocoder import readiness.",
+        "# TYPE flood_risk_geocoder_open_data_ready gauge",
+        f"flood_risk_geocoder_open_data_ready {1 if row_count > 0 else 0}",
+        "# HELP flood_risk_geocoder_open_data_rows Imported PostGIS open-data geocoder rows.",
+        "# TYPE flood_risk_geocoder_open_data_rows gauge",
+        f"flood_risk_geocoder_open_data_rows {row_count}",
+    ]
+    for row in summary.get("source_counts") or ():
+        if not isinstance(row, dict):
+            continue
+        source_key = _prometheus_label_value(str(row.get("source_key") or "unknown"))
+        source_row_count = int(row.get("row_count") or 0)
+        lines.append(f'flood_risk_geocoder_open_data_rows{{source_key="{source_key}"}} {source_row_count}')
+    return tuple(lines)
 
 
 def _check_database(database_url: str) -> DependencyReadiness:
