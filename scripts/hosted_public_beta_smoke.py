@@ -47,7 +47,10 @@ def main(argv: list[str] | None = None) -> int:
             label="road bundle",
             query="\u81fa\u5317\u5e02\u5927\u5b89\u5340\u4fe1\u7fa9\u8def\u4e09\u6bb5100\u865f",
             expected_precision="road_or_lane",
-            expected_source="local-open-data:moi-national-road-names",
+            expected_sources=(
+                "local-open-data:moi-national-road-names",
+                "postgis-open-data:moi-national-road-names",
+            ),
             expected_confirmation=True,
             assess_risk=True,
         )
@@ -58,7 +61,10 @@ def main(argv: list[str] | None = None) -> int:
             label="POI bundle",
             query="\u4e94\u5cf0\u6d3b\u52d5\u4e2d\u5fc3",
             expected_precision="poi",
-            expected_source="local-open-data:nfa-evacuation-shelter-locations",
+            expected_sources=(
+                "local-open-data:nfa-evacuation-shelter-locations",
+                "postgis-open-data:nfa-evacuation-shelter-locations",
+            ),
             expected_confirmation=False,
         )
     )
@@ -68,7 +74,10 @@ def main(argv: list[str] | None = None) -> int:
             label="admin bundle",
             query="\u65b0\u5317\u5e02\u65b0\u838a\u5340\u897f\u76db\u91cc",
             expected_precision="admin_area",
-            expected_source="local-open-data:moi-village-boundary-twd97-geographic",
+            expected_sources=(
+                "local-open-data:moi-village-boundary-twd97-geographic",
+                "postgis-open-data:moi-village-boundary-twd97-geographic",
+            ),
             expected_confirmation=True,
         )
     )
@@ -89,7 +98,7 @@ def check_geocode_candidate(
     label: str,
     query: str,
     expected_precision: str,
-    expected_source: str,
+    expected_sources: tuple[str, ...],
     expected_confirmation: bool,
     assess_risk: bool = False,
 ) -> list[str]:
@@ -111,8 +120,10 @@ def check_geocode_candidate(
         failures.append(
             f"{label} precision should be {expected_precision}, got {candidate.get('precision')}"
         )
-    if candidate.get("source") != expected_source:
-        failures.append(f"{label} source should be {expected_source}, got {candidate.get('source')}")
+    if candidate.get("source") not in expected_sources:
+        failures.append(
+            f"{label} source should be one of {', '.join(expected_sources)}, got {candidate.get('source')}"
+        )
     if candidate.get("requires_confirmation") is not expected_confirmation:
         failures.append(f"{label} requires_confirmation should be {expected_confirmation}")
     if expected_confirmation and not candidate.get("limitations"):
