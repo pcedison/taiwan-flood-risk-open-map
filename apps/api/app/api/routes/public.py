@@ -53,6 +53,7 @@ from app.domain.geocoding import (
     stable_uuid,
     within_taiwan_bounds,
 )
+from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
 from app.domain.history import (
     HistoricalFloodRecord,
     historical_record_matches_location_text,
@@ -264,6 +265,31 @@ def _build_geocoder():
         database_url=settings.database_url,
         postgis_enabled=settings.geocoder_postgis_enabled,
     )
+
+
+@router.get("/geocoder/open-data/status", include_in_schema=False)
+async def geocoder_open_data_status() -> dict[str, Any]:
+    settings = get_settings()
+    payload: dict[str, Any] = {
+        "checked_at": _now().isoformat(),
+        "postgis_enabled": settings.geocoder_postgis_enabled,
+        "bootstrap_enabled": settings.geocoder_postgis_bootstrap_enabled,
+        "bundled_path_count": len(settings.geocoder_open_data_paths),
+    }
+    if not settings.geocoder_postgis_enabled or not settings.database_url:
+        return {**payload, "status": "disabled", "row_count": 0, "source_counts": []}
+    try:
+        summary = fetch_postgis_geocoder_summary(settings.database_url)
+    except Exception:
+        return {**payload, "status": "unavailable", "row_count": 0, "source_counts": []}
+
+    row_count = int(summary.get("row_count") or 0)
+    return {
+        **payload,
+        "status": "healthy" if row_count > 0 else "empty",
+        "row_count": row_count,
+        "source_counts": summary.get("source_counts") or [],
+    }
 
 
 def _official_realtime_evidence(

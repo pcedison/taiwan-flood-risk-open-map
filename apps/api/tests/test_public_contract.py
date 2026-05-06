@@ -181,6 +181,33 @@ def test_geocode_contract_and_limit() -> None:
     assert_openapi_schema(payload, "GeocodeResponse")
 
 
+def test_geocoder_open_data_status_reports_no_secret_summary(monkeypatch) -> None:
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:password@example.invalid/db")
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_postgis_geocoder_summary",
+        lambda _url: {
+            "row_count": 2,
+            "source_counts": [{"source_key": "moi-national-road-names", "row_count": 2}],
+        },
+    )
+
+    try:
+        response = client.get("/v1/geocoder/open-data/status")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "healthy"
+    assert payload["row_count"] == 2
+    assert payload["source_counts"] == [{"source_key": "moi-national-road-names", "row_count": 2}]
+    assert "postgresql" not in response.text
+    assert "password" not in response.text
+
+
 def test_geocode_returns_taipei_main_station_coordinate() -> None:
     response = client.post(
         "/v1/geocode",
