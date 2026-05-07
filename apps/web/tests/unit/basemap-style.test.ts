@@ -123,12 +123,16 @@ test("external PMTiles styles are patched with text labels and glyphs", () => {
   assert.equal(roadLabel?.["source-layer"], "roads");
   assert.equal(roadLabel?.minzoom, 11);
   assert.equal(roadLabel?.layout?.["symbol-placement"], "line");
+  assert.deepEqual(roadLabel?.layout?.["text-font"], [
+    "Open Sans Regular",
+    "Arial Unicode MS Regular",
+  ]);
 });
 
-test("interactive max zoom stays below PMTiles source max zoom", () => {
+test("interactive max zoom allows vector overzoom for readable street labels", () => {
   const style = buildPmtilesBasemapStyle("https://cdn.example.test/taiwan.pmtiles");
 
-  assert.equal(getInteractiveBasemapMaxZoom(style), 13.8);
+  assert.equal(getInteractiveBasemapMaxZoom(style), 18);
 });
 
 test("label patch is idempotent", () => {

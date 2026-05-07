@@ -41,7 +41,8 @@ const PUBLIC_OSM_RASTER_TILES = ["https://tile.openstreetmap.org/{z}/{x}/{y}.png
 const PROTOMAPS_GLYPHS_URL =
   "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf";
 const DEFAULT_VECTOR_SOURCE_MAXZOOM = 14;
-const VECTOR_SOURCE_MAXZOOM_RENDER_BUFFER = 0.2;
+const VECTOR_SOURCE_OVERZOOM_LEVELS = 4;
+const INTERACTIVE_VECTOR_MAXZOOM = 18;
 const DEFAULT_OPEN_BASEMAP_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>';
 const DEV_OSM_WARNING =
@@ -277,7 +278,10 @@ export function getInteractiveBasemapMaxZoom(
   const sourceMaxzoom =
     typeof vectorSource.maxzoom === "number" ? vectorSource.maxzoom : inferBasemapMaxzoom(style);
 
-  return Math.max(0, sourceMaxzoom - VECTOR_SOURCE_MAXZOOM_RENDER_BUFFER);
+  return Math.max(
+    sourceMaxzoom,
+    Math.min(INTERACTIVE_VECTOR_MAXZOOM, sourceMaxzoom + VECTOR_SOURCE_OVERZOOM_LEVELS),
+  );
 }
 
 export function buildRasterBasemapStyle(
@@ -337,7 +341,7 @@ function buildBasemapLabelLayers(source: string): StyleLayer[] {
     ["get", "name"],
     ["get", "name:en"],
   ] as ExpressionSpecification;
-  const labelFont = ["Noto Sans Regular"];
+  const labelFont = ["Open Sans Regular", "Arial Unicode MS Regular"];
 
   return [
     {
