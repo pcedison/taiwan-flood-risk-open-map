@@ -402,7 +402,7 @@ function buildBasemapLabelLayers(source: string): StyleLayer[] {
         "text-pitch-alignment": "viewport",
         "text-letter-spacing": 0,
         "text-padding": 2,
-        "text-allow-overlap": false,
+        "text-allow-overlap": true,
         "text-ignore-placement": false,
       },
       paint: {

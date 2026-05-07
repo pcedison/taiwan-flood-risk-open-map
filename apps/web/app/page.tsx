@@ -249,6 +249,7 @@ const TAIWAN_CITY_GEOJSON: MapFeatureCollection = {
     },
   ],
 };
+const BASEMAP_LABEL_LAYER_IDS = ["base-place-labels", "base-poi-labels", "base-road-labels"];
 
 const healthLabels: Record<string, string> = {
   healthy: "正常",
@@ -466,6 +467,10 @@ function ensureTaiwanCityDots(map: MapLibreMap) {
   }
 }
 
+function firstExistingLayerId(map: MapLibreMap, layerIds: string[]): string | undefined {
+  return layerIds.find((layerId) => map.getLayer(layerId));
+}
+
 export default function HomePage() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -555,24 +560,31 @@ export default function HomePage() {
             type: "geojson",
             data: createRadiusFeature(INITIAL_COORDINATE, INITIAL_RADIUS),
           });
-          map.addLayer({
-            id: "query-radius-fill",
-            type: "fill",
-            source: "query-radius",
-            paint: {
-              "fill-color": "#c66a21",
-              "fill-opacity": 0.18,
+          const beforeBasemapLabels = firstExistingLayerId(map, BASEMAP_LABEL_LAYER_IDS);
+          map.addLayer(
+            {
+              id: "query-radius-fill",
+              type: "fill",
+              source: "query-radius",
+              paint: {
+                "fill-color": "#c66a21",
+                "fill-opacity": 0.18,
+              },
             },
-          });
-          map.addLayer({
-            id: "query-radius-line",
-            type: "line",
-            source: "query-radius",
-            paint: {
-              "line-color": "#c66a21",
-              "line-width": 2,
+            beforeBasemapLabels,
+          );
+          map.addLayer(
+            {
+              id: "query-radius-line",
+              type: "line",
+              source: "query-radius",
+              paint: {
+                "line-color": "#c66a21",
+                "line-width": 2,
+              },
             },
-          });
+            beforeBasemapLabels,
+          );
         }
         setIsMapReady(true);
       });
