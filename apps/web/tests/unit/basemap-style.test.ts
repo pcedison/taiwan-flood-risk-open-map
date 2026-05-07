@@ -16,6 +16,7 @@ type RasterSourceForTest = {
 
 type VectorSourceForTest = {
   attribution?: string;
+  maxzoom?: number;
   type: string;
   url?: string;
 };
@@ -67,6 +68,7 @@ test("PMTiles configuration builds a vector basemap style", () => {
 
   assert.equal(config.style.sources.basemap.type, "vector");
   assert.equal(config.style.sources.basemap.url, "pmtiles://https://cdn.example.test/taiwan.pmtiles");
+  assert.equal((config.style.sources.basemap as VectorSourceForTest).maxzoom, 14);
   assert.equal(config.style.sources.basemap.attribution, "Example PMTiles attribution");
   assert.equal(sourceLayerNames(config.style.layers).includes("buildings"), true);
   assert.equal(sourceLayerNames(config.style.layers).includes("roads"), true);
@@ -93,6 +95,9 @@ test("external PMTiles styles are patched with text labels and glyphs", () => {
         url: "pmtiles://https://cdn.example.test/taiwan.pmtiles",
       },
     },
+    metadata: {
+      "flood-risk:maxzoom": 13,
+    },
     layers: [
       {
         id: "roads",
@@ -111,6 +116,7 @@ test("external PMTiles styles are patched with text labels and glyphs", () => {
     | undefined;
 
   assert.match(style.glyphs ?? "", /basemaps-assets\/fonts/);
+  assert.equal((style.sources.basemap as VectorSourceForTest).maxzoom, 13);
   assert.equal(roadLabel?.type, "symbol");
   assert.equal(roadLabel?.["source-layer"], "roads");
   assert.equal(roadLabel?.layout?.["symbol-placement"], "line");
@@ -144,6 +150,7 @@ test("runtime BASEMAP aliases avoid build-time NEXT_PUBLIC inlining", () => {
     (config.style.sources.basemap as VectorSourceForTest).url,
     "pmtiles://https://cdn.example.test/runtime.pmtiles",
   );
+  assert.equal((config.style.sources.basemap as VectorSourceForTest).maxzoom, 14);
   assert.equal(
     (config.style.sources.basemap as AttributedSourceForTest).attribution,
     "Example runtime env attribution",

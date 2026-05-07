@@ -32,10 +32,15 @@ type SourceLayerStyleLayer = StyleLayer & {
   source?: string;
   "source-layer"?: string;
 };
+type VectorBasemapSource = StyleSpecification["sources"][string] & {
+  maxzoom?: number;
+  type: "vector";
+};
 
 const PUBLIC_OSM_RASTER_TILES = ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"];
 const PROTOMAPS_GLYPHS_URL =
   "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf";
+const DEFAULT_VECTOR_SOURCE_MAXZOOM = 14;
 const DEFAULT_OPEN_BASEMAP_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>';
 const DEV_OSM_WARNING =
@@ -159,6 +164,7 @@ export function buildPmtilesBasemapStyle(
       basemap: {
         type: "vector",
         url: sourceUrl,
+        maxzoom: DEFAULT_VECTOR_SOURCE_MAXZOOM,
         attribution,
       },
     },
@@ -237,20 +243,21 @@ export function buildPmtilesBasemapStyle(
 }
 
 export function ensureBasemapLabelLayers(style: StyleSpecification): StyleSpecification {
-  const basemapSource = findVectorBasemapSource(style);
+  const { source: basemapSource, style: styleWithOverzoom } =
+    ensureVectorBasemapSourceMaxzoom(style);
   if (!basemapSource) return style;
 
-  const existingLayerIds = new Set(style.layers.map((layer) => layer.id));
+  const existingLayerIds = new Set(styleWithOverzoom.layers.map((layer) => layer.id));
   const missingLabelLayers = buildBasemapLabelLayers(basemapSource).filter(
     (layer) => !existingLayerIds.has(layer.id),
   );
 
-  if (missingLabelLayers.length === 0 && style.glyphs) return style;
+  if (missingLabelLayers.length === 0 && styleWithOverzoom.glyphs) return styleWithOverzoom;
 
   return {
-    ...style,
-    glyphs: style.glyphs || PROTOMAPS_GLYPHS_URL,
-    layers: [...style.layers, ...missingLabelLayers],
+    ...styleWithOverzoom,
+    glyphs: styleWithOverzoom.glyphs || PROTOMAPS_GLYPHS_URL,
+    layers: [...styleWithOverzoom.layers, ...missingLabelLayers],
   };
 }
 
@@ -397,6 +404,52 @@ function findVectorBasemapSource(style: StyleSpecification): string | null {
   const sourceEntries = Object.entries(style.sources);
   const vectorSource = sourceEntries.find(([, source]) => source.type === "vector");
   return vectorSource?.[0] ?? null;
+}
+
+function ensureVectorBasemapSourceMaxzoom(style: StyleSpecification): {
+  source: string | null;
+  style: StyleSpecification;
+} {
+  const basemapSource = findVectorBasemapSource(style);
+  if (!basemapSource) return { source: null, style };
+
+  const source = style.sources[basemapSource];
+  if (!source || source.type !== "vector") return { source: null, style };
+
+  const vectorSource = source as VectorBasemapSource;
+  if (typeof vectorSource.maxzoom === "number") {
+    return { source: basemapSource, style };
+  }
+
+  return {
+    source: basemapSource,
+    style: {
+      ...style,
+      sources: {
+        ...style.sources,
+        [basemapSource]: {
+          ...vectorSource,
+          maxzoom: inferBasemapMaxzoom(style),
+        },
+      },
+    },
+  };
+}
+
+function inferBasemapMaxzoom(style: StyleSpecification): number {
+  const metadata = style.metadata as Record<string, unknown> | undefined;
+  const metadataMaxzoom =
+    metadata?.["flood-risk:maxzoom"] ?? metadata?.maxzoom ?? metadata?.["max_zoom"];
+
+  if (typeof metadataMaxzoom === "number" && Number.isFinite(metadataMaxzoom)) {
+    return metadataMaxzoom;
+  }
+  if (typeof metadataMaxzoom === "string") {
+    const parsed = Number.parseInt(metadataMaxzoom, 10);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return DEFAULT_VECTOR_SOURCE_MAXZOOM;
 }
 
 function buildUnconfiguredBasemapFallback({
