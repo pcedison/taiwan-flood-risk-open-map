@@ -3,7 +3,10 @@
 import type { GeoJSONSource, Map as MapLibreMap, Marker } from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { loadRuntimeBasemapStyleConfig } from "./lib/basemap-style";
+import {
+  getInteractiveBasemapMaxZoom,
+  loadRuntimeBasemapStyleConfig,
+} from "./lib/basemap-style";
 import {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
@@ -525,6 +528,7 @@ export default function HomePage() {
 
       unregisterPmtilesProtocol = registerPmtilesProtocol(maplibregl);
       basemap.warnings.forEach((warning) => console.warn(warning));
+      const interactiveMaxZoom = getInteractiveBasemapMaxZoom(basemap.style);
 
       const map = new maplibregl.Map({
         attributionControl: false,
@@ -534,6 +538,7 @@ export default function HomePage() {
           [118.0, 20.5],
           [123.8, 26.8],
         ],
+        ...(interactiveMaxZoom ? { maxZoom: interactiveMaxZoom } : {}),
         style: basemap.style,
         zoom: TAIWAN_OVERVIEW.zoom,
       });

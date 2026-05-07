@@ -6,6 +6,7 @@ const {
   buildPmtilesBasemapStyle,
   ensureBasemapLabelLayers,
   getBasemapStyleConfig,
+  getInteractiveBasemapMaxZoom,
   loadRuntimeBasemapStyleConfig,
 } = (await import(basemapModulePath)) as typeof import("../../app/lib/basemap-style");
 
@@ -24,6 +25,7 @@ type VectorSourceForTest = {
 type LayerWithSourceLayerForTest = {
   id?: string;
   layout?: Record<string, unknown>;
+  minzoom?: number;
   "source-layer"?: string;
   type?: string;
 };
@@ -119,7 +121,14 @@ test("external PMTiles styles are patched with text labels and glyphs", () => {
   assert.equal((style.sources.basemap as VectorSourceForTest).maxzoom, 13);
   assert.equal(roadLabel?.type, "symbol");
   assert.equal(roadLabel?.["source-layer"], "roads");
+  assert.equal(roadLabel?.minzoom, 11);
   assert.equal(roadLabel?.layout?.["symbol-placement"], "line");
+});
+
+test("interactive max zoom stays below PMTiles source max zoom", () => {
+  const style = buildPmtilesBasemapStyle("https://cdn.example.test/taiwan.pmtiles");
+
+  assert.equal(getInteractiveBasemapMaxZoom(style), 13.8);
 });
 
 test("label patch is idempotent", () => {

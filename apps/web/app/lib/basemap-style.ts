@@ -41,6 +41,7 @@ const PUBLIC_OSM_RASTER_TILES = ["https://tile.openstreetmap.org/{z}/{x}/{y}.png
 const PROTOMAPS_GLYPHS_URL =
   "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf";
 const DEFAULT_VECTOR_SOURCE_MAXZOOM = 14;
+const VECTOR_SOURCE_MAXZOOM_RENDER_BUFFER = 0.2;
 const DEFAULT_OPEN_BASEMAP_ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>';
 const DEV_OSM_WARNING =
@@ -261,6 +262,24 @@ export function ensureBasemapLabelLayers(style: StyleSpecification): StyleSpecif
   };
 }
 
+export function getInteractiveBasemapMaxZoom(
+  style: BasemapStyleConfig["style"],
+): number | undefined {
+  if (typeof style === "string") return undefined;
+
+  const basemapSource = findVectorBasemapSource(style);
+  if (!basemapSource) return undefined;
+
+  const source = style.sources[basemapSource];
+  if (!source || source.type !== "vector") return undefined;
+
+  const vectorSource = source as VectorBasemapSource;
+  const sourceMaxzoom =
+    typeof vectorSource.maxzoom === "number" ? vectorSource.maxzoom : inferBasemapMaxzoom(style);
+
+  return Math.max(0, sourceMaxzoom - VECTOR_SOURCE_MAXZOOM_RENDER_BUFFER);
+}
+
 export function buildRasterBasemapStyle(
   tiles: string[],
   attribution = DEFAULT_OPEN_BASEMAP_ATTRIBUTION,
@@ -348,12 +367,12 @@ function buildBasemapLabelLayers(source: string): StyleLayer[] {
       type: "symbol",
       source,
       "source-layer": "pois",
-      minzoom: 15,
+      minzoom: 13.2,
       filter: ["has", "name"],
       layout: {
         "text-field": localNameExpression,
         "text-font": labelFont,
-        "text-size": ["interpolate", ["linear"], ["zoom"], 15, 10, 17, 12],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 13, 9, 14, 11],
         "text-max-width": 7,
         "text-padding": 2,
         "text-allow-overlap": false,
@@ -370,14 +389,15 @@ function buildBasemapLabelLayers(source: string): StyleLayer[] {
       type: "symbol",
       source,
       "source-layer": "roads",
-      minzoom: 12,
+      minzoom: 11,
       filter: ["has", "name"],
       layout: {
         "symbol-placement": "line",
-        "symbol-spacing": ["interpolate", ["linear"], ["zoom"], 12, 360, 15, 220, 17, 160],
+        "symbol-spacing": ["interpolate", ["linear"], ["zoom"], 11, 420, 13, 220, 14, 150],
         "text-field": localNameExpression,
         "text-font": labelFont,
-        "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 15, 13, 17, 15],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 11, 10, 13, 12, 14, 14],
+        "text-keep-upright": true,
         "text-rotation-alignment": "map",
         "text-pitch-alignment": "viewport",
         "text-letter-spacing": 0,
