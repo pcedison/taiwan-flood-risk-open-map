@@ -35,17 +35,21 @@ TAIWAN_COUNTY_TERMS = (
     "連江縣",
 )
 TAIWAN_FLOOD_NEWS_TERMS = (
-    "淹水",
     "積淹水",
-    "積水",
-    "豪雨",
-    "暴雨",
-    "水災",
     "道路淹水",
     "地下道淹水",
+    "住家淹水",
+    "豪雨淹水",
+    "暴雨淹水",
+    "淹水災情",
+    "積淹水災情",
     "排水不及",
+    "側溝排水不及",
+    "低窪地區淹水",
+    "車道淹水",
 )
-DEFAULT_TERMS_PER_QUERY = 8
+DEFAULT_TERMS_PER_QUERY = 4
+GDELT_MIN_QUERY_TERM_CHARS = 3
 
 
 @dataclass(frozen=True)
@@ -65,14 +69,18 @@ def build_taiwan_flood_news_queries(
     *,
     terms_per_query: int = DEFAULT_TERMS_PER_QUERY,
 ) -> tuple[str, ...]:
-    terms = _dedupe(term.strip() for term in place_terms if term.strip())
+    terms = _dedupe(
+        term.strip() for term in place_terms if _is_gdelt_safe_query_term(term)
+    )
     if not terms:
         return ()
 
     queries: list[str] = []
+    flood_clause = " OR ".join(
+        term for term in TAIWAN_FLOOD_NEWS_TERMS if _is_gdelt_safe_query_term(term)
+    )
     for chunk in _chunks(terms, size=max(1, terms_per_query)):
         place_clause = " OR ".join(_quote_term(term) for term in chunk)
-        flood_clause = " OR ".join(TAIWAN_FLOOD_NEWS_TERMS)
         queries.append(f"({place_clause}) ({flood_clause}) sourcecountry:TW")
     return tuple(queries)
 
@@ -284,7 +292,11 @@ def _county(name: str) -> str | None:
 
 
 def _quote_term(term: str) -> str:
-    return f'"{term}"' if len(term) > 2 else term
+    return f'"{term}"' if any(char.isspace() for char in term) else term
+
+
+def _is_gdelt_safe_query_term(term: str) -> bool:
+    return len(_normalize_term(term)) >= GDELT_MIN_QUERY_TERM_CHARS
 
 
 def _float_or_none(value: object) -> float | None:

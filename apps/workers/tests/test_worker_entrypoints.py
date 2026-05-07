@@ -238,7 +238,8 @@ def test_main_gdelt_rehearsal_builds_geocoder_query_plan_without_network(
     assert config.require_query_place_match is True
     assert config.query_places[0].term == "高雄市三民區本和里"
     assert len(config.queries) == 1
-    assert '"本和里"' in config.queries[0]
+    assert "本和里" in config.queries[0]
+    assert '"本和里"' not in config.queries[0]
     assert config.query_plan_metadata["geocoder_query_plan"] is True
     assert json.loads(capsys.readouterr().out)["status"] == "succeeded"
 

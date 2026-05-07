@@ -57,6 +57,7 @@ from app.jobs.runtime_managed import run_managed_runtime_ingestion_cycle
 from app.jobs.sample import run_sample_job
 from app.jobs.tile_cache import PostgresTileCacheWriter, TileCacheUnavailable, TileLayerUnsupported
 from app.jobs.taiwan_news_query_plan import (
+    DEFAULT_TERMS_PER_QUERY,
     TaiwanQueryScope,
     build_taiwan_flood_news_queries,
     load_taiwan_geocoder_query_places,
@@ -617,9 +618,9 @@ def _build_gdelt_news_backfill_config(
                 or env_int(
                     os.environ,
                     "GDELT_GEOCODER_TERMS_PER_QUERY",
-                    default=8,
+                    default=DEFAULT_TERMS_PER_QUERY,
                 ),
-                default=8,
+                default=DEFAULT_TERMS_PER_QUERY,
             ),
         )
         queries = _slice_generated_queries(
