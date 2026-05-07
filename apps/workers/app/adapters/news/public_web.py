@@ -7,6 +7,7 @@ from datetime import datetime
 from hashlib import sha256
 from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urlencode
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from app.adapters._helpers import optional_str, parse_datetime, stable_evidence_id
@@ -49,6 +50,10 @@ class GdeltQueryPlace:
     precision: str | None = None
     source_key: str | None = None
     source_record_id: str | None = None
+
+
+class GdeltRateLimitError(RuntimeError):
+    """Raised when GDELT asks this client to stop sending requests."""
 
 
 class SamplePublicWebNewsAdapter:
@@ -193,6 +198,22 @@ class GdeltPublicNewsBackfillAdapter:
             )
             try:
                 payload = self._fetch_json(url)
+            except HTTPError as exc:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                self._log_progress(
+                    query_index=query_index,
+                    query_count=query_count,
+                    fetched_count=len(raw_items),
+                    phase="failed",
+                    error_type=exc.__class__.__name__,
+                    error_status=exc.code,
+                    retry_after=retry_after,
+                )
+                if exc.code == 429:
+                    raise GdeltRateLimitError(
+                        _rate_limit_message(retry_after=retry_after)
+                    ) from exc
+                continue
             except Exception as exc:
                 self._log_progress(
                     query_index=query_index,
@@ -305,6 +326,8 @@ class GdeltPublicNewsBackfillAdapter:
         fetched_count: int,
         phase: str,
         error_type: str | None = None,
+        error_status: int | None = None,
+        retry_after: str | None = None,
     ) -> None:
         if self._progress_log_interval <= 0:
             return
@@ -325,6 +348,10 @@ class GdeltPublicNewsBackfillAdapter:
         }
         if error_type is not None:
             payload["error_type"] = error_type
+        if error_status is not None:
+            payload["error_status"] = error_status
+        if retry_after:
+            payload["retry_after"] = retry_after
         print(
             json.dumps(payload, sort_keys=True),
             flush=True,
@@ -378,6 +405,12 @@ def _should_log_progress(*, query_index: int, query_count: int, interval: int) -
     if interval <= 0:
         return False
     return query_index == 1 or query_index == query_count or query_index % interval == 0
+
+
+def _rate_limit_message(*, retry_after: str | None) -> str:
+    if retry_after:
+        return f"GDELT returned HTTP 429 Too Many Requests; retry after {retry_after}"
+    return "GDELT returned HTTP 429 Too Many Requests"
 
 
 def _metadata_only_article_payload(article: Mapping[str, Any]) -> dict[str, Any]:

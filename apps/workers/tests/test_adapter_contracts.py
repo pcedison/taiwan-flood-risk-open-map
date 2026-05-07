@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from email.message import Message
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlparse
+
+import pytest
 
 from app.adapters.contracts import DataSourceAdapter, EventType, IngestionStatus, SourceFamily
 from app.adapters.dcard import DcardCandidateFixtureAdapter
-from app.adapters.news import GdeltPublicNewsBackfillAdapter, GdeltQueryPlace, SamplePublicWebNewsAdapter
+from app.adapters.news import (
+    GdeltPublicNewsBackfillAdapter,
+    GdeltQueryPlace,
+    GdeltRateLimitError,
+    SamplePublicWebNewsAdapter,
+)
 from app.adapters.ptt import PttCandidateFixtureAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
@@ -153,6 +162,37 @@ def test_gdelt_backfill_progress_logs_first_final_and_fetch_failures(capsys) -> 
     assert progress[-1]["query_index"] == 2
     assert progress[-1]["query_count"] == 2
     assert progress[-1]["metadata_only"] is True
+
+
+def test_gdelt_backfill_stops_on_rate_limit_and_logs_retry_after(capsys) -> None:
+    headers = Message()
+    headers["Retry-After"] = "120"
+
+    def fetch_json(url: str) -> dict[str, object]:
+        raise HTTPError(url, 429, "Too Many Requests", headers, fp=None)
+
+    adapter = GdeltPublicNewsBackfillAdapter(
+        ("rate limited query", "must not continue"),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, 1, 2, 3, tzinfo=timezone.utc),
+        end_datetime=datetime(2025, 8, 5, 4, 5, 6, tzinfo=timezone.utc),
+        progress_log_interval=1,
+        fetch_json=fetch_json,
+    )
+
+    with pytest.raises(GdeltRateLimitError, match="429 Too Many Requests"):
+        adapter.fetch()
+
+    progress = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.strip()
+    ]
+    assert [event["phase"] for event in progress] == ["started", "failed"]
+    assert progress[-1]["error_type"] == "HTTPError"
+    assert progress[-1]["error_status"] == 429
+    assert progress[-1]["retry_after"] == "120"
+    assert progress[-1]["query_index"] == 1
 
 
 def test_gdelt_backfill_dedupes_by_url_and_keeps_metadata_only() -> None:
