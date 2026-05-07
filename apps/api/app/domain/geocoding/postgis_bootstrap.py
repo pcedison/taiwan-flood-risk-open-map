@@ -3,11 +3,13 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
+LOGGER = logging.getLogger(__name__)
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS geocoder_open_data_entries (
@@ -121,12 +123,22 @@ def start_postgis_geocoder_bootstrap(
     if not enabled or not database_url or not paths:
         return
     thread = threading.Thread(
-        target=bootstrap_postgis_geocoder,
+        target=_bootstrap_postgis_geocoder_thread,
         kwargs={"database_url": database_url, "paths": paths},
         name="postgis-geocoder-bootstrap",
         daemon=True,
     )
     thread.start()
+
+
+def _bootstrap_postgis_geocoder_thread(*, database_url: str, paths: tuple[str, ...]) -> None:
+    try:
+        bootstrap_postgis_geocoder(database_url=database_url, paths=paths)
+    except Exception as exc:
+        LOGGER.warning(
+            "PostGIS geocoder bootstrap failed; service continues with file-backed fallback: %s",
+            exc,
+        )
 
 
 def bootstrap_postgis_geocoder(*, database_url: str, paths: tuple[str, ...]) -> None:
@@ -191,8 +203,14 @@ def bootstrap_postgis_geocoder(*, database_url: str, paths: tuple[str, ...]) -> 
                     )
                     connection.commit()
             finally:
-                cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", ("flood-risk-geocoder-bootstrap",))
-                connection.commit()
+                try:
+                    cursor.execute(
+                        "SELECT pg_advisory_unlock(hashtext(%s))",
+                        ("flood-risk-geocoder-bootstrap",),
+                    )
+                    connection.commit()
+                except psycopg.Error:
+                    LOGGER.warning("PostGIS geocoder bootstrap connection closed before advisory unlock.")
 
 
 def fetch_postgis_geocoder_summary(database_url: str) -> dict[str, Any]:

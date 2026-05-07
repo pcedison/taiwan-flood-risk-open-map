@@ -106,7 +106,7 @@ def get_settings() -> Settings:
         ),
         geocoder_postgis_bootstrap_enabled=_env_bool(
             "GEOCODER_POSTGIS_BOOTSTRAP_ENABLED",
-            default=_hosted_runtime(app_env),
+            default=False,
         ),
         historical_news_on_demand_enabled=_env_bool(
             "HISTORICAL_NEWS_ON_DEMAND_ENABLED",
