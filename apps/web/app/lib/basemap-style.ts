@@ -341,7 +341,7 @@ function buildBasemapLabelLayers(source: string): StyleLayer[] {
     ["get", "name"],
     ["get", "name:en"],
   ] as ExpressionSpecification;
-  const labelFont = ["Open Sans Regular", "Arial Unicode MS Regular"];
+  const labelFont = ["Noto Sans Regular"];
 
   return [
     {

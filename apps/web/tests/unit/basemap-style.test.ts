@@ -123,10 +123,7 @@ test("external PMTiles styles are patched with text labels and glyphs", () => {
   assert.equal(roadLabel?.["source-layer"], "roads");
   assert.equal(roadLabel?.minzoom, 11);
   assert.equal(roadLabel?.layout?.["symbol-placement"], "line");
-  assert.deepEqual(roadLabel?.layout?.["text-font"], [
-    "Open Sans Regular",
-    "Arial Unicode MS Regular",
-  ]);
+  assert.deepEqual(roadLabel?.layout?.["text-font"], ["Noto Sans Regular"]);
 });
 
 test("interactive max zoom allows vector overzoom for readable street labels", () => {
