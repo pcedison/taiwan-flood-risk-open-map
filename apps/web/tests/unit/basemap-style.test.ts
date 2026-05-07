@@ -4,6 +4,7 @@ import test from "node:test";
 const basemapModulePath = "../../app/lib/basemap-style.ts";
 const {
   buildPmtilesBasemapStyle,
+  ensureBasemapLabelLayers,
   getBasemapStyleConfig,
   loadRuntimeBasemapStyleConfig,
 } = (await import(basemapModulePath)) as typeof import("../../app/lib/basemap-style");
@@ -21,7 +22,9 @@ type VectorSourceForTest = {
 
 type LayerWithSourceLayerForTest = {
   id?: string;
+  layout?: Record<string, unknown>;
   "source-layer"?: string;
+  type?: string;
 };
 
 type AttributedSourceForTest = {
@@ -69,6 +72,9 @@ test("PMTiles configuration builds a vector basemap style", () => {
   assert.equal(sourceLayerNames(config.style.layers).includes("roads"), true);
   assert.equal(sourceLayerNames(config.style.layers).includes("boundaries"), true);
   assert.equal(config.style.layers.some((layer) => layer.id === "base-roads"), true);
+  assert.match(config.style.glyphs ?? "", /basemaps-assets\/fonts/);
+  assert.equal(config.style.layers.some((layer) => layer.id === "base-road-labels"), true);
+  assert.equal(config.style.layers.some((layer) => layer.id === "base-place-labels"), true);
 });
 
 test("PMTiles helper does not duplicate pmtiles protocol prefixes", () => {
@@ -76,6 +82,48 @@ test("PMTiles helper does not duplicate pmtiles protocol prefixes", () => {
 
   assert.equal(style.sources.basemap.type, "vector");
   assert.equal(style.sources.basemap.url, "pmtiles://https://cdn.example.test/taiwan.pmtiles");
+});
+
+test("external PMTiles styles are patched with text labels and glyphs", () => {
+  const style = ensureBasemapLabelLayers({
+    version: 8,
+    sources: {
+      basemap: {
+        type: "vector",
+        url: "pmtiles://https://cdn.example.test/taiwan.pmtiles",
+      },
+    },
+    layers: [
+      {
+        id: "roads",
+        type: "line",
+        source: "basemap",
+        "source-layer": "roads",
+        paint: {
+          "line-color": "#fff",
+        },
+      },
+    ],
+  });
+
+  const roadLabel = style.layers.find((layer) => layer.id === "base-road-labels") as
+    | LayerWithSourceLayerForTest
+    | undefined;
+
+  assert.match(style.glyphs ?? "", /basemaps-assets\/fonts/);
+  assert.equal(roadLabel?.type, "symbol");
+  assert.equal(roadLabel?.["source-layer"], "roads");
+  assert.equal(roadLabel?.layout?.["symbol-placement"], "line");
+});
+
+test("label patch is idempotent", () => {
+  const style = buildPmtilesBasemapStyle("https://cdn.example.test/taiwan.pmtiles");
+  const patched = ensureBasemapLabelLayers(style);
+
+  assert.equal(
+    patched.layers.filter((layer) => layer.id === "base-road-labels").length,
+    1,
+  );
 });
 
 test("runtime BASEMAP aliases avoid build-time NEXT_PUBLIC inlining", () => {

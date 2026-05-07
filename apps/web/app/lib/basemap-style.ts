@@ -1,4 +1,4 @@
-import type { StyleSpecification } from "maplibre-gl";
+import type { ExpressionSpecification, StyleSpecification } from "maplibre-gl";
 
 export type BasemapKind =
   | "style-url"
@@ -27,7 +27,17 @@ export type BasemapEnv = {
   NODE_ENV?: string;
 };
 
+type StyleLayer = StyleSpecification["layers"][number];
+type SourceLayerStyleLayer = StyleLayer & {
+  source?: string;
+  "source-layer"?: string;
+};
+
 const PUBLIC_OSM_RASTER_TILES = ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"];
+const PROTOMAPS_GLYPHS_URL =
+  "https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf";
+const DEFAULT_OPEN_BASEMAP_ATTRIBUTION =
+  '<a href="https://www.openstreetmap.org/copyright" target="_blank">&copy; OpenStreetMap contributors</a>';
 const DEV_OSM_WARNING =
   "Development fallback is using public OpenStreetMap raster tiles. Do not use this fallback for hosted public beta or production traffic.";
 const PRODUCTION_BASEMAP_WARNING =
@@ -114,10 +124,7 @@ export function getBasemapStyleConfig(env: BasemapEnv = readBasemapEnv()): Basem
   return buildUnconfiguredBasemapFallback({ isProduction, warnings: [] });
 }
 
-type BasemapConfigFetch = (
-  input: RequestInfo | URL,
-  init?: RequestInit,
-) => Promise<Response>;
+type BasemapConfigFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 export async function loadRuntimeBasemapStyleConfig(
   fetcher: BasemapConfigFetch = fetch,
@@ -142,11 +149,11 @@ export async function loadRuntimeBasemapStyleConfig(
 
 export function buildPmtilesBasemapStyle(
   pmtilesUrl: string,
-  attribution = "OpenStreetMap 貢獻者",
+  attribution = DEFAULT_OPEN_BASEMAP_ATTRIBUTION,
 ): StyleSpecification {
   const sourceUrl = pmtilesUrl.startsWith("pmtiles://") ? pmtilesUrl : `pmtiles://${pmtilesUrl}`;
 
-  return {
+  return ensureBasemapLabelLayers({
     version: 8,
     sources: {
       basemap: {
@@ -226,12 +233,30 @@ export function buildPmtilesBasemapStyle(
         },
       },
     ],
+  });
+}
+
+export function ensureBasemapLabelLayers(style: StyleSpecification): StyleSpecification {
+  const basemapSource = findVectorBasemapSource(style);
+  if (!basemapSource) return style;
+
+  const existingLayerIds = new Set(style.layers.map((layer) => layer.id));
+  const missingLabelLayers = buildBasemapLabelLayers(basemapSource).filter(
+    (layer) => !existingLayerIds.has(layer.id),
+  );
+
+  if (missingLabelLayers.length === 0 && style.glyphs) return style;
+
+  return {
+    ...style,
+    glyphs: style.glyphs || PROTOMAPS_GLYPHS_URL,
+    layers: [...style.layers, ...missingLabelLayers],
   };
 }
 
 export function buildRasterBasemapStyle(
   tiles: string[],
-  attribution = "底圖貢獻者",
+  attribution = DEFAULT_OPEN_BASEMAP_ATTRIBUTION,
 ): StyleSpecification {
   return {
     version: 8,
@@ -279,6 +304,101 @@ export function buildNoTileBasemapStyle(): StyleSpecification {
   };
 }
 
+function buildBasemapLabelLayers(source: string): StyleLayer[] {
+  const localNameExpression = [
+    "coalesce",
+    ["get", "name:zh-Hant"],
+    ["get", "name"],
+    ["get", "name:en"],
+  ] as ExpressionSpecification;
+  const labelFont = ["Noto Sans Regular"];
+
+  return [
+    {
+      id: "base-place-labels",
+      type: "symbol",
+      source,
+      "source-layer": "places",
+      minzoom: 6,
+      filter: ["has", "name"],
+      layout: {
+        "text-field": localNameExpression,
+        "text-font": labelFont,
+        "text-size": ["interpolate", ["linear"], ["zoom"], 6, 10, 11, 12, 15, 16],
+        "text-max-width": 8,
+        "text-padding": 3,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+      },
+      paint: {
+        "text-color": "#314238",
+        "text-halo-color": "#f8fbf5",
+        "text-halo-width": 1.3,
+      },
+    },
+    {
+      id: "base-poi-labels",
+      type: "symbol",
+      source,
+      "source-layer": "pois",
+      minzoom: 15,
+      filter: ["has", "name"],
+      layout: {
+        "text-field": localNameExpression,
+        "text-font": labelFont,
+        "text-size": ["interpolate", ["linear"], ["zoom"], 15, 10, 17, 12],
+        "text-max-width": 7,
+        "text-padding": 2,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+      },
+      paint: {
+        "text-color": "#52615a",
+        "text-halo-color": "#f8fbf5",
+        "text-halo-width": 1,
+      },
+    },
+    {
+      id: "base-road-labels",
+      type: "symbol",
+      source,
+      "source-layer": "roads",
+      minzoom: 12,
+      filter: ["has", "name"],
+      layout: {
+        "symbol-placement": "line",
+        "symbol-spacing": ["interpolate", ["linear"], ["zoom"], 12, 360, 15, 220, 17, 160],
+        "text-field": localNameExpression,
+        "text-font": labelFont,
+        "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 15, 13, 17, 15],
+        "text-rotation-alignment": "map",
+        "text-pitch-alignment": "viewport",
+        "text-letter-spacing": 0,
+        "text-padding": 2,
+        "text-allow-overlap": false,
+        "text-ignore-placement": false,
+      },
+      paint: {
+        "text-color": "#5b5f59",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.5,
+      },
+    },
+  ] as StyleLayer[];
+}
+
+function findVectorBasemapSource(style: StyleSpecification): string | null {
+  const sourceFromRoadLayer = style.layers
+    .map((layer) => layer as SourceLayerStyleLayer)
+    .find((layer) => layer["source-layer"] === "roads" && typeof layer.source === "string")
+    ?.source;
+  if (sourceFromRoadLayer) return sourceFromRoadLayer;
+
+  const sourceEntries = Object.entries(style.sources);
+  const vectorSource = sourceEntries.find(([, source]) => source.type === "vector");
+  return vectorSource?.[0] ?? null;
+}
+
 function buildUnconfiguredBasemapFallback({
   isProduction,
   warnings,
@@ -296,7 +416,7 @@ function buildUnconfiguredBasemapFallback({
 
   return {
     kind: "dev-osm-raster",
-    style: buildRasterBasemapStyle(PUBLIC_OSM_RASTER_TILES, "OpenStreetMap 貢獻者"),
+    style: buildRasterBasemapStyle(PUBLIC_OSM_RASTER_TILES, DEFAULT_OPEN_BASEMAP_ATTRIBUTION),
     warnings: [...warnings, DEV_OSM_WARNING],
   };
 }
@@ -311,7 +431,7 @@ function parseRasterTiles(value: string | undefined): string[] {
 function attributionFromEnv(env: BasemapEnv): string {
   return (
     basemapEnvValue(env, "NEXT_PUBLIC_BASEMAP_ATTRIBUTION", "BASEMAP_ATTRIBUTION") ||
-    "OpenStreetMap 貢獻者"
+    DEFAULT_OPEN_BASEMAP_ATTRIBUTION
   );
 }
 
