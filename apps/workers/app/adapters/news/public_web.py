@@ -175,6 +175,13 @@ class GdeltPublicNewsBackfillAdapter:
         seen_urls: set[str] = set()
         query_count = len(self._queries)
         for index, query in enumerate(self._queries):
+            query_index = index + 1
+            self._log_progress(
+                query_index=query_index,
+                query_count=query_count,
+                fetched_count=len(raw_items),
+                phase="started",
+            )
             if index > 0 and self._request_cadence_seconds > 0:
                 self._sleep(float(self._request_cadence_seconds))
             url = _gdelt_url(
@@ -186,7 +193,14 @@ class GdeltPublicNewsBackfillAdapter:
             )
             try:
                 payload = self._fetch_json(url)
-            except Exception:
+            except Exception as exc:
+                self._log_progress(
+                    query_index=query_index,
+                    query_count=query_count,
+                    fetched_count=len(raw_items),
+                    phase="failed",
+                    error_type=exc.__class__.__name__,
+                )
                 continue
             articles = payload.get("articles", ()) if isinstance(payload, Mapping) else ()
             for article in articles:
@@ -217,9 +231,10 @@ class GdeltPublicNewsBackfillAdapter:
                     )
                 )
             self._log_progress(
-                query_index=index + 1,
+                query_index=query_index,
                 query_count=query_count,
                 fetched_count=len(raw_items),
+                phase="completed",
             )
         return tuple(raw_items)
 
@@ -282,23 +297,36 @@ class GdeltPublicNewsBackfillAdapter:
             rejected=tuple(rejected),
         )
 
-    def _log_progress(self, *, query_index: int, query_count: int, fetched_count: int) -> None:
+    def _log_progress(
+        self,
+        *,
+        query_index: int,
+        query_count: int,
+        fetched_count: int,
+        phase: str,
+        error_type: str | None = None,
+    ) -> None:
         if self._progress_log_interval <= 0:
             return
-        if query_index < query_count and query_index % self._progress_log_interval != 0:
+        if not _should_log_progress(
+            query_index=query_index,
+            query_count=query_count,
+            interval=self._progress_log_interval,
+        ):
             return
+        payload: dict[str, Any] = {
+            "event": "gdelt_backfill.progress",
+            "adapter_key": self.metadata.key,
+            "phase": phase,
+            "query_index": query_index,
+            "query_count": query_count,
+            "fetched_count": fetched_count,
+            "metadata_only": True,
+        }
+        if error_type is not None:
+            payload["error_type"] = error_type
         print(
-            json.dumps(
-                {
-                    "event": "gdelt_backfill.progress",
-                    "adapter_key": self.metadata.key,
-                    "query_index": query_index,
-                    "query_count": query_count,
-                    "fetched_count": fetched_count,
-                    "metadata_only": True,
-                },
-                sort_keys=True,
-            ),
+            json.dumps(payload, sort_keys=True),
             flush=True,
         )
 
@@ -344,6 +372,12 @@ def _source_id(url: str) -> str:
 
 def _clamp_gdelt_max_records(max_records: int) -> int:
     return max(1, min(max_records, GDELT_MAX_RECORDS_PER_QUERY))
+
+
+def _should_log_progress(*, query_index: int, query_count: int, interval: int) -> bool:
+    if interval <= 0:
+        return False
+    return query_index == 1 or query_index == query_count or query_index % interval == 0
 
 
 def _metadata_only_article_payload(article: Mapping[str, Any]) -> dict[str, Any]:

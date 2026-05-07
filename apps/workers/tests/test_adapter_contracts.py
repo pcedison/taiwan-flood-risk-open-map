@@ -117,6 +117,44 @@ def test_gdelt_backfill_url_construction_and_max_records_clamp() -> None:
     assert params["enddatetime"] == ["20250805040506"]
 
 
+def test_gdelt_backfill_progress_logs_first_final_and_fetch_failures(capsys) -> None:
+    calls: list[str] = []
+
+    def fetch_json(url: str) -> dict[str, object]:
+        calls.append(url)
+        if len(calls) == 1:
+            raise TimeoutError("fixture timeout")
+        return {"articles": []}
+
+    adapter = GdeltPublicNewsBackfillAdapter(
+        ("first query", "second query"),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, 1, 2, 3, tzinfo=timezone.utc),
+        end_datetime=datetime(2025, 8, 5, 4, 5, 6, tzinfo=timezone.utc),
+        progress_log_interval=250,
+        fetch_json=fetch_json,
+    )
+
+    assert adapter.fetch() == ()
+
+    progress = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.strip()
+    ]
+    assert [event["phase"] for event in progress] == [
+        "started",
+        "failed",
+        "started",
+        "completed",
+    ]
+    assert progress[0]["query_index"] == 1
+    assert progress[1]["error_type"] == "TimeoutError"
+    assert progress[-1]["query_index"] == 2
+    assert progress[-1]["query_count"] == 2
+    assert progress[-1]["metadata_only"] is True
+
+
 def test_gdelt_backfill_dedupes_by_url_and_keeps_metadata_only() -> None:
     adapter = GdeltPublicNewsBackfillAdapter(
         ("台南市安南區積淹水", "台南市安南區豪雨"),
