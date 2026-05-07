@@ -84,7 +84,8 @@ NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 WIKIMEDIA_API_URL = "https://zh.wikipedia.org/w/api.php"
 NOMINATIM_USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
-LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test"}
+LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
+OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
 _ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
 
 
@@ -699,40 +700,40 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
             tuple(historical_evidence_items) if on_demand_news.records else None
         )
     else:
+        needs_historical_event_lookup = _needs_historical_event_lookup(
+            historical_records=(),
+            db_evidence_items=db_evidence_items,
+        )
         historical_records = (
             _fallback_historical_records(request)
-            if not db_evidence_items and _use_local_historical_fallback(settings.app_env)
+            if needs_historical_event_lookup and _use_local_historical_fallback(settings.app_env)
             else ()
         )
         if historical_records:
-            historical_evidence_items = [
+            historical_record_evidence_items = [
                 _historical_record_evidence(record, distance_to_query_m=distance_m)
                 for record, distance_m in historical_records
             ]
-            historical_signals = tuple(
-                _signal_from_historical_record(
-                    record,
-                    distance_to_query_m=_historical_scoring_distance(
-                        record=record,
-                        distance_to_query_m=distance_m,
-                        radius_m=request.radius_m,
-                        location_text=request.location_text,
-                    ),
-                )
-                for record, distance_m in historical_records
+            historical_evidence_items = [*db_evidence_items, *historical_record_evidence_items]
+            historical_signals = (
+                *tuple(_signal_from_evidence(item) for item in db_evidence_items),
+                *tuple(
+                    _signal_from_historical_record(
+                        record,
+                        distance_to_query_m=_historical_scoring_distance(
+                            record=record,
+                            distance_to_query_m=distance_m,
+                            radius_m=request.radius_m,
+                            location_text=request.location_text,
+                        ),
+                    )
+                    for record, distance_m in historical_records
+                ),
             )
-            historical_freshness_db_items = None
+            historical_freshness_db_items = tuple(historical_evidence_items) if db_evidence_items else None
         else:
-            if not db_evidence_items:
-                on_demand_news = search_public_flood_news(
-                    location_text=request.location_text,
-                    lat=request.point.lat,
-                    lng=request.point.lng,
-                    radius_m=request.radius_m,
-                    now=created_at,
-                    max_records=settings.historical_news_on_demand_max_records,
-                    timeout_seconds=settings.historical_news_on_demand_timeout_seconds,
-                ) if _use_on_demand_public_news(settings) else on_demand_news
+            if needs_historical_event_lookup:
+                on_demand_news = _on_demand_public_news_result(request, now=created_at)
             on_demand_evidence_items = _persist_or_build_on_demand_evidence(
                 on_demand_news,
                 writeback_enabled=settings.historical_news_on_demand_writeback_enabled,
@@ -838,9 +839,12 @@ def _on_demand_public_news_result(
     settings = get_settings()
     if not _use_on_demand_public_news(settings):
         return OnDemandNewsSearchResult(
-            attempted=False,
+            attempted=bool((request.location_text or "").strip()),
             source_id="on-demand-public-news",
-            message="公開新聞即時補查未啟用。",
+            message=(
+                "公開新聞即時補查未啟用；需完成新聞來源旗標與條款確認後，"
+                "才會查詢公開新聞索引。"
+            ),
             records=(),
         )
     return search_public_flood_news(
@@ -860,6 +864,24 @@ def _use_on_demand_public_news(settings: Any) -> bool:
     if settings.app_env.strip().lower() in {"production", "staging", "production-beta"}:
         return settings.source_news_enabled and settings.source_terms_review_ack
     return True
+
+
+def _needs_historical_event_lookup(
+    *,
+    historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
+    db_evidence_items: tuple[Evidence, ...] | None,
+) -> bool:
+    return (
+        not historical_records
+        and not _has_observed_historical_event(db_evidence_items or ())
+    )
+
+
+def _has_observed_historical_event(evidence_items: tuple[Evidence, ...]) -> bool:
+    return any(
+        item.event_type in OBSERVED_HISTORICAL_EVENT_TYPES
+        for item in evidence_items
+    )
 
 
 def _persist_or_build_on_demand_evidence(
@@ -1095,12 +1117,18 @@ def _historical_data_freshness(
     return DataFreshness(
         source_id="db-evidence",
         name="淹水潛勢與歷史資料庫" if only_flood_potential else "歷史淹水紀錄與公開新聞",
-        health_status="healthy" if db_evidence_items else "unknown",
+        health_status=(
+            "degraded"
+            if only_flood_potential
+            else "healthy"
+            if db_evidence_items
+            else "unknown"
+        ),
         observed_at=latest_observed,
         ingested_at=latest_ingested or now,
         message=(
             f"查詢半徑內與 {len(db_evidence_items)} 筆淹水潛勢規劃圖資相交；"
-            "這是歷史與情境參考，不代表目前正在淹水或即時災害警報。"
+            "這是情境參考，不是實際歷史淹水事件；仍需公開新聞或災情紀錄佐證。"
             if only_flood_potential
             else f"查詢半徑內找到 {len(db_evidence_items)} 筆已審核歷史資料。"
             if db_evidence_items
@@ -1153,8 +1181,16 @@ def _visible_source_limitations(
         water_level = statuses.get("wra-water-level")
         if water_level is not None:
             limitations.append(water_level.message or "即時水位資料目前沒有可用測站。")
-    if not historical_records and not db_evidence_items:
-        limitations.append("查詢半徑內尚未匯入歷史淹水紀錄；目前資料不足，不能標記為低風險或購屋安全。")
+    has_historical_event = (
+        bool(historical_records)
+        or _has_observed_historical_event(db_evidence_items or ())
+        or bool(on_demand_news.records)
+    )
+    if not has_historical_event:
+        limitations.append(
+            "查詢半徑內尚未匯入實際歷史淹水事件或公開新聞紀錄；"
+            "目前資料不足，淹水潛勢圖資只能作為情境參考，不能標記為低風險或購屋安全。"
+        )
     if on_demand_news.attempted and not on_demand_news.records and on_demand_news.message:
         limitations.append(
             f"公開新聞補查未取得可用事件：{on_demand_news.message}。"

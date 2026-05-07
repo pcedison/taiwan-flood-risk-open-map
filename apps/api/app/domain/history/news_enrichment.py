@@ -190,6 +190,9 @@ def _admin_and_road_terms(location: str) -> tuple[str, ...]:
     for match in _ROAD_PATTERN.finditer(normalized):
         road = match.group(0)
         terms.append(road)
+        trimmed_road = _trim_admin_prefix(road)
+        if trimmed_road != road:
+            terms.append(trimmed_road)
         for city in _CITY_ALIASES:
             if road.startswith(city) and len(road) > len(city) + 2:
                 terms.append(road[len(city) :])
@@ -199,6 +202,13 @@ def _admin_and_road_terms(location: str) -> tuple[str, ...]:
             prefix = normalized.split(marker, 1)[0] + marker
             terms.append(prefix)
     return _dedupe(terms, limit=8)
+
+
+def _trim_admin_prefix(value: str) -> str:
+    for marker in ("縣", "市", "區", "鄉", "鎮", "里", "村"):
+        if marker in value:
+            value = value.rsplit(marker, 1)[-1]
+    return value
 
 
 def _city_tail_district_terms(city: str, tail: str) -> tuple[str, ...]:

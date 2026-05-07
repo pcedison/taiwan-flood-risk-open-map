@@ -493,7 +493,8 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert payload["confidence"]["level"] in CONFIDENCE_LEVELS
     assert len(payload["evidence"]) >= 2
     assert payload["explanation"]["missing_sources"] == [
-        "查詢半徑內尚未匯入歷史淹水紀錄；目前資料不足，不能標記為低風險或購屋安全。"
+        "查詢半徑內尚未匯入實際歷史淹水事件或公開新聞紀錄；"
+        "目前資料不足，淹水潛勢圖資只能作為情境參考，不能標記為低風險或購屋安全。"
     ]
     assert set(payload["evidence"][0]) == {
         "id",
@@ -568,6 +569,167 @@ def test_risk_assess_uses_db_evidence_when_repository_is_available(monkeypatch) 
     assert payload["evidence"][0]["id"] == "b3f22a36-7316-4e2a-92b6-c6f6443c8528"
     assert payload["evidence"][0]["source_type"] == "news"
     assert not any("甇瑕" in source for source in payload["explanation"]["missing_sources"])
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_uses_curated_history_when_db_only_has_flood_potential(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (_flood_potential_record(),),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.65646, "lng": 120.32574},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "三民區本和里大豐一路",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["historical"]["level"] == "高"
+    assert any("本和里" in item["title"] for item in payload["evidence"])
+    assert any(item["event_type"] == "flood_potential" for item in payload["evidence"])
+    assert not any(
+        "尚未匯入實際歷史淹水事件" in source
+        for source in payload["explanation"]["missing_sources"]
+    )
+    assert payload["data_freshness"][-1]["source_id"] == "db-evidence"
+    assert payload["data_freshness"][-1]["health_status"] == "healthy"
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_attempts_on_demand_news_when_db_only_has_flood_potential(
+    monkeypatch,
+) -> None:
+    now = datetime.fromisoformat("2026-05-04T03:00:00+00:00")
+    enrichment_record = EvidenceUpsert(
+        id="b495328e-994b-5430-9bda-7a701494d966",
+        adapter_key="news.public_web.gdelt_backfill",
+        source_id="gdelt-on-demand:test-sanmin",
+        source_type="news",
+        event_type="flood_report",
+        title="高雄三民區大豐一路淹水 地下室災情嚴重",
+        summary="公開新聞索引標題與查詢地點及淹水關鍵字相符。",
+        url="https://example.test/news/sanmin-flood",
+        occurred_at=now,
+        observed_at=now,
+        ingested_at=now,
+        lat=22.65646,
+        lng=120.32574,
+        distance_to_query_m=0.0,
+        confidence=0.9,
+        freshness_score=0.95,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref="gdelt-doc:test-sanmin",
+        properties={"full_text_stored": False},
+    )
+    calls: list[str | None] = []
+
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (_flood_potential_record(),),
+    )
+    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+
+    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
+        calls.append(kwargs.get("location_text"))
+        return public_routes.OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="on-demand-public-news",
+            message="已從公開新聞索引補查並整理 1 筆候選淹水事件。",
+            records=(enrichment_record,),
+        )
+
+    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
+    monkeypatch.setattr(public_routes, "upsert_public_evidence", lambda **_kwargs: ())
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.65646, "lng": 120.32574},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "三民區本和里大豐一路",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == ["三民區本和里大豐一路"]
+    assert any("大豐一路" in item["title"] for item in payload["evidence"])
+    assert any(item["event_type"] == "flood_potential" for item in payload["evidence"])
+    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
+    assert payload["data_freshness"][-1]["health_status"] == "healthy"
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_marks_flood_potential_only_history_as_limited(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (_flood_potential_record(),),
+    )
+    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+    monkeypatch.setattr(
+        public_routes,
+        "search_public_flood_news",
+        lambda **_kwargs: public_routes.OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="on-demand-public-news",
+            message="公開新聞索引暫時沒有可採用候選事件。",
+            records=(),
+        ),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.65646, "lng": 120.32574},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "三民區本和里大豐一路",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    db_status = next(item for item in payload["data_freshness"] if item["source_id"] == "db-evidence")
+    assert db_status["health_status"] == "degraded"
+    assert "不是實際歷史淹水事件" in db_status["message"]
+    assert any(
+        "尚未匯入實際歷史淹水事件" in source
+        for source in payload["explanation"]["missing_sources"]
+    )
+    assert any(
+        "不代表該地點沒有淹水紀錄" in source
+        for source in payload["explanation"]["missing_sources"]
+    )
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
@@ -1020,6 +1182,30 @@ def _db_evidence_record() -> EvidenceRecord:
         source_weight=1.0,
         privacy_level="public",
         raw_ref="raw/news/accepted.json",
+    )
+
+
+def _flood_potential_record() -> EvidenceRecord:
+    return EvidenceRecord(
+        id="9497f7ec-cc75-4976-8b7a-80b3475adab8",
+        source_id="dprc-taiwan-flood-potential-139",
+        source_type="official",
+        event_type="flood_potential",
+        title="官方淹水潛勢規劃圖資",
+        summary="查詢範圍與官方淹水潛勢規劃圖資相交。",
+        url="https://data.gov.tw/dataset/25768",
+        occurred_at=None,
+        observed_at=None,
+        ingested_at=datetime.fromisoformat("2026-05-05T11:13:39+00:00"),
+        lat=22.65646,
+        lng=120.32574,
+        geometry={"type": "Polygon", "coordinates": [[[120.325, 22.656], [120.326, 22.656], [120.326, 22.657], [120.325, 22.656]]]},
+        distance_to_query_m=0.0,
+        confidence=0.78,
+        freshness_score=0.8,
+        source_weight=0.9,
+        privacy_level="public",
+        raw_ref="raw/flood-potential/test.geojson",
     )
 
 

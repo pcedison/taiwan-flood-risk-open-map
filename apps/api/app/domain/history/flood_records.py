@@ -171,6 +171,46 @@ _HISTORICAL_FLOOD_RECORDS = (
         source_weight=0.9,
         risk_factor=1.0,
     ),
+    HistoricalFloodRecord(
+        source_id="history-news:kaohsiung-sanmin-2024-07-27:benhe-tvbs",
+        source_name="TVBS：高雄三民本和里凱米淹水",
+        source_type="news",
+        event_type="flood_report",
+        title="2024-07-27 高雄三民區本和里凱米颱風期間嚴重淹水",
+        summary=(
+            "TVBS 報導指出，凱米颱風後高雄市三民區本和里為淹水重災區之一，"
+            "滯洪池周邊住戶一樓與地下室泡水，災後清運大型家具與家電。"
+        ),
+        url="https://news.tvbs.com.tw/life/2565010",
+        occurred_at=datetime(2024, 7, 27, 13, 1, tzinfo=_TAIWAN_TZ),
+        ingested_at=datetime(2026, 5, 7, 4, 45, tzinfo=UTC),
+        lat=22.65646,
+        lng=120.32574,
+        confidence=0.9,
+        freshness_score=0.88,
+        source_weight=1.0,
+        risk_factor=1.0,
+    ),
+    HistoricalFloodRecord(
+        source_id="history-news:kaohsiung-sanmin-2024-07-26:benhe-deshan-pts",
+        source_name="公視：三民本和里與德山街周邊淹水停電",
+        source_type="news",
+        event_type="flood_report",
+        title="2024-07-26 高雄三民區本和里及德山街周邊大樓地下室淹水",
+        summary=(
+            "公視報導高雄三民區本和里及德山街一帶大樓在凱米颱風後清理泡水物品，"
+            "多棟大樓地下室淹水並影響供電。"
+        ),
+        url="https://news.pts.org.tw/article/706777",
+        occurred_at=datetime(2024, 7, 26, 12, 31, tzinfo=_TAIWAN_TZ),
+        ingested_at=datetime(2026, 5, 7, 4, 45, tzinfo=UTC),
+        lat=22.65646,
+        lng=120.32574,
+        confidence=0.86,
+        freshness_score=0.88,
+        source_weight=0.95,
+        risk_factor=1.0,
+    ),
 )
 
 

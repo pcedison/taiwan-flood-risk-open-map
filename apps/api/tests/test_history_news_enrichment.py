@@ -101,6 +101,43 @@ def test_search_public_flood_news_falls_back_to_admin_road_terms() -> None:
     assert record.source_weight < 0.86
 
 
+def test_search_public_flood_news_trims_village_prefix_for_numbered_road() -> None:
+    requested_queries: list[str] = []
+
+    def fetch_json(url: str, _timeout_seconds: float) -> dict[str, object]:
+        query = parse_qs(urlparse(url).query)["query"][0]
+        requested_queries.append(query)
+        if '"大豐一路"' not in query:
+            return {"articles": []}
+        return {
+            "articles": [
+                {
+                    "url": "https://example.test/news/sanmin-flood",
+                    "title": "高雄三民區大豐一路淹水 地下室災情嚴重",
+                    "seendate": "20240727090100",
+                    "domain": "example.test",
+                    "sourcecountry": "TW",
+                    "language": "Chinese",
+                }
+            ]
+        }
+
+    result = search_public_flood_news(
+        location_text="三民區本和里大豐一路",
+        lat=22.65646,
+        lng=120.32574,
+        radius_m=500,
+        now=datetime(2026, 5, 7, 3, 0, tzinfo=timezone.utc),
+        max_records=5,
+        timeout_seconds=2.5,
+        fetch_json=fetch_json,
+    )
+
+    assert any('"大豐一路"' in query for query in requested_queries)
+    assert len(result.records) == 1
+    assert result.records[0].properties["location_match_scope"] == "road"
+
+
 def test_search_public_flood_news_returns_not_attempted_without_location() -> None:
     result = search_public_flood_news(
         location_text=None,
