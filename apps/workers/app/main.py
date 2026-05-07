@@ -21,10 +21,6 @@ from app.jobs.historical_news_backfill import (
     run_historical_news_backfill_rehearsal,
 )
 from app.adapters.news.public_web import GdeltQueryPlace
-from app.jobs.gdelt_live_acceptance import (
-    render_gdelt_live_acceptance_json,
-    validate_gdelt_live_acceptance_file,
-)
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.query_heat import (
     SUPPORTED_QUERY_HEAT_PERIODS,
@@ -414,6 +410,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_gdelt_news_production_candidate(args=args, settings=settings)
 
     if args.validate_gdelt_live_acceptance:
+        from app.jobs.gdelt_live_acceptance import (
+            render_gdelt_live_acceptance_json,
+            validate_gdelt_live_acceptance_file,
+        )
+
         gdelt_acceptance = validate_gdelt_live_acceptance_file(
             Path(args.validate_gdelt_live_acceptance)
         )
