@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 from typing import Any, Callable, Iterable, Mapping
@@ -36,6 +37,18 @@ _GDELT_METADATA_FIELDS = frozenset(
         "language",
     }
 )
+
+
+@dataclass(frozen=True)
+class GdeltQueryPlace:
+    term: str
+    lat: float
+    lng: float
+    scope: str
+    canonical_name: str | None = None
+    precision: str | None = None
+    source_key: str | None = None
+    source_record_id: str | None = None
 
 
 class SamplePublicWebNewsAdapter:
@@ -137,6 +150,8 @@ class GdeltPublicNewsBackfillAdapter:
         end_datetime: datetime,
         max_records_per_query: int = 250,
         request_cadence_seconds: int = 0,
+        query_places: Iterable[GdeltQueryPlace] = (),
+        require_query_place_match: bool = False,
         fetch_json: FetchJson | None = None,
         sleep: Sleep | None = None,
         raw_snapshot_key: str | None = None,
@@ -147,6 +162,8 @@ class GdeltPublicNewsBackfillAdapter:
         self._end_datetime = end_datetime
         self._max_records_per_query = _clamp_gdelt_max_records(max_records_per_query)
         self._request_cadence_seconds = max(0, request_cadence_seconds)
+        self._query_places = _dedupe_query_places(query_places)
+        self._require_query_place_match = require_query_place_match
         self._fetch_json = fetch_json or _fetch_json
         self._sleep = sleep or time.sleep
         self._raw_snapshot_key = raw_snapshot_key
@@ -164,7 +181,10 @@ class GdeltPublicNewsBackfillAdapter:
                 end_datetime=self._end_datetime,
                 max_records=self._max_records_per_query,
             )
-            payload = self._fetch_json(url)
+            try:
+                payload = self._fetch_json(url)
+            except Exception:
+                continue
             articles = payload.get("articles", ()) if isinstance(payload, Mapping) else ()
             for article in articles:
                 if not isinstance(article, Mapping):
@@ -174,6 +194,12 @@ class GdeltPublicNewsBackfillAdapter:
                     continue
                 seen_urls.add(article_url)
                 article_payload = _metadata_only_article_payload(article)
+                matched_place = _match_query_place(article_payload, self._query_places)
+                if matched_place is not None:
+                    article_payload = {
+                        **article_payload,
+                        **_query_place_payload(matched_place),
+                    }
                 raw_items.append(
                     RawSourceItem(
                         source_id=_source_id(article_url),
@@ -193,6 +219,10 @@ class GdeltPublicNewsBackfillAdapter:
         payload = raw_item.payload
         title = str(payload.get("title", "")).strip()
         if not title:
+            return None
+
+        has_query_place = isinstance(payload.get("geometry"), Mapping)
+        if self._require_query_place_match and not has_query_place:
             return None
 
         published_at = parse_datetime(payload.get("seendate") or payload.get("published_at"))
@@ -217,7 +247,8 @@ class GdeltPublicNewsBackfillAdapter:
             source_timestamp=published_at,
             fetched_at=raw_item.fetched_at,
             summary=summary,
-            location_text=", ".join(location_terms) if location_terms else None,
+            location_text=optional_str(payload.get("location_text"))
+            or (", ".join(location_terms) if location_terms else None),
             confidence=_article_confidence(payload, location_terms),
             status=IngestionStatus.NORMALIZED,
             attribution=optional_str(payload.get("domain")),
@@ -301,6 +332,7 @@ def _location_extraction_text(payload: Mapping[str, Any]) -> str:
         part
         for part in (
             str(payload.get("title", "")),
+            str(payload.get("location_text", "")),
             str(payload.get("backfill_query", "")),
             str(payload.get("domain", "")),
             country_hint,
@@ -316,6 +348,12 @@ def _summary_from_article(
     title = str(payload.get("title", "")).strip()
     if not title:
         return ""
+    location_text = optional_str(payload.get("location_text"))
+    if location_text:
+        return (
+            "Public news title mentions a flood-related event and matched a controlled "
+            f"Taiwan geocoder term: {location_text}. Title: {title}"
+        )
     if location_terms:
         return f"Public news title mentions a flood-related event. Extracted locations: {', '.join(location_terms)}. Title: {title}"
     return f"Public news title mentions a flood-related event, but needs location enrichment. Title: {title}"
@@ -329,6 +367,55 @@ def _article_confidence(payload: Mapping[str, Any], location_terms: tuple[str, .
         score += 0.18
     if location_terms:
         score += 0.16
+    if isinstance(payload.get("geometry"), Mapping):
+        score += 0.08
     if payload.get("domain"):
         score += 0.06
     return min(score, 0.9)
+
+
+def _dedupe_query_places(places: Iterable[GdeltQueryPlace]) -> tuple[GdeltQueryPlace, ...]:
+    deduped: dict[str, GdeltQueryPlace] = {}
+    for place in places:
+        term = place.term.strip()
+        if not term:
+            continue
+        deduped.setdefault(_normalize_term(term), place)
+    return tuple(sorted(deduped.values(), key=lambda item: len(item.term), reverse=True))
+
+
+def _match_query_place(
+    payload: Mapping[str, Any],
+    places: tuple[GdeltQueryPlace, ...],
+) -> GdeltQueryPlace | None:
+    if not places:
+        return None
+    title = str(payload.get("title", ""))
+    normalized_title = _normalize_term(title)
+    if not normalized_title:
+        return None
+    for place in places:
+        normalized_term = _normalize_term(place.term)
+        if normalized_term and normalized_term in normalized_title:
+            return place
+    return None
+
+
+def _query_place_payload(place: GdeltQueryPlace) -> dict[str, Any]:
+    return {
+        "location_text": place.canonical_name or place.term,
+        "geometry": {"type": "Point", "coordinates": [place.lng, place.lat]},
+        "query_place": {
+            "term": place.term,
+            "canonical_name": place.canonical_name,
+            "scope": place.scope,
+            "precision": place.precision,
+            "source_key": place.source_key,
+            "source_record_id": place.source_record_id,
+            "coordinate_policy": "taiwan_geocoder_query_place_title_match",
+        },
+    }
+
+
+def _normalize_term(value: str) -> str:
+    return value.casefold().replace("臺", "台").replace(" ", "").strip()

@@ -172,10 +172,16 @@ def _location_payload(raw_item: Any | None) -> dict[str, Any]:
     if raw_item is None or not isinstance(raw_item.payload, Mapping):
         return {}
 
+    payload: dict[str, Any] = {}
     geometry = raw_item.payload.get("geometry")
     if isinstance(geometry, Mapping):
-        return {"location_payload": {"geometry": dict(geometry)}}
-    return {}
+        payload["location_payload"] = {"geometry": dict(geometry)}
+
+    query_place = raw_item.payload.get("query_place")
+    if isinstance(query_place, Mapping):
+        location_payload = payload.setdefault("location_payload", {})
+        location_payload["query_place"] = dict(query_place)
+    return payload
 
 
 def _content_hash(result: AdapterRunResult) -> str:

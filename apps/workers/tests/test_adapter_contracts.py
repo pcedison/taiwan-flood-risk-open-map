@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from app.adapters.contracts import DataSourceAdapter, EventType, IngestionStatus, SourceFamily
 from app.adapters.dcard import DcardCandidateFixtureAdapter
-from app.adapters.news import GdeltPublicNewsBackfillAdapter, SamplePublicWebNewsAdapter
+from app.adapters.news import GdeltPublicNewsBackfillAdapter, GdeltQueryPlace, SamplePublicWebNewsAdapter
 from app.adapters.ptt import PttCandidateFixtureAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
@@ -154,6 +154,57 @@ def test_gdelt_backfill_dedupes_by_url_and_keeps_metadata_only() -> None:
     assert "full article text" not in evidence.summary
     assert evidence.location_text is not None
     assert "安南區" in evidence.location_text
+
+
+def test_gdelt_backfill_attaches_geocoder_geometry_only_on_title_match() -> None:
+    adapter = GdeltPublicNewsBackfillAdapter(
+        ("(\"本和里\" OR \"大豐一路\") (淹水) sourcecountry:TW",),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2024, 7, 1, tzinfo=timezone.utc),
+        end_datetime=datetime(2024, 8, 1, tzinfo=timezone.utc),
+        query_places=(
+            GdeltQueryPlace(
+                term="本和里",
+                lat=22.65646,
+                lng=120.32574,
+                scope="village",
+                canonical_name="高雄市三民區本和里",
+                source_key="moi-village-boundary-twd97-geographic",
+                source_record_id="64000052012",
+            ),
+        ),
+        require_query_place_match=True,
+        fetch_json=lambda _url: {
+            "articles": [
+                {
+                    "url": "https://example.test/news/benhe",
+                    "title": "高雄三民本和里凱米後仍有淹水",
+                    "seendate": "20240727T012800Z",
+                    "domain": "example.test",
+                    "sourcecountry": "TW",
+                },
+                {
+                    "url": "https://example.test/news/unmatched",
+                    "title": "高雄市多處豪雨積水",
+                    "seendate": "20240727T012800Z",
+                    "domain": "example.test",
+                    "sourcecountry": "TW",
+                },
+            ]
+        },
+    )
+
+    result = adapter.run()
+
+    assert len(result.fetched) == 2
+    assert len(result.normalized) == 1
+    matched_payload = result.fetched[0].payload
+    assert matched_payload["geometry"] == {
+        "type": "Point",
+        "coordinates": [120.32574, 22.65646],
+    }
+    assert result.normalized[0].location_text == "高雄市三民區本和里"
+    assert result.rejected == (result.fetched[1].source_id,)
 
 
 def test_gdelt_backfill_rejects_invalid_title_and_date() -> None:

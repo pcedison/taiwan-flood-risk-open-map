@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -166,6 +167,79 @@ def test_main_gdelt_rehearsal_wires_env_and_argv_without_network(
     assert config.max_records_per_query == 5
     assert config.request_cadence_seconds == 45
     assert captured["mode"] == "staging-batch"
+    assert json.loads(capsys.readouterr().out)["status"] == "succeeded"
+
+
+def test_main_gdelt_rehearsal_builds_geocoder_query_plan_without_network(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    geocoder_path = tmp_path / "geocoder.jsonl.gz"
+    with gzip.open(geocoder_path, "wt", encoding="utf-8") as output:
+        output.write(
+            json.dumps(
+                {
+                    "name": "高雄市三民區本和里",
+                    "normalized_aliases": ["高雄市三民區本和里", "本和里"],
+                    "lat": 22.65646,
+                    "lng": 120.32574,
+                    "place_type": "admin_area",
+                    "precision": "admin_area",
+                    "source_key": "moi-village-boundary-twd97-geographic",
+                    "source_record_id": "64000052012",
+                    "metadata": {"raw": {"source": "nlsc-village-boundary-centroid"}},
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+    class FakeRehearsalResult:
+        def as_payload(self) -> dict[str, object]:
+            return {"status": "succeeded", "metadata": {"metadata_only": True}}
+
+    def fake_rehearsal(
+        config: HistoricalNewsBackfillConfig,
+        *,
+        mode: str,
+    ) -> FakeRehearsalResult:
+        captured["config"] = config
+        captured["mode"] = mode
+        return FakeRehearsalResult()
+
+    monkeypatch.setenv("GDELT_SOURCE_ENABLED", "true")
+    monkeypatch.setenv("GDELT_BACKFILL_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
+    monkeypatch.setattr("app.main.run_historical_news_backfill_rehearsal", fake_rehearsal)
+
+    exit_code = main(
+        [
+            "--rehearse-gdelt-news-backfill",
+            "--gdelt-start",
+            "2024-07-01T00:00:00Z",
+            "--gdelt-end",
+            "2024-08-01T00:00:00Z",
+            "--gdelt-geocoder-term-path",
+            str(geocoder_path),
+            "--gdelt-geocoder-scopes",
+            "village",
+            "--gdelt-query-limit",
+            "1",
+            "--gdelt-require-geocoder-match",
+        ]
+    )
+
+    assert exit_code == 0
+    config = captured["config"]
+    assert isinstance(config, HistoricalNewsBackfillConfig)
+    assert config.require_query_place_match is True
+    assert config.query_places[0].term == "高雄市三民區本和里"
+    assert len(config.queries) == 1
+    assert '"本和里"' in config.queries[0]
+    assert config.query_plan_metadata["geocoder_query_plan"] is True
     assert json.loads(capsys.readouterr().out)["status"] == "succeeded"
 
 

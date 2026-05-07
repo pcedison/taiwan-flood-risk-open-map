@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -9,6 +9,7 @@ from app.adapters.news.public_web import (
     GDELT_MAX_RECORDS_PER_QUERY,
     FetchJson,
     GdeltPublicNewsBackfillAdapter,
+    GdeltQueryPlace,
     Sleep,
 )
 from app.adapters.contracts import AdapterRunResult
@@ -50,6 +51,9 @@ class HistoricalNewsBackfillConfig:
     gdelt_production_approval_evidence_ack: bool = False
     production_persist_intent: bool = False
     production_database_url: str | None = None
+    query_places: tuple[GdeltQueryPlace, ...] = ()
+    require_query_place_match: bool = False
+    query_plan_metadata: dict[str, Any] = field(default_factory=dict)
     fetch_json: FetchJson | None = None
     sleep: Sleep | None = None
 
@@ -297,6 +301,8 @@ def _build_historical_news_backfill_adapter(
         end_datetime=config.end_datetime,
         max_records_per_query=config.max_records_per_query,
         request_cadence_seconds=config.request_cadence_seconds,
+        query_places=config.query_places,
+        require_query_place_match=config.require_query_place_match,
         fetch_json=config.fetch_json,
         sleep=config.sleep,
     )
@@ -316,9 +322,12 @@ def _rehearsal_contract_metadata(config: HistoricalNewsBackfillConfig) -> dict[s
             1,
             min(config.max_records_per_query, GDELT_MAX_RECORDS_PER_QUERY),
         ),
+        "query_place_count": len(config.query_places),
+        "require_query_place_match": config.require_query_place_match,
         "query_count": len(tuple(query for query in config.queries if query.strip())),
         "start_datetime": config.start_datetime.isoformat(),
         "end_datetime": config.end_datetime.isoformat(),
+        **dict(config.query_plan_metadata),
     }
 
 
@@ -360,5 +369,8 @@ def _production_candidate_parameters(
         "end_datetime": config.end_datetime.isoformat(),
         "approval_evidence_path": config.gdelt_production_approval_evidence_path,
         "approval_evidence_ack": config.gdelt_production_approval_evidence_ack,
+        "query_place_count": len(config.query_places),
+        "require_query_place_match": config.require_query_place_match,
         "recorded_at": datetime.now(UTC).isoformat(),
+        **dict(config.query_plan_metadata),
     }

@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import pytest
 
+from app.adapters.news import GdeltQueryPlace
 from app.jobs.historical_news_backfill import (
     HistoricalNewsBackfillConfig,
     build_historical_news_backfill_batch,
@@ -282,6 +283,16 @@ def test_gdelt_production_candidate_persists_run_and_promotes_with_injected_fetc
             fetch_json=fetch_json,
             gdelt_production_ingestion_enabled=True,
             gdelt_production_approval_evidence_ack=True,
+            query_places=(
+                GdeltQueryPlace(
+                    term="長溪路二段",
+                    lat=23.056,
+                    lng=120.205,
+                    scope="road",
+                    canonical_name="台南市安南區長溪路二段",
+                ),
+            ),
+            require_query_place_match=True,
         ),
         staging_writer=staging_writer,
         run_writer=run_writer,
@@ -301,6 +312,10 @@ def test_gdelt_production_candidate_persists_run_and_promotes_with_injected_fetc
         "public-news",
         "backfill",
     ]
+    assert staging_writer.batches[0].accepted[0].payload["location_payload"]["geometry"] == {
+        "type": "Point",
+        "coordinates": [120.205, 23.056],
+    }
     assert run_writer.calls[0][1] == "test.gdelt.production_candidate"
     assert run_writer.calls[0][2] is not None
     assert run_writer.calls[0][2]["mode"] == "production-candidate"

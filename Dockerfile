@@ -56,7 +56,10 @@ RUN python -m venv "${VIRTUAL_ENV}" \
 
 COPY apps/api/pyproject.toml apps/api/README.md /app/apps/api/
 COPY apps/api/app /app/apps/api/app
-RUN pip install --no-cache-dir -e /app/apps/api
+RUN pip install --no-cache-dir -e /app/apps/api \
+  && pip install --no-cache-dir "PyYAML>=6.0"
+
+COPY apps/workers /app/apps/workers
 
 COPY --from=web-builder /app/apps/web/package.json /app/apps/web/package-lock.json /app/apps/web/
 COPY --from=web-builder /app/apps/web/node_modules /app/apps/web/node_modules

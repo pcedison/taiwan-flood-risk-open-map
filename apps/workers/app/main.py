@@ -20,6 +20,7 @@ from app.jobs.historical_news_backfill import (
     run_historical_news_backfill_production_candidate,
     run_historical_news_backfill_rehearsal,
 )
+from app.adapters.news.public_web import GdeltQueryPlace
 from app.jobs.gdelt_live_acceptance import (
     render_gdelt_live_acceptance_json,
     validate_gdelt_live_acceptance_file,
@@ -59,6 +60,11 @@ from app.jobs.runtime import (
 from app.jobs.runtime_managed import run_managed_runtime_ingestion_cycle
 from app.jobs.sample import run_sample_job
 from app.jobs.tile_cache import PostgresTileCacheWriter, TileCacheUnavailable, TileLayerUnsupported
+from app.jobs.taiwan_news_query_plan import (
+    TaiwanQueryScope,
+    build_taiwan_flood_news_queries,
+    load_taiwan_geocoder_query_places,
+)
 from app.logging import log_event
 from app.metrics import render_runtime_queue_metrics, write_prometheus_textfile
 from app.jobs.ingestion import IngestionRunSummaryWriter
@@ -179,6 +185,49 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Override default Taiwan flood-news queries. May be supplied multiple times. "
             "GDELT_REHEARSAL_QUERIES or GDELT_PRODUCTION_QUERIES can also provide "
             "comma-separated queries for their respective commands."
+        ),
+    )
+    parser.add_argument(
+        "--gdelt-geocoder-term-path",
+        action="append",
+        help=(
+            "Load Taiwan geocoder JSONL/JSONL.GZ terms for a controlled GDELT query plan. "
+            "May be supplied multiple times; env: GDELT_GEOCODER_TERM_PATHS."
+        ),
+    )
+    parser.add_argument(
+        "--gdelt-geocoder-scopes",
+        help=(
+            "Comma-separated geocoder scopes for query planning: village,road,town,county. "
+            "Defaults to GDELT_GEOCODER_SCOPES when set."
+        ),
+    )
+    parser.add_argument(
+        "--gdelt-geocoder-term-limit",
+        type=int,
+        help="Optional cap on loaded geocoder terms before query chunking.",
+    )
+    parser.add_argument(
+        "--gdelt-geocoder-terms-per-query",
+        type=int,
+        help="How many place terms to OR into one GDELT query. Defaults to 8.",
+    )
+    parser.add_argument(
+        "--gdelt-query-offset",
+        type=int,
+        help="Skip this many generated GDELT queries for resumable shards.",
+    )
+    parser.add_argument(
+        "--gdelt-query-limit",
+        type=int,
+        help="Run at most this many generated GDELT queries for resumable shards.",
+    )
+    parser.add_argument(
+        "--gdelt-require-geocoder-match",
+        action="store_true",
+        help=(
+            "When geocoder terms are loaded, only normalize articles whose title matches "
+            "one of those controlled village/road terms."
         ),
     )
     parser.add_argument(
@@ -553,6 +602,45 @@ def _build_gdelt_news_backfill_config(
 
     env_queries = env_list(os.environ, query_env_name)
     queries = tuple(args.gdelt_query or ()) or env_queries
+    query_places, query_plan_metadata = _build_gdelt_geocoder_query_plan(args)
+    if not queries and query_places:
+        generated_queries = build_taiwan_flood_news_queries(
+            (place.term for place in query_places),
+            terms_per_query=_positive_int(
+                args.gdelt_geocoder_terms_per_query
+                or env_int(
+                    os.environ,
+                    "GDELT_GEOCODER_TERMS_PER_QUERY",
+                    default=8,
+                ),
+                default=8,
+            ),
+        )
+        queries = _slice_generated_queries(
+            generated_queries,
+            offset=args.gdelt_query_offset
+            if args.gdelt_query_offset is not None
+            else env_int(os.environ, "GDELT_QUERY_OFFSET", default=0),
+            limit=args.gdelt_query_limit
+            if args.gdelt_query_limit is not None
+            else env_int(os.environ, "GDELT_QUERY_LIMIT", default=0),
+        )
+        query_plan_metadata = {
+            **query_plan_metadata,
+            "generated_query_count_total": len(generated_queries),
+            "generated_query_offset": max(
+                0,
+                args.gdelt_query_offset
+                if args.gdelt_query_offset is not None
+                else env_int(os.environ, "GDELT_QUERY_OFFSET", default=0),
+            ),
+            "generated_query_limit": (
+                args.gdelt_query_limit
+                if args.gdelt_query_limit is not None
+                else env_int(os.environ, "GDELT_QUERY_LIMIT", default=0)
+            )
+            or None,
+        }
     max_records = (
         args.gdelt_max_records
         if args.gdelt_max_records is not None
@@ -591,7 +679,84 @@ def _build_gdelt_news_backfill_config(
         or env_flag(os.environ, "GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK"),
         production_persist_intent=args.persist,
         production_database_url=production_database_url,
+        query_places=query_places,
+        require_query_place_match=args.gdelt_require_geocoder_match
+        or env_flag(os.environ, "GDELT_REQUIRE_GEOCODER_MATCH"),
+        query_plan_metadata=query_plan_metadata,
     )
+
+
+def _build_gdelt_geocoder_query_plan(
+    args: argparse.Namespace,
+) -> tuple[tuple[GdeltQueryPlace, ...], dict[str, object]]:
+    raw_paths = tuple(args.gdelt_geocoder_term_path or ()) or env_list(
+        os.environ,
+        "GDELT_GEOCODER_TERM_PATHS",
+    )
+    if not raw_paths:
+        return (), {}
+
+    scopes = _parse_gdelt_geocoder_scopes(
+        args.gdelt_geocoder_scopes
+        or os.environ.get("GDELT_GEOCODER_SCOPES")
+        or "village,road"
+    )
+    term_limit = (
+        args.gdelt_geocoder_term_limit
+        if args.gdelt_geocoder_term_limit is not None
+        else env_int(os.environ, "GDELT_GEOCODER_TERM_LIMIT", default=0)
+    )
+    loaded_places = load_taiwan_geocoder_query_places(
+        raw_paths,
+        scopes=scopes,
+        limit=term_limit if term_limit and term_limit > 0 else None,
+    )
+    query_places = tuple(
+        GdeltQueryPlace(
+            term=place.term,
+            lat=place.lat,
+            lng=place.lng,
+            scope=place.scope,
+            canonical_name=place.canonical_name,
+            precision=place.precision,
+            source_key=place.source_key,
+            source_record_id=place.source_record_id,
+        )
+        for place in loaded_places
+    )
+    return query_places, {
+        "geocoder_query_plan": True,
+        "geocoder_term_paths": tuple(str(path) for path in raw_paths),
+        "geocoder_scopes": scopes,
+        "geocoder_term_limit": term_limit or None,
+        "geocoder_query_place_count_total": len(query_places),
+    }
+
+
+def _parse_gdelt_geocoder_scopes(raw: str) -> tuple[TaiwanQueryScope, ...]:
+    allowed: set[TaiwanQueryScope] = {"county", "town", "village", "road"}
+    scopes: list[TaiwanQueryScope] = []
+    for part in raw.replace("\n", ",").split(","):
+        scope = part.strip().lower()
+        if scope in allowed and scope not in scopes:
+            scopes.append(scope)  # type: ignore[arg-type]
+    return tuple(scopes) or ("village", "road")
+
+
+def _slice_generated_queries(
+    queries: tuple[str, ...],
+    *,
+    offset: int,
+    limit: int,
+) -> tuple[str, ...]:
+    start = max(0, offset)
+    if limit and limit > 0:
+        return queries[start : start + limit]
+    return queries[start:]
+
+
+def _positive_int(value: int, *, default: int) -> int:
+    return value if value > 0 else default
 
 
 def _validate_gdelt_bounded_window(args: argparse.Namespace) -> int | None:
