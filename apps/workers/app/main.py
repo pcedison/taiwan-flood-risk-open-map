@@ -227,6 +227,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--gdelt-progress-log-interval",
+        type=int,
+        help="Emit metadata-only JSON progress logs every N GDELT query batches.",
+    )
+    parser.add_argument(
         "--gdelt-max-records",
         type=int,
         help=(
@@ -683,6 +688,9 @@ def _build_gdelt_news_backfill_config(
         query_places=query_places,
         require_query_place_match=args.gdelt_require_geocoder_match
         or env_flag(os.environ, "GDELT_REQUIRE_GEOCODER_MATCH"),
+        progress_log_interval=args.gdelt_progress_log_interval
+        if args.gdelt_progress_log_interval is not None
+        else env_int(os.environ, "GDELT_PROGRESS_LOG_INTERVAL", default=0),
         query_plan_metadata=query_plan_metadata,
     )
 

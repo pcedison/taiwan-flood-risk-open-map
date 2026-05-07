@@ -152,6 +152,7 @@ class GdeltPublicNewsBackfillAdapter:
         request_cadence_seconds: int = 0,
         query_places: Iterable[GdeltQueryPlace] = (),
         require_query_place_match: bool = False,
+        progress_log_interval: int = 0,
         fetch_json: FetchJson | None = None,
         sleep: Sleep | None = None,
         raw_snapshot_key: str | None = None,
@@ -164,6 +165,7 @@ class GdeltPublicNewsBackfillAdapter:
         self._request_cadence_seconds = max(0, request_cadence_seconds)
         self._query_places = _dedupe_query_places(query_places)
         self._require_query_place_match = require_query_place_match
+        self._progress_log_interval = max(0, progress_log_interval)
         self._fetch_json = fetch_json or _fetch_json
         self._sleep = sleep or time.sleep
         self._raw_snapshot_key = raw_snapshot_key
@@ -171,6 +173,7 @@ class GdeltPublicNewsBackfillAdapter:
     def fetch(self) -> tuple[RawSourceItem, ...]:
         raw_items: list[RawSourceItem] = []
         seen_urls: set[str] = set()
+        query_count = len(self._queries)
         for index, query in enumerate(self._queries):
             if index > 0 and self._request_cadence_seconds > 0:
                 self._sleep(float(self._request_cadence_seconds))
@@ -213,6 +216,11 @@ class GdeltPublicNewsBackfillAdapter:
                         raw_snapshot_key=self._raw_snapshot_key,
                     )
                 )
+            self._log_progress(
+                query_index=index + 1,
+                query_count=query_count,
+                fetched_count=len(raw_items),
+            )
         return tuple(raw_items)
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
@@ -272,6 +280,26 @@ class GdeltPublicNewsBackfillAdapter:
             fetched=fetched,
             normalized=tuple(normalized),
             rejected=tuple(rejected),
+        )
+
+    def _log_progress(self, *, query_index: int, query_count: int, fetched_count: int) -> None:
+        if self._progress_log_interval <= 0:
+            return
+        if query_index < query_count and query_index % self._progress_log_interval != 0:
+            return
+        print(
+            json.dumps(
+                {
+                    "event": "gdelt_backfill.progress",
+                    "adapter_key": self.metadata.key,
+                    "query_index": query_index,
+                    "query_count": query_count,
+                    "fetched_count": fetched_count,
+                    "metadata_only": True,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
         )
 
 

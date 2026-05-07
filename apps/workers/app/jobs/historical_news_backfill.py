@@ -53,6 +53,7 @@ class HistoricalNewsBackfillConfig:
     production_database_url: str | None = None
     query_places: tuple[GdeltQueryPlace, ...] = ()
     require_query_place_match: bool = False
+    progress_log_interval: int = 0
     query_plan_metadata: dict[str, Any] = field(default_factory=dict)
     fetch_json: FetchJson | None = None
     sleep: Sleep | None = None
@@ -303,6 +304,7 @@ def _build_historical_news_backfill_adapter(
         request_cadence_seconds=config.request_cadence_seconds,
         query_places=config.query_places,
         require_query_place_match=config.require_query_place_match,
+        progress_log_interval=config.progress_log_interval,
         fetch_json=config.fetch_json,
         sleep=config.sleep,
     )
@@ -324,6 +326,7 @@ def _rehearsal_contract_metadata(config: HistoricalNewsBackfillConfig) -> dict[s
         ),
         "query_place_count": len(config.query_places),
         "require_query_place_match": config.require_query_place_match,
+        "progress_log_interval": max(0, config.progress_log_interval),
         "query_count": len(tuple(query for query in config.queries if query.strip())),
         "start_datetime": config.start_datetime.isoformat(),
         "end_datetime": config.end_datetime.isoformat(),
@@ -371,6 +374,7 @@ def _production_candidate_parameters(
         "approval_evidence_ack": config.gdelt_production_approval_evidence_ack,
         "query_place_count": len(config.query_places),
         "require_query_place_match": config.require_query_place_match,
+        "progress_log_interval": max(0, config.progress_log_interval),
         "recorded_at": datetime.now(UTC).isoformat(),
         **dict(config.query_plan_metadata),
     }
