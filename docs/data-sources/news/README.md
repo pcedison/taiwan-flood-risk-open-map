@@ -27,11 +27,20 @@ The project must not rely on manually adding one road segment after a user finds
 
 `news.public_web.gdelt_backfill` is the first candidate adapter for this shape. It is disabled by default until terms review, source QA, rate limiting, and geocoding promotion are completed.
 
+The backfill query plan is no longer a single-city or single-road list. Worker defaults now cover all 22 Taiwan county/city names, and `app.jobs.taiwan_news_query_plan` can build bounded GDELT query batches from the bundled national village and road open-data geocoder files:
+
+- `villages.normalized.jsonl.gz` from NLSC village boundary centroids for village/neighborhood terms;
+- `roads-114.normalized.jsonl.gz` from MOI national road names for road-level terms;
+- chunked `sourcecountry:TW` GDELT DOC queries with shared Taiwan flood keywords.
+
+This produces an operator-reviewed nationwide query plan for staged backfill. It still must run behind the same source, terms, cadence, metadata-only, staging, and promotion gates below.
+
 ## On-demand enrichment at public API time
 
-The public risk API now has a bounded local-preview enrichment path for Taiwan-wide misses. When accepted DB evidence is empty and the request includes `location_text`, the API can:
+The public risk API now has a bounded local-preview enrichment path for Taiwan-wide misses. When accepted DB evidence is empty or only contains flood-potential reference polygons, the API can:
 
 - extract the likely Taiwan location from mixed text such as `2024 高雄岡山嘉新東路 豪雨淹水新聞`;
+- derive a nearby village/neighborhood term from bundled national village centroids when the user queried by map click and did not provide text;
 - query GDELT DOC ArtList for citation metadata only;
 - keep only URL, title, timestamp, domain, query metadata, confidence, and query-point geometry;
 - upsert accepted metadata into `evidence` through the same `source_id`/`raw_ref` idempotency constraint used by promotion;

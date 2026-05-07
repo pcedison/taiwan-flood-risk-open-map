@@ -58,6 +58,7 @@ from app.domain.history import (
     HistoricalFloodRecord,
     historical_record_matches_location_text,
     nearby_historical_flood_records,
+    nearest_public_news_location_text,
 )
 from app.domain.history.news_enrichment import (
     OnDemandNewsSearchResult,
@@ -837,9 +838,15 @@ def _on_demand_public_news_result(
     now: datetime,
 ) -> OnDemandNewsSearchResult:
     settings = get_settings()
+    location_text = nearest_public_news_location_text(
+        lat=request.point.lat,
+        lng=request.point.lng,
+        radius_m=request.radius_m,
+        preferred_text=request.location_text,
+    )
     if not _use_on_demand_public_news(settings):
         return OnDemandNewsSearchResult(
-            attempted=bool((request.location_text or "").strip()),
+            attempted=bool(location_text),
             source_id="on-demand-public-news",
             message=(
                 "公開新聞即時補查未啟用；需完成新聞來源旗標與條款確認後，"
@@ -848,7 +855,7 @@ def _on_demand_public_news_result(
             records=(),
         )
     return search_public_flood_news(
-        location_text=request.location_text,
+        location_text=location_text,
         lat=request.point.lat,
         lng=request.point.lng,
         radius_m=request.radius_m,

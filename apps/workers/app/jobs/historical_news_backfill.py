@@ -21,12 +21,9 @@ from app.pipelines.promotion import (
 from app.pipelines.staging import AdapterStagingBatch, build_staging_batch
 from app.pipelines.staging import StagingBatchWriter
 from app.jobs.ingestion import IngestionRunSummaryWriter
+from app.jobs.taiwan_news_query_plan import DEFAULT_TAIWAN_FLOOD_NEWS_QUERIES
 
 
-DEFAULT_TAIWAN_FLOOD_NEWS_QUERIES = (
-    '(淹水 OR 積淹水 OR 積水 OR 豪雨) (台灣 OR 台北 OR 新北 OR 桃園 OR 新竹 OR 苗栗 OR 台中 OR 彰化 OR 雲林 OR 嘉義 OR 台南 OR 高雄 OR 屏東 OR 宜蘭 OR 花蓮 OR 台東)',
-    '(道路淹水 OR 地下道淹水 OR 排水不及 OR 側溝排水不及) sourcecountry:TW',
-)
 DEFAULT_GDELT_REHEARSAL_MAX_RECORDS_PER_QUERY = 10
 DEFAULT_GDELT_REHEARSAL_CADENCE_SECONDS = 60
 GDELT_BACKFILL_ADAPTER_KEY = "news.public_web.gdelt_backfill"

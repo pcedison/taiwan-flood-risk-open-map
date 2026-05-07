@@ -453,6 +453,11 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "fetch_official_realtime_bundle",
         lambda **_kwargs: _official_realtime_bundle(),
     )
+    monkeypatch.setattr(
+        public_routes,
+        "nearest_public_news_location_text",
+        lambda **_kwargs: None,
+    )
 
     response = client.post(
         "/v1/risk/assess",
@@ -680,6 +685,47 @@ def test_risk_assess_attempts_on_demand_news_when_db_only_has_flood_potential(
     assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
     assert payload["data_freshness"][-1]["health_status"] == "healthy"
     assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_attempts_on_demand_news_for_map_click_with_nearby_village(
+    monkeypatch,
+) -> None:
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (_flood_potential_record(),),
+    )
+    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+
+    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
+        calls.append(kwargs.get("location_text"))
+        return public_routes.OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="on-demand-public-news",
+            message="公開新聞索引暫時沒有可採用候選事件。",
+            records=(),
+        )
+
+    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.65646, "lng": 120.32574},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": None,
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls == ["高雄市三民區本和里"]
 
 
 def test_risk_assess_marks_flood_potential_only_history_as_limited(
@@ -933,6 +979,11 @@ def test_risk_assess_does_not_use_local_fallback_when_gate_is_closed(monkeypatch
     )
     monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
     monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+    monkeypatch.setattr(
+        public_routes,
+        "nearest_public_news_location_text",
+        lambda **_kwargs: None,
+    )
 
     response = client.post(
         "/v1/risk/assess",
