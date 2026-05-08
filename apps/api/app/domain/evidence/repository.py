@@ -229,7 +229,10 @@ def query_nearby_evidence(
 ) -> tuple[EvidenceRecord, ...]:
     sql = """
         WITH query_point AS (
-            SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                (%s::double precision / 90000.0) AS degree_radius
         )
         SELECT
             e.id::text AS id,
@@ -257,6 +260,7 @@ def query_nearby_evidence(
         WHERE e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
             AND e.geom IS NOT NULL
+            AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
             AND ST_DWithin(e.geom::geography, qp.geog, %s)
         ORDER BY
             distance_to_query_m ASC,
@@ -266,7 +270,7 @@ def query_nearby_evidence(
     """
     return _fetch_records(
         sql,
-        (lng, lat, radius_m, max(1, min(limit, 100))),
+        (lng, lat, lng, lat, radius_m, radius_m, max(1, min(limit, 100))),
         database_url=database_url,
         connection_factory=connection_factory,
     )
@@ -397,7 +401,10 @@ def fetch_query_heat_snapshot(
 ) -> QueryHeatSnapshot:
     sql = """
         WITH query_point AS (
-            SELECT ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                (%s::double precision / 90000.0) AS degree_radius
         ),
         nearby_queries AS (
             SELECT lq.id, lq.privacy_bucket, lq.h3_index, lq.created_at
@@ -406,6 +413,7 @@ def fetch_query_heat_snapshot(
             CROSS JOIN query_point qp
             WHERE lq.geom IS NOT NULL
                 AND lq.created_at >= now() - (%s::interval)
+                AND lq.geom && ST_Expand(qp.geom, qp.degree_radius)
                 AND ST_DWithin(lq.geom::geography, qp.geog, %s)
         )
         SELECT
@@ -423,7 +431,10 @@ def fetch_query_heat_snapshot(
                         "SET LOCAL statement_timeout = %s",
                         (f"{statement_timeout_ms}ms",),
                     )
-                cursor.execute(sql, (lng, lat, _period_to_interval(period), radius_m))
+                cursor.execute(
+                    sql,
+                    (lng, lat, lng, lat, radius_m, _period_to_interval(period), radius_m),
+                )
                 row = cursor.fetchone()
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc

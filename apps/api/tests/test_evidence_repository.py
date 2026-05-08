@@ -109,8 +109,9 @@ def test_fetch_query_heat_snapshot_buckets_nearby_location_queries() -> None:
     assert timeout_params == ("1200ms",)
     assert "FROM location_queries lq" in sql
     assert "JOIN risk_assessments ra ON ra.query_id = lq.id" in sql
+    assert "lq.geom && ST_Expand(qp.geom, qp.degree_radius)" in sql
     assert "ST_DWithin" in sql
-    assert params == (121.5654, 25.033, "7 days", 500)
+    assert params == (121.5654, 25.033, 121.5654, 25.033, 500, "7 days", 500)
     assert snapshot.period == "P7D"
     assert snapshot.query_count == 17
     assert snapshot.query_count_bucket == "10-49"
@@ -132,7 +133,8 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert records == ()
     assert "ST_PointOnSurface(e.geom::geometry)" in sql
     assert "ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry" in sql
-    assert params == (121.5654, 25.033, 500, 50)
+    assert "e.geom && ST_Expand(qp.geom, qp.degree_radius)" in sql
+    assert params == (121.5654, 25.033, 121.5654, 25.033, 500, 500, 50)
 
 
 def test_upsert_public_evidence_writes_point_geometry_and_metadata() -> None:
