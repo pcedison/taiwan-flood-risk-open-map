@@ -1,8 +1,17 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import app.domain.realtime.official as official
+
+
+@pytest.fixture(autouse=True)
+def clear_official_json_cache() -> None:
+    official._json_cache.clear()
+    official._json_refreshing_keys.clear()
+    yield
+    official._json_cache.clear()
+    official._json_refreshing_keys.clear()
 
 
 def test_official_realtime_bundle_can_disable_cwa_and_wra_individually(
@@ -184,3 +193,62 @@ def test_near_low_wra_station_remains_low_risk_reference(
     assert len(observations) == 1
     assert observations[0].risk_factor == 0.0
     assert "未達警戒門檻" in observations[0].summary
+
+
+def test_fetch_json_uses_configured_official_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_timeouts: list[float] = []
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"ok": true}'
+
+    def fake_urlopen(request: object, *, timeout: float, **_kwargs: object) -> Response:
+        captured_timeouts.append(timeout)
+        return Response()
+
+    monkeypatch.setenv("OFFICIAL_REALTIME_FETCH_TIMEOUT_SECONDS", "1.25")
+    monkeypatch.setattr(official, "urlopen", fake_urlopen)
+
+    assert official._fetch_json("https://example.test/realtime.json") == {"ok": True}
+    assert captured_timeouts == [1.25]
+
+
+def test_expired_official_cache_returns_stale_payload_and_refreshes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InlineExecutor:
+        def submit(self, fn: object, *args: object) -> object:
+            assert callable(fn)
+            fn(*args)
+
+            class CompletedFuture:
+                pass
+
+            return CompletedFuture()
+
+    monkeypatch.setenv("OFFICIAL_REALTIME_CACHE_STALE_SECONDS", "600")
+    monkeypatch.setattr(official, "_CACHE_REFRESH_EXECUTOR", InlineExecutor())
+    monkeypatch.setattr(
+        official,
+        "_fetch_json",
+        lambda _url: {"fresh": True},
+    )
+    official._json_cache["cwa-rainfall"] = (
+        datetime.now(UTC) - timedelta(seconds=301),
+        {"stale": True},
+    )
+
+    payload = official._fetch_cached_json(
+        "cwa-rainfall",
+        "https://example.test/realtime.json",
+        ttl=300,
+    )
+
+    assert payload == {"stale": True}
+    assert official._json_cache["cwa-rainfall"][1] == {"fresh": True}

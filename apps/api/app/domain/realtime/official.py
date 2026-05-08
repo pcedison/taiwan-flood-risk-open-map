@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import ssl
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+from threading import Lock
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -20,6 +23,10 @@ USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 RAINFALL_STATION_LIMIT_M = 10_000.0
 WATER_LEVEL_STATION_LIMIT_M = 3_000.0
 TAIPEI_TZ = timezone(timedelta(hours=8))
+DEFAULT_FETCH_TIMEOUT_SECONDS = 3.0
+DEFAULT_CACHE_STALE_SECONDS = 1_800
+_OFFICIAL_LOOKUP_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="official-realtime")
+_CACHE_REFRESH_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="official-cache")
 
 
 @dataclass(frozen=True)
@@ -84,6 +91,8 @@ class _WaterLevelStation:
 
 
 _json_cache: dict[str, tuple[datetime, Any]] = {}
+_json_cache_lock = Lock()
+_json_refreshing_keys: set[str] = set()
 
 
 def fetch_official_realtime_bundle(
@@ -120,37 +129,42 @@ def fetch_official_realtime_bundle(
     observations: list[OfficialRealtimeObservation] = []
     statuses: list[OfficialRealtimeSourceStatus] = []
 
+    cwa_future: Future[tuple[list[OfficialRealtimeObservation], OfficialRealtimeSourceStatus]] | None = None
+    wra_future: Future[tuple[list[OfficialRealtimeObservation], OfficialRealtimeSourceStatus]] | None = None
+    cwa_result: tuple[list[OfficialRealtimeObservation], OfficialRealtimeSourceStatus] | None = None
+    wra_result: tuple[list[OfficialRealtimeObservation], OfficialRealtimeSourceStatus] | None = None
+
     if cwa_enabled:
-        rainfall = _nearest_rainfall_observation(
+        cwa_future = _OFFICIAL_LOOKUP_EXECUTOR.submit(
+            _nearest_rainfall_observation,
             lat=lat,
             lng=lng,
             radius_m=radius_m,
             cwa_authorization=cwa_authorization,
             checked_at=checked_at,
         )
-        observations.extend(rainfall[0])
-        statuses.append(rainfall[1])
     else:
-        statuses.append(
+        cwa_result = (
+            [],
             _disabled_realtime_status(
                 "cwa-rainfall",
                 "中央氣象署即時雨量",
                 checked_at,
                 _cwa_disabled_message(cwa_authorization),
-            )
+            ),
         )
 
     if wra_enabled:
-        water_level = _nearest_water_level_observation(
+        wra_future = _OFFICIAL_LOOKUP_EXECUTOR.submit(
+            _nearest_water_level_observation,
             lat=lat,
             lng=lng,
             radius_m=radius_m,
             checked_at=checked_at,
         )
-        observations.extend(water_level[0])
-        statuses.append(water_level[1])
     else:
-        statuses.append(
+        wra_result = (
+            [],
             _disabled_realtime_status(
                 "wra-water-level",
                 "經濟部水利署即時水位",
@@ -158,10 +172,58 @@ def fetch_official_realtime_bundle(
                 "SOURCE_WRA_API_ENABLED=false，因此尚未啟用水利署即時水位。"
                 "WRA 公開水位端點不使用 CWA token；需另外開啟 WRA 來源旗標。"
                 "原始即時資料未品管，啟用後仍需顯示限制。",
-            )
+            ),
         )
 
+    if cwa_future is not None:
+        cwa_result = _official_lookup_result(
+            cwa_future,
+            source_id="cwa-rainfall",
+            name="中央氣象署即時雨量",
+            checked_at=checked_at,
+            message="中央氣象署即時雨量暫時無法取得；本次查詢先以其他資料來源評估。",
+        )
+    if cwa_result is not None:
+        observations.extend(cwa_result[0])
+        statuses.append(cwa_result[1])
+
+    if wra_future is not None:
+        wra_result = _official_lookup_result(
+            wra_future,
+            source_id="wra-water-level",
+            name="經濟部水利署即時水位",
+            checked_at=checked_at,
+            message="水利署即時水位暫時無法取得；本次查詢先以其他資料來源評估。",
+        )
+    if wra_result is not None:
+        observations.extend(wra_result[0])
+        statuses.append(wra_result[1])
+
     return OfficialRealtimeBundle(observations=tuple(observations), source_statuses=tuple(statuses))
+
+
+def _official_lookup_result(
+    future: Future[tuple[list[OfficialRealtimeObservation], OfficialRealtimeSourceStatus]],
+    *,
+    source_id: str,
+    name: str,
+    checked_at: datetime,
+    message: str,
+) -> tuple[list[OfficialRealtimeObservation], OfficialRealtimeSourceStatus]:
+    try:
+        return future.result()
+    except Exception:
+        return (
+            [],
+            OfficialRealtimeSourceStatus(
+                source_id=source_id,
+                name=name,
+                health_status="failed",
+                observed_at=None,
+                ingested_at=checked_at,
+                message=message,
+            ),
+        )
 
 
 def _disabled_realtime_status(
@@ -501,37 +563,126 @@ def _parse_wra_station(
 
 def _fetch_cached_json(cache_key: str, url: str, *, ttl: int) -> Any:
     now = datetime.now(UTC)
-    cached = _json_cache.get(cache_key)
+    with _json_cache_lock:
+        cached = _json_cache.get(cache_key)
     if cached is not None:
-        cached_at, payload = cached
-        if now - cached_at < timedelta(seconds=ttl):
-            return payload
+        cached_at, cached_payload = cached
+        age = now - cached_at
+        if age < timedelta(seconds=ttl):
+            return cached_payload
+        if (
+            cached_payload is not None
+            and _official_cache_stale_seconds() > 0
+            and age < timedelta(seconds=ttl + _official_cache_stale_seconds())
+        ):
+            _schedule_cache_refresh(cache_key, url)
+            return cached_payload
 
     payload = _fetch_json(url)
-    _json_cache[cache_key] = (now, payload)
+    if payload is None:
+        if cached is not None and cached[1] is not None:
+            return cached[1]
+        with _json_cache_lock:
+            _json_cache[cache_key] = (now, payload)
+        return payload
+
+    with _json_cache_lock:
+        _json_cache[cache_key] = (now, payload)
     return payload
+
+
+def _schedule_cache_refresh(cache_key: str, url: str) -> None:
+    with _json_cache_lock:
+        if cache_key in _json_refreshing_keys:
+            return
+        _json_refreshing_keys.add(cache_key)
+    _CACHE_REFRESH_EXECUTOR.submit(_refresh_cached_json, cache_key, url)
+
+
+def _refresh_cached_json(cache_key: str, url: str) -> None:
+    try:
+        payload = _fetch_json(url)
+        if payload is not None:
+            with _json_cache_lock:
+                _json_cache[cache_key] = (datetime.now(UTC), payload)
+    finally:
+        with _json_cache_lock:
+            _json_refreshing_keys.discard(cache_key)
+
+
+def _official_fetch_timeout_seconds() -> float:
+    return _env_float(
+        "OFFICIAL_REALTIME_FETCH_TIMEOUT_SECONDS",
+        default=DEFAULT_FETCH_TIMEOUT_SECONDS,
+        minimum=0.5,
+    )
+
+
+def _official_cache_stale_seconds() -> int:
+    return _env_int(
+        "OFFICIAL_REALTIME_CACHE_STALE_SECONDS",
+        default=DEFAULT_CACHE_STALE_SECONDS,
+        minimum=0,
+    )
+
+
+def _env_float(name: str, *, default: float, minimum: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def _env_int(name: str, *, default: int, minimum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, value)
 
 
 def _fetch_json(url: str) -> Any:
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
+    timeout_seconds = _official_fetch_timeout_seconds()
     try:
-        with urlopen(request, timeout=8) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
     except ssl.SSLError:
-        return _fetch_json_without_certificate_verification(request)
+        return _fetch_json_without_certificate_verification(
+            request,
+            timeout_seconds=timeout_seconds,
+        )
     except HTTPError:
         return None
     except URLError as exc:
         if isinstance(exc.reason, ssl.SSLError):
-            return _fetch_json_without_certificate_verification(request)
+            return _fetch_json_without_certificate_verification(
+                request,
+                timeout_seconds=timeout_seconds,
+            )
         return None
     except (TimeoutError, json.JSONDecodeError):
         return None
 
 
-def _fetch_json_without_certificate_verification(request: Request) -> Any:
+def _fetch_json_without_certificate_verification(
+    request: Request,
+    *,
+    timeout_seconds: float,
+) -> Any:
     try:
-        with urlopen(request, timeout=8, context=ssl._create_unverified_context()) as response:
+        with urlopen(
+            request,
+            timeout=timeout_seconds,
+            context=ssl._create_unverified_context(),
+        ) as response:
             return json.loads(response.read().decode("utf-8"))
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
         return None
