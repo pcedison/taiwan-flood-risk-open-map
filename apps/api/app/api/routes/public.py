@@ -88,6 +88,7 @@ TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
 OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
 _ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
+_RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
 
 
 def _now() -> datetime:
@@ -644,6 +645,14 @@ async def geocode(request: GeocodeRequest) -> GeocodeResponse:
 async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
     settings = get_settings()
     created_at = _now()
+    response_cache_key = _risk_assessment_response_cache_key(request, settings)
+    cached_response = _cached_risk_assessment_response(
+        response_cache_key,
+        now=created_at,
+        ttl_seconds=settings.risk_assessment_response_cache_seconds,
+    )
+    if cached_response is not None:
+        return cached_response
     assessment_id = stable_uuid(
         "assessment",
         request.point.lat,
@@ -793,7 +802,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         created_at=created_at,
         expires_at=expires_at,
     )
-    return RiskAssessmentResponse(
+    response = RiskAssessmentResponse(
         assessment_id=assessment_id,
         location=request.point,
         radius_m=request.radius_m,
@@ -808,6 +817,13 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         data_freshness=data_freshness,
         query_heat=_query_heat(request, now=created_at),
     )
+    _cache_risk_assessment_response(
+        response_cache_key,
+        response,
+        now=created_at,
+        ttl_seconds=settings.risk_assessment_response_cache_seconds,
+    )
+    return response
 
 
 def _display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
@@ -959,6 +975,60 @@ def _cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence
     while len(_ASSESSMENT_EVIDENCE_CACHE) > 256:
         oldest_key = next(iter(_ASSESSMENT_EVIDENCE_CACHE))
         del _ASSESSMENT_EVIDENCE_CACHE[oldest_key]
+
+
+def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: Any) -> str:
+    return json.dumps(
+        {
+            "lat": round(request.point.lat, 5),
+            "lng": round(request.point.lng, 5),
+            "radius_m": request.radius_m,
+            "time_context": request.time_context,
+            "location_text": (request.location_text or "").strip(),
+            "app_env": settings.app_env,
+            "realtime_official_enabled": settings.realtime_official_enabled,
+            "source_cwa_api_enabled": settings.source_cwa_api_enabled,
+            "source_wra_api_enabled": settings.source_wra_api_enabled,
+            "source_news_enabled": settings.source_news_enabled,
+            "source_terms_review_ack": settings.source_terms_review_ack,
+            "evidence_repository_enabled": settings.evidence_repository_enabled,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+
+
+def _cached_risk_assessment_response(
+    cache_key: str,
+    *,
+    now: datetime,
+    ttl_seconds: int,
+) -> RiskAssessmentResponse | None:
+    if ttl_seconds <= 0:
+        return None
+    cached = _RISK_ASSESSMENT_RESPONSE_CACHE.get(cache_key)
+    if cached is None:
+        return None
+    cached_at, response = cached
+    if now - cached_at >= timedelta(seconds=ttl_seconds):
+        del _RISK_ASSESSMENT_RESPONSE_CACHE[cache_key]
+        return None
+    return response
+
+
+def _cache_risk_assessment_response(
+    cache_key: str,
+    response: RiskAssessmentResponse,
+    *,
+    now: datetime,
+    ttl_seconds: int,
+) -> None:
+    if ttl_seconds <= 0:
+        return
+    _RISK_ASSESSMENT_RESPONSE_CACHE[cache_key] = (now, response)
+    while len(_RISK_ASSESSMENT_RESPONSE_CACHE) > 128:
+        oldest_key = next(iter(_RISK_ASSESSMENT_RESPONSE_CACHE))
+        del _RISK_ASSESSMENT_RESPONSE_CACHE[oldest_key]
 
 
 def _persist_assessment(

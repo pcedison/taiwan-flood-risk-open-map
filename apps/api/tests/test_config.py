@@ -53,6 +53,29 @@ def test_settings_does_not_enable_bundled_geocoder_open_data_for_default_local(m
     assert settings.geocoder_open_data_paths == ()
     assert settings.geocoder_postgis_enabled is False
     assert settings.geocoder_postgis_bootstrap_enabled is False
+    assert settings.risk_assessment_response_cache_seconds == 0
+    get_settings.cache_clear()
+
+
+def test_settings_enables_short_risk_response_cache_for_hosted_runtime(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.delenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings.risk_assessment_response_cache_seconds == 120
+    get_settings.cache_clear()
+
+
+def test_settings_allows_disabling_risk_response_cache(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "0")
+
+    settings = get_settings()
+
+    assert settings.risk_assessment_response_cache_seconds == 0
     get_settings.cache_clear()
 
 

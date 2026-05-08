@@ -943,6 +943,40 @@ def test_risk_assess_skips_db_when_evidence_repository_is_disabled(monkeypatch) 
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
+def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
+    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "120")
+    get_settings.cache_clear()
+    public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
+
+    calls = {"realtime": 0}
+
+    def realtime_bundle(**_kwargs):
+        calls["realtime"] += 1
+        return _empty_realtime_bundle()
+
+    monkeypatch.setattr(public_routes, "fetch_official_realtime_bundle", realtime_bundle)
+
+    try:
+        payload = {
+            "point": {"lat": 23.05753, "lng": 120.20144},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "台南市安南區長溪路二段",
+        }
+        first_response = client.post("/v1/risk/assess", json=payload)
+        second_response = client.post("/v1/risk/assess", json=payload)
+    finally:
+        public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
+        get_settings.cache_clear()
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert calls["realtime"] == 1
+    assert second_response.json()["assessment_id"] == first_response.json()["assessment_id"]
+
+
 def test_risk_assess_uses_local_historical_fallback_when_local_db_returns_empty(
     monkeypatch,
 ) -> None:

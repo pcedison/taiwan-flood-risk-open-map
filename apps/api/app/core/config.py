@@ -43,6 +43,7 @@ class Settings:
     historical_news_on_demand_writeback_enabled: bool
     historical_news_on_demand_max_records: int
     historical_news_on_demand_timeout_seconds: float
+    risk_assessment_response_cache_seconds: int
     user_reports_enabled: bool
     user_reports_rate_limit_enabled: bool
     user_reports_rate_limit_backend: RateLimitBackend
@@ -125,6 +126,11 @@ def get_settings() -> Settings:
             "HISTORICAL_NEWS_ON_DEMAND_TIMEOUT_SECONDS",
             default=4.0,
             minimum=0.5,
+        ),
+        risk_assessment_response_cache_seconds=_env_int(
+            "RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS",
+            default=120 if _hosted_runtime(app_env) else 0,
+            minimum=0,
         ),
         user_reports_enabled=_env_bool("USER_REPORTS_ENABLED", default=False),
         user_reports_rate_limit_enabled=_env_bool(
