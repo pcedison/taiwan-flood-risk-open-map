@@ -3,7 +3,7 @@
 版本：0.1.0  
 狀態：正式工作進度規劃  
 來源規格：`docs/PROJECT_SDD.md`  
-最後更新：2026-04-30
+最後更新：2026-05-08
 專案授權決策：Apache-2.0  
 主要部署決策：GitHub repo -> Zeabur VPS auto deploy  
 語系決策：繁體中文 only
@@ -229,6 +229,46 @@ Phase 3 驗收：
 - Query heat 不影響 risk score。
 - API 回應含 data freshness 與 missing sources。
 
+### Phase 3.5：Precomputed Profiles and Cold-Query Performance
+
+目標：
+
+- 讓 public beta 第一次搜尋也能先讀取行政區或網格風險 profile，避免所有新地點都同步等待昂貴的精準半徑查詢。
+- 將 query heat 用於 refresh/review priority，而不是直接提高風險分數。
+- 建立向量輔助層的邊界：只輔助新聞去重、語意相關性與地名匹配，不取代 PostGIS/evidence。
+- 預先切分以縣市、鄉鎮市區、村里與 H3/geohash 為第一階段；「鄰」級 profile 需等可靠邊界資料與隱私審查後再啟用。
+
+建議工期：
+
+- 5-10 個工作日。
+
+可並行 work packages：
+
+- WP-015 Area/Grid Risk Profiles
+- WP-016 Vector-assisted Evidence Intelligence
+- WP-006 Geospatial/DB
+- WP-007 Worker Framework
+- WP-005 Domain Risk Engine
+- WP-014 Testing and CI
+
+主要產物：
+
+- `admin_area_profiles`、`risk_grid_profiles`、`profile_evidence_links`、`profile_refresh_jobs` migrations。
+- Profile builder service：從 accepted evidence、淹水潛勢、歷史新聞與資料新鮮度計算村里/鄉鎮/H3 profile。
+- Profile read path：`/v1/risk/assess` 可先用 profile 回傳初步 evidence-backed result，並在背景排精準 refresh。
+- Query heat priority rule：只影響 profile refresh、source backfill、review queue。
+- Optional `evidence_embeddings` contract：只存 metadata/summary embedding 與 evidence linkage。
+- Golden fixtures：profile scoring 與 exact-radius scoring 的差異可解釋。
+
+Phase 3.5 驗收：
+
+- 第一次查詢未知地點時，如果所在村里或 H3 profile 已存在，API 可在不等待 on-demand news/GDELT 的情況下回傳初步風險。
+- Profile response 必須標示資料範圍、profile radius/polygon rule、computed_at、expires_at、missing sources。
+- Exact-radius refresh job 可重跑且 idempotent。
+- Query heat 不改變 `realtime_score` 或 `historical_score`。
+- Vector candidate cannot become accepted evidence without source URL/metadata, location confidence, and PostGIS geometry or explicit uncertainty.
+- Unit tests cover stale profile, missing profile fallback, query-heat priority, and vector-only candidate rejection.
+
 ### Phase 4：Expanded News and Public Discussion
 
 目標：
@@ -422,6 +462,8 @@ Phase 6 驗收：
 | WP-012 Observability/Ops | `infra/monitoring/`, `docs/runbooks/` | almost all | service names |
 | WP-013 Security/Privacy | `apps/api/app/security/`, `docs/privacy/` | WP-004, WP-007 | data retention rules |
 | WP-014 Testing/CI | `.github/workflows/`, tests | all | skeleton structure |
+| WP-015 Area/Grid Risk Profiles | `infra/migrations/`, `apps/api/app/domain/profiles/`, `apps/workers/app/jobs/profiles/` | WP-005, WP-009, WP-012 | accepted evidence schema, geocoder/admin terms |
+| WP-016 Vector-assisted Evidence Intelligence | `apps/workers/app/domain/embeddings/`, `apps/workers/app/jobs/news/`, `docs/data-sources/news/` | WP-009, WP-015 | source/legal review, model choice |
 
 ---
 
@@ -787,6 +829,66 @@ Definition of Done:
 
 - User can see why a level was assigned.
 - Missing sources are visible.
+
+#### G3. Area/grid risk profile tables and builder
+
+Owner：WP-015, WP-006, WP-005
+Status：Ready after G1 and F1
+Dependencies：G1, F1, E4
+
+Tasks:
+
+- Add `admin_area_profiles`, `risk_grid_profiles`, `profile_evidence_links`, and `profile_refresh_jobs` migrations.
+- Define profile scope keys for county, town, village, and H3/geohash grid.
+- Build profile summaries from accepted evidence, flood-potential intersections, historical records/news, and source freshness.
+- Store top evidence IDs, evidence counts, score version, computed/stale timestamps, and missing-source warnings.
+- Add idempotent profile rebuild job and stale-profile cleanup.
+
+Definition of Done:
+
+- Profile builder tests cover village, town, and grid profiles.
+- Rebuild job is idempotent and can target one area/grid shard.
+- Profiles never use query heat as direct risk evidence.
+
+#### G4. Profile-backed risk read path
+
+Owner：WP-015, WP-004, WP-003
+Status：Ready after G3
+Dependencies：G3
+
+Tasks:
+
+- Resolve query point to village/town and grid cell.
+- Read fresh profile before exact-radius query when the request is cold.
+- Return profile-backed result with explicit scope, radius/polygon rule, computed_at, expires_at, and limitations.
+- Enqueue exact-radius refresh when profile is missing, stale, or user requests a precise radius.
+- Add frontend copy distinguishing profile preview from precise radius evidence.
+
+Definition of Done:
+
+- Unknown public beta lookup can return from profile when available.
+- UI clearly labels profile scope and does not imply address-level certainty.
+- Tests cover fresh profile hit, stale profile fallback, and missing profile fallback.
+
+#### G5. Vector-assisted evidence intelligence
+
+Owner：WP-016, WP-009, WP-005
+Status：Ready after F2
+Dependencies：F2, source/legal review
+
+Tasks:
+
+- Define optional `evidence_embeddings` contract with model name/version and evidence ID.
+- Add metadata/summary embedding job for accepted or staging news evidence only.
+- Use vector similarity for dedupe, semantic relevance, and ambiguous location-text candidate ranking.
+- Reject vector-only risk assertions without accepted evidence and geospatial confidence.
+- Add retention/takedown behavior tied to source evidence deletion.
+
+Definition of Done:
+
+- Embedding tests prove raw full text is not required or redistributed.
+- Similarity results remain advisory until linked to evidence and geometry.
+- Deleting/hiding source evidence also removes or hides its embedding.
 
 ### Epic H：Ops, Security, and Deployment
 
@@ -1186,19 +1288,26 @@ Completed execution order:
 51. Add worker/scheduler heartbeat textfile metrics and active Prometheus alert rules.
 52. Add Phase 4/5 public discussion and user report legal/privacy gate checklists.
 53. Verify migration 0005, MVT tile smoke, query persistence, worker DB demo, and heartbeat textfile output against local Compose.
+54. Add Phase 3.5 profile schema, API profile read repository, and refresh job claim/complete queue helpers.
+55. Implement profile rebuild SQL builder from accepted evidence, flood-potential, historical/news freshness, and top evidence links.
+56. Connect `/v1/risk/assess` to a profile-backed cold lookup fast path when exact-radius historical evidence is missing or only potential-only.
+57. Add optional vector-assisted evidence embedding contract table with source/evidence linkage and retention status.
 
 Next execution order:
 
-1. Replace fixture-backed worker runtime adapters with reviewed real source clients and a durable queue/singleton scheduler.
-2. Wire the open basemap path in engineering: MapLibre style selection,
+1. Seed/build the first production-candidate village/H3 profile shards from
+   accepted evidence and verify hosted `/v1/risk/assess` returns the
+   profile-backed fast path before on-demand GDELT/news enrichment.
+2. Replace fixture-backed worker runtime adapters with reviewed real source clients and a durable queue/singleton scheduler.
+3. Wire the open basemap path in engineering: MapLibre style selection,
    PMTiles/Protomaps source support, object-storage/CDN URL configuration,
    attribution display, range request smoke, and rollback. Do not require TGOS.
-3. Move project overlay tile generation from evidence/query fallback SQL to
+4. Move project overlay tile generation from evidence/query fallback SQL to
    dedicated production layer tables and hosting/cache strategy.
-4. Add monitoring dashboards and production scrape deployment around the new heartbeat/freshness metrics.
-5. Implement Phase 4/5 sources only through the new legal/privacy gate checklist.
-6. Prepare this checkpoint update for PR review: final diff check, commit, push, and CI confirmation.
-7. Meet the next-phase runtime acceptance standards recorded in `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md` before claiming queue, reports, query heat materialization, or tile cache readiness.
+5. Add monitoring dashboards and production scrape deployment around the new heartbeat/freshness metrics.
+6. Implement Phase 4/5 sources only through the new legal/privacy gate checklist.
+7. Prepare this checkpoint update for PR review: final diff check, commit, push, and CI confirmation.
+8. Meet the next-phase runtime acceptance standards recorded in `docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md` before claiming queue, reports, query heat materialization, or tile cache readiness.
 
 ---
 
@@ -1223,6 +1332,9 @@ The project is considered public-beta-ready when:
 - Public beta runtime does not depend on TGOS.
 - Backup/restore and deploy rollback are documented.
 - Monitoring can detect source freshness failure.
+- Cold public beta lookup has a profile-backed fast path for at least village
+  or H3 scope, or the remaining cold-query latency risk is explicitly accepted
+  in the beta readiness document.
 
 ---
 

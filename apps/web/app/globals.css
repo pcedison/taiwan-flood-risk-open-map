@@ -568,6 +568,27 @@ button {
   font-weight: 900;
 }
 
+.profile-preview-banner {
+  display: grid;
+  gap: 4px;
+  border: 1px solid rgba(20, 125, 100, 0.24);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(20, 125, 100, 0.08);
+}
+
+.profile-preview-banner strong {
+  color: var(--accent-strong);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.profile-preview-banner span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .limitations {
   display: grid;
   gap: 8px;

@@ -411,6 +411,18 @@ Tile feature refresh:
 docker compose run --rm worker sh -c "pip install -e . && python -m app.main --refresh-tile-features --tile-layer-id flood-potential --tile-feature-limit 25"
 ```
 
+Profile fast-path seeding and refresh:
+
+```powershell
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --seed-risk-profiles --profile-seed-limit 25 --profile-include-privacy-bucket-fallback"
+docker compose run --rm worker sh -c "pip install -e . && python -m app.main --work-profile-refresh-jobs --profile-refresh-limit 10"
+python infra/scripts/profile_fast_path_smoke.py --lat 22.65646 --lng 120.32574 --radius-m 500 --allow-missing --evidence-json tmp/profile-fast-path-smoke.json
+```
+
+The profile smoke is allowed to report `missing` in local environments before a
+profile shard has been seeded and rebuilt. Production-candidate evidence should
+drop `--allow-missing` and point at a seeded village or H3/geohash profile.
+
 Tile cache write smoke. The worker helper can upsert a cache row that the API
 will serve, but full production tile generation, expiry, invalidation, and
 external hosting are still not accepted:

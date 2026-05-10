@@ -4,6 +4,7 @@ import gzip
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from app import scheduler as scheduler_module
 from app.config import load_worker_settings
@@ -1732,6 +1733,106 @@ def test_main_refresh_tile_features_noops_without_database_url(monkeypatch) -> N
     monkeypatch.setattr("app.main.PostgresTileCacheWriter", fail_constructor)
 
     assert main(["--refresh-tile-features"]) == 0
+
+
+def test_main_seed_risk_profiles_runs_admin_and_grid_seeders(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_admin_seed(**kwargs: object) -> object:
+        captured["admin"] = kwargs
+        return SimpleNamespace(
+            profile_kind="admin_area",
+            seeded=2,
+            refresh_jobs_enqueued=2,
+            source="moi-village-boundary-twd97-geographic",
+        )
+
+    def fake_grid_seed(**kwargs: object) -> object:
+        captured["grid"] = kwargs
+        return SimpleNamespace(
+            profile_kind="risk_grid",
+            seeded=1,
+            refresh_jobs_enqueued=1,
+            source="location_queries",
+        )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.seed_admin_area_profiles_from_geocoder", fake_admin_seed)
+    monkeypatch.setattr("app.main.seed_grid_profiles_from_query_heat", fake_grid_seed)
+    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--seed-risk-profiles",
+            "--profile-seed-limit",
+            "5",
+            "--profile-grid-system",
+            "h3",
+            "--profile-grid-resolution",
+            "8",
+            "--profile-include-privacy-bucket-fallback",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["admin"]["database_url"] == "postgresql://worker:test@localhost/flood"
+    assert captured["admin"]["limit"] == 5
+    assert captured["grid"]["grid_system"] == "h3"
+    assert captured["grid"]["include_privacy_bucket_fallback"] is True
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile_seed"][0]["seeded"] == 2
+    assert payload["profile_seed"][1]["refresh_jobs_enqueued"] == 1
+
+
+def test_main_work_profile_refresh_jobs_claims_rebuilds_and_completes(monkeypatch, capsys) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_claim(**kwargs: object) -> tuple[object, ...]:
+        calls["claim"] = kwargs
+        return (
+            SimpleNamespace(
+                id="job-1",
+                profile_kind="admin_area",
+                profile_key="village:64000050-本和里",
+            ),
+        )
+
+    def fake_rebuild(**kwargs: object) -> object:
+        calls["rebuild"] = kwargs
+        return SimpleNamespace(
+            profile_kind="admin_area",
+            profile_key="village:64000050-本和里",
+            evidence_count=3,
+            historical_level="high",
+            realtime_level="unknown",
+        )
+
+    def fake_complete(**kwargs: object) -> bool:
+        calls["complete"] = kwargs
+        return True
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.claim_profile_refresh_jobs", fake_claim)
+    monkeypatch.setattr("app.main.rebuild_risk_profile", fake_rebuild)
+    monkeypatch.setattr("app.main.complete_profile_refresh_job", fake_complete)
+
+    exit_code = main(
+        [
+            "--work-profile-refresh-jobs",
+            "--profile-refresh-limit",
+            "2",
+            "--profile-refresh-worker-id",
+            "worker-a",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls["claim"]["limit"] == 2
+    assert calls["claim"]["worker_id"] == "worker-a"
+    assert calls["complete"]["status"] == "succeeded"
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile_refresh_jobs"][0]["status"] == "succeeded"
+    assert payload["profile_refresh_jobs"][0]["evidence_count"] == 3
 
 
 class _FakeStagingWriter:

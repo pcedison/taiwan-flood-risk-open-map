@@ -13,6 +13,11 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST_PATH = REPO_ROOT / "docs" / "data-sources" / "geocoding" / "geocoding-data-manifest.yaml"
 BETA_REQUIRED_PRECISIONS = {"road_or_lane", "poi", "admin_area"}
+PRODUCTION_EVIDENCE_FIELDS = {
+    "all_taiwan_address_source_ref",
+    "license_review_ref",
+    "coverage_review_ref",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,6 +93,7 @@ def coverage_summary(
 
     smoke = manifest.get("smoke_tests", {}) if isinstance(manifest.get("smoke_tests"), dict) else {}
     required_categories = set(smoke.get("required_categories") or ())
+    production_required_categories = set(smoke.get("production_required_categories") or ())
     required_precisions = set(smoke.get("required_precision_values") or ())
     missing: list[str] = []
     for category in sorted(required_categories):
@@ -97,9 +103,22 @@ def coverage_summary(
         if precision_counts.get(precision, 0) <= 0:
             missing.append(f"precision:{precision}")
     if production_complete:
+        if manifest.get("production_complete") is not True:
+            missing.append("manifest:production_complete")
+        for category in sorted(production_required_categories):
+            if category_counts.get(category, 0) <= 0:
+                missing.append(f"production_category:{category}")
         for precision in sorted(required_precisions):
             if precision_counts.get(precision, 0) <= 0:
                 missing.append(f"production_precision:{precision}")
+        production_evidence = (
+            manifest.get("production_complete_evidence")
+            if isinstance(manifest.get("production_complete_evidence"), dict)
+            else {}
+        )
+        for field in sorted(PRODUCTION_EVIDENCE_FIELDS):
+            if not _non_empty_string(production_evidence.get(field)):
+                missing.append(f"production_evidence:{field}")
 
     return {
         "schema_version": "geocoder-coverage-smoke/v1",
@@ -109,9 +128,14 @@ def coverage_summary(
         "category_counts": category_counts,
         "precision_counts": precision_counts,
         "required_categories": sorted(required_categories),
+        "production_required_categories": sorted(production_required_categories),
         "required_precision_values": sorted(required_precisions),
         "missing_requirements": missing,
     }
+
+
+def _non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 if __name__ == "__main__":

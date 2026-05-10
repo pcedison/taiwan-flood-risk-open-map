@@ -63,3 +63,13 @@ docker compose exec postgres psql -U flood_risk -d flood_risk -c "\di"
 - `adapter_runs`
 - `user_reports`
 - `audit_logs`
+
+Later migrations add runtime and beta-hardening tables, including worker queues,
+tile caches, user-report privacy redaction fields, open-data geocoder entries,
+and precomputed risk profile tables:
+
+- `admin_area_profiles`
+- `risk_grid_profiles`
+- `profile_evidence_links`
+- `profile_refresh_jobs`
+- `evidence_embeddings`

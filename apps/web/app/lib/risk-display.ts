@@ -75,6 +75,12 @@ export type LayerDisplayState = {
   hasTileContract: boolean;
 };
 
+export type ProfilePreviewState = {
+  isProfilePreview: boolean;
+  label: string | null;
+  message: string | null;
+};
+
 export type UserReportPayload = {
   point: {
     lat: number;
@@ -173,6 +179,33 @@ export function getEvidenceDisplayState(status: EvidenceStatus, itemCount: numbe
 
 export function shouldFetchEvidenceList(assessmentId: string | null | undefined) {
   return Boolean(assessmentId);
+}
+
+export function getProfilePreviewState(input: {
+  data_freshness?: DataFreshnessItem[] | null;
+  explanation?: {
+    summary?: string | null;
+  } | null;
+} | null | undefined): ProfilePreviewState {
+  const profileFreshness = input?.data_freshness?.find(
+    (item) => item.source_id === "precomputed-risk-profile",
+  );
+  if (!profileFreshness) {
+    return {
+      isProfilePreview: false,
+      label: null,
+      message: null,
+    };
+  }
+
+  return {
+    isProfilePreview: true,
+    label: "區域 profile 初步結果",
+    message:
+      profileFreshness.message ??
+      input?.explanation?.summary ??
+      "本次結果先使用預先計算的區域風險 profile，精準半徑資料會由背景工作更新。",
+  };
 }
 
 export function buildRiskAssessmentPayload(

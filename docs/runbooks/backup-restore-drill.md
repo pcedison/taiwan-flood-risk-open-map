@@ -18,9 +18,15 @@ Covered:
 
 Not covered:
 
-- Zeabur managed snapshot automation.
 - Object-storage raw snapshot lifecycle cleanup.
 - Destructive production restore.
+
+Production-complete evidence also requires a Zeabur-managed offsite backup
+artifact record. This runbook covers the local/logical `pg_dump` and scratch
+restore workflow, but the production readiness validator now separately
+requires private evidence that a Zeabur-managed PostgreSQL/PostGIS offsite
+backup artifact exists and that its download metadata and restore evidence were
+captured.
 
 ## Safety Rules
 
@@ -193,6 +199,24 @@ ops storage, then reference them from the private production readiness evidence:
   environment was available.
 - Record skipped restore execution as a blocker; production-complete evidence
   must have no backup restore blockers.
+
+For Zeabur-managed offsite backup evidence, record only private refs in
+`managed_backup_artifact`:
+
+- `artifact_ref`: the private ops artifact ID or storage ref for the downloaded
+  provider-managed backup file.
+- `download_metadata_ref`: the Zeabur dashboard/API metadata capture, including
+  backup time and download metadata, with any `downloadURL` stored privately.
+- `dashboard_evidence_ref`: screenshot/transcript evidence that the backup came
+  from the Zeabur managed Backup tab or Public API.
+- `restore_evidence_ref`: scratch restore transcript or isolated restore smoke
+  evidence.
+- `retention_days: 7`, matching the current Zeabur managed backup retention
+  documented by Zeabur.
+
+Never commit Zeabur backup download URLs, database URLs, or screenshots that
+show secrets. The validator rejects committed `download_url` and
+`database_url` fields in this section.
 
 ## Incident Restore Outline
 

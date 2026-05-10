@@ -15,6 +15,7 @@ const {
   formatDateTime,
   formatDistance,
   getEvidenceDisplayState,
+  getProfilePreviewState,
   getUserReportSubmissionDisplayState,
   selectEvidenceItems,
   shouldFetchEvidenceList,
@@ -145,6 +146,34 @@ test("evidence display state distinguishes loading, error, list, and empty state
     showError: false,
     showList: false,
     showLoading: false,
+  });
+});
+
+test("profile preview state labels precomputed profile responses", () => {
+  const state = getProfilePreviewState({
+    data_freshness: [
+      {
+        health_status: "healthy",
+        ingested_at: "2026-05-08T03:00:00Z",
+        message: "已使用預先計算的 risk_grid:h3:8 profile。",
+        name: "預先計算區域風險 profile",
+        observed_at: null,
+        source_id: "precomputed-risk-profile",
+      },
+    ],
+    explanation: {
+      summary: "此結果先使用預先計算的區域風險 profile 回應。",
+    },
+  });
+
+  assert.equal(state.isProfilePreview, true);
+  assert.equal(state.label, "區域 profile 初步結果");
+  assert.match(state.message ?? "", /risk_grid:h3:8/);
+
+  assert.deepEqual(getProfilePreviewState({ data_freshness: [] }), {
+    isProfilePreview: false,
+    label: null,
+    message: null,
   });
 });
 

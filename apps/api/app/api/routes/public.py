@@ -76,6 +76,12 @@ from app.domain.realtime import (
     OfficialRealtimeSourceStatus,
     fetch_official_realtime_bundle,
 )
+from app.domain.profiles import (
+    RiskProfileRecord,
+    RiskProfileRepositoryUnavailable,
+    enqueue_profile_refresh_job,
+    fetch_best_profile_for_point,
+)
 from app.domain.risk import RiskEvidenceSignal, RiskScoringResult, score_risk
 
 router = APIRouter(prefix="/v1", tags=["Public"])
@@ -671,6 +677,24 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         now=created_at,
     )
     db_evidence_items = _nearby_db_evidence(request)
+    if _can_use_profile_fast_path(db_evidence_items):
+        profile = _precomputed_risk_profile(request, now=created_at)
+        if profile is not None:
+            _enqueue_profile_refresh(profile, request=request)
+            response = _profile_backed_response(
+                request=request,
+                assessment_id=assessment_id,
+                profile=profile,
+                realtime_bundle=realtime_bundle,
+                created_at=created_at,
+            )
+            _cache_risk_assessment_response(
+                response_cache_key,
+                response,
+                now=created_at,
+                ttl_seconds=settings.risk_assessment_response_cache_seconds,
+            )
+            return response
     on_demand_news = OnDemandNewsSearchResult(
         attempted=False,
         source_id="on-demand-public-news",
@@ -846,6 +870,165 @@ def _display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
         }
     )
     return [*non_flood_potential_items, representative]
+
+
+def _can_use_profile_fast_path(db_evidence_items: tuple[Evidence, ...] | None) -> bool:
+    if db_evidence_items is None:
+        return False
+    return not any(item.event_type in OBSERVED_HISTORICAL_EVENT_TYPES for item in db_evidence_items)
+
+
+def _precomputed_risk_profile(
+    request: RiskAssessRequest,
+    *,
+    now: datetime,
+) -> RiskProfileRecord | None:
+    settings = get_settings()
+    if not settings.evidence_repository_enabled:
+        return None
+    try:
+        return fetch_best_profile_for_point(
+            database_url=settings.database_url,
+            lat=request.point.lat,
+            lng=request.point.lng,
+            radius_m=request.radius_m,
+            now=now,
+        )
+    except RiskProfileRepositoryUnavailable:
+        return None
+
+
+def _enqueue_profile_refresh(profile: RiskProfileRecord, *, request: RiskAssessRequest) -> None:
+    settings = get_settings()
+    if not settings.evidence_repository_enabled:
+        return
+    try:
+        enqueue_profile_refresh_job(
+            database_url=settings.database_url,
+            profile_kind=profile.profile_kind,
+            profile_key=profile.profile_key,
+            priority=10,
+            reason="cold_lookup_profile_refresh",
+            payload={
+                "lat": request.point.lat,
+                "lng": request.point.lng,
+                "radius_m": request.radius_m,
+                "location_text": request.location_text,
+            },
+        )
+    except RiskProfileRepositoryUnavailable:
+        return
+
+
+def _profile_backed_response(
+    *,
+    request: RiskAssessRequest,
+    assessment_id: str,
+    profile: RiskProfileRecord,
+    realtime_bundle: OfficialRealtimeBundle,
+    created_at: datetime,
+) -> RiskAssessmentResponse:
+    realtime_scoring = score_risk(
+        tuple(_signal_from_official_realtime(observation) for observation in realtime_bundle.observations),
+        now=created_at,
+    )
+    realtime_level = (
+        realtime_scoring.realtime_level
+        if realtime_scoring.realtime_level != "未知"
+        else _public_risk_level(profile.realtime_level)
+    )
+    historical_level = _public_risk_level(profile.historical_level)
+    confidence_level = _public_confidence_level(profile.confidence_level)
+    expires_at = profile.expires_at or created_at + timedelta(minutes=5)
+    data_freshness = [
+        *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
+        _profile_data_freshness(profile, now=created_at),
+    ]
+    explanation = Explanation(
+        summary=(
+            "此結果先使用預先計算的區域風險 profile 回應，"
+            "精準半徑資料會由背景工作重新整理；請視為 beta 初步參考。"
+        ),
+        main_reasons=_profile_main_reasons(profile),
+        missing_sources=_profile_missing_source_messages(profile),
+    )
+    return RiskAssessmentResponse(
+        assessment_id=assessment_id,
+        location=request.point,
+        radius_m=request.radius_m,
+        score_version=profile.score_version,
+        created_at=created_at,
+        expires_at=expires_at,
+        realtime=RiskLevelBlock(level=realtime_level),
+        historical=RiskLevelBlock(level=historical_level),
+        confidence=ConfidenceBlock(level=confidence_level),
+        explanation=explanation,
+        evidence=[],
+        data_freshness=data_freshness,
+        query_heat=_query_heat(request, now=created_at),
+    )
+
+
+def _profile_data_freshness(profile: RiskProfileRecord, *, now: datetime) -> DataFreshness:
+    return DataFreshness(
+        source_id="precomputed-risk-profile",
+        name="預先計算區域風險 profile",
+        health_status="healthy" if profile.status == "healthy" else "degraded",
+        observed_at=profile.latest_observed_at or profile.latest_occurred_at,
+        ingested_at=profile.latest_ingested_at or profile.computed_at or now,
+        message=(
+            f"已使用預先計算的 {profile.profile_kind}:{profile.profile_scope} profile；"
+            f"範圍半徑約 {profile.profile_radius_m} 公尺，"
+            f"計算時間 {profile.computed_at.isoformat()}。"
+        ),
+    )
+
+
+def _profile_main_reasons(profile: RiskProfileRecord) -> list[str]:
+    reasons = [
+        f"已命中預先計算的 {profile.profile_kind}:{profile.profile_scope} 區域風險 profile。",
+    ]
+    if profile.evidence_counts:
+        reasons.append(
+            "profile 彙整的公開資料筆數："
+            + "、".join(f"{key}={value}" for key, value in sorted(profile.evidence_counts.items()))
+        )
+    if profile.coverage_gaps:
+        reasons.append("profile 仍有資料覆蓋限制：" + "、".join(profile.coverage_gaps))
+    return reasons
+
+
+def _profile_missing_source_messages(profile: RiskProfileRecord) -> list[str]:
+    messages = []
+    for source in profile.missing_sources:
+        if source == "rainfall":
+            messages.append("profile 計算時缺少即時雨量來源。")
+        elif source == "water_level":
+            messages.append("profile 計算時缺少即時水位來源。")
+        else:
+            messages.append(f"profile 計算時缺少 {source} 來源。")
+    if profile.status != "healthy":
+        messages.append("profile 目前不是 healthy 狀態，結果只能作為初步參考。")
+    return messages
+
+
+def _public_risk_level(level: str) -> Literal["低", "中", "高", "極高", "未知"]:
+    return {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "severe": "極高",
+        "unknown": "未知",
+    }.get(level, "未知")
+
+
+def _public_confidence_level(level: str) -> Literal["低", "中", "高", "未知"]:
+    return {
+        "low": "低",
+        "medium": "中",
+        "high": "高",
+        "unknown": "未知",
+    }.get(level, "未知")
 
 
 def _on_demand_public_news_result(
