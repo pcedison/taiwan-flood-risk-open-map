@@ -129,6 +129,7 @@ button {
   inset: 0;
   display: grid;
   place-items: center;
+  pointer-events: none;
   background:
     linear-gradient(90deg, rgba(46, 94, 92, 0.12) 1px, transparent 1px),
     linear-gradient(rgba(46, 94, 92, 0.12) 1px, transparent 1px),
