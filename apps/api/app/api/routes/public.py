@@ -1013,22 +1013,28 @@ def _profile_missing_source_messages(profile: RiskProfileRecord) -> list[str]:
 
 
 def _public_risk_level(level: str) -> Literal["低", "中", "高", "極高", "未知"]:
-    return {
-        "low": "低",
-        "medium": "中",
-        "high": "高",
-        "severe": "極高",
-        "unknown": "未知",
-    }.get(level, "未知")
+    return cast(
+        Literal["低", "中", "高", "極高", "未知"],
+        {
+            "low": "低",
+            "medium": "中",
+            "high": "高",
+            "severe": "極高",
+            "unknown": "未知",
+        }.get(level, "未知"),
+    )
 
 
 def _public_confidence_level(level: str) -> Literal["低", "中", "高", "未知"]:
-    return {
-        "low": "低",
-        "medium": "中",
-        "high": "高",
-        "unknown": "未知",
-    }.get(level, "未知")
+    return cast(
+        Literal["低", "中", "高", "未知"],
+        {
+            "low": "低",
+            "medium": "中",
+            "high": "高",
+            "unknown": "未知",
+        }.get(level, "未知"),
+    )
 
 
 def _on_demand_public_news_result(

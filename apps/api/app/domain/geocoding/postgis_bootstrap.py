@@ -293,7 +293,10 @@ def import_row_from_payload(payload: dict[str, Any], *, jsonb: Any) -> dict[str,
     normalized_aliases = text_list(payload.get("normalized_aliases"))
     if not source_key or not name or lat is None or lng is None or not normalized_aliases:
         return None
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    metadata: dict[str, Any] = {}
+    metadata_value = payload.get("metadata")
+    if isinstance(metadata_value, dict):
+        metadata = dict(metadata_value)
     limitations = text_list(payload.get("limitations"))
     source_record_id = text_or_none(payload.get("source_record_id"))
     if source_record_id is None:

@@ -214,7 +214,7 @@ class FileBackedTaiwanOpenDataProvider:
         if not matches:
             normalized_query = compact_taiwan_query_key(request.query)
             for point in index.points:
-                matching_alias = next(
+                fallback_alias = next(
                     (
                         alias
                         for alias in point.aliases
@@ -222,8 +222,8 @@ class FileBackedTaiwanOpenDataProvider:
                     ),
                     None,
                 )
-                if matching_alias is not None:
-                    matches.append(open_data_match_sort_key(point, matching_alias))
+                if fallback_alias is not None:
+                    matches.append(open_data_match_sort_key(point, fallback_alias))
 
         matches.sort(key=lambda item: (item[0], item[1], item[2], item[3], item[5]))
         return tuple(

@@ -1619,7 +1619,7 @@ def _work_profile_refresh_jobs(
         log_event("profiles.refresh.claim_failed", error=str(exc))
         return 1
 
-    results = []
+    results: list[dict[str, object]] = []
     for job in jobs:
         try:
             summary = rebuild_risk_profile(
