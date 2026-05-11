@@ -45,6 +45,8 @@ def test_claim_profile_refresh_jobs_leases_due_jobs_in_priority_order() -> None:
     assert "FOR UPDATE SKIP LOCKED" in sql
     assert "UPDATE profile_refresh_jobs jobs" in sql
     assert "status = 'running'" in sql
+    assert "lease_expires_at <= now()" in sql
+    assert "attempts < max_attempts" in sql
     assert params == (3, "worker-a", 120)
     assert jobs[0].profile_key == "h3:842ab57ffffffff"
     assert jobs[0].payload == {"radius_m": 2000}
