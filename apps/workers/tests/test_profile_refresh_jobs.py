@@ -66,6 +66,8 @@ def test_seed_admin_area_profiles_from_geocoder_seeds_village_profiles_and_refre
     assert "INSERT INTO admin_area_profiles" in sql
     assert "INSERT INTO profile_refresh_jobs" in sql
     assert "ST_Buffer(centroid::geography" in sql
+    assert "'source_key', %s::text" in sql
+    assert "'scope', %s::text" in sql
     assert params[:4] == (
         "moi-village-boundary-twd97-geographic",
         10,
@@ -95,6 +97,9 @@ def test_seed_grid_profiles_from_query_heat_uses_existing_h3_or_privacy_bucket_s
     assert "INSERT INTO risk_grid_profiles" in sql
     assert "grid_geometry_approximated_from_query_heat" in sql
     assert "INSERT INTO profile_refresh_jobs" in sql
+    assert "ELSE %s::text || ':' || raw_grid_key" in sql
+    assert "'grid_system', %s::text" in sql
+    assert "'grid_resolution', %s::text" in sql
     assert params[:5] == (True, True, True, 5, "h3")
     assert summary.profile_kind == "risk_grid"
     assert summary.seeded == 3

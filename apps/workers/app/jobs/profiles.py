@@ -248,8 +248,8 @@ def seed_admin_area_profiles_from_geocoder(
                 'profile_seed',
                 jsonb_build_object(
                     'source', 'geocoder_open_data_entries',
-                    'source_key', %s,
-                    'scope', %s
+                    'source_key', %s::text,
+                    'scope', %s::text
                 ),
                 now(),
                 now()
@@ -341,7 +341,7 @@ def seed_grid_profiles_from_query_heat(
                 CASE
                     WHEN raw_grid_key LIKE 'h3:%%' OR raw_grid_key LIKE 'geohash:%%'
                         THEN raw_grid_key
-                    ELSE %s || ':' || raw_grid_key
+                    ELSE %s::text || ':' || raw_grid_key
                 END AS grid_key,
                 centroid,
                 ST_Buffer(centroid::geography, %s)::geometry AS geom,
@@ -365,8 +365,8 @@ def seed_grid_profiles_from_query_heat(
             )
             SELECT
                 grid_key,
-                %s,
-                %s,
+                %s::text,
+                %s::text,
                 geom,
                 centroid,
                 %s,
@@ -404,8 +404,8 @@ def seed_grid_profiles_from_query_heat(
                 'query_heat_priority',
                 jsonb_build_object(
                     'source', 'location_queries',
-                    'grid_system', %s,
-                    'grid_resolution', %s
+                    'grid_system', %s::text,
+                    'grid_resolution', %s::text
                 ),
                 now(),
                 now()
