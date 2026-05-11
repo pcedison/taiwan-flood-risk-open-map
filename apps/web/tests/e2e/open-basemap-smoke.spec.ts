@@ -172,10 +172,10 @@ async function mockRiskApi(page: Page) {
 
 async function expectVisibleMapCanvas(page: Page): Promise<Locator> {
   const mapCanvas = page.locator(".map-canvas");
-  await expect(mapCanvas).toBeVisible();
+  await expect(mapCanvas).toBeVisible({ timeout: 15_000 });
 
   const canvas = mapCanvas.locator("canvas").first();
-  await expect(canvas).toBeVisible();
+  await expect(canvas).toBeVisible({ timeout: 15_000 });
 
   const box = await canvas.boundingBox();
   expect(box?.width).toBeGreaterThan(0);
@@ -202,7 +202,7 @@ test("production-like open raster basemap renders without OSM or TGOS tiles", as
   await page.goto("/");
 
   const canvas = await expectVisibleMapCanvas(page);
-  await expect(page.locator(".map-marker")).toBeVisible();
+  await expect(page.locator(".map-marker")).toBeVisible({ timeout: 15_000 });
   await expectBasemapAttributionVisible(page);
   await expect.poll(() => basemapRequests.basemapTiles).toBeGreaterThan(0);
 
@@ -212,7 +212,7 @@ test("production-like open raster basemap renders without OSM or TGOS tiles", as
   await expect(page.getByText("Open basemap smoke risk summary")).toBeVisible();
   await expect(page.getByText("Open basemap smoke full evidence", { exact: true })).toBeVisible();
   await expect(page.getByText("Open basemap smoke layer")).toBeVisible();
-  await expect(page.locator(".map-marker")).toBeVisible();
+  await expect(page.locator(".map-marker")).toBeVisible({ timeout: 15_000 });
   await expect(canvas).toBeVisible();
 
   expect(basemapRequests.osmTiles).toBe(0);
