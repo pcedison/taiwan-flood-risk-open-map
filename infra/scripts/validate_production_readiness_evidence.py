@@ -141,6 +141,16 @@ DRILL_NAMES = {
     "backup restore drill",
 }
 
+ZEABUR_MANAGED_BACKUP_TYPES = {
+    "manual-online-offsite",
+    "automatic-online-offsite",
+}
+
+ON_CALL_MODES = {
+    "single-operator",
+    "primary-backup",
+}
+
 REQUIRED_GAP_FRAGMENTS = {
     "real Zeabur env",
     "real Zeabur secrets",
@@ -207,6 +217,13 @@ TEMPLATE_OWNER_VALUES = {
 
 RUNBOOK_ONLY_EVIDENCE_PREFIXES = (
     "docs/runbooks/",
+)
+
+MANAGED_BACKUP_REF_FIELDS = (
+    "artifact_ref",
+    "download_metadata_ref",
+    "dashboard_evidence_ref",
+    "restore_evidence_ref",
 )
 
 
@@ -307,6 +324,16 @@ def validate_evidence(
     )
     _validate_alert_routing(
         evidence.get("alert_routing"),
+        errors,
+        production_acceptance=production_acceptance,
+    )
+    _validate_on_call_model(
+        evidence.get("on_call_model"),
+        errors,
+        production_acceptance=production_acceptance,
+    )
+    _validate_managed_backup_artifact(
+        evidence.get("managed_backup_artifact"),
         errors,
         production_acceptance=production_acceptance,
     )
@@ -501,6 +528,154 @@ def _validate_alert_routing(
                     f"alert_routing[{family}].route",
                     errors,
                 )
+
+
+def _validate_on_call_model(
+    value: Any,
+    errors: list[str],
+    *,
+    production_acceptance: bool,
+) -> None:
+    if value is None and not production_acceptance:
+        return
+    if not isinstance(value, dict):
+        errors.append("on_call_model must be an object")
+        return
+
+    mode = value.get("mode")
+    if mode not in ON_CALL_MODES:
+        errors.append(f"on_call_model.mode must be one of {sorted(ON_CALL_MODES)}")
+
+    _validate_timestamp(value.get("accepted_at"), "on_call_model.accepted_at", errors)
+    for field in ("accepted_by", "accepted_scope", "evidence_ref"):
+        if not _non_empty_string(value.get(field)):
+            errors.append(f"on_call_model.{field} is required")
+
+    if not production_acceptance:
+        return
+
+    for field in ("accepted_by", "accepted_scope", "evidence_ref"):
+        if _non_empty_string(value.get(field)):
+            _validate_not_placeholder(value.get(field), f"on_call_model.{field}", errors)
+    if _non_empty_string(value.get("accepted_by")):
+        _validate_real_owner(value.get("accepted_by"), "on_call_model.accepted_by", errors)
+    if _non_empty_string(value.get("evidence_ref")):
+        _validate_single_production_ref(
+            value.get("evidence_ref"),
+            "on_call_model.evidence_ref",
+            errors,
+        )
+
+    if mode == "single-operator":
+        if value.get("explicit_go_no_go_acceptance") is not True:
+            errors.append(
+                "on_call_model.explicit_go_no_go_acceptance must be true for "
+                "single-operator mode when production_complete is true"
+            )
+        if value.get("limitations_acknowledged") is not True:
+            errors.append(
+                "on_call_model.limitations_acknowledged must be true for "
+                "single-operator mode when production_complete is true"
+            )
+
+
+def _validate_managed_backup_artifact(
+    value: Any,
+    errors: list[str],
+    *,
+    production_acceptance: bool,
+) -> None:
+    if value is None and not production_acceptance:
+        return
+    if not isinstance(value, dict):
+        errors.append("managed_backup_artifact must be an object")
+        return
+
+    if value.get("provider") != "zeabur":
+        errors.append("managed_backup_artifact.provider must be 'zeabur'")
+
+    for forbidden in ("download_url", "download_url_preview", "database_url", "database_url_preview"):
+        if forbidden in value:
+            errors.append(
+                f"managed_backup_artifact must not contain {forbidden}; store a private "
+                "evidence reference instead"
+            )
+
+    for field in (
+        "service_name",
+        "service_kind",
+        "backup_type",
+        "backup_scope",
+        "offsite_storage",
+    ):
+        if not _non_empty_string(value.get(field)):
+            errors.append(f"managed_backup_artifact.{field} is required")
+
+    _validate_timestamp(
+        value.get("captured_at"),
+        "managed_backup_artifact.captured_at",
+        errors,
+    )
+
+    retention_days = value.get("retention_days")
+    if not isinstance(retention_days, int):
+        errors.append("managed_backup_artifact.retention_days must be an integer")
+
+    for field in MANAGED_BACKUP_REF_FIELDS:
+        if not _non_empty_string(value.get(field)):
+            errors.append(f"managed_backup_artifact.{field} is required")
+
+    if not production_acceptance:
+        return
+
+    for field in (
+        "service_name",
+        "service_kind",
+        "backup_type",
+        "backup_scope",
+        "offsite_storage",
+    ):
+        if _non_empty_string(value.get(field)):
+            _validate_not_placeholder(value.get(field), f"managed_backup_artifact.{field}", errors)
+
+    backup_type = value.get("backup_type")
+    if backup_type not in ZEABUR_MANAGED_BACKUP_TYPES:
+        errors.append(
+            "managed_backup_artifact.backup_type must be manual-online-offsite "
+            "or automatic-online-offsite when production_complete is true"
+        )
+
+    service_kind = str(value.get("service_kind") or "").strip().lower()
+    if service_kind not in {"postgresql", "postgis", "postgres"}:
+        errors.append(
+            "managed_backup_artifact.service_kind must identify the hosted PostgreSQL/PostGIS "
+            "database when production_complete is true"
+        )
+
+    offsite_storage = str(value.get("offsite_storage") or "").strip().lower()
+    if "amazon s3" not in offsite_storage or "zeabur" not in offsite_storage:
+        errors.append(
+            "managed_backup_artifact.offsite_storage must reference Zeabur-managed "
+            "Amazon S3 offsite backup storage"
+        )
+
+    if retention_days != 7:
+        errors.append(
+            "managed_backup_artifact.retention_days must record Zeabur's 7-day "
+            "managed backup retention"
+        )
+
+    if value.get("restore_verified") is not True:
+        errors.append(
+            "managed_backup_artifact.restore_verified must be true when "
+            "production_complete is true"
+        )
+
+    for field in MANAGED_BACKUP_REF_FIELDS:
+        ref = value.get(field)
+        if _non_empty_string(ref):
+            _validate_not_placeholder(ref, f"managed_backup_artifact.{field}", errors)
+            _validate_single_production_ref(ref, f"managed_backup_artifact.{field}", errors)
 
 
 def _validate_drill_preflight(

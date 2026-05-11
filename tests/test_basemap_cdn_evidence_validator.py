@@ -114,6 +114,19 @@ def test_production_complete_rejects_placeholder_owner() -> None:
     ) in errors
 
 
+def test_production_complete_rejects_r2_dev_managed_host() -> None:
+    evidence = _production_complete_evidence()
+    evidence["style_url"] = (
+        "https://pub-6257ee5681314ac39a2e0b5f88823e39.r2.dev/styles/taiwan/style.json"
+    )
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "style_url must use an operator-owned custom CDN/domain, not a managed dev host"
+    ) in errors
+
+
 def _production_complete_evidence() -> dict[str, Any]:
     evidence = copy.deepcopy(_load_example())
     evidence["production_complete"] = True

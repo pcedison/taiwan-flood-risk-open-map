@@ -1,3 +1,5 @@
+import copy
+
 import yaml
 
 from infra.scripts.import_geocoder_open_data import (
@@ -112,6 +114,54 @@ def test_coverage_smoke_accepts_beta_categories_and_precisions() -> None:
 
     assert summary["missing_requirements"] == []
     assert summary["production_complete"] is False
+
+
+def test_coverage_smoke_rejects_beta_fallback_as_production_complete() -> None:
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+    rows = [
+        {"source_key": "moi-national-road-names", "precision": "road_or_lane"},
+        {"source_key": "moi-village-boundary-twd97-geographic", "precision": "admin_area"},
+        {"source_key": "nfa-evacuation-shelter-locations", "precision": "poi"},
+    ]
+
+    summary = coverage_summary(manifest, rows, production_complete=True)
+
+    assert "manifest:production_complete" in summary["missing_requirements"]
+    assert "production_category:addresses" in summary["missing_requirements"]
+    assert "production_precision:exact_address" in summary["missing_requirements"]
+    assert (
+        "production_evidence:all_taiwan_address_source_ref"
+        in summary["missing_requirements"]
+    )
+    assert summary["production_complete"] is False
+
+
+def test_coverage_smoke_accepts_reviewed_address_rows_for_production_complete() -> None:
+    manifest = copy.deepcopy(load_manifest(DEFAULT_MANIFEST_PATH))
+    manifest["production_complete"] = True
+    manifest["production_complete_evidence"] = {
+        "all_taiwan_address_source_ref": "private-ops://geocoder/address-source/2026-05-06",
+        "license_review_ref": "private-ops://geocoder/license-review/2026-05-06",
+        "coverage_review_ref": "private-ops://geocoder/coverage-review/2026-05-06",
+    }
+    manifest["datasets"].append(
+        {
+            "key": "reviewed-national-doorplate-addresses",
+            "category": "addresses",
+            "status": "production_ready_imported",
+        }
+    )
+    rows = [
+        {"source_key": "reviewed-national-doorplate-addresses", "precision": "exact_address"},
+        {"source_key": "moi-national-road-names", "precision": "road_or_lane"},
+        {"source_key": "moi-village-boundary-twd97-geographic", "precision": "admin_area"},
+        {"source_key": "nfa-evacuation-shelter-locations", "precision": "poi"},
+    ]
+
+    summary = coverage_summary(manifest, rows, production_complete=True)
+
+    assert summary["missing_requirements"] == []
+    assert summary["production_complete"] is True
 
 
 def test_importer_rejects_rows_outside_taiwan_bounds() -> None:

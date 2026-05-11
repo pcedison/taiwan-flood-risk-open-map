@@ -14,11 +14,20 @@ coverage_targets:
     - admin_areas
     - villages
     - poi
+  required_before_production_complete:
+    - all_taiwan_doorplate_addresses
+    - exact_address_precision
+    - license_review
+    - coverage_review
   precision_labels:
     exact_address: exact address
     road_or_lane: road / lane fallback
     poi: POI
     admin_area: admin fallback
+production_complete_evidence:
+  all_taiwan_address_source_ref: ""
+  license_review_ref: ""
+  coverage_review_ref: ""
 datasets:
   - key: moi-national-road-names
     name: 全國路名資料
@@ -144,6 +153,8 @@ smoke_tests:
     - roads
     - villages
     - poi
+  production_required_categories:
+    - addresses
   required_precision_values:
     - exact_address
     - road_or_lane

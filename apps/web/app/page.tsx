@@ -18,6 +18,7 @@ import {
   formatDateTime,
   formatDistance,
   getEvidenceDisplayState,
+  getProfilePreviewState,
   getUserReportSubmissionDisplayState,
   selectEvidenceItems,
   shouldFetchEvidenceList,
@@ -506,6 +507,7 @@ export default function HomePage() {
         layers: assessment.map_layers ?? assessment.layers,
       })
     : { hasTileContract: false, items: [], status: "pending" as const };
+  const profilePreviewState = getProfilePreviewState(assessment);
   const currentSummary = useMemo(
     () =>
       coordinate.source === "search"
@@ -977,6 +979,12 @@ export default function HomePage() {
           <div className="risk-meter" aria-label={text.riskMeter}>
             <span style={{ left: riskMeterPosition(assessment?.historical.level) }} />
           </div>
+          {profilePreviewState.isProfilePreview ? (
+            <div className="profile-preview-banner" role="status">
+              <strong>{profilePreviewState.label}</strong>
+              <span>{profilePreviewState.message}</span>
+            </div>
+          ) : null}
           <p>{assessment ? assessment.explanation.summary : text.riskPlaceholder}</p>
           {assessment ? (
             <dl className="risk-levels">

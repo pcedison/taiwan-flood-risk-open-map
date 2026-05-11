@@ -394,6 +394,37 @@ alert_routing:
     route: incident-channel-placeholder
     evidence_ref: docs/runbooks/backup-restore-drill.md
 
+on_call_model:
+  mode: single-operator
+  explicit_go_no_go_acceptance: false
+  limitations_acknowledged: false
+  accepted_scope: controlled-public-beta-placeholder
+  accepted_by: launch-owner-placeholder
+  accepted_at: "2026-05-03T00:00:00+08:00"
+  evidence_ref: docs/runbooks/production-readiness.md#on-call-drill
+  notes: >
+    Single-operator on-call is a controlled-public-beta risk decision only after
+    the launch owner explicitly accepts it in private go/no-go evidence.
+
+managed_backup_artifact:
+  provider: zeabur
+  service_name: postgis-service-placeholder
+  service_kind: postgresql
+  backup_type: manual-online-offsite-placeholder
+  backup_scope: production-beta database dump placeholder
+  offsite_storage: Zeabur-managed Amazon S3 offsite backup storage
+  retention_days: 7
+  captured_at: "2026-05-03T00:00:00+08:00"
+  artifact_ref: replace-with-private-zeabur-managed-backup-artifact-ref
+  download_metadata_ref: replace-with-private-zeabur-download-metadata-ref
+  dashboard_evidence_ref: replace-with-private-zeabur-dashboard-backup-evidence-ref
+  restore_evidence_ref: docs/runbooks/backup-restore-drill.md
+  restore_verified: false
+  notes: >
+    Do not commit Zeabur backup download URLs, database URLs, screenshots with
+    secrets, or restore transcripts. Store the artifact/download metadata and
+    scratch restore evidence in private ops storage.
+
 runbook_drills:
   - name: on-call drill
     timestamp: "2026-05-03T00:00:00+08:00"

@@ -76,6 +76,11 @@ LOCAL_OR_NON_PRODUCTION_HOSTS = {
     "::1",
 }
 
+NON_PRODUCTION_CDN_HOST_SUFFIXES = (
+    ".r2.dev",
+    ".workers.dev",
+)
+
 KNOWN_DEMO_URL_FRAGMENTS = (
     "demo-bucket.protomaps.com",
     "protomaps-sample-datasets",
@@ -557,6 +562,10 @@ def _validate_real_http_url(value: Any, field: str, errors: list[str]) -> None:
     host = parsed.hostname or ""
     if host.lower() in LOCAL_OR_NON_PRODUCTION_HOSTS:
         errors.append(f"{field} must not be a localhost/non-production URL")
+    if any(host.lower().endswith(suffix) for suffix in NON_PRODUCTION_CDN_HOST_SUFFIXES):
+        errors.append(
+            f"{field} must use an operator-owned custom CDN/domain, not a managed dev host"
+        )
     if any(fragment in value.lower() for fragment in KNOWN_DEMO_URL_FRAGMENTS):
         errors.append(f"{field} must be operator-provided production infrastructure, not a demo URL")
 

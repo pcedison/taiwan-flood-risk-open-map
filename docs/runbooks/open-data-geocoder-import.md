@@ -193,6 +193,29 @@ This satisfies the public beta category smoke for roads, villages, and POI. It
 is still not production-complete doorplate geocoding because no complete
 reviewed national doorplate dataset is imported.
 
+Production-complete geocoder coverage now has a stricter gate:
+
+- `docs/data-sources/geocoding/geocoding-data-manifest.yaml` or a private
+  production manifest must set `production_complete: true`.
+- The manifest must include `production_complete_evidence` refs for the
+  all-Taiwan address source, license review, and coverage review.
+- Imported rows must include an `addresses` category dataset and
+  `exact_address` precision rows, in addition to the beta road/POI/admin
+  fallbacks.
+
+Run the stricter check only against a reviewed production manifest and data
+bundle:
+
+```powershell
+python infra\scripts\geocoder_coverage_smoke.py `
+  --manifest <private-production-geocoder-manifest.yaml> `
+  --input-jsonl <reviewed-national-doorplate-addresses.normalized.jsonl.gz> `
+  --input-jsonl tmp\geocoder-data\roads-114.normalized.jsonl `
+  --input-jsonl tmp\geocoder-data\shelters.normalized.jsonl `
+  --input-jsonl tmp\geocoder-data\villages.normalized.jsonl `
+  --production-complete
+```
+
 The same rows are committed as compressed runtime data:
 
 ```powershell

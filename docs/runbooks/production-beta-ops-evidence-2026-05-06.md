@@ -8,6 +8,20 @@ scratch-restore drill, and forward-only rollback evidence. Production-complete
 status still needs Zeabur-managed offsite backup artifact evidence and a
 reviewed long-term backup retention policy.
 
+2026-05-06 follow-up: the repository now has stricter production-complete gates
+for the remaining gaps. `validate_production_readiness_evidence.py` requires a
+Zeabur-managed offsite backup artifact/download metadata/restore evidence
+section and explicit single-operator go/no-go acceptance. Basemap CDN evidence
+rejects `*.r2.dev` managed dev hosts in production-complete mode. Geocoder
+coverage production-complete mode requires all-Taiwan address source/license/
+coverage refs plus `addresses`/`exact_address` rows.
+
+Browser Use dashboard follow-up reached the Zeabur `flood_risk` project and the
+`postgis` service Backup & Restore tab. The Backup button entered a loading
+state, but after polling and refreshing no completed backup row, Download
+button, or download metadata was visible. This remains `not-proven`, not a
+production-complete managed backup artifact.
+
 This note records no-secret operational evidence gathered during the public
 beta readiness pass. Private addresses, tokens, secret values, screenshots that
 reveal values, and drill transcripts stay outside the public repository.
@@ -347,7 +361,8 @@ production-complete status by itself.
 - For production-complete status, capture a Zeabur-managed offsite PostGIS
   backup artifact and restore evidence through the dashboard or Public API.
   The beta-level logical scratch-restore drill has passed.
-- Decide whether controlled public beta can keep the Cloudflare managed
-  `r2.dev` host or should wait for a custom CDN/domain.
-- Keep the single-maintainer on-call model explicit until additional humans or
-  escalation routes exist.
+- Controlled public beta can keep the Cloudflare managed `r2.dev` host only as
+  an explicitly accepted beta limitation; production-complete evidence now
+  requires a custom CDN/domain.
+- Keep the single-maintainer on-call model explicit in the go/no-go record
+  until additional humans or escalation routes exist.

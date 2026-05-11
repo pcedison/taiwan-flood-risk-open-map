@@ -105,3 +105,45 @@ Still pending before production approval:
 - canonical URL and event-time dedupe beyond the adapter batch boundary;
 - geocoding QA and promotion rules for extracted Taiwan locations;
 - operator runbook, monitoring, alert routing, takedown, and disablement procedure.
+
+## Scheduled backfill to profile refresh contract
+
+Scheduled public-news backfill and public API on-demand enrichment must both feed
+the same promotion path before they can affect risk profiles. The contract is:
+
+- backfill fetches metadata-only candidate records from reviewed L2 sources;
+- staging stores URL, title, timestamp, short summary, source metadata, query
+  metadata, extracted location terms, and attribution, not full article text;
+- promotion deduplicates, geocodes, attaches PostGIS geometry or explicit
+  uncertainty, and writes accepted evidence;
+- profile refresh jobs recompute affected `admin_area_profiles` and
+  `risk_grid_profiles` after accepted evidence changes;
+- public beta aggregation starts with village/town and H3/geohash profiles,
+  using a 2km preview radius or an accepted polygon/buffer rule;
+- query heat may raise refresh, backfill, cache-warming, or review priority, but
+  must not directly raise realtime, historical, or confidence risk scores.
+
+On-demand enrichment at API time remains a miss-recovery preview. Its writeback
+must still pass source gates, metadata-only limits, idempotency, geocoding, and
+promotion before profile summaries or public risk levels change.
+
+## Vector-assisted public-news intelligence
+
+Embeddings may be added as an auxiliary intelligence layer for public-news
+coverage, but they are not the primary risk store. The allowed uses are:
+
+- near-duplicate clustering across titles, short summaries, and source metadata;
+- semantic relevance ranking for flood-related candidate records;
+- ambiguous road, village, and town location-text ranking;
+- reviewer triage and queue prioritization.
+
+The embedding payload should use title, short summary, source metadata, and
+normalized tags only. It must not require raw full article text, comments, images,
+or paywalled content. Each embedding record must link back to an evidence or
+staging evidence ID, model name/version, created timestamp, and deletion status.
+
+Vector similarity alone cannot create accepted evidence, raise a flood-risk
+score, or satisfy a public explanation. A vector-ranked candidate becomes usable
+only after it has source URL/metadata, geospatial confidence, and accepted
+evidence linkage. Takedown, hiding, or deletion of source evidence must also hide
+or delete the associated embedding.

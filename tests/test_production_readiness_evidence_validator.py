@@ -173,6 +173,54 @@ def test_production_complete_requires_passed_drill_result() -> None:
     ) in errors
 
 
+def test_production_complete_requires_single_operator_go_no_go_acceptance() -> None:
+    evidence = _production_complete_evidence()
+    evidence["on_call_model"]["explicit_go_no_go_acceptance"] = False
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "on_call_model.explicit_go_no_go_acceptance must be true for "
+        "single-operator mode when production_complete is true"
+    ) in errors
+
+
+def test_production_complete_requires_zeabur_managed_backup_restore_evidence() -> None:
+    evidence = _production_complete_evidence()
+    evidence["managed_backup_artifact"]["restore_verified"] = False
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "managed_backup_artifact.restore_verified must be true when "
+        "production_complete is true"
+    ) in errors
+
+
+def test_managed_backup_artifact_rejects_committed_download_url() -> None:
+    evidence = _production_complete_evidence()
+    evidence["managed_backup_artifact"]["download_url"] = "https://backup.zeabur.com/example"
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "managed_backup_artifact must not contain download_url; store a private "
+        "evidence reference instead"
+    ) in errors
+
+
+def test_production_complete_rejects_runbook_only_managed_backup_artifact_ref() -> None:
+    evidence = _production_complete_evidence()
+    evidence["managed_backup_artifact"]["artifact_ref"] = "docs/runbooks/backup-restore-drill.md"
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "managed_backup_artifact.artifact_ref must reference production evidence, "
+        "not only runbook instructions"
+    ) in errors
+
+
 def test_production_complete_rejects_runbook_only_drill_evidence() -> None:
     evidence = _production_complete_evidence()
     drill = next(
@@ -258,6 +306,34 @@ def _production_complete_evidence() -> dict[str, Any]:
     evidence["environment"]["project"] = "flood-risk-production-beta"
     evidence["environment"]["deployment_sha"] = "0123456789abcdef0123456789abcdef01234567"
     evidence["environment"]["captured_at"] = "2026-05-04T10:00:00+08:00"
+    evidence["on_call_model"] = {
+        "mode": "single-operator",
+        "explicit_go_no_go_acceptance": True,
+        "limitations_acknowledged": True,
+        "accepted_scope": "controlled public beta on 2026-05-04",
+        "accepted_by": "launch-owner@flood-risk.internal",
+        "accepted_at": "2026-05-04T09:55:00+08:00",
+        "evidence_ref": "private-ops://go-no-go/on-call/2026-05-04",
+    }
+    evidence["managed_backup_artifact"] = {
+        "provider": "zeabur",
+        "service_name": "postgis",
+        "service_kind": "postgresql",
+        "backup_type": "manual-online-offsite",
+        "backup_scope": "production-beta PostgreSQL/PostGIS database dump",
+        "offsite_storage": "Zeabur-managed Amazon S3 offsite backup storage",
+        "retention_days": 7,
+        "captured_at": "2026-05-04T10:35:00+08:00",
+        "artifact_ref": "private-ops://backups/zeabur/postgis/2026-05-04/artifact",
+        "download_metadata_ref": (
+            "private-ops://backups/zeabur/postgis/2026-05-04/download-metadata"
+        ),
+        "dashboard_evidence_ref": (
+            "private-ops://backups/zeabur/postgis/2026-05-04/dashboard"
+        ),
+        "restore_evidence_ref": "private-ops://drills/backup-restore/2026-05-04",
+        "restore_verified": True,
+    }
     evidence["drill_preflight"] = {
         "schema_version": "production-readiness-drill-preflight/v1",
         "generated_at": "2026-05-04T10:05:00+08:00",

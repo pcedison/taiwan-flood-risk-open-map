@@ -300,7 +300,7 @@ def _is_gdelt_safe_query_term(term: str) -> bool:
 
 
 def _float_or_none(value: object) -> float | None:
-    if value is None:
+    if not isinstance(value, (float, int, str)):
         return None
     try:
         return float(value)

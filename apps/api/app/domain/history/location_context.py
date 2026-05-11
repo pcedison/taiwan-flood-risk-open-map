@@ -93,6 +93,8 @@ def _village_locations() -> tuple[dict[str, Any], ...]:
 
 
 def _float(value: object) -> float | None:
+    if not isinstance(value, (float, int, str)):
+        return None
     try:
         return float(value)
     except (TypeError, ValueError):

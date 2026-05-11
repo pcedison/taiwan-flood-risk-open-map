@@ -19,6 +19,7 @@ from app.domain.evidence import (
     QueryHeatSnapshot,
 )
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
+from app.domain.profiles import RiskProfileRecord
 from app.domain.realtime import (
     OfficialRealtimeBundle,
     OfficialRealtimeObservation,
@@ -46,10 +47,16 @@ def fallback_to_local_historical_records(monkeypatch: pytest.MonkeyPatch) -> Non
     def layers_unavailable(**_kwargs: object) -> tuple[LayerRecord, ...]:
         raise LayerRepositoryUnavailable("database unavailable in contract tests")
 
+    def profile_unavailable(**_kwargs: object) -> None:
+        raise public_routes.RiskProfileRepositoryUnavailable(
+            "profile database unavailable in contract tests"
+        )
+
     monkeypatch.setattr(public_routes, "query_nearby_evidence", unavailable)
     monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
     monkeypatch.setattr(public_routes, "persist_risk_assessment", unavailable)
     monkeypatch.setattr(public_routes, "fetch_map_layers", layers_unavailable)
+    monkeypatch.setattr(public_routes, "fetch_best_profile_for_point", profile_unavailable)
 
 
 def assert_iso_datetime(value: str) -> None:
@@ -975,6 +982,112 @@ def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
     assert second_response.status_code == 200
     assert calls["realtime"] == 1
     assert second_response.json()["assessment_id"] == first_response.json()["assessment_id"]
+
+
+def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypatch) -> None:
+    computed_at = datetime.fromisoformat("2026-05-08T03:00:00+00:00")
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_best_profile_for_point",
+        lambda **_kwargs: RiskProfileRecord(
+            profile_kind="risk_grid",
+            profile_key="h3:842ab57ffffffff",
+            profile_scope="h3:8",
+            profile_radius_m=1000,
+            score_version="risk-v0.1.0",
+            realtime_level="unknown",
+            historical_level="high",
+            confidence_level="medium",
+            evidence_counts={"news:flood_report": 2, "official:flood_potential": 1},
+            top_evidence_ids=("b3f22a36-7316-4e2a-92b6-c6f6443c8528",),
+            latest_observed_at=None,
+            latest_occurred_at=computed_at,
+            latest_ingested_at=computed_at,
+            coverage_gaps=("historical_news_backfill_partial",),
+            missing_sources=("rainfall", "water_level"),
+            computed_at=computed_at,
+            expires_at=None,
+            status="healthy",
+            distance_to_query_m=88.0,
+        ),
+    )
+    enqueued: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        public_routes,
+        "enqueue_profile_refresh_job",
+        lambda **kwargs: enqueued.append(kwargs) or "job-id",
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "search_public_flood_news",
+        lambda **_kwargs: pytest.fail("profile fast path should not trigger on-demand news"),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.65646, "lng": 120.32574},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "高雄市三民區本和里",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["historical"]["level"] == "高"
+    assert payload["confidence"]["level"] == "中"
+    assert payload["evidence"] == []
+    profile_freshness = next(
+        item for item in payload["data_freshness"] if item["source_id"] == "precomputed-risk-profile"
+    )
+    assert profile_freshness["health_status"] == "healthy"
+    assert "預先計算" in profile_freshness["message"]
+    assert any("profile" in reason for reason in payload["explanation"]["main_reasons"])
+    assert "profile 計算時缺少即時雨量來源。" in payload["explanation"]["missing_sources"]
+    assert enqueued[0]["profile_kind"] == "risk_grid"
+    assert enqueued[0]["profile_key"] == "h3:842ab57ffffffff"
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_keeps_exact_radius_evidence_ahead_of_profile_fast_path(monkeypatch) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (_db_evidence_record(),),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_best_profile_for_point",
+        lambda **_kwargs: pytest.fail("profile fast path must not run after exact evidence"),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.65646, "lng": 120.32574},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "高雄市三民區本和里",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["evidence"][0]["title"] == "2025-08-02 accepted flood evidence near Annan"
+    assert not any(item["source_id"] == "precomputed-risk-profile" for item in payload["data_freshness"])
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
 def test_risk_assess_uses_local_historical_fallback_when_local_db_returns_empty(

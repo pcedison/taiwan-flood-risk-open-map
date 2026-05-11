@@ -25,3 +25,4 @@
 | [0006](0006-privacy-preserving-query-heat.md) | Privacy-Preserving Query Heat | Accepted | 2026-04-28 |
 | [0007](0007-official-and-public-evidence-strategy.md) | Official and Public Evidence Strategy | Accepted | 2026-04-28 |
 | [0008](0008-score-versioning-and-explainability.md) | Score Versioning and Explainability | Accepted | 2026-04-28 |
+| [0009](0009-precomputed-risk-profiles-and-vector-assisted-evidence.md) | Precomputed Risk Profiles and Vector-Assisted Evidence | Accepted | 2026-05-08 |

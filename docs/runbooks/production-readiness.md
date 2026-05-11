@@ -44,6 +44,12 @@ private drill artifacts to this repository. Production acceptance requires:
 - On-call, rollback, and backup restore drills with `result: passed` or
   `result: succeeded`, plus at least one production evidence reference outside
   the runbook instructions.
+- `on_call_model` evidence. If the launch intentionally uses a single
+  operator, the go/no-go record must explicitly accept that risk, acknowledge
+  the limitation, and point to private evidence.
+- `managed_backup_artifact` evidence for a Zeabur-managed PostgreSQL/PostGIS
+  offsite backup artifact, including private artifact/download metadata refs
+  and scratch restore evidence.
 - `pending_production_gaps: []`.
 
 Run production-complete acceptance with:
@@ -68,6 +74,9 @@ basemap record must include the real operator-provided style URL and PMTiles
 URL, 206 Range/`Content-Range` proof, CORS and cache-control headers, browser
 network log and screenshot references, provider/license/cadence owners, and a
 production request capture showing no calls to `tile.openstreetmap.org`.
+Cloudflare-managed `*.r2.dev` URLs are acceptable for controlled beta evidence
+when explicitly accepted, but production-complete basemap evidence must use an
+operator-owned custom CDN/domain.
 
 ## Drill Preflight Evidence
 
@@ -110,6 +119,11 @@ file. Attach results as references:
   `rollback.target` and the drill transcript in `rollback.evidence_ref`.
 - Backup restore: store the backup archive inspection, scratch restore, and
   post-restore smoke result ref in `backup_restore_ref`.
+- Zeabur managed backup artifact: store the Zeabur dashboard/API metadata,
+  artifact reference, and scratch restore evidence in private ops storage, then
+  copy only those refs into `managed_backup_artifact`. Never paste the
+  `downloadURL`, database URL, or screenshots that expose secret values into a
+  committed file.
 
 When `production_complete: true`, the validator requires these references to
 point outside the checked-in runbooks and rejects secret-like values in
@@ -263,6 +277,17 @@ Run this drill for staging first. Repeat for production beta before launch.
     runbook refs with real CDN/browser evidence, and validate it with
     `python infra/scripts/validate_basemap_cdn_evidence.py --production-complete <path>`.
 14. Record launch blockers, skipped checks, owner handoff, and next action.
+
+If the launch is intentionally staffed by one operator, record that decision in
+the private go/no-go note and mirror it in `on_call_model`:
+
+- `mode: single-operator`.
+- `explicit_go_no_go_acceptance: true`.
+- `limitations_acknowledged: true`.
+- A real launch owner, timestamp, accepted scope, and private evidence ref.
+
+This does not make single-operator on-call ideal. It makes the accepted beta
+risk visible and auditable instead of implicit.
 
 ## Rollback Drill
 

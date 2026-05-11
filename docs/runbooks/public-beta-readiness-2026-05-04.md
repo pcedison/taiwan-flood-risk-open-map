@@ -71,16 +71,17 @@ Completed in the Zeabur project:
   API 140 tests, worker 247 tests, repository 64 tests, unknown-address smoke,
   web unit 21 tests, typecheck, lint, and 10 Playwright E2E tests.
 
-Remaining blockers:
+Remaining production-complete gaps after the later 2026-05-06 ops pass:
 
-- MinIO bucket/object upload and basemap CDN evidence are not production
-  complete yet; the current MinIO test subdomain fails trusted HTTPS validation.
-- Backup/restore drill is pending because Zeabur requires pausing PostGIS
-  before manual backup.
-- Rollback drill is pending a scheduled drill window.
-- Backup alert route and backup human route are still pending.
-- Complete Taiwan address/road/POI import remains broader than the current
-  public beta dataset.
+- A Zeabur-managed offsite PostGIS backup artifact, download metadata, and
+  scratch restore evidence must be captured in private evidence. The logical
+  PostGIS scratch-restore drill is beta-level evidence only.
+- The current Cloudflare R2 `r2.dev` host is acceptable only as an explicitly
+  accepted controlled beta limitation; production-complete basemap evidence
+  requires a custom CDN/domain.
+- Single-operator on-call must be explicitly accepted in the go/no-go record.
+- Complete Taiwan doorplate/address coverage remains a post-beta data expansion
+  track. Current production data is the road/POI/village fallback bundle.
 
 No secret values or private email addresses are recorded in this repository.
 See `docs/runbooks/production-beta-ops-evidence-2026-05-06.md` for the
