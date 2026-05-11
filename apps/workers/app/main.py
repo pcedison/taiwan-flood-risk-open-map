@@ -440,6 +440,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Lease seconds for --work-profile-refresh-jobs. Defaults to 300.",
     )
     parser.add_argument(
+        "--profile-refresh-statement-timeout-ms",
+        type=int,
+        default=15000,
+        help=(
+            "Per-profile rebuild statement timeout in milliseconds. "
+            "Defaults to 15000 to keep hosted PostGIS responsive."
+        ),
+    )
+    parser.add_argument(
+        "--profile-refresh-cooldown-seconds",
+        type=int,
+        default=0,
+        help="Seconds to sleep between claimed profile refresh jobs. Defaults to 0.",
+    )
+    parser.add_argument(
         "--tile-layer-id",
         default="flood-potential",
         help="Tile layer for --refresh-tile-features. Defaults to flood-potential.",
@@ -613,6 +628,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             worker_id=args.profile_refresh_worker_id,
             limit=args.profile_refresh_limit,
             lease_seconds=args.profile_refresh_lease_seconds,
+            statement_timeout_ms=args.profile_refresh_statement_timeout_ms,
+            cooldown_seconds=args.profile_refresh_cooldown_seconds,
         )
 
     if args.refresh_tile_features:
@@ -1595,6 +1612,8 @@ def _work_profile_refresh_jobs(
     worker_id: str | None,
     limit: int,
     lease_seconds: int,
+    statement_timeout_ms: int,
+    cooldown_seconds: int,
 ) -> int:
     resolved_database_url = database_url or settings.database_url
     if limit < 1:
@@ -1602,6 +1621,12 @@ def _work_profile_refresh_jobs(
         return 1
     if lease_seconds < 1:
         log_event("profiles.refresh.failed", error="profile refresh lease seconds must be positive")
+        return 1
+    if statement_timeout_ms < 1:
+        log_event("profiles.refresh.failed", error="profile refresh statement timeout must be positive")
+        return 1
+    if cooldown_seconds < 0:
+        log_event("profiles.refresh.failed", error="profile refresh cooldown cannot be negative")
         return 1
     if not resolved_database_url:
         log_event("profiles.refresh.noop", reason="no_database_url")
@@ -1620,12 +1645,15 @@ def _work_profile_refresh_jobs(
         return 1
 
     results: list[dict[str, object]] = []
-    for job in jobs:
+    for index, job in enumerate(jobs):
+        if index > 0 and cooldown_seconds > 0:
+            time.sleep(cooldown_seconds)
         try:
             summary = rebuild_risk_profile(
                 database_url=resolved_database_url,
                 profile_kind=job.profile_kind,
                 profile_key=job.profile_key,
+                statement_timeout_ms=statement_timeout_ms,
             )
             if summary is None:
                 complete_profile_refresh_job(

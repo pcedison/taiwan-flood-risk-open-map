@@ -1823,16 +1823,73 @@ def test_main_work_profile_refresh_jobs_claims_rebuilds_and_completes(monkeypatc
             "2",
             "--profile-refresh-worker-id",
             "worker-a",
+            "--profile-refresh-statement-timeout-ms",
+            "9000",
+            "--profile-refresh-cooldown-seconds",
+            "0",
         ]
     )
 
     assert exit_code == 0
     assert calls["claim"]["limit"] == 2
     assert calls["claim"]["worker_id"] == "worker-a"
+    assert calls["rebuild"]["statement_timeout_ms"] == 9000
     assert calls["complete"]["status"] == "succeeded"
     payload = json.loads(capsys.readouterr().out)
     assert payload["profile_refresh_jobs"][0]["status"] == "succeeded"
     assert payload["profile_refresh_jobs"][0]["evidence_count"] == 3
+
+
+def test_main_work_profile_refresh_jobs_sleeps_between_claimed_jobs(monkeypatch, capsys) -> None:
+    sleep_calls: list[int] = []
+
+    def fake_claim(**kwargs: object) -> tuple[object, ...]:
+        del kwargs
+        return (
+            SimpleNamespace(
+                id="job-1",
+                profile_kind="risk_grid",
+                profile_key="h3:22.68,120.29",
+            ),
+            SimpleNamespace(
+                id="job-2",
+                profile_kind="risk_grid",
+                profile_key="h3:22.69,120.31",
+            ),
+        )
+
+    def fake_rebuild(**kwargs: object) -> object:
+        return SimpleNamespace(
+            profile_kind=kwargs["profile_kind"],
+            profile_key=kwargs["profile_key"],
+            evidence_count=1,
+            historical_level="high",
+            realtime_level="unknown",
+        )
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.claim_profile_refresh_jobs", fake_claim)
+    monkeypatch.setattr("app.main.rebuild_risk_profile", fake_rebuild)
+    monkeypatch.setattr("app.main.complete_profile_refresh_job", lambda **kwargs: True)
+    monkeypatch.setattr("app.main.time.sleep", lambda seconds: sleep_calls.append(seconds))
+
+    exit_code = main(
+        [
+            "--work-profile-refresh-jobs",
+            "--profile-refresh-limit",
+            "2",
+            "--profile-refresh-cooldown-seconds",
+            "7",
+        ]
+    )
+
+    assert exit_code == 0
+    assert sleep_calls == [7]
+    payload = json.loads(capsys.readouterr().out)
+    assert [job["status"] for job in payload["profile_refresh_jobs"]] == [
+        "succeeded",
+        "succeeded",
+    ]
 
 
 class _FakeStagingWriter:
