@@ -757,7 +757,10 @@ def rebuild_risk_profile(
         with _connect(database_url, connection_factory) as connection:
             with connection.cursor() as cursor:
                 if statement_timeout_ms is not None:
-                    cursor.execute("SET LOCAL statement_timeout = %s", (f"{statement_timeout_ms}ms",))
+                    cursor.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (f"{statement_timeout_ms}ms",),
+                    )
                 cursor.execute(
                     sql,
                     (

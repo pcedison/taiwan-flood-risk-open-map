@@ -229,7 +229,7 @@ def test_rebuild_risk_profile_sets_optional_statement_timeout() -> None:
 
     assert summary is not None
     assert connection.cursor_instance.executions[0] == (
-        "SET LOCAL statement_timeout = %s",
+        "SELECT set_config('statement_timeout', %s, true)",
         ("9000ms",),
     )
     assert "FROM risk_grid_profiles" in connection.cursor_instance.executions[1][0]
