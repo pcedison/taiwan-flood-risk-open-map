@@ -24,6 +24,7 @@ coverage/
 playwright-report/
 test-results/
 .runtime-smoke/
+.wrangler/
 
 # Python
 __pycache__/

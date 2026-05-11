@@ -502,12 +502,15 @@ def rebuild_risk_profile(
     profile_kind: str,
     profile_key: str,
     now: datetime | None = None,
+    statement_timeout_ms: int | None = None,
     connection_factory: ConnectionFactory | None = None,
 ) -> ProfileRebuildSummary | None:
     if database_url is None and connection_factory is None:
         raise ValueError("database_url or connection_factory is required")
     if profile_kind not in {"admin_area", "risk_grid"}:
         raise ValueError("profile_kind must be 'admin_area' or 'risk_grid'")
+    if statement_timeout_ms is not None and statement_timeout_ms < 1:
+        raise ValueError("statement_timeout_ms must be positive")
 
     profile_table = "admin_area_profiles" if profile_kind == "admin_area" else "risk_grid_profiles"
     key_column = "area_key" if profile_kind == "admin_area" else "grid_key"
@@ -753,6 +756,8 @@ def rebuild_risk_profile(
     try:
         with _connect(database_url, connection_factory) as connection:
             with connection.cursor() as cursor:
+                if statement_timeout_ms is not None:
+                    cursor.execute("SET LOCAL statement_timeout = %s", (f"{statement_timeout_ms}ms",))
                 cursor.execute(
                     sql,
                     (

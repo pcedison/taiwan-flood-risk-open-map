@@ -204,6 +204,37 @@ def test_rebuild_risk_profile_rejects_unknown_profile_kind() -> None:
         )
 
 
+def test_rebuild_risk_profile_sets_optional_statement_timeout() -> None:
+    computed_at = datetime(2026, 5, 8, 3, 15, tzinfo=timezone.utc)
+    connection = _FakeConnection(
+        row={
+            "profile_key": "h3:22.68,120.29",
+            "evidence_count": 1,
+            "top_evidence_ids": [],
+            "realtime_level": "unknown",
+            "historical_level": "high",
+            "confidence_level": "medium",
+            "computed_at": computed_at,
+        }
+    )
+
+    summary = rebuild_risk_profile(
+        database_url="postgresql://example.test/flood",
+        profile_kind="risk_grid",
+        profile_key="h3:22.68,120.29",
+        now=computed_at,
+        statement_timeout_ms=9000,
+        connection_factory=lambda: connection,
+    )
+
+    assert summary is not None
+    assert connection.cursor_instance.executions[0] == (
+        "SET LOCAL statement_timeout = %s",
+        ("9000ms",),
+    )
+    assert "FROM risk_grid_profiles" in connection.cursor_instance.executions[1][0]
+
+
 class _FakeConnection:
     def __init__(
         self,
