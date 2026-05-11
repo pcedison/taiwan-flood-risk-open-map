@@ -15,7 +15,7 @@ const webBaseUrl = `http://127.0.0.1:${webPort}`;
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
-  workers: process.env.CI ? 2 : undefined,
+  workers: process.env.CI ? 1 : undefined,
   use: {
     baseURL: webBaseUrl,
     trace: "on-first-retry",
@@ -36,14 +36,14 @@ export default defineConfig({
       url: `http://127.0.0.1:${apiPort}/health`,
     },
     {
-      command: `npm run clean:next && npm run dev -- --hostname 127.0.0.1 --port ${webPort}`,
+      command: `npm run clean:next && npm run build && npm run start -- --hostname 127.0.0.1 --port ${webPort}`,
       env: {
         ...basemapSmokeEnv,
         INTERNAL_API_BASE_URL: apiBaseUrl,
         NEXT_PUBLIC_API_BASE_URL: apiBaseUrl,
       },
       reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
+      timeout: 240_000,
       url: webBaseUrl,
     },
   ],

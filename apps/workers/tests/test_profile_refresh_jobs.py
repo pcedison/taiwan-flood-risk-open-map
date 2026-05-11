@@ -93,14 +93,17 @@ def test_seed_grid_profiles_from_query_heat_uses_existing_h3_or_privacy_bucket_s
     )
 
     sql, params = connection.cursor_instance.executions[0]
+    assert "WITH query_rows AS" in sql
     assert "FROM location_queries lq" in sql
+    assert "FROM query_rows" in sql
+    assert "GROUP BY raw_grid_key" in sql
     assert "INSERT INTO risk_grid_profiles" in sql
     assert "grid_geometry_approximated_from_query_heat" in sql
     assert "INSERT INTO profile_refresh_jobs" in sql
     assert "ELSE %s::text || ':' || raw_grid_key" in sql
     assert "'grid_system', %s::text" in sql
     assert "'grid_resolution', %s::text" in sql
-    assert params[:5] == (True, True, True, 5, "h3")
+    assert params[:3] == (True, 5, "h3")
     assert summary.profile_kind == "risk_grid"
     assert summary.seeded == 3
     assert summary.refresh_jobs_enqueued == 1

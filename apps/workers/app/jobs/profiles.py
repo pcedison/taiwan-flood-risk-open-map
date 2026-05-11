@@ -314,26 +314,27 @@ def seed_grid_profiles_from_query_heat(
         raise ValueError("limit must be positive")
 
     sql = """
-        WITH source_cells AS (
+        WITH query_rows AS (
             SELECT
                 COALESCE(
                     NULLIF(lq.h3_index, ''),
                     CASE WHEN %s THEN NULLIF(lq.privacy_bucket, '') END
                 ) AS raw_grid_key,
-                COUNT(*)::integer AS query_count,
-                MAX(lq.created_at) AS latest_query_at,
-                ST_Centroid(ST_Collect(lq.geom)) AS centroid
+                lq.created_at,
+                lq.geom
             FROM location_queries lq
             WHERE lq.geom IS NOT NULL
-                AND COALESCE(
-                    NULLIF(lq.h3_index, ''),
-                    CASE WHEN %s THEN NULLIF(lq.privacy_bucket, '') END
-                ) IS NOT NULL
-            GROUP BY COALESCE(
-                NULLIF(lq.h3_index, ''),
-                CASE WHEN %s THEN NULLIF(lq.privacy_bucket, '') END
-            )
-            ORDER BY MAX(lq.created_at) DESC, COUNT(*) DESC
+        ),
+        source_cells AS (
+            SELECT
+                raw_grid_key,
+                COUNT(*)::integer AS query_count,
+                MAX(created_at) AS latest_query_at,
+                ST_Centroid(ST_Collect(geom)) AS centroid
+            FROM query_rows
+            WHERE raw_grid_key IS NOT NULL
+            GROUP BY raw_grid_key
+            ORDER BY MAX(created_at) DESC, COUNT(*) DESC
             LIMIT COALESCE(%s::integer, 2147483647)
         ),
         normalized_profiles AS (
@@ -425,8 +426,6 @@ def seed_grid_profiles_from_query_heat(
                 cursor.execute(
                     sql,
                     (
-                        include_privacy_bucket_fallback,
-                        include_privacy_bucket_fallback,
                         include_privacy_bucket_fallback,
                         limit,
                         grid_system,
