@@ -68,8 +68,15 @@ def claim_profile_refresh_jobs(
         WITH candidate_jobs AS (
             SELECT id
             FROM profile_refresh_jobs
-            WHERE status = 'queued'
-                AND run_after <= now()
+            WHERE (
+                    status = 'queued'
+                    AND run_after <= now()
+                )
+                OR (
+                    status = 'running'
+                    AND lease_expires_at <= now()
+                    AND attempts < max_attempts
+                )
             ORDER BY
                 priority DESC,
                 run_after ASC,
