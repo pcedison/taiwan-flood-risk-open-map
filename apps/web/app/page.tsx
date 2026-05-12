@@ -7,6 +7,7 @@ import {
   getInteractiveBasemapMaxZoom,
   loadRuntimeBasemapStyleConfig,
 } from "./lib/basemap-style";
+import { apiBaseUrl, getJson, postJson } from "./lib/api-client";
 import {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
@@ -116,7 +117,7 @@ type MapFeatureCollection = {
   }>;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = apiBaseUrl;
 let activePmtilesProtocol: Protocol | null = null;
 
 const text = {
@@ -214,8 +215,6 @@ const sourceLabels: Record<CoordinateSource, string> = {
 const radiusOptions = [300, 500, 1000, 2000];
 const USER_REPORTS_PUBLIC_ENABLED = process.env.NEXT_PUBLIC_USER_REPORTS_ENABLED === "true";
 const MIN_GEOCODE_CONFIDENCE = 0.65;
-const API_REQUEST_TIMEOUT_MS = 15_000;
-const EVIDENCE_REQUEST_TIMEOUT_MS = 8_000;
 const INITIAL_RADIUS = 500;
 const INITIAL_COORDINATE: Coordinate = {
   lat: 25.04776,
@@ -338,49 +337,6 @@ const targetCenter = (coordinate: Coordinate): [number, number] =>
     ? [TAIWAN_OVERVIEW.lng, TAIWAN_OVERVIEW.lat]
     : [coordinate.lng, coordinate.lat];
 
-async function fetchJson<T>(
-  path: string,
-  init: RequestInit = {},
-  timeoutMs = API_REQUEST_TIMEOUT_MS,
-): Promise<T> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
-
-    return response.json() as Promise<T>;
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("Request timed out");
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function postJson<T>(path: string, payload: unknown): Promise<T> {
-  return fetchJson<T>(path, {
-    body: JSON.stringify(payload),
-    headers: {
-      "Content-Type": "application/json",
-    },
-    method: "POST",
-  });
-}
-
-async function getJson<T>(path: string): Promise<T> {
-  return fetchJson<T>(path, {}, EVIDENCE_REQUEST_TIMEOUT_MS);
-}
-
 function createRadiusFeature(coordinate: Coordinate, radiusMeters: number): RadiusFeatureCollection {
   const steps = 96;
   const earthRadius = 6371008.8;
@@ -479,6 +435,7 @@ export default function HomePage() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const markerRef = useRef<Marker | null>(null);
   const requestIdRef = useRef(0);
+  const searchAbortRef = useRef<AbortController | null>(null);
   const [query, setQuery] = useState(text.taipeiMainStation);
   const [radius, setRadius] = useState(INITIAL_RADIUS);
   const [coordinate, setCoordinate] = useState<Coordinate>(INITIAL_COORDINATE);
@@ -595,6 +552,8 @@ export default function HomePage() {
       });
 
       map.on("click", (event) => {
+        searchAbortRef.current?.abort();
+        searchAbortRef.current = null;
         setCoordinate({
           lat: event.lngLat.lat,
           lng: event.lngLat.lng,
@@ -607,6 +566,7 @@ export default function HomePage() {
         setAssessment(null);
         setEvidenceItems([]);
         setEvidenceStatus("idle");
+        setIsLoading(false);
         setErrorMessage(null);
         setGeocodeNotice(null);
       });
@@ -620,6 +580,8 @@ export default function HomePage() {
       markerRef.current = null;
       mapRef.current?.remove();
       mapRef.current = null;
+      searchAbortRef.current?.abort();
+      searchAbortRef.current = null;
       unregisterPmtilesProtocol?.();
     };
   }, []);
@@ -656,6 +618,9 @@ export default function HomePage() {
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    searchAbortRef.current?.abort();
+    const requestController = new AbortController();
+    searchAbortRef.current = requestController;
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setIsLoading(true);
@@ -673,6 +638,8 @@ export default function HomePage() {
           input_type: "address",
           limit: 1,
           query: normalized,
+        }, {
+          signal: requestController.signal,
         });
         const candidate = geocode.candidates[0];
         if (!candidate || candidate.confidence < MIN_GEOCODE_CONFIDENCE) {
@@ -709,6 +676,9 @@ export default function HomePage() {
       const risk = await postJson<RiskAssessmentResponse>(
         "/v1/risk/assess",
         buildRiskAssessmentPayload(target, radius, resolvedLocationText),
+        {
+          signal: requestController.signal,
+        },
       );
       if (requestIdRef.current !== requestId) return;
       setAssessment(risk);
@@ -720,6 +690,9 @@ export default function HomePage() {
         try {
           const evidence = await getJson<EvidenceListResponse>(
             `/v1/evidence/${encodeURIComponent(risk.assessment_id)}`,
+            {
+              signal: requestController.signal,
+            },
           );
           if (requestIdRef.current !== requestId) return;
           setEvidenceItems(evidence.items);
@@ -732,10 +705,13 @@ export default function HomePage() {
         setEvidenceStatus("ready");
       }
     } catch {
-      if (requestIdRef.current === requestId) {
+      if (!requestController.signal.aborted && requestIdRef.current === requestId) {
         setErrorMessage(text.queryFailed);
       }
     } finally {
+      if (searchAbortRef.current === requestController) {
+        searchAbortRef.current = null;
+      }
       if (requestIdRef.current === requestId) {
         setIsLoading(false);
       }

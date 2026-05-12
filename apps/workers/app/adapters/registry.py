@@ -3,8 +3,11 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from app.adapters.contracts import AdapterMetadata, SourceFamily
+from app.adapters.cwa import CWA_RAINFALL_METADATA
 from app.adapters.dcard import METADATA as DCARD_METADATA
+from app.adapters.flood_potential import FLOOD_POTENTIAL_GEOJSON_METADATA
 from app.adapters.ptt import METADATA as PTT_METADATA
+from app.adapters.wra import WRA_WATER_LEVEL_METADATA
 from app.config import WorkerSettings, load_worker_settings
 
 
@@ -23,24 +26,9 @@ ADAPTER_REGISTRY = MappingProxyType(
             display_name="GDELT public-news historical flood backfill adapter",
             terms_review_required=True,
         ),
-        "official.cwa.rainfall": AdapterMetadata(
-            key="official.cwa.rainfall",
-            family=SourceFamily.OFFICIAL,
-            enabled_by_default=True,
-            display_name="CWA rainfall observation adapter",
-        ),
-        "official.wra.water_level": AdapterMetadata(
-            key="official.wra.water_level",
-            family=SourceFamily.OFFICIAL,
-            enabled_by_default=True,
-            display_name="WRA water level observation adapter",
-        ),
-        "official.flood_potential.geojson": AdapterMetadata(
-            key="official.flood_potential.geojson",
-            family=SourceFamily.OFFICIAL,
-            enabled_by_default=True,
-            display_name="Flood potential GeoJSON import adapter",
-        ),
+        CWA_RAINFALL_METADATA.key: CWA_RAINFALL_METADATA,
+        WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
+        FLOOD_POTENTIAL_GEOJSON_METADATA.key: FLOOD_POTENTIAL_GEOJSON_METADATA,
         PTT_METADATA.key: PTT_METADATA,
         DCARD_METADATA.key: DCARD_METADATA,
     }

@@ -527,6 +527,16 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
+def test_official_realtime_evidence_links_to_data_gov_catalog() -> None:
+    rainfall, water_level = _official_realtime_bundle().observations
+
+    rainfall_evidence = public_routes._official_realtime_evidence(rainfall)
+    water_level_evidence = public_routes._official_realtime_evidence(water_level)
+
+    assert rainfall_evidence.url == "https://data.gov.tw/dataset/9177"
+    assert water_level_evidence.url == "https://data.gov.tw/dataset/25768"
+
+
 def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> None:
     monkeypatch.setattr(
         public_routes,

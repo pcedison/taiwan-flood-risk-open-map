@@ -94,6 +94,10 @@ NOMINATIM_USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
 OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
+OFFICIAL_REALTIME_DATA_GOV_URLS = {
+    "rainfall": "https://data.gov.tw/dataset/9177",
+    "water_level": "https://data.gov.tw/dataset/25768",
+}
 _ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
 _RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
 _PROFILE_SOURCE_TYPE_FALLBACKS = {
@@ -328,7 +332,7 @@ def _official_realtime_evidence(
         event_type=observation.event_type,
         title=observation.title,
         summary=observation.summary,
-        url=None,
+        url=OFFICIAL_REALTIME_DATA_GOV_URLS.get(observation.event_type),
         occurred_at=None,
         observed_at=observation.observed_at,
         ingested_at=observation.ingested_at,

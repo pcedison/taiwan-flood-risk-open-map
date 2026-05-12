@@ -3,6 +3,9 @@
 from app.adapters.wra.water_level import (
     DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS,
     WRA_WATER_LEVEL_API_URL,
+    WRA_WATER_LEVEL_DATA_GOV_DATASET_ID,
+    WRA_WATER_LEVEL_DATA_GOV_URL,
+    WRA_WATER_LEVEL_METADATA,
     FetchJson,
     WraWaterLevelAdapter,
     WraWaterLevelAdapterError,
@@ -15,6 +18,9 @@ from app.adapters.wra.water_level import (
 __all__ = [
     "DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS",
     "WRA_WATER_LEVEL_API_URL",
+    "WRA_WATER_LEVEL_DATA_GOV_DATASET_ID",
+    "WRA_WATER_LEVEL_DATA_GOV_URL",
+    "WRA_WATER_LEVEL_METADATA",
     "FetchJson",
     "WraWaterLevelAdapter",
     "WraWaterLevelAdapterError",

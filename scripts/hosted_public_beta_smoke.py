@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-DEFAULT_BASE_URL = "https://floodrisk.zeabur.app"
+DEFAULT_BASE_URL = "https://floodrisk.cc"
 REQUIRED_GEOCODE_FIELDS = {
     "precision",
     "matched_query",

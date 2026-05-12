@@ -28,6 +28,23 @@ def test_default_enabled_adapters_are_official_only() -> None:
     )
 
 
+def test_official_registry_metadata_uses_data_gov_primary_catalog() -> None:
+    assert ADAPTER_REGISTRY["official.cwa.rainfall"].data_gov_url == (
+        "https://data.gov.tw/dataset/9177"
+    )
+    assert ADAPTER_REGISTRY["official.cwa.rainfall"].resource_url is not None
+    assert ADAPTER_REGISTRY["official.wra.water_level"].data_gov_dataset_id == "25768"
+    assert "quality checked" in " ".join(
+        ADAPTER_REGISTRY["official.wra.water_level"].limitations
+    )
+    assert ADAPTER_REGISTRY["official.flood_potential.geojson"].data_gov_url == (
+        "https://data.gov.tw/dataset/25766"
+    )
+    assert "not a realtime flood warning" in " ".join(
+        ADAPTER_REGISTRY["official.flood_potential.geojson"].limitations
+    )
+
+
 def test_official_source_flags_can_disable_individual_adapters() -> None:
     settings = load_worker_settings(
         {

@@ -94,7 +94,8 @@ def test_cwa_rainfall_api_adapter_fetches_and_normalizes_official_payload() -> N
     assert result.rejected == ()
 
     raw = result.fetched[0]
-    assert raw.source_url == "https://example.test/cwa/rainfall?station=all&format=JSON"
+    assert raw.source_url == "https://data.gov.tw/dataset/9177"
+    assert raw.payload["resource_url"] == "https://example.test/cwa/rainfall?station=all&format=JSON"
     assert "test-token" not in raw.source_url
     assert raw.payload["rainfall_mm_10m"] == 7.5
     assert raw.payload["geometry"] == {
@@ -186,7 +187,10 @@ def test_wra_water_level_api_adapter_fetches_and_normalizes_official_payload() -
     assert result.rejected == ()
 
     raw = result.fetched[0]
-    assert raw.source_url == "https://example.test/wra/water-level?county=taipei&format=JSON"
+    assert raw.source_url == "https://data.gov.tw/dataset/25768"
+    assert raw.payload["resource_url"] == (
+        "https://example.test/wra/water-level?county=taipei&format=JSON"
+    )
     assert raw.payload["water_level_m"] == 7.82
     assert raw.payload["geometry"] == {
         "type": "Point",
@@ -248,7 +252,10 @@ def test_wra_water_level_api_adapter_omits_optional_token_from_source_url() -> N
     request_params = parse_qs(urlsplit(request_url).query)
     assert request_params["api_key"] == ["test-token"]
     assert "old-token" not in request_url
-    assert result.fetched[0].source_url == "https://example.test/wra/water-level?format=JSON"
+    assert result.fetched[0].source_url == "https://data.gov.tw/dataset/25768"
+    assert result.fetched[0].payload["resource_url"] == (
+        "https://example.test/wra/water-level?format=JSON"
+    )
 
 
 def test_wra_water_level_api_payload_shape_errors_are_explicit() -> None:

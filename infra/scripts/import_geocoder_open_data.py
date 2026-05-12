@@ -48,6 +48,10 @@ class ImportSource:
     target_precision: str
     target_place_type: str
     coordinate_policy: str
+    data_gov_dataset_id: str | None = None
+    data_gov_url: str | None = None
+    resource_url: str | None = None
+    source_catalog_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -159,8 +163,32 @@ def manifest_sources(manifest: dict[str, Any]) -> dict[str, ImportSource]:
             target_precision=precision if precision in GEOCODE_PRECISION_VALUES else "unknown",
             target_place_type=place_type if place_type in PLACE_TYPE_VALUES else "poi",
             coordinate_policy=str(dataset.get("coordinate_policy") or "source_wgs84_point"),
+            data_gov_dataset_id=optional_manifest_text(dataset.get("data_gov_dataset_id")),
+            data_gov_url=optional_manifest_text(dataset.get("data_gov_url") or dataset.get("landing_url")),
+            resource_url=optional_manifest_text(dataset.get("resource_url")),
+            source_catalog_key=optional_manifest_text(dataset.get("source_catalog_key")),
         )
     return sources
+
+
+def optional_manifest_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def source_metadata(source: ImportSource) -> dict[str, str]:
+    return {
+        key: value
+        for key, value in {
+            "data_gov_dataset_id": source.data_gov_dataset_id,
+            "data_gov_url": source.data_gov_url,
+            "resource_url": source.resource_url,
+            "source_catalog_key": source.source_catalog_key,
+        }.items()
+        if value
+    }
 
 
 def read_source_file(path: Path, source: ImportSource) -> tuple[list[GeocoderImportRow], int]:
@@ -280,6 +308,7 @@ def geocoder_row_from_mapping(row: dict[str, Any], source: ImportSource) -> Geoc
         confidence=row_float(row, "confidence"),
         limitations=row_list(row, "limitations", "limitation"),
         metadata={
+            **source_metadata(source),
             "coordinate_policy": source.coordinate_policy,
             "raw": {key: value for key, value in row.items() if value not in (None, "")},
         },
@@ -324,6 +353,7 @@ def road_row_from_mapping(row: dict[str, Any], source: ImportSource) -> Geocoder
         confidence=0.63,
         limitations=limitations,
         metadata={
+            **source_metadata(source),
             "coordinate_policy": source.coordinate_policy,
             "coordinate_precision": "admin_area_centroid",
             "raw": {key: value for key, value in row.items() if value not in (None, "")},
@@ -395,6 +425,10 @@ def write_evidence_json(
         "schema_version": "geocoder-import-evidence/v1",
         "source_key": source.key,
         "source_url": source.source_url,
+        "data_gov_dataset_id": source.data_gov_dataset_id,
+        "data_gov_url": source.data_gov_url,
+        "resource_url": source.resource_url,
+        "source_catalog_key": source.source_catalog_key,
         "license": source.license,
         "attribution": source.attribution,
         "coordinate_policy": source.coordinate_policy,

@@ -49,7 +49,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\public-beta-local-
 Repeat the hosted no-secret smoke after each Zeabur deployment with:
 
 ```powershell
-python scripts\hosted_public_beta_smoke.py --base-url https://floodrisk.zeabur.app
+python scripts\hosted_public_beta_smoke.py --base-url https://floodrisk.cc
+python scripts\taiwan_wide_public_beta_smoke.py --base-url https://floodrisk.cc --include-town-samples
 ```
 
 ## 2026-05-06 Ops Update

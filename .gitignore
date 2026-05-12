@@ -48,6 +48,10 @@ coverage/
 data/raw/
 data/processed/
 data/tmp/
+tmp/*
+!tmp/
+!tmp/.gitkeep
+!tmp/README.md
 *.mbtiles
 *.pmtiles
 *.gpkg

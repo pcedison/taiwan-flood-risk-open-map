@@ -25,6 +25,15 @@ Latest data.gov.tw review:
   CWA rainfall dataset 9177, WRA water-level dataset 25768, and WRA
   flood-potential dataset 25766 as preferred official sources, while noting
   that historical news and all-Taiwan doorplates are not solved by data.gov.tw.
+- `docs/data-sources/official/official-source-catalog.yaml` is the
+  machine-readable source catalog. Worker official adapter metadata is tested
+  against it so data.gov.tw remains the primary public catalog reference while
+  raw snapshots can still retain concrete resource URLs.
+- `docs/data-sources/geocoding/geocoding-data-manifest.yaml` now carries the
+  matching data.gov.tw dataset IDs, landing URLs, resource URLs, and source
+  catalog keys for the primary geocoder inputs: village boundaries dataset 7438,
+  national road names dataset 35321, and shelter points dataset 73242. The
+  closed doorplate suggestion 136942 is explicitly tracked as unavailable.
 
 Source mapping notes:
 
@@ -39,7 +48,8 @@ Source mapping notes:
   by the worker adapter and public MVP bridge.
 - DPRC flood-potential SHP packages are handled as planning/reference data, not
   realtime observations. Local all-Taiwan import evidence was recorded on
-  2026-05-05 under `tmp/evidence/flood-potential/`.
+  2026-05-05 under `tmp/evidence/flood-potential/`; `tmp/` is local scratch and
+  should promote only curated summaries into tracked docs.
 - Protomaps/PMTiles belongs to the basemap delivery path. It is not an evidence
   source for flood risk by itself, but the web app supports operator-owned
   PMTiles, raster, or MapLibre style URLs through `NEXT_PUBLIC_BASEMAP_*`.

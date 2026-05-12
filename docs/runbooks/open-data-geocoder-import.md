@@ -84,10 +84,11 @@ Reviewed geocoding sources are tracked in:
 docs\data-sources\geocoding\geocoding-data-manifest.yaml
 ```
 
-The manifest records source URL, license, owner, update frequency, intended
-precision, and import status. Public beta may use point sources marked
-`ready_for_point_import`; address-only sources stay as candidates until a
-separate geocoding pass records precision and confidence.
+The manifest records data.gov.tw dataset ID, data.gov.tw landing URL, concrete
+resource URL, license, owner, update frequency, intended precision, and import
+status. Public beta may use point sources marked `ready_for_point_import`;
+address-only sources stay as candidates until a separate geocoding pass records
+precision and confidence.
 
 Current beta seed categories:
 
@@ -99,6 +100,11 @@ Current beta seed categories:
 - POI: NFA shelter points.
 - POI candidate requiring coordinate transform: NPA police office points.
 - address-only POI candidate: MOHW medical institution records.
+
+The all-Taiwan doorplate coordinate suggestion at
+`https://data.gov.tw/suggests/136942` is tracked as unavailable, not as a usable
+dataset. Production-grade exact address coverage still needs a separate
+approved source.
 
 ## PostGIS Import Table
 
@@ -244,6 +250,28 @@ For the full no-secret MVP gate:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\public-beta-local-gate.ps1
 ```
+
+## Taiwan-Wide Public Beta Smoke
+
+The public service must stay usable across Taiwan, not just for one regression
+address. Before and after every public beta redeploy, run the hosted smoke
+against the public domain:
+
+```powershell
+python scripts\taiwan_wide_public_beta_smoke.py --base-url https://floodrisk.cc --include-town-samples
+```
+
+The default mode checks all 22 county/city queries. `--include-town-samples`
+adds one representative township/district per county/city so the deploy gate
+covers 44 admin-area geocode and risk-assessment requests without relying on
+external geocoding. Use `--all-towns` only for a heavier audit because it
+assesses every bundled Taiwan township/district.
+
+This smoke proves the public API can geocode and assess all Taiwan admin areas.
+It does not claim production-complete national doorplate precision. The
+data.gov.tw road, village, and shelter bundles are beta search enrichment; the
+all-Taiwan doorplate coordinate request at `https://data.gov.tw/suggests/136942`
+remains an unavailable suggestion, not a usable dataset.
 
 ## Production Notes
 

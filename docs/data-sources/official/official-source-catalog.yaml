@@ -1,0 +1,118 @@
+schema_version: official-source-catalog/v1
+reviewed_at: "2026-05-12T00:00:00+08:00"
+review_method: "Browser Use inspection of data.gov.tw dataset pages"
+policy:
+  primary_catalog: "https://data.gov.tw/"
+  source_url_policy: "Public evidence should point to the data.gov.tw dataset landing page when a matching official dataset exists; raw snapshots may retain the concrete resource URL."
+  remaining_gap_policy: "Do not treat data suggestions or missing national datasets as production-ready sources."
+sources:
+  - key: official.cwa.rainfall
+    need: realtime_rainfall
+    status: primary
+    data_gov_dataset_id: "9177"
+    data_gov_url: "https://data.gov.tw/dataset/9177"
+    title: "Rainfall observation station rainfall data"
+    provider: "Central Weather Administration"
+    resource_url: "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001"
+    resource_format: "JSON API"
+    update_frequency: "every 10 minutes"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use as the canonical realtime rainfall source."
+    limitations:
+      - "Station values can be missing or invalid during outages."
+      - "Use WGS84 coordinates when present and keep freshness visible."
+  - key: official.wra.water_level
+    need: realtime_water_level
+    status: primary
+    data_gov_dataset_id: "25768"
+    data_gov_url: "https://data.gov.tw/dataset/25768"
+    title: "Realtime water level data"
+    provider: "Water Resources Agency"
+    resource_url: "https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0"
+    resource_format: "JSON API"
+    update_frequency: "data.gov.tw metadata: every 1 hour; observations are recorded every 10 minutes"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use as the canonical realtime water-level source, joined with station metadata when coordinates are needed."
+    limitations:
+      - "Realtime observations are raw and not fully quality checked."
+      - "Transmission interruption or instrument failure can stop or distort station data."
+  - key: official.flood_potential.geojson
+    need: planning_flood_potential
+    status: primary_reference
+    data_gov_dataset_id: "25766"
+    data_gov_url: "https://data.gov.tw/dataset/25766"
+    title: "Flood potential maps"
+    provider: "Water Resources Agency"
+    resource_url: "https://opendata.wra.gov.tw/api/v2/de9578fe-b014-4f00-b8ca-e6280324f08d"
+    resource_format: "JSON API"
+    update_frequency: "irregular"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use as the canonical planning/reference flood-potential source."
+    limitations:
+      - "Planning/reference layer, not a realtime flood warning."
+      - "Must not be used as land-use control or legal determination evidence."
+  - key: official.wra.flood_warning
+    need: realtime_flood_warning
+    status: phase4_candidate
+    data_gov_dataset_id: "5982"
+    data_gov_url: "https://data.gov.tw/dataset/5982"
+    title: "Flood warning disaster information"
+    provider: "Water Resources Agency"
+    resource_url: "https://opendata.wra.gov.tw/api/v2/301c0b62-8736-4e03-95ef-55309c1a5e74"
+    resource_format: "JSON API / KML list"
+    update_frequency: "irregular"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Keep as a Phase 4 warning-layer candidate; do not blend into flood-potential scoring until warning semantics are implemented."
+    limitations:
+      - "Requires parser, cadence review, source-health alerts, and UI language before scoring use."
+  - key: geocoder.moi.village_boundary
+    need: village_admin_fallback
+    status: primary
+    data_gov_dataset_id: "7438"
+    data_gov_url: "https://data.gov.tw/dataset/7438"
+    title: "Village boundaries, TWD97 geographic coordinates"
+    provider: "National Land Surveying and Mapping Center"
+    resource_url: "https://www.tgos.tw/tgos/VirtualDir/Product/a04697c8-64db-450a-a105-3eb471c45abd/%E6%9D%91(%E9%87%8C)%E7%95%8C(TWD97%E7%B6%93%E7%B7%AF%E5%BA%A6)1150407.zip"
+    resource_format: "SHP ZIP"
+    update_frequency: "irregular"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use for admin-area fallback and profile shard building only."
+    limitations:
+      - "Not a doorplate or road-segment coordinate source."
+  - key: geocoder.moi.road_names
+    need: road_name_fallback
+    status: primary_fallback
+    data_gov_dataset_id: "35321"
+    data_gov_url: "https://data.gov.tw/dataset/35321"
+    title: "National road-name data"
+    provider: "Ministry of the Interior"
+    resource_url: "https://www.ris.gov.tw/rs-opendata/api/v1/datastore/ODRP049/107"
+    resource_format: "JSON API plus county CSV resources"
+    update_frequency: "irregular"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use only as searchable road-name fallback with admin centroid limitations."
+    limitations:
+      - "Contains road names, not road geometry, lanes, alleys, segments, or doorplates."
+  - key: geocoder.nfa.shelters
+    need: shelter_poi_geocoder
+    status: primary
+    data_gov_dataset_id: "73242"
+    data_gov_url: "https://data.gov.tw/dataset/73242"
+    title: "Shelter location point file"
+    provider: "National Fire Agency"
+    resource_url: "https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/ED6CF735-6C03-4573-A882-72C1BEC799CB/resource/54550E2F-4567-4C8F-BD2E-E54E9D0386B8/download"
+    resource_format: "CSV"
+    update_frequency: "irregular"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use for POI search enrichment and future public safety layers; do not change flood-risk scoring by itself."
+    limitations:
+      - "Past public comments note coordinate quality issues, so import must keep bounds checks and confidence limits."
+gaps:
+  - key: historical_news
+    status: not_available_on_data_gov
+    data_gov_url: null
+    decision: "Keep the reviewed public-news/GDELT path with source allowlist and legal review."
+  - key: national_doorplate_coordinates
+    status: unavailable
+    data_gov_url: "https://data.gov.tw/suggests/136942"
+    decision: "This is a closed public suggestion, not a usable dataset; keep road, village, POI, and local partial geocoder fallback until a licensed nationwide doorplate source is approved."

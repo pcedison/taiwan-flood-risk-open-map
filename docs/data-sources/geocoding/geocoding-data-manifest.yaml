@@ -28,12 +28,24 @@ production_complete_evidence:
   all_taiwan_address_source_ref: ""
   license_review_ref: ""
   coverage_review_ref: ""
+unavailable_sources:
+  - key: national-doorplate-coordinates
+    status: closed_suggestion_not_dataset
+    data_gov_suggest_url: https://data.gov.tw/suggests/136942
+    decision: >
+      Do not import or model this as an available nationwide doorplate dataset.
+      Keep road, village, POI, and reviewed local address fallbacks until a
+      licensed nationwide doorplate coordinate source is approved.
 datasets:
   - key: moi-national-road-names
     name: 全國路名資料
     category: roads
     status: ready_for_import_planning
     landing_url: https://data.gov.tw/dataset/35321
+    data_gov_dataset_id: "35321"
+    data_gov_url: https://data.gov.tw/dataset/35321
+    resource_url: https://www.ris.gov.tw/rs-opendata/api/v1/datastore/ODRP049/107
+    source_catalog_key: geocoder.moi.road_names
     provider: 內政部戶政司
     license: 政府資料開放授權條款-第1版
     update_frequency: 不定期更新
@@ -56,6 +68,8 @@ datasets:
     category: villages
     status: coordinate_transform_candidate
     landing_url: https://data.gov.tw/dataset/7439
+    data_gov_dataset_id: "7439"
+    data_gov_url: https://data.gov.tw/dataset/7439
     provider: 內政部國土測繪中心
     license: Open Government Data License, version 1.0
     update_frequency: 不定期更新
@@ -76,6 +90,10 @@ datasets:
     category: villages
     status: ready_for_centroid_import
     landing_url: https://data.gov.tw/dataset/7438
+    data_gov_dataset_id: "7438"
+    data_gov_url: https://data.gov.tw/dataset/7438
+    resource_url: https://www.tgos.tw/tgos/VirtualDir/Product/a04697c8-64db-450a-a105-3eb471c45abd/%E6%9D%91(%E9%87%8C)%E7%95%8C(TWD97%E7%B6%93%E7%B7%AF%E5%BA%A6)1150407.zip
+    source_catalog_key: geocoder.moi.village_boundary
     provider: 內政部國土測繪中心
     license: Open Government Data License, version 1.0
     update_frequency: 不定期更新
@@ -99,6 +117,10 @@ datasets:
     category: poi
     status: ready_for_point_import
     landing_url: https://data.gov.tw/dataset/73242
+    data_gov_dataset_id: "73242"
+    data_gov_url: https://data.gov.tw/dataset/73242
+    resource_url: https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/ED6CF735-6C03-4573-A882-72C1BEC799CB/resource/54550E2F-4567-4C8F-BD2E-E54E9D0386B8/download
+    source_catalog_key: geocoder.nfa.shelters
     provider: 內政部消防署
     license: Open Government Data License, version 1.0
     update_frequency: 每1年
@@ -117,6 +139,8 @@ datasets:
     category: poi
     status: ready_for_point_import
     landing_url: https://data.gov.tw/dataset/5958
+    data_gov_dataset_id: "5958"
+    data_gov_url: https://data.gov.tw/dataset/5958
     provider: 內政部警政署
     license: 政府資料開放授權條款-第1版
     update_frequency: 不定期更新
@@ -135,6 +159,8 @@ datasets:
     category: poi
     status: address_only_candidate
     landing_url: https://data.gov.tw/dataset/15393
+    data_gov_dataset_id: "15393"
+    data_gov_url: https://data.gov.tw/dataset/15393
     provider: 衛生福利部醫事司
     license: 政府資料開放授權條款-第1版
     update_frequency: 每1年

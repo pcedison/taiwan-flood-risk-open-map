@@ -2,6 +2,9 @@
 
 from app.adapters.cwa.rainfall import (
     CWA_RAINFALL_API_URL,
+    CWA_RAINFALL_DATA_GOV_DATASET_ID,
+    CWA_RAINFALL_DATA_GOV_URL,
+    CWA_RAINFALL_METADATA,
     DEFAULT_CWA_RAINFALL_TIMEOUT_SECONDS,
     CwaRainfallAdapter,
     CwaRainfallApiAdapter,
@@ -15,6 +18,9 @@ from app.adapters.cwa.rainfall import (
 
 __all__ = [
     "CWA_RAINFALL_API_URL",
+    "CWA_RAINFALL_DATA_GOV_DATASET_ID",
+    "CWA_RAINFALL_DATA_GOV_URL",
+    "CWA_RAINFALL_METADATA",
     "DEFAULT_CWA_RAINFALL_TIMEOUT_SECONDS",
     "CwaRainfallAdapter",
     "CwaRainfallApiAdapter",

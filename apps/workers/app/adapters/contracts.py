@@ -38,6 +38,12 @@ class AdapterMetadata:
     enabled_by_default: bool
     display_name: str
     terms_review_required: bool = False
+    data_gov_dataset_id: str | None = None
+    data_gov_url: str | None = None
+    resource_url: str | None = None
+    update_frequency: str | None = None
+    license: str | None = None
+    limitations: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

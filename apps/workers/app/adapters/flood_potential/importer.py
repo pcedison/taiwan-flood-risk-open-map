@@ -22,6 +22,11 @@ from app.adapters.contracts import (
 
 FetchJson = Callable[[str, int], Mapping[str, Any]]
 
+FLOOD_POTENTIAL_DATA_GOV_DATASET_ID = "25766"
+FLOOD_POTENTIAL_DATA_GOV_URL = "https://data.gov.tw/dataset/25766"
+FLOOD_POTENTIAL_DATA_GOV_RESOURCE_URL = (
+    "https://opendata.wra.gov.tw/api/v2/de9578fe-b014-4f00-b8ca-e6280324f08d"
+)
 FLOOD_POTENTIAL_GEOJSON_ATTRIBUTION = "Official flood potential dataset"
 FLOOD_POTENTIAL_GEOJSON_USER_AGENT = "FloodRiskTaiwan/0.1 worker-flood-potential"
 DEFAULT_FLOOD_POTENTIAL_GEOJSON_TIMEOUT_SECONDS = 8
@@ -31,6 +36,15 @@ FLOOD_POTENTIAL_GEOJSON_METADATA = AdapterMetadata(
     family=SourceFamily.OFFICIAL,
     enabled_by_default=True,
     display_name="Flood potential GeoJSON import adapter",
+    data_gov_dataset_id=FLOOD_POTENTIAL_DATA_GOV_DATASET_ID,
+    data_gov_url=FLOOD_POTENTIAL_DATA_GOV_URL,
+    resource_url=FLOOD_POTENTIAL_DATA_GOV_RESOURCE_URL,
+    update_frequency="irregular",
+    license="Government Open Data License, version 1.0",
+    limitations=(
+        "Planning/reference layer, not a realtime flood warning.",
+        "Must not be used as land-use control or legal determination evidence.",
+    ),
 )
 
 

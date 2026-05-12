@@ -8,6 +8,7 @@ from infra.scripts.import_geocoder_open_data import (
     load_manifest,
     manifest_sources,
     read_source_file,
+    write_evidence_json,
 )
 from infra.scripts.extract_village_centroids import row_from_shape_record
 from infra.scripts.geocoder_coverage_smoke import coverage_summary
@@ -17,6 +18,7 @@ def test_geocoding_manifest_lists_required_beta_coverage_sources() -> None:
     manifest = load_manifest(DEFAULT_MANIFEST_PATH)
     datasets = manifest["datasets"]
     categories = {dataset["category"] for dataset in datasets}
+    datasets_by_key = {dataset["key"]: dataset for dataset in datasets}
     keys = {dataset["key"] for dataset in datasets}
 
     assert {"roads", "villages", "poi"} <= categories
@@ -28,8 +30,40 @@ def test_geocoding_manifest_lists_required_beta_coverage_sources() -> None:
     } <= keys
     for dataset in datasets:
         assert dataset["landing_url"].startswith("https://data.gov.tw/")
+        assert dataset["data_gov_url"].startswith("https://data.gov.tw/dataset/")
         assert dataset["license"]
         assert dataset["update_frequency"]
+    assert datasets_by_key["moi-national-road-names"]["data_gov_dataset_id"] == "35321"
+    assert datasets_by_key["moi-village-boundary-twd97-geographic"]["data_gov_dataset_id"] == "7438"
+    assert datasets_by_key["nfa-evacuation-shelter-locations"]["data_gov_dataset_id"] == "73242"
+    assert manifest["unavailable_sources"][0]["data_gov_suggest_url"] == (
+        "https://data.gov.tw/suggests/136942"
+    )
+
+
+def test_geocoding_manifest_matches_official_source_catalog_for_primary_sources() -> None:
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+    catalog_path = (
+        DEFAULT_MANIFEST_PATH.parents[1] / "official" / "official-source-catalog.yaml"
+    )
+    catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))
+    catalog_sources = {source["key"]: source for source in catalog["sources"]}
+    datasets_by_catalog_key = {
+        dataset["source_catalog_key"]: dataset
+        for dataset in manifest["datasets"]
+        if dataset.get("source_catalog_key")
+    }
+
+    for catalog_key in (
+        "geocoder.moi.road_names",
+        "geocoder.moi.village_boundary",
+        "geocoder.nfa.shelters",
+    ):
+        dataset = datasets_by_catalog_key[catalog_key]
+        catalog_source = catalog_sources[catalog_key]
+        assert dataset["data_gov_dataset_id"] == catalog_source["data_gov_dataset_id"]
+        assert dataset["data_gov_url"] == catalog_source["data_gov_url"]
+        assert dataset["resource_url"] == catalog_source["resource_url"]
 
 
 def test_importer_normalizes_point_rows_with_manifest_defaults(tmp_path) -> None:
@@ -80,7 +114,35 @@ def test_importer_maps_road_names_to_admin_centroid_with_limitation(tmp_path) ->
     assert rows[0].precision == "road_or_lane"
     assert rows[0].confidence == 0.63
     assert rows[0].metadata["coordinate_precision"] == "admin_area_centroid"
+    assert rows[0].metadata["data_gov_dataset_id"] == "35321"
+    assert rows[0].metadata["data_gov_url"] == "https://data.gov.tw/dataset/35321"
+    assert rows[0].metadata["resource_url"].startswith("https://www.ris.gov.tw/")
     assert rows[0].limitations
+
+
+def test_import_evidence_json_carries_data_gov_source_metadata(tmp_path) -> None:
+    manifest = load_manifest(DEFAULT_MANIFEST_PATH)
+    source = manifest_sources(manifest)["nfa-evacuation-shelter-locations"]
+    row = geocoder_row_from_mapping(
+        {
+            "Shelter Name": "Test Shelter",
+            "Shelter address": "Test Address",
+            "Longitude": "120.3",
+            "Latitude": "22.7",
+        },
+        source,
+    )
+    assert row is not None
+
+    evidence_path = tmp_path / "evidence.json"
+    write_evidence_json(evidence_path, source, [row], skipped=0)
+
+    payload = yaml.safe_load(evidence_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "geocoder-import-evidence/v1"
+    assert payload["data_gov_dataset_id"] == "73242"
+    assert payload["data_gov_url"] == "https://data.gov.tw/dataset/73242"
+    assert payload["source_catalog_key"] == "geocoder.nfa.shelters"
+    assert payload["resource_url"].startswith("https://opdadm.moi.gov.tw/")
 
 
 def test_village_centroid_extractor_outputs_admin_fallback_row() -> None:

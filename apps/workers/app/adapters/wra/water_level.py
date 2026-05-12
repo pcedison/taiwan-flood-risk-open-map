@@ -26,6 +26,8 @@ WRA_WATER_LEVEL_API_URL = (
     "https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0"
     "?format=JSON&sort=_importdate+desc&limit=5000"
 )
+WRA_WATER_LEVEL_DATA_GOV_DATASET_ID = "25768"
+WRA_WATER_LEVEL_DATA_GOV_URL = "https://data.gov.tw/dataset/25768"
 WRA_WATER_LEVEL_ATTRIBUTION = "Water Resources Agency"
 WRA_WATER_LEVEL_USER_AGENT = "FloodRiskTaiwan/0.1 worker-wra-water-level"
 DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS = 8
@@ -35,6 +37,15 @@ WRA_WATER_LEVEL_METADATA = AdapterMetadata(
     family=SourceFamily.OFFICIAL,
     enabled_by_default=True,
     display_name="WRA water level observation adapter",
+    data_gov_dataset_id=WRA_WATER_LEVEL_DATA_GOV_DATASET_ID,
+    data_gov_url=WRA_WATER_LEVEL_DATA_GOV_URL,
+    resource_url=WRA_WATER_LEVEL_API_URL,
+    update_frequency="data.gov.tw metadata: every 1 hour; observations are recorded every 10 minutes",
+    license="Government Open Data License, version 1.0",
+    limitations=(
+        "Realtime water-level observations are raw and not fully quality checked.",
+        "Transmission interruption or instrument failure can stop or distort station data.",
+    ),
 )
 
 
@@ -72,7 +83,7 @@ class WraWaterLevelApiAdapter:
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         request_url = _wra_water_level_request_url(self._api_url, self._api_token)
-        source_url = _wra_water_level_source_url(self._api_url)
+        resource_url = _wra_water_level_source_url(self._api_url)
         try:
             payload = self._fetch_json(request_url, self._timeout_seconds)
         except WraWaterLevelAdapterError:
@@ -80,7 +91,11 @@ class WraWaterLevelApiAdapter:
         except Exception as exc:
             raise WraWaterLevelFetchError(f"WRA water level fetcher failed: {exc}") from exc
 
-        records = parse_wra_water_level_api_payload(payload, source_url=source_url)
+        records = parse_wra_water_level_api_payload(
+            payload,
+            source_url=WRA_WATER_LEVEL_DATA_GOV_URL,
+            resource_url=resource_url,
+        )
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
             RawSourceItem(
@@ -169,13 +184,18 @@ def parse_wra_water_level_api_payload(
     payload: object,
     *,
     source_url: str,
+    resource_url: str | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     items = _water_level_items(payload)
     parsed: list[Mapping[str, Any]] = []
     for item in items:
         if not isinstance(item, Mapping):
             continue
-        record = _parse_wra_station_record(item, source_url=source_url)
+        record = _parse_wra_station_record(
+            item,
+            source_url=source_url,
+            resource_url=resource_url,
+        )
         if record is not None:
             parsed.append(record)
     return tuple(parsed)
@@ -260,6 +280,7 @@ def _parse_wra_station_record(
     item: Mapping[str, Any],
     *,
     source_url: str,
+    resource_url: str | None,
 ) -> Mapping[str, Any] | None:
     station_id = _first_text(
         item,
@@ -315,6 +336,8 @@ def _parse_wra_station_record(
         "attribution": WRA_WATER_LEVEL_ATTRIBUTION,
         "confidence": 0.92,
     }
+    if resource_url is not None:
+        record["resource_url"] = resource_url
 
     river_name = _first_text(item, "river_name", "RiverName", "rivername")
     warning_level_m = _optional_float(

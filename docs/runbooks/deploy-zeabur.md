@@ -394,8 +394,10 @@ Smoke checks after deploy:
 3. Readiness confirms database and Redis connectivity.
 4. A mock or real risk query returns a valid risk level and `score_version`.
 5. Source health is visible for configured adapters.
-6. Scheduler has exactly one running replica.
-7. Worker logs show no repeated startup or migration errors.
+6. Taiwan-wide public smoke passes:
+   `python scripts\taiwan_wide_public_beta_smoke.py --base-url https://floodrisk.cc --include-town-samples`.
+7. Scheduler has exactly one running replica.
+8. Worker logs show no repeated startup or migration errors.
 
 ## Post-Deploy Checklist
 

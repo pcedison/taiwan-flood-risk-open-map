@@ -240,6 +240,45 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("查詢關注度：低")).toBeVisible();
 });
 
+test("map click cancels a slow search and re-enables the query button", async ({ page }) => {
+  let releaseGeocode: (() => void) | undefined;
+
+  await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
+    await new Promise<void>((resolve) => {
+      releaseGeocode = resolve;
+    });
+    await route
+      .fulfill({
+        contentType: "application/json",
+        json: { candidates: [] },
+      })
+      .catch(() => undefined);
+  });
+
+  try {
+    await page.goto("/");
+    const canvas = page.locator(".map-canvas");
+    await expect(canvas).toBeVisible();
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+
+    const searchInput = page.locator("form input").first();
+    const submitButton = page.locator('form button[type="submit"]').first();
+    await searchInput.fill("slow-address");
+    await submitButton.click();
+    await expect(submitButton).toBeDisabled();
+
+    await canvas.click({
+      position: { x: Math.round(box!.width / 2), y: Math.round(box!.height / 2) },
+    });
+
+    await expect(searchInput).toHaveValue("");
+    await expect(submitButton).toBeEnabled();
+  } finally {
+    releaseGeocode?.();
+  }
+});
+
 test("live local unknown-address flow assesses precise fixtures and coarse admin geocodes", async ({
   page,
 }) => {

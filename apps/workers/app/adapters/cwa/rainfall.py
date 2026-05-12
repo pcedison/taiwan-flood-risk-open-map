@@ -23,6 +23,8 @@ from app.adapters.contracts import (
 FetchJson = Callable[[str, int], Mapping[str, Any]]
 
 CWA_RAINFALL_API_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001"
+CWA_RAINFALL_DATA_GOV_DATASET_ID = "9177"
+CWA_RAINFALL_DATA_GOV_URL = "https://data.gov.tw/dataset/9177"
 CWA_RAINFALL_ATTRIBUTION = "Central Weather Administration"
 CWA_RAINFALL_USER_AGENT = "FloodRiskTaiwan/0.1 worker-cwa-rainfall"
 DEFAULT_CWA_RAINFALL_TIMEOUT_SECONDS = 8
@@ -32,6 +34,15 @@ CWA_RAINFALL_METADATA = AdapterMetadata(
     family=SourceFamily.OFFICIAL,
     enabled_by_default=True,
     display_name="CWA rainfall observation adapter",
+    data_gov_dataset_id=CWA_RAINFALL_DATA_GOV_DATASET_ID,
+    data_gov_url=CWA_RAINFALL_DATA_GOV_URL,
+    resource_url=CWA_RAINFALL_API_URL,
+    update_frequency="every 10 minutes",
+    license="Government Open Data License, version 1.0",
+    limitations=(
+        "Station values can be missing or invalid during outages.",
+        "Use WGS84 coordinates when present and keep freshness visible.",
+    ),
 )
 
 
@@ -79,7 +90,7 @@ class CwaRainfallApiAdapter:
             )
 
         request_url = _cwa_rainfall_request_url(self._api_url, authorization)
-        source_url = _cwa_rainfall_source_url(self._api_url)
+        resource_url = _cwa_rainfall_source_url(self._api_url)
         try:
             payload = self._fetch_json(request_url, self._timeout_seconds)
         except CwaRainfallAdapterError:
@@ -87,7 +98,11 @@ class CwaRainfallApiAdapter:
         except Exception as exc:
             raise CwaRainfallFetchError(f"CWA rainfall fetcher failed: {exc}") from exc
 
-        records = parse_cwa_rainfall_api_payload(payload, source_url=source_url)
+        records = parse_cwa_rainfall_api_payload(
+            payload,
+            source_url=CWA_RAINFALL_DATA_GOV_URL,
+            resource_url=resource_url,
+        )
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
             RawSourceItem(
@@ -176,6 +191,7 @@ def parse_cwa_rainfall_api_payload(
     payload: Mapping[str, Any],
     *,
     source_url: str,
+    resource_url: str | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     records = payload.get("records")
     if not isinstance(records, Mapping):
@@ -189,7 +205,11 @@ def parse_cwa_rainfall_api_payload(
     for item in stations:
         if not isinstance(item, Mapping):
             continue
-        record = _parse_cwa_station_record(item, source_url=source_url)
+        record = _parse_cwa_station_record(
+            item,
+            source_url=source_url,
+            resource_url=resource_url,
+        )
         if record is not None:
             parsed.append(record)
     return tuple(parsed)
@@ -244,6 +264,7 @@ def _parse_cwa_station_record(
     item: Mapping[str, Any],
     *,
     source_url: str,
+    resource_url: str | None,
 ) -> Mapping[str, Any] | None:
     geo_info = item.get("GeoInfo")
     rainfall = item.get("RainfallElement")
@@ -271,6 +292,8 @@ def _parse_cwa_station_record(
         "attribution": CWA_RAINFALL_ATTRIBUTION,
         "confidence": 0.93,
     }
+    if resource_url is not None:
+        record["resource_url"] = resource_url
 
     rainfall_10m = _precipitation_value(rainfall.get("Past10Min"))
     rainfall_24h = _precipitation_value(rainfall.get("Past24hr"))
