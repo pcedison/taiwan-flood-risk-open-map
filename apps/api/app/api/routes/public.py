@@ -1177,9 +1177,18 @@ def _profile_evidence_total(profile: RiskProfileRecord) -> int:
 
 
 def _positive_int(value: object) -> int | None:
-    try:
+    if isinstance(value, bool):
         count = int(value)
-    except (TypeError, ValueError):
+    elif isinstance(value, int):
+        count = value
+    elif isinstance(value, float):
+        count = int(value)
+    elif isinstance(value, str):
+        try:
+            count = int(value)
+        except ValueError:
+            return None
+    else:
         return None
     return count if count > 0 else None
 
