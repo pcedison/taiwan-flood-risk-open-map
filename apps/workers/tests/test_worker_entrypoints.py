@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from app import scheduler as scheduler_module
 from app.config import load_worker_settings
 from app.jobs.historical_news_backfill import HistoricalNewsBackfillConfig
+from app.jobs.profiles import ProfileRefreshJobUnavailable
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import (
     RuntimeQueueDeadLetterJob,
@@ -1889,6 +1890,51 @@ def test_main_work_profile_refresh_jobs_sleeps_between_claimed_jobs(monkeypatch,
     assert [job["status"] for job in payload["profile_refresh_jobs"]] == [
         "succeeded",
         "succeeded",
+    ]
+
+
+def test_main_work_profile_refresh_jobs_aborts_batch_on_database_connection_error(
+    monkeypatch, capsys
+) -> None:
+    rebuild_keys: list[str] = []
+
+    def fake_claim(**kwargs: object) -> tuple[object, ...]:
+        del kwargs
+        return (
+            SimpleNamespace(
+                id="job-1",
+                profile_kind="risk_grid",
+                profile_key="h3:23.00,120.17",
+            ),
+            SimpleNamespace(
+                id="job-2",
+                profile_kind="risk_grid",
+                profile_key="h3:23.06,120.20",
+            ),
+        )
+
+    def fake_rebuild(**kwargs: object) -> object:
+        rebuild_keys.append(str(kwargs["profile_key"]))
+        raise ProfileRefreshJobUnavailable("connection timeout expired")
+
+    monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
+    monkeypatch.setattr("app.main.claim_profile_refresh_jobs", fake_claim)
+    monkeypatch.setattr("app.main.rebuild_risk_profile", fake_rebuild)
+    monkeypatch.setattr("app.main.complete_profile_refresh_job", lambda **kwargs: True)
+
+    exit_code = main(["--work-profile-refresh-jobs", "--profile-refresh-limit", "2"])
+
+    assert exit_code == 1
+    assert rebuild_keys == ["h3:23.00,120.17"]
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["profile_refresh_jobs"] == [
+        {
+            "error": "connection timeout expired",
+            "job_id": "job-1",
+            "profile_key": "h3:23.00,120.17",
+            "profile_kind": "risk_grid",
+            "status": "failed",
+        }
     ]
 
 
