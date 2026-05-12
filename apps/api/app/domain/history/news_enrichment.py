@@ -7,7 +7,7 @@ from hashlib import sha256
 import json
 import re
 from time import monotonic
-from typing import Any
+from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -63,6 +63,7 @@ class OnDemandNewsSearchResult:
     source_id: str
     message: str
     records: tuple[EvidenceUpsert, ...]
+    health_status: Literal["healthy", "degraded", "failed", "disabled", "unknown"] = "unknown"
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ def search_public_flood_news(
             source_id="on-demand-public-news",
             message="沒有可用地名，未啟動公開新聞補查。",
             records=(),
+            health_status="unknown",
         )
 
     client = fetch_json or _fetch_json
@@ -146,16 +148,20 @@ def search_public_flood_news(
             source_id="on-demand-public-news",
             message=f"已從公開新聞索引補查並整理 {len(accepted)} 筆候選淹水事件。",
             records=tuple(accepted),
+            health_status="healthy",
         )
     if timed_out or query_errors:
         message = "公開新聞索引暫時無法回應；保留既有資料，不阻塞風險查詢。"
+        health_status: Literal["healthy", "degraded", "failed", "disabled", "unknown"] = "degraded"
     else:
         message = "公開新聞索引未找到可通過地點與淹水關鍵字比對的候選事件。"
+        health_status = "unknown"
     return OnDemandNewsSearchResult(
         attempted=True,
         source_id="on-demand-public-news",
         message=message,
         records=(),
+        health_status=health_status,
     )
 
 

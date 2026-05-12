@@ -51,6 +51,21 @@ sources:
     limitations:
       - "Planning/reference layer, not a realtime flood warning."
       - "Must not be used as land-use control or legal determination evidence."
+  - key: official.nstc.flood_disaster_points
+    need: observed_historical_flood_points
+    status: primary
+    data_gov_dataset_id: "130016"
+    data_gov_url: "https://data.gov.tw/dataset/130016"
+    title: "Flooding disaster points in the past 5 years"
+    provider: "National Science and Technology Council"
+    resource_url: "https://mas.nstc.gov.tw/OPENDATA/GetFile?fileodr=1&format=csv&serialno=455"
+    resource_format: "CSV"
+    update_frequency: "irregular"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use as the canonical official observed historical flood-point source before news corroboration."
+    limitations:
+      - "Provides year and point coordinates only, not full event timestamps, depth, address, or impact details."
+      - "Source coordinates are TWD97 / TM2 and must be converted to EPSG:4326 before spatial queries."
   - key: official.wra.flood_warning
     need: realtime_flood_warning
     status: phase4_candidate

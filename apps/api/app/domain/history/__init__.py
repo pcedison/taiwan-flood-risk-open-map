@@ -8,11 +8,21 @@ from app.domain.history.location_context import (
     nearest_public_news_location_context,
     nearest_public_news_location_text,
 )
+from app.domain.history.official_disaster_points import (
+    DATA_GOV_DATASET_ID as OFFICIAL_FLOOD_DISASTER_DATA_GOV_DATASET_ID,
+    DATA_GOV_URL as OFFICIAL_FLOOD_DISASTER_DATA_GOV_URL,
+    OfficialFloodDisasterLookup,
+    lookup_official_flood_disaster_points,
+)
 
 __all__ = [
     "HistoricalFloodRecord",
+    "OFFICIAL_FLOOD_DISASTER_DATA_GOV_DATASET_ID",
+    "OFFICIAL_FLOOD_DISASTER_DATA_GOV_URL",
+    "OfficialFloodDisasterLookup",
     "PublicNewsLocationContext",
     "historical_record_matches_location_text",
+    "lookup_official_flood_disaster_points",
     "nearby_historical_flood_records",
     "nearest_public_news_location_context",
     "nearest_public_news_location_text",

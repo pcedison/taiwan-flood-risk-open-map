@@ -57,7 +57,9 @@ from app.domain.geocoding import (
 from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
 from app.domain.history import (
     HistoricalFloodRecord,
+    OfficialFloodDisasterLookup,
     historical_record_matches_location_text,
+    lookup_official_flood_disaster_points,
     nearby_historical_flood_records,
     nearest_public_news_location_text,
 )
@@ -98,6 +100,7 @@ OFFICIAL_DATA_GOV_URLS = {
     "rainfall": "https://data.gov.tw/dataset/9177",
     "water_level": "https://data.gov.tw/dataset/25768",
     "flood_potential": "https://data.gov.tw/dataset/25766",
+    "flood_report": "https://data.gov.tw/dataset/130016",
 }
 _ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
 _RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
@@ -387,6 +390,22 @@ def _fallback_historical_records(
         lng=request.point.lng,
         radius_m=request.radius_m,
         location_text=request.location_text,
+    )
+
+
+def _official_flood_disaster_lookup(
+    request: RiskAssessRequest,
+    *,
+    now: datetime,
+) -> OfficialFloodDisasterLookup:
+    settings = get_settings()
+    return lookup_official_flood_disaster_points(
+        lat=request.point.lat,
+        lng=request.point.lng,
+        radius_m=request.radius_m,
+        csv_path=settings.official_flood_disaster_points_path,
+        enabled=settings.official_flood_disaster_points_enabled,
+        now=now,
     )
 
 
@@ -718,7 +737,9 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         now=created_at,
     )
     db_evidence_items = _nearby_db_evidence(request)
-    if _can_use_profile_fast_path(db_evidence_items):
+    official_history_lookup = _official_flood_disaster_lookup(request, now=created_at)
+    official_historical_records = official_history_lookup.records
+    if _can_use_profile_fast_path(db_evidence_items) and not official_historical_records:
         profile = _precomputed_risk_profile(request, now=created_at)
         if profile is not None:
             _enqueue_profile_refresh(profile, request=request)
@@ -743,7 +764,12 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
         records=(),
     )
     if db_evidence_items is None:
-        historical_records = _fallback_historical_records(request)
+        curated_historical_records = (
+            _fallback_historical_records(request)
+            if _use_local_historical_fallback(settings.app_env)
+            else ()
+        )
+        historical_records = (*official_historical_records, *curated_historical_records)
         if not historical_records:
             on_demand_news = _on_demand_public_news_result(request, now=created_at)
         historical_evidence_items = [
@@ -780,8 +806,15 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
             db_evidence_items=db_evidence_items,
         )
         historical_records = (
-            _fallback_historical_records(request)
-            if needs_historical_event_lookup and _use_local_historical_fallback(settings.app_env)
+            (
+                *official_historical_records,
+                *(
+                    _fallback_historical_records(request)
+                    if _use_local_historical_fallback(settings.app_env)
+                    else ()
+                ),
+            )
+            if needs_historical_event_lookup or official_historical_records
             else ()
         )
         if historical_records:
@@ -847,6 +880,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
     )
     data_freshness = [
         *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
+        *_official_flood_disaster_data_freshness(official_history_lookup),
         DataFreshness(
             source_id=historical_freshness.source_id,
             name="歷史淹水紀錄與公開新聞",
@@ -1307,10 +1341,11 @@ def _on_demand_public_news_result(
             attempted=bool(location_text),
             source_id="on-demand-public-news",
             message=(
-                "公開新聞即時補查未啟用；需完成新聞來源旗標與條款確認後，"
-                "才會查詢公開新聞索引。"
+                "公開新聞即時補查未啟用；系統仍會使用已匯入的官方災點、"
+                "歷史事件與 citation-only 新聞證據。"
             ),
             records=(),
+            health_status="disabled",
         )
     return search_public_flood_news(
         location_text=location_text,
@@ -1326,8 +1361,8 @@ def _on_demand_public_news_result(
 def _use_on_demand_public_news(settings: Any) -> bool:
     if not settings.historical_news_on_demand_enabled:
         return False
-    if settings.app_env.strip().lower() in {"production", "staging", "production-beta"}:
-        return settings.source_news_enabled and settings.source_terms_review_ack
+    # On-demand lookup stores and displays citation metadata only. Full historical
+    # news backfill and writeback still remain behind their own source/terms gates.
     return True
 
 
@@ -1407,7 +1442,7 @@ def _on_demand_data_freshness(
         DataFreshness(
             source_id=result.source_id,
             name="公開新聞即時補查",
-            health_status="healthy" if result.records else "unknown",
+            health_status=result.health_status if not result.records else "healthy",
             observed_at=max(
                 (record.observed_at for record in result.records if record.observed_at is not None),
                 default=None,
@@ -1416,6 +1451,25 @@ def _on_demand_data_freshness(
             message=result.message,
         )
     ]
+
+
+def _official_flood_disaster_data_freshness(
+    lookup: OfficialFloodDisasterLookup,
+) -> list[DataFreshness]:
+    if not lookup.attempted:
+        return []
+    return [
+        DataFreshness(
+            source_id=lookup.source_id,
+            name=lookup.name,
+            health_status=lookup.health_status,
+            observed_at=lookup.observed_at,
+            ingested_at=lookup.ingested_at,
+            message=lookup.message,
+        )
+    ]
+
+
 def _cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence]) -> None:
     _ASSESSMENT_EVIDENCE_CACHE[assessment_id] = evidence_items
     while len(_ASSESSMENT_EVIDENCE_CACHE) > 256:
@@ -1437,6 +1491,9 @@ def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: An
             "source_wra_api_enabled": settings.source_wra_api_enabled,
             "source_news_enabled": settings.source_news_enabled,
             "source_terms_review_ack": settings.source_terms_review_ack,
+            "official_flood_disaster_points_enabled": (
+                settings.official_flood_disaster_points_enabled
+            ),
             "evidence_repository_enabled": settings.evidence_repository_enabled,
         },
         ensure_ascii=True,
@@ -1714,7 +1771,14 @@ def _visible_source_limitations(
             "查詢半徑內尚未匯入實際歷史淹水事件或公開新聞紀錄；"
             "目前資料不足，淹水潛勢圖資只能作為情境參考，不能標記為低風險或購屋安全。"
         )
-    if on_demand_news.attempted and not on_demand_news.records and on_demand_news.message:
+    if (
+        on_demand_news.attempted
+        and not on_demand_news.records
+        and on_demand_news.message
+        and on_demand_news.health_status == "disabled"
+    ):
+        limitations.append(on_demand_news.message)
+    elif on_demand_news.attempted and not on_demand_news.records and on_demand_news.message:
         limitations.append(
             f"公開新聞補查未取得可用事件：{on_demand_news.message}。"
             "這代表資料仍不足，不代表該地點沒有淹水紀錄。"

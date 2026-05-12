@@ -25,7 +25,7 @@
   "expected": {
     "score_version": "risk-v0.1.0",
     "realtime_level": "低",
-    "historical_level": "低",
+    "historical_level": "中",
     "confidence_level": "中",
     "missing_sources": [
       "尚未接入即時水位資料。"

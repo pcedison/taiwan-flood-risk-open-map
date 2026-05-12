@@ -539,6 +539,58 @@ def test_official_evidence_links_to_data_gov_catalog() -> None:
     assert flood_potential_evidence.url == "https://data.gov.tw/dataset/25766"
 
 
+def test_risk_assess_surfaces_official_flood_disaster_points(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    csv_path = tmp_path / "flood_points.csv"
+    csv_path.write_text(
+        "\n".join(
+            (
+                "FID,year,X_97,Y_97,source",
+                "0,2023,172956.00,2543478.00,EMIC",
+            )
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OFFICIAL_FLOOD_DISASTER_POINTS_ENABLED", "true")
+    monkeypatch.setenv("OFFICIAL_FLOOD_DISASTER_POINTS_PATH", str(csv_path))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+
+    try:
+        response = client.post(
+            "/v1/risk/assess",
+            json={
+                "point": {"lat": 22.990947, "lng": 120.248506},
+                "radius_m": 300,
+                "time_context": "now",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["historical"]["level"] == "中"
+    assert any(item["source_type"] == "official" for item in payload["evidence"])
+    assert any("官方淹水災害情資點位" in item["title"] for item in payload["evidence"])
+    assert not any(
+        "尚未匯入實際歷史淹水事件" in source
+        for source in payload["explanation"]["missing_sources"]
+    )
+    official_status = next(
+        item for item in payload["data_freshness"] if item["source_id"] == "official-flood-disaster-points"
+    )
+    assert official_status["health_status"] == "healthy"
+    assert "命中 1 筆" in official_status["message"]
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
 def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> None:
     monkeypatch.setattr(
         public_routes,

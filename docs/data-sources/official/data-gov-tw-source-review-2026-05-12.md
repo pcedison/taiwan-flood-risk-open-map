@@ -21,6 +21,7 @@ Machine-readable catalog:
 | Realtime rainfall | Central Weather Administration automatic rainfall observations | https://data.gov.tw/dataset/9177 | Keep as the primary rainfall adapter. Dataset 9177 maps to `O-A0002-001`, updates every 10 minutes, and exposes station coordinates plus 10m/1h/3h/6h/12h/24h precipitation fields. |
 | Realtime water level | Water Resources Agency realtime water-level observations | https://data.gov.tw/dataset/25768 | Keep as the primary water-level adapter. Use with station metadata and show raw-data limitations because observations are not fully QC checked and can be interrupted. |
 | Planning/historical flood potential | Water Resources Agency flood-potential maps | https://data.gov.tw/dataset/25766 | Prefer this as the canonical flood-potential import source. It is planning/reference data, not a live flood warning and not a land-use control basis. |
+| Observed historical flood points | National Science and Technology Council flood disaster points | https://data.gov.tw/dataset/130016 | Add as the primary official observed historical flood-point source. It provides year, TWD97 point coordinates, and source agency label for flood disaster information; use it before public-news corroboration. |
 | Flood warning layer | Water Resources Agency flood warning dataset | https://data.gov.tw/dataset/5982 | Candidate for Phase 4 warning layer and source freshness monitoring. Do not mix it with historical flood-potential scoring until parser, cadence, and alert semantics are implemented. |
 | Village/admin fallback geocoder | National Land Surveying and Mapping Center village boundaries | https://data.gov.tw/dataset/7438 | Keep as the village/admin fallback source. It supports admin-area search and profile shard building, but it is not a doorplate/road-geometry source. |
 | Shelter POI geocoder | National Fire Agency shelter point file | https://data.gov.tw/dataset/73242 | Keep as POI search enrichment and future public safety layer. It should not change flood-risk scoring by itself. |
@@ -56,6 +57,10 @@ Machine-readable catalog:
   potential maps. The page describes the layer as planning/reference data and
   says it cannot be used as a live event simulation, land-use control basis, or
   land-development restriction basis.
+- Dataset 130016 currently lists a CSV resource with fields `FID`, `year`,
+  `X_97`, `Y_97`, and `source`, 998 records, modified on 2025-11-04, and notes
+  that the data was produced in 2023. It is a historical point dataset, not a
+  depth or address-level event log.
 - Dataset 5982 currently lists WRA v2 CSV/JSON/XML resources for flood warning
   KML inventory data. It is useful, but it needs a separate parser and warning
   semantics before entering scoring.
@@ -83,9 +88,12 @@ Machine-readable catalog:
    worker adapter targets.
 2. Continue flood-potential import from reviewed WRA packages with checksum and
    scenario evidence; align any future import manifest to dataset 25766.
-3. Keep geocoder imports based on dataset 7438, dataset 73242, road-name
+3. Add dataset 130016 as an official observed historical flood-point source,
+   convert TWD97 / TM2 coordinates to WGS84, and present it separately from
+   flood-potential planning polygons.
+4. Keep geocoder imports based on dataset 7438, dataset 73242, road-name
    dataset 35321, and local reviewed open datasets until a nationwide
    doorplate source is approved. The import manifest now propagates these
    data.gov.tw IDs and resource URLs into row metadata and import evidence.
-4. Make profile fast-path responses include evidence summaries and card-level
+5. Make profile fast-path responses include evidence summaries and card-level
    basis text so users can see why historical/profile labels are high.

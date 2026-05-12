@@ -10,11 +10,13 @@ ChallengeProvider = Literal["turnstile", "static"]
 ChoiceT = TypeVar("ChoiceT", bound=str)
 APP_ROOT = Path(__file__).resolve().parents[1]
 BUNDLED_GEOCODER_DATA_DIR = APP_ROOT / "data" / "geocoder"
+BUNDLED_OFFICIAL_DATA_DIR = APP_ROOT / "data" / "official"
 BUNDLED_GEOCODER_OPEN_DATA_FILENAMES = (
     "roads-114.normalized.jsonl.gz",
     "shelters.normalized.jsonl.gz",
     "villages.normalized.jsonl.gz",
 )
+BUNDLED_OFFICIAL_FLOOD_DISASTER_POINTS_FILENAME = "flood_disaster_points_130016.csv"
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,8 @@ class Settings:
     historical_news_on_demand_writeback_enabled: bool
     historical_news_on_demand_max_records: int
     historical_news_on_demand_timeout_seconds: float
+    official_flood_disaster_points_enabled: bool
+    official_flood_disaster_points_path: str | None
     risk_assessment_response_cache_seconds: int
     user_reports_enabled: bool
     user_reports_rate_limit_enabled: bool
@@ -127,6 +131,11 @@ def get_settings() -> Settings:
             default=4.0,
             minimum=0.5,
         ),
+        official_flood_disaster_points_enabled=_env_bool(
+            "OFFICIAL_FLOOD_DISASTER_POINTS_ENABLED",
+            default=_hosted_runtime(app_env),
+        ),
+        official_flood_disaster_points_path=_official_flood_disaster_points_path(),
         risk_assessment_response_cache_seconds=_env_int(
             "RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS",
             default=120 if _hosted_runtime(app_env) else 0,
@@ -253,6 +262,14 @@ def _geocoder_open_data_paths(app_env: str) -> tuple[str, ...]:
         )
         if path.is_file()
     )
+
+
+def _official_flood_disaster_points_path() -> str | None:
+    configured_path = _env_str_or_none("OFFICIAL_FLOOD_DISASTER_POINTS_PATH")
+    if configured_path is not None:
+        return configured_path
+    bundled_path = BUNDLED_OFFICIAL_DATA_DIR / BUNDLED_OFFICIAL_FLOOD_DISASTER_POINTS_FILENAME
+    return str(bundled_path) if bundled_path.is_file() else None
 
 
 def _hosted_runtime(app_env: str) -> bool:

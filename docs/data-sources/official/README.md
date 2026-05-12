@@ -11,6 +11,7 @@ This bridge is not Phase 2 completion by itself. Phase 2 acceptance still requir
 | `official.cwa.rainfall` | `official` | `rainfall` | Fixture parser + API bridge + gated worker live client implemented |
 | `official.wra.water_level` | `official` | `water_level` | Fixture parser + API bridge + gated worker live client implemented |
 | `official.flood_potential.geojson` | `official` | `flood_potential` | Fixture parser implemented |
+| `official.nstc.flood_disaster_points` | `official` | `flood_report` | API bundled snapshot fallback implemented |
 
 Current official endpoints used by the MVP bridge:
 
@@ -23,8 +24,9 @@ Latest data.gov.tw review:
 - `docs/data-sources/official/data-gov-tw-source-review-2026-05-12.md`
   records the 2026-05-12 source comparison requested for public beta. It keeps
   CWA rainfall dataset 9177, WRA water-level dataset 25768, and WRA
-  flood-potential dataset 25766 as preferred official sources, while noting
-  that historical news and all-Taiwan doorplates are not solved by data.gov.tw.
+  flood-potential dataset 25766 as preferred official sources. It now also
+  tracks dataset 130016 as the primary official observed flood-disaster point
+  source, while noting that all-Taiwan doorplates are not solved by data.gov.tw.
 - `docs/data-sources/official/official-source-catalog.yaml` is the
   machine-readable source catalog. Worker official adapter metadata is tested
   against it so data.gov.tw remains the primary public catalog reference while
@@ -46,6 +48,10 @@ Source mapping notes:
   exposes `WeatherElement`, not `RainfallElement`.
 - data.gov.tw dataset 25768 maps to the WRA realtime water-level endpoint used
   by the worker adapter and public MVP bridge.
+- data.gov.tw dataset 130016 maps to the official observed historical
+  flood-disaster point CSV. The API uses a bundled snapshot for hosted beta
+  fallback so user queries still show official flood facts when the upstream
+  CSV host is slow or has TLS issues.
 - DPRC flood-potential SHP packages are handled as planning/reference data, not
   realtime observations. Local all-Taiwan import evidence was recorded on
   2026-05-05 under `tmp/evidence/flood-potential/`; `tmp/` is local scratch and

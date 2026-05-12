@@ -27,6 +27,7 @@ EVENT_SCORE_CAPS = {
     # overlapping polygons should not stack into an "active disaster" signal.
     "flood_potential": 40.0,
 }
+OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM = 25.0
 REQUIRED_REALTIME_EVENTS = {"rainfall", "water_level"}
 
 
@@ -120,6 +121,13 @@ def _weighted_score(
             * _distance_factor(signal.distance_to_query_m)
             * max(signal.source_weight, 0.0)
         )
+        if (
+            signal.event_type == "flood_report"
+            and weight >= HISTORICAL_WEIGHTS["flood_report"]
+            and signal.distance_to_query_m is not None
+            and signal.distance_to_query_m <= 1000
+        ):
+            contribution = max(contribution, OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM)
         event_total = totals_by_event.get(signal.event_type, 0.0) + contribution
         event_cap = EVENT_SCORE_CAPS.get(signal.event_type)
         totals_by_event[signal.event_type] = (
@@ -224,7 +232,7 @@ def _main_reasons(
         reasons.append("附近即時雨量或水位資料偏高。")
     if observed_history_count:
         reasons.append(
-            f"查詢半徑內有 {observed_history_count} 筆公開新聞或淹水事件紀錄。"
+            f"查詢半徑內有 {observed_history_count} 筆官方災點、公開新聞或淹水事件紀錄。"
         )
     if historical_level in {"中", "高", "極高"} and flood_potential_count:
         reasons.append(

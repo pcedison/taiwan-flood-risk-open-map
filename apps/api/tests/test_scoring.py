@@ -99,8 +99,27 @@ def test_scoring_explains_observed_history_and_official_potential_counts() -> No
 
     result = score_risk(signals, now=datetime.fromisoformat("2026-05-12T00:00:00+00:00"))
 
-    assert "2 筆公開新聞或淹水事件紀錄" in result.main_reasons[0]
+    assert "2 筆官方災點、公開新聞或淹水事件紀錄" in result.main_reasons[0]
     assert "1 筆官方淹水潛勢規劃圖資" in result.main_reasons[1]
+
+
+def test_observed_flood_report_within_one_km_is_at_least_medium_history() -> None:
+    result = score_risk(
+        (
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_report",
+                confidence=0.82,
+                distance_to_query_m=958.0,
+                freshness_score=0.74,
+                source_weight=1.0,
+            ),
+        ),
+        now=datetime.fromisoformat("2026-05-13T00:00:00+00:00"),
+    )
+
+    assert result.historical_score == 25.0
+    assert result.historical_level == "中"
 
 
 def _signal_from_fixture(payload: dict[str, object]) -> RiskEvidenceSignal:
