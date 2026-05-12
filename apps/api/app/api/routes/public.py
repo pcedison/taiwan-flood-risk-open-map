@@ -1779,8 +1779,10 @@ def _visible_source_limitations(
     ):
         limitations.append(on_demand_news.message)
     elif on_demand_news.attempted and not on_demand_news.records and on_demand_news.message:
+        news_message = on_demand_news.message.rstrip()
+        separator = "" if news_message.endswith(("。", ".", "！", "!", "？", "?")) else "。"
         limitations.append(
-            f"公開新聞補查未取得可用事件：{on_demand_news.message}。"
+            f"公開新聞補查未取得可用事件：{news_message}{separator}"
             "這代表資料仍不足，不代表該地點沒有淹水紀錄。"
         )
     return limitations
