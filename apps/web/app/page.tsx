@@ -18,6 +18,7 @@ import {
   formatDateTime,
   formatDistance,
   getEvidenceDisplayState,
+  getProfileBasisText,
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
   selectEvidenceItems,
@@ -158,6 +159,7 @@ const text = {
   evidenceOpenSource: "開啟來源",
   evidenceMissingUrl: "未提供連結",
   evidenceEmpty: "本次查詢尚未回傳可列出的資料佐證。",
+  profileEvidenceEmpty: "本次 profile 尚未列出逐筆摘要證據；請先看上方 profile 說明與資料限制。",
   evidenceLoading: "正在載入完整資料佐證。",
   evidenceError: "完整資料佐證載入失敗，先顯示風險摘要中的預覽資料。",
   limitations: "資料限制",
@@ -508,6 +510,7 @@ export default function HomePage() {
       })
     : { hasTileContract: false, items: [], status: "pending" as const };
   const profilePreviewState = getProfilePreviewState(assessment);
+  const profileBasisText = getProfileBasisText(assessment);
   const currentSummary = useMemo(
     () =>
       coordinate.source === "search"
@@ -995,10 +998,16 @@ export default function HomePage() {
               <div>
                 <dt>{text.historical}</dt>
                 <dd>{assessment.historical.level}</dd>
+                {profileBasisText.historicalNote ? (
+                  <small className="risk-card-note">{profileBasisText.historicalNote}</small>
+                ) : null}
               </div>
               <div>
                 <dt>{text.confidence}</dt>
                 <dd>{assessment.confidence.level}</dd>
+                {profileBasisText.confidenceNote ? (
+                  <small className="risk-card-note">{profileBasisText.confidenceNote}</small>
+                ) : null}
               </div>
             </dl>
           ) : null}
@@ -1020,6 +1029,9 @@ export default function HomePage() {
                 {assessment.explanation.missing_sources.length ? (
                   <div className="evidence-warning" role="status">
                     <strong>{text.limitations}</strong>
+                    {profileBasisText.limitationLead ? (
+                      <span className="evidence-warning-note">{profileBasisText.limitationLead}</span>
+                    ) : null}
                     <ul>
                       {assessment.explanation.missing_sources.map((item) => (
                         <li key={item}>{item}</li>
@@ -1093,7 +1105,9 @@ export default function HomePage() {
                     })}
                   </ul>
                 ) : evidenceDisplayState.showEmpty ? (
-                  <div className="evidence-empty">{text.evidenceEmpty}</div>
+                  <div className="evidence-empty">
+                    {profilePreviewState.isProfilePreview ? text.profileEvidenceEmpty : text.evidenceEmpty}
+                  </div>
                 ) : null}
               </div>
             ) : (

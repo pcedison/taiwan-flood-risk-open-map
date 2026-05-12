@@ -81,6 +81,12 @@ export type ProfilePreviewState = {
   message: string | null;
 };
 
+export type ProfileBasisText = {
+  historicalNote: string | null;
+  confidenceNote: string | null;
+  limitationLead: string | null;
+};
+
 export type UserReportPayload = {
   point: {
     lat: number;
@@ -205,6 +211,43 @@ export function getProfilePreviewState(input: {
       profileFreshness.message ??
       input?.explanation?.summary ??
       "本次結果先使用預先計算的區域風險 profile，精準半徑資料會由背景工作更新。",
+  };
+}
+
+export function getProfileBasisText(input: {
+  data_freshness?: DataFreshnessItem[] | null;
+  explanation?: {
+    main_reasons?: string[] | null;
+  } | null;
+  evidence?: EvidencePreview[] | null;
+} | null | undefined): ProfileBasisText {
+  const profileFreshness = input?.data_freshness?.find(
+    (item) => item.source_id === "precomputed-risk-profile",
+  );
+  if (!profileFreshness) {
+    return {
+      historicalNote: null,
+      confidenceNote: null,
+      limitationLead: null,
+    };
+  }
+
+  const reasons = input?.explanation?.main_reasons ?? [];
+  const evidenceCount = input?.evidence?.length ?? 0;
+  const evidenceReason =
+    reasons.find((reason) => reason.includes("歷史參考來自 profile")) ??
+    reasons.find((reason) => reason.includes("profile 彙整")) ??
+    null;
+
+  return {
+    historicalNote:
+      evidenceReason ??
+      (evidenceCount > 0
+        ? `profile 已提供 ${evidenceCount} 筆摘要證據。`
+        : "profile 尚未列出逐筆摘要證據。"),
+    confidenceNote: "由 profile 的來源類型、資料筆數、時間新鮮度與覆蓋缺口推估。",
+    limitationLead:
+      "這不是系統錯誤，而是本次 profile 未納入的資料來源；即時雨量或水位缺口會限制即時判斷。",
   };
 }
 

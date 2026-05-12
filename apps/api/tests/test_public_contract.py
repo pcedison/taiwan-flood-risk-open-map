@@ -1017,6 +1017,33 @@ def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypa
             distance_to_query_m=88.0,
         ),
     )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_evidence_by_ids",
+        lambda **_kwargs: (
+            EvidenceRecord(
+                id="b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+                source_id="news:kaohsiung-2024-flood",
+                source_type="news",
+                event_type="flood_report",
+                title="2024 representative flood news from profile top evidence",
+                summary="A reviewed top evidence row selected by the precomputed profile.",
+                url="https://example.test/profile-top-news",
+                occurred_at=computed_at,
+                observed_at=computed_at,
+                ingested_at=computed_at,
+                lat=22.65646,
+                lng=120.32574,
+                geometry={"type": "Point", "coordinates": [120.32574, 22.65646]},
+                distance_to_query_m=88.0,
+                confidence=0.9,
+                freshness_score=0.8,
+                source_weight=0.72,
+                privacy_level="public",
+                raw_ref="news:profile-top",
+            ),
+        ),
+    )
     enqueued: list[dict[str, object]] = []
     monkeypatch.setattr(
         public_routes,
@@ -1043,14 +1070,35 @@ def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypa
     payload = response.json()
     assert payload["historical"]["level"] == "高"
     assert payload["confidence"]["level"] == "中"
-    assert payload["evidence"] == []
+    assert len(payload["evidence"]) == 2
+    profile_evidence_types = {
+        (item["source_type"], item["event_type"])
+        for item in payload["evidence"]
+    }
+    assert profile_evidence_types == {
+        ("news", "flood_report"),
+        ("official", "flood_potential"),
+    }
+    assert any(
+        item["title"] == "2024 representative flood news from profile top evidence"
+        for item in payload["evidence"]
+    )
+    assert any("profile 摘要" in item["title"] for item in payload["evidence"])
+    assert all(item["distance_to_query_m"] == 88.0 for item in payload["evidence"])
+    evidence_response = client.get(f"/v1/evidence/{payload['assessment_id']}")
+    assert evidence_response.status_code == 200
+    evidence_payload = evidence_response.json()
+    assert len(evidence_payload["items"]) == 2
+    source_ids = {item["source_id"] for item in evidence_payload["items"]}
+    assert "news:kaohsiung-2024-flood" in source_ids
+    assert "precomputed-risk-profile:official:flood_potential" in source_ids
     profile_freshness = next(
         item for item in payload["data_freshness"] if item["source_id"] == "precomputed-risk-profile"
     )
     assert profile_freshness["health_status"] == "healthy"
     assert "預先計算" in profile_freshness["message"]
     assert any("profile" in reason for reason in payload["explanation"]["main_reasons"])
-    assert "profile 計算時缺少即時雨量來源。" in payload["explanation"]["missing_sources"]
+    assert "profile 未納入即時雨量來源；這會限制即時風險，不代表歷史參考沒有依據。" in payload["explanation"]["missing_sources"]
     assert enqueued[0]["profile_kind"] == "risk_grid"
     assert enqueued[0]["profile_key"] == "h3:842ab57ffffffff"
     assert_openapi_schema(payload, "RiskAssessmentResponse")

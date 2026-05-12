@@ -15,6 +15,7 @@ const {
   formatDateTime,
   formatDistance,
   getEvidenceDisplayState,
+  getProfileBasisText,
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
   selectEvidenceItems,
@@ -174,6 +175,35 @@ test("profile preview state labels precomputed profile responses", () => {
     isProfilePreview: false,
     label: null,
     message: null,
+  });
+});
+
+test("profile basis text explains historical and confidence cards", () => {
+  const state = getProfileBasisText({
+    data_freshness: [
+      {
+        health_status: "healthy",
+        ingested_at: "2026-05-08T03:00:00Z",
+        message: "profile freshness",
+        name: "預先計算區域風險 profile",
+        observed_at: null,
+        source_id: "precomputed-risk-profile",
+      },
+    ],
+    evidence: [previewEvidence],
+    explanation: {
+      main_reasons: ["歷史參考來自 profile 彙整的 3 筆公開資料：官方淹水潛勢資料 1 筆、新聞淹水事件資料 2 筆"],
+    },
+  });
+
+  assert.match(state.historicalNote ?? "", /3 筆公開資料/);
+  assert.match(state.confidenceNote ?? "", /來源類型/);
+  assert.match(state.limitationLead ?? "", /不是系統錯誤/);
+
+  assert.deepEqual(getProfileBasisText({ data_freshness: [] }), {
+    confidenceNote: null,
+    historicalNote: null,
+    limitationLead: null,
   });
 });
 

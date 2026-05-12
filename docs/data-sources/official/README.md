@@ -18,6 +18,14 @@ Current official endpoints used by the MVP bridge:
 - WRA realtime water level observations: `https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0`
 - WRA water-level station metadata: `https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92`
 
+Latest data.gov.tw review:
+
+- `docs/data-sources/official/data-gov-tw-source-review-2026-05-12.md`
+  records the 2026-05-12 source comparison requested for public beta. It keeps
+  CWA rainfall dataset 9177, WRA water-level dataset 25768, and WRA
+  flood-potential dataset 25766 as preferred official sources, while noting
+  that historical news and all-Taiwan doorplates are not solved by data.gov.tw.
+
 Source mapping notes:
 
 - data.gov.tw dataset 9177 maps to the CWA `O-A0002-001` automatic rainfall

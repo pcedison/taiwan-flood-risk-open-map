@@ -38,6 +38,7 @@ from app.domain.evidence import (
     EvidenceRepositoryUnavailable,
     EvidenceUpsert,
     fetch_assessment_evidence,
+    fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
     persist_risk_assessment,
     query_nearby_evidence,
@@ -95,6 +96,22 @@ LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "pr
 OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
 _ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
 _RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
+_PROFILE_SOURCE_TYPE_FALLBACKS = {
+    "official": "official",
+    "news": "news",
+    "forum": "forum",
+    "social": "social",
+    "user_report": "user_report",
+}
+_PROFILE_EVENT_TYPE_FALLBACKS = {
+    "rainfall",
+    "water_level",
+    "flood_warning",
+    "flood_potential",
+    "flood_report",
+    "road_closure",
+    "discussion",
+}
 
 
 def _now() -> datetime:
@@ -944,6 +961,12 @@ def _profile_backed_response(
         *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
         _profile_data_freshness(profile, now=created_at),
     ]
+    profile_evidence_items = _profile_evidence_items(
+        profile,
+        request=request,
+        created_at=created_at,
+    )
+    _cache_assessment_evidence(assessment_id, profile_evidence_items)
     explanation = Explanation(
         summary=(
             "此結果先使用預先計算的區域風險 profile 回應，"
@@ -963,7 +986,7 @@ def _profile_backed_response(
         historical=RiskLevelBlock(level=historical_level),
         confidence=ConfidenceBlock(level=confidence_level),
         explanation=explanation,
-        evidence=[],
+        evidence=[_evidence_preview(item) for item in profile_evidence_items],
         data_freshness=data_freshness,
         query_heat=_query_heat(request, now=created_at),
     )
@@ -990,9 +1013,10 @@ def _profile_main_reasons(profile: RiskProfileRecord) -> list[str]:
     ]
     if profile.evidence_counts:
         reasons.append(
-            "profile 彙整的公開資料筆數："
-            + "、".join(f"{key}={value}" for key, value in sorted(profile.evidence_counts.items()))
+            f"歷史參考來自 profile 彙整的 {_profile_evidence_total(profile)} 筆公開資料："
+            + _profile_evidence_count_summary(profile)
         )
+        reasons.append("資料信心由來源類型、資料筆數、時間新鮮度與 coverage gap 綜合推估。")
     if profile.coverage_gaps:
         reasons.append("profile 仍有資料覆蓋限制：" + "、".join(profile.coverage_gaps))
     return reasons
@@ -1002,14 +1026,190 @@ def _profile_missing_source_messages(profile: RiskProfileRecord) -> list[str]:
     messages = []
     for source in profile.missing_sources:
         if source == "rainfall":
-            messages.append("profile 計算時缺少即時雨量來源。")
+            messages.append("profile 未納入即時雨量來源；這會限制即時風險，不代表歷史參考沒有依據。")
         elif source == "water_level":
-            messages.append("profile 計算時缺少即時水位來源。")
+            messages.append("profile 未納入即時水位來源；這會限制即時風險，不代表歷史參考沒有依據。")
         else:
-            messages.append(f"profile 計算時缺少 {source} 來源。")
+            messages.append(f"profile 未納入 {source} 來源；請把它視為資料覆蓋限制。")
     if profile.status != "healthy":
         messages.append("profile 目前不是 healthy 狀態，結果只能作為初步參考。")
     return messages
+
+
+def _profile_evidence_items(
+    profile: RiskProfileRecord,
+    *,
+    request: RiskAssessRequest,
+    created_at: datetime,
+) -> list[Evidence]:
+    top_evidence_items = _profile_top_evidence_items(profile)
+    represented_count_keys = {
+        _profile_normalized_count_key(item.source_type, item.event_type)
+        for item in top_evidence_items
+    }
+    evidence_items: list[Evidence] = list(top_evidence_items)
+    for count_key, raw_count in sorted(profile.evidence_counts.items()):
+        count = _positive_int(raw_count)
+        if count is None:
+            continue
+        source_type, event_type = _profile_count_key_types(count_key)
+        normalized_count_key = _profile_normalized_count_key(source_type, event_type)
+        if normalized_count_key in represented_count_keys:
+            continue
+        label = _profile_count_label(source_type, event_type)
+        evidence_items.append(
+            Evidence(
+                id=stable_uuid(
+                    "profile-evidence-summary",
+                    profile.profile_kind,
+                    profile.profile_key,
+                    count_key,
+                ),
+                source_id=f"precomputed-risk-profile:{count_key}",
+                source_type=cast(Any, source_type),
+                event_type=cast(Any, event_type),
+                title=f"{label} profile 摘要",
+                summary=(
+                    f"預先計算 profile 彙整 {count} 筆{label}。"
+                    "這是區域層級的摘要證據，不等於逐篇新聞清單；"
+                    "精準半徑資料會由背景工作更新。"
+                ),
+                url=None,
+                occurred_at=profile.latest_occurred_at,
+                observed_at=profile.latest_observed_at,
+                ingested_at=profile.latest_ingested_at or profile.computed_at or created_at,
+                point=request.point,
+                geometry=GeoJsonGeometry(
+                    type="Point",
+                    coordinates=[request.point.lng, request.point.lat],
+                ),
+                distance_to_query_m=profile.distance_to_query_m,
+                confidence=_profile_evidence_confidence(profile),
+                freshness_score=_profile_evidence_freshness_score(profile),
+                source_weight=_profile_source_weight(source_type),
+                privacy_level="aggregated",
+                raw_ref=_profile_evidence_raw_ref(profile, count_key=count_key),
+            )
+        )
+    return evidence_items
+
+
+def _profile_top_evidence_items(profile: RiskProfileRecord) -> tuple[Evidence, ...]:
+    if not profile.top_evidence_ids:
+        return ()
+    try:
+        records = fetch_evidence_by_ids(
+            database_url=get_settings().database_url,
+            evidence_ids=profile.top_evidence_ids,
+        )
+    except EvidenceRepositoryUnavailable:
+        return ()
+    return tuple(_evidence_from_record(record) for record in records)
+
+
+def _profile_evidence_raw_ref(profile: RiskProfileRecord, *, count_key: str) -> str:
+    if not profile.top_evidence_ids:
+        return f"profile:{profile.profile_kind}:{profile.profile_key}:{count_key}"
+    top_ids = ",".join(profile.top_evidence_ids[:5])
+    return f"profile:{profile.profile_kind}:{profile.profile_key}:{count_key}:top={top_ids}"
+
+
+def _profile_count_key_types(count_key: str) -> tuple[str, str]:
+    if ":" in count_key:
+        source_key, event_key = count_key.split(":", 1)
+    else:
+        source_key = count_key
+        event_key = {
+            "official": "flood_potential",
+            "news": "flood_report",
+            "forum": "discussion",
+            "social": "discussion",
+            "user_report": "flood_report",
+        }.get(source_key, "discussion")
+    source_type = _PROFILE_SOURCE_TYPE_FALLBACKS.get(source_key, "derived")
+    event_type = event_key if event_key in _PROFILE_EVENT_TYPE_FALLBACKS else "discussion"
+    return source_type, event_type
+
+
+def _profile_normalized_count_key(source_type: str, event_type: str) -> str:
+    return f"{source_type}:{event_type}"
+
+
+def _profile_count_label(source_type: str, event_type: str) -> str:
+    source_labels = {
+        "official": "官方",
+        "news": "新聞",
+        "forum": "討論區",
+        "social": "社群",
+        "user_report": "民眾回報",
+        "derived": "衍生",
+    }
+    event_labels = {
+        "rainfall": "雨量資料",
+        "water_level": "水位資料",
+        "flood_warning": "淹水警戒",
+        "flood_potential": "淹水潛勢資料",
+        "flood_report": "淹水事件資料",
+        "road_closure": "道路封閉資料",
+        "discussion": "公開討論資料",
+    }
+    return f"{source_labels.get(source_type, '資料')}{event_labels.get(event_type, '資料')}"
+
+
+def _profile_evidence_count_summary(profile: RiskProfileRecord) -> str:
+    parts = []
+    for count_key, raw_count in sorted(profile.evidence_counts.items()):
+        count = _positive_int(raw_count)
+        if count is None:
+            continue
+        source_type, event_type = _profile_count_key_types(count_key)
+        parts.append(f"{_profile_count_label(source_type, event_type)} {count} 筆")
+    return "、".join(parts) if parts else "尚無可列出的資料筆數"
+
+
+def _profile_evidence_total(profile: RiskProfileRecord) -> int:
+    total = 0
+    for raw_count in profile.evidence_counts.values():
+        count = _positive_int(raw_count)
+        if count is not None:
+            total += count
+    return total
+
+
+def _positive_int(value: object) -> int | None:
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count > 0 else None
+
+
+def _profile_evidence_confidence(profile: RiskProfileRecord) -> float:
+    return {
+        "high": 0.86,
+        "medium": 0.68,
+        "low": 0.46,
+        "unknown": 0.25,
+    }.get(profile.confidence_level, 0.55)
+
+
+def _profile_evidence_freshness_score(profile: RiskProfileRecord) -> float:
+    if profile.latest_observed_at or profile.latest_occurred_at:
+        return 0.72
+    if profile.latest_ingested_at:
+        return 0.62
+    return 0.5
+
+
+def _profile_source_weight(source_type: str) -> float:
+    return {
+        "official": 1.0,
+        "news": 0.72,
+        "forum": 0.48,
+        "social": 0.42,
+        "user_report": 0.58,
+        "derived": 0.5,
+    }.get(source_type, 0.5)
 
 
 def _public_risk_level(level: str) -> Literal["低", "中", "高", "極高", "未知"]:

@@ -6,6 +6,7 @@ from app.domain.layers import fetch_map_layer, fetch_map_layers
 from app.domain.evidence.repository import (
     EvidenceUpsert,
     RiskAssessmentPersistence,
+    fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
     persist_risk_assessment,
     query_nearby_evidence,
@@ -135,6 +136,81 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert "ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry" in sql
     assert "e.geom && ST_Expand(qp.geom, qp.degree_radius)" in sql
     assert params == (121.5654, 25.033, 121.5654, 25.033, 500, 500, 50)
+
+
+def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
+    ingested_at = datetime(2026, 5, 12, 2, 0, tzinfo=timezone.utc)
+    connection = _FakeConnection(
+        rows=[
+            {
+                "id": "22222222-2222-4222-8222-222222222222",
+                "source_id": "official:flood-potential",
+                "source_type": "official",
+                "event_type": "flood_potential",
+                "title": "Official profile top evidence",
+                "summary": "Representative official profile evidence.",
+                "url": None,
+                "occurred_at": None,
+                "observed_at": ingested_at,
+                "ingested_at": ingested_at,
+                "lat": 22.65646,
+                "lng": 120.32574,
+                "geometry": '{"type":"Point","coordinates":[120.32574,22.65646]}',
+                "distance_to_query_m": 88.0,
+                "confidence": 0.86,
+                "freshness_score": 0.72,
+                "source_weight": 1.0,
+                "privacy_level": "public",
+                "raw_ref": "profile-top:official",
+            },
+            {
+                "id": "11111111-1111-4111-8111-111111111111",
+                "source_id": "news:flood-report",
+                "source_type": "news",
+                "event_type": "flood_report",
+                "title": "News profile top evidence",
+                "summary": "Representative news profile evidence.",
+                "url": "https://example.test/news",
+                "occurred_at": ingested_at,
+                "observed_at": ingested_at,
+                "ingested_at": ingested_at,
+                "lat": 22.65646,
+                "lng": 120.32574,
+                "geometry": '{"type":"Point","coordinates":[120.32574,22.65646]}',
+                "distance_to_query_m": 90.0,
+                "confidence": 0.9,
+                "freshness_score": 0.8,
+                "source_weight": 0.72,
+                "privacy_level": "public",
+                "raw_ref": "profile-top:news",
+            },
+        ]
+    )
+
+    records = fetch_evidence_by_ids(
+        database_url="postgresql://example.test/flood",
+        evidence_ids=(
+            "22222222-2222-4222-8222-222222222222",
+            "11111111-1111-4111-8111-111111111111",
+        ),
+        connection_factory=lambda: connection,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert "WITH requested AS" in sql
+    assert "WITH ORDINALITY" in sql
+    assert "ORDER BY requested.ordinality ASC" in sql
+    assert params == (
+        [
+            "22222222-2222-4222-8222-222222222222",
+            "11111111-1111-4111-8111-111111111111",
+        ],
+    )
+    assert [record.id for record in records] == [
+        "22222222-2222-4222-8222-222222222222",
+        "11111111-1111-4111-8111-111111111111",
+    ]
+    assert records[0].geometry == {"type": "Point", "coordinates": [120.32574, 22.65646]}
 
 
 def test_upsert_public_evidence_writes_point_geometry_and_metadata() -> None:

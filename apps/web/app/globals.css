@@ -569,6 +569,15 @@ button {
   font-weight: 900;
 }
 
+.risk-card-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .profile-preview-banner {
   display: grid;
   gap: 4px;
@@ -688,6 +697,12 @@ button {
 
 .evidence-warning strong {
   color: #75410f;
+}
+
+.evidence-warning-note {
+  color: #6a625a;
+  font-size: 0.84rem;
+  line-height: 1.45;
 }
 
 .evidence-warning ul {

@@ -505,6 +505,56 @@ def fetch_assessment_evidence(
     )
 
 
+def fetch_evidence_by_ids(
+    *,
+    database_url: str,
+    evidence_ids: tuple[str, ...],
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[EvidenceRecord, ...]:
+    if not evidence_ids:
+        return ()
+
+    sql = """
+        WITH requested AS (
+            SELECT requested_id::uuid AS id, ordinality
+            FROM unnest(%s::uuid[]) WITH ORDINALITY AS requested(requested_id, ordinality)
+        )
+        SELECT
+            e.id::text AS id,
+            e.source_id,
+            e.source_type,
+            e.event_type,
+            e.title,
+            e.summary,
+            e.url,
+            e.occurred_at,
+            e.observed_at,
+            e.ingested_at,
+            CASE WHEN e.geom IS NOT NULL THEN ST_Y(ST_PointOnSurface(e.geom::geometry)) END AS lat,
+            CASE WHEN e.geom IS NOT NULL THEN ST_X(ST_PointOnSurface(e.geom::geometry)) END AS lng,
+            CASE WHEN e.geom IS NOT NULL THEN ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) END
+                AS geometry,
+            e.distance_to_query_m,
+            e.confidence,
+            COALESCE(e.freshness_score, 0.8) AS freshness_score,
+            COALESCE(e.source_weight, CASE WHEN e.source_type = 'official' THEN 1.0 ELSE 0.85 END)
+                AS source_weight,
+            e.privacy_level,
+            e.raw_ref
+        FROM requested
+        JOIN evidence e ON e.id = requested.id
+        WHERE e.ingestion_status = 'accepted'
+            AND e.privacy_level IN ('public', 'aggregated')
+        ORDER BY requested.ordinality ASC
+    """
+    return _fetch_records(
+        sql,
+        (list(evidence_ids),),
+        database_url=database_url,
+        connection_factory=connection_factory,
+    )
+
+
 def _fetch_records(
     sql: str,
     params: tuple[object, ...],
