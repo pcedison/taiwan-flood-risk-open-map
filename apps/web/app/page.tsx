@@ -965,6 +965,13 @@ export default function HomePage() {
             </div>
           ) : null}
           <p>{assessment ? assessment.explanation.summary : text.riskPlaceholder}</p>
+          {assessment?.explanation.main_reasons.length ? (
+            <ul className="risk-reasons">
+              {assessment.explanation.main_reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
           {assessment ? (
             <dl className="risk-levels">
               <div>

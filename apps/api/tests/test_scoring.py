@@ -69,6 +69,40 @@ def test_overlapping_flood_potential_polygons_do_not_stack_to_extreme() -> None:
     assert "情境參考" in result.main_reasons[0]
 
 
+def test_scoring_explains_observed_history_and_official_potential_counts() -> None:
+    signals = (
+        RiskEvidenceSignal(
+            source_type="news",
+            event_type="flood_report",
+            confidence=0.86,
+            distance_to_query_m=54.0,
+            freshness_score=0.95,
+            source_weight=1.0,
+        ),
+        RiskEvidenceSignal(
+            source_type="news",
+            event_type="flood_report",
+            confidence=0.78,
+            distance_to_query_m=918.0,
+            freshness_score=0.95,
+            source_weight=0.9,
+        ),
+        RiskEvidenceSignal(
+            source_type="official",
+            event_type="flood_potential",
+            confidence=0.78,
+            distance_to_query_m=0.0,
+            freshness_score=0.7,
+            source_weight=1.0,
+        ),
+    )
+
+    result = score_risk(signals, now=datetime.fromisoformat("2026-05-12T00:00:00+00:00"))
+
+    assert "2 筆公開新聞或淹水事件紀錄" in result.main_reasons[0]
+    assert "1 筆官方淹水潛勢規劃圖資" in result.main_reasons[1]
+
+
 def _signal_from_fixture(payload: dict[str, object]) -> RiskEvidenceSignal:
     observed_at = payload.get("observed_at")
     return RiskEvidenceSignal(

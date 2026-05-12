@@ -541,6 +541,17 @@ button {
   box-shadow: 0 2px 8px rgba(27, 38, 33, 0.24);
 }
 
+.risk-reasons {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .risk-levels {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

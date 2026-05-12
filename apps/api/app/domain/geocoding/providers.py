@@ -184,11 +184,21 @@ class GeocoderChain:
         self.providers = providers
 
     def geocode(self, request: GeocodeRequest) -> list[PlaceCandidate]:
+        fallback_candidates: tuple[PlaceCandidate, ...] = ()
         for provider in self.providers:
             candidates = provider.search(request)
             if candidates:
-                return list(candidates[: request.limit])
-        return []
+                limited_candidates = tuple(candidates[: request.limit])
+                if any(candidate.confidence >= 0.65 for candidate in limited_candidates):
+                    if fallback_candidates and (
+                        _best_precision_sort_order(limited_candidates)
+                        > _best_precision_sort_order(fallback_candidates)
+                    ):
+                        continue
+                    return list(limited_candidates)
+                if not fallback_candidates:
+                    fallback_candidates = limited_candidates
+        return list(fallback_candidates)
 
 
 class FileBackedTaiwanOpenDataProvider:
@@ -671,6 +681,10 @@ def precision_sort_order(precision: GeocodePrecision) -> int:
     return order[precision]
 
 
+def _best_precision_sort_order(candidates: tuple[PlaceCandidate, ...]) -> int:
+    return min((precision_sort_order(candidate.precision) for candidate in candidates), default=99)
+
+
 def local_open_data_candidate(
     point: LocalOpenDataPoint,
     *,
@@ -1002,6 +1016,7 @@ def geocode_candidate_queries(query: str) -> tuple[str, ...]:
         (
             *build_taiwan_geocode_queries(query),
             *address_fallback_queries(query),
+            *road_fallback_queries(query),
             *taiwan_context_fallback_queries(query.strip()),
         ),
         limit=12,
@@ -1038,6 +1053,37 @@ def address_fallback_queries(query: str) -> tuple[str, ...]:
         if candidate != normalized and candidate not in deduplicated:
             deduplicated.append(candidate)
     return tuple(deduplicated[:4])
+
+
+def road_fallback_queries(query: str) -> tuple[str, ...]:
+    normalized = query.strip()
+    if not normalized:
+        return ()
+
+    candidates: list[str] = []
+    for match in re.finditer(
+        r"[\u4e00-\u9fff]{1,18}(?:路|街|大道)"
+        r"(?:[一二三四五六七八九十0-9]+段)?(?:\d+巷)?",
+        normalized,
+    ):
+        road = match.group(0)
+        candidates.append(road)
+        trimmed_road = trim_admin_prefix_from_road(road)
+        if trimmed_road != road:
+            candidates.append(trimmed_road)
+
+    deduplicated: list[str] = []
+    for candidate in candidates:
+        if candidate != normalized and candidate not in deduplicated:
+            deduplicated.append(candidate)
+    return tuple(deduplicated[:4])
+
+
+def trim_admin_prefix_from_road(value: str) -> str:
+    for marker in ("縣", "市", "區", "鄉", "鎮", "里", "村"):
+        if marker in value:
+            value = value.rsplit(marker, 1)[-1]
+    return value
 
 
 def taiwan_context_fallback_queries(query: str) -> tuple[str, ...]:
