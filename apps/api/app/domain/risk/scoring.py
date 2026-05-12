@@ -215,14 +215,22 @@ def _main_reasons(
     if not signals:
         return ("目前缺少可採用的即時或歷史資料，尚不能判定風險高低。",)
 
-    event_types = {signal.event_type for signal in signals}
+    observed_history_count = sum(
+        1 for signal in signals if signal.event_type in {"flood_report", "road_closure"}
+    )
+    flood_potential_count = sum(1 for signal in signals if signal.event_type == "flood_potential")
     reasons = []
     if realtime_level in {"高", "極高"}:
         reasons.append("附近即時雨量或水位資料偏高。")
-    if historical_level in {"中", "高", "極高"} and "flood_potential" in event_types:
-        reasons.append("查詢半徑內與淹水潛勢規劃圖資相交；這是情境參考，不代表即時災害警報。")
-    if "flood_report" in event_types:
-        reasons.append("附近有近期公開淹水通報或新聞線索。")
+    if observed_history_count:
+        reasons.append(
+            f"查詢半徑內有 {observed_history_count} 筆公開新聞或淹水事件紀錄。"
+        )
+    if historical_level in {"中", "高", "極高"} and flood_potential_count:
+        reasons.append(
+            f"另與 {flood_potential_count} 筆官方淹水潛勢規劃圖資相交；"
+            "這是情境參考，不代表即時災害警報。"
+        )
     if not reasons:
         reasons.append("目前可用資料未形成強烈即時淹水訊號。")
     return tuple(reasons)

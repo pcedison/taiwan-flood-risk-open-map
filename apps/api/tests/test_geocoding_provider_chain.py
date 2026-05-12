@@ -102,6 +102,57 @@ def test_provider_chain_preserves_file_backed_low_confidence_limitations(
     assert "道路名稱資料未提供道路線形。" in candidates[0].limitations
 
 
+def test_provider_chain_continues_past_low_confidence_road_centroid(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "taiwan-roads.jsonl"
+    source_path.write_text(
+        (
+            '{"name":"臺南市安南區培安路","aliases":["臺南市安南區培安路"],'
+            '"lat":23.04405,"lng":120.154766,"precision":"road_or_lane",'
+            '"type":"address","source":"local-open-data-road","confidence":0.63,'
+            '"limitations":["道路名稱資料未提供道路線形或門牌座標。"]}'
+        ),
+        encoding="utf-8",
+    )
+    nominatim_queries: list[str] = []
+
+    def nominatim_lookup(query: str, *_args: object) -> tuple[PlaceCandidate, ...]:
+        nominatim_queries.append(query)
+        if query == "培安路":
+            return (
+                PlaceCandidate(
+                    place_id="osm-peian-road",
+                    name="培安路",
+                    type="address",
+                    point=LatLng(lat=23.0447736, lng=120.2115377),
+                    admin_code=None,
+                    source="openstreetmap-nominatim",
+                    confidence=0.9,
+                    precision="road_or_lane",
+                ),
+            )
+        return ()
+
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=nominatim_lookup,
+        wikimedia_lookup=lambda *_args: (),
+        open_data_paths=(str(source_path),),
+    )
+
+    candidates = geocoder.geocode(
+        GeocodeRequest(query="台南市安南區培安路", input_type="address", limit=1),
+    )
+
+    assert "培安路" in nominatim_queries
+    assert candidates[0].name == "培安路（由查詢文字萃取地名）"
+    assert candidates[0].source == "openstreetmap-nominatim-taiwan-normalized"
+    assert candidates[0].matched_query == "培安路"
+    assert candidates[0].point == LatLng(lat=23.0447736, lng=120.2115377)
+    assert candidates[0].confidence == 0.82
+    assert candidates[0].requires_confirmation is False
+
+
 def test_provider_chain_reads_gzipped_file_backed_open_data(tmp_path: Path) -> None:
     source_path = tmp_path / "taiwan-roads.jsonl.gz"
     with gzip.open(source_path, "wt", encoding="utf-8") as handle:
