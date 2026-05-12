@@ -527,14 +527,16 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
-def test_official_realtime_evidence_links_to_data_gov_catalog() -> None:
+def test_official_evidence_links_to_data_gov_catalog() -> None:
     rainfall, water_level = _official_realtime_bundle().observations
 
     rainfall_evidence = public_routes._official_realtime_evidence(rainfall)
     water_level_evidence = public_routes._official_realtime_evidence(water_level)
+    flood_potential_evidence = public_routes._evidence_from_record(_flood_potential_record())
 
     assert rainfall_evidence.url == "https://data.gov.tw/dataset/9177"
     assert water_level_evidence.url == "https://data.gov.tw/dataset/25768"
+    assert flood_potential_evidence.url == "https://data.gov.tw/dataset/25766"
 
 
 def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> None:
@@ -1449,7 +1451,7 @@ def _flood_potential_record() -> EvidenceRecord:
         event_type="flood_potential",
         title="官方淹水潛勢規劃圖資",
         summary="查詢範圍與官方淹水潛勢規劃圖資相交。",
-        url="https://data.gov.tw/dataset/25768",
+        url="https://www.dprcflood.org.tw/DPRC/02.html",
         occurred_at=None,
         observed_at=None,
         ingested_at=datetime.fromisoformat("2026-05-05T11:13:39+00:00"),

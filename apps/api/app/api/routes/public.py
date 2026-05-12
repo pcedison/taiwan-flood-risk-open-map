@@ -94,9 +94,10 @@ NOMINATIM_USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
 OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
-OFFICIAL_REALTIME_DATA_GOV_URLS = {
+OFFICIAL_DATA_GOV_URLS = {
     "rainfall": "https://data.gov.tw/dataset/9177",
     "water_level": "https://data.gov.tw/dataset/25768",
+    "flood_potential": "https://data.gov.tw/dataset/25766",
 }
 _ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
 _RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
@@ -332,7 +333,7 @@ def _official_realtime_evidence(
         event_type=observation.event_type,
         title=observation.title,
         summary=observation.summary,
-        url=OFFICIAL_REALTIME_DATA_GOV_URLS.get(observation.event_type),
+        url=OFFICIAL_DATA_GOV_URLS.get(observation.event_type),
         occurred_at=None,
         observed_at=observation.observed_at,
         ingested_at=observation.ingested_at,
@@ -359,7 +360,11 @@ def _historical_record_evidence(
         event_type=record.event_type,
         title=record.title,
         summary=record.summary,
-        url=record.url,
+        url=_public_evidence_url(
+            source_type=record.source_type,
+            event_type=record.event_type,
+            fallback_url=record.url,
+        ),
         occurred_at=record.occurred_at,
         observed_at=record.occurred_at,
         ingested_at=record.ingested_at,
@@ -430,7 +435,11 @@ def _evidence_from_record(record: EvidenceRecord) -> Evidence:
         event_type=cast(Any, record.event_type),
         title=title,
         summary=summary,
-        url=record.url,
+        url=_public_evidence_url(
+            source_type=record.source_type,
+            event_type=record.event_type,
+            fallback_url=record.url,
+        ),
         occurred_at=record.occurred_at,
         observed_at=record.observed_at,
         ingested_at=record.ingested_at,
@@ -453,6 +462,17 @@ def _localized_evidence_text(record: EvidenceRecord) -> tuple[str, str]:
             "不代表目前正在淹水，也不是即時災害警報。",
         )
     return (record.title, record.summary)
+
+
+def _public_evidence_url(
+    *,
+    source_type: str,
+    event_type: str,
+    fallback_url: str | None,
+) -> str | None:
+    if source_type == "official":
+        return OFFICIAL_DATA_GOV_URLS.get(event_type, fallback_url)
+    return fallback_url
 
 
 def _evidence_preview(evidence: Evidence) -> EvidencePreview:
@@ -1337,7 +1357,11 @@ def _evidence_from_upsert(record: EvidenceUpsert) -> Evidence:
         event_type=cast(Any, record.event_type),
         title=record.title,
         summary=record.summary,
-        url=record.url,
+        url=_public_evidence_url(
+            source_type=record.source_type,
+            event_type=record.event_type,
+            fallback_url=record.url,
+        ),
         occurred_at=record.occurred_at,
         observed_at=record.observed_at,
         ingested_at=record.ingested_at,
