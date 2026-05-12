@@ -928,7 +928,7 @@ def _precomputed_risk_profile(
     if not settings.evidence_repository_enabled:
         return None
     try:
-        return fetch_best_profile_for_point(
+        profile = fetch_best_profile_for_point(
             database_url=settings.database_url,
             lat=request.point.lat,
             lng=request.point.lng,
@@ -937,6 +937,22 @@ def _precomputed_risk_profile(
         )
     except RiskProfileRepositoryUnavailable:
         return None
+    if profile is None:
+        return None
+    if not _profile_has_observed_history(profile):
+        return None
+    return profile
+
+
+def _profile_has_observed_history(profile: RiskProfileRecord) -> bool:
+    for count_key, raw_count in profile.evidence_counts.items():
+        count = _positive_int(raw_count)
+        if count is None:
+            continue
+        _, event_type = _profile_count_key_types(count_key)
+        if event_type in OBSERVED_HISTORICAL_EVENT_TYPES:
+            return True
+    return False
 
 
 def _enqueue_profile_refresh(profile: RiskProfileRecord, *, request: RiskAssessRequest) -> None:
@@ -1098,7 +1114,11 @@ def _profile_evidence_items(
                     "這是區域層級的摘要證據，不等於逐篇新聞清單；"
                     "精準半徑資料會由背景工作更新。"
                 ),
-                url=None,
+                url=_public_evidence_url(
+                    source_type=source_type,
+                    event_type=event_type,
+                    fallback_url=None,
+                ),
                 occurred_at=profile.latest_occurred_at,
                 observed_at=profile.latest_observed_at,
                 ingested_at=profile.latest_ingested_at or profile.computed_at or created_at,

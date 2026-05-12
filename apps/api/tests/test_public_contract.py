@@ -1116,6 +1116,76 @@ def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypa
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
+def test_risk_assess_skips_profile_fast_path_without_observed_history(monkeypatch) -> None:
+    computed_at = datetime.fromisoformat("2026-05-12T02:01:34+00:00")
+    monkeypatch.setenv("HISTORICAL_NEWS_ON_DEMAND_ENABLED", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
+    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_best_profile_for_point",
+        lambda **_kwargs: RiskProfileRecord(
+            profile_kind="risk_grid",
+            profile_key="h3:8:flood-potential-only",
+            profile_scope="h3:8",
+            profile_radius_m=1000,
+            score_version="risk-v0.1.0",
+            realtime_level="low",
+            historical_level="severe",
+            confidence_level="high",
+            evidence_counts={"official:flood_potential": 58},
+            top_evidence_ids=(),
+            latest_observed_at=None,
+            latest_occurred_at=None,
+            latest_ingested_at=computed_at,
+            coverage_gaps=("historical_news_backfill_partial",),
+            missing_sources=("rainfall", "water_level"),
+            computed_at=computed_at,
+            expires_at=None,
+            status="healthy",
+            distance_to_query_m=0.0,
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_evidence_by_ids",
+        lambda **_kwargs: pytest.fail("flood-potential-only profile should not load top evidence"),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "enqueue_profile_refresh_job",
+        lambda **_kwargs: pytest.fail("flood-potential-only profile should not be returned"),
+    )
+
+    try:
+        response = client.post(
+            "/v1/risk/assess",
+            json={
+                "point": {"lat": 23.908362, "lng": 120.781026},
+                "radius_m": 1000,
+                "time_context": "now",
+                "location_text": "profile flood-potential-only regression",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["historical"]["level"] == "未知"
+    assert payload["evidence"] == []
+    assert not any(
+        item["source_id"] == "precomputed-risk-profile" for item in payload["data_freshness"]
+    )
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
 def test_risk_assess_keeps_exact_radius_evidence_ahead_of_profile_fast_path(monkeypatch) -> None:
     monkeypatch.setattr(
         public_routes,
