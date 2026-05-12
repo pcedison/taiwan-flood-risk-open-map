@@ -1690,12 +1690,13 @@ def _work_profile_refresh_jobs(
                 }
             )
         except (ProfileRefreshJobUnavailable, ValueError) as exc:
+            error_message = str(exc)
             try:
                 complete_profile_refresh_job(
                     database_url=resolved_database_url,
                     job_id=job.id,
                     status="failed",
-                    error_message=str(exc),
+                    error_message=error_message,
                 )
             except ProfileRefreshJobUnavailable:
                 pass
@@ -1705,12 +1706,41 @@ def _work_profile_refresh_jobs(
                     "profile_kind": job.profile_kind,
                     "profile_key": job.profile_key,
                     "status": "failed",
-                    "error": str(exc),
+                    "error": error_message,
                 }
             )
+            if _is_transient_profile_refresh_database_error(error_message):
+                log_event(
+                    "profiles.refresh.aborted",
+                    reason="transient_database_error",
+                    error=error_message,
+                    processed_jobs=len(results),
+                    claimed_jobs=len(jobs),
+                )
+                break
 
     print(json.dumps({"profile_refresh_jobs": results}, ensure_ascii=False, sort_keys=True))
     return 1 if any(result["status"] == "failed" for result in results) else 0
+
+
+def _is_transient_profile_refresh_database_error(error_message: str) -> bool:
+    normalized = error_message.casefold()
+    if "statement timeout" in normalized:
+        return False
+    return any(
+        marker in normalized
+        for marker in (
+            "administrator command",
+            "connection timeout expired",
+            "connection refused",
+            "could not connect",
+            "server closed the connection",
+            "terminating connection",
+            "connection is closed",
+            "ssl syscall",
+            "eof detected",
+        )
+    )
 
 
 def _runtime_dead_letter_job_json(job: RuntimeQueueDeadLetterJob) -> str:
