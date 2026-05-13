@@ -62,6 +62,33 @@ def test_lookup_official_flood_disaster_points_uses_local_snapshot(tmp_path) -> 
     assert "命中 1 筆" in lookup.message
 
 
+def test_lookup_official_flood_disaster_points_explains_zero_hit_scope(tmp_path) -> None:
+    csv_path = tmp_path / "flood_points.csv"
+    csv_path.write_text(
+        "\n".join(
+            (
+                "FID,year,X_97,Y_97,source",
+                "0,2023,172956.00,2543478.00,EMIC",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    lookup = lookup_official_flood_disaster_points(
+        lat=25.04776,
+        lng=121.51706,
+        radius_m=300,
+        csv_path=str(csv_path),
+        enabled=True,
+        now=datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc),
+    )
+
+    assert lookup.health_status == "healthy"
+    assert lookup.records == ()
+    assert "單一官方來源半徑內 0 筆命中" in lookup.message
+    assert "不代表該地點沒有淹水紀錄" in lookup.message
+
+
 def test_bundled_official_flood_disaster_points_cover_taiwan_wide_extent() -> None:
     csv_path = (
         Path(__file__).resolve().parents[1]

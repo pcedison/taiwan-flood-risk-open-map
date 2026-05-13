@@ -109,8 +109,8 @@ def lookup_official_flood_disaster_points(
         name=SOURCE_NAME,
         health_status="healthy",
         message=(
-            "官方近5年淹水災點資料已查詢，半徑內未命中；"
-            "這不代表該地點沒有淹水紀錄。"
+            "官方近5年淹水災點資料已查詢，此單一官方來源半徑內 0 筆命中；"
+            "請與歷史淹水紀錄與公開新聞來源分開解讀，這不代表該地點沒有淹水紀錄。"
         ),
         observed_at=None,
         ingested_at=now,

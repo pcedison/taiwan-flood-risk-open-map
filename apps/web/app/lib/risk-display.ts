@@ -76,6 +76,29 @@ export type LayerDisplayState = {
   hasTileContract: boolean;
 };
 
+const layerAvailabilityLabels: Record<LayerDisplayItem["availability"], string> = {
+  available: "可顯示",
+  empty: "無圖層資料",
+  limited: "部分可用",
+  pending: "等待查詢",
+  unavailable: "不可用",
+};
+
+const dataAvailabilityLabels: Record<LayerDisplayItem["availability"], string> = {
+  available: "有命中資料",
+  empty: "本來源 0 命中",
+  limited: "部分可用",
+  pending: "等待查詢",
+  unavailable: "不可用",
+};
+
+export function layerAvailabilityDisplayLabel(
+  item: Pick<LayerDisplayItem, "availability" | "kind">,
+) {
+  const labels = item.kind === "資料" ? dataAvailabilityLabels : layerAvailabilityLabels;
+  return labels[item.availability] ?? "未知";
+}
+
 export type ProfilePreviewState = {
   isProfilePreview: boolean;
   label: string | null;

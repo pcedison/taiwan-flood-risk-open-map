@@ -22,6 +22,7 @@ import {
   getProfileBasisText,
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
+  layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
   selectEvidenceItems,
   shouldFetchEvidenceList,
@@ -289,16 +290,6 @@ const geocodeCandidateNotice = (candidate: GeocodeResponse["candidates"][number]
   }
   return parts.map(trimNoticeSentence).filter(Boolean).join("。");
 };
-
-const layerAvailabilityLabels: Record<string, string> = {
-  available: text.layerReady,
-  empty: text.layerEmpty,
-  limited: text.layerLimited,
-  pending: text.layerPending,
-  unavailable: "不可用",
-};
-
-const layerAvailabilityLabel = (value: string) => layerAvailabilityLabels[value] ?? "未知";
 
 const sourceTypeLabels: Record<string, string> = {
   official: "官方公開資料",
@@ -925,7 +916,7 @@ export default function HomePage() {
                 <li key={item.id}>
                   <div>
                     <strong>{item.name}</strong>
-                    <span>{`${item.kind}：${layerAvailabilityLabel(item.availability)}`}</span>
+                    <span>{`${item.kind}：${layerAvailabilityDisplayLabel(item)}`}</span>
                   </div>
                   <dl>
                     <div>
