@@ -81,6 +81,10 @@ def lookup_official_flood_disaster_points(
             ingested_at=now,
         )
 
+    coverage_years = _record_year_span(records)
+    source_name = _source_name_with_coverage(coverage_years)
+    coverage_note = _coverage_note(coverage_years)
+
     matches: list[tuple[HistoricalFloodRecord, float]] = []
     for record in records:
         distance_m = _haversine_m(lat, lng, record.lat, record.lng)
@@ -93,11 +97,11 @@ def lookup_official_flood_disaster_points(
         return OfficialFloodDisasterLookup(
             attempted=True,
             source_id=SOURCE_ID,
-            name=SOURCE_NAME,
+            name=source_name,
             health_status="healthy",
             message=(
                 f"官方近5年淹水災點資料命中 {len(ordered)} 筆；"
-                "此資料提供年度與點位，作為官方歷史淹水事件佐證。"
+                f"{coverage_note}此資料提供年度與點位，作為官方歷史淹水事件佐證。"
             ),
             records=ordered,
             observed_at=latest_observed,
@@ -106,11 +110,12 @@ def lookup_official_flood_disaster_points(
     return OfficialFloodDisasterLookup(
         attempted=True,
         source_id=SOURCE_ID,
-        name=SOURCE_NAME,
+        name=source_name,
         health_status="healthy",
         message=(
-            "官方近5年淹水災點資料已查詢，此單一官方來源半徑內 0 筆命中；"
-            "請與歷史淹水紀錄與公開新聞來源分開解讀，這不代表該地點沒有淹水紀錄。"
+            f"官方近5年淹水災點資料已查詢；{coverage_note}此單一官方來源半徑內 0 筆命中。"
+            "若事件未收錄於此官方快照，請以歷史淹水紀錄與公開新聞來源佐證；"
+            "這不代表該地點沒有淹水紀錄。"
         ),
         observed_at=None,
         ingested_at=now,
@@ -241,6 +246,27 @@ def _freshness_score(year: int) -> float:
     if year >= 2020:
         return 0.82
     return 0.74
+
+
+def _record_year_span(records: tuple[HistoricalFloodRecord, ...]) -> str | None:
+    years = sorted({record.occurred_at.year for record in records})
+    if not years:
+        return None
+    if len(years) == 1:
+        return str(years[0])
+    return f"{years[0]}-{years[-1]}"
+
+
+def _source_name_with_coverage(coverage_years: str | None) -> str:
+    if not coverage_years:
+        return SOURCE_NAME
+    return f"{SOURCE_NAME}（快照 {coverage_years}）"
+
+
+def _coverage_note(coverage_years: str | None) -> str:
+    if not coverage_years:
+        return ""
+    return f"本地快照涵蓋 {coverage_years}；"
 
 
 def _haversine_m(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:
