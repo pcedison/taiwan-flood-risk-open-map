@@ -908,6 +908,63 @@ def test_risk_assess_attempts_on_demand_news_for_map_click_with_nearby_village(
     assert calls == ["高雄市三民區本和里"]
 
 
+def test_risk_assess_attempts_on_demand_news_when_history_store_is_unavailable(
+    monkeypatch,
+) -> None:
+    calls: list[str | None] = []
+    monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+    monkeypatch.setattr(
+        public_routes,
+        "_official_flood_disaster_lookup",
+        lambda *_args, **_kwargs: OfficialFloodDisasterLookup(
+            attempted=True,
+            source_id="official-flood-disaster-points",
+            name="官方資料：近5年淹水災點",
+            health_status="healthy",
+            message="官方近5年淹水災點資料已查詢，半徑內未命中。",
+            records=(),
+        ),
+    )
+
+    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
+        calls.append(kwargs.get("location_text"))
+        return public_routes.OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="on-demand-public-news",
+            message="公開新聞索引未找到可通過地點與淹水關鍵字比對的候選事件。",
+            records=(),
+        )
+
+    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
+
+    try:
+        response = client.post(
+            "/v1/risk/assess",
+            json={
+                "point": {"lat": 24.676, "lng": 121.77},
+                "radius_m": 500,
+                "time_context": "now",
+                "location_text": "宜蘭羅東中正路",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == ["宜蘭羅東中正路"]
+    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
+    assert payload["data_freshness"][-1]["health_status"] == "unknown"
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
 def test_risk_assess_marks_flood_potential_only_history_as_limited(
     monkeypatch,
 ) -> None:

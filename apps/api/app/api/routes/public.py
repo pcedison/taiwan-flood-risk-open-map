@@ -1412,15 +1412,10 @@ def _should_attempt_public_news_lookup(
     historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
     db_evidence_items: tuple[Evidence, ...] | None,
 ) -> bool:
-    if _has_public_news_evidence(
+    return not _has_public_news_evidence(
         historical_records=historical_records,
         db_evidence_items=db_evidence_items,
-    ):
-        return False
-    return any(
-        record.event_type in OBSERVED_HISTORICAL_EVENT_TYPES
-        for record, _distance_m in historical_records
-    ) or _has_observed_historical_event(db_evidence_items or ())
+    )
 
 
 def _has_public_news_evidence(
