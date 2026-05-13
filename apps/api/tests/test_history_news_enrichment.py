@@ -269,3 +269,47 @@ def test_search_public_flood_news_expands_representative_taiwan_regions() -> Non
         )
 
         assert len(result.records) == 1, location_text
+
+
+def test_search_public_flood_news_uses_rss_backup_when_gdelt_is_unavailable() -> None:
+    requested_feed_urls: list[str] = []
+
+    def fetch_json(_url: str, _timeout_seconds: float) -> dict[str, object]:
+        return {}
+
+    def fetch_text(url: str, _timeout_seconds: float) -> str:
+        requested_feed_urls.append(url)
+        return """<?xml version="1.0" encoding="utf-8" ?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>彰化員林中山路水淹 店家清理積水</title>
+              <link>https://example.test/news/yuanlin-flood</link>
+              <pubDate>Thu, 10 Jul 2025 04:00:00 GMT</pubDate>
+              <description>彰化員林中山路豪雨後道路積水。</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+    result = search_public_flood_news(
+        location_text="彰化員林中山路",
+        lat=23.956,
+        lng=120.57,
+        radius_m=500,
+        now=datetime(2026, 5, 13, 3, 0, tzinfo=timezone.utc),
+        max_records=3,
+        timeout_seconds=2.5,
+        fetch_json=fetch_json,
+        fetch_text=fetch_text,
+    )
+
+    assert requested_feed_urls
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.adapter_key == "news.public_web.on_demand_search"
+    assert record.source_id.startswith("public-news-rss:")
+    assert record.title == "彰化員林中山路水淹 店家清理積水"
+    assert record.url == "https://example.test/news/yuanlin-flood"
+    assert record.properties["ingestion_mode"] == "on_demand_public_news_rss"
+    assert record.properties["full_text_stored"] is False

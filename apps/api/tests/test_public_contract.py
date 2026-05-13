@@ -557,6 +557,7 @@ def test_risk_assess_surfaces_official_flood_disaster_points(
     )
     monkeypatch.setenv("OFFICIAL_FLOOD_DISASTER_POINTS_ENABLED", "true")
     monkeypatch.setenv("OFFICIAL_FLOOD_DISASTER_POINTS_PATH", str(csv_path))
+    monkeypatch.setenv("HISTORICAL_NEWS_ON_DEMAND_ENABLED", "false")
     get_settings.cache_clear()
     monkeypatch.setattr(
         public_routes,

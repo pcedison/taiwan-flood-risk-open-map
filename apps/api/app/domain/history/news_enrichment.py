@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from hashlib import sha256
 import json
 import re
 from time import monotonic
 from typing import Any, Literal
+from xml.etree import ElementTree
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -18,9 +20,13 @@ from app.domain.geocoding import extract_taiwan_search_location
 
 
 FetchJson = Callable[[str, float], Mapping[str, Any]]
+FetchText = Callable[[str, float], str]
 
 GDELT_DOC_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_ON_DEMAND_ADAPTER_KEY = "news.public_web.gdelt_backfill"
+PUBLIC_NEWS_ON_DEMAND_ADAPTER_KEY = "news.public_web.on_demand_search"
+GOOGLE_NEWS_RSS_ENDPOINT = "https://news.google.com/rss/search"
+BING_NEWS_RSS_ENDPOINT = "https://www.bing.com/news/search"
 PRIMARY_FLOOD_TERMS = ("淹水", "積淹水", "積水", "水淹", "水災", "水患", "泡水")
 CONTEXT_FLOOD_TERMS = (
     "豪雨",
@@ -111,6 +117,7 @@ def search_public_flood_news(
     max_records: int,
     timeout_seconds: float,
     fetch_json: FetchJson | None = None,
+    fetch_text: FetchText | None = None,
 ) -> OnDemandNewsSearchResult:
     location = extract_taiwan_search_location(location_text or "")
     if not location:
@@ -123,17 +130,20 @@ def search_public_flood_news(
         )
 
     client = fetch_json or _fetch_json
+    text_client = fetch_text if fetch_text is not None else (_fetch_text if fetch_json is None else None)
     search_windows = _search_windows(location_text or "", now)
     accepted: list[EvidenceUpsert] = []
     seen_urls: set[str] = set()
     query_errors = 0
     timed_out = False
     deadline = monotonic() + max(0.5, timeout_seconds)
+    rss_reserve_seconds = _rss_reserve_seconds(timeout_seconds) if text_client is not None else 0.0
+    gdelt_deadline = deadline - rss_reserve_seconds
     per_query_max_records = _per_query_max_records(max_records)
     for target in _search_targets(location):
         for search_window in search_windows:
             for query in _gdelt_queries(target.term, scope=target.scope):
-                remaining_seconds = deadline - monotonic()
+                remaining_seconds = gdelt_deadline - monotonic()
                 if remaining_seconds <= 0:
                     timed_out = True
                     break
@@ -177,6 +187,24 @@ def search_public_flood_news(
         if len(accepted) >= max_records:
             break
 
+    rss_attempted = False
+    rss_errors = 0
+    if not accepted and text_client is not None:
+        rss_attempted = True
+        rss_records, rss_errors = _search_public_news_rss(
+            location=location,
+            location_text=location_text or "",
+            lat=lat,
+            lng=lng,
+            radius_m=radius_m,
+            now=now,
+            max_records=max_records,
+            deadline=deadline,
+            fetch_text=text_client,
+            seen_urls=seen_urls,
+        )
+        accepted.extend(rss_records)
+
     if accepted:
         return OnDemandNewsSearchResult(
             attempted=True,
@@ -185,11 +213,11 @@ def search_public_flood_news(
             records=tuple(accepted),
             health_status="healthy",
         )
-    if timed_out or query_errors:
-        message = "公開新聞索引暫時無法回應；保留既有資料，不阻塞風險查詢。"
+    if timed_out or query_errors or (rss_attempted and rss_errors):
+        message = "公開新聞索引或 RSS 備援暫時無法完整回應；保留既有資料，不阻塞風險查詢。"
         health_status: Literal["healthy", "degraded", "failed", "disabled", "unknown"] = "degraded"
     else:
-        message = "公開新聞索引未找到可通過地點與淹水關鍵字比對的候選事件。"
+        message = "公開新聞索引與 RSS 備援未找到可通過地點與淹水關鍵字比對的候選事件。"
         health_status = "unknown"
     return OnDemandNewsSearchResult(
         attempted=True,
@@ -309,6 +337,10 @@ def _per_query_max_records(max_records: int) -> int:
     return max(max_records, min(max_records * 4, 20))
 
 
+def _rss_reserve_seconds(timeout_seconds: float) -> float:
+    return min(2.0, max(0.8, timeout_seconds * 0.45))
+
+
 def _fetch_json(url: str, timeout_seconds: float) -> Mapping[str, Any]:
     request = Request(
         url,
@@ -326,11 +358,185 @@ def _fetch_json(url: str, timeout_seconds: float) -> Mapping[str, Any]:
     return payload if isinstance(payload, Mapping) else {}
 
 
+def _fetch_text(url: str, timeout_seconds: float) -> str:
+    request = Request(
+        url,
+        headers={
+            "Accept": "application/rss+xml, application/xml, text/xml",
+            "User-Agent": "FloodRiskTaiwan/0.1 on-demand-public-news-rss",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=max(0.5, timeout_seconds)) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError):
+        return ""
+
+
 def _articles(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
     articles = payload.get("articles", ())
     if not isinstance(articles, list):
         return ()
     return tuple(article for article in articles if isinstance(article, Mapping))
+
+
+def _search_public_news_rss(
+    *,
+    location: str,
+    location_text: str,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    now: datetime,
+    max_records: int,
+    deadline: float,
+    fetch_text: FetchText,
+    seen_urls: set[str],
+) -> tuple[list[EvidenceUpsert], int]:
+    accepted: list[EvidenceUpsert] = []
+    errors = 0
+    for target in _rss_search_targets(location):
+        for feed_url in _public_news_rss_urls(target.term, location_text=location_text, now=now):
+            remaining_seconds = deadline - monotonic()
+            if remaining_seconds <= 0:
+                errors += 1
+                return accepted, errors
+            payload = fetch_text(feed_url, min(2.0, max(0.5, remaining_seconds)))
+            if not payload:
+                errors += 1
+                continue
+            for article in _rss_articles(payload, feed_url=feed_url):
+                record = _record_from_article(
+                    article,
+                    location=target.term,
+                    match_scope=target.scope,
+                    target_source_weight=_rss_source_weight(target.scope),
+                    lat=lat,
+                    lng=lng,
+                    radius_m=radius_m,
+                    now=now,
+                    query_url=feed_url,
+                    search_window_label="public-news-rss",
+                    adapter_key=PUBLIC_NEWS_ON_DEMAND_ADAPTER_KEY,
+                    source_prefix="public-news-rss",
+                    raw_ref_prefix="public-news-rss",
+                    ingestion_mode="on_demand_public_news_rss",
+                )
+                if record is None or record.url is None or record.url in seen_urls:
+                    continue
+                seen_urls.add(record.url)
+                accepted.append(record)
+                if len(accepted) >= max_records:
+                    return accepted, errors
+        if accepted:
+            return accepted, errors
+    return accepted, errors
+
+
+def _public_news_rss_urls(
+    location: str,
+    *,
+    location_text: str,
+    now: datetime,
+) -> tuple[str, ...]:
+    urls: list[str] = []
+    for query in _public_news_rss_queries(location, location_text=location_text, now=now):
+        urls.append(
+            f"{GOOGLE_NEWS_RSS_ENDPOINT}?{urlencode({'q': query, 'hl': 'zh-TW', 'gl': 'TW', 'ceid': 'TW:zh-Hant'})}"
+        )
+        urls.append(
+            f"{BING_NEWS_RSS_ENDPOINT}?{urlencode({'q': query, 'format': 'rss', 'mkt': 'zh-TW'})}"
+        )
+    return _dedupe(urls, limit=6)
+
+
+def _rss_search_targets(location: str) -> tuple[_SearchTarget, ...]:
+    targets = _search_targets(location)
+    return tuple(
+        sorted(
+            targets,
+            key=lambda target: (
+                0 if target.scope == "road" else 1 if target.scope == "exact" else 2,
+                len(target.term),
+            ),
+        )
+    )
+
+
+def _public_news_rss_queries(
+    location: str,
+    *,
+    location_text: str,
+    now: datetime,
+) -> tuple[str, ...]:
+    # News RSS engines often broaden or break CJK quoted phrases; unquoted
+    # road terms produce better metadata recall while local matching remains strict.
+    quoted_location = location
+    years = _query_years(location_text, now=now)
+    queries = [
+        f"{quoted_location} 淹水",
+        f"{quoted_location} 積水",
+        f"{quoted_location} 水淹",
+        f"{quoted_location} 豪雨 積水",
+    ]
+    for year in years:
+        queries.extend(
+            (
+                f"{quoted_location} {year} 淹水",
+                f"{quoted_location} {year} 積水",
+                f"{quoted_location} {year} 水淹",
+            )
+        )
+    return _dedupe(queries, limit=8)
+
+
+def _query_years(location_text: str, *, now: datetime) -> tuple[int, ...]:
+    explicit_years = [int(match.group(1)) for match in _YEAR_PATTERN.finditer(location_text)]
+    if explicit_years:
+        return tuple(dict.fromkeys(explicit_years))
+    return (now.year, now.year - 1, now.year - 2)
+
+
+def _rss_source_weight(match_scope: str) -> float:
+    if match_scope == "exact":
+        return 0.78
+    if match_scope == "road":
+        return 0.72
+    return 0.58
+
+
+def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ...]:
+    try:
+        root = ElementTree.fromstring(payload)
+    except ElementTree.ParseError:
+        return ()
+    articles: list[Mapping[str, Any]] = []
+    for item in root.findall(".//item"):
+        title = _xml_child_text(item, "title")
+        link = _xml_child_text(item, "link")
+        if not title or not link:
+            continue
+        description = _xml_child_text(item, "description")
+        pub_date = _xml_child_text(item, "pubDate") or _xml_child_text(item, "published")
+        articles.append(
+            {
+                "title": title,
+                "url": link,
+                "description": description,
+                "published_at": pub_date,
+                "domain": _domain_from_url(link),
+                "feed_url": feed_url,
+            }
+        )
+    return tuple(articles)
+
+
+def _xml_child_text(item: ElementTree.Element, child_name: str) -> str:
+    child = item.find(child_name)
+    if child is None or child.text is None:
+        return ""
+    return child.text.strip()
 
 
 def _record_from_article(
@@ -345,6 +551,10 @@ def _record_from_article(
     now: datetime,
     query_url: str,
     search_window_label: str,
+    adapter_key: str = GDELT_ON_DEMAND_ADAPTER_KEY,
+    source_prefix: str = "gdelt-on-demand",
+    raw_ref_prefix: str = "gdelt-doc",
+    ingestion_mode: str = "on_demand_public_news",
 ) -> EvidenceUpsert | None:
     title = str(article.get("title", "")).strip()
     url = str(article.get("url", "")).strip()
@@ -354,15 +564,15 @@ def _record_from_article(
     if not _text_matches(match_text, location):
         return None
 
-    published_at = _parse_gdelt_datetime(article.get("seendate") or article.get("published_at"))
+    published_at = _parse_public_news_datetime(article.get("seendate") or article.get("published_at"))
     domain = str(article.get("domain", "")).strip() or _domain_from_url(url)
-    source_id = f"gdelt-on-demand:{sha256(url.encode('utf-8')).hexdigest()[:24]}"
-    raw_ref = f"gdelt-doc:{sha256((url + title).encode('utf-8')).hexdigest()[:32]}"
+    source_id = f"{source_prefix}:{sha256(url.encode('utf-8')).hexdigest()[:24]}"
+    raw_ref = f"{raw_ref_prefix}:{sha256((url + title).encode('utf-8')).hexdigest()[:32]}"
     text_locations = _text_locations(match_text)
     confidence = _confidence(text=match_text, location=location, domain=domain, match_scope=match_scope)
     return EvidenceUpsert(
         id=str(uuid5(NAMESPACE_URL, source_id)),
-        adapter_key=GDELT_ON_DEMAND_ADAPTER_KEY,
+        adapter_key=adapter_key,
         source_id=source_id,
         source_type="news",
         event_type="flood_report",
@@ -381,8 +591,8 @@ def _record_from_article(
         privacy_level="public",
         raw_ref=raw_ref,
         properties={
-            "adapter_key": GDELT_ON_DEMAND_ADAPTER_KEY,
-            "ingestion_mode": "on_demand_public_news",
+            "adapter_key": adapter_key,
+            "ingestion_mode": ingestion_mode,
             "query_location": location,
             "location_match_scope": match_scope,
             "query_radius_m": radius_m,
@@ -544,6 +754,19 @@ def _parse_gdelt_datetime(value: object) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _parse_public_news_datetime(value: object) -> datetime | None:
+    parsed = _parse_gdelt_datetime(value)
+    if parsed is not None:
+        return parsed
+    if value is None:
+        return None
+    try:
+        rss_parsed = parsedate_to_datetime(str(value).strip())
+    except (TypeError, ValueError, IndexError):
+        return None
+    return rss_parsed if rss_parsed.tzinfo else rss_parsed.replace(tzinfo=UTC)
 
 
 def _domain_from_url(url: str) -> str:
