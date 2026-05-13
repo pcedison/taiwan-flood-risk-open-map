@@ -35,6 +35,7 @@ def no_network_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setenv("SOURCE_NEWS_ENABLED", "false")
     monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "false")
     monkeypatch.setenv("HISTORICAL_NEWS_ON_DEMAND_ENABLED", "false")
+    monkeypatch.setenv("OFFICIAL_FLOOD_DISASTER_POINTS_ENABLED", "true")
     monkeypatch.setenv("GEOCODER_BUNDLED_OPEN_DATA_ENABLED", "false")
     monkeypatch.setenv("GEOCODER_POSTGIS_ENABLED", "false")
     get_settings.cache_clear()
@@ -132,6 +133,19 @@ def test_public_api_geocodes_and_assesses_all_taiwan_admin_samples(
             failures.append(f"{sample.name} risk missing explanation summary")
         if not isinstance(payload.get("data_freshness"), list):
             failures.append(f"{sample.name} risk data_freshness should be a list")
+        else:
+            official_history = [
+                item
+                for item in payload["data_freshness"]
+                if item.get("source_id") == "official-flood-disaster-points"
+            ]
+            if len(official_history) != 1:
+                failures.append(f"{sample.name} missing official flood disaster source status")
+            elif official_history[0].get("health_status") != "healthy":
+                failures.append(
+                    f"{sample.name} official flood disaster source status="
+                    f"{official_history[0].get('health_status')}"
+                )
         if not isinstance(payload.get("evidence"), list):
             failures.append(f"{sample.name} risk evidence should be a list")
 

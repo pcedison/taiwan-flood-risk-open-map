@@ -214,6 +214,10 @@ _HISTORICAL_FLOOD_RECORDS = (
 )
 
 
+def bundled_historical_flood_records() -> tuple[HistoricalFloodRecord, ...]:
+    return _HISTORICAL_FLOOD_RECORDS
+
+
 def nearby_historical_flood_records(
     *,
     lat: float,
