@@ -18,6 +18,7 @@ from app.domain.evidence import (
     EvidenceUpsert,
     QueryHeatSnapshot,
 )
+from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
 from app.domain.profiles import RiskProfileRecord
 from app.domain.realtime import (
@@ -763,6 +764,109 @@ def test_risk_assess_attempts_on_demand_news_when_db_only_has_flood_potential(
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
+def test_risk_assess_attempts_on_demand_news_when_official_history_has_no_news(
+    monkeypatch,
+) -> None:
+    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
+    official_record = HistoricalFloodRecord(
+        source_id="official-flood-disaster-points:test",
+        source_name="官方資料：近5年淹水災點",
+        source_type="official",
+        event_type="flood_report",
+        title="2025 官方淹水災害情資點位",
+        summary="官方資料命中，但沒有新聞連結。",
+        url="https://data.gov.tw/dataset/130016",
+        occurred_at=datetime.fromisoformat("2025-12-31T12:00:00+08:00"),
+        ingested_at=now,
+        lat=25.068,
+        lng=121.628,
+        confidence=0.82,
+        freshness_score=0.95,
+        source_weight=1.0,
+        risk_factor=1.0,
+    )
+    enrichment_record = EvidenceUpsert(
+        id="fd3615cf-849f-5e52-a2f3-9ce4a6a9f96b",
+        adapter_key="news.public_web.gdelt_backfill",
+        source_id="gdelt-on-demand:test-official-cross-check",
+        source_type="news",
+        event_type="flood_report",
+        title="新北汐止區康寧街水淹 住戶清理積水",
+        summary="公開新聞索引 metadata 與查詢地點及淹水關鍵字相符。",
+        url="https://example.test/news/xizhi-flood",
+        occurred_at=now,
+        observed_at=now,
+        ingested_at=now,
+        lat=25.068,
+        lng=121.628,
+        distance_to_query_m=0.0,
+        confidence=0.88,
+        freshness_score=0.95,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref="gdelt-doc:test-official-cross-check",
+        properties={"full_text_stored": False},
+    )
+    calls: list[str | None] = []
+
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (_flood_potential_record(),),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "_official_flood_disaster_lookup",
+        lambda *_args, **_kwargs: OfficialFloodDisasterLookup(
+            attempted=True,
+            source_id="official-flood-disaster-points",
+            name="官方資料：近5年淹水災點",
+            health_status="healthy",
+            message="官方近5年淹水災點資料命中 1 筆。",
+            records=((official_record, 80.0),),
+            observed_at=official_record.occurred_at,
+            ingested_at=now,
+        ),
+    )
+    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+
+    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
+        calls.append(kwargs.get("location_text"))
+        return public_routes.OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="on-demand-public-news",
+            message="已從公開新聞索引補查並整理 1 筆候選淹水事件。",
+            records=(enrichment_record,),
+        )
+
+    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
+    monkeypatch.setattr(public_routes, "upsert_public_evidence", lambda **_kwargs: ())
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 25.068, "lng": 121.628},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "新北汐止康寧街",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == ["新北汐止康寧街"]
+    assert any(item["source_type"] == "official" for item in payload["evidence"])
+    assert any(item["source_type"] == "news" for item in payload["evidence"])
+    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
+    assert payload["data_freshness"][-1]["health_status"] == "healthy"
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
 def test_risk_assess_attempts_on_demand_news_for_map_click_with_nearby_village(
     monkeypatch,
 ) -> None:
@@ -1240,6 +1344,108 @@ def test_risk_assess_skips_profile_fast_path_without_observed_history(monkeypatc
     assert not any(
         item["source_id"] == "precomputed-risk-profile" for item in payload["data_freshness"]
     )
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_skips_official_only_profile_to_try_public_news(monkeypatch) -> None:
+    computed_at = datetime.fromisoformat("2026-05-12T02:01:34+00:00")
+    enrichment_record = EvidenceUpsert(
+        id="66d18e99-0239-50bf-9fe2-7c68b4ca8b17",
+        adapter_key="news.public_web.gdelt_backfill",
+        source_id="gdelt-on-demand:test-profile-cross-check",
+        source_type="news",
+        event_type="flood_report",
+        title="彰化員林中山路水淹 店家清理積水",
+        summary="公開新聞索引 metadata 與查詢地點及淹水關鍵字相符。",
+        url="https://example.test/news/yuanlin-flood",
+        occurred_at=computed_at,
+        observed_at=computed_at,
+        ingested_at=computed_at,
+        lat=23.956,
+        lng=120.57,
+        distance_to_query_m=0.0,
+        confidence=0.88,
+        freshness_score=0.95,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref="gdelt-doc:test-profile-cross-check",
+        properties={"full_text_stored": False},
+    )
+    calls: list[str | None] = []
+
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
+    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_best_profile_for_point",
+        lambda **_kwargs: RiskProfileRecord(
+            profile_kind="risk_grid",
+            profile_key="h3:8:official-history-only",
+            profile_scope="h3:8",
+            profile_radius_m=1000,
+            score_version="risk-v0.1.0",
+            realtime_level="unknown",
+            historical_level="high",
+            confidence_level="medium",
+            evidence_counts={"official:flood_report": 2, "official:flood_potential": 1},
+            top_evidence_ids=("official-profile-evidence",),
+            latest_observed_at=None,
+            latest_occurred_at=computed_at,
+            latest_ingested_at=computed_at,
+            coverage_gaps=("historical_news_backfill_partial",),
+            missing_sources=("rainfall", "water_level"),
+            computed_at=computed_at,
+            expires_at=None,
+            status="healthy",
+            distance_to_query_m=88.0,
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_evidence_by_ids",
+        lambda **_kwargs: pytest.fail("official-only profile should not short-circuit"),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "enqueue_profile_refresh_job",
+        lambda **_kwargs: pytest.fail("official-only profile should not be returned"),
+    )
+
+    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
+        calls.append(kwargs.get("location_text"))
+        return public_routes.OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="on-demand-public-news",
+            message="已從公開新聞索引補查並整理 1 筆候選淹水事件。",
+            records=(enrichment_record,),
+        )
+
+    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
+    monkeypatch.setattr(public_routes, "upsert_public_evidence", lambda **_kwargs: ())
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 23.956, "lng": 120.57},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "彰化員林中山路",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls == ["彰化員林中山路"]
+    assert any(item["source_type"] == "news" for item in payload["evidence"])
+    assert not any(
+        item["source_id"] == "precomputed-risk-profile" for item in payload["data_freshness"]
+    )
+    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 

@@ -743,21 +743,22 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
     if _can_use_profile_fast_path(db_evidence_items) and not official_historical_records:
         profile = _precomputed_risk_profile(request, now=created_at)
         if profile is not None:
-            _enqueue_profile_refresh(profile, request=request)
-            response = _profile_backed_response(
-                request=request,
-                assessment_id=assessment_id,
-                profile=profile,
-                realtime_bundle=realtime_bundle,
-                created_at=created_at,
-            )
-            _cache_risk_assessment_response(
-                response_cache_key,
-                response,
-                now=created_at,
-                ttl_seconds=settings.risk_assessment_response_cache_seconds,
-            )
-            return response
+            if _profile_has_public_news(profile):
+                _enqueue_profile_refresh(profile, request=request)
+                response = _profile_backed_response(
+                    request=request,
+                    assessment_id=assessment_id,
+                    profile=profile,
+                    realtime_bundle=realtime_bundle,
+                    created_at=created_at,
+                )
+                _cache_risk_assessment_response(
+                    response_cache_key,
+                    response,
+                    now=created_at,
+                    ttl_seconds=settings.risk_assessment_response_cache_seconds,
+                )
+                return response
     on_demand_news = OnDemandNewsSearchResult(
         attempted=False,
         source_id="on-demand-public-news",
@@ -771,7 +772,10 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
             else ()
         )
         historical_records = (*official_historical_records, *curated_historical_records)
-        if not historical_records:
+        if _should_attempt_public_news_lookup(
+            historical_records=historical_records,
+            db_evidence_items=None,
+        ):
             on_demand_news = _on_demand_public_news_result(request, now=created_at)
         historical_evidence_items = [
             _historical_record_evidence(record, distance_to_query_m=distance_m)
@@ -819,11 +823,24 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
             else ()
         )
         if historical_records:
+            if _should_attempt_public_news_lookup(
+                historical_records=historical_records,
+                db_evidence_items=db_evidence_items,
+            ):
+                on_demand_news = _on_demand_public_news_result(request, now=created_at)
             historical_record_evidence_items = [
                 _historical_record_evidence(record, distance_to_query_m=distance_m)
                 for record, distance_m in historical_records
             ]
-            historical_evidence_items = [*db_evidence_items, *historical_record_evidence_items]
+            on_demand_evidence_items = _persist_or_build_on_demand_evidence(
+                on_demand_news,
+                writeback_enabled=settings.historical_news_on_demand_writeback_enabled,
+            )
+            historical_evidence_items = [
+                *db_evidence_items,
+                *historical_record_evidence_items,
+                *on_demand_evidence_items,
+            ]
             historical_signals = (
                 *tuple(_signal_from_evidence(item) for item in db_evidence_items),
                 *tuple(
@@ -838,6 +855,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
                     )
                     for record, distance_m in historical_records
                 ),
+                *tuple(_signal_from_evidence(item) for item in on_demand_evidence_items),
             )
             historical_freshness_db_items = tuple(historical_evidence_items) if db_evidence_items else None
         else:
@@ -986,6 +1004,17 @@ def _profile_has_observed_history(profile: RiskProfileRecord) -> bool:
             continue
         _, event_type = _profile_count_key_types(count_key)
         if event_type in OBSERVED_HISTORICAL_EVENT_TYPES:
+            return True
+    return False
+
+
+def _profile_has_public_news(profile: RiskProfileRecord) -> bool:
+    for count_key, raw_count in profile.evidence_counts.items():
+        count = _positive_int(raw_count)
+        if count is None:
+            continue
+        source_type, event_type = _profile_count_key_types(count_key)
+        if source_type == "news" and event_type in OBSERVED_HISTORICAL_EVENT_TYPES:
             return True
     return False
 
@@ -1378,6 +1407,36 @@ def _needs_historical_event_lookup(
     )
 
 
+def _should_attempt_public_news_lookup(
+    *,
+    historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
+    db_evidence_items: tuple[Evidence, ...] | None,
+) -> bool:
+    if _has_public_news_evidence(
+        historical_records=historical_records,
+        db_evidence_items=db_evidence_items,
+    ):
+        return False
+    return any(
+        record.event_type in OBSERVED_HISTORICAL_EVENT_TYPES
+        for record, _distance_m in historical_records
+    ) or _has_observed_historical_event(db_evidence_items or ())
+
+
+def _has_public_news_evidence(
+    *,
+    historical_records: tuple[tuple[HistoricalFloodRecord, float], ...],
+    db_evidence_items: tuple[Evidence, ...] | None,
+) -> bool:
+    return any(
+        record.source_type == "news" and record.event_type in OBSERVED_HISTORICAL_EVENT_TYPES
+        for record, _distance_m in historical_records
+    ) or any(
+        item.source_type == "news" and item.event_type in OBSERVED_HISTORICAL_EVENT_TYPES
+        for item in (db_evidence_items or ())
+    )
+
+
 def _has_observed_historical_event(evidence_items: tuple[Evidence, ...]) -> bool:
     return any(
         item.event_type in OBSERVED_HISTORICAL_EVENT_TYPES
@@ -1492,6 +1551,18 @@ def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: An
             "source_wra_api_enabled": settings.source_wra_api_enabled,
             "source_news_enabled": settings.source_news_enabled,
             "source_terms_review_ack": settings.source_terms_review_ack,
+            "historical_news_on_demand_enabled": (
+                settings.historical_news_on_demand_enabled
+            ),
+            "historical_news_on_demand_writeback_enabled": (
+                settings.historical_news_on_demand_writeback_enabled
+            ),
+            "historical_news_on_demand_max_records": (
+                settings.historical_news_on_demand_max_records
+            ),
+            "historical_news_on_demand_timeout_seconds": (
+                settings.historical_news_on_demand_timeout_seconds
+            ),
             "official_flood_disaster_points_enabled": (
                 settings.official_flood_disaster_points_enabled
             ),
