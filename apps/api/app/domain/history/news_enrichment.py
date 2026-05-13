@@ -172,26 +172,41 @@ def search_public_flood_news(
     rss_errors = 0
     wiki_attempted = False
     wiki_errors = 0
-    if text_client is not None:
-        rss_max_records = max_records
-        if wiki_client is not None and max_records > 1:
-            rss_max_records = max_records - 1
-        rss_attempted = True
-        rss_records, rss_errors = _search_public_news_rss(
+    if wiki_client is not None and max_records > 1:
+        wiki_attempted = True
+        wiki_records, wiki_errors = _search_public_wiki(
             location=location,
             location_text=location_text or "",
             lat=lat,
             lng=lng,
             radius_m=radius_m,
             now=now,
-            max_records=rss_max_records,
-            deadline=min(deadline, monotonic() + _rss_front_budget_seconds(timeout_seconds)),
-            fetch_text=text_client,
+            max_records=1,
+            deadline=min(deadline, monotonic() + _wiki_budget_seconds(timeout_seconds)),
+            fetch_json=wiki_client,
             seen_urls=seen_urls,
         )
-        accepted.extend(rss_records)
+        accepted.extend(wiki_records)
 
-    if wiki_client is not None and len(accepted) < max_records:
+    if text_client is not None:
+        rss_max_records = max_records - len(accepted)
+        rss_attempted = True
+        if rss_max_records > 0:
+            rss_records, rss_errors = _search_public_news_rss(
+                location=location,
+                location_text=location_text or "",
+                lat=lat,
+                lng=lng,
+                radius_m=radius_m,
+                now=now,
+                max_records=rss_max_records,
+                deadline=min(deadline, monotonic() + _rss_front_budget_seconds(timeout_seconds)),
+                fetch_text=text_client,
+                seen_urls=seen_urls,
+            )
+            accepted.extend(rss_records)
+
+    if wiki_client is not None and not wiki_attempted and len(accepted) < max_records:
         wiki_attempted = True
         wiki_records, wiki_errors = _search_public_wiki(
             location=location,
