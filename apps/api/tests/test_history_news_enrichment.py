@@ -48,7 +48,7 @@ def test_search_public_flood_news_builds_bounded_gdelt_metadata_query() -> None:
     params = parse_qs(parsed.query)
     assert params["mode"] == ["ArtList"]
     assert params["format"] == ["json"]
-    assert params["maxrecords"] == ["5"]
+    assert params["maxrecords"] == ["20"]
     assert "sourcecountry:TW" in params["query"][0]
     assert result.attempted is True
     assert len(result.records) == 1
@@ -152,3 +152,120 @@ def test_search_public_flood_news_returns_not_attempted_without_location() -> No
 
     assert result.attempted is False
     assert result.records == ()
+
+
+def test_search_public_flood_news_checks_previous_year_when_recent_window_misses() -> None:
+    requested_windows: list[tuple[str, str]] = []
+
+    def fetch_json(url: str, _timeout_seconds: float) -> dict[str, object]:
+        params = parse_qs(urlparse(url).query)
+        window = (params["startdatetime"][0], params["enddatetime"][0])
+        requested_windows.append(window)
+        if window != ("20250101000000", "20251231235959"):
+            return {"articles": []}
+        return {
+            "articles": [
+                {
+                    "url": "https://example.test/news/tainan-july-flood",
+                    "title": "台南安南區培安路水淹 民眾清理家園",
+                    "seendate": "20250728103000",
+                    "domain": "example.test",
+                    "sourcecountry": "TW",
+                    "language": "Chinese",
+                }
+            ]
+        }
+
+    result = search_public_flood_news(
+        location_text="台南安南區培安路",
+        lat=23.03844,
+        lng=120.21315,
+        radius_m=500,
+        now=datetime(2026, 5, 4, 3, 0, tzinfo=timezone.utc),
+        max_records=3,
+        timeout_seconds=2.5,
+        fetch_json=fetch_json,
+    )
+
+    assert ("20250101000000", "20251231235959") in requested_windows
+    assert len(result.records) == 1
+    assert result.records[0].properties["search_window"] == "2025"
+
+
+def test_search_public_flood_news_uses_public_metadata_beyond_title_for_location_match() -> None:
+    def fetch_json(url: str, _timeout_seconds: float) -> dict[str, object]:
+        query = parse_qs(urlparse(url).query)["query"][0]
+        if '"汐止區康寧街"' not in query:
+            return {"articles": []}
+        return {
+            "articles": [
+                {
+                    "url": "https://example.test/news/xizhi-flood",
+                    "title": "豪雨造成道路積水 多處交通受阻",
+                    "description": "新北市汐止區康寧街一帶水淹，住戶上午清理積水。",
+                    "seendate": "20250710120000",
+                    "domain": "example.test",
+                    "sourcecountry": "TW",
+                    "language": "Chinese",
+                }
+            ]
+        }
+
+    result = search_public_flood_news(
+        location_text="新北汐止康寧街",
+        lat=25.068,
+        lng=121.628,
+        radius_m=500,
+        now=datetime(2026, 5, 4, 3, 0, tzinfo=timezone.utc),
+        max_records=3,
+        timeout_seconds=2.5,
+        fetch_json=fetch_json,
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.title == "豪雨造成道路積水 多處交通受阻"
+    assert record.properties["location_match_scope"] == "road"
+    assert record.properties["full_text_stored"] is False
+
+
+def test_search_public_flood_news_expands_representative_taiwan_regions() -> None:
+    cases = (
+        ("台北文山木柵路", "文山區木柵路", "台北文山區木柵路豪雨淹水"),
+        ("台中太平樹孝路", "太平區樹孝路", "台中太平區樹孝路道路積水"),
+        ("高雄三民大豐一路", "三民區大豐一路", "高雄三民區大豐一路水淹"),
+        ("宜蘭羅東中正路", "羅東中正路", "宜蘭羅東中正路颱風積水"),
+        ("花蓮市中山路", "花蓮市中山路", "花蓮市中山路豪雨淹水"),
+    )
+
+    for location_text, expected_query_term, title in cases:
+
+        def fetch_json(url: str, _timeout_seconds: float) -> dict[str, object]:
+            query = parse_qs(urlparse(url).query)["query"][0]
+            if f'"{expected_query_term}"' not in query:
+                return {"articles": []}
+            return {
+                "articles": [
+                    {
+                        "url": f"https://example.test/news/{expected_query_term}",
+                        "title": title,
+                        "seendate": "20250710120000",
+                        "domain": "example.test",
+                        "sourcecountry": "TW",
+                        "language": "Chinese",
+                    }
+                ]
+            }
+
+        result = search_public_flood_news(
+            location_text=location_text,
+            lat=24.0,
+            lng=121.0,
+            radius_m=500,
+            now=datetime(2026, 5, 4, 3, 0, tzinfo=timezone.utc),
+            max_records=1,
+            timeout_seconds=2.5,
+            fetch_json=fetch_json,
+        )
+
+        assert len(result.records) == 1, location_text

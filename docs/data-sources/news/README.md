@@ -41,8 +41,9 @@ The public risk API now has a bounded local-preview enrichment path for Taiwan-w
 
 - extract the likely Taiwan location from mixed text such as `2024 高雄岡山嘉新東路 豪雨淹水新聞`;
 - derive a nearby village/neighborhood term from bundled national village centroids when the user queried by map click and did not provide text;
-- query GDELT DOC ArtList for citation metadata only;
+- query GDELT DOC ArtList for citation metadata only, using multiple bounded location terms, flood wording variants, and recent plus annual time windows so older events are not hidden by a single broad 10-year query;
 - keep only URL, title, timestamp, domain, query metadata, confidence, and query-point geometry;
+- compare the candidate title together with public metadata snippets returned by the search index, while still not storing full article text;
 - upsert accepted metadata into `evidence` through the same `source_id`/`raw_ref` idempotency constraint used by promotion;
 - return an explicit `on-demand-public-news` freshness row when the lookup succeeds, returns no results, or is rate-limited.
 
@@ -54,6 +55,12 @@ Local preview controls:
 - `HISTORICAL_NEWS_ON_DEMAND_WRITEBACK_ENABLED=true`
 - `HISTORICAL_NEWS_ON_DEMAND_MAX_RECORDS=5`
 - `HISTORICAL_NEWS_ON_DEMAND_TIMEOUT_SECONDS=4`
+
+`HISTORICAL_NEWS_ON_DEMAND_MAX_RECORDS` caps returned candidates. The live
+lookup may request a larger bounded page from the public index, currently up to
+20 records per query, then filters and deduplicates locally before returning the
+configured maximum. This improves recall for cases where a real flood article is
+present but not ranked in the first few raw search-index results.
 
 Production/staging still requires `SOURCE_NEWS_ENABLED=true` and `SOURCE_TERMS_REVIEW_ACK=true`; `HISTORICAL_NEWS_ON_DEMAND_ENABLED=false` remains the kill switch. Because GDELT may return `429`, user-facing responses must keep the historical gap visible instead of implying safety when enrichment cannot complete.
 
