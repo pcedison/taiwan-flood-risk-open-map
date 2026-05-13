@@ -18,6 +18,7 @@ const {
   getProfileBasisText,
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
+  latestNewsEvidenceLinks,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } = (await import(riskDisplayModulePath)) as typeof import("../../app/lib/risk-display");
@@ -115,6 +116,48 @@ test("evidence URL and published-at shaping prefer full-list fields", () => {
 
   assert.equal(evidenceSourceUrl(previewEvidence), "https://example.test/source");
   assert.equal(evidencePublishedAt(previewEvidence), "2026-04-30T01:00:00+08:00");
+});
+
+test("latestNewsEvidenceLinks returns newest linked news first", () => {
+  const oldLinkedNews: EvidencePreview = {
+    ...previewEvidence,
+    id: "news-old",
+    occurred_at: "2024-07-25T10:00:00+08:00",
+    source_type: "news",
+    source_url: "https://example.test/old-news",
+    title: "Old flood news",
+  };
+  const newLinkedNews: EvidencePreview = {
+    ...previewEvidence,
+    id: "news-new",
+    occurred_at: "2025-08-02T08:00:00+08:00",
+    source_type: "news",
+    source_url: "https://example.test/new-news",
+    title: "New flood news",
+  };
+  const unlinkedNews: EvidencePreview = {
+    ...previewEvidence,
+    id: "news-missing-url",
+    occurred_at: "2026-01-01T08:00:00+08:00",
+    source_type: "news",
+    source_url: null,
+    title: "Unlinked flood news",
+  };
+
+  assert.deepEqual(latestNewsEvidenceLinks([oldLinkedNews, previewEvidence, unlinkedNews, newLinkedNews], 2), [
+    {
+      id: "news-new",
+      time: "2025-08-02T08:00:00+08:00",
+      title: "New flood news",
+      url: "https://example.test/new-news",
+    },
+    {
+      id: "news-old",
+      time: "2024-07-25T10:00:00+08:00",
+      title: "Old flood news",
+      url: "https://example.test/old-news",
+    },
+  ]);
 });
 
 test("evidence full-list selection falls back to preview items", () => {

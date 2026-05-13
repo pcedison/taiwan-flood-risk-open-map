@@ -245,6 +245,7 @@ class EvidencePreview(ContractModel):
     ingested_at: datetime
     distance_to_query_m: float | None = Field(default=None, ge=0)
     confidence: float = Field(ge=0, le=1)
+    url: str | None = None
 
 
 class DataFreshness(ContractModel):

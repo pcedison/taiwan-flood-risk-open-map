@@ -165,6 +165,33 @@ export function evidenceTimeSummary(item: EvidencePreview) {
   return formatDateTime(observedAt ?? publishedAt ?? null);
 }
 
+export type NewsEvidenceLink = {
+  id: string;
+  title: string;
+  url: string;
+  time: string | null;
+};
+
+export function latestNewsEvidenceLinks(items: EvidencePreview[], limit = 3): NewsEvidenceLink[] {
+  return items
+    .filter((item) => item.source_type === "news" && Boolean(evidenceSourceUrl(item)))
+    .sort((left, right) => evidenceSortTime(right) - evidenceSortTime(left))
+    .slice(0, Math.max(0, limit))
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      url: evidenceSourceUrl(item) ?? "",
+      time: evidencePublishedAt(item) ?? item.observed_at ?? item.ingested_at ?? null,
+    }));
+}
+
+function evidenceSortTime(item: EvidencePreview) {
+  const time = evidencePublishedAt(item) ?? item.observed_at ?? item.ingested_at;
+  if (!time) return 0;
+  const parsed = Date.parse(time);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 export function selectEvidenceItems<T extends EvidencePreview>(
   previewItems: T[],
   fullListItems: T[],

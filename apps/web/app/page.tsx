@@ -22,6 +22,7 @@ import {
   getProfileBasisText,
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
+  latestNewsEvidenceLinks,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } from "./lib/risk-display";
@@ -163,6 +164,7 @@ const text = {
   profileEvidenceEmpty: "本次 profile 尚未列出逐筆摘要證據；請先看上方 profile 說明與資料限制。",
   evidenceLoading: "正在載入完整資料佐證。",
   evidenceError: "完整資料佐證載入失敗，先顯示風險摘要中的預覽資料。",
+  latestNewsSources: "最新新聞來源",
   limitations: "資料限制",
   evidenceFlood: "尚未查詢附近淹水事件。",
   evidenceRain: "查詢後會顯示雨量、水位與淹水潛勢資料。",
@@ -452,9 +454,17 @@ export default function HomePage() {
   const [reportStatus, setReportStatus] = useState<UserReportSubmissionStatus>("idle");
 
   const statusText = isMapReady ? text.mapStatusReady : text.mapStatusLoading;
-  const displayedEvidence = assessment
-    ? selectEvidenceItems(assessment.evidence, evidenceItems, evidenceStatus)
-    : [];
+  const displayedEvidence = useMemo(
+    () =>
+      assessment
+        ? selectEvidenceItems(assessment.evidence, evidenceItems, evidenceStatus)
+        : [],
+    [assessment, evidenceItems, evidenceStatus],
+  );
+  const latestNewsLinks = useMemo(
+    () => latestNewsEvidenceLinks(displayedEvidence, 3),
+    [displayedEvidence],
+  );
   const evidenceDisplayState = getEvidenceDisplayState(
     evidenceStatus,
     displayedEvidence.length,
@@ -689,7 +699,7 @@ export default function HomePage() {
         setEvidenceStatus("loading");
         try {
           const evidence = await getJson<EvidenceListResponse>(
-            `/v1/evidence/${encodeURIComponent(risk.assessment_id)}`,
+            `/v1/evidence/${encodeURIComponent(risk.assessment_id)}?page_size=100`,
             {
               signal: requestController.signal,
             },
@@ -1110,12 +1120,35 @@ export default function HomePage() {
           </div>
           {assessment ? (
             <ul className="freshness-list">
-              {assessment.data_freshness.map((item) => (
-                <li key={item.source_id}>
-                  <strong>{`${item.name}：${healthLabel(item.health_status)}`}</strong>
-                  {item.message ? <span>{item.message}</span> : null}
-                </li>
-              ))}
+              {assessment.data_freshness.map((item) => {
+                const showLatestNewsLinks =
+                  latestNewsLinks.length > 0 &&
+                  ["db-evidence", "historical-flood-records", "on-demand-public-news"].includes(
+                    item.source_id,
+                  );
+
+                return (
+                  <li key={item.source_id}>
+                    <strong>{`${item.name}：${healthLabel(item.health_status)}`}</strong>
+                    {item.message ? <span>{item.message}</span> : null}
+                    {showLatestNewsLinks ? (
+                      <div className="freshness-source-links">
+                        <span>{text.latestNewsSources}</span>
+                        <ol>
+                          {latestNewsLinks.map((link) => (
+                            <li key={link.id}>
+                              <a href={link.url} target="_blank" rel="noreferrer">
+                                {link.title}
+                              </a>
+                              <small>{formatDateTime(link.time)}</small>
+                            </li>
+                          ))}
+                        </ol>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           ) : (
             <p>{text.lastSync}</p>

@@ -1402,6 +1402,11 @@ components:
           type: number
           minimum: 0
           maximum: 1
+        url:
+          type:
+            - string
+            - "null"
+          format: uri
       additionalProperties: false
 
     EvidenceListResponse:

@@ -519,6 +519,7 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "ingested_at",
         "distance_to_query_m",
         "confidence",
+        "url",
     }
     assert payload["data_freshness"][0]["health_status"] == "healthy"
     assert payload["data_freshness"][0]["source_id"] == "cwa-rainfall"
@@ -613,6 +614,10 @@ def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> No
     assert payload["historical"]["level"] == "高"
     assert any(item["source_type"] == "news" for item in payload["evidence"])
     assert any("2025-08-02" in item["title"] for item in payload["evidence"])
+    assert any(
+        item["source_type"] == "news" and item["url"]
+        for item in payload["evidence"]
+    )
     assert payload["data_freshness"][-1]["source_id"] == "historical-flood-records"
     assert "2 筆" in payload["data_freshness"][-1]["message"]
 

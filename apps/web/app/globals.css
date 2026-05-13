@@ -873,7 +873,7 @@ button {
   list-style: none;
 }
 
-.freshness-list li {
+.freshness-list > li {
   display: grid;
   gap: 3px;
   border-left: 3px solid rgba(20, 125, 100, 0.44);
@@ -887,6 +887,43 @@ button {
 .freshness-list span {
   color: var(--muted);
   line-height: 1.45;
+}
+
+.freshness-source-links {
+  display: grid;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.freshness-source-links > span {
+  color: var(--foreground);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.freshness-source-links ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.freshness-source-links li {
+  line-height: 1.35;
+}
+
+.freshness-source-links a {
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.freshness-source-links small {
+  display: block;
+  color: var(--muted);
+  font-weight: 700;
+  margin-top: 2px;
 }
 
 @media (max-width: 800px) {

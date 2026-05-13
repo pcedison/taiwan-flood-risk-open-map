@@ -506,6 +506,7 @@ def _evidence_preview(evidence: Evidence) -> EvidencePreview:
         ingested_at=evidence.ingested_at,
         distance_to_query_m=evidence.distance_to_query_m,
         confidence=evidence.confidence,
+        url=evidence.url,
     )
 
 
