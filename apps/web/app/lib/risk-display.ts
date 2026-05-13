@@ -85,7 +85,7 @@ const layerAvailabilityLabels: Record<LayerDisplayItem["availability"], string> 
 };
 
 const dataAvailabilityLabels: Record<LayerDisplayItem["availability"], string> = {
-  available: "有命中資料",
+  available: "來源可用",
   empty: "本來源 0 命中",
   limited: "部分可用",
   pending: "等待查詢",
@@ -441,7 +441,7 @@ function layerKindLabel(value: string | null | undefined) {
   return "圖層";
 }
 
-function evidenceCountForSource(evidenceItems: EvidenceItem[], sourceId: string) {
+function evidenceCountForSource(evidenceItems: EvidenceItem[], sourceId: string): number | null {
   if (sourceId === "on-demand-public-news") {
     return evidenceItems.filter((item) =>
       Boolean(
@@ -452,7 +452,8 @@ function evidenceCountForSource(evidenceItems: EvidenceItem[], sourceId: string)
     ).length;
   }
 
-  return evidenceItems.filter((item) => item.source_id === sourceId).length;
+  const matchingCount = evidenceItems.filter((item) => item.source_id === sourceId).length;
+  return matchingCount > 0 ? matchingCount : null;
 }
 
 export function buildLayerDisplayState(input: {

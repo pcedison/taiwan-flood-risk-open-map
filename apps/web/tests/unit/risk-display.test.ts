@@ -322,12 +322,32 @@ test("layer display state uses freshness feature counts for on-demand public new
 
   assert.equal(state.items[0].featureCount, 5);
   assert.equal(state.items[0].availability, "available");
-  assert.equal(layerAvailabilityDisplayLabel(state.items[0]), "有命中資料");
+  assert.equal(layerAvailabilityDisplayLabel(state.items[0]), "來源可用");
 });
 
 test("data-source availability labels distinguish zero hits from missing map layers", () => {
   assert.equal(layerAvailabilityDisplayLabel({ availability: "empty", kind: "資料" }), "本來源 0 命中");
   assert.equal(layerAvailabilityDisplayLabel({ availability: "empty", kind: "點陣圖磚" }), "無圖層資料");
+});
+
+test("layer display state leaves non-evidence source counts unknown instead of zero", () => {
+  const state = buildLayerDisplayState({
+    dataFreshness: [
+      {
+        health_status: "healthy",
+        ingested_at: "2026-05-13T04:20:00Z",
+        message: "來源可用，但沒有逐筆證據計數。",
+        name: "中央氣象署即時雨量",
+        observed_at: "2026-05-13T04:20:00Z",
+        source_id: "cwa-rainfall",
+      },
+    ],
+    evidenceItems: [],
+  });
+
+  assert.equal(state.items[0].availability, "available");
+  assert.equal(state.items[0].featureCount, null);
+  assert.equal(layerAvailabilityDisplayLabel(state.items[0]), "來源可用");
 });
 
 test("layer display state falls back to on-demand public news source prefixes", () => {
