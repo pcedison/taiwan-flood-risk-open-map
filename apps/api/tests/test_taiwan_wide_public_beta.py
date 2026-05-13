@@ -141,11 +141,13 @@ def test_public_api_geocodes_and_assesses_all_taiwan_admin_samples(
             ]
             if len(official_history) != 1:
                 failures.append(f"{sample.name} missing official flood disaster source status")
-            elif official_history[0].get("health_status") != "healthy":
+            elif official_history[0].get("health_status") not in {"healthy", "degraded"}:
                 failures.append(
                     f"{sample.name} official flood disaster source status="
                     f"{official_history[0].get('health_status')}"
                 )
+            elif "快照" not in str(official_history[0].get("name")):
+                failures.append(f"{sample.name} official flood disaster source should be labeled as a snapshot")
         if not isinstance(payload.get("evidence"), list):
             failures.append(f"{sample.name} risk evidence should be a list")
 

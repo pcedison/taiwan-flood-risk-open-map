@@ -589,8 +589,9 @@ def test_risk_assess_surfaces_official_flood_disaster_points(
     official_status = next(
         item for item in payload["data_freshness"] if item["source_id"] == "official-flood-disaster-points"
     )
-    assert official_status["health_status"] == "healthy"
+    assert official_status["health_status"] == "degraded"
     assert "命中 1 筆" in official_status["message"]
+    assert "尚未涵蓋 2024-2026" in official_status["message"]
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
@@ -773,7 +774,7 @@ def test_risk_assess_attempts_on_demand_news_when_official_history_has_no_news(
     now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
     official_record = HistoricalFloodRecord(
         source_id="official-flood-disaster-points:test",
-        source_name="官方資料：近5年淹水災點",
+        source_name="官方資料：淹水災點快照",
         source_type="official",
         event_type="flood_report",
         title="2025 官方淹水災害情資點位",
@@ -828,9 +829,9 @@ def test_risk_assess_attempts_on_demand_news_when_official_history_has_no_news(
         lambda *_args, **_kwargs: OfficialFloodDisasterLookup(
             attempted=True,
             source_id="official-flood-disaster-points",
-            name="官方資料：近5年淹水災點",
-            health_status="healthy",
-            message="官方近5年淹水災點資料命中 1 筆。",
+            name="官方資料：淹水災點快照（2025）",
+            health_status="degraded",
+            message="官方淹水災點快照命中 1 筆；本地快照涵蓋 2025；",
             records=((official_record, 80.0),),
             observed_at=official_record.occurred_at,
             ingested_at=now,
@@ -930,9 +931,9 @@ def test_risk_assess_attempts_on_demand_news_when_history_store_is_unavailable(
         lambda *_args, **_kwargs: OfficialFloodDisasterLookup(
             attempted=True,
             source_id="official-flood-disaster-points",
-            name="官方資料：近5年淹水災點",
-            health_status="healthy",
-            message="官方近5年淹水災點資料已查詢，半徑內未命中。",
+            name="官方資料：淹水災點快照（2018-2022）",
+            health_status="degraded",
+            message="官方淹水災點快照已查詢；本地快照涵蓋 2018-2022；此單一官方快照來源半徑內 0 筆命中。",
             records=(),
         ),
     )

@@ -21,7 +21,7 @@ Machine-readable catalog:
 | Realtime rainfall | Central Weather Administration automatic rainfall observations | https://data.gov.tw/dataset/9177 | Keep as the primary rainfall adapter. Dataset 9177 maps to `O-A0002-001`, updates every 10 minutes, and exposes station coordinates plus 10m/1h/3h/6h/12h/24h precipitation fields. |
 | Realtime water level | Water Resources Agency realtime water-level observations | https://data.gov.tw/dataset/25768 | Keep as the primary water-level adapter. Use with station metadata and show raw-data limitations because observations are not fully QC checked and can be interrupted. |
 | Planning/historical flood potential | Water Resources Agency flood-potential maps | https://data.gov.tw/dataset/25766 | Prefer this as the canonical flood-potential import source. It is planning/reference data, not a live flood warning and not a land-use control basis. |
-| Observed historical flood points | National Science and Technology Council flood disaster points | https://data.gov.tw/dataset/130016 | Add as the primary official observed historical flood-point source. It provides year, TWD97 point coordinates, and source agency label for flood disaster information; use it before public-news corroboration. |
+| Observed historical flood points | National Science and Technology Council flood disaster points | https://data.gov.tw/dataset/130016 | Use as an official observed historical flood-point snapshot, not rolling current-year coverage. It provides year, TWD97 point coordinates, and source agency label for flood disaster information; use it before public-news/wiki corroboration, but label its coverage window. |
 | Flood warning layer | Water Resources Agency flood warning dataset | https://data.gov.tw/dataset/5982 | Candidate for Phase 4 warning layer and source freshness monitoring. Do not mix it with historical flood-potential scoring until parser, cadence, and alert semantics are implemented. |
 | Village/admin fallback geocoder | National Land Surveying and Mapping Center village boundaries | https://data.gov.tw/dataset/7438 | Keep as the village/admin fallback source. It supports admin-area search and profile shard building, but it is not a doorplate/road-geometry source. |
 | Shelter POI geocoder | National Fire Agency shelter point file | https://data.gov.tw/dataset/73242 | Keep as POI search enrichment and future public safety layer. It should not change flood-risk scoring by itself. |
@@ -58,9 +58,10 @@ Machine-readable catalog:
   says it cannot be used as a live event simulation, land-use control basis, or
   land-development restriction basis.
 - Dataset 130016 currently lists a CSV resource with fields `FID`, `year`,
-  `X_97`, `Y_97`, and `source`, 998 records, modified on 2025-11-04, and notes
-  that the data was produced in 2023. It is a historical point dataset, not a
-  depth or address-level event log.
+  `X_97`, `Y_97`, and `source`, and notes that the data was produced in 2023.
+  A direct 2026-05-13 resource download returned 5,923 rows covering 2018-2022
+  only, with no 2023-2026 rows. It is a historical point snapshot, not a depth,
+  address-level, or rolling current-year event log.
 - Dataset 5982 currently lists WRA v2 CSV/JSON/XML resources for flood warning
   KML inventory data. It is useful, but it needs a separate parser and warning
   semantics before entering scoring.
@@ -88,9 +89,10 @@ Machine-readable catalog:
    worker adapter targets.
 2. Continue flood-potential import from reviewed WRA packages with checksum and
    scenario evidence; align any future import manifest to dataset 25766.
-3. Add dataset 130016 as an official observed historical flood-point source,
-   convert TWD97 / TM2 coordinates to WGS84, and present it separately from
-   flood-potential planning polygons.
+3. Keep dataset 130016 as an official observed historical flood-point snapshot,
+   convert TWD97 / TM2 coordinates to WGS84, present its coverage years in the
+   UI/API, and do not treat 0 hits as evidence against 2023-2026 wiki/news
+   flood records.
 4. Keep geocoder imports based on dataset 7438, dataset 73242, road-name
    dataset 35321, and local reviewed open datasets until a nationwide
    doorplate source is approved. The import manifest now propagates these

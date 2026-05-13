@@ -1373,7 +1373,7 @@ def _on_demand_public_news_result(
             attempted=bool(location_text),
             source_id="on-demand-public-news",
             message=(
-                "公開新聞即時補查未啟用；系統仍會使用已匯入的官方災點、"
+                "公開新聞／Wiki 即時補查未啟用；系統仍會使用已匯入的官方快照、"
                 "歷史事件與 citation-only 新聞證據。"
             ),
             records=(),
@@ -1498,7 +1498,7 @@ def _on_demand_data_freshness(
     return [
         DataFreshness(
             source_id=result.source_id,
-            name="公開新聞即時補查",
+            name="公開新聞／Wiki 即時補查",
             health_status=result.health_status if not result.records else "healthy",
             observed_at=max(
                 (record.observed_at for record in result.records if record.observed_at is not None),

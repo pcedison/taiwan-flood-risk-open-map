@@ -55,13 +55,14 @@ def test_lookup_official_flood_disaster_points_uses_local_snapshot(tmp_path) -> 
     )
 
     assert lookup.attempted is True
-    assert lookup.health_status == "healthy"
-    assert lookup.name == "官方資料：近5年淹水災點（快照 2023）"
+    assert lookup.health_status == "degraded"
+    assert lookup.name == "官方資料：淹水災點快照（2023）"
     assert len(lookup.records) == 1
     assert lookup.records[0][0].source_id == "data-gov-130016:2023:EMIC:0"
     assert lookup.records[0][1] < 5
     assert "命中 1 筆" in lookup.message
     assert "本地快照涵蓋 2023" in lookup.message
+    assert "尚未涵蓋 2024-2026" in lookup.message
 
 
 def test_lookup_official_flood_disaster_points_explains_zero_hit_scope(tmp_path) -> None:
@@ -85,11 +86,12 @@ def test_lookup_official_flood_disaster_points_explains_zero_hit_scope(tmp_path)
         now=datetime(2026, 5, 13, 0, 0, tzinfo=timezone.utc),
     )
 
-    assert lookup.health_status == "healthy"
-    assert lookup.name == "官方資料：近5年淹水災點（快照 2023）"
+    assert lookup.health_status == "degraded"
+    assert lookup.name == "官方資料：淹水災點快照（2023）"
     assert lookup.records == ()
     assert "本地快照涵蓋 2023" in lookup.message
-    assert "單一官方來源半徑內 0 筆命中" in lookup.message
+    assert "尚未涵蓋 2024-2026" in lookup.message
+    assert "單一官方快照來源半徑內 0 筆命中" in lookup.message
     assert "不代表該地點沒有淹水紀錄" in lookup.message
 
 

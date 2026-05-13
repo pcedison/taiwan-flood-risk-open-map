@@ -15,7 +15,7 @@ DATA_GOV_DATASET_ID = "130016"
 DATA_GOV_URL = "https://data.gov.tw/dataset/130016"
 RESOURCE_URL = "https://mas.nstc.gov.tw/OPENDATA/GetFile?fileodr=1&format=csv&serialno=455"
 SOURCE_ID = "official-flood-disaster-points"
-SOURCE_NAME = "官方資料：近5年淹水災點"
+SOURCE_NAME = "官方資料：淹水災點快照"
 _TAIWAN_TZ = timezone(timedelta(hours=8))
 
 
@@ -81,9 +81,12 @@ def lookup_official_flood_disaster_points(
             ingested_at=now,
         )
 
-    coverage_years = _record_year_span(records)
+    coverage_bounds = _record_year_bounds(records)
+    coverage_years = _format_year_span(coverage_bounds)
     source_name = _source_name_with_coverage(coverage_years)
     coverage_note = _coverage_note(coverage_years)
+    coverage_gap_note = _coverage_gap_note(coverage_bounds, now=now)
+    health_status = _snapshot_health_status(coverage_bounds, now=now)
 
     matches: list[tuple[HistoricalFloodRecord, float]] = []
     for record in records:
@@ -98,10 +101,11 @@ def lookup_official_flood_disaster_points(
             attempted=True,
             source_id=SOURCE_ID,
             name=source_name,
-            health_status="healthy",
+            health_status=health_status,
             message=(
-                f"官方近5年淹水災點資料命中 {len(ordered)} 筆；"
-                f"{coverage_note}此資料提供年度與點位，作為官方歷史淹水事件佐證。"
+                f"官方淹水災點快照命中 {len(ordered)} 筆；"
+                f"{coverage_note}{coverage_gap_note}"
+                "此資料提供年度與點位，作為官方歷史淹水事件佐證。"
             ),
             records=ordered,
             observed_at=latest_observed,
@@ -111,9 +115,10 @@ def lookup_official_flood_disaster_points(
         attempted=True,
         source_id=SOURCE_ID,
         name=source_name,
-        health_status="healthy",
+        health_status=health_status,
         message=(
-            f"官方近5年淹水災點資料已查詢；{coverage_note}此單一官方來源半徑內 0 筆命中。"
+            f"官方淹水災點快照已查詢；{coverage_note}{coverage_gap_note}"
+            "此單一官方快照來源半徑內 0 筆命中。"
             "若事件未收錄於此官方快照，請以歷史淹水紀錄與公開新聞來源佐證；"
             "這不代表該地點沒有淹水紀錄。"
         ),
@@ -248,25 +253,57 @@ def _freshness_score(year: int) -> float:
     return 0.74
 
 
-def _record_year_span(records: tuple[HistoricalFloodRecord, ...]) -> str | None:
+def _record_year_bounds(records: tuple[HistoricalFloodRecord, ...]) -> tuple[int, int] | None:
     years = sorted({record.occurred_at.year for record in records})
     if not years:
         return None
-    if len(years) == 1:
-        return str(years[0])
-    return f"{years[0]}-{years[-1]}"
+    return (years[0], years[-1])
+
+
+def _format_year_span(bounds: tuple[int, int] | None) -> str | None:
+    if bounds is None:
+        return None
+    start_year, end_year = bounds
+    if start_year == end_year:
+        return str(start_year)
+    return f"{start_year}-{end_year}"
 
 
 def _source_name_with_coverage(coverage_years: str | None) -> str:
     if not coverage_years:
         return SOURCE_NAME
-    return f"{SOURCE_NAME}（快照 {coverage_years}）"
+    return f"{SOURCE_NAME}（{coverage_years}）"
 
 
 def _coverage_note(coverage_years: str | None) -> str:
     if not coverage_years:
         return ""
     return f"本地快照涵蓋 {coverage_years}；"
+
+
+def _coverage_gap_note(bounds: tuple[int, int] | None, *, now: datetime) -> str:
+    if bounds is None:
+        return ""
+    _, end_year = bounds
+    current_year = now.astimezone(_TAIWAN_TZ).year
+    if end_year >= current_year:
+        return ""
+    missing_start = end_year + 1
+    missing_range = (
+        str(missing_start) if missing_start == current_year else f"{missing_start}-{current_year}"
+    )
+    return f"此官方快照尚未涵蓋 {missing_range}；"
+
+
+def _snapshot_health_status(
+    bounds: tuple[int, int] | None,
+    *,
+    now: datetime,
+) -> Literal["healthy", "degraded"]:
+    if bounds is None:
+        return "degraded"
+    _, end_year = bounds
+    return "healthy" if end_year >= now.astimezone(_TAIWAN_TZ).year else "degraded"
 
 
 def _haversine_m(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:

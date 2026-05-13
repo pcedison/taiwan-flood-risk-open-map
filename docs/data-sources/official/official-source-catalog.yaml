@@ -53,19 +53,21 @@ sources:
       - "Must not be used as land-use control or legal determination evidence."
   - key: official.nstc.flood_disaster_points
     need: observed_historical_flood_points
-    status: primary
+    status: official_snapshot
     data_gov_dataset_id: "130016"
     data_gov_url: "https://data.gov.tw/dataset/130016"
-    title: "Flooding disaster points in the past 5 years"
+    title: "Flooding disaster point snapshot"
     provider: "National Science and Technology Council"
     resource_url: "https://mas.nstc.gov.tw/OPENDATA/GetFile?fileodr=1&format=csv&serialno=455"
     resource_format: "CSV"
     update_frequency: "irregular"
     license: "Government Open Data License, version 1.0"
-    integration_decision: "Use as the canonical official observed historical flood-point source before news corroboration."
+    integration_decision: "Use as an official observed historical flood-point snapshot before news/wiki corroboration; do not treat it as rolling current-year coverage."
     limitations:
+      - "Direct 2026-05-13 resource download returned 5,923 rows covering 2018-2022 only; no 2023-2026 events are present."
       - "Provides year and point coordinates only, not full event timestamps, depth, address, or impact details."
       - "Source coordinates are TWD97 / TM2 and must be converted to EPSG:4326 before spatial queries."
+      - "Recent flood facts must be corroborated through public news/wiki metadata or other separately modeled official sources, not merged into this official snapshot."
   - key: official.wra.flood_warning
     need: realtime_flood_warning
     status: phase4_candidate
