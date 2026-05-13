@@ -24,6 +24,7 @@ import {
   getUserReportSubmissionDisplayState,
   layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
+  latestNewsLinksFreshnessSourceId,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } from "./lib/risk-display";
@@ -455,6 +456,10 @@ export default function HomePage() {
   const latestNewsLinks = useMemo(
     () => latestNewsEvidenceLinks(displayedEvidence, 3),
     [displayedEvidence],
+  );
+  const latestNewsLinkSourceId = useMemo(
+    () => latestNewsLinksFreshnessSourceId(assessment?.data_freshness ?? [], displayedEvidence),
+    [assessment?.data_freshness, displayedEvidence],
   );
   const evidenceDisplayState = getEvidenceDisplayState(
     evidenceStatus,
@@ -1113,10 +1118,7 @@ export default function HomePage() {
             <ul className="freshness-list">
               {assessment.data_freshness.map((item) => {
                 const showLatestNewsLinks =
-                  latestNewsLinks.length > 0 &&
-                  ["db-evidence", "historical-flood-records", "on-demand-public-news"].includes(
-                    item.source_id,
-                  );
+                  latestNewsLinks.length > 0 && item.source_id === latestNewsLinkSourceId;
 
                 return (
                   <li key={item.source_id}>

@@ -20,6 +20,7 @@ const {
   getUserReportSubmissionDisplayState,
   layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
+  latestNewsLinksFreshnessSourceId,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } = (await import(riskDisplayModulePath)) as typeof import("../../app/lib/risk-display");
@@ -323,6 +324,53 @@ test("layer display state uses freshness feature counts for on-demand public new
   assert.equal(state.items[0].featureCount, 5);
   assert.equal(state.items[0].availability, "available");
   assert.equal(layerAvailabilityDisplayLabel(state.items[0]), "來源可用");
+});
+
+test("latest news links are attached to one freshness source only", () => {
+  const dataFreshness = [
+    {
+      feature_count: 12,
+      health_status: "healthy",
+      ingested_at: "2026-05-13T03:50:00Z",
+      message: "查詢半徑內找到 12 筆已審核歷史資料。",
+      name: "歷史淹水紀錄與公開新聞",
+      observed_at: "2026-04-23T02:28:00Z",
+      source_id: "db-evidence",
+    },
+    {
+      feature_count: 2,
+      health_status: "healthy",
+      ingested_at: "2026-05-13T03:50:00Z",
+      message: "已從公開新聞/百科索引補查並整理 2 筆候選淹水事件。",
+      name: "公開新聞／Wiki 即時補查",
+      observed_at: "2026-04-23T02:28:00Z",
+      source_id: "on-demand-public-news",
+    },
+  ];
+
+  assert.equal(
+    latestNewsLinksFreshnessSourceId(dataFreshness, [
+      {
+        ...fullEvidence,
+        id: "rss-news",
+        source_id: "public-news-rss:abc",
+        source_type: "news",
+      },
+    ]),
+    "on-demand-public-news",
+  );
+
+  assert.equal(
+    latestNewsLinksFreshnessSourceId([dataFreshness[0]], [
+      {
+        ...fullEvidence,
+        id: "db-news",
+        source_id: "news:stored",
+        source_type: "news",
+      },
+    ]),
+    "db-evidence",
+  );
 });
 
 test("data-source availability labels distinguish zero hits from missing map layers", () => {

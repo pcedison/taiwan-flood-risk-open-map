@@ -391,11 +391,13 @@ def test_search_public_flood_news_accepts_rss_admin_context_when_road_title_is_b
 
 def test_search_public_flood_news_rss_reaches_2023_queries() -> None:
     requested_queries: list[str] = []
+    requested_feed_urls: list[str] = []
 
     def fetch_json(_url: str, _timeout_seconds: float) -> dict[str, object]:
         return {"articles": []}
 
     def fetch_text(url: str, _timeout_seconds: float) -> str:
+        requested_feed_urls.append(url)
         requested_queries.append(parse_qs(urlparse(url).query)["q"][0])
         return """<?xml version="1.0" encoding="utf-8" ?>
         <rss version="2.0"><channel></channel></rss>
@@ -413,6 +415,8 @@ def test_search_public_flood_news_rss_reaches_2023_queries() -> None:
         fetch_text=fetch_text,
     )
 
+    assert any("www.bing.com" in url for url in requested_feed_urls)
+    assert any("2024" in query for query in requested_queries)
     assert any("2023" in query for query in requested_queries)
 
 

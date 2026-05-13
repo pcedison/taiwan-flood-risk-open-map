@@ -595,15 +595,17 @@ def _public_news_rss_urls(
     now: datetime,
 ) -> tuple[str, ...]:
     queries = _public_news_rss_queries(location, location_text=location_text, now=now)
-    google_urls = [
-        f"{GOOGLE_NEWS_RSS_ENDPOINT}?{urlencode({'q': query, 'hl': 'zh-TW', 'gl': 'TW', 'ceid': 'TW:zh-Hant'})}"
-        for query in queries
-    ]
-    bing_urls = [
-        f"{BING_NEWS_RSS_ENDPOINT}?{urlencode({'q': query, 'format': 'rss', 'mkt': 'zh-TW'})}"
-        for query in queries[:2]
-    ]
-    return _dedupe([*google_urls, *bing_urls], limit=8)
+    urls: list[str] = []
+    for query in queries:
+        urls.append(
+            f"{GOOGLE_NEWS_RSS_ENDPOINT}?"
+            f"{urlencode({'q': query, 'hl': 'zh-TW', 'gl': 'TW', 'ceid': 'TW:zh-Hant'})}"
+        )
+        urls.append(
+            f"{BING_NEWS_RSS_ENDPOINT}?"
+            f"{urlencode({'q': query, 'format': 'rss', 'mkt': 'zh-TW'})}"
+        )
+    return _dedupe(urls, limit=16)
 
 
 def _rss_search_targets(location: str) -> tuple[_SearchTarget, ...]:

@@ -595,6 +595,95 @@ def test_risk_assess_surfaces_official_flood_disaster_points(
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
+def test_display_evidence_items_collapses_repeated_official_disaster_points() -> None:
+    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
+    items = [
+        public_routes.Evidence(
+            id="official-2018",
+            source_id="data-gov-130016:2018:EMIC:1",
+            source_type="official",
+            event_type="flood_report",
+            title="2018 官方淹水災害情資點位（EMIC #1）",
+            summary="官方淹水災點快照命中。",
+            url="https://data.gov.tw/dataset/130016",
+            occurred_at=datetime.fromisoformat("2018-12-31T12:00:00+08:00"),
+            observed_at=datetime.fromisoformat("2018-12-31T12:00:00+08:00"),
+            ingested_at=now,
+            point=public_routes.LatLng(lat=23.0, lng=120.2),
+            geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[120.2, 23.0]),
+            distance_to_query_m=42.0,
+            confidence=0.82,
+            freshness_score=0.74,
+            source_weight=1.0,
+            privacy_level="public",
+            raw_ref="historical-record:data-gov-130016:2018:EMIC:1",
+        ),
+        public_routes.Evidence(
+            id="official-2020",
+            source_id="data-gov-130016:2020:EMIC:2",
+            source_type="official",
+            event_type="flood_report",
+            title="2020 官方淹水災害情資點位（EMIC #2）",
+            summary="官方淹水災點快照命中。",
+            url="https://data.gov.tw/dataset/130016",
+            occurred_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
+            observed_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
+            ingested_at=now,
+            point=public_routes.LatLng(lat=23.0, lng=120.2),
+            geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[120.2, 23.0]),
+            distance_to_query_m=80.0,
+            confidence=0.86,
+            freshness_score=0.82,
+            source_weight=1.0,
+            privacy_level="public",
+            raw_ref="historical-record:data-gov-130016:2020:EMIC:2",
+        ),
+    ]
+
+    displayed = public_routes._display_evidence_items(items)
+
+    assert len(displayed) == 1
+    assert displayed[0].source_id == "data-gov-130016:summary"
+    assert displayed[0].title == "官方淹水災害情資點位彙整（2018、2020）"
+    assert "命中 2 筆" in displayed[0].summary
+    assert "風險計分仍使用原始命中點位" in displayed[0].summary
+
+
+def test_public_news_failure_is_not_promoted_when_history_exists() -> None:
+    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
+    official_record = HistoricalFloodRecord(
+        source_id="official-flood-disaster-points:test",
+        source_name="官方資料：淹水災點快照",
+        source_type="official",
+        event_type="flood_report",
+        title="2020 官方淹水災害情資點位",
+        summary="官方資料命中。",
+        url="https://data.gov.tw/dataset/130016",
+        occurred_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
+        ingested_at=now,
+        lat=23.0,
+        lng=120.2,
+        confidence=0.82,
+        freshness_score=0.82,
+        source_weight=1.0,
+        risk_factor=1.0,
+    )
+    limitations = public_routes._visible_source_limitations(
+        public_routes.OfficialRealtimeBundle(observations=(), source_statuses=()),
+        ((official_record, 30.0),),
+        None,
+        public_routes.OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="on-demand-public-news",
+            message="公開新聞、RSS 或百科索引暫時無法完整回應；保留既有資料。",
+            records=(),
+            health_status="degraded",
+        ),
+    )
+
+    assert limitations == []
+
+
 def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> None:
     monkeypatch.setattr(
         public_routes,

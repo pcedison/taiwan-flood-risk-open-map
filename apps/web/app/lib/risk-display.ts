@@ -196,6 +196,12 @@ export type NewsEvidenceLink = {
   time: string | null;
 };
 
+const historicalFreshnessSourceIds = new Set([
+  "db-evidence",
+  "historical-flood-records",
+  "on-demand-public-news",
+]);
+
 export function latestNewsEvidenceLinks(items: EvidencePreview[], limit = 3): NewsEvidenceLink[] {
   return items
     .filter((item) => item.source_type === "news" && Boolean(evidenceSourceUrl(item)))
@@ -207,6 +213,28 @@ export function latestNewsEvidenceLinks(items: EvidencePreview[], limit = 3): Ne
       url: evidenceSourceUrl(item) ?? "",
       time: evidencePublishedAt(item) ?? item.observed_at ?? item.ingested_at ?? null,
     }));
+}
+
+export function latestNewsLinksFreshnessSourceId(
+  dataFreshness: DataFreshnessItem[],
+  evidenceItems: Array<EvidencePreview & { source_id?: string | null }>,
+) {
+  const hasNewsLinks = latestNewsEvidenceLinks(evidenceItems, 1).length > 0;
+  if (!hasNewsLinks) return null;
+
+  const onDemand = dataFreshness.find((item) => item.source_id === "on-demand-public-news");
+  const hasOnDemandEvidence = evidenceItems.some((item) =>
+    Boolean(
+      item.source_id?.startsWith("public-news-rss:") ||
+        item.source_id?.startsWith("public-wiki:") ||
+        item.source_id?.startsWith("gdelt-on-demand:"),
+    ),
+  );
+  if (onDemand && ((onDemand.feature_count ?? 0) > 0 || hasOnDemandEvidence)) {
+    return onDemand.source_id;
+  }
+
+  return dataFreshness.find((item) => historicalFreshnessSourceIds.has(item.source_id))?.source_id ?? null;
 }
 
 function evidenceSortTime(item: EvidencePreview) {

@@ -96,6 +96,7 @@ NOMINATIM_USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
 OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
+OFFICIAL_FLOOD_DISASTER_SOURCE_PREFIX = "data-gov-130016:"
 OFFICIAL_DATA_GOV_URLS = {
     "rainfall": "https://data.gov.tw/dataset/9177",
     "water_level": "https://data.gov.tw/dataset/25768",
@@ -946,6 +947,11 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
 
 
 def _display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
+    evidence_items = _collapse_official_flood_disaster_items(evidence_items)
+    return _collapse_flood_potential_items(evidence_items)
+
+
+def _collapse_flood_potential_items(evidence_items: list[Evidence]) -> list[Evidence]:
     flood_potential_items = [
         item for item in evidence_items if item.event_type == "flood_potential"
     ]
@@ -965,6 +971,90 @@ def _display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
         }
     )
     return [*non_flood_potential_items, representative]
+
+
+def _collapse_official_flood_disaster_items(evidence_items: list[Evidence]) -> list[Evidence]:
+    official_items = [
+        item for item in evidence_items if _is_official_flood_disaster_item(item)
+    ]
+    if len(official_items) <= 1:
+        return evidence_items
+
+    representative = _official_flood_disaster_summary_item(official_items)
+    collapsed: list[Evidence] = []
+    inserted = False
+    for item in evidence_items:
+        if not _is_official_flood_disaster_item(item):
+            collapsed.append(item)
+            continue
+        if not inserted:
+            collapsed.append(representative)
+            inserted = True
+    return collapsed
+
+
+def _is_official_flood_disaster_item(item: Evidence) -> bool:
+    return (
+        item.source_type == "official"
+        and item.event_type == "flood_report"
+        and item.source_id.startswith(OFFICIAL_FLOOD_DISASTER_SOURCE_PREFIX)
+    )
+
+
+def _official_flood_disaster_summary_item(items: list[Evidence]) -> Evidence:
+    closest_item = min(
+        items,
+        key=lambda item: item.distance_to_query_m
+        if item.distance_to_query_m is not None
+        else float("inf"),
+    )
+    latest_observed = max(
+        (item.observed_at or item.occurred_at for item in items if item.observed_at or item.occurred_at),
+        default=closest_item.observed_at or closest_item.occurred_at,
+    )
+    years = sorted(
+        {
+            value.year
+            for item in items
+            for value in (item.observed_at or item.occurred_at,)
+            if value is not None
+        }
+    )
+    year_label = _year_label(years)
+    return closest_item.model_copy(
+        update={
+            "id": stable_uuid(
+                "official-flood-disaster-summary",
+                len(items),
+                ",".join(sorted(item.source_id for item in items)),
+            ),
+            "source_id": "data-gov-130016:summary",
+            "title": f"官方淹水災害情資點位彙整（{year_label}）",
+            "summary": (
+                f"查詢半徑內命中 {len(items)} 筆 data.gov.tw 130016 官方淹水災點快照，"
+                f"命中年份：{year_label}。已合併為一筆代表資料顯示，以避免同一官方快照"
+                "在證據清單重複佔版面；風險計分仍使用原始命中點位。"
+            ),
+            "observed_at": latest_observed,
+            "occurred_at": latest_observed,
+            "distance_to_query_m": min(
+                (item.distance_to_query_m for item in items if item.distance_to_query_m is not None),
+                default=None,
+            ),
+            "confidence": max(item.confidence for item in items),
+            "freshness_score": max(item.freshness_score for item in items),
+            "source_weight": max(item.source_weight for item in items),
+            "raw_ref": f"historical-record:data-gov-130016:summary:{len(items)}",
+        }
+    )
+
+
+def _year_label(years: list[int]) -> str:
+    if not years:
+        return "年份未提供"
+    if len(years) <= 3:
+        return "、".join(str(year) for year in years)
+    return f"{years[0]}-{years[-1]}"
 
 
 def _can_use_profile_fast_path(db_evidence_items: tuple[Evidence, ...] | None) -> bool:
@@ -1844,20 +1934,16 @@ def _visible_source_limitations(
             "查詢半徑內尚未匯入實際歷史淹水事件或公開新聞紀錄；"
             "目前資料不足，淹水潛勢圖資只能作為情境參考，不能標記為低風險或購屋安全。"
         )
-    if (
-        on_demand_news.attempted
-        and not on_demand_news.records
-        and on_demand_news.message
-        and on_demand_news.health_status == "disabled"
-    ):
-        limitations.append(on_demand_news.message)
-    elif on_demand_news.attempted and not on_demand_news.records and on_demand_news.message:
+    if on_demand_news.attempted and not on_demand_news.records and on_demand_news.message and not has_historical_event:
         news_message = on_demand_news.message.rstrip()
         separator = "" if news_message.endswith(("。", ".", "！", "!", "？", "?")) else "。"
-        limitations.append(
-            f"公開新聞補查未取得可用事件：{news_message}{separator}"
-            "這代表資料仍不足，不代表該地點沒有淹水紀錄。"
-        )
+        if on_demand_news.health_status == "disabled":
+            limitations.append(news_message)
+        else:
+            limitations.append(
+                f"公開新聞補查未取得可用事件：{news_message}{separator}"
+                "這代表資料仍不足，不代表該地點沒有淹水紀錄。"
+            )
     return limitations
 
 
