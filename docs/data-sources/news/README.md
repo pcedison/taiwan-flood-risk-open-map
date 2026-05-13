@@ -45,7 +45,7 @@ The public risk API now has a bounded local-preview enrichment path for Taiwan-w
 - keep only URL, title, timestamp, domain, query metadata, confidence, and query-point geometry;
 - compare the candidate title together with public metadata snippets returned by the search index, while still not storing full article text;
 - query public news RSS/search metadata sources such as Google News RSS and Bing News RSS/search result feeds before GDELT so a slow or rate-limited single index does not hide available public citations; query ordering now includes older year terms such as 2023 instead of only the most recent one or two years;
-- query public wiki/encyclopedia metadata from zh.wikipedia.org and zh.wikinews.org as citation-only fallback when disaster events are documented there but do not appear in ordinary news indexes;
+- query public wiki/encyclopedia metadata from Wikimedia REST search, zh.wikipedia.org, and zh.wikinews.org as citation-only fallback when disaster events are documented there but do not appear in ordinary news indexes;
 - RSS/search fallback still stores only citation metadata. Exact road matches require road plus administrative context when the road name is common, while broader same-admin-area matches are downgraded to admin-area evidence instead of being treated as precise road evidence;
 - upsert accepted metadata into `evidence` through the same `source_id`/`raw_ref` idempotency constraint used by promotion;
 - return an explicit `on-demand-public-news` freshness row when the lookup succeeds, returns no results, or is rate-limited.

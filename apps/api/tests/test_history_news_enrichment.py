@@ -423,10 +423,27 @@ def test_search_public_flood_news_uses_wiki_public_metadata_fallback() -> None:
         return {"articles": []}
 
     def fetch_wiki_json(url: str, _timeout_seconds: float) -> dict[str, object]:
-        query = parse_qs(urlparse(url).query)["srsearch"][0]
+        params = parse_qs(urlparse(url).query)
+        query = (params.get("q") or params.get("srsearch") or [""])[0]
         requested_wiki_queries.append(query)
         if "2023" not in query:
-            return {"query": {"search": []}}
+            return {"pages": []} if "api.wikimedia.org" in url else {"query": {"search": []}}
+        if "api.wikimedia.org" in url:
+            return {
+                "pages": [
+                    {
+                        "key": "2023年9月嘉義暴雨",
+                        "title": "2023年9月嘉義暴雨",
+                        "excerpt": (
+                            '<span class="searchmatch">2023</span>年9月'
+                            '<span class="searchmatch">嘉義</span>縣與'
+                            '<span class="searchmatch">嘉義市</span>持續暴雨，'
+                            "造成道路淹水與災情。"
+                        ),
+                        "description": "指嘉義縣與嘉義市於2023年9月發生的天災事件",
+                    }
+                ]
+            }
         return {
             "query": {
                 "search": [

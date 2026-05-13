@@ -33,6 +33,7 @@ ZH_WIKIPEDIA_API_ENDPOINT = "https://zh.wikipedia.org/w/api.php"
 ZH_WIKIPEDIA_PAGE_ENDPOINT = "https://zh.wikipedia.org/wiki/"
 ZH_WIKINEWS_API_ENDPOINT = "https://zh.wikinews.org/w/api.php"
 ZH_WIKINEWS_PAGE_ENDPOINT = "https://zh.wikinews.org/wiki/"
+WIKIMEDIA_REST_SEARCH_ENDPOINT = "https://api.wikimedia.org/core/v1/wikipedia/zh/search/page"
 PRIMARY_FLOOD_TERMS = ("淹水", "積淹水", "積水", "水淹", "水災", "水患", "泡水")
 CONTEXT_FLOOD_TERMS = (
     "豪雨",
@@ -111,6 +112,7 @@ class _WikiSource:
     api_url: str
     page_url: str
     domain: str
+    api_kind: str
 
 
 @dataclass(frozen=True)
@@ -127,8 +129,24 @@ class _SearchWindow:
 
 
 _WIKI_SOURCES = (
-    _WikiSource(ZH_WIKIPEDIA_API_ENDPOINT, ZH_WIKIPEDIA_PAGE_ENDPOINT, "zh.wikipedia.org"),
-    _WikiSource(ZH_WIKINEWS_API_ENDPOINT, ZH_WIKINEWS_PAGE_ENDPOINT, "zh.wikinews.org"),
+    _WikiSource(
+        WIKIMEDIA_REST_SEARCH_ENDPOINT,
+        ZH_WIKIPEDIA_PAGE_ENDPOINT,
+        "zh.wikipedia.org",
+        "wikimedia_rest",
+    ),
+    _WikiSource(
+        ZH_WIKIPEDIA_API_ENDPOINT,
+        ZH_WIKIPEDIA_PAGE_ENDPOINT,
+        "zh.wikipedia.org",
+        "mediawiki_query",
+    ),
+    _WikiSource(
+        ZH_WIKINEWS_API_ENDPOINT,
+        ZH_WIKINEWS_PAGE_ENDPOINT,
+        "zh.wikinews.org",
+        "mediawiki_query",
+    ),
 )
 
 
@@ -416,7 +434,7 @@ def _fetch_json(url: str, timeout_seconds: float) -> Mapping[str, Any]:
         url,
         headers={
             "Accept": "application/json",
-            "User-Agent": "FloodRiskTaiwan/0.1 on-demand-public-news",
+            "User-Agent": "FloodRiskTaiwan/0.1 (https://floodrisk.cc; public citation metadata)",
         },
         method="GET",
     )
@@ -530,7 +548,7 @@ def _search_public_wiki(
                     errors += 1
                     return accepted, errors
                 payload = fetch_json(
-                    _wiki_search_url(source.api_url, query),
+                    _wiki_search_url(source, query),
                     min(1.2, max(0.45, remaining_seconds)),
                 )
                 if not payload:
@@ -663,7 +681,10 @@ def _public_wiki_queries(
     return _dedupe(queries, limit=12)
 
 
-def _wiki_search_url(api_url: str, query: str) -> str:
+def _wiki_search_url(source: _WikiSource, query: str) -> str:
+    if source.api_kind == "wikimedia_rest":
+        return f"{source.api_url}?{urlencode({'q': query, 'limit': '5'})}"
+
     params = urlencode(
         {
             "action": "query",
@@ -676,7 +697,7 @@ def _wiki_search_url(api_url: str, query: str) -> str:
             "utf8": "1",
         }
     )
-    return f"{api_url}?{params}"
+    return f"{source.api_url}?{params}"
 
 
 def _wiki_articles(
@@ -685,6 +706,11 @@ def _wiki_articles(
     source: _WikiSource,
     query: str,
 ) -> tuple[Mapping[str, Any], ...]:
+    query_url = _wiki_search_url(source, query)
+    rest_items = payload.get("pages")
+    if isinstance(rest_items, list):
+        return _wikimedia_rest_articles(rest_items, source=source, query_url=query_url, query=query)
+
     query_payload = payload.get("query")
     if not isinstance(query_payload, Mapping):
         return ()
@@ -692,7 +718,7 @@ def _wiki_articles(
     if not isinstance(items, list):
         return ()
     articles: list[Mapping[str, Any]] = []
-    query_url = _wiki_search_url(source.api_url, query)
+
     for item in items:
         if not isinstance(item, Mapping):
             continue
@@ -704,6 +730,42 @@ def _wiki_articles(
             {
                 "title": title,
                 "url": f"{source.page_url}{quote(title.replace(' ', '_'), safe='()')}",
+                "description": snippet,
+                "published_at": _wiki_event_datetime(title=title, snippet=snippet, query=query),
+                "domain": source.domain,
+                "query_url": query_url,
+            }
+        )
+    return tuple(articles)
+
+
+def _wikimedia_rest_articles(
+    items: list[Any],
+    *,
+    source: _WikiSource,
+    query_url: str,
+    query: str,
+) -> tuple[Mapping[str, Any], ...]:
+    articles: list[Mapping[str, Any]] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        title = str(item.get("title", "")).strip()
+        key = str(item.get("key", "")).strip()
+        page_key = key or title
+        if not title or not page_key:
+            continue
+        snippet = _clean_wiki_snippet(
+            " ".join(
+                str(value).strip()
+                for value in (item.get("excerpt"), item.get("description"))
+                if str(value or "").strip()
+            )
+        )
+        articles.append(
+            {
+                "title": title,
+                "url": f"{source.page_url}{quote(page_key.replace(' ', '_'), safe='()')}",
                 "description": snippet,
                 "published_at": _wiki_event_datetime(title=title, snippet=snippet, query=query),
                 "domain": source.domain,
