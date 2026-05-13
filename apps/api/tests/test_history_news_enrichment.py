@@ -387,3 +387,83 @@ def test_search_public_flood_news_accepts_rss_admin_context_when_road_title_is_b
     assert record.properties["location_match_basis"] == "relaxed_admin_context"
     assert record.distance_to_query_m is None
     assert record.source_weight == 0.58
+
+
+def test_search_public_flood_news_rss_reaches_2023_queries() -> None:
+    requested_queries: list[str] = []
+
+    def fetch_json(_url: str, _timeout_seconds: float) -> dict[str, object]:
+        return {"articles": []}
+
+    def fetch_text(url: str, _timeout_seconds: float) -> str:
+        requested_queries.append(parse_qs(urlparse(url).query)["q"][0])
+        return """<?xml version="1.0" encoding="utf-8" ?>
+        <rss version="2.0"><channel></channel></rss>
+        """
+
+    search_public_flood_news(
+        location_text="嘉義市",
+        lat=23.48,
+        lng=120.45,
+        radius_m=500,
+        now=datetime(2026, 5, 13, 3, 0, tzinfo=timezone.utc),
+        max_records=1,
+        timeout_seconds=5.0,
+        fetch_json=fetch_json,
+        fetch_text=fetch_text,
+    )
+
+    assert any("2023" in query for query in requested_queries)
+
+
+def test_search_public_flood_news_uses_wiki_public_metadata_fallback() -> None:
+    requested_wiki_queries: list[str] = []
+
+    def fetch_json(_url: str, _timeout_seconds: float) -> dict[str, object]:
+        return {"articles": []}
+
+    def fetch_wiki_json(url: str, _timeout_seconds: float) -> dict[str, object]:
+        query = parse_qs(urlparse(url).query)["srsearch"][0]
+        requested_wiki_queries.append(query)
+        if "2023" not in query:
+            return {"query": {"search": []}}
+        return {
+            "query": {
+                "search": [
+                    {
+                        "title": "2023年9月嘉義暴雨",
+                        "snippet": (
+                            '<span class="searchmatch">2023</span>年9月'
+                            '<span class="searchmatch">嘉義</span>縣與'
+                            '<span class="searchmatch">嘉義市</span>持續暴雨，'
+                            "造成道路淹水與災情。"
+                        ),
+                        "timestamp": "2025-11-01T00:00:00Z",
+                    }
+                ]
+            }
+        }
+
+    result = search_public_flood_news(
+        location_text="嘉義市",
+        lat=23.48,
+        lng=120.45,
+        radius_m=500,
+        now=datetime(2026, 5, 13, 3, 0, tzinfo=timezone.utc),
+        max_records=3,
+        timeout_seconds=2.5,
+        fetch_json=fetch_json,
+        fetch_wiki_json=fetch_wiki_json,
+    )
+
+    assert any("2023" in query for query in requested_wiki_queries)
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.adapter_key == "news.public_web.wiki_search"
+    assert record.source_id.startswith("public-wiki:")
+    assert record.title == "2023年9月嘉義暴雨"
+    assert record.url == "https://zh.wikipedia.org/wiki/2023%E5%B9%B49%E6%9C%88%E5%98%89%E7%BE%A9%E6%9A%B4%E9%9B%A8"
+    assert record.occurred_at == datetime(2023, 9, 1, tzinfo=timezone.utc)
+    assert record.properties["ingestion_mode"] == "on_demand_public_wiki"
+    assert record.properties["location_match_scope"] == "exact"
+    assert record.properties["full_text_stored"] is False
