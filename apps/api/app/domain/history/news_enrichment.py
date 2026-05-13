@@ -101,6 +101,12 @@ class _SearchTarget:
 
 
 @dataclass(frozen=True)
+class _LocationMatch:
+    term: str
+    basis: str
+
+
+@dataclass(frozen=True)
 class _SearchWindow:
     start: datetime
     end: datetime
@@ -137,59 +143,9 @@ def search_public_flood_news(
     query_errors = 0
     timed_out = False
     deadline = monotonic() + max(0.5, timeout_seconds)
-    rss_reserve_seconds = _rss_reserve_seconds(timeout_seconds) if text_client is not None else 0.0
-    gdelt_deadline = deadline - rss_reserve_seconds
-    per_query_max_records = _per_query_max_records(max_records)
-    for target in _search_targets(location):
-        for search_window in search_windows:
-            for query in _gdelt_queries(target.term, scope=target.scope):
-                remaining_seconds = gdelt_deadline - monotonic()
-                if remaining_seconds <= 0:
-                    timed_out = True
-                    break
-                url = _gdelt_url(
-                    query=query,
-                    start_datetime=search_window.start,
-                    end_datetime=search_window.end,
-                    max_records=per_query_max_records,
-                )
-                payload = client(url, min(timeout_seconds, max(0.5, remaining_seconds)))
-                if not payload:
-                    query_errors += 1
-                    continue
-                for article in _articles(payload):
-                    record = _record_from_article(
-                        article,
-                        location=target.term,
-                        match_scope=target.scope,
-                        target_source_weight=target.source_weight,
-                        lat=lat,
-                        lng=lng,
-                        radius_m=radius_m,
-                        now=now,
-                        query_url=url,
-                        search_window_label=search_window.label,
-                    )
-                    if record is None or record.url is None or record.url in seen_urls:
-                        continue
-                    seen_urls.add(record.url)
-                    accepted.append(record)
-                    if len(accepted) >= max_records:
-                        break
-                if len(accepted) >= max_records:
-                    break
-            if timed_out:
-                break
-            if len(accepted) >= max_records:
-                break
-        if timed_out:
-            break
-        if len(accepted) >= max_records:
-            break
-
     rss_attempted = False
     rss_errors = 0
-    if not accepted and text_client is not None:
+    if text_client is not None:
         rss_attempted = True
         rss_records, rss_errors = _search_public_news_rss(
             location=location,
@@ -199,11 +155,60 @@ def search_public_flood_news(
             radius_m=radius_m,
             now=now,
             max_records=max_records,
-            deadline=deadline,
+            deadline=min(deadline, monotonic() + _rss_front_budget_seconds(timeout_seconds)),
             fetch_text=text_client,
             seen_urls=seen_urls,
         )
         accepted.extend(rss_records)
+
+    per_query_max_records = _per_query_max_records(max_records)
+    if not accepted:
+        for target in _search_targets(location):
+            for search_window in search_windows:
+                for query in _gdelt_queries(target.term, scope=target.scope):
+                    remaining_seconds = deadline - monotonic()
+                    if remaining_seconds <= 0:
+                        timed_out = True
+                        break
+                    url = _gdelt_url(
+                        query=query,
+                        start_datetime=search_window.start,
+                        end_datetime=search_window.end,
+                        max_records=per_query_max_records,
+                    )
+                    payload = client(url, min(timeout_seconds, max(0.5, remaining_seconds)))
+                    if not payload:
+                        query_errors += 1
+                        continue
+                    for article in _articles(payload):
+                        record = _record_from_article(
+                            article,
+                            location=target.term,
+                            match_scope=target.scope,
+                            target_source_weight=target.source_weight,
+                            lat=lat,
+                            lng=lng,
+                            radius_m=radius_m,
+                            now=now,
+                            query_url=url,
+                            search_window_label=search_window.label,
+                        )
+                        if record is None or record.url is None or record.url in seen_urls:
+                            continue
+                        seen_urls.add(record.url)
+                        accepted.append(record)
+                        if len(accepted) >= max_records:
+                            break
+                    if len(accepted) >= max_records:
+                        break
+                if timed_out:
+                    break
+                if len(accepted) >= max_records:
+                    break
+            if timed_out:
+                break
+            if len(accepted) >= max_records:
+                break
 
     if accepted:
         return OnDemandNewsSearchResult(
@@ -337,8 +342,8 @@ def _per_query_max_records(max_records: int) -> int:
     return max(max_records, min(max_records * 4, 20))
 
 
-def _rss_reserve_seconds(timeout_seconds: float) -> float:
-    return min(2.0, max(0.8, timeout_seconds * 0.45))
+def _rss_front_budget_seconds(timeout_seconds: float) -> float:
+    return min(3.0, max(1.5, timeout_seconds * 0.65))
 
 
 def _fetch_json(url: str, timeout_seconds: float) -> Mapping[str, Any]:
@@ -422,6 +427,7 @@ def _search_public_news_rss(
                     source_prefix="public-news-rss",
                     raw_ref_prefix="public-news-rss",
                     ingestion_mode="on_demand_public_news_rss",
+                    relaxed_location_terms=_rss_relaxed_location_terms(location_text or location),
                 )
                 if record is None or record.url is None or record.url in seen_urls:
                     continue
@@ -448,7 +454,7 @@ def _public_news_rss_urls(
         urls.append(
             f"{BING_NEWS_RSS_ENDPOINT}?{urlencode({'q': query, 'format': 'rss', 'mkt': 'zh-TW'})}"
         )
-    return _dedupe(urls, limit=6)
+    return _dedupe(urls, limit=4)
 
 
 def _rss_search_targets(location: str) -> tuple[_SearchTarget, ...]:
@@ -489,6 +495,106 @@ def _public_news_rss_queries(
             )
         )
     return _dedupe(queries, limit=8)
+
+
+def _rss_relaxed_location_terms(location_text: str) -> tuple[str, ...]:
+    normalized = _normalize(location_text)
+    terms: list[str] = list(_admin_context_terms(normalized, include_city=False))
+    for marker in ("縣", "市", "區", "鄉", "鎮"):
+        for match in re.finditer(rf"[\u4e00-\u9fff]{{2,8}}{marker}", normalized):
+            value = match.group(0)
+            terms.append(value)
+            terms.append(value.removesuffix(marker))
+    for city in _CITY_ALIASES:
+        city_norm = _normalize(city)
+        if not normalized.startswith(city_norm):
+            continue
+        tail = normalized[len(city_norm) :]
+        road_tail = _short_road_tail(tail)
+        if road_tail:
+            admin = tail[: -len(road_tail)]
+            if admin:
+                terms.append(admin)
+                terms.append(admin.rstrip("區鄉鎮市縣"))
+    return tuple(term for term in _dedupe(terms, limit=8) if len(term) >= 2)
+
+
+def _short_road_tail(value: str) -> str:
+    normalized = _normalize(value)
+    trimmed = _trim_admin_prefix(normalized)
+    if trimmed != normalized and _ROAD_PATTERN.fullmatch(trimmed):
+        return trimmed
+    for district_length in (2, 3, 4):
+        if len(normalized) <= district_length + 1:
+            continue
+        road = normalized[district_length:]
+        if _ROAD_PATTERN.fullmatch(road):
+            return road
+    match = re.search(
+        r"[\u4e00-\u9fff]{2,4}(?:路|街|大道)(?:[一二三四五六七八九十0-9]+段)?(?:\d+巷)?$",
+        normalized,
+    )
+    return match.group(0) if match is not None else ""
+
+
+def _road_tail(location: str) -> str:
+    normalized = _normalize(location)
+    if not normalized:
+        return ""
+    trimmed = _trim_admin_prefix(normalized)
+    if trimmed != normalized and _ROAD_PATTERN.fullmatch(trimmed):
+        return trimmed
+    for city in _CITY_ALIASES:
+        city_norm = _normalize(city)
+        if not normalized.startswith(city_norm):
+            continue
+        tail = normalized[len(city_norm) :]
+        road = _short_road_tail(tail)
+        if road:
+            return road
+    matches = list(_ROAD_PATTERN.finditer(normalized))
+    if not matches:
+        return ""
+    road = matches[-1].group(0)
+    trimmed_road = _trim_admin_prefix(road)
+    return trimmed_road if _ROAD_PATTERN.fullmatch(trimmed_road) else road
+
+
+def _admin_context_terms(location: str, *, include_city: bool) -> tuple[str, ...]:
+    normalized = _normalize(location)
+    road = _road_tail(normalized)
+    prefix = normalized[: -len(road)] if road and normalized.endswith(road) else normalized
+    terms: list[str] = []
+
+    for marker in ("縣", "市", "區", "鄉", "鎮"):
+        for match in re.finditer(rf"[\u4e00-\u9fff]{{2,8}}{marker}", prefix):
+            value = match.group(0)
+            terms.append(value)
+            terms.append(value.removesuffix(marker))
+
+    for city in _CITY_ALIASES:
+        city_norm = _normalize(city)
+        if not normalized.startswith(city_norm):
+            continue
+        tail = normalized[len(city_norm) :]
+        road_tail = _short_road_tail(tail)
+        district = tail[: -len(road_tail)] if road_tail else tail
+        district = district.rstrip("區鄉鎮市縣")
+        if include_city:
+            terms.append(city_norm)
+        if district:
+            terms.append(district)
+            terms.append(f"{city_norm}{district}")
+            for suffix in ("區", "鄉", "鎮", "市"):
+                terms.append(f"{district}{suffix}")
+                terms.append(f"{city_norm}{district}{suffix}")
+        break
+
+    return tuple(
+        term
+        for term in _dedupe(terms, limit=12)
+        if len(term) >= 2 and not any(marker in term for marker in ("路", "街", "大道"))
+    )
 
 
 def _query_years(location_text: str, *, now: datetime) -> tuple[int, ...]:
@@ -555,13 +661,19 @@ def _record_from_article(
     source_prefix: str = "gdelt-on-demand",
     raw_ref_prefix: str = "gdelt-doc",
     ingestion_mode: str = "on_demand_public_news",
+    relaxed_location_terms: tuple[str, ...] = (),
 ) -> EvidenceUpsert | None:
     title = str(article.get("title", "")).strip()
     url = str(article.get("url", "")).strip()
     if not title or not url:
         return None
     match_text = _article_match_text(article)
-    if not _text_matches(match_text, location):
+    location_match = _location_match(
+        match_text,
+        location,
+        relaxed_location_terms=relaxed_location_terms,
+    )
+    if location_match is None:
         return None
 
     published_at = _parse_public_news_datetime(article.get("seendate") or article.get("published_at"))
@@ -569,7 +681,13 @@ def _record_from_article(
     source_id = f"{source_prefix}:{sha256(url.encode('utf-8')).hexdigest()[:24]}"
     raw_ref = f"{raw_ref_prefix}:{sha256((url + title).encode('utf-8')).hexdigest()[:32]}"
     text_locations = _text_locations(match_text)
-    confidence = _confidence(text=match_text, location=location, domain=domain, match_scope=match_scope)
+    effective_match_scope = _effective_match_scope(match_scope, location_match)
+    confidence = _confidence(
+        text=match_text,
+        location=location,
+        domain=domain,
+        match_scope=effective_match_scope,
+    )
     return EvidenceUpsert(
         id=str(uuid5(NAMESPACE_URL, source_id)),
         adapter_key=adapter_key,
@@ -584,17 +702,19 @@ def _record_from_article(
         ingested_at=now,
         lat=lat,
         lng=lng,
-        distance_to_query_m=_distance_to_query_for_match(match_scope),
+        distance_to_query_m=_distance_to_query_for_match(effective_match_scope),
         confidence=confidence,
         freshness_score=_freshness_score(published_at, now),
-        source_weight=target_source_weight,
+        source_weight=_effective_source_weight(target_source_weight, effective_match_scope),
         privacy_level="public",
         raw_ref=raw_ref,
         properties={
             "adapter_key": adapter_key,
             "ingestion_mode": ingestion_mode,
             "query_location": location,
-            "location_match_scope": match_scope,
+            "location_match_scope": effective_match_scope,
+            "location_match_basis": location_match.basis,
+            "location_match_term": location_match.term,
             "query_radius_m": radius_m,
             "location_payload": {
                 "resolution": "query_point",
@@ -614,14 +734,50 @@ def _title_matches(title: str, location: str) -> bool:
     return _text_matches(title, location)
 
 
-def _text_matches(text: str, location: str) -> bool:
-    normalized_title = _normalize(text)
+def _text_matches(
+    text: str,
+    location: str,
+    *,
+    relaxed_location_terms: tuple[str, ...] = (),
+) -> bool:
+    return _location_match(text, location, relaxed_location_terms=relaxed_location_terms) is not None
+
+
+def _location_match(
+    text: str,
+    location: str,
+    *,
+    relaxed_location_terms: tuple[str, ...] = (),
+) -> _LocationMatch | None:
+    normalized_text = _normalize(text)
     normalized_location = _normalize(location)
-    if not any(term in normalized_title for term in TAIWAN_NEWS_FLOOD_TERMS):
-        return False
-    if normalized_location and normalized_location in normalized_title:
-        return True
-    return any(_normalize(term) in normalized_title for term in _location_terms(location))
+    if not any(term in normalized_text for term in TAIWAN_NEWS_FLOOD_TERMS):
+        return None
+    if normalized_location and normalized_location in normalized_text:
+        return _LocationMatch(term=location, basis="exact")
+
+    road_tail = _road_tail(location)
+    normalized_road_tail = _normalize(road_tail)
+    admin_terms = _admin_context_terms(location, include_city=True)
+    if normalized_road_tail and normalized_road_tail in normalized_text:
+        if not admin_terms or any(_normalize(term) in normalized_text for term in admin_terms):
+            return _LocationMatch(term=road_tail, basis="road_with_admin_context")
+        return None
+
+    for term in _location_terms(location):
+        normalized_term = _normalize(term)
+        if not normalized_term:
+            continue
+        if admin_terms and normalized_road_tail and normalized_term == normalized_road_tail:
+            continue
+        if normalized_term in normalized_text:
+            return _LocationMatch(term=term, basis="location_term")
+
+    for term in relaxed_location_terms:
+        normalized_term = _normalize(term)
+        if normalized_term and normalized_term in normalized_text:
+            return _LocationMatch(term=term, basis="relaxed_admin_context")
+    return None
 
 
 def _article_match_text(article: Mapping[str, Any]) -> str:
@@ -676,6 +832,20 @@ def _confidence(*, text: str, location: str, domain: str, match_scope: str) -> f
     elif match_scope == "road":
         score -= 0.06
     return min(max(score, 0.45), 0.9)
+
+
+def _effective_match_scope(target_scope: str, location_match: _LocationMatch) -> str:
+    if location_match.basis == "relaxed_admin_context":
+        return "admin_area"
+    return target_scope
+
+
+def _effective_source_weight(target_source_weight: float, match_scope: str) -> float:
+    if match_scope == "admin_area":
+        return min(target_source_weight, 0.58)
+    if match_scope == "road":
+        return min(target_source_weight, 0.72)
+    return target_source_weight
 
 
 def _freshness_score(published_at: datetime | None, now: datetime) -> float:

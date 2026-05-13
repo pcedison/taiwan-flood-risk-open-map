@@ -312,4 +312,78 @@ def test_search_public_flood_news_uses_rss_backup_when_gdelt_is_unavailable() ->
     assert record.title == "彰化員林中山路水淹 店家清理積水"
     assert record.url == "https://example.test/news/yuanlin-flood"
     assert record.properties["ingestion_mode"] == "on_demand_public_news_rss"
+    assert record.properties["location_match_scope"] == "road"
+    assert record.properties["location_match_basis"] == "exact"
     assert record.properties["full_text_stored"] is False
+
+
+def test_search_public_flood_news_rejects_same_road_in_wrong_admin_area() -> None:
+    def fetch_json(_url: str, _timeout_seconds: float) -> dict[str, object]:
+        return {}
+
+    def fetch_text(_url: str, _timeout_seconds: float) -> str:
+        return """<?xml version="1.0" encoding="utf-8" ?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>神岡中山路長期積淹水 居民陳情改善</title>
+              <link>https://example.test/news/shengang-flood</link>
+              <pubDate>Mon, 28 Jul 2025 07:00:00 GMT</pubDate>
+              <description>台中神岡中山路豪雨後道路積水。</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+    result = search_public_flood_news(
+        location_text="彰化員林中山路",
+        lat=23.956,
+        lng=120.57,
+        radius_m=500,
+        now=datetime(2026, 5, 13, 3, 0, tzinfo=timezone.utc),
+        max_records=3,
+        timeout_seconds=2.5,
+        fetch_json=fetch_json,
+        fetch_text=fetch_text,
+    )
+
+    assert result.records == ()
+
+
+def test_search_public_flood_news_accepts_rss_admin_context_when_road_title_is_broader() -> None:
+    def fetch_json(_url: str, _timeout_seconds: float) -> dict[str, object]:
+        return {}
+
+    def fetch_text(_url: str, _timeout_seconds: float) -> str:
+        return """<?xml version="1.0" encoding="utf-8" ?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>員林市區大淹水 救護車寸步難行</title>
+              <link>https://example.test/news/yuanlin-city-flood</link>
+              <pubDate>Tue, 08 Jul 2025 07:00:00 GMT</pubDate>
+              <description>彰化員林豪雨造成市區水淹。</description>
+            </item>
+          </channel>
+        </rss>
+        """
+
+    result = search_public_flood_news(
+        location_text="彰化員林中山路",
+        lat=23.956,
+        lng=120.57,
+        radius_m=500,
+        now=datetime(2026, 5, 13, 3, 0, tzinfo=timezone.utc),
+        max_records=3,
+        timeout_seconds=2.5,
+        fetch_json=fetch_json,
+        fetch_text=fetch_text,
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.title == "員林市區大淹水 救護車寸步難行"
+    assert record.properties["location_match_scope"] == "admin_area"
+    assert record.properties["location_match_basis"] == "relaxed_admin_context"
+    assert record.distance_to_query_m is None
+    assert record.source_weight == 0.58

@@ -44,7 +44,8 @@ The public risk API now has a bounded local-preview enrichment path for Taiwan-w
 - query GDELT DOC ArtList for citation metadata only, using multiple bounded location terms, flood wording variants, and recent plus annual time windows so older events are not hidden by a single broad 10-year query;
 - keep only URL, title, timestamp, domain, query metadata, confidence, and query-point geometry;
 - compare the candidate title together with public metadata snippets returned by the search index, while still not storing full article text;
-- when GDELT is slow, rate-limited, or unavailable, fall back to public news RSS/search metadata sources such as Google News RSS and Bing News RSS/search result feeds; this fallback still stores only citation metadata and must pass the same local flood-keyword plus location matching before it can appear as evidence;
+- query public news RSS/search metadata sources such as Google News RSS and Bing News RSS/search result feeds before GDELT so a slow or rate-limited single index does not hide available public citations;
+- RSS/search fallback still stores only citation metadata. Exact road matches require road plus administrative context when the road name is common, while broader same-admin-area matches are downgraded to admin-area evidence instead of being treated as precise road evidence;
 - upsert accepted metadata into `evidence` through the same `source_id`/`raw_ref` idempotency constraint used by promotion;
 - return an explicit `on-demand-public-news` freshness row when the lookup succeeds, returns no results, or is rate-limited.
 
