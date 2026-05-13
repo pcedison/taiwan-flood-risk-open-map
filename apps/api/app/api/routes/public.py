@@ -906,6 +906,7 @@ async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
             health_status=historical_freshness.health_status,
             observed_at=historical_freshness.observed_at,
             ingested_at=historical_freshness.ingested_at,
+            feature_count=historical_freshness.feature_count,
             message=historical_freshness.message,
         ),
         *_on_demand_data_freshness(on_demand_news, now=created_at),
@@ -1103,6 +1104,7 @@ def _profile_data_freshness(profile: RiskProfileRecord, *, now: datetime) -> Dat
         health_status="healthy" if profile.status == "healthy" else "degraded",
         observed_at=profile.latest_observed_at or profile.latest_occurred_at,
         ingested_at=profile.latest_ingested_at or profile.computed_at or now,
+        feature_count=_profile_evidence_total(profile),
         message=(
             f"已使用預先計算的 {profile.profile_kind}:{profile.profile_scope} profile；"
             f"範圍半徑約 {profile.profile_radius_m} 公尺，"
@@ -1503,6 +1505,7 @@ def _on_demand_data_freshness(
                 default=None,
             ),
             ingested_at=now,
+            feature_count=len(result.records),
             message=result.message,
         )
     ]
@@ -1520,6 +1523,7 @@ def _official_flood_disaster_data_freshness(
             health_status=lookup.health_status,
             observed_at=lookup.observed_at,
             ingested_at=lookup.ingested_at,
+            feature_count=len(lookup.records),
             message=lookup.message,
         )
     ]
@@ -1747,6 +1751,7 @@ def _historical_data_freshness(
             health_status="healthy" if historical_records else "unknown",
             observed_at=max((record.occurred_at for record, _ in historical_records), default=None),
             ingested_at=now,
+            feature_count=len(historical_records),
             message=_historical_freshness_message(historical_records),
         )
 
@@ -1773,6 +1778,7 @@ def _historical_data_freshness(
         ),
         observed_at=latest_observed,
         ingested_at=latest_ingested or now,
+        feature_count=len(db_evidence_items),
         message=(
             f"查詢半徑內與 {len(db_evidence_items)} 筆淹水潛勢規劃圖資相交；"
             "這是情境參考，不是實際歷史淹水事件；仍需公開新聞或災情紀錄佐證。"

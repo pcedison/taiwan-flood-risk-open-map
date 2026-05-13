@@ -254,6 +254,7 @@ class DataFreshness(ContractModel):
     health_status: Literal["healthy", "degraded", "failed", "disabled", "unknown"]
     observed_at: datetime | None = None
     ingested_at: datetime | None = None
+    feature_count: int | None = Field(default=None, ge=0)
     message: str | None = None
 
 

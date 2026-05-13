@@ -35,6 +35,7 @@ export type DataFreshnessItem = {
   health_status: string;
   observed_at: string | null;
   ingested_at: string | null;
+  feature_count?: number | null;
   message: string | null;
 };
 
@@ -418,6 +419,16 @@ function layerKindLabel(value: string | null | undefined) {
 }
 
 function evidenceCountForSource(evidenceItems: EvidenceItem[], sourceId: string) {
+  if (sourceId === "on-demand-public-news") {
+    return evidenceItems.filter((item) =>
+      Boolean(
+        item.source_id?.startsWith("public-news-rss:") ||
+          item.source_id?.startsWith("public-wiki:") ||
+          item.source_id?.startsWith("gdelt-on-demand:"),
+      ),
+    ).length;
+  }
+
   return evidenceItems.filter((item) => item.source_id === sourceId).length;
 }
 
@@ -444,7 +455,7 @@ export function buildLayerDisplayState(input: {
       }))
     : dataFreshness.map((item) => ({
         availability: normalizeLayerAvailability(item),
-        featureCount: evidenceCountForSource(evidenceItems, item.source_id),
+        featureCount: item.feature_count ?? evidenceCountForSource(evidenceItems, item.source_id),
         freshnessAt: item.observed_at ?? item.ingested_at,
         id: item.source_id,
         kind: "資料",

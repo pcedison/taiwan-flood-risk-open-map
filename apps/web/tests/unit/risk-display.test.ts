@@ -303,6 +303,57 @@ test("layer display state derives a limited fallback from freshness and evidence
   assert.equal(state.items[0].freshnessAt, "2026-04-30T01:40:00+08:00");
 });
 
+test("layer display state uses freshness feature counts for on-demand public news", () => {
+  const state = buildLayerDisplayState({
+    dataFreshness: [
+      {
+        feature_count: 5,
+        health_status: "healthy",
+        ingested_at: "2026-05-13T03:50:00Z",
+        message: "已從公開新聞/百科索引補查並整理 5 筆候選淹水事件。",
+        name: "公開新聞即時補查",
+        observed_at: "2026-04-23T02:28:00Z",
+        source_id: "on-demand-public-news",
+      },
+    ],
+    evidenceItems: [],
+  });
+
+  assert.equal(state.items[0].featureCount, 5);
+  assert.equal(state.items[0].availability, "available");
+});
+
+test("layer display state falls back to on-demand public news source prefixes", () => {
+  const state = buildLayerDisplayState({
+    dataFreshness: [
+      {
+        health_status: "healthy",
+        ingested_at: "2026-05-13T03:50:00Z",
+        message: "已從公開新聞/百科索引補查並整理 2 筆候選淹水事件。",
+        name: "公開新聞即時補查",
+        observed_at: "2026-04-23T02:28:00Z",
+        source_id: "on-demand-public-news",
+      },
+    ],
+    evidenceItems: [
+      {
+        ...fullEvidence,
+        id: "rss-news",
+        source_id: "public-news-rss:abc",
+        source_type: "news",
+      },
+      {
+        ...fullEvidence,
+        id: "wiki-news",
+        source_id: "public-wiki:def",
+        source_type: "news",
+      },
+    ],
+  });
+
+  assert.equal(state.items[0].featureCount, 2);
+});
+
 test("layer display state exposes an empty state when no layer inputs exist", () => {
   assert.deepEqual(buildLayerDisplayState({}), {
     hasTileContract: false,

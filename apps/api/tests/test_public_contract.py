@@ -622,6 +622,7 @@ def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> No
     )
     assert payload["data_freshness"][-1]["source_id"] == "historical-flood-records"
     assert "2 筆" in payload["data_freshness"][-1]["message"]
+    assert payload["data_freshness"][-1]["feature_count"] == 2
 
 
 def test_risk_assess_uses_db_evidence_when_repository_is_available(monkeypatch) -> None:
@@ -649,6 +650,7 @@ def test_risk_assess_uses_db_evidence_when_repository_is_available(monkeypatch) 
     payload = response.json()
     assert [item["source_id"] for item in payload["data_freshness"]][-1] == "db-evidence"
     assert "已審核歷史資料" in payload["data_freshness"][-1]["message"]
+    assert payload["data_freshness"][-1]["feature_count"] == 1
     assert payload["evidence"][0]["id"] == "b3f22a36-7316-4e2a-92b6-c6f6443c8528"
     assert payload["evidence"][0]["source_type"] == "news"
     assert not any("甇瑕" in source for source in payload["explanation"]["missing_sources"])
@@ -865,6 +867,7 @@ def test_risk_assess_attempts_on_demand_news_when_official_history_has_no_news(
     assert any(item["source_type"] == "news" for item in payload["evidence"])
     assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
     assert payload["data_freshness"][-1]["health_status"] == "healthy"
+    assert payload["data_freshness"][-1]["feature_count"] == 1
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
@@ -1676,6 +1679,7 @@ def test_risk_assess_on_demand_news_enrichment_writes_back_and_scores(
     assert any("嘉新東路" in item["title"] for item in payload["evidence"])
     assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
     assert "公開新聞索引補查" in payload["data_freshness"][-1]["message"]
+    assert payload["data_freshness"][-1]["feature_count"] == 1
     assert payload["explanation"]["missing_sources"] == [
         "即時雨量來源正常，查詢半徑內未採用測站。",
         "即時水位來源正常，查詢半徑內未採用測站。",
