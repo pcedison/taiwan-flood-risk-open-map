@@ -23,7 +23,9 @@ ENV NEXT_PUBLIC_BASEMAP_ATTRIBUTION=${NEXT_PUBLIC_BASEMAP_ATTRIBUTION}
 ENV INTERNAL_API_BASE_URL=${INTERNAL_API_BASE_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build && npm prune --omit=dev
+RUN npm run build
+RUN npm prune --omit=dev --no-audit --no-fund --ignore-scripts \
+  && npm cache clean --force
 
 FROM python:3.12-slim AS runtime
 
