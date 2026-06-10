@@ -269,7 +269,7 @@ test("combined risk display separates summary from source basis", () => {
 
   const highOverlay = riskOverlayPresentation("高", true);
   assert.equal(highOverlay.colorName, "紅色");
-  assert.equal(highOverlay.fillOpacity, 0.15);
+  assert.equal(highOverlay.fillOpacity, 0.85);
 
   const idleOverlay = riskOverlayPresentation(null, false);
   assert.equal(idleOverlay.level, "未知");

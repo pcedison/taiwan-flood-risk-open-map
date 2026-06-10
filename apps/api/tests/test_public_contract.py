@@ -596,6 +596,96 @@ def test_risk_assess_surfaces_official_flood_disaster_points(
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
+def test_risk_assess_keeps_single_old_official_hit_with_potential_context_at_medium(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HISTORICAL_NEWS_ON_DEMAND_ENABLED", "false")
+    get_settings.cache_clear()
+    now = datetime.fromisoformat("2026-06-10T14:30:00+00:00")
+    official_record = HistoricalFloodRecord(
+        source_id="data-gov-130016:2021:EMIC:4972",
+        source_name="官方資料：淹水災點快照",
+        source_type="official",
+        event_type="flood_report",
+        title="2021 官方淹水災害情資點位（EMIC #4972）",
+        summary=(
+            "data.gov.tw dataset 130016 彙整防救災部會署淹水災害情資點位；"
+            "此筆資料提供年度與座標點，未提供完整事件時間、淹水深度或地址。"
+        ),
+        url="https://data.gov.tw/dataset/130016",
+        occurred_at=datetime.fromisoformat("2021-12-31T12:00:00+08:00"),
+        ingested_at=now,
+        lat=23.59045,
+        lng=120.29340,
+        confidence=0.82,
+        freshness_score=0.74,
+        source_weight=1.0,
+        risk_factor=1.0,
+    )
+    first_potential = replace(
+        _flood_potential_record(),
+        id="potential-context-1",
+        source_id="dprc-taiwan-flood-potential-context-1",
+        lat=23.59100,
+        lng=120.29320,
+        distance_to_query_m=185.0,
+        freshness_score=1.0,
+        source_weight=1.0,
+    )
+    second_potential = replace(
+        first_potential,
+        id="potential-context-2",
+        source_id="dprc-taiwan-flood-potential-context-2",
+        distance_to_query_m=240.0,
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (first_potential, second_potential),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "lookup_official_flood_disaster_points",
+        lambda **_kwargs: OfficialFloodDisasterLookup(
+            attempted=True,
+            source_id="official-flood-disaster-points",
+            name="官方資料：淹水災點快照（2018-2022）",
+            health_status="degraded",
+            message="官方淹水災點快照命中 1 筆。",
+            records=((official_record, 101.0),),
+            observed_at=official_record.occurred_at,
+            ingested_at=now,
+        ),
+    )
+
+    try:
+        response = client.post(
+            "/v1/risk/assess",
+            json={
+                "point": {"lat": 23.59132, "lng": 120.29373},
+                "radius_m": 500,
+                "time_context": "now",
+                "location_text": "劉厝",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["realtime"]["level"] == "未知"
+    assert payload["historical"]["level"] == "中"
+    assert "歷史與淹水潛勢參考為中" in payload["explanation"]["summary"]
+    assert any("官方淹水災害情資點位" in item["title"] for item in payload["evidence"])
+    assert any("官方淹水潛勢規劃圖資" in item["title"] for item in payload["evidence"])
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
 def test_display_evidence_items_collapses_repeated_official_disaster_points() -> None:
     now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
     items = [
@@ -1410,7 +1500,7 @@ def test_risk_assess_skips_db_when_evidence_repository_is_disabled(monkeypatch) 
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["historical"]["level"] == "高"
+    assert payload["historical"]["level"] == "中"
     assert payload["query_heat"]["query_count_bucket"] == "limited-db-disabled"
     assert payload["query_heat"]["unique_approx_count_bucket"] == "limited-db-disabled"
     assert_openapi_schema(payload, "RiskAssessmentResponse")
@@ -1640,7 +1730,7 @@ def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypa
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["historical"]["level"] == "高"
+    assert payload["historical"]["level"] == "中"
     assert payload["confidence"]["level"] == "中"
     assert len(payload["evidence"]) == 2
     profile_evidence_types = {
@@ -2148,7 +2238,8 @@ def test_risk_assess_matches_historical_records_by_location_text(monkeypatch) ->
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["historical"]["level"] == "高"
+    assert payload["historical"]["level"] == "中"
+    assert "歷史與淹水潛勢參考為中" in payload["explanation"]["summary"]
     assert any("長溪路二段" in item["title"] for item in payload["evidence"])
 
 

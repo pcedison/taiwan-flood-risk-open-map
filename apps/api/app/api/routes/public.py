@@ -59,7 +59,6 @@ from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summar
 from app.domain.history import (
     HistoricalFloodRecord,
     OfficialFloodDisasterLookup,
-    historical_record_matches_location_text,
     lookup_official_flood_disaster_points,
     nearby_historical_flood_records,
     nearest_public_news_location_text,
@@ -1077,7 +1076,7 @@ def _profile_backed_response(
         if realtime_scoring.realtime_level != "未知"
         else _public_risk_level(profile.realtime_level)
     )
-    historical_level = _public_risk_level(profile.historical_level)
+    historical_level = _profile_public_historical_level(profile)
     confidence_level = _public_confidence_level(profile.confidence_level)
     expires_at = profile.expires_at or created_at + timedelta(minutes=5)
     data_freshness = [
@@ -1129,6 +1128,15 @@ def _profile_data_freshness(profile: RiskProfileRecord, *, now: datetime) -> Dat
             f"計算時間 {profile.computed_at.isoformat()}。"
         ),
     )
+
+
+def _profile_public_historical_level(
+    profile: RiskProfileRecord,
+) -> Literal["低", "中", "高", "極高", "未知"]:
+    level = _public_risk_level(profile.historical_level)
+    if level in {"高", "極高"}:
+        return "中"
+    return level
 
 
 def _profile_main_reasons(profile: RiskProfileRecord) -> list[str]:
@@ -1815,11 +1823,6 @@ def _historical_scoring_distance(
     radius_m: int,
     location_text: str | None,
 ) -> float:
-    if distance_to_query_m > radius_m and historical_record_matches_location_text(
-        record,
-        location_text,
-    ):
-        return min(float(radius_m), 100.0)
     return distance_to_query_m
 
 

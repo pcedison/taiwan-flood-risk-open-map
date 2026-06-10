@@ -379,7 +379,7 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
 
   await expect(page.getByText(/定位精度：門牌/)).toBeVisible();
   await expect(page.getByText("已定位：台南市安南區長溪路二段410巷16弄1號").first()).toBeVisible();
-  await expect(page.getByText(/歷史與淹水潛勢參考為高/)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/歷史與淹水潛勢參考為中/)).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => riskCalls).toBe(1);
 
   await page.getByLabel("輸入地標、地址或行政區").fill("宜蘭縣礁溪鄉");

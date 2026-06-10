@@ -123,6 +123,42 @@ def test_observed_flood_report_within_one_km_is_at_least_medium_history() -> Non
     assert result.historical_level == "中"
 
 
+def test_flood_potential_context_does_not_escalate_single_observed_history_to_high() -> None:
+    result = score_risk(
+        (
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_report",
+                confidence=0.82,
+                distance_to_query_m=101.0,
+                freshness_score=0.74,
+                source_weight=1.0,
+            ),
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_potential",
+                confidence=0.78,
+                distance_to_query_m=185.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+            ),
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_potential",
+                confidence=0.78,
+                distance_to_query_m=240.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+            ),
+        ),
+        now=datetime.fromisoformat("2026-06-10T14:30:00+00:00"),
+    )
+
+    assert result.historical_score == 45.0
+    assert result.historical_level == "中"
+    assert result.realtime_level == "未知"
+
+
 def _signal_from_fixture(payload: dict[str, object]) -> RiskEvidenceSignal:
     observed_at = payload.get("observed_at")
     return RiskEvidenceSignal(

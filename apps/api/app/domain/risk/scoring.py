@@ -27,6 +27,7 @@ EVENT_SCORE_CAPS = {
     # overlapping polygons should not stack into an "active disaster" signal.
     "flood_potential": 40.0,
 }
+FLOOD_POTENTIAL_CONTEXT_CAP_WITH_OBSERVED_HISTORY = 20.0
 OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM = 25.0
 REQUIRED_REALTIME_EVENTS = {"rainfall", "water_level"}
 
@@ -107,6 +108,11 @@ def _weighted_score(
     max_age: timedelta | None = None,
 ) -> float:
     totals_by_event: dict[str, float] = {}
+    has_observed_history = any(
+        signal.event_type in {"flood_report", "road_closure"}
+        and weights.get(signal.event_type, 0.0) > 0
+        for signal in signals
+    )
     for signal in signals:
         weight = weights.get(signal.event_type, 0.0)
         if weight == 0:
@@ -129,12 +135,25 @@ def _weighted_score(
         ):
             contribution = max(contribution, OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM)
         event_total = totals_by_event.get(signal.event_type, 0.0) + contribution
-        event_cap = EVENT_SCORE_CAPS.get(signal.event_type)
+        event_cap = _event_score_cap(
+            signal.event_type,
+            has_observed_history=has_observed_history,
+        )
         totals_by_event[signal.event_type] = (
             min(event_total, event_cap) if event_cap is not None else event_total
         )
     total = sum(totals_by_event.values())
     return min(total, 100.0)
+
+
+def _event_score_cap(
+    event_type: str,
+    *,
+    has_observed_history: bool,
+) -> float | None:
+    if event_type == "flood_potential" and has_observed_history:
+        return FLOOD_POTENTIAL_CONTEXT_CAP_WITH_OBSERVED_HISTORY
+    return EVENT_SCORE_CAPS.get(event_type)
 
 
 def _has_weighted_evidence(

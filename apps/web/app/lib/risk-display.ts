@@ -243,7 +243,7 @@ export function riskOverlayPresentation(
   return {
     level: normalizedLevel,
     ...palette,
-    fillOpacity: hasAssessment ? 0.15 : 0.18,
+    fillOpacity: hasAssessment ? 0.85 : 0.18,
   };
 }
 
