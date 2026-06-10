@@ -14,12 +14,14 @@ Use this checklist when filling Zeabur environment variables for the current sin
 
 Do not use `/ready` as the first health check. `/ready` checks PostgreSQL and Redis, so it can fail before those services exist.
 
-This checklist is for a deployable single-service preview only. It does not
-accept worker ingestion, queue replay, queue metrics, hosted scheduler cadence,
-or flood-potential live ingestion. Real upstream URL/license review,
-credential review, hosted cadence, alert routing, poison-job
-quarantine/replay audit, and production egress verification remain pending
-unless a separate environment handoff says otherwise.
+This checklist is for the deployable single-service public beta. By default it
+starts API and Web only. It can also start a beta ingestion scheduler in the
+same container when `HOSTED_INGESTION_SCHEDULER_ENABLED=true`; that scheduler
+uses the existing worker managed-ingestion path, persists official snapshots to
+Postgres, promotes them to evidence, and guards repeated runs with the
+Postgres scheduler lease. A separate worker/scheduler topology is still the
+preferred production operating model once alerting, scaling, and incident
+ownership are accepted.
 
 ## Required Variables
 
@@ -36,11 +38,8 @@ unless a separate environment handoff says otherwise.
 | `NEXT_PUBLIC_BASEMAP_RASTER_TILES` | Reviewed raster tile template only for temporary fallback |
 | `NEXT_PUBLIC_BASEMAP_ATTRIBUTION` | Reviewed attribution text for the selected basemap |
 | `NEXT_TELEMETRY_DISABLED` | `1` |
-| `REALTIME_OFFICIAL_ENABLED` | `false` for the no-secret public beta smoke |
-| `SOURCE_CWA_API_ENABLED` | `false` until CWA is explicitly enabled |
-| `SOURCE_WRA_API_ENABLED` | `false` until WRA is explicitly enabled |
-| `CWA_API_AUTHORIZATION` | Leave empty until CWA is explicitly enabled |
-| `EVIDENCE_REPOSITORY_ENABLED` | `false` until PostgreSQL is attached and migrated |
+| `REALTIME_OFFICIAL_ENABLED` | `true` when official evidence snapshots are enabled; `false` only for no-secret smoke |
+| `EVIDENCE_REPOSITORY_ENABLED` | `true` when PostgreSQL is attached and migrated |
 | `HISTORICAL_NEWS_ON_DEMAND_ENABLED` | `false` until source terms are reviewed |
 | `HISTORICAL_NEWS_ON_DEMAND_WRITEBACK_ENABLED` | `false` until database writeback is enabled |
 | `SOURCE_NEWS_ENABLED` | `false` until source terms are reviewed |
@@ -59,6 +58,29 @@ public basemap.
 | `API_VERSION` | Release label, for example `preview-2026-04-29` | You want `/health` to show a recognizable version. |
 | `CORS_ORIGINS` | The Zeabur origin, for example `https://your-service.zeabur.app` | A separate site will call the API directly. Usually unnecessary for same-origin preview. |
 
+## Optional Single-Service Official Ingestion
+
+Use this only after PostgreSQL migrations have been applied and the source
+credentials are intentionally enabled. The scheduler runs inside the same
+Zeabur service as API/Web so the public beta can receive official CWA/WRA
+snapshots before a dedicated worker service exists.
+
+| Variable | Zeabur value |
+|---|---|
+| `HOSTED_INGESTION_SCHEDULER_ENABLED` | `true` |
+| `DATABASE_URL` | Zeabur Postgres connection URL |
+| `WORKER_DATABASE_URL` | Leave blank to reuse `DATABASE_URL`, or set the same Postgres URL |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level` |
+| `SOURCE_CWA_API_ENABLED` | `true` |
+| `CWA_API_AUTHORIZATION` | Your CWA API authorization token |
+| `SOURCE_WRA_API_ENABLED` | `true` |
+| `SCHEDULER_INTERVAL_SECONDS` | `300` for a 5-minute beta cadence |
+| `SCHEDULER_LEASE_TTL_SECONDS` | `600` |
+
+Leave `SOURCE_CWA_ENABLED` and `SOURCE_WRA_ENABLED` unset unless you need an
+explicit override. Setting either to `false` disables that source even when it
+is listed in `WORKER_ENABLED_ADAPTER_KEYS`.
+
 ## Leave Blank For First Preview
 
 Do not add these variables for the first single-service preview unless an engineer specifically tells you the related service is ready:
@@ -68,10 +90,9 @@ Do not add these variables for the first single-service preview unless an engine
 | `DATABASE_URL`, `POSTGRES_*` | PostgreSQL is not part of the first preview. |
 | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT` | Redis is not part of the first preview. |
 | `MINIO_*` | Object storage is not part of the first preview. |
-| `SOURCE_*_ENABLED` not listed above | These are worker and scheduler flags; there is no worker or scheduler in this service. |
-| `CWA_API_URL`, `CWA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
-| `WRA_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Worker live-ingestion knobs; the single-service preview only uses the API realtime bridge. |
-| `WORKER_METRICS_TEXTFILE_PATH`, `SCHEDULER_METRICS_TEXTFILE_PATH` | Queue/heartbeat metric knobs for worker or scheduler services; this single-service preview has neither. |
+| `CWA_API_URL`, `CWA_API_TIMEOUT_SECONDS` | Optional worker live-ingestion knobs; leave blank/default unless CWA endpoint review requires an override. |
+| `WRA_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Optional worker live-ingestion knobs; leave blank/default unless WRA endpoint review requires an override. |
+| `WORKER_METRICS_TEXTFILE_PATH`, `SCHEDULER_METRICS_TEXTFILE_PATH` | Queue/heartbeat metric files require a collector; leave blank in this single-service beta unless monitoring is attached. |
 | `S3_*` | The current runtime does not read these names. |
 | `TGOS_API_KEY` | Reserved for future optional TGOS support; not read by the current runtime. |
 | `API_HOST`, `API_PORT`, `WEB_HOST`, `WEB_PORT` | Zeabur and the Dockerfile already choose the correct runtime ports. |

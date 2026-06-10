@@ -59,38 +59,14 @@ COPY apps/api/app /app/apps/api/app
 RUN pip install --no-cache-dir -e /app/apps/api
 
 COPY apps/workers /app/apps/workers
+RUN pip install --no-cache-dir -e /app/apps/workers
 
 COPY --from=web-builder /app/apps/web/package.json /app/apps/web/package-lock.json /app/apps/web/
 COPY --from=web-builder /app/apps/web/node_modules /app/apps/web/node_modules
 COPY --from=web-builder /app/apps/web/.next /app/apps/web/.next
 COPY apps/web/next.config.mjs /app/apps/web/next.config.mjs
-
-RUN printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  'set -Eeuo pipefail' \
-  'api_host="${API_HOST:-127.0.0.1}"' \
-  'api_port="${API_PORT:-8000}"' \
-  'web_host="${WEB_HOST:-0.0.0.0}"' \
-  'web_port="${PORT:-${WEB_PORT:-3000}}"' \
-  'cd /app/apps/api' \
-  'python -m uvicorn app.main:app --host "${api_host}" --port "${api_port}" &' \
-  'api_pid=$!' \
-  'cleanup() {' \
-  '  kill "${api_pid}" "${web_pid:-0}" 2>/dev/null || true' \
-  '  wait "${api_pid}" "${web_pid:-0}" 2>/dev/null || true' \
-  '}' \
-  'trap cleanup EXIT INT TERM' \
-  'cd /app/apps/web' \
-  'node node_modules/next/dist/bin/next start --hostname "${web_host}" --port "${web_port}" &' \
-  'web_pid=$!' \
-  'set +e' \
-  'wait -n "${api_pid}" "${web_pid}"' \
-  'exit_status=$?' \
-  'cleanup' \
-  'trap - EXIT INT TERM' \
-  'exit "${exit_status}"' \
-  > /app/start-zeabur-single.sh \
-  && chmod +x /app/start-zeabur-single.sh
+COPY scripts/start-zeabur-single.sh /app/start-zeabur-single.sh
+RUN chmod +x /app/start-zeabur-single.sh
 
 EXPOSE 3000
 

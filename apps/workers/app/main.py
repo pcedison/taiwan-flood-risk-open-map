@@ -645,6 +645,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.run_enabled_adapters:
         if args.persist:
+            if args.scheduler:
+                return _run_managed_enabled_adapters_loop(
+                    settings=settings,
+                    database_url=args.database_url,
+                    once=args.once,
+                    max_ticks=args.max_ticks,
+                )
             return _run_managed_enabled_adapters(
                 settings=settings,
                 database_url=args.database_url,
@@ -1140,6 +1147,81 @@ def _run_managed_enabled_adapters(
         evidence_ids=result.evidence_ids,
     )
     return 1 if result.failed or result.has_alerts else 0
+
+
+def _run_managed_enabled_adapters_loop(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    once: bool,
+    max_ticks: int | None,
+) -> int:
+    resolved_database_url = database_url or settings.database_url
+    if not resolved_database_url:
+        log_event("worker.runtime.managed_scheduler.noop", reason="no_database_url")
+        return 0
+
+    tick_limit = (
+        1
+        if once
+        else max(1, max_ticks)
+        if max_ticks is not None
+        else settings.scheduler_max_ticks
+    )
+    lease_holder = settings.metrics_instance
+    lease_key = "scheduler.enabled-adapters"
+    queue = PostgresRuntimeQueue(database_url=resolved_database_url)
+    try:
+        lease_acquired = queue.acquire_scheduler_lease(
+            lease_key=lease_key,
+            holder_id=lease_holder,
+            ttl_seconds=settings.scheduler_lease_ttl_seconds,
+        )
+    except RuntimeQueueUnavailable as exc:
+        log_event("worker.runtime.managed_scheduler.lease_unavailable", error=str(exc))
+        lease_acquired = True
+
+    if not lease_acquired:
+        log_event(
+            "worker.runtime.managed_scheduler.lease_skipped",
+            lease_key=lease_key,
+            holder_id=lease_holder,
+        )
+        return 0
+
+    had_failure = False
+    tick = 0
+    try:
+        while tick_limit is None or tick < tick_limit:
+            result = run_managed_runtime_ingestion_cycle(
+                settings=settings,
+                database_url=resolved_database_url,
+                adapter_builder=build_runtime_adapters,
+                promote=True,
+                job_key="worker.runtime.managed_scheduler",
+            )
+            had_failure = had_failure or result.failed or result.has_alerts
+            log_event(
+                "worker.runtime.managed_scheduler.tick_completed",
+                status=result.status,
+                reason=result.reason,
+                promoted=result.promoted,
+                evidence_ids=result.evidence_ids,
+            )
+            tick += 1
+            if tick_limit is not None and tick >= tick_limit:
+                break
+            time.sleep(settings.scheduler_interval_seconds)
+    finally:
+        try:
+            queue.release_scheduler_lease(
+                lease_key=lease_key,
+                holder_id=lease_holder,
+            )
+        except RuntimeQueueUnavailable as exc:
+            log_event("worker.runtime.managed_scheduler.lease_release_failed", error=str(exc))
+
+    return 1 if had_failure else 0
 
 
 def _enqueue_runtime_jobs(

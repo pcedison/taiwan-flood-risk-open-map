@@ -78,7 +78,11 @@ manager when the owning operator has approved it."
 5. Save the service and let Zeabur build the container.
 6. Copy the generated Zeabur domain, for example `https://your-service.zeabur.app`.
 
-Do not add custom build or start commands for this mode. The root `Dockerfile` already builds the web app, installs the API package, starts FastAPI internally, and starts Next.js on Zeabur's public `$PORT`.
+Do not add custom build or start commands for this mode. The root `Dockerfile`
+already builds the web app, installs the API and worker packages, starts
+FastAPI internally, and starts Next.js on Zeabur's public `$PORT`. When
+`HOSTED_INGESTION_SCHEDULER_ENABLED=true`, the same start script also launches a
+beta official-ingestion scheduler that persists CWA/WRA snapshots to Postgres.
 
 ### Health Check
 
@@ -127,6 +131,18 @@ Optional:
 | `API_VERSION` | release label | Optional label returned by `/health`. |
 | `CORS_ORIGINS` | Zeabur domain origin, for example `https://your-service.zeabur.app` | Usually not needed in single-service mode because browser requests are same-origin. Set it if a separate test page calls the API directly. |
 
+Optional official ingestion scheduler for the single-service beta:
+
+| Variable | Value | When to set it |
+|---|---|---|
+| `HOSTED_INGESTION_SCHEDULER_ENABLED` | `true` | Starts the in-container managed ingestion loop. |
+| `DATABASE_URL` | Zeabur Postgres URL | Required for persisted official evidence. |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level` | Selects official rainfall and water-level adapters. |
+| `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |
+| `SOURCE_WRA_API_ENABLED` | `true` | Enables the WRA live client. |
+| `SCHEDULER_INTERVAL_SECONDS` | `300` | Five-minute beta cadence. |
+| `SCHEDULER_LEASE_TTL_SECONDS` | `600` | Postgres scheduler lease TTL. |
+
 Do not fill these for the first single-service preview:
 
 | Variable | Why not |
@@ -135,7 +151,7 @@ Do not fill these for the first single-service preview:
 | `REDIS_URL` | Only needed after attaching Redis. If set incorrectly, `/ready` fails. |
 | `MINIO_ENDPOINT`, `MINIO_BUCKET_RAW_SNAPSHOTS`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | Object storage is not required for the first public preview. |
 | `POSTGRES_*`, `REDIS_HOST`, `REDIS_PORT`, `WEB_PORT`, `API_PORT`, `API_HOST`, `WEB_HOST` | Local Docker Compose or advanced runtime knobs; Zeabur already injects `$PORT` for the public web process. |
-| `SOURCE_*_ENABLED` | Worker/scheduler adapter flags; no worker or scheduler runs in single-service preview. |
+| `SOURCE_*_ENABLED` | Leave unset unless intentionally enabling or disabling a specific ingestion source. |
 | `S3_*` | Not supported by the current runtime settings. Use only after code and `.env.example` introduce S3 aliases. |
 | `TGOS_API_KEY` | Reserved for a future geocoding fallback; not used by the current single-service runtime. |
 
