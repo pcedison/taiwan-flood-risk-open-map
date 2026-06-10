@@ -128,6 +128,7 @@ def build_runtime_adapters(
     if settings.source_wra_api_enabled and "official.wra.water_level" in enabled_keys:
         wra_adapter = WraWaterLevelApiAdapter(
             api_url=settings.wra_api_url,
+            station_api_url=settings.wra_station_api_url,
             api_token=settings.wra_api_token,
             timeout_seconds=settings.wra_api_timeout_seconds,
             fetched_at=fetched_at,

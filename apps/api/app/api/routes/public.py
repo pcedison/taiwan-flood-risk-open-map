@@ -1840,13 +1840,14 @@ def _visible_source_limitations(
 ) -> list[str]:
     limitations: list[str] = []
     observation_types = {observation.event_type for observation in bundle.observations}
+    persisted_observation_types = _persisted_official_observation_types(db_evidence_items or ())
     statuses = {status.source_id: status for status in bundle.source_statuses}
 
-    if "rainfall" not in observation_types:
+    if "rainfall" not in observation_types and "rainfall" not in persisted_observation_types:
         rainfall = statuses.get("cwa-rainfall")
         if rainfall is not None:
             limitations.append(rainfall.message or "即時雨量資料目前沒有可用測站。")
-    if "water_level" not in observation_types:
+    if "water_level" not in observation_types and "water_level" not in persisted_observation_types:
         water_level = statuses.get("wra-water-level")
         if water_level is not None:
             limitations.append(water_level.message or "即時水位資料目前沒有可用測站。")
@@ -1871,6 +1872,14 @@ def _visible_source_limitations(
                 "這代表資料仍不足，不代表該地點沒有淹水紀錄。"
             )
     return limitations
+
+
+def _persisted_official_observation_types(evidence_items: tuple[Evidence, ...]) -> set[str]:
+    return {
+        item.event_type
+        for item in evidence_items
+        if item.source_type == "official" and item.event_type in {"rainfall", "water_level"}
+    }
 
 
 @router.get("/evidence/{assessment_id}", response_model=EvidenceListResponse)

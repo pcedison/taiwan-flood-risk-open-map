@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
@@ -25,6 +26,10 @@ FetchJson = Callable[[str, int], Any]
 WRA_WATER_LEVEL_API_URL = (
     "https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0"
     "?format=JSON&sort=_importdate+desc&limit=5000"
+)
+WRA_WATER_STATION_API_URL = (
+    "https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92"
+    "?format=JSON&limit=5000"
 )
 WRA_WATER_LEVEL_DATA_GOV_DATASET_ID = "25768"
 WRA_WATER_LEVEL_DATA_GOV_URL = "https://data.gov.tw/dataset/25768"
@@ -68,6 +73,7 @@ class WraWaterLevelApiAdapter:
         self,
         *,
         api_url: str | None = None,
+        station_api_url: str | None = None,
         api_token: str | None = None,
         timeout_seconds: int = DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS,
         fetched_at: datetime | None = None,
@@ -75,6 +81,7 @@ class WraWaterLevelApiAdapter:
         raw_snapshot_key: str | None = None,
     ) -> None:
         self._api_url = (api_url or WRA_WATER_LEVEL_API_URL).strip()
+        self._station_api_url = (station_api_url or WRA_WATER_STATION_API_URL).strip()
         self._api_token = api_token
         self._timeout_seconds = max(1, timeout_seconds)
         self._fetched_at = fetched_at
@@ -84,17 +91,23 @@ class WraWaterLevelApiAdapter:
     def fetch(self) -> tuple[RawSourceItem, ...]:
         request_url = _wra_water_level_request_url(self._api_url, self._api_token)
         resource_url = _wra_water_level_source_url(self._api_url)
+        station_request_url = _wra_water_level_request_url(self._station_api_url, self._api_token)
+        station_resource_url = _wra_water_level_source_url(self._station_api_url)
         try:
             payload = self._fetch_json(request_url, self._timeout_seconds)
+            station_payload = self._fetch_json(station_request_url, self._timeout_seconds)
         except WraWaterLevelAdapterError:
             raise
         except Exception as exc:
             raise WraWaterLevelFetchError(f"WRA water level fetcher failed: {exc}") from exc
 
+        station_metadata = parse_wra_station_metadata_payload(station_payload)
         records = parse_wra_water_level_api_payload(
             payload,
             source_url=WRA_WATER_LEVEL_DATA_GOV_URL,
             resource_url=resource_url,
+            station_metadata=station_metadata,
+            station_metadata_url=station_resource_url,
         )
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
@@ -185,6 +198,8 @@ def parse_wra_water_level_api_payload(
     *,
     source_url: str,
     resource_url: str | None = None,
+    station_metadata: Mapping[str, Mapping[str, Any]] | None = None,
+    station_metadata_url: str | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     items = _water_level_items(payload)
     parsed: list[Mapping[str, Any]] = []
@@ -195,10 +210,25 @@ def parse_wra_water_level_api_payload(
             item,
             source_url=source_url,
             resource_url=resource_url,
+            station_metadata=station_metadata,
+            station_metadata_url=station_metadata_url,
         )
         if record is not None:
             parsed.append(record)
     return tuple(parsed)
+
+
+def parse_wra_station_metadata_payload(payload: object) -> dict[str, Mapping[str, Any]]:
+    records: dict[str, Mapping[str, Any]] = {}
+    for item in _station_metadata_items(payload):
+        if not isinstance(item, Mapping):
+            continue
+        record = _parse_wra_station_metadata_record(item)
+        if record is None:
+            continue
+        for key in _station_metadata_lookup_keys(record):
+            records[key] = record
+    return records
 
 
 def _normalize_water_level_record(
@@ -281,6 +311,8 @@ def _parse_wra_station_record(
     *,
     source_url: str,
     resource_url: str | None,
+    station_metadata: Mapping[str, Mapping[str, Any]] | None,
+    station_metadata_url: str | None,
 ) -> Mapping[str, Any] | None:
     station_id = _first_text(
         item,
@@ -325,7 +357,8 @@ def _parse_wra_station_record(
         return None
     if water_level_m <= -90:
         return None
-    station_name = station_name or station_id
+    metadata = station_metadata.get(station_id) if station_metadata is not None else None
+    station_name = station_name or _metadata_text(metadata, "station_name") or station_id
 
     record: dict[str, Any] = {
         "station_id": station_id,
@@ -338,8 +371,13 @@ def _parse_wra_station_record(
     }
     if resource_url is not None:
         record["resource_url"] = resource_url
+    if station_metadata_url is not None:
+        record["station_metadata_url"] = station_metadata_url
 
-    river_name = _first_text(item, "river_name", "RiverName", "rivername")
+    river_name = _first_text(item, "river_name", "RiverName", "rivername") or _metadata_text(
+        metadata,
+        "river_name",
+    )
     warning_level_m = _optional_float(
         _first_value(
             item,
@@ -352,6 +390,10 @@ def _parse_wra_station_record(
             "AlertLevel1",
         )
     )
+    if warning_level_m is None:
+        warning_level_m = _metadata_float(metadata, "alert_level_2_m")
+    if warning_level_m is None:
+        warning_level_m = _metadata_float(metadata, "alert_level_1_m")
     if river_name is not None:
         record["river_name"] = river_name
     if warning_level_m is not None:
@@ -359,12 +401,105 @@ def _parse_wra_station_record(
 
     lat = _optional_float(_first_value(item, "latitude", "Latitude", "Lat"))
     lng = _optional_float(_first_value(item, "longitude", "Longitude", "Lon", "Lng"))
+    if lat is None:
+        lat = _metadata_float(metadata, "latitude")
+    if lng is None:
+        lng = _metadata_float(metadata, "longitude")
     if lat is not None and lng is not None:
         record["latitude"] = lat
         record["longitude"] = lng
         record["geometry"] = {"type": "Point", "coordinates": [lng, lat]}
 
     return record
+
+
+def _parse_wra_station_metadata_record(item: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    status = _first_text(item, "observationstatus", "ObservationStatus")
+    if status == "\u5df2\u5ee2":
+        return None
+
+    station_id = _first_text(
+        item,
+        "basinidentifier",
+        "stationid",
+        "StationId",
+        "StationID",
+        "StationNo",
+        "ST_NO",
+    )
+    if station_id is None:
+        return None
+
+    coordinate = _wra_station_metadata_coordinate(item)
+    if coordinate is None:
+        return None
+    lat, lng = coordinate
+    record: dict[str, Any] = {
+        "station_id": station_id,
+        "latitude": lat,
+        "longitude": lng,
+    }
+
+    observatory_identifier = _first_text(
+        item,
+        "observatoryidentifier",
+        "ObservatoryIdentifier",
+    )
+    station_name = _first_text(item, "observatoryname", "StationName", "station_name")
+    river_name = _first_text(item, "rivername", "RiverName", "river_name")
+    alert_level_1_m = _optional_float(_first_value(item, "alertlevel1", "AlertLevel1"))
+    alert_level_2_m = _optional_float(_first_value(item, "alertlevel2", "AlertLevel2"))
+
+    if observatory_identifier is not None:
+        record["observatory_identifier"] = observatory_identifier
+    if station_name is not None:
+        record["station_name"] = station_name
+    if river_name is not None:
+        record["river_name"] = river_name
+    if alert_level_1_m is not None:
+        record["alert_level_1_m"] = alert_level_1_m
+    if alert_level_2_m is not None:
+        record["alert_level_2_m"] = alert_level_2_m
+    return record
+
+
+def _station_metadata_lookup_keys(record: Mapping[str, Any]) -> tuple[str, ...]:
+    keys = [
+        value
+        for value in (
+            record.get("station_id"),
+            record.get("observatory_identifier"),
+        )
+        if isinstance(value, str) and value
+    ]
+    return tuple(dict.fromkeys(keys))
+
+
+def _wra_station_metadata_coordinate(item: Mapping[str, Any]) -> tuple[float, float] | None:
+    lat = _optional_float(_first_value(item, "latitude", "Latitude", "Lat"))
+    lng = _optional_float(_first_value(item, "longitude", "Longitude", "Lon", "Lng"))
+    if lat is not None and lng is not None:
+        return (lat, lng)
+    return _twd97_xy_to_wgs84(
+        _first_value(
+            item,
+            "locationbytwd97_xy",
+            "LocationByTWD97_XY",
+            "TWD97_XY",
+        )
+    )
+
+
+def _metadata_text(metadata: Mapping[str, Any] | None, key: str) -> str | None:
+    if metadata is None:
+        return None
+    return optional_str(metadata.get(key))
+
+
+def _metadata_float(metadata: Mapping[str, Any] | None, key: str) -> float | None:
+    if metadata is None:
+        return None
+    return _optional_float(metadata.get(key))
 
 
 def _fetch_json(url: str, timeout_seconds: int) -> Any:
@@ -415,6 +550,22 @@ def _url_with_query(api_url: str, params: Mapping[str, str]) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
+def _station_metadata_items(payload: object) -> Iterable[Any]:
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, Mapping):
+        raise WraWaterLevelPayloadError(
+            "WRA station metadata payload is missing a station metadata record list"
+        )
+    for key in ("responseData", "data", "Data", "records"):
+        items = payload.get(key)
+        if isinstance(items, list):
+            return items
+    raise WraWaterLevelPayloadError(
+        "WRA station metadata payload is missing a station metadata record list"
+    )
+
+
 def _first_text(item: Mapping[str, Any], *keys: str) -> str | None:
     return optional_str(_first_value(item, *keys))
 
@@ -445,3 +596,57 @@ def _optional_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _twd97_xy_to_wgs84(value: object) -> tuple[float, float] | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.split()
+    if len(parts) != 2:
+        return None
+    x = _optional_float(parts[0])
+    y = _optional_float(parts[1])
+    if x is None or y is None:
+        return None
+
+    a = 6378137.0
+    b = 6356752.314245
+    lng0 = math.radians(121)
+    k0 = 0.9999
+    dx = 250000.0
+    dy = 0.0
+    e = math.sqrt(1 - (b * b) / (a * a))
+
+    x -= dx
+    y -= dy
+    m = y / k0
+    mu = m / (a * (1 - e**2 / 4 - 3 * e**4 / 64 - 5 * e**6 / 256))
+    e1 = (1 - math.sqrt(1 - e**2)) / (1 + math.sqrt(1 - e**2))
+
+    fp = (
+        mu
+        + (3 * e1 / 2 - 27 * e1**3 / 32) * math.sin(2 * mu)
+        + (21 * e1**2 / 16 - 55 * e1**4 / 32) * math.sin(4 * mu)
+        + (151 * e1**3 / 96) * math.sin(6 * mu)
+        + (1097 * e1**4 / 512) * math.sin(8 * mu)
+    )
+
+    e2 = e**2 / (1 - e**2)
+    c1 = e2 * math.cos(fp) ** 2
+    t1 = math.tan(fp) ** 2
+    r1 = a * (1 - e**2) / ((1 - e**2 * math.sin(fp) ** 2) ** 1.5)
+    n1 = a / math.sqrt(1 - e**2 * math.sin(fp) ** 2)
+    d = x / (n1 * k0)
+
+    lat = fp - (n1 * math.tan(fp) / r1) * (
+        d**2 / 2
+        - (5 + 3 * t1 + 10 * c1 - 4 * c1**2 - 9 * e2) * d**4 / 24
+        + (61 + 90 * t1 + 298 * c1 + 45 * t1**2 - 252 * e2 - 3 * c1**2) * d**6 / 720
+    )
+    lng = lng0 + (
+        d
+        - (1 + 2 * t1 + c1) * d**3 / 6
+        + (5 - 2 * c1 + 28 * t1 - 3 * c1**2 + 8 * e2 + 24 * t1**2) * d**5 / 120
+    ) / math.cos(fp)
+
+    return (math.degrees(lat), math.degrees(lng))

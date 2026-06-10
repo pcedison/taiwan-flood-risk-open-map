@@ -80,12 +80,22 @@ RUN printf '%s\n' \
   'web_host="${WEB_HOST:-0.0.0.0}"' \
   'web_port="${PORT:-${WEB_PORT:-3000}}"' \
   'ingestion_enabled="${HOSTED_INGESTION_SCHEDULER_ENABLED:-${SINGLE_SERVICE_INGESTION_SCHEDULER_ENABLED:-false}}"' \
+  'scheduler_pid=""' \
   'cd /app/apps/api' \
   'python -m uvicorn app.main:app --host "${api_host}" --port "${api_port}" &' \
   'api_pid=$!' \
   'cleanup() {' \
-  '  kill "${api_pid}" "${web_pid:-0}" "${scheduler_pid:-0}" 2>/dev/null || true' \
-  '  wait "${api_pid}" "${web_pid:-0}" "${scheduler_pid:-0}" 2>/dev/null || true' \
+  '  local pid' \
+  '  for pid in "${api_pid:-}" "${web_pid:-}" "${scheduler_pid:-}"; do' \
+  '    if [ -n "${pid}" ]; then' \
+  '      kill "${pid}" 2>/dev/null || true' \
+  '    fi' \
+  '  done' \
+  '  for pid in "${api_pid:-}" "${web_pid:-}" "${scheduler_pid:-}"; do' \
+  '    if [ -n "${pid}" ]; then' \
+  '      wait "${pid}" 2>/dev/null || true' \
+  '    fi' \
+  '  done' \
   '}' \
   'trap cleanup EXIT INT TERM' \
   'cd /app/apps/web' \

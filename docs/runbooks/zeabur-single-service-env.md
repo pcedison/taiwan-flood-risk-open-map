@@ -74,6 +74,7 @@ snapshots before a dedicated worker service exists.
 | `SOURCE_CWA_API_ENABLED` | `true` |
 | `CWA_API_AUTHORIZATION` | Your CWA API authorization token |
 | `SOURCE_WRA_API_ENABLED` | `true` |
+| `WRA_STATION_API_URL` | Leave blank unless overriding the WRA station metadata endpoint |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` for a 5-minute beta cadence |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` |
 
@@ -91,7 +92,7 @@ Do not add these variables for the first single-service preview unless an engine
 | `REDIS_URL`, `REDIS_HOST`, `REDIS_PORT` | Redis is not part of the first preview. |
 | `MINIO_*` | Object storage is not part of the first preview. |
 | `CWA_API_URL`, `CWA_API_TIMEOUT_SECONDS` | Optional worker live-ingestion knobs; leave blank/default unless CWA endpoint review requires an override. |
-| `WRA_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Optional worker live-ingestion knobs; leave blank/default unless WRA endpoint review requires an override. |
+| `WRA_API_URL`, `WRA_STATION_API_URL`, `WRA_API_TOKEN`, `WRA_API_TIMEOUT_SECONDS` | Optional worker live-ingestion knobs; leave blank/default unless WRA endpoint review requires an override. |
 | `WORKER_METRICS_TEXTFILE_PATH`, `SCHEDULER_METRICS_TEXTFILE_PATH` | Queue/heartbeat metric files require a collector; leave blank in this single-service beta unless monitoring is attached. |
 | `S3_*` | The current runtime does not read these names. |
 | `TGOS_API_KEY` | Reserved for future optional TGOS support; not read by the current runtime. |

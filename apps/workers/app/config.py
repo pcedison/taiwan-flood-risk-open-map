@@ -38,6 +38,7 @@ class WorkerSettings:
     cwa_api_url: str | None
     cwa_api_timeout_seconds: int
     wra_api_url: str | None
+    wra_station_api_url: str | None
     wra_api_token: str | None
     wra_api_timeout_seconds: int
     flood_potential_geojson_url: str | None
@@ -94,6 +95,7 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         cwa_api_url=env_str(values, "CWA_API_URL"),
         cwa_api_timeout_seconds=env_int(values, "CWA_API_TIMEOUT_SECONDS", default=8),
         wra_api_url=env_str(values, "WRA_API_URL"),
+        wra_station_api_url=env_str(values, "WRA_STATION_API_URL"),
         wra_api_token=env_str(values, "WRA_API_TOKEN"),
         wra_api_timeout_seconds=env_int(values, "WRA_API_TIMEOUT_SECONDS", default=8),
         flood_potential_geojson_url=env_str(values, "FLOOD_POTENTIAL_GEOJSON_URL"),

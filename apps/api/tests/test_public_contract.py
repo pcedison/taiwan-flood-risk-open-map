@@ -748,6 +748,84 @@ def test_public_news_failure_is_not_promoted_when_history_exists() -> None:
     assert limitations == []
 
 
+def test_visible_source_limitations_respects_persisted_official_realtime_evidence() -> None:
+    now = datetime.fromisoformat("2026-06-10T03:00:00+00:00")
+    rainfall = public_routes.Evidence(
+        id="official-rainfall",
+        source_id="cwa-rainfall:test",
+        source_type="official",
+        event_type="rainfall",
+        title="Persisted rainfall",
+        summary="Persisted CWA rainfall snapshot.",
+        url="https://data.gov.tw/dataset/9177",
+        occurred_at=None,
+        observed_at=now,
+        ingested_at=now,
+        point=public_routes.LatLng(lat=25.0, lng=121.5),
+        geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[121.5, 25.0]),
+        distance_to_query_m=100.0,
+        confidence=0.92,
+        freshness_score=0.95,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref="raw/cwa/rainfall/test.json",
+    )
+    historical_news = public_routes.Evidence(
+        id="historical-news",
+        source_id="news:test",
+        source_type="news",
+        event_type="flood_report",
+        title="Historical flood evidence",
+        summary="Historical observed flood evidence.",
+        url="https://example.test/news",
+        occurred_at=now,
+        observed_at=now,
+        ingested_at=now,
+        point=public_routes.LatLng(lat=25.0, lng=121.5),
+        geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[121.5, 25.0]),
+        distance_to_query_m=100.0,
+        confidence=0.8,
+        freshness_score=0.8,
+        source_weight=0.85,
+        privacy_level="public",
+        raw_ref="raw/news/test.json",
+    )
+
+    limitations = public_routes._visible_source_limitations(
+        public_routes.OfficialRealtimeBundle(
+            observations=(),
+            source_statuses=(
+                public_routes.OfficialRealtimeSourceStatus(
+                    source_id="cwa-rainfall",
+                    name="CWA rainfall",
+                    health_status="degraded",
+                    observed_at=None,
+                    ingested_at=now,
+                    message="rainfall missing",
+                ),
+                public_routes.OfficialRealtimeSourceStatus(
+                    source_id="wra-water-level",
+                    name="WRA water level",
+                    health_status="degraded",
+                    observed_at=None,
+                    ingested_at=now,
+                    message="water level missing",
+                ),
+            ),
+        ),
+        (),
+        (rainfall, historical_news),
+        public_routes.OnDemandNewsSearchResult(
+            attempted=False,
+            source_id="on-demand-public-news",
+            message="not attempted",
+            records=(),
+        ),
+    )
+
+    assert limitations == ["water level missing"]
+
+
 def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> None:
     monkeypatch.setattr(
         public_routes,

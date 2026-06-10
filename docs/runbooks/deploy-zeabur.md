@@ -140,6 +140,7 @@ Optional official ingestion scheduler for the single-service beta:
 | `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level` | Selects official rainfall and water-level adapters. |
 | `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |
 | `SOURCE_WRA_API_ENABLED` | `true` | Enables the WRA live client. |
+| `WRA_STATION_API_URL` | leave blank | Optional override for the WRA station metadata endpoint used to add coordinates to realtime water-level rows. |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` | Five-minute beta cadence. |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` | Postgres scheduler lease TTL. |
 
@@ -241,6 +242,7 @@ Adapter and source variables:
 | `CWA_API_URL` | worker | Optional override for the worker CWA rainfall endpoint; leave blank for the default CWA O-A0002-001 datastore |
 | `CWA_API_TIMEOUT_SECONDS` | worker | Worker CWA rainfall request timeout; default `8` seconds |
 | `WRA_API_URL` | worker | Optional override for the worker WRA water-level endpoint; leave blank for the default WRA open-data v2 datastore |
+| `WRA_STATION_API_URL` | worker | Optional override for the worker WRA station metadata endpoint; leave blank for the default WRA open-data v2 station catalog |
 | `WRA_API_TOKEN` | worker | Optional WRA token if an upstream environment requires one; omitted by default and never written into `source_url` |
 | `WRA_API_TIMEOUT_SECONDS` | worker | Worker WRA water-level request timeout; default `8` seconds |
 

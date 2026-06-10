@@ -28,6 +28,7 @@ from app.adapters.wra import (
     WraWaterLevelApiAdapter,
     WraWaterLevelFetchError,
     WraWaterLevelPayloadError,
+    parse_wra_station_metadata_payload,
     parse_wra_water_level_api_payload,
 )
 from app.pipelines.validation import validate_evidence_for_promotion
@@ -162,8 +163,22 @@ def test_wra_water_level_api_adapter_fetches_and_normalizes_official_payload() -
     captured: dict[str, object] = {}
 
     def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
-        captured["url"] = url
+        captured.setdefault("urls", []).append(url)
         captured["timeout_seconds"] = timeout_seconds
+        if "c4acc691-7416-40ca-9464-292c0c00da92" in url:
+            return {
+                "responseData": [
+                    {
+                        "basinidentifier": "WRA-1001",
+                        "observatoryidentifier": "3132020RVWRA-1001",
+                        "observationstatus": "\u73fe\u5b58",
+                        "observatoryname": "Dahan Bridge",
+                        "rivername": "Dahan River",
+                        "Latitude": "25.0320",
+                        "Longitude": "121.4820",
+                    }
+                ]
+            }
         return _load_mapping("wra_water_level_api_sample.json")
 
     adapter = WraWaterLevelApiAdapter(
@@ -176,11 +191,12 @@ def test_wra_water_level_api_adapter_fetches_and_normalizes_official_payload() -
 
     result = adapter.run()
 
-    request_url = str(captured["url"])
+    request_url = str(cast(Any, captured["urls"])[0])
     request_params = parse_qs(urlsplit(request_url).query)
     assert captured["timeout_seconds"] == 5
     assert request_params["format"] == ["JSON"]
     assert request_params["county"] == ["taipei"]
+    assert "c4acc691-7416-40ca-9464-292c0c00da92" in str(cast(Any, captured["urls"])[1])
 
     assert len(result.fetched) == 1
     assert len(result.normalized) == 1
@@ -231,12 +247,80 @@ def test_wra_water_level_api_payload_accepts_wra_v2_list_shape() -> None:
     assert records[0]["warning_level_m"] == 4.0
 
 
+def test_wra_water_level_api_payload_joins_station_metadata_for_geometry() -> None:
+    station_metadata = parse_wra_station_metadata_payload(
+        [
+            {
+                "basinidentifier": "WRA-2001",
+                "observatoryidentifier": "3132020RVWRA-2001",
+                "observationstatus": "\u73fe\u5b58",
+                "observatoryname": "Keelung Bridge",
+                "rivername": "Keelung River",
+                "alertlevel1": "5.0",
+                "alertlevel2": "4.0",
+                "Latitude": "25.0620",
+                "Longitude": "121.6420",
+            }
+        ]
+    )
+
+    records = parse_wra_water_level_api_payload(
+        [
+            {
+                "stationid": "WRA-2001",
+                "datetime": "2026-04-28T16:05:00+08:00",
+                "waterlevel": "3.21",
+            }
+        ],
+        source_url="https://example.test/wra/water-level?format=JSON",
+        station_metadata=station_metadata,
+        station_metadata_url="https://example.test/wra/stations?format=JSON",
+    )
+
+    assert len(records) == 1
+    assert records[0]["station_name"] == "Keelung Bridge"
+    assert records[0]["river_name"] == "Keelung River"
+    assert records[0]["warning_level_m"] == 4.0
+    assert records[0]["station_metadata_url"] == "https://example.test/wra/stations?format=JSON"
+    assert records[0]["geometry"] == {
+        "type": "Point",
+        "coordinates": [121.642, 25.062],
+    }
+
+
+def test_wra_station_metadata_payload_converts_twd97_station_coordinates() -> None:
+    station_metadata = parse_wra_station_metadata_payload(
+        [
+            {
+                "basinidentifier": "1010H006",
+                "observationstatus": "\u73fe\u5b58",
+                "observatoryname": "Xinshuxi Bridge",
+                "rivername": "Huang River",
+                "locationbytwd97_xy": "313411.44 2790930.63",
+            },
+            {
+                "basinidentifier": "1010H001",
+                "observationstatus": "\u5df2\u5ee2",
+                "locationbytwd97_xy": "310928.30 2790168.45",
+            },
+        ]
+    )
+
+    station = station_metadata["1010H006"]
+    assert station["station_name"] == "Xinshuxi Bridge"
+    assert 25.20 < float(station["latitude"]) < 25.30
+    assert 121.60 < float(station["longitude"]) < 121.70
+    assert "1010H001" not in station_metadata
+
+
 def test_wra_water_level_api_adapter_omits_optional_token_from_source_url() -> None:
     captured: dict[str, object] = {}
 
     def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
-        captured["url"] = url
+        captured.setdefault("urls", []).append(url)
         del timeout_seconds
+        if "c4acc691-7416-40ca-9464-292c0c00da92" in url:
+            return {"responseData": []}
         return _load_mapping("wra_water_level_api_sample.json")
 
     adapter = WraWaterLevelApiAdapter(
@@ -248,7 +332,7 @@ def test_wra_water_level_api_adapter_omits_optional_token_from_source_url() -> N
 
     result = adapter.run()
 
-    request_url = str(captured["url"])
+    request_url = str(cast(Any, captured["urls"])[0])
     request_params = parse_qs(urlsplit(request_url).query)
     assert request_params["api_key"] == ["test-token"]
     assert "old-token" not in request_url

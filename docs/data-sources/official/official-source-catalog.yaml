@@ -29,6 +29,7 @@ sources:
     title: "Realtime water level data"
     provider: "Water Resources Agency"
     resource_url: "https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0"
+    station_metadata_url: "https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92"
     resource_format: "JSON API"
     update_frequency: "data.gov.tw metadata: every 1 hour; observations are recorded every 10 minutes"
     license: "Government Open Data License, version 1.0"
