@@ -102,6 +102,20 @@ RUN printf '%s\n' \
   '  done' \
   '}' \
   'trap cleanup EXIT INT TERM' \
+  'api_ready=""' \
+  'echo "[start] waiting for api health"' \
+  'for attempt in $(seq 1 60); do' \
+  '  if python -c "import urllib.request; urllib.request.urlopen('"'"'http://${api_host}:${api_port}/health'"'"', timeout=1)" >/dev/null 2>&1; then' \
+  '    api_ready="1"' \
+  '    break' \
+  '  fi' \
+  '  sleep 1' \
+  'done' \
+  'if [ -z "${api_ready}" ]; then' \
+  '  echo "[start] api health did not become ready"' \
+  '  exit 1' \
+  'fi' \
+  'echo "[start] api health ready"' \
   'cd /app/apps/web' \
   'echo "[start] launching web"' \
   'node node_modules/next/dist/bin/next start --hostname "${web_host}" --port "${web_port}" &' \
