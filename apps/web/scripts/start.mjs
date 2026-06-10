@@ -4,10 +4,22 @@ import { fileURLToPath } from "node:url";
 const nextBin = fileURLToPath(new URL("../node_modules/next/dist/bin/next", import.meta.url));
 const hostname = process.env.WEB_HOST || "0.0.0.0";
 const port = process.env.PORT || process.env.WEB_PORT || "3000";
+const passthroughArgs = process.argv.slice(2);
+const hasOption = (names) =>
+  passthroughArgs.some((arg) => names.some((name) => arg === name || arg.startsWith(`${name}=`)));
+const nextArgs = ["start", ...passthroughArgs];
+
+if (!hasOption(["--hostname", "-H"])) {
+  nextArgs.push("--hostname", hostname);
+}
+
+if (!hasOption(["--port", "-p"])) {
+  nextArgs.push("--port", port);
+}
 
 const child = spawn(
   process.execPath,
-  [nextBin, "start", "--hostname", hostname, "--port", port],
+  [nextBin, ...nextArgs],
   {
     env: process.env,
     stdio: "inherit",
