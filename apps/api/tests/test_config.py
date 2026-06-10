@@ -82,6 +82,42 @@ def test_settings_enables_short_risk_response_cache_for_hosted_runtime(monkeypat
     settings = get_settings()
 
     assert settings.risk_assessment_response_cache_seconds == 120
+    assert settings.realtime_official_diagnostic_fallback_enabled is False
+    assert settings.tile_dynamic_fallback_enabled is False
+    get_settings.cache_clear()
+
+
+def test_settings_local_defaults_allow_realtime_diagnostic_fallback(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", raising=False)
+
+    settings = get_settings()
+
+    assert settings.realtime_official_diagnostic_fallback_enabled is True
+    assert settings.tile_dynamic_fallback_enabled is True
+    get_settings.cache_clear()
+
+
+def test_settings_can_explicitly_enable_hosted_tile_dynamic_fallback(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("TILE_DYNAMIC_FALLBACK_ENABLED", "true")
+
+    settings = get_settings()
+
+    assert settings.tile_dynamic_fallback_enabled is True
+    get_settings.cache_clear()
+
+
+def test_settings_can_explicitly_enable_hosted_realtime_diagnostic_fallback(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", "true")
+
+    settings = get_settings()
+
+    assert settings.realtime_official_diagnostic_fallback_enabled is True
     get_settings.cache_clear()
 
 
@@ -93,6 +129,81 @@ def test_settings_allows_disabling_risk_response_cache(monkeypatch):
     settings = get_settings()
 
     assert settings.risk_assessment_response_cache_seconds == 0
+    get_settings.cache_clear()
+
+
+def test_settings_hosted_defaults_disable_admin_samples_and_enable_public_redis_limits(
+    monkeypatch,
+):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.delenv("ADMIN_SAMPLE_DATA_ENABLED", raising=False)
+    monkeypatch.delenv("DEMO_MODE_ENABLED", raising=False)
+    monkeypatch.delenv("PUBLIC_RATE_LIMIT_ENABLED", raising=False)
+    monkeypatch.delenv("PUBLIC_RATE_LIMIT_BACKEND", raising=False)
+    monkeypatch.delenv("GEOCODE_RATE_LIMIT_MAX_REQUESTS", raising=False)
+    monkeypatch.delenv("RISK_ASSESSMENT_RATE_LIMIT_MAX_REQUESTS", raising=False)
+    monkeypatch.delenv("PUBLIC_RATE_LIMIT_WINDOW_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings.admin_sample_data_enabled is False
+    assert settings.public_rate_limit_enabled is True
+    assert settings.public_rate_limit_backend == "redis"
+    assert settings.geocode_rate_limit_max_requests == 60
+    assert settings.risk_assessment_rate_limit_max_requests == 30
+    assert settings.public_rate_limit_window_seconds == 60
+    get_settings.cache_clear()
+
+
+def test_settings_local_defaults_allow_admin_samples_without_public_rate_limit(
+    monkeypatch,
+):
+    get_settings.cache_clear()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ADMIN_SAMPLE_DATA_ENABLED", raising=False)
+    monkeypatch.delenv("DEMO_MODE_ENABLED", raising=False)
+    monkeypatch.delenv("PUBLIC_RATE_LIMIT_ENABLED", raising=False)
+    monkeypatch.delenv("PUBLIC_RATE_LIMIT_BACKEND", raising=False)
+
+    settings = get_settings()
+
+    assert settings.admin_sample_data_enabled is True
+    assert settings.public_rate_limit_enabled is False
+    assert settings.public_rate_limit_backend == "memory"
+    get_settings.cache_clear()
+
+
+def test_settings_admin_sample_data_can_be_enabled_by_demo_flag(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("DEMO_MODE_ENABLED", "true")
+    monkeypatch.delenv("ADMIN_SAMPLE_DATA_ENABLED", raising=False)
+
+    settings = get_settings()
+
+    assert settings.admin_sample_data_enabled is True
+    get_settings.cache_clear()
+
+
+def test_settings_public_rate_limit_env_overrides(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "true")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_BACKEND", "memory")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_CLIENT_HEADER", "x-forwarded-for")
+    monkeypatch.setenv("GEOCODE_RATE_LIMIT_MAX_REQUESTS", "12")
+    monkeypatch.setenv("RISK_ASSESSMENT_RATE_LIMIT_MAX_REQUESTS", "7")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_WINDOW_SECONDS", "15")
+
+    settings = get_settings()
+
+    assert settings.public_rate_limit_enabled is True
+    assert settings.public_rate_limit_backend == "memory"
+    assert settings.public_rate_limit_client_header == "x-forwarded-for"
+    assert settings.geocode_rate_limit_max_requests == 12
+    assert settings.risk_assessment_rate_limit_max_requests == 7
+    assert settings.public_rate_limit_window_seconds == 15
     get_settings.cache_clear()
 
 

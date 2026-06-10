@@ -43,6 +43,7 @@ from app.logging import log_event
 from app.metrics import (
     RunStatus,
     render_scheduler_heartbeat_metrics,
+    render_source_freshness_metrics,
     render_worker_heartbeat_metrics,
     write_prometheus_textfile,
 )
@@ -516,6 +517,10 @@ def _write_worker_heartbeat(
         heartbeat_at=datetime.now(UTC),
         last_run_status=_run_status(result),
         job=job_key,
+    )
+    content += render_source_freshness_metrics(
+        summaries=result.summaries,
+        freshness_checks=result.freshness_checks,
     )
     _write_metrics_textfile(settings.worker_metrics_textfile_path, content)
 

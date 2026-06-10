@@ -29,6 +29,7 @@ def test_fetch_vector_tile_prefers_dedicated_layer_feature_table() -> None:
     assert tile == b"mvt-bytes"
     assert "FROM map_layers" in sql
     assert "WHERE layer_id = %s" in sql
+    assert "AND status IN ('available', 'degraded')" in sql
     assert "FROM tile_cache_entries" in sql
     assert "FROM map_layer_features" in sql
     assert "AND (minzoom IS NULL OR minzoom <= %s)" in sql
@@ -82,6 +83,25 @@ def test_fetch_vector_tile_keeps_explicit_fallback_when_layer_features_empty() -
     assert "e.event_type = 'flood_potential'" in sql
 
 
+def test_fetch_vector_tile_can_disable_source_table_fallback() -> None:
+    connection = _FakeConnection(row={"tile": b"mvt-bytes"})
+
+    fetch_vector_tile(
+        database_url="postgresql://example.test/flood",
+        layer_id="flood-potential",
+        z=8,
+        x=215,
+        y=107,
+        allow_dynamic_fallback=False,
+        connection_factory=lambda: connection,
+    )
+
+    sql, _params = connection.cursor_instance.executions[0]
+    assert "fallback_src" not in sql
+    assert "FROM evidence e" not in sql
+    assert "SELECT * FROM production_src" in sql
+
+
 def test_tile_layer_feature_cache_migration_defines_cache_schema() -> None:
     migration = (
         Path(__file__).resolve().parents[3]
@@ -100,6 +120,16 @@ def test_tile_layer_feature_cache_migration_defines_cache_schema() -> None:
     assert "tile_data bytea NOT NULL" in migration
     assert "UNIQUE (layer_id, z, x, y)" in migration
     assert "CREATE INDEX IF NOT EXISTS idx_tile_cache_entries_lookup" in migration
+
+    scrub_migration = (
+        Path(__file__).resolve().parents[3]
+        / "infra"
+        / "migrations"
+        / "0016_scrub_placeholder_tile_urls.sql"
+    ).read_text(encoding="utf-8")
+    assert "metadata = metadata - 'tiles'" in scrub_migration
+    assert "tiles.placeholder.flood-risk.local" in scrub_migration
+    assert "tiles.example.test" in scrub_migration
 
 
 def test_fetch_vector_tile_rejects_unknown_layer_without_sql() -> None:

@@ -9,6 +9,7 @@ from psycopg.rows import dict_row
 
 
 ConnectionFactory = Callable[[], Any]
+VECTOR_TILE_CACHE_CONTROL = "public, max-age=60"
 
 
 class TileLayerNotFound(RuntimeError):
@@ -97,13 +98,20 @@ def fetch_vector_tile(
     z: int,
     x: int,
     y: int,
+    allow_dynamic_fallback: bool = True,
     connection_factory: ConnectionFactory | None = None,
 ) -> bytes:
     spec = _LAYER_SPECS.get(layer_id)
     if spec is None:
         raise TileLayerNotFound(layer_id)
 
-    sql, params = build_mvt_sql(spec=spec, z=z, x=x, y=y)
+    sql, params = build_mvt_sql(
+        spec=spec,
+        z=z,
+        x=x,
+        y=y,
+        allow_dynamic_fallback=allow_dynamic_fallback,
+    )
     try:
         with _connect(database_url, connection_factory) as connection:
             with connection.cursor() as cursor:
@@ -119,16 +127,40 @@ def fetch_vector_tile(
     return _bytes(tile)
 
 
-def build_mvt_sql(*, spec: TileLayerSpec, z: int, x: int, y: int) -> tuple[str, tuple[object, ...]]:
+def build_mvt_sql(
+    *,
+    spec: TileLayerSpec,
+    z: int,
+    x: int,
+    y: int,
+    allow_dynamic_fallback: bool = True,
+) -> tuple[str, tuple[object, ...]]:
     property_select = ",\n                ".join(
         f"src.{column}" for column in spec.property_columns
     )
     production_property_select = ",\n                ".join(spec.production_property_sql)
+    fallback_cte = ""
+    src_select = "SELECT * FROM production_src"
+    if allow_dynamic_fallback:
+        fallback_cte = f""",
+        fallback_src AS (
+            SELECT fallback.*
+            FROM (
+                {spec.fallback_source_sql}
+            ) fallback
+            WHERE NOT (SELECT has_features FROM production_layer_has_features)
+        )"""
+        src_select = """
+            SELECT * FROM production_src
+            UNION ALL
+            SELECT * FROM fallback_src
+        """
     sql = f"""
         WITH requested_layer AS (
             SELECT layer_id
             FROM map_layers
             WHERE layer_id = %s
+                AND status IN ('available', 'degraded')
             LIMIT 1
         ),
         cached_tile AS (
@@ -170,18 +202,9 @@ def build_mvt_sql(*, spec: TileLayerSpec, z: int, x: int, y: int) -> tuple[str, 
                 AND (mlf.minzoom IS NULL OR mlf.minzoom <= %s)
                 AND (mlf.maxzoom IS NULL OR mlf.maxzoom >= %s)
                 AND (mlf.expires_at IS NULL OR mlf.expires_at > now())
-        ),
-        fallback_src AS (
-            SELECT fallback.*
-            FROM (
-                {spec.fallback_source_sql}
-            ) fallback
-            WHERE NOT (SELECT has_features FROM production_layer_has_features)
-        ),
+        ){fallback_cte},
         src AS (
-            SELECT * FROM production_src
-            UNION ALL
-            SELECT * FROM fallback_src
+            {src_select}
         ),
         mvtgeom AS (
             SELECT

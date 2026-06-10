@@ -11,7 +11,8 @@ from typing import Literal
 import redis
 
 
-UserReportRateLimitBackend = Literal["redis", "memory"]
+RateLimitBackend = Literal["redis", "memory"]
+UserReportRateLimitBackend = RateLimitBackend
 _REDIS_RATE_LIMIT_SCRIPT = """
 local bucket_key = KEYS[1]
 local sequence_key = KEYS[2]
@@ -41,29 +42,61 @@ return {1, 0}
 
 
 @dataclass(frozen=True)
-class UserReportRateLimitPolicy:
+class RateLimitPolicy:
     max_requests: int
     window_seconds: int
 
 
-class UserReportRateLimitExceeded(RuntimeError):
-    def __init__(self, *, retry_after_seconds: int, policy: UserReportRateLimitPolicy) -> None:
-        super().__init__("user report intake rate limit exceeded")
+class RateLimitExceeded(RuntimeError):
+    def __init__(
+        self,
+        *,
+        retry_after_seconds: int,
+        policy: RateLimitPolicy,
+        message: str = "rate limit exceeded",
+    ) -> None:
+        super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
         self.policy = policy
 
 
-class UserReportRateLimitUnavailable(RuntimeError):
+class UserReportRateLimitExceeded(RateLimitExceeded):
+    def __init__(self, *, retry_after_seconds: int, policy: RateLimitPolicy) -> None:
+        super().__init__(
+            retry_after_seconds=retry_after_seconds,
+            policy=policy,
+            message="user report intake rate limit exceeded",
+        )
+
+
+class RateLimitUnavailable(RuntimeError):
     """Raised when the configured shared abuse guard cannot be reached."""
 
 
-class InMemoryUserReportRateLimiter:
+class UserReportRateLimitUnavailable(RateLimitUnavailable):
+    """Raised when user report abuse controls cannot be reached."""
+
+
+class InMemoryRateLimiter:
     def __init__(self, *, clock: Callable[[], float] = monotonic) -> None:
         self._clock = clock
         self._requests_by_client: dict[str, deque[float]] = {}
         self._lock = Lock()
 
-    def check(self, *, client_key: str, policy: UserReportRateLimitPolicy) -> None:
+    def check(self, *, client_key: str, policy: RateLimitPolicy) -> None:
+        self._check(
+            client_key=client_key,
+            policy=policy,
+            exceeded_error=RateLimitExceeded,
+        )
+
+    def _check(
+        self,
+        *,
+        client_key: str,
+        policy: RateLimitPolicy,
+        exceeded_error: type[RateLimitExceeded],
+    ) -> None:
         if policy.max_requests < 1:
             raise ValueError("rate limit max_requests must be at least 1")
         if policy.window_seconds < 1:
@@ -78,7 +111,7 @@ class InMemoryUserReportRateLimiter:
 
             if len(requests) >= policy.max_requests:
                 retry_after = max(1, ceil(policy.window_seconds - (now - requests[0])))
-                raise UserReportRateLimitExceeded(
+                raise exceeded_error(
                     retry_after_seconds=retry_after,
                     policy=policy,
                 )
@@ -86,12 +119,28 @@ class InMemoryUserReportRateLimiter:
             requests.append(now)
 
 
-class RedisUserReportRateLimiter:
-    def __init__(self, *, redis_url: str, clock: Callable[[], float] = time) -> None:
+class InMemoryUserReportRateLimiter(InMemoryRateLimiter):
+    def check(self, *, client_key: str, policy: RateLimitPolicy) -> None:
+        self._check(
+            client_key=client_key,
+            policy=policy,
+            exceeded_error=UserReportRateLimitExceeded,
+        )
+
+
+class RedisRateLimiter:
+    def __init__(
+        self,
+        *,
+        redis_url: str,
+        namespace: str,
+        clock: Callable[[], float] = time,
+    ) -> None:
         self._redis_url = redis_url
+        self._namespace = namespace
         self._clock = clock
 
-    def check(self, *, client_key: str, policy: UserReportRateLimitPolicy) -> None:
+    def check(self, *, client_key: str, policy: RateLimitPolicy) -> None:
         if policy.max_requests < 1:
             raise ValueError("rate limit max_requests must be at least 1")
         if policy.window_seconds < 1:
@@ -106,26 +155,77 @@ class RedisUserReportRateLimiter:
             result = client.eval(
                 _REDIS_RATE_LIMIT_SCRIPT,
                 2,
-                f"flood-risk:user-report-rate:{client_key}",
-                f"flood-risk:user-report-rate-seq:{client_key}",
+                f"flood-risk:{self._namespace}:{client_key}",
+                f"flood-risk:{self._namespace}-seq:{client_key}",
                 int(self._clock() * 1000),
                 policy.window_seconds * 1000,
                 policy.max_requests,
             )
         except redis.RedisError as exc:
-            raise UserReportRateLimitUnavailable(str(exc)) from exc
+            raise RateLimitUnavailable(str(exc)) from exc
         finally:
             client.close()
 
         allowed, retry_ms = _parse_redis_rate_limit_result(result)
         if not allowed:
-            raise UserReportRateLimitExceeded(
+            raise RateLimitExceeded(
                 retry_after_seconds=max(1, ceil(retry_ms / 1000)),
                 policy=policy,
             )
 
 
+class RedisUserReportRateLimiter(RedisRateLimiter):
+    def __init__(self, *, redis_url: str, clock: Callable[[], float] = time) -> None:
+        super().__init__(
+            redis_url=redis_url,
+            namespace="user-report-rate",
+            clock=clock,
+        )
+
+    def check(self, *, client_key: str, policy: RateLimitPolicy) -> None:
+        try:
+            super().check(client_key=client_key, policy=policy)
+        except RateLimitExceeded as exc:
+            raise UserReportRateLimitExceeded(
+                retry_after_seconds=exc.retry_after_seconds,
+                policy=exc.policy,
+            ) from exc
+        except RateLimitUnavailable as exc:
+            raise UserReportRateLimitUnavailable(str(exc)) from exc
+
+
+UserReportRateLimitPolicy = RateLimitPolicy
+PUBLIC_ENDPOINT_RATE_LIMITER = InMemoryRateLimiter()
 USER_REPORT_INTAKE_RATE_LIMITER = InMemoryUserReportRateLimiter()
+
+
+def check_rate_limit(
+    *,
+    client_key: str,
+    namespace: str,
+    max_requests: int,
+    window_seconds: int,
+    backend: RateLimitBackend = "redis",
+    redis_url: str | None = None,
+    limiter: InMemoryRateLimiter = PUBLIC_ENDPOINT_RATE_LIMITER,
+) -> None:
+    policy = RateLimitPolicy(
+        max_requests=max_requests,
+        window_seconds=window_seconds,
+    )
+    if backend == "redis":
+        if redis_url is None:
+            raise RateLimitUnavailable("redis_url is required for redis rate limiting")
+        RedisRateLimiter(redis_url=redis_url, namespace=namespace).check(
+            client_key=client_key,
+            policy=policy,
+        )
+        return
+
+    limiter.check(
+        client_key=f"{namespace}:{client_key}",
+        policy=policy,
+    )
 
 
 def check_user_report_intake_rate_limit(
@@ -137,7 +237,7 @@ def check_user_report_intake_rate_limit(
     redis_url: str | None = None,
     limiter: InMemoryUserReportRateLimiter = USER_REPORT_INTAKE_RATE_LIMITER,
 ) -> None:
-    policy = UserReportRateLimitPolicy(
+    policy = RateLimitPolicy(
         max_requests=max_requests,
         window_seconds=window_seconds,
     )
@@ -158,5 +258,5 @@ def check_user_report_intake_rate_limit(
 
 def _parse_redis_rate_limit_result(result: object) -> tuple[bool, int]:
     if not isinstance(result, list | tuple) or len(result) != 2:
-        raise UserReportRateLimitUnavailable("unexpected Redis rate-limit script response")
+        raise RateLimitUnavailable("unexpected Redis rate-limit script response")
     return bool(int(result[0])), int(result[1])

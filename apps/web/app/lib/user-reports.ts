@@ -7,6 +7,7 @@ export type UserReportCreateResponse = {
 
 export type UserReportSubmitErrorCode =
   | "feature_disabled"
+  | "rate_limited"
   | "repository_unavailable"
   | "report_submit_failed";
 
@@ -51,6 +52,10 @@ export async function postUserReport(
 
   if (response.status === 503 && errorCode === "repository_unavailable") {
     throw new UserReportSubmitError("repository_unavailable");
+  }
+
+  if (response.status === 429 && errorCode === "rate_limited") {
+    throw new UserReportSubmitError("rate_limited");
   }
 
   throw new UserReportSubmitError("report_submit_failed");

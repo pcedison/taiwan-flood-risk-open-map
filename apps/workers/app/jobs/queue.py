@@ -66,6 +66,7 @@ class RuntimeQueueMetricsSnapshot:
     running_count: int
     final_failed_count: int
     expired_lease_count: int
+    oldest_queued_at: datetime | None
     oldest_final_failed_at: datetime | None
 
 
@@ -166,6 +167,7 @@ class NullRuntimeQueue:
                 running_count=0,
                 final_failed_count=0,
                 expired_lease_count=0,
+                oldest_queued_at=None,
                 oldest_final_failed_at=None,
             ),
         )
@@ -616,6 +618,9 @@ class PostgresRuntimeQueue:
                                     status = 'running'
                                     AND lease_expires_at <= now()
                             )::bigint AS expired_lease_count,
+                            min(run_after) FILTER (
+                                WHERE status = 'queued' AND run_after <= now()
+                            ) AS oldest_queued_at,
                             min(COALESCE(final_failed_at, finished_at, updated_at)) FILTER (
                                 WHERE status = 'failed' AND attempts >= max_attempts
                             ) AS oldest_final_failed_at
@@ -639,6 +644,7 @@ class PostgresRuntimeQueue:
                     running_count=0,
                     final_failed_count=0,
                     expired_lease_count=0,
+                    oldest_queued_at=None,
                     oldest_final_failed_at=None,
                 ),
             )
@@ -650,7 +656,8 @@ class PostgresRuntimeQueue:
                 running_count=int(row[2] or 0),
                 final_failed_count=int(row[3] or 0),
                 expired_lease_count=int(row[4] or 0),
-                oldest_final_failed_at=row[5] if isinstance(row[5], datetime) else None,
+                oldest_queued_at=row[5] if isinstance(row[5], datetime) else None,
+                oldest_final_failed_at=row[6] if isinstance(row[6], datetime) else None,
             )
             for row in rows
         )

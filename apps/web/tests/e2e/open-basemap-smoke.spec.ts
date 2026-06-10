@@ -135,7 +135,7 @@ async function mockRiskApi(page: Page) {
   });
 
   await page.route(
-    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-open-basemap`,
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-open-basemap**`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -211,6 +211,8 @@ test("production-like open raster basemap renders without OSM or TGOS tiles", as
 
   await expect(page.getByText("Open basemap smoke risk summary")).toBeVisible();
   await expect(page.getByText("Open basemap smoke full evidence", { exact: true })).toBeVisible();
+  await expect(page.getByText("Open basemap smoke layer")).not.toBeVisible();
+  await page.getByTestId("diagnostics-summary").click();
   await expect(page.getByText("Open basemap smoke layer")).toBeVisible();
   await expect(page.locator(".map-marker")).toBeVisible({ timeout: 15_000 });
   await expect(canvas).toBeVisible();
@@ -275,7 +277,7 @@ test("map-click assessment skips stale search geocoding", async ({ page }) => {
   });
 
   await page.route(
-    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-map-click`,
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-map-click**`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",

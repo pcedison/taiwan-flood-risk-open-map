@@ -46,6 +46,17 @@ paths:
                     checked_at: "2026-04-28T13:00:00Z"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "429":
+          description: Public geocode rate limit exceeded.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -131,6 +142,17 @@ paths:
                         limitations: []
         "400":
           $ref: "#/components/responses/BadRequest"
+        "429":
+          description: Public risk-assessment rate limit exceeded.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -330,6 +352,12 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          description: Layer tile metadata is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -387,11 +415,15 @@ paths:
                     name: "淹水潛勢"
                     version: "2026-04-28"
                     attribution: "Government open data"
+                    status: available
                     scheme: xyz
                     tiles:
-                      - "https://tiles.example.test/flood-potential/{z}/{x}/{y}.pbf"
+                      - "/v1/tiles/flood-potential/{z}/{x}/{y}.mvt"
+                    tile_url_source: local_vector_tile_endpoint
+                    cache_control: "public, max-age=60"
                     minzoom: 8
                     maxzoom: 18
+                    updated_at: "2026-04-28T12:00:00Z"
                     bounds:
                       - 119.3
                       - 21.8
@@ -515,6 +547,12 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Admin job repository unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -563,6 +601,12 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Admin source repository unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1689,6 +1733,15 @@ components:
           type:
             - string
             - "null"
+        status:
+          type:
+            - string
+            - "null"
+          enum:
+            - available
+            - degraded
+            - disabled
+            - null
         scheme:
           type: string
           enum:
@@ -1701,6 +1754,18 @@ components:
           items:
             type: string
             format: uri-template
+        tile_url_source:
+          type:
+            - string
+            - "null"
+          enum:
+            - metadata
+            - local_vector_tile_endpoint
+            - null
+        cache_control:
+          type:
+            - string
+            - "null"
         minzoom:
           type:
             - integer
@@ -1725,6 +1790,11 @@ components:
           maxItems: 3
           items:
             type: number
+        updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         vector_layers:
           type: array
           items:

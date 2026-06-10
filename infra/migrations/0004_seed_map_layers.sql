@@ -25,11 +25,8 @@ VALUES
         now(),
         '{
             "tilejson": "3.0.0",
-            "version": "placeholder-2026-04-30",
+            "version": "disabled-2026-06-09",
             "scheme": "xyz",
-            "tiles": [
-                "https://tiles.placeholder.flood-risk.local/flood-potential/{z}/{x}/{y}.pbf"
-            ],
             "bounds": [119.3, 21.8, 122.1, 25.4],
             "vector_layers": [
                 {
@@ -55,11 +52,8 @@ VALUES
         now(),
         '{
             "tilejson": "3.0.0",
-            "version": "placeholder-2026-04-30",
+            "version": "disabled-2026-06-09",
             "scheme": "xyz",
-            "tiles": [
-                "https://tiles.placeholder.flood-risk.local/query-heat/{z}/{x}/{y}.pbf"
-            ],
             "bounds": [119.3, 21.8, 122.1, 25.4],
             "vector_layers": [
                 {

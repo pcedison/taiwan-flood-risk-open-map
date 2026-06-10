@@ -138,6 +138,7 @@ export type UserReportSubmissionStatus =
   | "loading"
   | "success"
   | "feature_disabled"
+  | "rate_limited"
   | "repository_unavailable"
   | "error";
 
@@ -146,6 +147,105 @@ export type UserReportSubmissionDisplayState = {
   message: string | null;
   submitLabel: string;
 };
+
+export const UNKNOWN_RISK_LEVEL = "未知";
+
+const riskLevelRanks = new Map<string, number>([
+  [UNKNOWN_RISK_LEVEL, 0],
+  ["低", 1],
+  ["中", 2],
+  ["高", 3],
+  ["極高", 4],
+]);
+
+export type RiskOverlayPresentation = {
+  level: string;
+  fillColor: string;
+  lineColor: string;
+  fillOpacity: number;
+  colorName: string;
+};
+
+const riskOverlayByLevel: Record<
+  string,
+  Omit<RiskOverlayPresentation, "level" | "fillOpacity">
+> = {
+  [UNKNOWN_RISK_LEVEL]: {
+    fillColor: "#7a8791",
+    lineColor: "#626c76",
+    colorName: "灰色",
+  },
+  低: {
+    fillColor: "#2f8f5b",
+    lineColor: "#236f47",
+    colorName: "綠色",
+  },
+  中: {
+    fillColor: "#d9b928",
+    lineColor: "#a48314",
+    colorName: "黃色",
+  },
+  高: {
+    fillColor: "#cf4f35",
+    lineColor: "#983825",
+    colorName: "紅色",
+  },
+  極高: {
+    fillColor: "#9f2f2f",
+    lineColor: "#742222",
+    colorName: "深紅色",
+  },
+};
+
+export function riskLevelRank(level?: string | null): number {
+  return riskLevelRanks.get(level ?? UNKNOWN_RISK_LEVEL) ?? 0;
+}
+
+export function combinedRiskLevel(
+  realtimeLevel?: string | null,
+  historicalLevel?: string | null,
+): string {
+  const candidates = [realtimeLevel, historicalLevel].filter(
+    (level): level is string => Boolean(level),
+  );
+  if (candidates.length === 0) {
+    return UNKNOWN_RISK_LEVEL;
+  }
+  return candidates.reduce((current, next) =>
+    riskLevelRank(next) > riskLevelRank(current) ? next : current,
+  );
+}
+
+export function riskSummaryTitle(
+  realtimeLevel?: string | null,
+  historicalLevel?: string | null,
+): string {
+  const level = combinedRiskLevel(realtimeLevel, historicalLevel);
+  return level === UNKNOWN_RISK_LEVEL ? "資料不足" : `綜合風險：${level}`;
+}
+
+export function riskSummaryBasis(
+  realtimeLevel?: string | null,
+  historicalLevel?: string | null,
+): string {
+  return `即時：${realtimeLevel || UNKNOWN_RISK_LEVEL}；歷史參考：${
+    historicalLevel || UNKNOWN_RISK_LEVEL
+  }`;
+}
+
+export function riskOverlayPresentation(
+  level?: string | null,
+  hasAssessment = true,
+): RiskOverlayPresentation {
+  const normalizedLevel =
+    level && riskOverlayByLevel[level] ? level : UNKNOWN_RISK_LEVEL;
+  const palette = riskOverlayByLevel[normalizedLevel];
+  return {
+    level: normalizedLevel,
+    ...palette,
+    fillOpacity: hasAssessment ? 0.15 : 0.18,
+  };
+}
 
 export function formatCoordinate(value: number) {
   return value.toFixed(5);
@@ -405,6 +505,14 @@ export function getUserReportSubmissionDisplayState(
     return {
       kind: "error",
       message: "通報收件暫時無法使用。",
+      submitLabel: "送出通報",
+    };
+  }
+
+  if (status === "rate_limited") {
+    return {
+      kind: "warning",
+      message: "通報送出太頻繁，請稍後再試。",
       submitLabel: "送出通報",
     };
   }

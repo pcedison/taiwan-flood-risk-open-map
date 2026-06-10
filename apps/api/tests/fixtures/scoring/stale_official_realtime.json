@@ -1,0 +1,30 @@
+{
+  "now": "2026-04-29T00:00:00+00:00",
+  "signals": [
+    {
+      "source_type": "official",
+      "event_type": "rainfall",
+      "confidence": 0.93,
+      "distance_to_query_m": 80,
+      "freshness_score": 0.95,
+      "source_weight": 1.0,
+      "observed_at": "2026-04-28T00:00:00+00:00"
+    },
+    {
+      "source_type": "official",
+      "event_type": "water_level",
+      "confidence": 0.9,
+      "distance_to_query_m": 120,
+      "freshness_score": 0.95,
+      "source_weight": 1.0,
+      "observed_at": "2026-04-28T00:00:00+00:00"
+    }
+  ],
+  "expected": {
+    "score_version": "risk-v0.1.0",
+    "realtime_level": "\u672a\u77e5",
+    "historical_level": "\u672a\u77e5",
+    "confidence_level": "\u4e2d",
+    "missing_sources": []
+  }
+}

@@ -262,6 +262,22 @@ def _nearest_rainfall_observation(
     cwa_authorization: str | None,
     checked_at: datetime,
 ) -> tuple[list[OfficialRealtimeObservation], OfficialRealtimeSourceStatus]:
+    if not cwa_authorization:
+        return (
+            [],
+            OfficialRealtimeSourceStatus(
+                source_id="cwa-rainfall",
+                name="中央氣象署即時雨量",
+                health_status="failed",
+                observed_at=None,
+                ingested_at=checked_at,
+                message=(
+                    "SOURCE_CWA_API_ENABLED=true，但 CWA_API_AUTHORIZATION 未載入到 API process；"
+                    "請在啟動 API 前設定 CWA token，並重新啟動服務。"
+                ),
+            ),
+        )
+
     stations = _fetch_cwa_rainfall_stations(cwa_authorization)
     if not stations:
         return (
@@ -272,7 +288,10 @@ def _nearest_rainfall_observation(
                 health_status="failed",
                 observed_at=None,
                 ingested_at=checked_at,
-                message="即時雨量資料暫時無法取得。",
+                message=(
+                    "即時雨量資料暫時無法取得；請確認 CWA_API_AUTHORIZATION 是否正確、"
+                    "CWA API 是否可連線，或稍後再試。"
+                ),
             ),
         )
 
@@ -652,40 +671,53 @@ def _fetch_json(url: str) -> Any:
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
     timeout_seconds = _official_fetch_timeout_seconds()
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except ssl.SSLError:
-        return _fetch_json_without_certificate_verification(
-            request,
-            timeout_seconds=timeout_seconds,
-        )
+        return _read_json_response(request, timeout_seconds)
     except HTTPError:
         return None
-    except URLError as exc:
-        if isinstance(exc.reason, ssl.SSLError):
-            return _fetch_json_without_certificate_verification(
-                request,
-                timeout_seconds=timeout_seconds,
-            )
-        return None
-    except (TimeoutError, json.JSONDecodeError):
+    except (ssl.SSLError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        if _should_retry_with_local_unverified_tls(exc):
+            try:
+                return _read_json_response(
+                    request,
+                    timeout_seconds,
+                    context=ssl._create_unverified_context(),
+                )
+            except (ssl.SSLError, HTTPError, URLError, TimeoutError, json.JSONDecodeError):
+                return None
         return None
 
 
-def _fetch_json_without_certificate_verification(
+def _read_json_response(
     request: Request,
-    *,
     timeout_seconds: float,
+    *,
+    context: ssl.SSLContext | None = None,
 ) -> Any:
-    try:
-        with urlopen(
-            request,
-            timeout=timeout_seconds,
-            context=ssl._create_unverified_context(),
-        ) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError):
-        return None
+    if context is None:
+        response_context = urlopen(request, timeout=timeout_seconds)
+    else:
+        response_context = urlopen(request, timeout=timeout_seconds, context=context)
+    with response_context as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _should_retry_with_local_unverified_tls(exc: BaseException) -> bool:
+    if not _is_tls_verification_error(exc):
+        return False
+    if os.getenv("APP_ENV", "local").strip().lower() not in {"local", "development", "test"}:
+        return False
+    return os.getenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _is_tls_verification_error(exc: BaseException) -> bool:
+    if isinstance(exc, ssl.SSLError):
+        return True
+    return isinstance(exc, URLError) and isinstance(exc.reason, ssl.SSLError)
 
 
 def _nearest_station[T](

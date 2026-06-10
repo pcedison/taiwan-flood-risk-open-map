@@ -45,6 +45,17 @@ groups:
           description: "{{ $labels.source_id }} is older than the freshness threshold used by the ops check. Compare source_timestamp_max and last_success_at in the admin source endpoint."
           runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
 
+      - alert: FloodRiskOfficialSourceFreshnessStale
+        expr: flood_risk_source_freshness_stale{source_type="official"} == 1
+        for: 10m
+        labels:
+          severity: critical
+          service: monitoring
+        annotations:
+          summary: "Official source data is stale for {{ $labels.source_id }}"
+          description: "{{ $labels.source_id }} is an official source and is older than the accepted freshness threshold. Check worker runs, credentials, upstream health, and source kill switches."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
   - name: flood-risk-api
     rules:
       - alert: FloodRiskApiReadyDown
@@ -124,4 +135,15 @@ groups:
         annotations:
           summary: "Runtime queue has expired leases for {{ $labels.queue_name }}"
           description: "{{ $labels.queue_name }} has running rows with expired leases. Workers can recover retryable rows on dequeue; inspect worker health and database latency."
+          runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"
+
+      - alert: FloodRiskRuntimeQueueLagHigh
+        expr: flood_risk_runtime_queue_lag_seconds > 900
+        for: 10m
+        labels:
+          severity: warning
+          service: worker
+        annotations:
+          summary: "Runtime queue lag is high for {{ $labels.queue_name }}"
+          description: "{{ $labels.queue_name }} has a ready queued job waiting more than 15 minutes. Check scheduler producer, worker consumers, leases, and database latency."
           runbook_url: "docs/runbooks/monitoring-freshness-alerts.md"

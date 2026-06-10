@@ -437,6 +437,16 @@ button {
   gap: 4px;
 }
 
+.risk-summary {
+  background: linear-gradient(180deg, #ffffff 0%, #f7faf6 100%);
+}
+
+.risk-summary .section-heading strong {
+  color: #10251e;
+  font-size: 1.45rem;
+  line-height: 1.15;
+}
+
 .layer-panel p,
 .risk-summary p,
 .freshness-panel p,
@@ -541,6 +551,21 @@ button {
   box-shadow: 0 2px 8px rgba(27, 38, 33, 0.24);
 }
 
+.risk-summary-basis,
+.risk-overlay-note {
+  margin: 8px 0 0;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.risk-summary-basis {
+  color: #263b33;
+}
+
+.risk-overlay-note {
+  color: var(--muted);
+}
+
 .risk-reasons {
   display: grid;
   gap: 6px;
@@ -566,6 +591,11 @@ button {
   background: #ffffff;
 }
 
+.risk-levels .risk-confidence-card {
+  border-color: rgba(20, 125, 100, 0.28);
+  background: rgba(20, 125, 100, 0.08);
+}
+
 .risk-levels dt {
   margin: 0 0 4px;
   color: var(--muted);
@@ -578,6 +608,11 @@ button {
   color: var(--foreground);
   font-size: 1.15rem;
   font-weight: 900;
+}
+
+.risk-explanation {
+  color: #263b33;
+  font-weight: 700;
 }
 
 .risk-card-note {
@@ -648,12 +683,14 @@ button {
   color: var(--foreground);
 }
 
-.evidence-drawer {
+.evidence-drawer,
+.diagnostics-drawer {
   display: grid;
   gap: 14px;
 }
 
-.evidence-drawer summary {
+.evidence-drawer summary,
+.diagnostics-drawer summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 4px 12px;
@@ -662,11 +699,13 @@ button {
   list-style: none;
 }
 
-.evidence-drawer summary::-webkit-details-marker {
+.evidence-drawer summary::-webkit-details-marker,
+.diagnostics-drawer summary::-webkit-details-marker {
   display: none;
 }
 
-.evidence-drawer summary::after {
+.evidence-drawer summary::after,
+.diagnostics-drawer summary::after {
   content: "+";
   grid-row: 1 / span 2;
   grid-column: 2;
@@ -681,11 +720,13 @@ button {
   font-weight: 900;
 }
 
-.evidence-drawer[open] summary::after {
+.evidence-drawer[open] summary::after,
+.diagnostics-drawer[open] summary::after {
   content: "-";
 }
 
-.evidence-drawer summary > span:last-child {
+.evidence-drawer summary > span:last-child,
+.diagnostics-drawer summary > span:last-child {
   justify-self: end;
   color: var(--muted);
   font-size: 0.78rem;
@@ -860,6 +901,24 @@ button {
   color: var(--muted);
   background: var(--surface-soft);
   line-height: 1.45;
+}
+
+.diagnostics-panel {
+  background: #f7faf5;
+}
+
+.diagnostics-body {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnostics-section {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
 }
 
 .freshness-panel {

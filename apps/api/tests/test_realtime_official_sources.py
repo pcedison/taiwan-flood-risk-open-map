@@ -1,4 +1,6 @@
+import ssl
 from datetime import UTC, datetime, timedelta
+from urllib.error import URLError
 
 import pytest
 
@@ -78,6 +80,22 @@ def test_official_realtime_global_disable_reports_both_sources_disabled(
         "即時雨量資料來源目前已停用。",
         "即時水位資料來源目前已停用。",
     ]
+
+
+def test_enabled_cwa_without_token_reports_missing_process_secret() -> None:
+    observations, status = official._nearest_rainfall_observation(
+        lat=23.05753,
+        lng=120.20144,
+        radius_m=500,
+        cwa_authorization=None,
+        checked_at=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+    )
+
+    assert observations == []
+    assert status.source_id == "cwa-rainfall"
+    assert status.health_status == "failed"
+    assert "CWA_API_AUTHORIZATION 未載入" in (status.message or "")
+    assert "重新啟動服務" in (status.message or "")
 
 
 def test_far_wra_station_is_reported_as_limited_not_evidence(
@@ -217,6 +235,141 @@ def test_fetch_json_uses_configured_official_timeout(monkeypatch: pytest.MonkeyP
 
     assert official._fetch_json("https://example.test/realtime.json") == {"ok": True}
     assert captured_timeouts == [1.25]
+
+
+def test_fetch_json_returns_none_on_ssl_error_without_unverified_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fail_unverified_context() -> None:
+        pytest.fail("official realtime fetch must not create an unverified TLS context")
+
+    def fake_urlopen(request: object, *, timeout: float, **kwargs: object) -> object:
+        captured_kwargs.append(kwargs)
+        raise ssl.SSLError("certificate verify failed")
+
+    monkeypatch.setattr(official.ssl, "_create_unverified_context", fail_unverified_context)
+    monkeypatch.setattr(official, "urlopen", fake_urlopen)
+
+    assert official._fetch_json("https://example.test/realtime.json") is None
+    assert captured_kwargs == [{}]
+
+
+def test_fetch_json_returns_none_on_urlerror_ssl_reason_without_unverified_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fail_unverified_context() -> None:
+        pytest.fail("official realtime fetch must not create an unverified TLS context")
+
+    def fake_urlopen(request: object, *, timeout: float, **kwargs: object) -> object:
+        captured_kwargs.append(kwargs)
+        raise URLError(ssl.SSLError("certificate verify failed"))
+
+    monkeypatch.setattr(official.ssl, "_create_unverified_context", fail_unverified_context)
+    monkeypatch.setattr(official, "urlopen", fake_urlopen)
+
+    assert official._fetch_json("https://example.test/realtime.json") is None
+    assert captured_kwargs == [{}]
+
+
+def test_fetch_json_allows_explicit_local_diagnostic_tls_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_kwargs: list[dict[str, object]] = []
+    unverified_context = object()
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"ok": true}'
+
+    def fake_unverified_context() -> object:
+        return unverified_context
+
+    def fake_urlopen(request: object, *, timeout: float, **kwargs: object) -> object:
+        captured_kwargs.append(kwargs)
+        if "context" not in kwargs:
+            raise URLError(ssl.SSLError("certificate verify failed"))
+        assert kwargs["context"] is unverified_context
+        return Response()
+
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", "true")
+    monkeypatch.setattr(official.ssl, "_create_unverified_context", fake_unverified_context)
+    monkeypatch.setattr(official, "urlopen", fake_urlopen)
+
+    assert official._fetch_json("https://example.test/realtime.json") == {"ok": True}
+    assert captured_kwargs == [{}, {"context": unverified_context}]
+
+
+def test_fetch_json_blocks_diagnostic_tls_retry_in_hosted_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_kwargs: list[dict[str, object]] = []
+
+    def fail_unverified_context() -> None:
+        pytest.fail("hosted official realtime fetch must not create an unverified TLS context")
+
+    def fake_urlopen(request: object, *, timeout: float, **kwargs: object) -> object:
+        captured_kwargs.append(kwargs)
+        raise URLError(ssl.SSLError("certificate verify failed"))
+
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", "true")
+    monkeypatch.setattr(official.ssl, "_create_unverified_context", fail_unverified_context)
+    monkeypatch.setattr(official, "urlopen", fake_urlopen)
+
+    assert official._fetch_json("https://example.test/realtime.json") is None
+    assert captured_kwargs == [{}]
+
+
+@pytest.mark.parametrize("app_env", [None, "staging", "production", "production-beta"])
+def test_official_source_tls_failure_yields_failed_status_without_unverified_context(
+    monkeypatch: pytest.MonkeyPatch,
+    app_env: str | None,
+) -> None:
+    fetch_attempts = 0
+    unverified_context_calls = 0
+
+    if app_env is None:
+        monkeypatch.delenv("APP_ENV", raising=False)
+    else:
+        monkeypatch.setenv("APP_ENV", app_env)
+
+    def fail_unverified_context() -> None:
+        nonlocal unverified_context_calls
+        unverified_context_calls += 1
+        pytest.fail("official realtime fetch must not create an unverified TLS context")
+
+    def fake_urlopen(request: object, *, timeout: float, **kwargs: object) -> object:
+        nonlocal fetch_attempts
+        assert "context" not in kwargs
+        fetch_attempts += 1
+        raise ssl.SSLError("certificate verify failed")
+
+    monkeypatch.setattr(official.ssl, "_create_unverified_context", fail_unverified_context)
+    monkeypatch.setattr(official, "urlopen", fake_urlopen)
+
+    observations, status = official._nearest_water_level_observation(
+        lat=22.68709,
+        lng=120.30761,
+        radius_m=500,
+        checked_at=datetime(2026, 5, 5, 14, 30, tzinfo=UTC),
+    )
+
+    assert observations == []
+    assert status.source_id == "wra-water-level"
+    assert status.health_status == "failed"
+    assert fetch_attempts == 2
+    assert unverified_context_calls == 0
 
 
 def test_expired_official_cache_returns_stale_payload_and_refreshes(

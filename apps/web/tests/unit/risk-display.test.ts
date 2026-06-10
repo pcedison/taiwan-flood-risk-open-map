@@ -8,6 +8,7 @@ const {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
   buildUserReportPayload,
+  combinedRiskLevel,
   evidencePublishedAt,
   evidenceSourceUrl,
   formatConfidence,
@@ -21,6 +22,9 @@ const {
   layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
   latestNewsLinksFreshnessSourceId,
+  riskOverlayPresentation,
+  riskSummaryBasis,
+  riskSummaryTitle,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } = (await import(riskDisplayModulePath)) as typeof import("../../app/lib/risk-display");
@@ -102,6 +106,12 @@ test("user report display state covers success and disabled/error gates", () => 
   assert.deepEqual(getUserReportSubmissionDisplayState("repository_unavailable"), {
     kind: "error",
     message: "通報收件暫時無法使用。",
+    submitLabel: "送出通報",
+  });
+
+  assert.deepEqual(getUserReportSubmissionDisplayState("rate_limited"), {
+    kind: "warning",
+    message: "通報送出太頻繁，請稍後再試。",
     submitLabel: "送出通報",
   });
 
@@ -250,6 +260,20 @@ test("profile basis text explains historical and confidence cards", () => {
     historicalNote: null,
     limitationLead: null,
   });
+});
+
+test("combined risk display separates summary from source basis", () => {
+  assert.equal(combinedRiskLevel("未知", "高"), "高");
+  assert.equal(riskSummaryTitle("未知", "高"), "綜合風險：高");
+  assert.equal(riskSummaryBasis("未知", "高"), "即時：未知；歷史參考：高");
+
+  const highOverlay = riskOverlayPresentation("高", true);
+  assert.equal(highOverlay.colorName, "紅色");
+  assert.equal(highOverlay.fillOpacity, 0.15);
+
+  const idleOverlay = riskOverlayPresentation(null, false);
+  assert.equal(idleOverlay.level, "未知");
+  assert.equal(idleOverlay.fillOpacity, 0.18);
 });
 
 test("layer display state prefers explicit tile contract fields", () => {

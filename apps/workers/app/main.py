@@ -1297,6 +1297,7 @@ def _default_queue_metrics_snapshots(
             running_count=0,
             final_failed_count=0,
             expired_lease_count=0,
+            oldest_queued_at=None,
             oldest_final_failed_at=None,
         ),
     )
@@ -1815,6 +1816,11 @@ def _runtime_queue_metrics_json(
                     "running_count": snapshot.running_count,
                     "final_failed_count": snapshot.final_failed_count,
                     "expired_lease_count": snapshot.expired_lease_count,
+                    "oldest_queued_at": (
+                        snapshot.oldest_queued_at.isoformat()
+                        if snapshot.oldest_queued_at is not None
+                        else None
+                    ),
                     "oldest_final_failed_at": (
                         snapshot.oldest_final_failed_at.isoformat()
                         if snapshot.oldest_final_failed_at is not None

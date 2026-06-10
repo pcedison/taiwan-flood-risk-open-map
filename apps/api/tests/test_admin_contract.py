@@ -404,6 +404,48 @@ def test_admin_pending_reports_return_503_when_database_is_unavailable(
     assert response.json()["error"]["code"] == "repository_unavailable"
 
 
+def test_admin_jobs_return_503_when_database_is_unavailable_in_hosted_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.delenv("ADMIN_SAMPLE_DATA_ENABLED", raising=False)
+    monkeypatch.delenv("DEMO_MODE_ENABLED", raising=False)
+    get_settings.cache_clear()
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/jobs",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"]["code"] == "repository_unavailable"
+    assert "jobs repository" in payload["error"]["message"]
+
+
+def test_admin_sources_return_503_when_database_is_unavailable_in_hosted_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.delenv("ADMIN_SAMPLE_DATA_ENABLED", raising=False)
+    monkeypatch.delenv("DEMO_MODE_ENABLED", raising=False)
+    get_settings.cache_clear()
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/sources",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"]["code"] == "repository_unavailable"
+    assert "sources repository" in payload["error"]["message"]
+
+
 def test_admin_sources_fall_back_to_sample_data_when_database_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -422,6 +464,27 @@ def test_admin_sources_fall_back_to_sample_data_when_database_is_unavailable(
     assert len(payload["sources"]) >= 2
     assert {source["health_status"] for source in payload["sources"]} == {"healthy"}
     assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
+def test_admin_sources_can_use_sample_data_with_explicit_demo_flag_in_hosted_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("ADMIN_SAMPLE_DATA_ENABLED", "true")
+    get_settings.cache_clear()
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/sources",
+        params={"health_status": "healthy"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["sources"]) >= 2
+    assert {source["health_status"] for source in payload["sources"]} == {"healthy"}
 
 
 def test_admin_rejects_invalid_token(monkeypatch: pytest.MonkeyPatch) -> None:

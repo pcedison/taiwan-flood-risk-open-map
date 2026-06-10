@@ -29,6 +29,10 @@ This runbook covers:
 - Future split-service deployment
 - Database migration, worker, scheduler, and rollback notes
 
+The split-service worker/scheduler deployment contract is now documented in
+[worker-scheduler-deployment.md](worker-scheduler-deployment.md). Use it before
+turning on production-beta ingestion cadence.
+
 Commands below describe the current Phase 1 service contracts. Exact package commands may change as the app implementation grows, but changes must remain compatible with this runbook or update it in the same pull request.
 
 ## Quick Path: Single Zeabur Service
@@ -113,6 +117,7 @@ Required:
 | `NEXT_TELEMETRY_DISABLED` | `1` | Disables Next.js telemetry. |
 | `REALTIME_OFFICIAL_ENABLED` | `true` | Enables official realtime observations. |
 | `CWA_API_AUTHORIZATION` | your CWA token | Required when realtime official observations are enabled. |
+| `TILE_DYNAMIC_FALLBACK_ENABLED` | `false` | Keep hosted overlay tiles tied to accepted `map_layers` metadata, cache, or feature tables; local/test may enable runtime fallback. |
 
 Optional:
 
@@ -174,6 +179,7 @@ Required Phase 1 variables:
 | `DATABASE_URL` | api, worker, scheduler, migration | PostgreSQL/PostGIS connection string |
 | `REDIS_URL` | api, worker, scheduler | Redis connection string |
 | `MINIO_ENDPOINT` | api, worker | MinIO or S3-compatible endpoint currently read by FastAPI settings |
+| `TILE_DYNAMIC_FALLBACK_ENABLED` | api | `false` for staging/production-beta unless an operator records a temporary non-production exception |
 | `MINIO_BUCKET_RAW_SNAPSHOTS` | worker | Raw source snapshot bucket name |
 | `WORKER_QUEUE` | worker, scheduler | Queue name; current default is `default` |
 | `WORKER_IDLE_SECONDS` | worker | Placeholder polling interval until durable jobs are implemented |

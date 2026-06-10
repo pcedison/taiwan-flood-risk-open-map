@@ -1,0 +1,101 @@
+# Template calibration manifest for risk-v0.1.0.
+#
+# This file documents the checked-in golden fixtures used to prevent scoring
+# regression. It is not a production calibration acceptance record. Private
+# production calibration evidence must set production_complete: true, clear
+# coverage_gaps, reference accepted source_launch_gates from P1-04, and run:
+#
+#   python infra/scripts/validate_risk_calibration_manifest.py --production-complete <private-manifest.yaml>
+
+schema_version: risk-calibration-manifest/v1
+production_complete: false
+readiness_state: not-production-complete
+score_version: risk-v0.1.0
+calibration_status: fixture-locked-baseline
+calibration_decision_ref: docs/scoring/README.md
+
+trusted_source_dependency:
+  p1_04_status: in-progress
+  source_launch_evidence_ref: docs/runbooks/production-readiness-evidence.example.yaml#source_launch_gates
+  production_complete_required_before_weight_changes: true
+  notes: >
+    These fixtures protect deterministic scoring behavior. They do not prove
+    calibrated hydrology thresholds until enabled production sources have
+    accepted launch evidence and replay fixtures are promoted from those
+    reviewed sources.
+
+fixtures:
+  - name: heavy_rainfall_water_level
+    fixture_path: apps/api/tests/fixtures/scoring/heavy_rainfall_water_level.json
+    scenario: high_risk
+    calibration_role: Official realtime high-signal baseline.
+    source_basis_status: fixture_only
+    source_launch_gate_keys:
+      - official.cwa.realtime
+      - official.wra.realtime
+    trusted_evidence_refs:
+      - docs/runbooks/production-readiness-evidence.example.yaml#source_launch_gates
+    limitations:
+      - Synthetic fixture locks expected output but is not production replay evidence.
+  - name: flood_potential_only
+    fixture_path: apps/api/tests/fixtures/scoring/flood_potential_only.json
+    scenario: low_risk
+    calibration_role: Planning-layer-only baseline for medium historical risk and unknown realtime risk.
+    source_basis_status: fixture_only
+    source_launch_gate_keys:
+      - official.flood_potential.geojson
+    trusted_evidence_refs:
+      - docs/runbooks/flood-potential-import.example.yaml
+    limitations:
+      - Flood-potential layers are planning/reference data, not live inundation observations.
+  - name: stale_official_realtime
+    fixture_path: apps/api/tests/fixtures/scoring/stale_official_realtime.json
+    scenario: stale_source
+    calibration_role: Stale official realtime observations must not produce active realtime risk.
+    source_basis_status: fixture_only
+    source_launch_gate_keys:
+      - official.cwa.realtime
+      - official.wra.realtime
+    trusted_evidence_refs:
+      - docs/runbooks/official-realtime-source-of-truth.md
+    limitations:
+      - Fixture proves stale-source scoring behavior only; production stale thresholds require accepted monitoring evidence.
+  - name: no_evidence_found
+    fixture_path: apps/api/tests/fixtures/scoring/no_evidence_found.json
+    scenario: missing_data
+    calibration_role: Missing-data baseline for unknown realtime, historical, and confidence levels.
+    source_basis_status: fixture_only
+    source_launch_gate_keys: []
+    trusted_evidence_refs:
+      - docs/scoring/README.md
+    limitations:
+      - Missing-data behavior is a product safety baseline, not a hydrology calibration point.
+  - name: partial_source_outage
+    fixture_path: apps/api/tests/fixtures/scoring/partial_source_outage.json
+    scenario: missing_data
+    calibration_role: Partial official-source outage confidence cap.
+    source_basis_status: fixture_only
+    source_launch_gate_keys:
+      - official.cwa.realtime
+      - news.gdelt
+    trusted_evidence_refs:
+      - docs/runbooks/official-realtime-source-of-truth.md
+    limitations:
+      - Public-news signal remains fixture-only until source launch evidence is accepted.
+  - name: conflicting_public_report_low_official_signal
+    fixture_path: apps/api/tests/fixtures/scoring/conflicting_public_report_low_official_signal.json
+    scenario: conflicting_signal
+    calibration_role: Conflicting official/public signal baseline.
+    source_basis_status: fixture_only
+    source_launch_gate_keys:
+      - official.cwa.realtime
+      - news.gdelt
+    trusted_evidence_refs:
+      - docs/data-sources/news/l2-source-allowlist.yaml
+    limitations:
+      - Public evidence remains citation/snippet-oriented and source-governed.
+
+coverage_gaps:
+  - Private production replay fixtures from accepted source_launch_gates are not available in this repository.
+  - Thresholds and weights are still rule-baseline values, not statistically calibrated values.
+  - Known no-event cases are represented by no-evidence/missing-data fixtures until reviewed no-event replay data exists.

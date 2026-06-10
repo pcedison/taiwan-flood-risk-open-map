@@ -341,10 +341,14 @@ class TileJson(BaseModel):
     name: str
     version: str | None = None
     attribution: str | None = None
+    status: Literal["available", "degraded", "disabled"] | None = None
     scheme: Literal["xyz", "tms"] = "xyz"
     tiles: list[str] = Field(min_length=1)
+    tile_url_source: Literal["metadata", "local_vector_tile_endpoint"] | None = None
+    cache_control: str | None = None
     minzoom: int | None = Field(default=None, ge=0, le=24)
     maxzoom: int | None = Field(default=None, ge=0, le=24)
     bounds: list[float] | None = Field(default=None, min_length=4, max_length=4)
     center: list[float] | None = Field(default=None, min_length=3, max_length=3)
+    updated_at: datetime | None = None
     vector_layers: list[TileJsonVectorLayer] | None = None

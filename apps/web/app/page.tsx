@@ -7,11 +7,12 @@ import {
   getInteractiveBasemapMaxZoom,
   loadRuntimeBasemapStyleConfig,
 } from "./lib/basemap-style";
-import { apiBaseUrl, getJson, postJson } from "./lib/api-client";
+import { apiBaseUrl, getJson, postJson, publicApiErrorMessage } from "./lib/api-client";
 import {
   buildRiskAssessmentPayload,
   buildLayerDisplayState,
   buildUserReportPayload,
+  combinedRiskLevel,
   evidenceSourceUrl,
   evidenceTimeSummary,
   formatConfidence,
@@ -25,6 +26,9 @@ import {
   layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
   latestNewsLinksFreshnessSourceId,
+  riskOverlayPresentation,
+  riskSummaryBasis,
+  riskSummaryTitle,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } from "./lib/risk-display";
@@ -122,6 +126,7 @@ type MapFeatureCollection = {
 
 const API_BASE_URL = apiBaseUrl;
 let activePmtilesProtocol: Protocol | null = null;
+const IDLE_RISK_OVERLAY = riskOverlayPresentation(null, false);
 
 const text = {
   appLabel: "台灣淹水風險地圖",
@@ -191,6 +196,10 @@ const text = {
   geocodePrecision: "定位精度",
   lastSync: "最後同步：--",
   freshnessNote: "查詢後會顯示資料來源的最新狀態。",
+  diagnosticsKicker: "診斷資訊",
+  diagnosticsTitle: "來源與圖層狀態",
+  diagnosticsPending: "尚未查詢",
+  diagnosticsReady: "查看資料來源、圖層與同步狀態",
   defaultSource: "預設位置",
   mapSource: "地圖點選",
   searchSource: "搜尋定位",
@@ -474,6 +483,28 @@ export default function HomePage() {
     : { hasTileContract: false, items: [], status: "pending" as const };
   const profilePreviewState = getProfilePreviewState(assessment);
   const profileBasisText = getProfileBasisText(assessment);
+  const hasAssessment = Boolean(assessment);
+  const realtimeRiskLevel = assessment?.realtime.level ?? null;
+  const historicalRiskLevel = assessment?.historical.level ?? null;
+  const combinedRisk = useMemo(
+    () =>
+      hasAssessment
+        ? combinedRiskLevel(realtimeRiskLevel, historicalRiskLevel)
+        : null,
+    [hasAssessment, historicalRiskLevel, realtimeRiskLevel],
+  );
+  const riskOverlay = useMemo(
+    () => riskOverlayPresentation(combinedRisk, hasAssessment),
+    [combinedRisk, hasAssessment],
+  );
+  const riskSummaryHeading = assessment
+    ? hasInsufficientRiskData(assessment)
+      ? text.insufficientData
+      : riskSummaryTitle(realtimeRiskLevel, historicalRiskLevel)
+    : text.pendingData;
+  const riskSummaryBasisLine = assessment
+    ? riskSummaryBasis(realtimeRiskLevel, historicalRiskLevel)
+    : null;
   const currentSummary = useMemo(
     () =>
       coordinate.source === "search"
@@ -535,8 +566,8 @@ export default function HomePage() {
               type: "fill",
               source: "query-radius",
               paint: {
-                "fill-color": "#c66a21",
-                "fill-opacity": 0.18,
+                "fill-color": IDLE_RISK_OVERLAY.fillColor,
+                "fill-opacity": IDLE_RISK_OVERLAY.fillOpacity,
               },
             },
             beforeBasemapLabels,
@@ -547,7 +578,7 @@ export default function HomePage() {
               type: "line",
               source: "query-radius",
               paint: {
-                "line-color": "#c66a21",
+                "line-color": IDLE_RISK_OVERLAY.lineColor,
                 "line-width": 2,
               },
             },
@@ -621,6 +652,19 @@ export default function HomePage() {
       zoom: targetZoom(coordinate, radius),
     });
   }, [coordinate, isMapReady, radius]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) return;
+
+    if (map.getLayer("query-radius-fill")) {
+      map.setPaintProperty("query-radius-fill", "fill-color", riskOverlay.fillColor);
+      map.setPaintProperty("query-radius-fill", "fill-opacity", riskOverlay.fillOpacity);
+    }
+    if (map.getLayer("query-radius-line")) {
+      map.setPaintProperty("query-radius-line", "line-color", riskOverlay.lineColor);
+    }
+  }, [isMapReady, riskOverlay]);
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -710,9 +754,14 @@ export default function HomePage() {
       } else {
         setEvidenceStatus("ready");
       }
-    } catch {
+    } catch (error) {
       if (!requestController.signal.aborted && requestIdRef.current === requestId) {
-        setErrorMessage(text.queryFailed);
+        setErrorMessage(
+          publicApiErrorMessage(error, {
+            fallback: text.queryFailed,
+            notFoundMessage: text.noGeocodeResult,
+          }),
+        );
       }
     } finally {
       if (searchAbortRef.current === requestController) {
@@ -744,6 +793,8 @@ export default function HomePage() {
     } catch (error) {
       if (error instanceof UserReportSubmitError && error.code === "feature_disabled") {
         setReportStatus("feature_disabled");
+      } else if (error instanceof UserReportSubmitError && error.code === "rate_limited") {
+        setReportStatus("rate_limited");
       } else if (error instanceof UserReportSubmitError && error.code === "repository_unavailable") {
         setReportStatus("repository_unavailable");
       } else {
@@ -827,159 +878,31 @@ export default function HomePage() {
           {geocodeNotice ? <p className="form-notice">{geocodeNotice}</p> : null}
         </form>
 
-        <section className="panel-section coordinate-panel">
-          <div>
-            <span className="section-kicker">{text.currentCoordinate}</span>
-            <strong>{currentSummary}</strong>
-          </div>
-          <dl>
-            <div>
-              <dt>{text.latitude}</dt>
-              <dd>{formatCoordinate(coordinate.lat)}</dd>
-            </div>
-            <div>
-              <dt>{text.longitude}</dt>
-              <dd>{formatCoordinate(coordinate.lng)}</dd>
-            </div>
-            <div>
-              <dt>{text.radius}</dt>
-              <dd>{radius.toLocaleString("zh-TW")} 公尺</dd>
-            </div>
-          </dl>
-        </section>
-
-        {USER_REPORTS_PUBLIC_ENABLED ? (
-          <form className="panel-section user-report-panel" onSubmit={handleUserReportSubmit}>
-            <div className="section-heading">
-              <span className="section-kicker">{text.publicReportKicker}</span>
-              <strong>{text.publicReportTitle}</strong>
-            </div>
-            <div className="report-location">
-              <span>{text.reportLocation}</span>
-              <strong>
-                {formatCoordinate(coordinate.lat)}, {formatCoordinate(coordinate.lng)}
-              </strong>
-            </div>
-            <label className="field">
-              <span>{text.reportObservation}</span>
-              <textarea
-                value={reportSummary}
-                onChange={(event) => {
-                  setReportSummary(event.target.value);
-                  if (reportStatus !== "loading") setReportStatus("idle");
-                }}
-                placeholder={text.reportPlaceholder}
-                maxLength={500}
-                rows={4}
-              />
-            </label>
-            {!userReportPayload.isValid && reportSummary.length > 0 ? (
-              <p className="form-error">{text.reportValidation}</p>
-            ) : null}
-            <button
-              className="primary-action"
-              type="submit"
-              disabled={isReportLoading || !userReportPayload.isValid}
-            >
-              {isReportLoading ? reportDisplayState.submitLabel : text.reportSubmit}
-            </button>
-            {reportDisplayState.message ? (
-              <p className={`report-state report-state-${reportDisplayState.kind}`} role="status">
-                {reportDisplayState.message}
-              </p>
-            ) : null}
-          </form>
-        ) : (
-          <section className="panel-section user-report-panel" aria-label={text.reportDisabledTitle}>
-            <div className="section-heading">
-              <span className="section-kicker">{text.publicReportKicker}</span>
-              <strong>{text.reportDisabledTitle}</strong>
-            </div>
-            <p>{text.reportDisabledMessage}</p>
-          </section>
-        )}
-
-        <section className="panel-section layer-panel">
-          <div className="section-heading">
-            <span className="section-kicker">{text.layers}</span>
-            <strong>
-              {layerDisplayState.status === "ready"
-                ? text.layerReady
-                : layerDisplayState.status === "limited"
-                  ? text.layerLimited
-                  : layerDisplayState.status === "empty"
-                    ? text.layerEmpty
-                    : text.layerPending}
-            </strong>
-          </div>
-          <div className="layer-contract-status">
-            {layerDisplayState.hasTileContract ? text.layerContract : text.layerFallback}
-          </div>
-          {layerDisplayState.items.length ? (
-            <ul className="layer-list">
-              {layerDisplayState.items.map((item) => (
-                <li key={item.id}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <span>{`${item.kind}：${layerAvailabilityDisplayLabel(item)}`}</span>
-                  </div>
-                  <dl>
-                    <div>
-                      <dt>{text.freshness}</dt>
-                      <dd>{formatDateTime(item.freshnessAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>{text.layerFeatureCount}</dt>
-                      <dd>{item.featureCount ?? "--"}</dd>
-                    </div>
-                    <div>
-                      <dt>{text.mapStatus}</dt>
-                      <dd>{healthLabel(item.status)}</dd>
-                    </div>
-                    <div>
-                      <dt>{text.tileLabel}</dt>
-                      <dd>{item.tileUrl ? text.provided : text.layerNoTile}</dd>
-                    </div>
-                  </dl>
-                  {item.message ? <p>{item.message}</p> : null}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>{assessment ? text.layerNoData : text.freshnessNote}</p>
-          )}
-        </section>
-
-        <section className="panel-section risk-summary">
+        <section className="panel-section risk-summary" data-testid="risk-summary">
           <div className="section-heading">
             <span className="section-kicker">{text.riskSummary}</span>
-            <strong>
-              {hasInsufficientRiskData(assessment)
-                ? text.insufficientData
-                : assessment
-                ? `${assessment.realtime.level} / ${assessment.historical.level}`
-                : text.pendingData}
-            </strong>
+            <strong>{riskSummaryHeading}</strong>
           </div>
           <div className="risk-meter" aria-label={text.riskMeter}>
-            <span style={{ left: riskMeterPosition(assessment?.historical.level) }} />
+            <span style={{ left: riskMeterPosition(combinedRisk ?? undefined) }} />
           </div>
-          {profilePreviewState.isProfilePreview ? (
-            <div className="profile-preview-banner" role="status">
-              <strong>{profilePreviewState.label}</strong>
-              <span>{profilePreviewState.message}</span>
-            </div>
+          {riskSummaryBasisLine ? (
+            <p className="risk-summary-basis">{riskSummaryBasisLine}</p>
           ) : null}
-          <p>{assessment ? assessment.explanation.summary : text.riskPlaceholder}</p>
-          {assessment?.explanation.main_reasons.length ? (
-            <ul className="risk-reasons">
-              {assessment.explanation.main_reasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
+          {assessment ? (
+            <p className="risk-overlay-note">
+              地圖罩色：{riskOverlay.level}（{riskOverlay.colorName}，透明度 85%）
+            </p>
           ) : null}
           {assessment ? (
             <dl className="risk-levels">
+              <div className="risk-confidence-card">
+                <dt>{text.confidence}</dt>
+                <dd>{assessment.confidence.level}</dd>
+                {profileBasisText.confidenceNote ? (
+                  <small className="risk-card-note">{profileBasisText.confidenceNote}</small>
+                ) : null}
+              </div>
               <div>
                 <dt>{text.realtime}</dt>
                 <dd>{assessment.realtime.level}</dd>
@@ -991,18 +914,25 @@ export default function HomePage() {
                   <small className="risk-card-note">{profileBasisText.historicalNote}</small>
                 ) : null}
               </div>
-              <div>
-                <dt>{text.confidence}</dt>
-                <dd>{assessment.confidence.level}</dd>
-                {profileBasisText.confidenceNote ? (
-                  <small className="risk-card-note">{profileBasisText.confidenceNote}</small>
-                ) : null}
-              </div>
             </dl>
+          ) : null}
+          {profilePreviewState.isProfilePreview ? (
+            <div className="profile-preview-banner" role="status">
+              <strong>{profilePreviewState.label}</strong>
+              <span>{profilePreviewState.message}</span>
+            </div>
+          ) : null}
+          <p className="risk-explanation">{assessment ? assessment.explanation.summary : text.riskPlaceholder}</p>
+          {assessment?.explanation.main_reasons.length ? (
+            <ul className="risk-reasons">
+              {assessment.explanation.main_reasons.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
           ) : null}
         </section>
 
-        <section className="panel-section evidence-panel">
+        <section className="panel-section evidence-panel" data-testid="evidence-panel">
           <details className="evidence-drawer" open>
             <summary>
               <span className="section-kicker">{text.evidenceKicker}</span>
@@ -1015,30 +945,6 @@ export default function HomePage() {
             </summary>
             {assessment ? (
               <div className="evidence-drawer-body">
-                {assessment.explanation.missing_sources.length ? (
-                  <div className="evidence-warning" role="status">
-                    <strong>{text.limitations}</strong>
-                    {profileBasisText.limitationLead ? (
-                      <span className="evidence-warning-note">{profileBasisText.limitationLead}</span>
-                    ) : null}
-                    <ul>
-                      {assessment.explanation.missing_sources.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                <div className="freshness-strip" aria-label={text.freshness}>
-                  {assessment.data_freshness.map((item) => (
-                    <div key={item.source_id}>
-                      <strong>{item.name}</strong>
-                      <span>{healthLabel(item.health_status)}</span>
-                      <small>{formatDateTime(item.observed_at ?? item.ingested_at)}</small>
-                    </div>
-                  ))}
-                </div>
-
                 {evidenceDisplayState.showLoading ? (
                   <div className="evidence-state" role="status">
                     {text.evidenceLoading}
@@ -1098,6 +1004,20 @@ export default function HomePage() {
                     {profilePreviewState.isProfilePreview ? text.profileEvidenceEmpty : text.evidenceEmpty}
                   </div>
                 ) : null}
+
+                {assessment.explanation.missing_sources.length ? (
+                  <div className="evidence-warning" data-testid="evidence-limitations" role="status">
+                    <strong>{text.limitations}</strong>
+                    {profileBasisText.limitationLead ? (
+                      <span className="evidence-warning-note">{profileBasisText.limitationLead}</span>
+                    ) : null}
+                    <ul>
+                      {assessment.explanation.missing_sources.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <ul className="evidence-placeholder-list">
@@ -1109,48 +1029,182 @@ export default function HomePage() {
           </details>
         </section>
 
-        <section className="panel-section freshness-panel">
-          <div>
-            <span className="section-kicker">{text.freshness}</span>
-            <strong>{assessment ? text.online : text.offline}</strong>
-          </div>
-          {assessment ? (
-            <ul className="freshness-list">
-              {assessment.data_freshness.map((item) => {
-                const showLatestNewsLinks =
-                  latestNewsLinks.length > 0 && item.source_id === latestNewsLinkSourceId;
+        {USER_REPORTS_PUBLIC_ENABLED ? (
+          <form className="panel-section user-report-panel" data-testid="user-report-panel" onSubmit={handleUserReportSubmit}>
+            <div className="section-heading">
+              <span className="section-kicker">{text.publicReportKicker}</span>
+              <strong>{text.publicReportTitle}</strong>
+            </div>
+            <div className="report-location">
+              <span>{text.reportLocation}</span>
+              <strong>
+                {formatCoordinate(coordinate.lat)}, {formatCoordinate(coordinate.lng)}
+              </strong>
+            </div>
+            <label className="field">
+              <span>{text.reportObservation}</span>
+              <textarea
+                value={reportSummary}
+                onChange={(event) => {
+                  setReportSummary(event.target.value);
+                  if (reportStatus !== "loading") setReportStatus("idle");
+                }}
+                placeholder={text.reportPlaceholder}
+                maxLength={500}
+                rows={4}
+              />
+            </label>
+            {!userReportPayload.isValid && reportSummary.length > 0 ? (
+              <p className="form-error">{text.reportValidation}</p>
+            ) : null}
+            <button
+              className="primary-action"
+              type="submit"
+              disabled={isReportLoading || !userReportPayload.isValid}
+            >
+              {isReportLoading ? reportDisplayState.submitLabel : text.reportSubmit}
+            </button>
+            {reportDisplayState.message ? (
+              <p className={`report-state report-state-${reportDisplayState.kind}`} role="status">
+                {reportDisplayState.message}
+              </p>
+            ) : null}
+          </form>
+        ) : (
+          <section className="panel-section user-report-panel" data-testid="user-report-panel" aria-label={text.reportDisabledTitle}>
+            <div className="section-heading">
+              <span className="section-kicker">{text.publicReportKicker}</span>
+              <strong>{text.reportDisabledTitle}</strong>
+            </div>
+            <p>{text.reportDisabledMessage}</p>
+          </section>
+        )}
 
-                return (
-                  <li key={item.source_id}>
-                    <strong>{`${item.name}：${healthLabel(item.health_status)}`}</strong>
-                    {item.message ? <span>{item.message}</span> : null}
-                    {showLatestNewsLinks ? (
-                      <div className="freshness-source-links">
-                        <span>{text.latestNewsSources}</span>
-                        <ol>
-                          {latestNewsLinks.map((link) => (
-                            <li key={link.id}>
-                              <a href={link.url} target="_blank" rel="noreferrer">
-                                {link.title}
-                              </a>
-                              <small>{formatDateTime(link.time)}</small>
-                            </li>
-                          ))}
-                        </ol>
-                      </div>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p>{text.lastSync}</p>
-          )}
-          <p>
-            {assessment
-              ? `查詢關注度：${assessment.query_heat.attention_level}`
-              : text.freshnessNote}
-          </p>
+        <section className="panel-section diagnostics-panel" data-testid="diagnostics-panel">
+          <details className="diagnostics-drawer" data-testid="diagnostics-drawer">
+            <summary data-testid="diagnostics-summary">
+              <span className="section-kicker">{text.diagnosticsKicker}</span>
+              <strong>{text.diagnosticsTitle}</strong>
+              <span>{assessment ? text.diagnosticsReady : text.diagnosticsPending}</span>
+            </summary>
+            <div className="diagnostics-body">
+              <section className="diagnostics-section coordinate-panel" aria-label={text.currentCoordinate}>
+                <div>
+                  <span className="section-kicker">{text.currentCoordinate}</span>
+                  <strong>{currentSummary}</strong>
+                </div>
+                <dl>
+                  <div>
+                    <dt>{text.latitude}</dt>
+                    <dd>{formatCoordinate(coordinate.lat)}</dd>
+                  </div>
+                  <div>
+                    <dt>{text.longitude}</dt>
+                    <dd>{formatCoordinate(coordinate.lng)}</dd>
+                  </div>
+                  <div>
+                    <dt>{text.radius}</dt>
+                    <dd>{radius.toLocaleString("zh-TW")} 公尺</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="diagnostics-section layer-panel" aria-label={text.layers}>
+                <div className="section-heading">
+                  <span className="section-kicker">{text.layers}</span>
+                  <strong>
+                    {layerDisplayState.status === "ready"
+                      ? text.layerReady
+                      : layerDisplayState.status === "limited"
+                        ? text.layerLimited
+                        : layerDisplayState.status === "empty"
+                          ? text.layerEmpty
+                          : text.layerPending}
+                  </strong>
+                </div>
+                <div className="layer-contract-status">
+                  {layerDisplayState.hasTileContract ? text.layerContract : text.layerFallback}
+                </div>
+                {layerDisplayState.items.length ? (
+                  <ul className="layer-list">
+                    {layerDisplayState.items.map((item) => (
+                      <li key={item.id}>
+                        <div>
+                          <strong>{item.name}</strong>
+                          <span>{`${item.kind}：${layerAvailabilityDisplayLabel(item)}`}</span>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>{text.freshness}</dt>
+                            <dd>{formatDateTime(item.freshnessAt)}</dd>
+                          </div>
+                          <div>
+                            <dt>{text.layerFeatureCount}</dt>
+                            <dd>{item.featureCount ?? "--"}</dd>
+                          </div>
+                          <div>
+                            <dt>{text.mapStatus}</dt>
+                            <dd>{healthLabel(item.status)}</dd>
+                          </div>
+                          <div>
+                            <dt>{text.tileLabel}</dt>
+                            <dd>{item.tileUrl ? text.provided : text.layerNoTile}</dd>
+                          </div>
+                        </dl>
+                        {item.message ? <p>{item.message}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>{assessment ? text.layerNoData : text.freshnessNote}</p>
+                )}
+              </section>
+
+              <section className="diagnostics-section freshness-panel" aria-label={text.freshness}>
+                <div>
+                  <span className="section-kicker">{text.freshness}</span>
+                  <strong>{assessment ? text.online : text.offline}</strong>
+                </div>
+                {assessment ? (
+                  <ul className="freshness-list">
+                    {assessment.data_freshness.map((item) => {
+                      const showLatestNewsLinks =
+                        latestNewsLinks.length > 0 && item.source_id === latestNewsLinkSourceId;
+
+                      return (
+                        <li key={item.source_id}>
+                          <strong>{`${item.name}：${healthLabel(item.health_status)}`}</strong>
+                          {item.message ? <span>{item.message}</span> : null}
+                          {showLatestNewsLinks ? (
+                            <div className="freshness-source-links">
+                              <span>{text.latestNewsSources}</span>
+                              <ol>
+                                {latestNewsLinks.map((link) => (
+                                  <li key={link.id}>
+                                    <a href={link.url} target="_blank" rel="noreferrer">
+                                      {link.title}
+                                    </a>
+                                    <small>{formatDateTime(link.time)}</small>
+                                  </li>
+                                ))}
+                              </ol>
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p>{text.lastSync}</p>
+                )}
+                <p>
+                  {assessment
+                    ? `查詢關注度：${assessment.query_heat.attention_level}`
+                    : text.freshnessNote}
+                </p>
+              </section>
+            </div>
+          </details>
         </section>
       </aside>
     </main>

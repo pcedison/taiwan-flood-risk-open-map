@@ -67,6 +67,196 @@ drill_preflight:
     - name: USER_REPORTS_CHALLENGE_STATIC_TOKEN
       ref: replace-with-secret-manager-ref
 
+source_launch_gates:
+  - key: official.cwa.realtime
+    display_name: CWA official realtime rainfall
+    category: official
+    owner: source-owner
+    status: deferred
+    enabled: false
+    expected_default: false
+    cadence: worker-managed CWA polling after launch approval
+    source_health_expectation: freshness metrics and admin source status stay within accepted CWA stale thresholds
+    alert_route_ref: infra/monitoring/alert-rules.yml
+    rollback_plan: disable CWA live ingestion and fall back to persisted/stale official-source status
+    kill_switches:
+      - SOURCE_CWA_API_ENABLED=false
+      - SOURCE_CWA_ENABLED=false
+    disabled_reason: production CWA credential, egress, cadence, and alert ownership evidence is not accepted in this template
+    evidence:
+      license_review_ref: docs/data-sources/official/README.md
+      credential_review_ref: docs/runbooks/production-readiness.md#secrets-inventory
+      egress_review_ref: docs/runbooks/production-readiness.md#launch-blockers
+      cadence_review_ref: docs/runbooks/official-realtime-source-of-truth.md
+      alert_ownership_ref: docs/runbooks/production-readiness.md#alert-routing
+      rollback_ref: docs/runbooks/production-readiness.md#source-kill-switch
+    source_specific_evidence_refs:
+      - docs/data-sources/official/official-source-catalog.yaml
+  - key: official.wra.realtime
+    display_name: WRA official realtime water level
+    category: official
+    owner: source-owner
+    status: deferred
+    enabled: false
+    expected_default: false
+    cadence: worker-managed WRA polling after launch approval
+    source_health_expectation: freshness metrics and admin source status stay within accepted WRA stale thresholds
+    alert_route_ref: infra/monitoring/alert-rules.yml
+    rollback_plan: disable WRA live ingestion and fall back to persisted/stale official-source status
+    kill_switches:
+      - SOURCE_WRA_API_ENABLED=false
+      - SOURCE_WRA_ENABLED=false
+    disabled_reason: production WRA credential, egress, cadence, and alert ownership evidence is not accepted in this template
+    evidence:
+      license_review_ref: docs/data-sources/official/README.md
+      credential_review_ref: docs/runbooks/production-readiness.md#secrets-inventory
+      egress_review_ref: docs/runbooks/production-readiness.md#launch-blockers
+      cadence_review_ref: docs/runbooks/official-realtime-source-of-truth.md
+      alert_ownership_ref: docs/runbooks/production-readiness.md#alert-routing
+      rollback_ref: docs/runbooks/production-readiness.md#source-kill-switch
+    source_specific_evidence_refs:
+      - docs/data-sources/official/official-source-catalog.yaml
+  - key: official.flood_potential.geojson
+    display_name: Official flood-potential GeoJSON
+    category: official
+    owner: source-owner
+    status: deferred
+    enabled: false
+    expected_default: false
+    cadence: import or scheduled refresh only after source URL and cadence review
+    source_health_expectation: latest flood-potential import is available, fresh, and traceable to reviewed upstream metadata
+    alert_route_ref: infra/monitoring/alert-rules.yml
+    rollback_plan: disable flood-potential GeoJSON ingestion and keep previous accepted overlay/evidence
+    kill_switches:
+      - SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false
+      - SOURCE_FLOOD_POTENTIAL_ENABLED=false
+    disabled_reason: upstream URL, license, cadence, import, and rollback evidence is not accepted in this template
+    evidence:
+      license_review_ref: docs/data-sources/official/data-gov-tw-source-review-2026-05-12.md
+      credential_review_ref: docs/runbooks/production-readiness.md#secrets-inventory
+      egress_review_ref: docs/runbooks/production-readiness.md#launch-blockers
+      cadence_review_ref: docs/runbooks/official-realtime-source-of-truth.md
+      alert_ownership_ref: docs/runbooks/production-readiness.md#alert-routing
+      rollback_ref: docs/runbooks/production-readiness.md#source-kill-switch
+      source_import_validator_ref: docs/data-sources/official/README.md
+    source_specific_evidence_refs:
+      - docs/data-sources/official/data-gov-tw-source-review-2026-05-12.md
+  - key: news.gdelt
+    display_name: GDELT public news backfill
+    category: public_web_news
+    owner: governance-owner
+    status: deferred
+    enabled: false
+    expected_default: false
+    cadence: bounded backfill or production-candidate ingestion only after GDELT approval evidence
+    source_health_expectation: persisted public-news evidence has accepted query scope, citation policy, and stale-source alerting
+    alert_route_ref: infra/monitoring/alert-rules.yml
+    rollback_plan: disable GDELT gates, stop backfill jobs, and quarantine unapproved public-news evidence
+    kill_switches:
+      - SOURCE_NEWS_ENABLED=false
+      - GDELT_SOURCE_ENABLED=false
+      - GDELT_BACKFILL_ENABLED=false
+      - GDELT_PRODUCTION_INGESTION_ENABLED=false
+      - GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK=false
+    disabled_reason: GDELT source/legal/egress approval and production-candidate persistence evidence is not accepted in this template
+    evidence:
+      license_review_ref: docs/data-sources/news/README.md
+      credential_review_ref: docs/runbooks/production-readiness.md#secrets-inventory
+      egress_review_ref: docs/data-sources/news/README.md
+      cadence_review_ref: docs/data-sources/news/README.md
+      alert_ownership_ref: docs/runbooks/production-readiness.md#alert-routing
+      rollback_ref: docs/runbooks/production-readiness.md#source-kill-switch
+      terms_review_ref: docs/data-sources/news/README.md
+      citation_policy_ref: docs/data-sources/news/l2-source-allowlist.yaml
+      gdelt_live_acceptance_ref: docs/data-sources/news/gdelt-live-acceptance.example.yaml
+    source_specific_evidence_refs:
+      - docs/data-sources/news/gdelt-live-acceptance.example.yaml
+      - docs/data-sources/news/l2-source-allowlist.yaml
+  - key: community.forum
+    display_name: Forum and social discussion ingestion
+    category: public_discussion
+    owner: governance-owner
+    status: disabled
+    enabled: false
+    expected_default: false
+    cadence: no production cadence; fixture-only candidates until Phase 4 legal/privacy approval
+    source_health_expectation: no real crawling, scraping, HTTP fetch, identity storage, or raw-content storage
+    alert_route_ref: infra/monitoring/alert-rules.yml
+    rollback_plan: keep forum gates false and remove any accidental scheduler or adapter configuration
+    kill_switches:
+      - SOURCE_FORUM_ENABLED=false
+      - SOURCE_PTT_ENABLED=false
+      - SOURCE_DCARD_ENABLED=false
+      - SOURCE_PTT_CANDIDATE_APPROVAL_ACK=false
+      - SOURCE_DCARD_CANDIDATE_APPROVAL_ACK=false
+      - SOURCE_TERMS_REVIEW_ACK=false
+    disabled_reason: public discussion ingestion is deferred until legal, privacy, platform terms, and governance approval are accepted
+    evidence:
+      license_review_ref: docs/data-sources/forum/README.md
+      credential_review_ref: docs/runbooks/production-readiness.md#secrets-inventory
+      egress_review_ref: docs/data-sources/forum/source-approval-manifest.yaml
+      cadence_review_ref: docs/data-sources/forum/source-approval-manifest.yaml
+      alert_ownership_ref: docs/runbooks/production-readiness.md#alert-routing
+      rollback_ref: docs/runbooks/production-readiness.md#source-kill-switch
+      legal_review_ref: docs/data-sources/forum/source-approval-request.example.yaml
+      privacy_review_ref: docs/data-sources/forum/source-approval-request.example.yaml
+      terms_review_ref: docs/data-sources/forum/source-approval-manifest.yaml
+      forum_source_approval_ref: docs/data-sources/forum/source-approval-manifest.yaml
+    source_specific_evidence_refs:
+      - docs/data-sources/forum/source-approval-manifest.yaml
+      - docs/data-sources/forum/source-approval-request.example.yaml
+  - key: public_reports
+    display_name: Public user reports
+    category: public_intake
+    owner: privacy-governance-owner
+    status: deferred
+    enabled: false
+    expected_default: false
+    cadence: user-submitted intake only after bot-defense, moderation, retention, and privacy gates are accepted
+    source_health_expectation: intake remains disabled or protected by accepted bot defense, Redis abuse controls, moderation SLA, and deletion path
+    alert_route_ref: infra/monitoring/alert-rules.yml
+    rollback_plan: disable public reports, preserve received records for privacy review, and stop public intake paths
+    kill_switches:
+      - USER_REPORTS_ENABLED=false
+      - USER_REPORTS_CHALLENGE_REQUIRED=false
+    disabled_reason: public report legal/privacy/moderation launch evidence is not accepted in this template
+    evidence:
+      license_review_ref: docs/runbooks/public-reports-governance.md
+      credential_review_ref: docs/runbooks/production-readiness.md#secrets-inventory
+      egress_review_ref: docs/runbooks/public-reports-governance.md
+      cadence_review_ref: docs/runbooks/public-reports-governance.md
+      alert_ownership_ref: docs/runbooks/production-readiness.md#alert-routing
+      rollback_ref: docs/runbooks/production-readiness.md#public-report-disable
+      legal_review_ref: docs/runbooks/public-reports-governance.md
+      privacy_review_ref: docs/runbooks/public-reports-governance.md
+      moderation_review_ref: docs/runbooks/public-reports-governance.md
+      public_reports_launch_evidence_ref: docs/runbooks/public-reports-launch-evidence.example.yaml
+    source_specific_evidence_refs:
+      - docs/runbooks/public-reports-launch-evidence.example.yaml
+  - key: sample_data
+    display_name: Sample/demo data
+    category: local_demo
+    owner: platform-owner
+    status: disabled
+    enabled: false
+    expected_default: false
+    cadence: no production cadence; local/test/demo only
+    source_health_expectation: hosted environments must return explicit unavailable status instead of sample data
+    alert_route_ref: infra/monitoring/alert-rules.yml
+    rollback_plan: set sample data gate false and verify hosted admin endpoints do not return sample rows
+    kill_switches:
+      - SOURCE_SAMPLE_DATA_ENABLED=false
+    disabled_reason: sample data is never a production source of truth
+    evidence:
+      license_review_ref: docs/runbooks/production-readiness.md#source-kill-switch
+      credential_review_ref: docs/runbooks/production-readiness.md#secrets-inventory
+      egress_review_ref: docs/runbooks/production-readiness.md#source-kill-switch
+      cadence_review_ref: docs/runbooks/production-readiness.md#source-kill-switch
+      alert_ownership_ref: docs/runbooks/production-readiness.md#alert-routing
+      rollback_ref: docs/runbooks/production-readiness.md#source-kill-switch
+    source_specific_evidence_refs:
+      - docs/runbooks/production-readiness.md#source-kill-switch
+
 required_env:
   - name: APP_ENV
     owner: platform-owner

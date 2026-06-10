@@ -113,12 +113,12 @@ external Grafana instances, import the JSON manually and select the Prometheus
 datasource when prompted. The dashboard covers:
 
 - API metrics scrape status and readiness.
-- Source freshness status and source age.
+- Source freshness status, source age, and last successful ingestion age.
 - Stale source count.
 - Worker heartbeat age.
 - Scheduler heartbeat age.
 - Worker last-run failed count and last-run status table.
-- Runtime queue queued/running/final-failed/expired-lease counts.
+- Runtime queue queued/running/final-failed/expired-lease counts and queue lag.
 
 ## Future Metrics
 
@@ -128,8 +128,11 @@ by the runtime when the corresponding environment variables are set:
 - `flood_risk_worker_heartbeat_timestamp_seconds`
 - `flood_risk_scheduler_heartbeat_timestamp_seconds`
 - `flood_risk_worker_last_run_status`
+- `flood_risk_source_last_success_age_seconds`
+- `flood_risk_adapter_last_success_timestamp_seconds`
 - `flood_risk_runtime_queue_final_failed_jobs`
 - `flood_risk_runtime_queue_expired_leases`
+- `flood_risk_runtime_queue_lag_seconds`
 - `flood_risk_runtime_queue_oldest_final_failed_age_seconds`
 - `flood_risk_runtime_queue_metrics_available`
 

@@ -20,6 +20,7 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "scoring"
         "heavy_rainfall_water_level.json",
         "no_evidence_found.json",
         "partial_source_outage.json",
+        "stale_official_realtime.json",
         "conflicting_public_report_low_official_signal.json",
     ],
 )

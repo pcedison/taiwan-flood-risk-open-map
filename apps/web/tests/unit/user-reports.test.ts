@@ -53,6 +53,15 @@ test("postUserReport maps report gate responses to typed errors", async () => {
     ),
     (error) => error instanceof UserReportSubmitError && error.code === "repository_unavailable",
   );
+
+  await assert.rejects(
+    postUserReport(
+      "https://api.example.test",
+      { point: { lat: 25.033, lng: 121.5654 }, summary: "Water over curb." },
+      async () => jsonResponse({ error: { code: "rate_limited" } }, 429),
+    ),
+    (error) => error instanceof UserReportSubmitError && error.code === "rate_limited",
+  );
 });
 
 test("postUserReport maps unexpected responses to a generic submit error", async () => {

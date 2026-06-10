@@ -31,7 +31,9 @@ class Settings:
     minio_endpoint: str
     cors_origins: tuple[str, ...]
     admin_bearer_token: str | None
+    admin_sample_data_enabled: bool
     realtime_official_enabled: bool
+    realtime_official_diagnostic_fallback_enabled: bool
     cwa_api_authorization: str | None
     source_cwa_api_enabled: bool
     source_wra_api_enabled: bool
@@ -48,6 +50,13 @@ class Settings:
     official_flood_disaster_points_enabled: bool
     official_flood_disaster_points_path: str | None
     risk_assessment_response_cache_seconds: int
+    tile_dynamic_fallback_enabled: bool
+    public_rate_limit_enabled: bool
+    public_rate_limit_backend: RateLimitBackend
+    public_rate_limit_client_header: str | None
+    geocode_rate_limit_max_requests: int
+    risk_assessment_rate_limit_max_requests: int
+    public_rate_limit_window_seconds: int
     user_reports_enabled: bool
     user_reports_rate_limit_enabled: bool
     user_reports_rate_limit_backend: RateLimitBackend
@@ -68,7 +77,10 @@ class Settings:
 def get_settings() -> Settings:
     cors_origins = tuple(
         origin.strip()
-        for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+        for origin in os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000",
+        ).split(",")
         if origin.strip()
     )
     app_env = os.getenv("APP_ENV", "local")
@@ -91,7 +103,12 @@ def get_settings() -> Settings:
         minio_endpoint=os.getenv("MINIO_ENDPOINT", "http://minio:9000"),
         cors_origins=cors_origins,
         admin_bearer_token=os.getenv("ADMIN_BEARER_TOKEN") or None,
+        admin_sample_data_enabled=_admin_sample_data_enabled(app_env),
         realtime_official_enabled=_env_bool("REALTIME_OFFICIAL_ENABLED", default=True),
+        realtime_official_diagnostic_fallback_enabled=_env_bool(
+            "REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED",
+            default=_local_or_test_runtime(app_env),
+        ),
         cwa_api_authorization=cwa_api_authorization,
         source_cwa_api_enabled=_env_bool(
             "SOURCE_CWA_API_ENABLED",
@@ -140,6 +157,37 @@ def get_settings() -> Settings:
             "RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS",
             default=120 if _hosted_runtime(app_env) else 0,
             minimum=0,
+        ),
+        tile_dynamic_fallback_enabled=_env_bool(
+            "TILE_DYNAMIC_FALLBACK_ENABLED",
+            default=_local_or_test_runtime(app_env),
+        ),
+        public_rate_limit_enabled=_env_bool(
+            "PUBLIC_RATE_LIMIT_ENABLED",
+            default=_hosted_runtime(app_env),
+        ),
+        public_rate_limit_backend=_env_choice(
+            "PUBLIC_RATE_LIMIT_BACKEND",
+            choices={"redis", "memory"},
+            default="memory" if _local_or_test_runtime(app_env) else "redis",
+        ),
+        public_rate_limit_client_header=_env_str_or_none(
+            "PUBLIC_RATE_LIMIT_CLIENT_HEADER"
+        ),
+        geocode_rate_limit_max_requests=_env_int(
+            "GEOCODE_RATE_LIMIT_MAX_REQUESTS",
+            default=60,
+            minimum=1,
+        ),
+        risk_assessment_rate_limit_max_requests=_env_int(
+            "RISK_ASSESSMENT_RATE_LIMIT_MAX_REQUESTS",
+            default=30,
+            minimum=1,
+        ),
+        public_rate_limit_window_seconds=_env_int(
+            "PUBLIC_RATE_LIMIT_WINDOW_SECONDS",
+            default=60,
+            minimum=1,
         ),
         user_reports_enabled=_env_bool("USER_REPORTS_ENABLED", default=False),
         user_reports_rate_limit_enabled=_env_bool(
@@ -274,6 +322,17 @@ def _official_flood_disaster_points_path() -> str | None:
 
 def _hosted_runtime(app_env: str) -> bool:
     return app_env.strip().lower() in {"staging", "production", "production-beta"}
+
+
+def _local_or_test_runtime(app_env: str) -> bool:
+    return app_env.strip().lower() in {"local", "development", "test"}
+
+
+def _admin_sample_data_enabled(app_env: str) -> bool:
+    return _local_or_test_runtime(app_env) or _env_bool(
+        "ADMIN_SAMPLE_DATA_ENABLED",
+        default=False,
+    ) or _env_bool("DEMO_MODE_ENABLED", default=False)
 
 
 def _env_int(name: str, *, default: int, minimum: int | None = None) -> int:

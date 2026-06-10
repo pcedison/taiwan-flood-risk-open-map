@@ -105,6 +105,44 @@ def test_production_complete_flag_rejects_template() -> None:
     assert "readiness_state must be 'production-complete'" in errors
 
 
+def test_missing_source_launch_gates_fails() -> None:
+    evidence = copy.deepcopy(_load_example())
+    evidence.pop("source_launch_gates")
+
+    errors = _errors_for(evidence)
+
+    assert "source_launch_gates must be a list" in errors
+
+
+def test_enabled_source_requires_accepted_or_reviewed_status() -> None:
+    evidence = copy.deepcopy(_load_example())
+    source_gate = next(
+        item
+        for item in evidence["source_launch_gates"]
+        if item["key"] == "official.cwa.realtime"
+    )
+    source_gate["enabled"] = True
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "source_launch_gates[official.cwa.realtime].enabled=true requires status "
+        "accepted or reviewed"
+    ) in errors
+
+
+def test_disabled_source_requires_kill_switches() -> None:
+    evidence = copy.deepcopy(_load_example())
+    public_reports = next(
+        item for item in evidence["source_launch_gates"] if item["key"] == "public_reports"
+    )
+    public_reports["kill_switches"] = []
+
+    errors = _errors_for(evidence)
+
+    assert "source_launch_gates[public_reports].kill_switches must be a non-empty list" in errors
+
+
 def test_production_complete_requires_secret_manager_status() -> None:
     evidence = _production_complete_evidence()
     admin_token = next(
@@ -157,6 +195,57 @@ def test_production_complete_requires_reviewed_gate_status() -> None:
     assert (
         "required_env[SOURCE_CWA_ENABLED].status must be accepted or reviewed "
         "when production_complete is true"
+    ) in errors
+
+
+def test_production_complete_rejects_source_gate_placeholder_owner() -> None:
+    evidence = _production_complete_evidence()
+    source_gate = next(
+        item
+        for item in evidence["source_launch_gates"]
+        if item["key"] == "official.cwa.realtime"
+    )
+    source_gate["owner"] = "source-owner"
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "source_launch_gates[official.cwa.realtime].owner must name a real "
+        "production owner, not a template placeholder"
+    ) in errors
+
+
+def test_production_complete_rejects_source_gate_runbook_only_ref() -> None:
+    evidence = _production_complete_evidence()
+    source_gate = next(
+        item
+        for item in evidence["source_launch_gates"]
+        if item["key"] == "official.cwa.realtime"
+    )
+    source_gate["evidence"]["license_review_ref"] = "docs/runbooks/production-readiness.md"
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "source_launch_gates[official.cwa.realtime].evidence.license_review_ref "
+        "must reference production evidence, not only runbook instructions"
+    ) in errors
+
+
+def test_production_complete_public_reports_enabled_requires_governance_refs() -> None:
+    evidence = _production_complete_evidence()
+    public_reports = next(
+        item for item in evidence["source_launch_gates"] if item["key"] == "public_reports"
+    )
+    public_reports["status"] = "accepted"
+    public_reports["enabled"] = True
+    public_reports["evidence"].pop("legal_review_ref")
+
+    errors = _errors_for(evidence)
+
+    assert (
+        "source_launch_gates[public_reports].evidence.legal_review_ref is required "
+        "for enabled production sources"
     ) in errors
 
 
@@ -436,5 +525,168 @@ def _production_complete_evidence() -> dict[str, Any]:
         item["evidence_refs"] = [drill_refs[item["name"]]]
         item["blockers"] = []
 
+    evidence["source_launch_gates"] = _production_source_launch_gates()
     evidence["pending_production_gaps"] = []
     return evidence
+
+
+def _production_source_launch_gates() -> list[dict[str, Any]]:
+    def refs(key: str, *, extra: dict[str, str] | None = None) -> dict[str, str]:
+        values = {
+            "license_review_ref": f"private-ops://source-gates/{key}/license/2026-05-04",
+            "credential_review_ref": f"private-ops://source-gates/{key}/credential/2026-05-04",
+            "egress_review_ref": f"private-ops://source-gates/{key}/egress/2026-05-04",
+            "cadence_review_ref": f"private-ops://source-gates/{key}/cadence/2026-05-04",
+            "alert_ownership_ref": f"private-ops://source-gates/{key}/alerts/2026-05-04",
+            "rollback_ref": f"private-ops://source-gates/{key}/rollback/2026-05-04",
+        }
+        if extra:
+            values.update(extra)
+        return values
+
+    def gate(
+        key: str,
+        *,
+        owner: str,
+        status: str,
+        enabled: bool,
+        kill_switches: list[str],
+        disabled_reason: str | None = None,
+        extra_evidence: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        item: dict[str, Any] = {
+            "key": key,
+            "display_name": key,
+            "category": key.split(".", 1)[0],
+            "owner": owner,
+            "status": status,
+            "enabled": enabled,
+            "expected_default": False,
+            "cadence": f"accepted production cadence for {key}",
+            "source_health_expectation": f"accepted freshness and failure threshold for {key}",
+            "alert_route_ref": f"pagerduty:flood-risk-{key.replace('.', '-')}",
+            "rollback_plan": f"disable {key} source gates and verify degraded output",
+            "kill_switches": kill_switches,
+            "evidence": refs(key, extra=extra_evidence),
+            "source_specific_evidence_refs": [
+                f"private-ops://source-gates/{key}/source-specific/2026-05-04",
+            ],
+        }
+        if disabled_reason is not None:
+            item["disabled_reason"] = disabled_reason
+        return item
+
+    return [
+        gate(
+            "official.cwa.realtime",
+            owner="cwa.source@flood-risk.internal",
+            status="accepted",
+            enabled=True,
+            kill_switches=["SOURCE_CWA_API_ENABLED=false", "SOURCE_CWA_ENABLED=false"],
+        ),
+        gate(
+            "official.wra.realtime",
+            owner="wra.source@flood-risk.internal",
+            status="accepted",
+            enabled=True,
+            kill_switches=["SOURCE_WRA_API_ENABLED=false", "SOURCE_WRA_ENABLED=false"],
+        ),
+        gate(
+            "official.flood_potential.geojson",
+            owner="flood-potential.source@flood-risk.internal",
+            status="accepted",
+            enabled=True,
+            kill_switches=[
+                "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false",
+                "SOURCE_FLOOD_POTENTIAL_ENABLED=false",
+            ],
+            extra_evidence={
+                "source_import_validator_ref": (
+                    "private-ops://source-gates/official.flood_potential.geojson/import/"
+                    "2026-05-04"
+                ),
+            },
+        ),
+        gate(
+            "news.gdelt",
+            owner="news.governance@flood-risk.internal",
+            status="accepted",
+            enabled=True,
+            kill_switches=[
+                "SOURCE_NEWS_ENABLED=false",
+                "GDELT_SOURCE_ENABLED=false",
+                "GDELT_BACKFILL_ENABLED=false",
+                "GDELT_PRODUCTION_INGESTION_ENABLED=false",
+                "GDELT_PRODUCTION_APPROVAL_EVIDENCE_ACK=false",
+            ],
+            extra_evidence={
+                "terms_review_ref": "private-ops://source-gates/news.gdelt/terms/2026-05-04",
+                "citation_policy_ref": (
+                    "private-ops://source-gates/news.gdelt/citation-policy/2026-05-04"
+                ),
+                "gdelt_live_acceptance_ref": (
+                    "private-ops://source-gates/news.gdelt/live-acceptance/2026-05-04"
+                ),
+            },
+        ),
+        gate(
+            "community.forum",
+            owner="forum.governance@flood-risk.internal",
+            status="disabled",
+            enabled=False,
+            kill_switches=[
+                "SOURCE_FORUM_ENABLED=false",
+                "SOURCE_PTT_ENABLED=false",
+                "SOURCE_DCARD_ENABLED=false",
+                "SOURCE_PTT_CANDIDATE_APPROVAL_ACK=false",
+                "SOURCE_DCARD_CANDIDATE_APPROVAL_ACK=false",
+                "SOURCE_TERMS_REVIEW_ACK=false",
+            ],
+            disabled_reason=(
+                "forum and social ingestion remains outside the accepted production beta scope"
+            ),
+            extra_evidence={
+                "legal_review_ref": "private-ops://source-gates/community.forum/legal/2026-05-04",
+                "privacy_review_ref": (
+                    "private-ops://source-gates/community.forum/privacy/2026-05-04"
+                ),
+                "terms_review_ref": "private-ops://source-gates/community.forum/terms/2026-05-04",
+                "forum_source_approval_ref": (
+                    "private-ops://source-gates/community.forum/approval/2026-05-04"
+                ),
+            },
+        ),
+        gate(
+            "public_reports",
+            owner="reports.privacy@flood-risk.internal",
+            status="deferred",
+            enabled=False,
+            kill_switches=[
+                "USER_REPORTS_ENABLED=false",
+                "USER_REPORTS_CHALLENGE_REQUIRED=false",
+            ],
+            disabled_reason=(
+                "public reports remain disabled until privacy and moderation launch gates pass"
+            ),
+            extra_evidence={
+                "legal_review_ref": "private-ops://source-gates/public_reports/legal/2026-05-04",
+                "privacy_review_ref": (
+                    "private-ops://source-gates/public_reports/privacy/2026-05-04"
+                ),
+                "moderation_review_ref": (
+                    "private-ops://source-gates/public_reports/moderation/2026-05-04"
+                ),
+                "public_reports_launch_evidence_ref": (
+                    "private-ops://source-gates/public_reports/launch-evidence/2026-05-04"
+                ),
+            },
+        ),
+        gate(
+            "sample_data",
+            owner="platform.ops@flood-risk.internal",
+            status="disabled",
+            enabled=False,
+            kill_switches=["SOURCE_SAMPLE_DATA_ENABLED=false"],
+            disabled_reason="sample data is not an accepted production source",
+        ),
+    ]

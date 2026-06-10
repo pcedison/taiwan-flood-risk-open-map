@@ -62,10 +62,10 @@ configured.
 | SLO surface | Dashboard panel | Alert | Launch evidence needed |
 |---|---|---|---|
 | API availability/readiness | `API Metrics Scrape`, `API Readiness` | `FloodRiskApiReadyDown` | Hosted API scrape target and `/ready` interpretation documented. |
-| Source freshness | `Stale Sources`, `Source Freshness Status`, `Source Freshness Age` | `FloodRiskSourceFreshnessFailed`, `FloodRiskSourceFreshnessDegraded`, `FloodRiskSourceFreshnessUnknown`, `FloodRiskSourceFreshnessStale` | Scheduled freshness export for enabled sources with source owners. |
+| Source freshness | `Stale Sources`, `Source Freshness Status`, `Source Freshness Age`, `Source Last Success Age` | `FloodRiskSourceFreshnessFailed`, `FloodRiskSourceFreshnessDegraded`, `FloodRiskSourceFreshnessUnknown`, `FloodRiskSourceFreshnessStale`, `FloodRiskOfficialSourceFreshnessStale` | Scheduled freshness export for enabled sources with source owners. |
 | Worker heartbeat and latest run | `Worker Heartbeat Age`, `Worker Last Run Failed`, `Worker Last Run Status` | `FloodRiskWorkerHeartbeatMissing`, `FloodRiskWorkerLastRunFailed` | Worker textfile path mounted and owner receives alerts. |
 | Scheduler singleton health | `Scheduler Heartbeat Age` | `FloodRiskSchedulerHeartbeatMissing` | Exactly one scheduler replica and heartbeat textfile emission. |
-| Queue visibility | `Queue Metrics Available`, `Runtime Queue Counts` | `FloodRiskRuntimeQueueMetricsUnavailable` | Scheduled queue metrics export and DB access evidence. |
+| Queue visibility | `Queue Metrics Available`, `Runtime Queue Counts`, `Queue Lag` | `FloodRiskRuntimeQueueMetricsUnavailable`, `FloodRiskRuntimeQueueLagHigh` | Scheduled queue metrics export and DB access evidence. |
 | Final-failed row triage | `Queue Final-Failed Rows`, `Queue Oldest Final-Failed Age` | `FloodRiskRuntimeQueueFinalFailedRowsPresent` | Owner handoff and replay/quarantine policy; row visibility is not a DLQ. |
 | Expired leases | `Queue Expired Leases` | `FloodRiskRuntimeQueueExpiredLeases` | Worker health and retry behavior documented for the environment. |
 
@@ -123,6 +123,7 @@ The dashboard includes:
 | Worker Last Run Failed | `sum(flood_risk_worker_last_run_status{status="failed"} == 1)` | Flags failed latest worker runs. |
 | Source Freshness Status | `flood_risk_source_freshness_status == 1` | Lists active source health status by source. |
 | Source Freshness Age | `flood_risk_source_freshness_age_seconds` | Tracks freshness age by source. |
+| Source Last Success Age | `flood_risk_source_last_success_age_seconds`, `time() - flood_risk_adapter_last_success_timestamp_seconds` | Tracks admin-source last success age and worker-observed successful adapter run age. |
 | Worker Heartbeat Age | `time() - flood_risk_worker_heartbeat_timestamp_seconds` | Shows worker heartbeat age by instance and queue. |
 | Scheduler Heartbeat Age | `time() - flood_risk_scheduler_heartbeat_timestamp_seconds` | Shows scheduler heartbeat age by instance and scheduler. |
 | Worker Last Run Status | `flood_risk_worker_last_run_status == 1` | Lists the latest worker run status by job. |
@@ -131,6 +132,7 @@ The dashboard includes:
 | Queue Oldest Final-Failed Age | `max(flood_risk_runtime_queue_oldest_final_failed_age_seconds)` | Shows how long the oldest final-failed row has been visible. |
 | Queue Metrics Available | `min(flood_risk_runtime_queue_metrics_available)` | Shows whether the CLI exporter could query the DB. |
 | Runtime Queue Counts | queue count metrics | Table view of queued/running/final-failed/expired-lease series. |
+| Queue Lag | `max(flood_risk_runtime_queue_lag_seconds)` | Shows the age of the oldest queued job ready to run. |
 
 ## Prometheus API Scrape
 
@@ -218,9 +220,9 @@ Use the dashboard panels as deployment acceptance signals:
 
 | Surface | Panels | Required metric path |
 |---|---|---|
-| Source freshness | `Stale Sources`, `Source Freshness Status`, `Source Freshness Age` | Scheduled `ops-source-freshness-check.ps1` with `-MetricsPath`, exported through node exporter. |
+| Source freshness | `Stale Sources`, `Source Freshness Status`, `Source Freshness Age`, `Source Last Success Age` | Scheduled `ops-source-freshness-check.ps1` with `-MetricsPath`, exported through node exporter. |
 | Worker queue health | `Worker Heartbeat Age`, `Worker Last Run Failed`, `Worker Last Run Status` | Worker process writes `WORKER_METRICS_TEXTFILE_PATH` into the collector directory. |
-| Runtime queue row visibility | `Queue Final-Failed Rows`, `Queue Expired Leases`, `Queue Oldest Final-Failed Age`, `Queue Metrics Available`, `Runtime Queue Counts` | Scheduled `python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path <collector-file>`. |
+| Runtime queue row visibility | `Queue Final-Failed Rows`, `Queue Expired Leases`, `Queue Oldest Final-Failed Age`, `Queue Metrics Available`, `Runtime Queue Counts`, `Queue Lag` | Scheduled `python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path <collector-file>`. |
 | Scheduler health | `Scheduler Heartbeat Age` | Scheduler process writes `SCHEDULER_METRICS_TEXTFILE_PATH` into the collector directory. |
 
 For local Compose, set these paths when you want worker/scheduler textfile

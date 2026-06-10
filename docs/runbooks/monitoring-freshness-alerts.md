@@ -183,6 +183,7 @@ Alerts:
 | `FloodRiskSourceFreshnessDegraded` | warning | `flood_risk_source_freshness_status{status="degraded"}` | Source is still usable but impaired. |
 | `FloodRiskSourceFreshnessUnknown` | warning | `flood_risk_source_freshness_status{status="unknown"}` | Source health could not be classified. |
 | `FloodRiskSourceFreshnessStale` | critical | `flood_risk_source_freshness_stale` | Source timestamp exceeded the script threshold. |
+| `FloodRiskOfficialSourceFreshnessStale` | critical | `flood_risk_source_freshness_stale{source_type="official"}` | An official source exceeded the freshness threshold. |
 | `FloodRiskApiReadyDown` | critical | `up{job="flood-risk-api"}` or future `flood_risk_api_ready` | API scrape/readiness is down. |
 | `FloodRiskWorkerHeartbeatMissing` | warning | `flood_risk_worker_heartbeat_timestamp_seconds` | Worker heartbeat is absent or older than 300 seconds. |
 | `FloodRiskSchedulerHeartbeatMissing` | warning | `flood_risk_scheduler_heartbeat_timestamp_seconds` | Scheduler heartbeat is absent or older than 600 seconds. |
@@ -190,6 +191,7 @@ Alerts:
 | `FloodRiskRuntimeQueueMetricsUnavailable` | warning | `flood_risk_runtime_queue_metrics_available` | Queue metrics exporter could not read the durable queue backend. |
 | `FloodRiskRuntimeQueueFinalFailedRowsPresent` | warning | `flood_risk_runtime_queue_final_failed_jobs` | Exhausted final-failed rows are present; inspect before any manual requeue. |
 | `FloodRiskRuntimeQueueExpiredLeases` | warning | `flood_risk_runtime_queue_expired_leases` | Running queue rows have expired leases. |
+| `FloodRiskRuntimeQueueLagHigh` | warning | `flood_risk_runtime_queue_lag_seconds` | A ready queued job has waited more than the accepted lag threshold. |
 
 The current API scrape target is `api:8000/metrics`. If the deployed API does
 not expose Prometheus metrics yet, `FloodRiskApiReadyDown` should be interpreted
@@ -207,12 +209,12 @@ Import it into Grafana and choose the Prometheus datasource when prompted. The
 dashboard covers the same operational surfaces as the alert rules:
 
 - API scrape and readiness.
-- Source freshness age, stale count, and active status.
+- Source freshness age, stale count, last-success age, and active status.
 - Worker heartbeat age.
 - Scheduler heartbeat age.
 - Worker last-run failed count and active last-run status.
-- Queue final-failed row count, expired leases, oldest final-failed age, and
-  metrics availability.
+- Queue final-failed row count, expired leases, queue lag, oldest final-failed
+  age, and metrics availability.
 
 ## Manual Check
 
@@ -276,6 +278,8 @@ Expected fixture shape:
   "sources": [
     {
       "id": "cwa-rainfall",
+      "adapter_key": "official.cwa.rainfall",
+      "source_type": "official",
       "health_status": "healthy",
       "last_success_at": "2026-04-30T08:00:00Z",
       "source_timestamp_max": "2026-04-30T07:55:00Z"
@@ -292,9 +296,11 @@ The ops script writes these metrics when `-MetricsPath` is supplied:
 |---|---|---|
 | `flood_risk_source_freshness_check_success` | none | `1` when the latest script run passed, otherwise `0`. |
 | `flood_risk_source_freshness_threshold_seconds` | none | The `-MaxAgeMinutes` threshold converted to seconds. |
-| `flood_risk_source_freshness_age_seconds` | `source_id`, `health_status` | Age of the newest source timestamp, or `-1` if missing. |
-| `flood_risk_source_freshness_stale` | `source_id`, `health_status` | `1` when the source is stale or missing timestamps. |
-| `flood_risk_source_freshness_status` | `source_id`, `status` | One-hot health status gauge for `healthy`, `degraded`, `failed`, `unknown`, `disabled`. |
+| `flood_risk_source_freshness_age_seconds` | `source_id`, `adapter_key`, `source_type`, `health_status` | Age of the newest source timestamp, or `-1` if missing. |
+| `flood_risk_source_freshness_stale` | `source_id`, `adapter_key`, `source_type`, `health_status` | `1` when the source is stale or missing timestamps. |
+| `flood_risk_source_freshness_status` | `source_id`, `adapter_key`, `source_type`, `status` | One-hot health status gauge for `healthy`, `degraded`, `failed`, `unknown`, `disabled`. |
+| `flood_risk_source_last_success_timestamp_seconds` | `source_id`, `adapter_key`, `source_type`, `health_status` | Unix timestamp of the latest successful ingestion recorded by the admin source endpoint, or `0` if unknown. |
+| `flood_risk_source_last_success_age_seconds` | `source_id`, `adapter_key`, `source_type`, `health_status` | Age of the latest successful ingestion recorded by the admin source endpoint, or `-1` if unknown. |
 
 The Prometheus freshness alerts read the `status` and `stale` metrics directly.
 The script and alert rules therefore share one threshold source:
@@ -316,6 +322,7 @@ Runtime heartbeat metrics:
 | `flood_risk_scheduler_heartbeat_timestamp_seconds` | `service`, `instance`, `scheduler` | Unix timestamp of the latest scheduler heartbeat. |
 | `flood_risk_worker_last_run_status` | `service`, `instance`, `queue`, `job`, `status` | One-hot latest worker run status for `succeeded`, `failed`, `skipped`, `running`, `unknown`. |
 | `flood_risk_scheduler_last_run_status` | `service`, `instance`, `scheduler`, `status` | One-hot latest scheduler run status. |
+| `flood_risk_adapter_last_success_timestamp_seconds` | `service`, `adapter_key` | Unix timestamp of a successful adapter run observed by the worker textfile path. |
 
 Runtime queue visibility metrics:
 
@@ -326,6 +333,7 @@ Runtime queue visibility metrics:
 | `flood_risk_runtime_queue_running_jobs` | `service`, `surface`, `queue_name` | Rows currently in `running` status. |
 | `flood_risk_runtime_queue_final_failed_jobs` | `service`, `surface`, `queue_name` | Exhausted `failed` rows where attempts reached max attempts. Not a complete DLQ. |
 | `flood_risk_runtime_queue_expired_leases` | `service`, `surface`, `queue_name` | Running rows with an expired lease. |
+| `flood_risk_runtime_queue_lag_seconds` | `service`, `surface`, `queue_name` | Age of the oldest queued job whose `run_after` is due, or `0` when no due queued job exists. |
 | `flood_risk_runtime_queue_oldest_final_failed_age_seconds` | `service`, `surface`, `queue_name` | Age of the oldest exhausted final-failed row, or `0` when none exists. |
 
 Until an HTTP `/metrics` endpoint is wired, configure the worker runtime to

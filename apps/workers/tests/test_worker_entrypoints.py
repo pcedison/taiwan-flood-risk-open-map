@@ -732,6 +732,7 @@ def test_main_summarize_runtime_dead_letter_jobs_reports_database_unavailable(
 def test_main_export_runtime_queue_metrics_prints_prometheus(monkeypatch, capsys) -> None:
     captured: dict[str, object] = {}
     oldest = datetime(2026, 4, 30, 7, 0, tzinfo=UTC)
+    oldest_queued = datetime(2026, 4, 30, 6, 45, tzinfo=UTC)
 
     class FakeRuntimeQueue:
         def __init__(self, *, database_url: str) -> None:
@@ -750,6 +751,7 @@ def test_main_export_runtime_queue_metrics_prints_prometheus(monkeypatch, capsys
                     running_count=2,
                     final_failed_count=1,
                     expired_lease_count=1,
+                    oldest_queued_at=oldest_queued,
                     oldest_final_failed_at=oldest,
                 ),
             )
@@ -775,6 +777,7 @@ def test_main_export_runtime_queue_metrics_prints_prometheus(monkeypatch, capsys
     assert "flood_risk_runtime_queue_metrics_available" in output
     assert "flood_risk_runtime_queue_final_failed_jobs" in output
     assert "flood_risk_runtime_queue_expired_leases" in output
+    assert "flood_risk_runtime_queue_lag_seconds" in output
     assert "dlq" not in output.lower()
 
 
@@ -797,6 +800,7 @@ def test_main_export_runtime_queue_metrics_writes_textfile(monkeypatch, tmp_path
                     running_count=0,
                     final_failed_count=0,
                     expired_lease_count=0,
+                    oldest_queued_at=None,
                     oldest_final_failed_at=None,
                 ),
             )
@@ -836,6 +840,7 @@ def test_main_export_runtime_queue_metrics_prints_json(monkeypatch, capsys) -> N
                     running_count=2,
                     final_failed_count=1,
                     expired_lease_count=1,
+                    oldest_queued_at=datetime(2026, 4, 30, 6, 45, tzinfo=UTC),
                     oldest_final_failed_at=datetime(2026, 4, 30, 7, 0, tzinfo=UTC),
                 ),
             )
@@ -860,6 +865,7 @@ def test_main_export_runtime_queue_metrics_prints_json(monkeypatch, capsys) -> N
         {
             "expired_lease_count": 1,
             "final_failed_count": 1,
+            "oldest_queued_at": "2026-04-30T06:45:00+00:00",
             "oldest_final_failed_at": "2026-04-30T07:00:00+00:00",
             "queue_name": "runtime-adapters",
             "queued_count": 4,

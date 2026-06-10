@@ -117,6 +117,67 @@ PRODUCTION_REVIEWED_ENV_NAMES = PRODUCTION_GATES | {
     "NEXT_PUBLIC_BASEMAP_ATTRIBUTION",
 }
 
+SOURCE_LAUNCH_GATE_KEYS = {
+    "official.cwa.realtime",
+    "official.wra.realtime",
+    "official.flood_potential.geojson",
+    "news.gdelt",
+    "community.forum",
+    "public_reports",
+    "sample_data",
+}
+
+SOURCE_LAUNCH_GATE_STATUSES = {
+    "accepted",
+    "reviewed",
+    "deferred",
+    "disabled",
+}
+
+SOURCE_LAUNCH_GATE_ENABLED_STATUSES = {"accepted", "reviewed"}
+SOURCE_LAUNCH_GATE_DISABLED_STATUSES = {"deferred", "disabled"}
+
+SOURCE_LAUNCH_GATE_REQUIRED_FIELDS = (
+    "owner",
+    "status",
+    "cadence",
+    "source_health_expectation",
+    "alert_route_ref",
+    "rollback_plan",
+)
+
+SOURCE_LAUNCH_GATE_EVIDENCE_FIELDS = (
+    "license_review_ref",
+    "credential_review_ref",
+    "egress_review_ref",
+    "cadence_review_ref",
+    "alert_ownership_ref",
+    "rollback_ref",
+)
+
+SOURCE_LAUNCH_GATE_SENSITIVE_EVIDENCE_FIELDS = {
+    "community.forum": (
+        "legal_review_ref",
+        "privacy_review_ref",
+        "terms_review_ref",
+        "forum_source_approval_ref",
+    ),
+    "news.gdelt": (
+        "terms_review_ref",
+        "citation_policy_ref",
+        "gdelt_live_acceptance_ref",
+    ),
+    "official.flood_potential.geojson": (
+        "source_import_validator_ref",
+    ),
+    "public_reports": (
+        "legal_review_ref",
+        "privacy_review_ref",
+        "moderation_review_ref",
+        "public_reports_launch_evidence_ref",
+    ),
+}
+
 SLO_NAMES = {
     "API availability",
     "Source freshness",
@@ -317,6 +378,11 @@ def validate_evidence(
         errors,
         production_acceptance=production_acceptance,
     )
+    _validate_source_launch_gates(
+        evidence.get("source_launch_gates"),
+        errors,
+        production_acceptance=production_acceptance,
+    )
     _validate_slos(
         evidence.get("slos"),
         errors,
@@ -469,6 +535,186 @@ def _validate_secret_env_entry(
         errors.append(
             f"required_env[{name}].value_status must be stored-in-secret-manager "
             "when production_complete is true"
+        )
+
+
+def _validate_source_launch_gates(
+    value: Any,
+    errors: list[str],
+    *,
+    production_acceptance: bool,
+) -> None:
+    if not isinstance(value, list):
+        errors.append("source_launch_gates must be a list")
+        return
+
+    entries = _index_entries(value, "key", "source_launch_gates", errors)
+    missing = SOURCE_LAUNCH_GATE_KEYS - set(entries)
+    if missing:
+        errors.append(f"source_launch_gates missing keys: {sorted(missing)}")
+    unknown = set(entries) - SOURCE_LAUNCH_GATE_KEYS
+    if unknown:
+        errors.append(f"source_launch_gates unknown keys: {sorted(unknown)}")
+
+    for key, entry in entries.items():
+        _validate_source_launch_gate(
+            key,
+            entry,
+            errors,
+            production_acceptance=production_acceptance,
+        )
+
+
+def _validate_source_launch_gate(
+    key: str,
+    entry: dict[str, Any],
+    errors: list[str],
+    *,
+    production_acceptance: bool,
+) -> None:
+    for field in SOURCE_LAUNCH_GATE_REQUIRED_FIELDS:
+        if not _non_empty_string(entry.get(field)):
+            errors.append(f"source_launch_gates[{key}].{field} is required")
+
+    status = entry.get("status")
+    if status not in SOURCE_LAUNCH_GATE_STATUSES:
+        errors.append(
+            f"source_launch_gates[{key}].status must be one of "
+            f"{sorted(SOURCE_LAUNCH_GATE_STATUSES)}"
+        )
+
+    enabled = entry.get("enabled")
+    if not isinstance(enabled, bool):
+        errors.append(f"source_launch_gates[{key}].enabled must be true or false")
+
+    if entry.get("expected_default") is not False:
+        errors.append(f"source_launch_gates[{key}].expected_default must be false")
+
+    if enabled is True and status not in SOURCE_LAUNCH_GATE_ENABLED_STATUSES:
+        errors.append(
+            f"source_launch_gates[{key}].enabled=true requires status accepted or reviewed"
+        )
+    if enabled is not True and status in SOURCE_LAUNCH_GATE_ENABLED_STATUSES:
+        disabled_reason = entry.get("disabled_reason")
+        if not _non_empty_string(disabled_reason):
+            errors.append(
+                f"source_launch_gates[{key}].disabled_reason is required when "
+                "enabled=false"
+            )
+    if status in SOURCE_LAUNCH_GATE_DISABLED_STATUSES and enabled is not False:
+        errors.append(
+            f"source_launch_gates[{key}].status {status} requires enabled=false"
+        )
+    if status in SOURCE_LAUNCH_GATE_DISABLED_STATUSES:
+        disabled_reason = entry.get("disabled_reason")
+        if not _non_empty_string(disabled_reason):
+            errors.append(
+                f"source_launch_gates[{key}].disabled_reason is required when "
+                "status is disabled or deferred"
+            )
+
+    kill_switches = entry.get("kill_switches")
+    if (
+        not isinstance(kill_switches, list)
+        or not kill_switches
+        or not all(_non_empty_string(item) for item in kill_switches)
+    ):
+        errors.append(f"source_launch_gates[{key}].kill_switches must be a non-empty list")
+
+    evidence = entry.get("evidence")
+    if not isinstance(evidence, dict):
+        errors.append(f"source_launch_gates[{key}].evidence must be an object")
+        evidence = {}
+
+    for field in SOURCE_LAUNCH_GATE_EVIDENCE_FIELDS:
+        if not _non_empty_string(evidence.get(field)):
+            errors.append(f"source_launch_gates[{key}].evidence.{field} is required")
+
+    source_specific_refs = entry.get("source_specific_evidence_refs")
+    if (
+        not isinstance(source_specific_refs, list)
+        or not source_specific_refs
+        or not all(_non_empty_string(ref) for ref in source_specific_refs)
+    ):
+        errors.append(
+            f"source_launch_gates[{key}].source_specific_evidence_refs must be "
+            "a non-empty list"
+        )
+
+    if not production_acceptance:
+        return
+
+    owner = entry.get("owner")
+    if _non_empty_string(owner):
+        _validate_real_owner(owner, f"source_launch_gates[{key}].owner", errors)
+
+    for field in (
+        "cadence",
+        "source_health_expectation",
+        "alert_route_ref",
+        "rollback_plan",
+        "disabled_reason",
+    ):
+        if _non_empty_string(entry.get(field)):
+            _validate_not_placeholder(
+                entry.get(field),
+                f"source_launch_gates[{key}].{field}",
+                errors,
+            )
+
+    if isinstance(kill_switches, list):
+        for index, kill_switch in enumerate(kill_switches):
+            if _non_empty_string(kill_switch):
+                _validate_not_placeholder(
+                    kill_switch,
+                    f"source_launch_gates[{key}].kill_switches[{index}]",
+                    errors,
+                )
+
+    if enabled is True:
+        _validate_enabled_source_launch_evidence(
+            key,
+            evidence,
+            source_specific_refs,
+            errors,
+        )
+
+
+def _validate_enabled_source_launch_evidence(
+    key: str,
+    evidence: dict[str, Any],
+    source_specific_refs: Any,
+    errors: list[str],
+) -> None:
+    required_evidence_fields = list(SOURCE_LAUNCH_GATE_EVIDENCE_FIELDS)
+    required_evidence_fields.extend(SOURCE_LAUNCH_GATE_SENSITIVE_EVIDENCE_FIELDS.get(key, ()))
+
+    for field in required_evidence_fields:
+        ref = evidence.get(field)
+        if not _non_empty_string(ref):
+            errors.append(
+                f"source_launch_gates[{key}].evidence.{field} is required for "
+                "enabled production sources"
+            )
+            continue
+        _validate_not_placeholder(
+            ref,
+            f"source_launch_gates[{key}].evidence.{field}",
+            errors,
+        )
+        _validate_single_production_ref(
+            ref,
+            f"source_launch_gates[{key}].evidence.{field}",
+            errors,
+        )
+
+    if isinstance(source_specific_refs, list) and all(
+        _non_empty_string(ref) for ref in source_specific_refs
+    ):
+        _validate_production_evidence_refs(
+            source_specific_refs,
+            f"source_launch_gates[{key}].source_specific_evidence_refs",
+            errors,
         )
 
 

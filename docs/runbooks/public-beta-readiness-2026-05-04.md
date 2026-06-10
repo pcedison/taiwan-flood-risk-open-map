@@ -46,6 +46,11 @@ Repeat the local gate with:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\public-beta-local-gate.ps1
 ```
 
+The local gate is no-secret but intentionally broad: it validates Docker
+Compose config, API/worker/repository tests, launch evidence templates,
+OpenAPI/contract fixtures, source manifests, web audit/lint/typecheck/build/E2E,
+unknown-address behavior, and the 2026-06-08/09 event public-value smokes.
+
 Repeat the hosted no-secret smoke after each Zeabur deployment with:
 
 ```powershell

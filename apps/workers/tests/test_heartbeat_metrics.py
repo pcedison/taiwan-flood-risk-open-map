@@ -9,10 +9,13 @@ from app.metrics import (
     render_prometheus_text,
     render_runtime_queue_metrics,
     render_scheduler_heartbeat_metrics,
+    render_source_freshness_metrics,
     render_worker_heartbeat_metrics,
     write_prometheus_textfile,
     PrometheusSample,
 )
+from app.jobs.freshness import FreshnessCheck
+from app.jobs.ingestion import AdapterBatchRunSummary
 from app.jobs.queue import RuntimeQueueMetricsSnapshot
 
 
@@ -82,6 +85,7 @@ def test_runtime_queue_metrics_render_operator_visibility_without_dlq_name() -> 
                 running_count=2,
                 final_failed_count=1,
                 expired_lease_count=1,
+                oldest_queued_at=datetime(2026, 4, 30, 3, 30, 5, tzinfo=UTC),
                 oldest_final_failed_at=datetime(2026, 4, 30, 3, 0, 5, tzinfo=UTC),
             ),
         ),
@@ -108,10 +112,76 @@ def test_runtime_queue_metrics_render_operator_visibility_without_dlq_name() -> 
         'service="worker",surface="runtime_queue"} 1'
     ) in text
     assert (
+        'flood_risk_runtime_queue_lag_seconds'
+        '{queue_name="runtime-adapters",service="worker",surface="runtime_queue"} 1800'
+    ) in text
+    assert (
         'flood_risk_runtime_queue_oldest_final_failed_age_seconds'
         '{queue_name="runtime-adapters",service="worker",surface="runtime_queue"} 3600'
     ) in text
     assert "dlq" not in text.lower()
+
+
+def test_source_freshness_metrics_render_counts_status_and_adapter_success() -> None:
+    text = render_source_freshness_metrics(
+        summaries=(
+            AdapterBatchRunSummary(
+                adapter_key="official.cwa.rainfall",
+                status="succeeded",
+                started_at=HEARTBEAT_AT,
+                finished_at=HEARTBEAT_AT,
+                items_fetched=1,
+                items_promoted=1,
+                items_rejected=0,
+                source_timestamp_max=HEARTBEAT_AT,
+            ),
+            AdapterBatchRunSummary(
+                adapter_key="official.wra.water_level",
+                status="failed",
+                started_at=HEARTBEAT_AT,
+                finished_at=HEARTBEAT_AT,
+                items_fetched=0,
+                items_promoted=0,
+                items_rejected=0,
+                error_message="upstream failed",
+            ),
+        ),
+        freshness_checks=(
+            FreshnessCheck(
+                adapter_key="official.cwa.rainfall",
+                status="fresh",
+                checked_at=HEARTBEAT_AT,
+                max_age_seconds=3600,
+                source_timestamp_max=HEARTBEAT_AT,
+                age_seconds=0,
+            ),
+            FreshnessCheck(
+                adapter_key="official.wra.water_level",
+                status="failed",
+                checked_at=HEARTBEAT_AT,
+                max_age_seconds=3600,
+                reason="upstream failed",
+            ),
+        ),
+    )
+
+    assert "flood_risk_source_freshness_stale_count" in text
+    assert 'surface="source_freshness"} 0' in text
+    assert "flood_risk_source_freshness_failed_count" in text
+    assert (
+        'flood_risk_source_freshness_status{adapter_key="official.wra.water_level",'
+        'source_id="official.wra.water_level",source_type="official",status="failed"} 1'
+    ) in text
+    assert (
+        'flood_risk_adapter_last_success_timestamp_seconds'
+        '{adapter_key="official.cwa.rainfall",service="worker"} 1777521605'
+    ) in text
+    assert "flood_risk_adapter_last_success_timestamp_seconds" in text
+    assert "official.wra.water_level" in text
+    assert (
+        'flood_risk_adapter_last_success_timestamp_seconds'
+        '{adapter_key="official.wra.water_level",service="worker"}'
+    ) not in text
 
 
 def test_alert_rules_yaml_parse_and_reference_heartbeat_metrics() -> None:
@@ -139,4 +209,12 @@ def test_alert_rules_yaml_parse_and_reference_heartbeat_metrics() -> None:
     assert (
         "flood_risk_runtime_queue_expired_leases"
         in expressions["FloodRiskRuntimeQueueExpiredLeases"]
+    )
+    assert (
+        'flood_risk_source_freshness_stale{source_type="official"}'
+        in expressions["FloodRiskOfficialSourceFreshnessStale"]
+    )
+    assert (
+        "flood_risk_runtime_queue_lag_seconds"
+        in expressions["FloodRiskRuntimeQueueLagHigh"]
     )

@@ -1,13 +1,14 @@
 import json
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
+from hashlib import sha256
 from typing import Any, Literal, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request as FastAPIRequest
 
 from app.api.errors import error_payload
 from app.api.schemas import (
@@ -30,8 +31,8 @@ from app.api.schemas import (
     RiskAssessmentResponse,
     RiskLevelBlock,
     TileJson,
-    TileJsonVectorLayer,
 )
+from app.api.services import public_evidence, public_layers, public_risk
 from app.core.config import get_settings
 from app.domain.evidence import (
     EvidenceRecord,
@@ -69,7 +70,6 @@ from app.domain.history.news_enrichment import (
 )
 from app.domain.layers import (
     LayerRecord,
-    LayerRepositoryUnavailable,
     fetch_map_layer,
     fetch_map_layers,
 )
@@ -78,6 +78,12 @@ from app.domain.realtime import (
     OfficialRealtimeObservation,
     OfficialRealtimeSourceStatus,
     fetch_official_realtime_bundle,
+)
+from app.domain.reports.abuse import (
+    RateLimitBackend,
+    RateLimitExceeded,
+    RateLimitUnavailable,
+    check_rate_limit,
 )
 from app.domain.profiles import (
     RiskProfileRecord,
@@ -97,13 +103,9 @@ TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
 OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
 OFFICIAL_FLOOD_DISASTER_SOURCE_PREFIX = "data-gov-130016:"
-OFFICIAL_DATA_GOV_URLS = {
-    "rainfall": "https://data.gov.tw/dataset/9177",
-    "water_level": "https://data.gov.tw/dataset/25768",
-    "flood_potential": "https://data.gov.tw/dataset/25766",
-    "flood_report": "https://data.gov.tw/dataset/130016",
-}
-_ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
+HOSTED_RUNTIME_ENVS = {"staging", "production", "production-beta"}
+OFFICIAL_DATA_GOV_URLS = public_evidence.OFFICIAL_DATA_GOV_URLS
+_ASSESSMENT_EVIDENCE_CACHE = public_evidence._ASSESSMENT_EVIDENCE_CACHE
 _RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
 _PROFILE_SOURCE_TYPE_FALLBACKS = {
     "official": "official",
@@ -121,6 +123,7 @@ _PROFILE_EVENT_TYPE_FALLBACKS = {
     "road_closure",
     "discussion",
 }
+_PUBLIC_RATE_LIMIT_MEMORY_ENVS = {"local", "development", "test"}
 
 
 def _now() -> datetime:
@@ -434,54 +437,11 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
 
 
 def _evidence_from_record(record: EvidenceRecord) -> Evidence:
-    point = (
-        LatLng(lat=record.lat, lng=record.lng)
-        if record.lat is not None and record.lng is not None
-        else None
-    )
-    geometry = (
-        GeoJsonGeometry(
-            type=record.geometry["type"],
-            coordinates=record.geometry["coordinates"],
-        )
-        if record.geometry is not None
-        else None
-    )
-    title, summary = _localized_evidence_text(record)
-    return Evidence(
-        id=record.id,
-        source_id=record.source_id,
-        source_type=cast(Any, record.source_type),
-        event_type=cast(Any, record.event_type),
-        title=title,
-        summary=summary,
-        url=_public_evidence_url(
-            source_type=record.source_type,
-            event_type=record.event_type,
-            fallback_url=record.url,
-        ),
-        occurred_at=record.occurred_at,
-        observed_at=record.observed_at,
-        ingested_at=record.ingested_at,
-        point=point,
-        geometry=geometry,
-        distance_to_query_m=record.distance_to_query_m,
-        confidence=record.confidence,
-        freshness_score=record.freshness_score,
-        source_weight=record.source_weight,
-        privacy_level=cast(Any, record.privacy_level),
-        raw_ref=record.raw_ref,
-    )
+    return public_evidence.evidence_from_record(record)
 
 
 def _localized_evidence_text(record: EvidenceRecord) -> tuple[str, str]:
-    if record.event_type == "flood_potential":
-        return (
-            "官方淹水潛勢規劃圖資",
-            "此筆資料表示查詢範圍與官方淹水潛勢規劃圖資相交，屬於歷史與情境參考；"
-            "不代表目前正在淹水，也不是即時災害警報。",
-        )
-    return (record.title, record.summary)
+    return public_evidence.localized_evidence_text(record)
 
 
 def _public_evidence_url(
@@ -490,9 +450,11 @@ def _public_evidence_url(
     event_type: str,
     fallback_url: str | None,
 ) -> str | None:
-    if source_type == "official":
-        return OFFICIAL_DATA_GOV_URLS.get(event_type, fallback_url)
-    return fallback_url
+    return public_evidence.public_evidence_url(
+        source_type=source_type,
+        event_type=event_type,
+        fallback_url=fallback_url,
+    )
 
 
 def _evidence_preview(evidence: Evidence) -> EvidencePreview:
@@ -555,395 +517,217 @@ def _signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
 
 
 def _legacy_static_layers(now: datetime) -> list[MapLayer]:
-    return [
-        MapLayer(
-            id="flood-potential",
-            name="淹水潛勢",
-            description="官方公開資料中的淹水潛勢範圍。",
-            category="flood_potential",
-            status="available",
-            minzoom=8,
-            maxzoom=18,
-            attribution="政府開放資料",
-            tilejson_url="/v1/layers/flood-potential/tilejson",
-            updated_at=now,
-        ),
-        MapLayer(
-            id="query-heat",
-            name="查詢關注度",
-            description="去識別化後的區域查詢關注度。",
-            category="query_heat",
-            status="available",
-            minzoom=8,
-            maxzoom=14,
-            attribution="Flood Risk 去識別化統計",
-            tilejson_url="/v1/layers/query-heat/tilejson",
-            updated_at=now,
-        ),
-    ]
+    return public_layers.legacy_static_layers(now)
 
 
 def _static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
-    return (
-        LayerRecord(
-            id="flood-potential",
-            name="淹水潛勢規劃圖資",
-            description="官方淹水潛勢規劃圖資的靜態備援圖層。",
-            category="flood_potential",
-            status="disabled",
-            minzoom=8,
-            maxzoom=18,
-            attribution="政府開放資料",
-            tilejson_url="/v1/layers/flood-potential/tilejson",
-            updated_at=now,
-            metadata={
-                "version": "static-fallback",
-                "tiles": [
-                    "https://tiles.placeholder.flood-risk.local/flood-potential/{z}/{x}/{y}.pbf"
-                ],
-                "bounds": [119.3, 21.8, 122.1, 25.4],
-                "vector_layers": [
-                    {
-                        "id": "flood_potential",
-                        "fields": {"source_id": "String", "category": "String"},
-                    }
-                ],
-            },
-        ),
-        LayerRecord(
-            id="query-heat",
-            name="查詢關注度",
-            description="去識別化區域查詢密度的靜態備援圖層。",
-            category="query_heat",
-            status="disabled",
-            minzoom=8,
-            maxzoom=14,
-            attribution="本服務去識別化統計",
-            tilejson_url="/v1/layers/query-heat/tilejson",
-            updated_at=now,
-            metadata={
-                "version": "static-fallback",
-                "tiles": [
-                    "https://tiles.placeholder.flood-risk.local/query-heat/{z}/{x}/{y}.pbf"
-                ],
-                "bounds": [119.3, 21.8, 122.1, 25.4],
-                "vector_layers": [
-                    {
-                        "id": "query_heat",
-                        "fields": {"query_count_bucket": "String", "period": "String"},
-                    }
-                ],
-            },
-        ),
-    )
+    return public_layers.static_layer_records(now)
 
 
 def _map_layer_from_record(record: LayerRecord) -> MapLayer:
-    return MapLayer(
-        id=record.id,
-        name=_localized_layer_name(record),
-        description=_localized_layer_description(record),
-        category=cast(Any, record.category),
-        status=cast(Any, record.status),
-        minzoom=record.minzoom,
-        maxzoom=record.maxzoom,
-        attribution=_localized_layer_attribution(record),
-        tilejson_url=record.tilejson_url,
-        updated_at=record.updated_at,
-    )
+    return public_layers.map_layer_from_record(record)
 
 
 def _localized_layer_name(record: LayerRecord) -> str:
-    if record.id == "flood-potential":
-        return "淹水潛勢規劃圖資"
-    if record.id == "query-heat":
-        return "查詢關注度"
-    return record.name
+    return public_layers.localized_layer_name(record)
 
 
 def _localized_layer_description(record: LayerRecord) -> str | None:
-    if record.id == "flood-potential":
-        return "官方淹水潛勢規劃圖資。"
-    if record.id == "query-heat":
-        return "去識別化後的區域查詢關注度。"
-    return record.description
+    return public_layers.localized_layer_description(record)
 
 
 def _localized_layer_attribution(record: LayerRecord) -> str | None:
-    if record.id in {"flood-potential", "query-heat"}:
-        return "政府開放資料" if record.id == "flood-potential" else "本服務去識別化統計"
-    return record.attribution
+    return public_layers.localized_layer_attribution(record)
 
 
 def _layer_records(now: datetime) -> tuple[LayerRecord, ...]:
-    try:
-        records = fetch_map_layers(database_url=get_settings().database_url)
-    except LayerRepositoryUnavailable:
-        return _static_layer_records(now)
-    return records or _static_layer_records(now)
+    return public_layers.layer_records(
+        now,
+        database_url=get_settings().database_url,
+        fetch_layers=fetch_map_layers,
+    )
 
 
 def _static_layer_by_id(layer_id: str, now: datetime) -> LayerRecord | None:
-    return {layer.id: layer for layer in _static_layer_records(now)}.get(layer_id)
+    return public_layers.static_layer_by_id(layer_id, now)
 
 
 def _layer_record(layer_id: str, now: datetime) -> LayerRecord | None:
-    try:
-        records = fetch_map_layers(database_url=get_settings().database_url)
-    except LayerRepositoryUnavailable:
-        return _static_layer_by_id(layer_id, now)
-    if not records:
-        return _static_layer_by_id(layer_id, now)
-    try:
-        return fetch_map_layer(database_url=get_settings().database_url, layer_id=layer_id)
-    except LayerRepositoryUnavailable:
-        return _static_layer_by_id(layer_id, now)
+    return public_layers.layer_record(
+        layer_id,
+        now,
+        database_url=get_settings().database_url,
+        fetch_layers=fetch_map_layers,
+        fetch_layer=fetch_map_layer,
+    )
 
 
 def _layers(now: datetime) -> list[MapLayer]:
-    return [_map_layer_from_record(record) for record in _layer_records(now)]
+    return public_layers.layers(
+        now,
+        database_url=get_settings().database_url,
+        fetch_layers=fetch_map_layers,
+    )
+
+
+def _enforce_public_rate_limit(
+    request: FastAPIRequest,
+    *,
+    settings: Any,
+    namespace: str,
+    max_requests: int,
+    endpoint_name: str,
+) -> None:
+    if not settings.public_rate_limit_enabled:
+        return
+
+    try:
+        check_rate_limit(
+            client_key=_public_rate_limit_client_key(
+                request,
+                settings=settings,
+                namespace=namespace,
+            ),
+            namespace=namespace,
+            backend=_public_rate_limit_backend(
+                settings.app_env,
+                settings.public_rate_limit_backend,
+            ),
+            redis_url=settings.redis_url,
+            max_requests=max_requests,
+            window_seconds=settings.public_rate_limit_window_seconds,
+        )
+    except RateLimitExceeded as exc:
+        raise HTTPException(
+            status_code=429,
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+            detail=error_payload(
+                "rate_limited",
+                f"{endpoint_name} rate limit exceeded. Try again later.",
+                {
+                    "retry_after_seconds": exc.retry_after_seconds,
+                    "window_seconds": exc.policy.window_seconds,
+                },
+            )["error"],
+        ) from exc
+    except RateLimitUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "abuse_guard_unavailable",
+                f"{endpoint_name} abuse guard is temporarily unavailable.",
+            )["error"],
+        ) from exc
+
+
+def _public_rate_limit_backend(
+    app_env: str,
+    configured_backend: RateLimitBackend,
+) -> RateLimitBackend:
+    if app_env.strip().lower() in _PUBLIC_RATE_LIMIT_MEMORY_ENVS:
+        return configured_backend
+    return "redis"
+
+
+def _public_rate_limit_client_key(
+    request: FastAPIRequest,
+    *,
+    settings: Any,
+    namespace: str,
+) -> str:
+    client_signal = _client_signal(request, settings.public_rate_limit_client_header)
+    salt = settings.abuse_hash_salt or f"{settings.service_id}:{settings.app_env}"
+    return sha256(f"{namespace}:{salt}:{client_signal}".encode("utf-8")).hexdigest()
+
+
+def _client_signal(request: FastAPIRequest, configured_header: str | None) -> str:
+    if configured_header:
+        header_value = request.headers.get(configured_header)
+        if header_value:
+            configured_signal = header_value.split(",", 1)[0].strip()
+            if configured_signal:
+                return configured_signal
+    if request.client is None:
+        return "unknown-client"
+    return request.client.host
 
 
 @router.post("/geocode", response_model=GeocodeResponse)
-async def geocode(request: GeocodeRequest) -> GeocodeResponse:
+async def geocode(
+    request: GeocodeRequest,
+    http_request: FastAPIRequest,
+) -> GeocodeResponse:
+    settings = get_settings()
+    _enforce_public_rate_limit(
+        http_request,
+        settings=settings,
+        namespace="public-geocode-rate",
+        max_requests=settings.geocode_rate_limit_max_requests,
+        endpoint_name="Geocode",
+    )
     return GeocodeResponse(candidates=_build_geocoder().geocode(request))
 
 
 @router.post("/risk/assess", response_model=RiskAssessmentResponse)
-async def assess_risk(request: RiskAssessRequest) -> RiskAssessmentResponse:
+async def assess_risk(
+    request: RiskAssessRequest,
+    http_request: FastAPIRequest,
+) -> RiskAssessmentResponse:
     settings = get_settings()
-    created_at = _now()
-    response_cache_key = _risk_assessment_response_cache_key(request, settings)
-    cached_response = _cached_risk_assessment_response(
-        response_cache_key,
-        now=created_at,
-        ttl_seconds=settings.risk_assessment_response_cache_seconds,
+    _enforce_public_rate_limit(
+        http_request,
+        settings=settings,
+        namespace="public-risk-assess-rate",
+        max_requests=settings.risk_assessment_rate_limit_max_requests,
+        endpoint_name="Risk assessment",
     )
-    if cached_response is not None:
-        return cached_response
-    assessment_id = stable_uuid(
-        "assessment",
-        request.point.lat,
-        request.point.lng,
-        request.radius_m,
-        created_at.isoformat(),
+    return public_risk.assess_risk(
+        request,
+        settings=settings,
+        created_at=_now(),
+        dependencies=_risk_assessment_dependencies(),
     )
-    realtime_bundle = fetch_official_realtime_bundle(
-        lat=request.point.lat,
-        lng=request.point.lng,
-        radius_m=request.radius_m,
-        cwa_authorization=settings.cwa_api_authorization,
-        enabled=settings.realtime_official_enabled,
-        cwa_enabled=settings.source_cwa_api_enabled,
-        wra_enabled=settings.source_wra_api_enabled,
-        now=created_at,
+
+
+def _risk_assessment_dependencies() -> public_risk.RiskAssessmentDependencies:
+    return public_risk.RiskAssessmentDependencies(
+        risk_assessment_response_cache_key=_risk_assessment_response_cache_key,
+        cached_risk_assessment_response=_cached_risk_assessment_response,
+        fetch_official_realtime_bundle=_official_realtime_bundle_for_risk,
+        nearby_db_evidence=_nearby_db_evidence,
+        official_flood_disaster_lookup=_official_flood_disaster_lookup,
+        can_use_profile_fast_path=_can_use_profile_fast_path,
+        precomputed_risk_profile=_precomputed_risk_profile,
+        profile_has_public_news=_profile_has_public_news,
+        enqueue_profile_refresh=_enqueue_profile_refresh,
+        profile_backed_response=_profile_backed_response,
+        cache_risk_assessment_response=_cache_risk_assessment_response,
+        fallback_historical_records=_fallback_historical_records,
+        use_local_historical_fallback=_use_local_historical_fallback,
+        should_attempt_public_news_lookup=_should_attempt_public_news_lookup,
+        on_demand_public_news_result=_on_demand_public_news_result,
+        historical_record_evidence=_historical_record_evidence,
+        evidence_from_upsert=_evidence_from_upsert,
+        signal_from_historical_record=_signal_from_historical_record,
+        historical_scoring_distance=_historical_scoring_distance,
+        signal_from_evidence=_signal_from_evidence,
+        needs_historical_event_lookup=_needs_historical_event_lookup,
+        persist_or_build_on_demand_evidence=_persist_or_build_on_demand_evidence,
+        historical_data_freshness=_historical_data_freshness,
+        official_realtime_evidence=_official_realtime_evidence,
+        display_evidence_items=_display_evidence_items,
+        score_risk=score_risk,
+        signal_from_official_realtime=_signal_from_official_realtime,
+        cache_assessment_evidence=_cache_assessment_evidence,
+        persisted_official_realtime_data_freshness=_persisted_official_realtime_data_freshness,
+        visible_source_limitations=_visible_source_limitations,
+        freshness_from_status=_freshness_from_status,
+        official_flood_disaster_data_freshness=_official_flood_disaster_data_freshness,
+        on_demand_data_freshness=_on_demand_data_freshness,
+        persist_assessment=_persist_assessment,
+        evidence_preview=_evidence_preview,
+        query_heat=_query_heat,
     )
-    db_evidence_items = _nearby_db_evidence(request)
-    official_history_lookup = _official_flood_disaster_lookup(request, now=created_at)
-    official_historical_records = official_history_lookup.records
-    if _can_use_profile_fast_path(db_evidence_items) and not official_historical_records:
-        profile = _precomputed_risk_profile(request, now=created_at)
-        if profile is not None:
-            if _profile_has_public_news(profile):
-                _enqueue_profile_refresh(profile, request=request)
-                response = _profile_backed_response(
-                    request=request,
-                    assessment_id=assessment_id,
-                    profile=profile,
-                    realtime_bundle=realtime_bundle,
-                    created_at=created_at,
-                )
-                _cache_risk_assessment_response(
-                    response_cache_key,
-                    response,
-                    now=created_at,
-                    ttl_seconds=settings.risk_assessment_response_cache_seconds,
-                )
-                return response
-    on_demand_news = OnDemandNewsSearchResult(
-        attempted=False,
-        source_id="on-demand-public-news",
-        message="未啟動公開新聞補查。",
-        records=(),
-    )
-    if db_evidence_items is None:
-        curated_historical_records = (
-            _fallback_historical_records(request)
-            if _use_local_historical_fallback(settings.app_env)
-            else ()
-        )
-        historical_records = (*official_historical_records, *curated_historical_records)
-        if _should_attempt_public_news_lookup(
-            historical_records=historical_records,
-            db_evidence_items=None,
-        ):
-            on_demand_news = _on_demand_public_news_result(request, now=created_at)
-        historical_evidence_items = [
-            _historical_record_evidence(record, distance_to_query_m=distance_m)
-            for record, distance_m in historical_records
-        ]
-        historical_evidence_items.extend(
-            _evidence_from_upsert(record) for record in on_demand_news.records
-        )
-        historical_signals = (
-            *tuple(
-                _signal_from_historical_record(
-                    record,
-                    distance_to_query_m=_historical_scoring_distance(
-                        record=record,
-                        distance_to_query_m=distance_m,
-                        radius_m=request.radius_m,
-                        location_text=request.location_text,
-                    ),
-                )
-                for record, distance_m in historical_records
-            ),
-            *tuple(
-                _signal_from_evidence(item)
-                for item in historical_evidence_items[len(historical_records) :]
-            ),
-        )
-        historical_freshness_db_items = (
-            tuple(historical_evidence_items) if on_demand_news.records else None
-        )
-    else:
-        needs_historical_event_lookup = _needs_historical_event_lookup(
-            historical_records=(),
-            db_evidence_items=db_evidence_items,
-        )
-        historical_records = (
-            (
-                *official_historical_records,
-                *(
-                    _fallback_historical_records(request)
-                    if _use_local_historical_fallback(settings.app_env)
-                    else ()
-                ),
-            )
-            if needs_historical_event_lookup or official_historical_records
-            else ()
-        )
-        if historical_records:
-            if _should_attempt_public_news_lookup(
-                historical_records=historical_records,
-                db_evidence_items=db_evidence_items,
-            ):
-                on_demand_news = _on_demand_public_news_result(request, now=created_at)
-            historical_record_evidence_items = [
-                _historical_record_evidence(record, distance_to_query_m=distance_m)
-                for record, distance_m in historical_records
-            ]
-            on_demand_evidence_items = _persist_or_build_on_demand_evidence(
-                on_demand_news,
-                writeback_enabled=settings.historical_news_on_demand_writeback_enabled,
-            )
-            historical_evidence_items = [
-                *db_evidence_items,
-                *historical_record_evidence_items,
-                *on_demand_evidence_items,
-            ]
-            historical_signals = (
-                *tuple(_signal_from_evidence(item) for item in db_evidence_items),
-                *tuple(
-                    _signal_from_historical_record(
-                        record,
-                        distance_to_query_m=_historical_scoring_distance(
-                            record=record,
-                            distance_to_query_m=distance_m,
-                            radius_m=request.radius_m,
-                            location_text=request.location_text,
-                        ),
-                    )
-                    for record, distance_m in historical_records
-                ),
-                *tuple(_signal_from_evidence(item) for item in on_demand_evidence_items),
-            )
-            historical_freshness_db_items = tuple(historical_evidence_items) if db_evidence_items else None
-        else:
-            if needs_historical_event_lookup:
-                on_demand_news = _on_demand_public_news_result(request, now=created_at)
-            on_demand_evidence_items = _persist_or_build_on_demand_evidence(
-                on_demand_news,
-                writeback_enabled=settings.historical_news_on_demand_writeback_enabled,
-            )
-            historical_evidence_items = [*db_evidence_items, *on_demand_evidence_items]
-            historical_signals = tuple(_signal_from_evidence(item) for item in historical_evidence_items)
-            historical_freshness_db_items = tuple(historical_evidence_items)
-    historical_freshness = _historical_data_freshness(
-        historical_records=historical_records,
-        db_evidence_items=historical_freshness_db_items,
-        now=created_at,
-    )
-    evidence_items = [
-        *(_official_realtime_evidence(observation) for observation in realtime_bundle.observations),
-        *historical_evidence_items,
-    ]
-    display_evidence_items = _display_evidence_items(evidence_items)
-    scoring = score_risk(
-        (
-            *(_signal_from_official_realtime(observation) for observation in realtime_bundle.observations),
-            *historical_signals,
-        ),
-        now=created_at,
-    )
-    _cache_assessment_evidence(assessment_id, display_evidence_items)
-    expires_at = created_at + timedelta(minutes=10)
-    explanation = Explanation(
-        summary=scoring.explanation_summary,
-        main_reasons=list(scoring.main_reasons),
-        missing_sources=_visible_source_limitations(
-            realtime_bundle,
-            historical_records,
-            historical_freshness_db_items,
-            on_demand_news,
-        ),
-    )
-    data_freshness = [
-        *(_freshness_from_status(status) for status in realtime_bundle.source_statuses),
-        *_official_flood_disaster_data_freshness(official_history_lookup),
-        DataFreshness(
-            source_id=historical_freshness.source_id,
-            name="歷史淹水紀錄與公開新聞",
-            health_status=historical_freshness.health_status,
-            observed_at=historical_freshness.observed_at,
-            ingested_at=historical_freshness.ingested_at,
-            feature_count=historical_freshness.feature_count,
-            message=historical_freshness.message,
-        ),
-        *_on_demand_data_freshness(on_demand_news, now=created_at),
-    ]
-    _persist_assessment(
-        assessment_id=assessment_id,
-        request=request,
-        scoring=scoring,
-        explanation=explanation,
-        data_freshness=data_freshness,
-        evidence_items=display_evidence_items,
-        created_at=created_at,
-        expires_at=expires_at,
-    )
-    response = RiskAssessmentResponse(
-        assessment_id=assessment_id,
-        location=request.point,
-        radius_m=request.radius_m,
-        score_version=scoring.score_version,
-        created_at=created_at,
-        expires_at=created_at + timedelta(minutes=10),
-        realtime=RiskLevelBlock(level=scoring.realtime_level),
-        historical=RiskLevelBlock(level=scoring.historical_level),
-        confidence=ConfidenceBlock(level=scoring.confidence_level),
-        explanation=explanation,
-        evidence=[_evidence_preview(item) for item in display_evidence_items],
-        data_freshness=data_freshness,
-        query_heat=_query_heat(request, now=created_at),
-    )
-    _cache_risk_assessment_response(
-        response_cache_key,
-        response,
-        now=created_at,
-        ttl_seconds=settings.risk_assessment_response_cache_seconds,
-    )
-    return response
 
 
 def _display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
@@ -1008,9 +792,14 @@ def _official_flood_disaster_summary_item(items: list[Evidence]) -> Evidence:
         if item.distance_to_query_m is not None
         else float("inf"),
     )
-    latest_observed = max(
-        (item.observed_at or item.occurred_at for item in items if item.observed_at or item.occurred_at),
-        default=closest_item.observed_at or closest_item.occurred_at,
+    candidate_times = [
+        value
+        for item in items
+        for value in (item.observed_at, item.occurred_at)
+        if value is not None
+    ]
+    latest_observed = max(candidate_times) if candidate_times else (
+        closest_item.observed_at or closest_item.occurred_at
     )
     years = sorted(
         {
@@ -1055,6 +844,130 @@ def _year_label(years: list[int]) -> str:
     if len(years) <= 3:
         return "、".join(str(year) for year in years)
     return f"{years[0]}-{years[-1]}"
+
+
+def _official_realtime_bundle_for_risk(
+    *,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    cwa_authorization: str | None,
+    enabled: bool,
+    cwa_enabled: bool,
+    wra_enabled: bool,
+    now: datetime,
+) -> OfficialRealtimeBundle:
+    settings = get_settings()
+    if (
+        settings.app_env.strip().lower() in HOSTED_RUNTIME_ENVS
+        and not settings.realtime_official_diagnostic_fallback_enabled
+    ):
+        return OfficialRealtimeBundle(
+            observations=(),
+            source_statuses=(
+                _diagnostic_realtime_disabled_status(
+                    "cwa-rainfall",
+                    "中央氣象署即時雨量",
+                    now,
+                ),
+                _diagnostic_realtime_disabled_status(
+                    "wra-water-level",
+                    "水利署即時水位",
+                    now,
+                ),
+            ),
+        )
+    return fetch_official_realtime_bundle(
+        lat=lat,
+        lng=lng,
+        radius_m=radius_m,
+        cwa_authorization=cwa_authorization,
+        enabled=enabled,
+        cwa_enabled=cwa_enabled,
+        wra_enabled=wra_enabled,
+        now=now,
+    )
+
+
+def _diagnostic_realtime_disabled_status(
+    source_id: str,
+    name: str,
+    checked_at: datetime,
+) -> OfficialRealtimeSourceStatus:
+    return OfficialRealtimeSourceStatus(
+        source_id=source_id,
+        name=name,
+        health_status="degraded",
+        observed_at=None,
+        ingested_at=checked_at,
+        message=(
+            "Hosted risk assessment uses worker-persisted official evidence as the "
+            "source of truth; unmanaged on-demand realtime API fallback is disabled."
+        ),
+    )
+
+
+def _persisted_official_realtime_data_freshness(
+    evidence_items: tuple[Evidence, ...],
+    *,
+    now: datetime,
+) -> list[DataFreshness]:
+    freshness_items: list[DataFreshness] = []
+    for event_type, source_id, name in (
+        ("rainfall", "cwa-rainfall", "中央氣象署即時雨量"),
+        ("water_level", "wra-water-level", "水利署即時水位"),
+    ):
+        source_items = [
+            item
+            for item in evidence_items
+            if item.source_type == "official" and item.event_type == event_type
+        ]
+        if not source_items:
+            continue
+        observed_values: list[datetime] = []
+        for item in source_items:
+            observed_value = item.observed_at or item.occurred_at
+            if observed_value is not None:
+                observed_values.append(observed_value)
+        latest_observed = max(observed_values) if observed_values else None
+        latest_ingested = max(item.ingested_at for item in source_items)
+        is_fresh = (
+            latest_observed is not None
+            and _is_recent_official_realtime_observation(latest_observed, now)
+        )
+        freshness_items.append(
+            DataFreshness(
+                source_id=source_id,
+                name=name,
+                health_status="healthy" if is_fresh else "degraded",
+                observed_at=latest_observed,
+                ingested_at=latest_ingested,
+                feature_count=len(source_items),
+                message=(
+                    f"Using {len(source_items)} worker-persisted official "
+                    f"{event_type} evidence item(s) as the hosted source of truth."
+                    if is_fresh
+                    else (
+                        f"Worker-persisted official {event_type} evidence is stale or "
+                        "missing source timestamps; unmanaged on-demand realtime API "
+                        "fallback remains disabled."
+                    )
+                ),
+            )
+        )
+    return freshness_items
+
+
+def _is_recent_official_realtime_observation(observed_at: datetime, now: datetime) -> bool:
+    comparable_observed_at = observed_at
+    if comparable_observed_at.tzinfo is None and now.tzinfo is not None:
+        comparable_observed_at = comparable_observed_at.replace(tzinfo=now.tzinfo)
+    comparable_now = now
+    if comparable_now.tzinfo is None and comparable_observed_at.tzinfo is not None:
+        comparable_now = comparable_now.replace(tzinfo=comparable_observed_at.tzinfo)
+    return comparable_now - timedelta(hours=6) <= comparable_observed_at <= (
+        comparable_now + timedelta(minutes=5)
+    )
 
 
 def _can_use_profile_fast_path(db_evidence_items: tuple[Evidence, ...] | None) -> bool:
@@ -1620,10 +1533,7 @@ def _official_flood_disaster_data_freshness(
 
 
 def _cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence]) -> None:
-    _ASSESSMENT_EVIDENCE_CACHE[assessment_id] = evidence_items
-    while len(_ASSESSMENT_EVIDENCE_CACHE) > 256:
-        oldest_key = next(iter(_ASSESSMENT_EVIDENCE_CACHE))
-        del _ASSESSMENT_EVIDENCE_CACHE[oldest_key]
+    public_evidence.cache_assessment_evidence(assessment_id, evidence_items)
 
 
 def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: Any) -> str:
@@ -1636,6 +1546,9 @@ def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: An
             "location_text": (request.location_text or "").strip(),
             "app_env": settings.app_env,
             "realtime_official_enabled": settings.realtime_official_enabled,
+            "realtime_official_diagnostic_fallback_enabled": (
+                settings.realtime_official_diagnostic_fallback_enabled
+            ),
             "source_cwa_api_enabled": settings.source_cwa_api_enabled,
             "source_wra_api_enabled": settings.source_wra_api_enabled,
             "source_news_enabled": settings.source_news_enabled,
@@ -1954,111 +1867,27 @@ async def list_evidence(
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> EvidenceListResponse:
     del cursor
-    cached_items = _ASSESSMENT_EVIDENCE_CACHE.get(str(assessment_id))
-    if cached_items is None:
-        items = list(_assessment_db_evidence(str(assessment_id), page_size=page_size))
-    else:
-        items = cached_items[:page_size]
-    return EvidenceListResponse(
-        assessment_id=str(assessment_id),
-        items=items,
-        next_cursor=None,
+    return public_evidence.list_assessment_evidence(
+        str(assessment_id),
+        page_size=page_size,
+        fetch_db_evidence=_assessment_db_evidence,
     )
 
 
 def _assessment_db_evidence(assessment_id: str, *, page_size: int) -> tuple[Evidence, ...]:
-    try:
-        records = fetch_assessment_evidence(
-            database_url=get_settings().database_url,
-            assessment_id=assessment_id,
-            page_size=page_size,
-        )
-    except EvidenceRepositoryUnavailable:
-        return ()
-    return tuple(_evidence_from_record(record) for record in records)
-
-
-def _tilejson_from_layer_record(record: LayerRecord) -> TileJson:
-    metadata = record.metadata
-    return TileJson(
-        tilejson=str(metadata.get("tilejson", "3.0.0")),
-        name=_localized_layer_name(record),
-        version=_optional_str(metadata.get("version")),
-        attribution=_localized_layer_attribution(record),
-        scheme=cast(Any, metadata.get("scheme", "xyz")),
-        tiles=_string_list(
-            metadata.get("tiles"),
-            fallback=[
-                "https://tiles.placeholder.flood-risk.local/"
-                f"{record.id}/{{z}}/{{x}}/{{y}}.pbf"
-            ],
-        ),
-        minzoom=_optional_int(metadata.get("minzoom")) if "minzoom" in metadata else record.minzoom,
-        maxzoom=_optional_int(metadata.get("maxzoom")) if "maxzoom" in metadata else record.maxzoom,
-        bounds=_number_list(metadata.get("bounds"), expected_length=4),
-        center=_number_list(metadata.get("center"), expected_length=3),
-        vector_layers=_tilejson_vector_layers(record),
+    return public_evidence.assessment_db_evidence(
+        assessment_id,
+        page_size=page_size,
+        database_url=get_settings().database_url,
+        fetch_assessment_evidence=fetch_assessment_evidence,
     )
 
 
-def _tilejson_vector_layers(record: LayerRecord) -> list[TileJsonVectorLayer]:
-    vector_layers = record.metadata.get("vector_layers")
-    if isinstance(vector_layers, list) and vector_layers:
-        return [
-            TileJsonVectorLayer(
-                id=str(item.get("id", record.id.replace("-", "_"))),
-                description=_optional_str(item.get("description")),
-                minzoom=_optional_int(item.get("minzoom")),
-                maxzoom=_optional_int(item.get("maxzoom")),
-                fields=_string_dict(item.get("fields")),
-            )
-            for item in vector_layers
-            if isinstance(item, dict)
-        ]
-    return [
-        TileJsonVectorLayer(
-            id=record.id.replace("-", "_"),
-            fields={"source_id": "String", "category": "String"},
-        )
-    ]
-
-
-def _optional_str(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _optional_int(value: object) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(cast(Any, value))
-    except (TypeError, ValueError):
-        return None
-
-
-def _string_list(value: object, *, fallback: list[str]) -> list[str]:
-    if isinstance(value, list):
-        items = [str(item) for item in value if item]
-        if items:
-            return items
-    return fallback
-
-
-def _number_list(value: object, *, expected_length: int) -> list[float] | None:
-    if not isinstance(value, list) or len(value) != expected_length:
-        return None
-    try:
-        return [float(cast(Any, item)) for item in value]
-    except (TypeError, ValueError):
-        return None
-
-
-def _string_dict(value: object) -> dict[str, str] | None:
-    if not isinstance(value, dict):
-        return None
-    return {str(key): str(item) for key, item in value.items()}
+def _tilejson_from_layer_record(record: LayerRecord) -> TileJson:
+    return public_layers.tilejson_from_layer_record(
+        record,
+        allow_local_tile_fallback=get_settings().tile_dynamic_fallback_enabled,
+    )
 
 
 @router.get("/layers", response_model=LayersResponse)
@@ -2074,4 +1903,20 @@ async def get_layer_tilejson(layer_id: str) -> TileJson:
             status_code=404,
             detail=error_payload("not_found", f"Layer '{layer_id}' was not found.")["error"],
         )
-    return _tilejson_from_layer_record(layer)
+    try:
+        return _tilejson_from_layer_record(layer)
+    except public_layers.LayerTileJsonDisabled:
+        raise HTTPException(
+            status_code=404,
+            detail=error_payload("layer_disabled", f"Layer '{layer_id}' is disabled.")[
+                "error"
+            ],
+        ) from None
+    except public_layers.LayerTileJsonUnavailable:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "tiles_unavailable",
+                f"Layer '{layer_id}' has no usable tile template.",
+            )["error"],
+        ) from None

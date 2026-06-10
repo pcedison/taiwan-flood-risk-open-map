@@ -30,10 +30,7 @@ def test_fetch_map_layers_reads_layer_metadata() -> None:
                 "tilejson_url": "/v1/layers/flood-potential/tilejson",
                 "updated_at": updated_at,
                 "metadata": {
-                    "tiles": [
-                        "https://tiles.placeholder.flood-risk.local/"
-                        "flood-potential/{z}/{x}/{y}.pbf"
-                    ],
+                    "tiles": ["/v1/tiles/flood-potential/{z}/{x}/{y}.mvt"],
                     "bounds": [119.3, 21.8, 122.1, 25.4],
                 },
             }

@@ -48,10 +48,16 @@ async def list_admin_jobs(
     status: JobStatus | None = None,
     job_key: str | None = Query(default=None, min_length=1, max_length=120),
 ) -> AdminJobsResponse:
+    settings = get_settings()
     try:
         jobs = _db_jobs(status=status, job_key=job_key)
-    except (OSError, psycopg.Error):
-        jobs = _filter_jobs(_sample_jobs(), status=status, job_key=job_key)
+    except (OSError, psycopg.Error) as exc:
+        if settings.admin_sample_data_enabled:
+            jobs = _filter_jobs(_sample_jobs(), status=status, job_key=job_key)
+        else:
+            raise _admin_repository_unavailable(
+                "Admin jobs repository is temporarily unavailable."
+            ) from exc
     return AdminJobsResponse(jobs=jobs)
 
 
@@ -60,10 +66,16 @@ async def list_admin_sources(
     _admin: Annotated[str, Depends(_require_admin)],
     health_status: HealthStatus | None = None,
 ) -> AdminSourcesResponse:
+    settings = get_settings()
     try:
         sources = _db_sources(health_status=health_status)
-    except (OSError, psycopg.Error):
-        sources = _filter_sources(_sample_sources(), health_status=health_status)
+    except (OSError, psycopg.Error) as exc:
+        if settings.admin_sample_data_enabled:
+            sources = _filter_sources(_sample_sources(), health_status=health_status)
+        else:
+            raise _admin_repository_unavailable(
+                "Admin sources repository is temporarily unavailable."
+            ) from exc
     return AdminSourcesResponse(sources=sources)
 
 
@@ -176,6 +188,13 @@ async def _require_admin(
             detail=error_payload("unauthorized", "Invalid admin bearer token.")["error"],
         )
     return "admin_api"
+
+
+def _admin_repository_unavailable(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=error_payload("repository_unavailable", message)["error"],
+    )
 
 
 def _now() -> datetime:

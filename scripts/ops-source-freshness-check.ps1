@@ -39,6 +39,54 @@ function Get-SourceTimestamp {
     return $null
 }
 
+function Get-SourceLastSuccessTimestamp {
+    param([object]$Source)
+
+    if ($Source.PSObject.Properties.Name -contains "last_success_at") {
+        $value = $Source.last_success_at
+        if ($value) {
+            return [DateTimeOffset]::Parse($value).ToUniversalTime()
+        }
+    }
+
+    return $null
+}
+
+function Get-SourceType {
+    param([object]$Source)
+
+    if ($Source.PSObject.Properties.Name -contains "source_type") {
+        $value = [string]$Source.source_type
+        if ($value) {
+            return $value
+        }
+    }
+
+    return "unknown"
+}
+
+function Get-AdapterKey {
+    param(
+        [object]$Source,
+        [string]$Fallback
+    )
+
+    if ($Source.PSObject.Properties.Name -contains "adapter_key") {
+        $value = [string]$Source.adapter_key
+        if ($value) {
+            return $value
+        }
+    }
+
+    return $Fallback
+}
+
+function ConvertTo-UnixTimestampSeconds {
+    param([DateTimeOffset]$Timestamp)
+
+    return [Math]::Floor($Timestamp.ToUnixTimeSeconds())
+}
+
 function ConvertTo-PrometheusLabelValue {
     param([string]$Value)
 
@@ -84,18 +132,28 @@ function Write-FreshnessMetrics {
     $lines.Add("# TYPE flood_risk_source_freshness_stale gauge")
     $lines.Add("# HELP flood_risk_source_freshness_status Source health status as a labeled gauge where the active status is 1.")
     $lines.Add("# TYPE flood_risk_source_freshness_status gauge")
+    $lines.Add("# HELP flood_risk_source_last_success_timestamp_seconds Unix timestamp of the latest successful source ingestion recorded by the admin source endpoint.")
+    $lines.Add("# TYPE flood_risk_source_last_success_timestamp_seconds gauge")
+    $lines.Add("# HELP flood_risk_source_last_success_age_seconds Age of the latest successful source ingestion recorded by the admin source endpoint.")
+    $lines.Add("# TYPE flood_risk_source_last_success_age_seconds gauge")
 
     foreach ($source in $Result.Sources) {
         $labels = @{
             source_id = $source.SourceId
+            adapter_key = $source.AdapterKey
+            source_type = $source.SourceType
             health_status = $source.HealthStatus
         }
         $lines.Add((New-SourceMetricLine -MetricName "flood_risk_source_freshness_age_seconds" -Labels $labels -Value $source.AgeSeconds))
         $lines.Add((New-SourceMetricLine -MetricName "flood_risk_source_freshness_stale" -Labels $labels -Value ([int]$source.IsStale)))
+        $lines.Add((New-SourceMetricLine -MetricName "flood_risk_source_last_success_timestamp_seconds" -Labels $labels -Value $source.LastSuccessTimestampSeconds))
+        $lines.Add((New-SourceMetricLine -MetricName "flood_risk_source_last_success_age_seconds" -Labels $labels -Value $source.LastSuccessAgeSeconds))
 
         foreach ($status in @("healthy", "degraded", "failed", "unknown", "disabled")) {
             $statusLabels = @{
                 source_id = $source.SourceId
+                adapter_key = $source.AdapterKey
+                source_type = $source.SourceType
                 status = $status
             }
             $lines.Add((New-SourceMetricLine -MetricName "flood_risk_source_freshness_status" -Labels $statusLabels -Value ([int]($source.HealthStatus -eq $status))))
@@ -133,17 +191,31 @@ function Test-SourceFreshness {
 
     foreach ($source in $Payload.sources) {
         $sourceId = if ($source.id) { $source.id } else { "<unknown>" }
+        $adapterKey = Get-AdapterKey -Source $source -Fallback $sourceId
+        $sourceType = Get-SourceType -Source $source
         $status = if ($source.health_status) { $source.health_status } else { "unknown" }
         $ageSeconds = -1
         $isStale = $false
+        $lastSuccessTimestampSeconds = 0
+        $lastSuccessAgeSeconds = -1
+
+        $lastSuccessTimestamp = Get-SourceLastSuccessTimestamp -Source $source
+        if ($lastSuccessTimestamp) {
+            $lastSuccessTimestampSeconds = ConvertTo-UnixTimestampSeconds -Timestamp $lastSuccessTimestamp
+            $lastSuccessAgeSeconds = [Math]::Max([double]0, [Math]::Round(($now - $lastSuccessTimestamp).TotalSeconds, 1))
+        }
 
         if ($status -eq "disabled") {
             Write-Info "SKIP $sourceId status=disabled"
             $sourceResults.Add([pscustomobject]@{
                 SourceId = $sourceId
+                AdapterKey = $adapterKey
+                SourceType = $sourceType
                 HealthStatus = $status
                 AgeSeconds = $ageSeconds
                 IsStale = $false
+                LastSuccessTimestampSeconds = $lastSuccessTimestampSeconds
+                LastSuccessAgeSeconds = $lastSuccessAgeSeconds
             })
             continue
         }
@@ -157,9 +229,13 @@ function Test-SourceFreshness {
             $problems.Add("$sourceId has no source_timestamp_max or last_success_at")
             $sourceResults.Add([pscustomobject]@{
                 SourceId = $sourceId
+                AdapterKey = $adapterKey
+                SourceType = $sourceType
                 HealthStatus = $status
                 AgeSeconds = $ageSeconds
                 IsStale = $true
+                LastSuccessTimestampSeconds = $lastSuccessTimestampSeconds
+                LastSuccessAgeSeconds = $lastSuccessAgeSeconds
             })
             continue
         }
@@ -176,9 +252,13 @@ function Test-SourceFreshness {
 
         $sourceResults.Add([pscustomobject]@{
             SourceId = $sourceId
+            AdapterKey = $adapterKey
+            SourceType = $sourceType
             HealthStatus = $status
             AgeSeconds = $ageSeconds
             IsStale = $isStale
+            LastSuccessTimestampSeconds = $lastSuccessTimestampSeconds
+            LastSuccessAgeSeconds = $lastSuccessAgeSeconds
         })
     }
 

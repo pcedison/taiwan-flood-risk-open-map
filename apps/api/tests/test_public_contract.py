@@ -1,4 +1,5 @@
-from datetime import datetime
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 import warnings
 from uuid import UUID
@@ -649,6 +650,69 @@ def test_display_evidence_items_collapses_repeated_official_disaster_points() ->
     assert "風險計分仍使用原始命中點位" in displayed[0].summary
 
 
+def test_official_disaster_summary_uses_latest_available_timestamp() -> None:
+    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
+
+    def evidence(
+        *,
+        item_id: str,
+        source_id: str,
+        distance_to_query_m: float,
+        observed_at: datetime | None,
+        occurred_at: datetime | None,
+    ) -> public_routes.Evidence:
+        return public_routes.Evidence(
+            id=item_id,
+            source_id=source_id,
+            source_type="official",
+            event_type="flood_report",
+            title="Official flood disaster point",
+            summary="Official flood disaster point summary.",
+            url="https://data.gov.tw/dataset/130016",
+            occurred_at=occurred_at,
+            observed_at=observed_at,
+            ingested_at=now,
+            point=public_routes.LatLng(lat=23.0, lng=120.2),
+            geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[120.2, 23.0]),
+            distance_to_query_m=distance_to_query_m,
+            confidence=0.82,
+            freshness_score=0.74,
+            source_weight=1.0,
+            privacy_level="public",
+            raw_ref=f"historical-record:{source_id}",
+        )
+
+    nearest_without_time = evidence(
+        item_id="official-nearest",
+        source_id="data-gov-130016:nearest",
+        distance_to_query_m=10.0,
+        observed_at=None,
+        occurred_at=None,
+    )
+    older_observed = evidence(
+        item_id="official-observed",
+        source_id="data-gov-130016:observed",
+        distance_to_query_m=50.0,
+        observed_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
+        occurred_at=None,
+    )
+    latest_occurred = evidence(
+        item_id="official-occurred",
+        source_id="data-gov-130016:occurred",
+        distance_to_query_m=90.0,
+        observed_at=None,
+        occurred_at=datetime.fromisoformat("2022-12-31T12:00:00+08:00"),
+    )
+
+    summary = public_routes._official_flood_disaster_summary_item(
+        [nearest_without_time, older_observed, latest_occurred]
+    )
+
+    assert summary.distance_to_query_m == 10.0
+    assert summary.observed_at == datetime.fromisoformat("2022-12-31T12:00:00+08:00")
+    assert summary.occurred_at == datetime.fromisoformat("2022-12-31T12:00:00+08:00")
+
+
 def test_public_news_failure_is_not_promoted_when_history_exists() -> None:
     now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
     official_record = HistoricalFloodRecord(
@@ -1277,6 +1341,7 @@ def test_risk_assess_skips_db_when_evidence_repository_is_disabled(monkeypatch) 
 def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production-beta")
     monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "120")
     get_settings.cache_clear()
     public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
@@ -1304,8 +1369,108 @@ def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
+    assert calls["realtime"] == 0
+    first_payload = first_response.json()
+    assert second_response.json()["assessment_id"] == first_payload["assessment_id"]
+    realtime_statuses = [
+        item for item in first_payload["data_freshness"]
+        if item["source_id"] in {"cwa-rainfall", "wra-water-level"}
+    ]
+    assert {item["health_status"] for item in realtime_statuses} == {"degraded"}
+    assert all("worker-persisted official evidence" in item["message"] for item in realtime_statuses)
+
+
+def test_risk_assess_allows_hosted_realtime_diagnostic_fallback_when_explicit(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", "true")
+    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "0")
+    get_settings.cache_clear()
+
+    calls = {"realtime": 0}
+
+    def realtime_bundle(**_kwargs):
+        calls["realtime"] += 1
+        return _empty_realtime_bundle()
+
+    monkeypatch.setattr(public_routes, "fetch_official_realtime_bundle", realtime_bundle)
+
+    try:
+        response = client.post(
+            "/v1/risk/assess",
+            json={
+                "point": {"lat": 23.05753, "lng": 120.20144},
+                "radius_m": 500,
+                "time_context": "now",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
     assert calls["realtime"] == 1
-    assert second_response.json()["assessment_id"] == first_response.json()["assessment_id"]
+
+
+def test_risk_assess_uses_persisted_official_realtime_freshness_in_hosted(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "0")
+    get_settings.cache_clear()
+
+    calls = {"realtime": 0}
+    observed_at = datetime.now(UTC).replace(microsecond=0)
+    rainfall_record = replace(
+        _db_evidence_record(),
+        id="870ae36d-28c9-4a08-8aa6-4b0cb4fa9bb4",
+        source_id="cwa-rainfall:test-station",
+        source_type="official",
+        event_type="rainfall",
+        title="CWA persisted rainfall near query point",
+        summary="Worker-promoted official rainfall evidence.",
+        url="https://data.gov.tw/dataset/9177",
+        occurred_at=None,
+        observed_at=observed_at,
+        ingested_at=observed_at,
+        freshness_score=0.95,
+        source_weight=1.0,
+        raw_ref="raw/cwa/rainfall/test-station.json",
+    )
+
+    def realtime_bundle(**_kwargs):
+        calls["realtime"] += 1
+        return _empty_realtime_bundle()
+
+    monkeypatch.setattr(public_routes, "fetch_official_realtime_bundle", realtime_bundle)
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: (rainfall_record,))
+
+    try:
+        response = client.post(
+            "/v1/risk/assess",
+            json={
+                "point": {"lat": 23.038818, "lng": 120.213493},
+                "radius_m": 300,
+                "time_context": "now",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert calls["realtime"] == 0
+    assert payload["realtime"]["level"] != "未知"
+    cwa_status = next(item for item in payload["data_freshness"] if item["source_id"] == "cwa-rainfall")
+    wra_status = next(item for item in payload["data_freshness"] if item["source_id"] == "wra-water-level")
+    assert cwa_status["health_status"] == "healthy"
+    assert cwa_status["feature_count"] == 1
+    assert "worker-persisted official rainfall" in cwa_status["message"]
+    assert wra_status["health_status"] == "degraded"
+    assert "on-demand realtime API fallback is disabled" in wra_status["message"]
 
 
 def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypatch) -> None:
@@ -2216,13 +2381,52 @@ def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
     assert payload["name"] == "DB flood layer"
     assert payload["version"] == "db-v1"
     assert payload["attribution"] == "DB attribution"
+    assert payload["status"] == "available"
     assert payload["tiles"] == ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]
+    assert payload["tile_url_source"] == "metadata"
+    assert "cache_control" not in payload
     assert payload["minzoom"] == 5
     assert payload["maxzoom"] == 13
     assert payload["bounds"] == [120.0, 22.0, 121.0, 23.0]
     assert payload["vector_layers"][0]["id"] == "db_flood_vector"
     assert payload["vector_layers"][0]["fields"] == {"risk": "Number", "source_id": "String"}
     assert_openapi_schema(payload, "TileJson")
+
+
+def test_tilejson_sanitizes_placeholder_tile_metadata(monkeypatch) -> None:
+    get_settings.cache_clear()
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("TILE_DYNAMIC_FALLBACK_ENABLED", raising=False)
+    db_layer = LayerRecord(
+        id="db-flood",
+        name="DB flood layer",
+        description=None,
+        category="flood_potential",
+        status="available",
+        minzoom=5,
+        maxzoom=13,
+        attribution="DB attribution",
+        tilejson_url="/v1/layers/db-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [
+                "https://tiles.placeholder.flood-risk.local/db-flood/{z}/{x}/{y}.pbf"
+            ],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: db_layer)
+
+    response = client.get("/v1/layers/db-flood/tilejson")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["tiles"] == ["/v1/tiles/db-flood/{z}/{x}/{y}.mvt"]
+    assert payload["tile_url_source"] == "local_vector_tile_endpoint"
+    assert payload["cache_control"] == "public, max-age=60"
+    assert "tiles.placeholder.flood-risk.local" not in response.text
+    assert_openapi_schema(payload, "TileJson")
+    get_settings.cache_clear()
 
 
 def test_tilejson_returns_404_for_missing_db_layer(monkeypatch) -> None:
@@ -2248,6 +2452,37 @@ def test_tilejson_returns_404_for_missing_db_layer(monkeypatch) -> None:
     assert_error_envelope(response.json())
 
 
+def test_tilejson_returns_503_for_enabled_layer_without_tiles_in_hosted_env(
+    monkeypatch,
+) -> None:
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.delenv("TILE_DYNAMIC_FALLBACK_ENABLED", raising=False)
+    db_layer = LayerRecord(
+        id="db-flood",
+        name="DB flood layer",
+        description=None,
+        category="flood_potential",
+        status="available",
+        minzoom=5,
+        maxzoom=13,
+        attribution=None,
+        tilejson_url="/v1/layers/db-flood/tilejson",
+        updated_at=None,
+        metadata={},
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: db_layer)
+
+    response = client.get("/v1/layers/db-flood/tilejson")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert_error_envelope(payload)
+    assert payload["error"]["code"] == "tiles_unavailable"
+    get_settings.cache_clear()
+
+
 def test_layers_and_tilejson_contracts() -> None:
     layers_response = client.get("/v1/layers")
 
@@ -2270,16 +2505,11 @@ def test_layers_and_tilejson_contracts() -> None:
     }
 
     tilejson_response = client.get(layer["tilejson_url"])
-    assert tilejson_response.status_code == 200
-    tilejson = tilejson_response.json()
-    assert {"tilejson", "name", "tiles"}.issubset(tilejson)
-    assert tilejson["tilejson"] == "3.0.0"
-    assert tilejson["tiles"]
-    assert "tiles.example.test" not in tilejson["tiles"][0]
-    assert len(tilejson["bounds"]) == 4
-    assert tilejson["vector_layers"][0]["id"] == layer["id"].replace("-", "_")
+    assert tilejson_response.status_code == 404
+    payload = tilejson_response.json()
+    assert_error_envelope(payload)
+    assert payload["error"]["code"] == "layer_disabled"
     assert_openapi_schema(layers_payload, "LayersResponse")
-    assert_openapi_schema(tilejson, "TileJson")
 
 
 def test_validation_and_not_found_use_error_envelope() -> None:
@@ -2292,14 +2522,27 @@ def test_validation_and_not_found_use_error_envelope() -> None:
     assert_error_envelope(not_found.json())
 
 
-def test_cors_allows_local_web_origin() -> None:
+def test_cors_allows_local_web_origins() -> None:
+    for origin in ("http://localhost:3000", "http://127.0.0.1:3000"):
+        response = client.options(
+            "/v1/risk/assess",
+            headers={
+                "Access-Control-Request-Method": "POST",
+                "Origin": origin,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+
+
+def test_cors_rejects_unknown_web_origin() -> None:
     response = client.options(
         "/v1/risk/assess",
         headers={
             "Access-Control-Request-Method": "POST",
-            "Origin": "http://localhost:3000",
+            "Origin": "http://example.test:3000",
         },
     )
 
-    assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.status_code == 400

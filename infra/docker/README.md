@@ -62,8 +62,9 @@ Pending before production:
   before classifying official-source workers as production beta ready.
 - A decision on how the API realtime official bridge is replaced or reconciled
   with persisted worker-ingested official evidence.
-- Singleton scheduler deployment and documented hosted ingestion/maintenance
-  cadence.
+- Hosted worker/scheduler topology and cadence are documented in
+  `docs/runbooks/worker-scheduler-deployment.md`; production acceptance still
+  requires target-environment evidence and alert ownership.
 - Alertmanager or equivalent routing, TLS/auth, persistent monitoring storage,
   and backup/retention policy.
 - Production policy for queue idempotency scope, replay audit, retry/backoff,

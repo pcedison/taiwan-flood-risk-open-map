@@ -39,6 +39,10 @@ private drill artifacts to this repository. Production acceptance requires:
 - Secret entries with `value_status: stored-in-secret-manager` and no `value`
   or `value_preview`.
 - Production source/report gates with `status: accepted` or `status: reviewed`.
+- `source_launch_gates` entries for every production source category. Enabled
+  entries must include private license, credential, egress, cadence, alert
+  ownership, rollback, and source-specific evidence refs; disabled or deferred
+  entries must name their kill switches and disabled reason.
 - `drill_preflight` references for runtime smoke, Playwright, alert test,
   rollback target/evidence, backup restore evidence, and secret manager refs.
 - On-call, rollback, and backup restore drills with `result: passed` or
@@ -58,6 +62,11 @@ Run production-complete acceptance with:
 python infra/scripts/validate_production_readiness_evidence.py --production-complete <private-evidence.yaml>
 python infra/scripts/validate_basemap_cdn_evidence.py --production-complete <private-basemap-evidence.yaml>
 ```
+
+For the full P1-04/P2-01 private evidence sequence, including source launch
+gates, event public-value smokes, basemap evidence, public-report evidence, and
+risk calibration acceptance, use
+`docs/runbooks/private-production-evidence-handoff.md`.
 
 Public reports have an additional launch evidence validator because external
 intake needs bot-defense, moderation, privacy, deletion, and abuse-measurement
@@ -185,6 +194,7 @@ Non-secret flags still have owners because they control production behavior.
 | `USER_REPORTS_CHALLENGE_VERIFY_URL` | privacy/governance owner | provider default unless reviewed | Override only for approved provider endpoint changes. |
 | `USER_REPORTS_CHALLENGE_TIMEOUT_SECONDS` | privacy/governance owner | reviewed numeric policy | Keep low enough to fail closed without exhausting API workers. |
 | `USER_REPORTS_CHALLENGE_NON_PRODUCTION_BYPASS` | privacy/governance owner | `false` | Explicit staging/preview-only bypass; production-like public intake otherwise fails closed without a configured challenge provider. |
+| `TILE_DYNAMIC_FALLBACK_ENABLED` | map/platform owner | `false` | Runtime source-table tile fallback is local/test-only unless a temporary non-production exception is recorded. Production overlays should use accepted metadata, feature tables, tile cache, or CDN/object release paths. |
 | `NEXT_PUBLIC_BASEMAP_STYLE_URL` | web owner | reviewed URL or blank | Open basemap style URL; record provider/license/attribution evidence before hosted use. |
 | `NEXT_PUBLIC_BASEMAP_KIND` | web owner | reviewed kind or blank | Must match frontend implementation, for example style, pmtiles, or raster. |
 | `NEXT_PUBLIC_BASEMAP_PMTILES_URL` | web owner | reviewed URL or blank | PMTiles source/package must have license, attribution, and update-cadence evidence. |
@@ -214,10 +224,10 @@ hosted monitoring and alert routing are wired.
 | Surface | SLI | Beta target | Dashboard or alert |
 |---|---|---:|---|
 | API availability | `up{job="flood-risk-api"}` or `flood_risk_api_ready` | 99.5% over 7 days | `API Metrics Scrape`, `API Readiness`, `FloodRiskApiReadyDown` |
-| Source freshness | enabled sources with `flood_risk_source_freshness_stale == 0` | 95% of checks over 7 days | `Stale Sources`, `Source Freshness Age`, `FloodRiskSourceFreshnessStale` |
+| Source freshness | enabled sources with `flood_risk_source_freshness_stale == 0` | 95% of checks over 7 days | `Stale Sources`, `Source Freshness Age`, `Source Last Success Age`, `FloodRiskSourceFreshnessStale`, `FloodRiskOfficialSourceFreshnessStale` |
 | Worker heartbeat | heartbeat age under 300 seconds | 99% of checks over 7 days | `Worker Heartbeat Age`, `FloodRiskWorkerHeartbeatMissing` |
 | Scheduler heartbeat | heartbeat age under 600 seconds and one scheduler replica | 99% of checks over 7 days | `Scheduler Heartbeat Age`, `FloodRiskSchedulerHeartbeatMissing` |
-| Queue visibility | queue exporter available | 99% of checks over 7 days | `Queue Metrics Available`, `FloodRiskRuntimeQueueMetricsUnavailable` |
+| Queue visibility | queue exporter available and ready job lag under threshold | 99% of checks over 7 days | `Queue Metrics Available`, `Queue Lag`, `FloodRiskRuntimeQueueMetricsUnavailable`, `FloodRiskRuntimeQueueLagHigh` |
 | Final-failed jobs | final-failed rows triaged | triage started within 1 business hour | `Queue Final-Failed Rows`, `FloodRiskRuntimeQueueFinalFailedRowsPresent` |
 | Backup restore | latest backup can be inspected and restored to scratch | one successful drill per release candidate | `backup-restore-drill.ps1` and drill notes |
 
@@ -270,7 +280,9 @@ Run this drill for staging first. Repeat for production beta before launch.
     restart worker, restart scheduler last.
 12. Copy the schema shape from
     `docs/runbooks/production-readiness-evidence.example.yaml`, replace the
-    placeholders with private evidence references, and validate the record with
+    placeholders with private evidence references. Fill `source_launch_gates`
+    for every source category before enabling any source; keep deferred sources
+    disabled with explicit kill switches. Validate the record with
     `python infra/scripts/validate_production_readiness_evidence.py --production-complete <path>`.
 13. Copy the schema shape from
     `docs/runbooks/basemap-cdn-evidence.example.yaml`, replace the demo URLs and

@@ -309,8 +309,9 @@ def test_null_runtime_queue_dead_letter_summary_is_empty() -> None:
 
 def test_runtime_queue_collects_queue_metrics_for_operator_visibility() -> None:
     oldest = datetime(2026, 4, 30, 7, 0, tzinfo=UTC)
+    oldest_queued = datetime(2026, 4, 30, 6, 45, tzinfo=UTC)
     connection = _FakeConnection(
-        fetch_rows=[("runtime-adapters", 4, 2, 1, 1, oldest)]
+        fetch_rows=[("runtime-adapters", 4, 2, 1, 1, oldest_queued, oldest)]
     )
     queue = PostgresRuntimeQueue(connection_factory=lambda: connection)
 
@@ -323,6 +324,7 @@ def test_runtime_queue_collects_queue_metrics_for_operator_visibility() -> None:
             running_count=2,
             final_failed_count=1,
             expired_lease_count=1,
+            oldest_queued_at=oldest_queued,
             oldest_final_failed_at=oldest,
         ),
     )
@@ -331,6 +333,7 @@ def test_runtime_queue_collects_queue_metrics_for_operator_visibility() -> None:
     assert "count(*) FILTER (WHERE status = 'running')" in sql
     assert "status = 'failed' AND attempts >= max_attempts" in sql
     assert "lease_expires_at <= now()" in sql
+    assert "status = 'queued' AND run_after <= now()" in sql
     assert "GROUP BY queue_name" in sql
     assert params == ("runtime-adapters", "runtime-adapters")
 
@@ -347,6 +350,7 @@ def test_runtime_queue_collect_metrics_returns_zero_row_for_filtered_empty_queue
             running_count=0,
             final_failed_count=0,
             expired_lease_count=0,
+            oldest_queued_at=None,
             oldest_final_failed_at=None,
         ),
     )
@@ -364,6 +368,7 @@ def test_runtime_queue_collect_metrics_returns_default_zero_row_for_empty_queue(
             running_count=0,
             final_failed_count=0,
             expired_lease_count=0,
+            oldest_queued_at=None,
             oldest_final_failed_at=None,
         ),
     )

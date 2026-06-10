@@ -33,11 +33,15 @@ EXPECTED_PANEL_TITLES = {
     "Queue Oldest Final-Failed Age",
     "Queue Metrics Available",
     "Runtime Queue Counts",
+    "Source Last Success Age",
+    "Queue Lag",
 }
 EXPECTED_DASHBOARD_METRICS = {
     "flood_risk_source_freshness_status",
     "flood_risk_source_freshness_stale",
     "flood_risk_source_freshness_age_seconds",
+    "flood_risk_source_last_success_age_seconds",
+    "flood_risk_adapter_last_success_timestamp_seconds",
     "flood_risk_worker_heartbeat_timestamp_seconds",
     "flood_risk_scheduler_heartbeat_timestamp_seconds",
     "flood_risk_worker_last_run_status",
@@ -46,6 +50,7 @@ EXPECTED_DASHBOARD_METRICS = {
     "flood_risk_runtime_queue_running_jobs",
     "flood_risk_runtime_queue_final_failed_jobs",
     "flood_risk_runtime_queue_expired_leases",
+    "flood_risk_runtime_queue_lag_seconds",
     "flood_risk_runtime_queue_oldest_final_failed_age_seconds",
 }
 EXPECTED_ALERT_METRICS = {
@@ -57,6 +62,7 @@ EXPECTED_ALERT_METRICS = {
     "flood_risk_runtime_queue_metrics_available",
     "flood_risk_runtime_queue_final_failed_jobs",
     "flood_risk_runtime_queue_expired_leases",
+    "flood_risk_runtime_queue_lag_seconds",
 }
 REQUIRED_PRODUCTION_READINESS_SECTIONS = {
     "## Secrets Inventory",

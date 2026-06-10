@@ -2,7 +2,12 @@ from fastapi import APIRouter, HTTPException, Path, Response
 
 from app.api.errors import error_payload
 from app.core.config import get_settings
-from app.domain.tiles import TileLayerNotFound, TileRepositoryUnavailable, fetch_vector_tile
+from app.domain.tiles import (
+    TileLayerNotFound,
+    TileRepositoryUnavailable,
+    VECTOR_TILE_CACHE_CONTROL,
+    fetch_vector_tile,
+)
 
 router = APIRouter(prefix="/v1", tags=["Tiles"])
 
@@ -30,12 +35,14 @@ async def get_vector_tile(
         )
 
     try:
+        settings = get_settings()
         tile = fetch_vector_tile(
-            database_url=get_settings().database_url,
+            database_url=settings.database_url,
             layer_id=layer_id,
             z=z,
             x=x,
             y=y,
+            allow_dynamic_fallback=settings.tile_dynamic_fallback_enabled,
         )
     except TileLayerNotFound:
         raise HTTPException(
@@ -56,7 +63,7 @@ async def get_vector_tile(
         content=tile,
         media_type="application/vnd.mapbox-vector-tile",
         headers={
-            "Cache-Control": "public, max-age=60",
+            "Cache-Control": VECTOR_TILE_CACHE_CONTROL,
             "X-Tile-Layer": layer_id,
         },
     )

@@ -123,7 +123,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   });
 
   await page.route(
-    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11`,
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11**`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -205,9 +205,10 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText("已定位：台北火車站").first()).toBeVisible();
-  await expect(page.getByText("25.04776", { exact: true })).toBeVisible();
-  await expect(page.getByText("121.51706", { exact: true })).toBeVisible();
-  await expect(page.getByText("低 / 中")).toBeVisible();
+  await expect(page.locator(".map-coordinate-card")).toContainText("25.04776, 121.51706");
+  await expect(page.getByText("綜合風險：中")).toBeVisible();
+  await expect(page.getByText("即時：低；歷史參考：中")).toBeVisible();
+  await expect(page.getByText("地圖罩色：中（黃色，透明度 85%）")).toBeVisible();
   await expect(page.getByText("即時風險為低，歷史參考風險為中，資料信心為中。")).toBeVisible();
   await expect(page.getByText("資料限制")).toBeVisible();
   await expect(page.getByText("完整端點淹水潛勢", { exact: true })).toBeVisible();
@@ -218,6 +219,42 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("90%")).toBeVisible();
   await expect(page.getByText("0 公尺", { exact: true })).toBeVisible();
   await expect(page.getByText("3 筆來源")).toBeVisible();
+  await expect(page.getByTestId("risk-summary").locator(".risk-confidence-card")).toBeVisible();
+  await expect(page.getByTestId("risk-summary").locator(".risk-explanation")).toBeVisible();
+  await expect(page.getByTestId("risk-summary").locator(".layer-list")).toHaveCount(0);
+  await expect(page.getByTestId("evidence-panel").locator(".evidence-card")).toHaveCount(3);
+  await expect(page.getByTestId("evidence-panel").locator(".freshness-strip")).toHaveCount(0);
+  await expect(page.getByTestId("user-report-panel")).toBeVisible();
+  await expect(page.getByTestId("diagnostics-panel")).toBeVisible();
+  const primarySectionOrder = await page.evaluate(() => {
+    const riskSummary = document.querySelector('[data-testid="risk-summary"]');
+    const evidencePanel = document.querySelector('[data-testid="evidence-panel"]');
+    const userReportPanel = document.querySelector('[data-testid="user-report-panel"]');
+    const diagnosticsPanel = document.querySelector('[data-testid="diagnostics-panel"]');
+    const evidenceList = document.querySelector('[data-testid="evidence-panel"] .evidence-list');
+    const limitations = document.querySelector('[data-testid="evidence-limitations"]');
+    const comesBefore = (left: Element | null, right: Element | null) =>
+      Boolean(
+        left &&
+          right &&
+          left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    return {
+      evidenceBeforeLimitations: comesBefore(evidenceList, limitations),
+      evidenceBeforeUserReport: comesBefore(evidencePanel, userReportPanel),
+      riskBeforeEvidence: comesBefore(riskSummary, evidencePanel),
+      userReportBeforeDiagnostics: comesBefore(userReportPanel, diagnosticsPanel),
+    };
+  });
+  expect(primarySectionOrder).toEqual({
+    evidenceBeforeLimitations: true,
+    evidenceBeforeUserReport: true,
+    riskBeforeEvidence: true,
+    userReportBeforeDiagnostics: true,
+  });
+  await expect(page.getByText("來源與圖層狀態")).toBeVisible();
+  await expect(page.getByText("淹水潛勢示範圖層")).not.toBeVisible();
+  await page.getByTestId("diagnostics-summary").click();
   await expect(page.getByText("圖層管線")).toBeVisible();
   await expect(page.getByText("部分可用", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("圖層資料合約")).toBeVisible();
@@ -277,6 +314,53 @@ test("map click cancels a slow search and re-enables the query button", async ({
   } finally {
     releaseGeocode?.();
   }
+});
+
+test("structured API failures render localized public-safe messages", async ({ page }) => {
+  await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        candidates: [
+          {
+            admin_code: "63000000",
+            confidence: 0.96,
+            name: "台北火車站",
+            place_id: "place-test",
+            point: { lat: 25.04776, lng: 121.51706 },
+            precision: "poi",
+            requires_confirmation: false,
+            matched_query: "台北火車站",
+            limitations: [],
+            source: "mock-geocoder",
+            type: "landmark",
+          },
+        ],
+      },
+    });
+  });
+
+  await page.route(`${API_BASE_URL}/v1/risk/assess`, async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        error: {
+          code: "repository_unavailable",
+          details: {},
+          message: "database host failed over",
+        },
+      },
+      status: 503,
+    });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("輸入地標、地址或行政區").fill("台北火車站");
+  await page.getByRole("button", { name: "查詢風險" }).click();
+
+  await expect(page.getByText("資料服務暫時無法使用，請稍後再試。")).toBeVisible();
+  await expect(page.getByText("database host failed over")).not.toBeVisible();
+  await expect(page.getByTestId("evidence-panel").locator(".evidence-card")).toHaveCount(0);
 });
 
 test("live local unknown-address flow assesses precise fixtures and coarse admin geocodes", async ({
@@ -372,7 +456,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
   });
 
   await page.route(
-    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11`,
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11**`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",
@@ -389,6 +473,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
   await page.locator("form input").first().fill("valid-address");
   await page.getByRole("button", { name: "查詢風險" }).click();
   await expect(page.getByText("mock-risk-summary")).toBeVisible();
+  await page.getByTestId("diagnostics-summary").click();
   await expect(page.getByText("無圖層資料")).toBeVisible();
   await expect(page.getByText("本次查詢未回傳可展示的圖層或資料來源。")).toBeVisible();
 
@@ -485,7 +570,7 @@ test("an admin-area geocode warns and still assesses with data limits", async ({
   });
 
   await page.route(
-    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11`,
+    `${API_BASE_URL}/v1/evidence/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11**`,
     async (route) => {
       await route.fulfill({
         contentType: "application/json",
