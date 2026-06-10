@@ -7,7 +7,7 @@
     "clean:next": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
     "e2e": "npm run clean:next && playwright test",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/start.mjs",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit --incremental false",
     "test": "node --test --experimental-strip-types \"tests/unit/**/*.test.ts\""
