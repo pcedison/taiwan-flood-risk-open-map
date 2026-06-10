@@ -59,7 +59,7 @@ COPY apps/api/app /app/apps/api/app
 RUN pip install --no-cache-dir -e /app/apps/api
 
 COPY apps/workers /app/apps/workers
-RUN pip install --no-cache-dir -e /app/apps/workers
+RUN pip install --no-cache-dir "PyYAML>=6.0"
 
 COPY --from=web-builder /app/apps/web/package.json /app/apps/web/package-lock.json /app/apps/web/
 COPY --from=web-builder /app/apps/web/node_modules /app/apps/web/node_modules
