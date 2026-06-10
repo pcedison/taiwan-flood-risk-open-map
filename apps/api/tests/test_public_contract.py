@@ -1378,7 +1378,7 @@ def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
     ]
     assert {item["health_status"] for item in realtime_statuses} == {"degraded"}
     messages = [item["message"] for item in realtime_statuses]
-    assert all("正式站採用已由背景工作保存" in message for message in messages)
+    assert all("正式站採用系統定期保存" in message for message in messages)
     assert all("worker-persisted" not in message for message in messages)
     assert len(set(messages)) == 2
 
@@ -1471,9 +1471,9 @@ def test_risk_assess_uses_persisted_official_realtime_freshness_in_hosted(
     wra_status = next(item for item in payload["data_freshness"] if item["source_id"] == "wra-water-level")
     assert cwa_status["health_status"] == "healthy"
     assert cwa_status["feature_count"] == 1
-    assert "背景工作保存的中央氣象署即時雨量" in cwa_status["message"]
+    assert "系統定期保存的中央氣象署即時雨量" in cwa_status["message"]
     assert wra_status["health_status"] == "degraded"
-    assert "背景工作保存的水利署即時水位" in wra_status["message"]
+    assert "系統定期保存的水利署即時水位" in wra_status["message"]
     assert "on-demand realtime API fallback" not in wra_status["message"]
 
 

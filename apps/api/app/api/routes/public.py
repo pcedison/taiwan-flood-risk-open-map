@@ -907,16 +907,16 @@ def _diagnostic_realtime_disabled_status(
 def _hosted_realtime_unavailable_message(*, source_id: str, name: str) -> str:
     if source_id == "cwa-rainfall":
         return (
-            "正式站採用已由背景工作保存的中央氣象署即時雨量作為可信來源；"
+            "正式站採用系統定期保存的中央氣象署即時雨量作為可信來源；"
             "目前查詢半徑內尚未取得可用的雨量快照，因此不判定即時雨量風險。"
         )
     if source_id == "wra-water-level":
         return (
-            "正式站採用已由背景工作保存的水利署即時水位作為可信來源；"
+            "正式站採用系統定期保存的水利署即時水位作為可信來源；"
             "目前查詢半徑內尚未取得可用的水位快照，因此不判定即時水位風險。"
         )
     return (
-        f"正式站採用已由背景工作保存的{name}作為可信來源；"
+        f"正式站採用系統定期保存的{name}作為可信來源；"
         "目前尚未取得可用快照，因此不使用未受監控的即時 API 備援查詢。"
     )
 
@@ -958,11 +958,11 @@ def _persisted_official_realtime_data_freshness(
                 ingested_at=latest_ingested,
                 feature_count=len(source_items),
                 message=(
-                    f"已使用 {len(source_items)} 筆背景工作保存的{name}，"
+                    f"已使用 {len(source_items)} 筆系統定期保存的{name}，"
                     "作為正式站可信來源。"
                     if is_fresh
                     else (
-                        f"背景工作保存的{name}已過期或缺少觀測時間；"
+                        f"系統定期保存的{name}已過期或缺少觀測時間；"
                         "正式站不使用未受監控的即時 API 備援查詢，因此暫不判定此即時來源風險。"
                     )
                 ),
