@@ -80,10 +80,12 @@ RUN printf '%s\n' \
   'api_host="${API_HOST:-127.0.0.1}"' \
   'api_port="${API_PORT:-8000}"' \
   'web_host="${WEB_HOST:-0.0.0.0}"' \
-  'web_port="${PORT:-${WEB_PORT:-3000}}"' \
+  'web_port="${PORT:-${WEB_PORT:-8080}}"' \
   'ingestion_enabled="${HOSTED_INGESTION_SCHEDULER_ENABLED:-${SINGLE_SERVICE_INGESTION_SCHEDULER_ENABLED:-false}}"' \
   'scheduler_pid=""' \
+  'echo "[start] api=${api_host}:${api_port} web=${web_host}:${web_port} ingestion=${ingestion_enabled}"' \
   'cd /app/apps/api' \
+  'echo "[start] launching api"' \
   'python -m uvicorn app.main:app --host "${api_host}" --port "${api_port}" &' \
   'api_pid=$!' \
   'cleanup() {' \
@@ -101,9 +103,11 @@ RUN printf '%s\n' \
   '}' \
   'trap cleanup EXIT INT TERM' \
   'cd /app/apps/web' \
+  'echo "[start] launching web"' \
   'node node_modules/next/dist/bin/next start --hostname "${web_host}" --port "${web_port}" &' \
   'web_pid=$!' \
   'if truthy "${ingestion_enabled}"; then' \
+  '  echo "[start] launching official ingestion scheduler"' \
   '  export WORKER_DATABASE_URL="${WORKER_DATABASE_URL:-${DATABASE_URL:-}}"' \
   '  export WORKER_ENABLED_ADAPTER_KEYS="${WORKER_ENABLED_ADAPTER_KEYS:-official.cwa.rainfall,official.wra.water_level}"' \
   '  export SCHEDULER_INTERVAL_SECONDS="${SCHEDULER_INTERVAL_SECONDS:-300}"' \
@@ -112,6 +116,8 @@ RUN printf '%s\n' \
   '  cd /app/apps/workers' \
   '  python -m app.main --run-enabled-adapters --persist --scheduler &' \
   '  scheduler_pid=$!' \
+  'else' \
+  '  echo "[start] official ingestion scheduler disabled"' \
   'fi' \
   'set +e' \
   'wait -n "${api_pid}" "${web_pid}"' \
@@ -122,6 +128,6 @@ RUN printf '%s\n' \
   > /app/start-zeabur-single.sh \
   && chmod +x /app/start-zeabur-single.sh
 
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["/app/start-zeabur-single.sh"]
