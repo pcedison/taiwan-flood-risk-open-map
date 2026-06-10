@@ -900,10 +900,24 @@ def _diagnostic_realtime_disabled_status(
         health_status="degraded",
         observed_at=None,
         ingested_at=checked_at,
-        message=(
-            "Hosted risk assessment uses worker-persisted official evidence as the "
-            "source of truth; unmanaged on-demand realtime API fallback is disabled."
-        ),
+        message=_hosted_realtime_unavailable_message(source_id=source_id, name=name),
+    )
+
+
+def _hosted_realtime_unavailable_message(*, source_id: str, name: str) -> str:
+    if source_id == "cwa-rainfall":
+        return (
+            "正式站採用已由背景工作保存的中央氣象署即時雨量作為可信來源；"
+            "目前查詢半徑內尚未取得可用的雨量快照，因此不判定即時雨量風險。"
+        )
+    if source_id == "wra-water-level":
+        return (
+            "正式站採用已由背景工作保存的水利署即時水位作為可信來源；"
+            "目前查詢半徑內尚未取得可用的水位快照，因此不判定即時水位風險。"
+        )
+    return (
+        f"正式站採用已由背景工作保存的{name}作為可信來源；"
+        "目前尚未取得可用快照，因此不使用未受監控的即時 API 備援查詢。"
     )
 
 
@@ -944,13 +958,12 @@ def _persisted_official_realtime_data_freshness(
                 ingested_at=latest_ingested,
                 feature_count=len(source_items),
                 message=(
-                    f"Using {len(source_items)} worker-persisted official "
-                    f"{event_type} evidence item(s) as the hosted source of truth."
+                    f"已使用 {len(source_items)} 筆背景工作保存的{name}，"
+                    "作為正式站可信來源。"
                     if is_fresh
                     else (
-                        f"Worker-persisted official {event_type} evidence is stale or "
-                        "missing source timestamps; unmanaged on-demand realtime API "
-                        "fallback remains disabled."
+                        f"背景工作保存的{name}已過期或缺少觀測時間；"
+                        "正式站不使用未受監控的即時 API 備援查詢，因此暫不判定此即時來源風險。"
                     )
                 ),
             )

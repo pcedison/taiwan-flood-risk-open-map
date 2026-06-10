@@ -1377,7 +1377,10 @@ def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
         if item["source_id"] in {"cwa-rainfall", "wra-water-level"}
     ]
     assert {item["health_status"] for item in realtime_statuses} == {"degraded"}
-    assert all("worker-persisted official evidence" in item["message"] for item in realtime_statuses)
+    messages = [item["message"] for item in realtime_statuses]
+    assert all("正式站採用已由背景工作保存" in message for message in messages)
+    assert all("worker-persisted" not in message for message in messages)
+    assert len(set(messages)) == 2
 
 
 def test_risk_assess_allows_hosted_realtime_diagnostic_fallback_when_explicit(
@@ -1468,9 +1471,10 @@ def test_risk_assess_uses_persisted_official_realtime_freshness_in_hosted(
     wra_status = next(item for item in payload["data_freshness"] if item["source_id"] == "wra-water-level")
     assert cwa_status["health_status"] == "healthy"
     assert cwa_status["feature_count"] == 1
-    assert "worker-persisted official rainfall" in cwa_status["message"]
+    assert "背景工作保存的中央氣象署即時雨量" in cwa_status["message"]
     assert wra_status["health_status"] == "degraded"
-    assert "on-demand realtime API fallback is disabled" in wra_status["message"]
+    assert "背景工作保存的水利署即時水位" in wra_status["message"]
+    assert "on-demand realtime API fallback" not in wra_status["message"]
 
 
 def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypatch) -> None:
