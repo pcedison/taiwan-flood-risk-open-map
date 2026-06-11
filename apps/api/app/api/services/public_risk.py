@@ -348,3 +348,39 @@ def _merge_realtime_data_freshness(
     ]
     merged.extend(persisted_by_source.values())
     return merged
+
+
+def assessment_result_snapshot(
+    *,
+    assessment_id: str,
+    request: RiskAssessRequest,
+    scoring: Any,
+    explanation: Explanation,
+    data_freshness: list[DataFreshness],
+    evidence_items: list[Any],
+    created_at: datetime,
+    expires_at: datetime,
+) -> dict[str, Any]:
+    return {
+        "assessment_id": assessment_id,
+        "location": request.point.model_dump(mode="json"),
+        "radius_m": request.radius_m,
+        "location_text": request.location_text,
+        "score_version": scoring.score_version,
+        "scores": {
+            "realtime": scoring.realtime_score,
+            "historical": scoring.historical_score,
+            "confidence": scoring.confidence_score,
+        },
+        "levels": {
+            "realtime": scoring.realtime_level,
+            "historical": scoring.historical_level,
+            "confidence": scoring.confidence_level,
+        },
+        "explanation": explanation.model_dump(mode="json"),
+        "evidence_ids": [item.id for item in evidence_items],
+        "evidence_count": len(evidence_items),
+        "data_freshness": [item.model_dump(mode="json") for item in data_freshness],
+        "created_at": created_at.isoformat(),
+        "expires_at": expires_at.isoformat(),
+    }
