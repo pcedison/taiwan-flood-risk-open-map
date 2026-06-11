@@ -27,6 +27,7 @@ from app.domain.realtime import (
     OfficialRealtimeObservation,
     OfficialRealtimeSourceStatus,
 )
+from app.domain.realtime import official as official_realtime
 from app.main import create_app
 
 with warnings.catch_warnings():
@@ -1516,11 +1517,12 @@ def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
 
     calls = {"realtime": 0}
 
-    def realtime_bundle(**_kwargs):
+    def upstream_lookup(**_kwargs):
         calls["realtime"] += 1
-        return _empty_realtime_bundle()
+        raise AssertionError("hosted risk assess must not hit official upstream")
 
-    monkeypatch.setattr(public_routes, "fetch_official_realtime_bundle", realtime_bundle)
+    monkeypatch.setattr(official_realtime, "_nearest_rainfall_observation", upstream_lookup)
+    monkeypatch.setattr(official_realtime, "_nearest_water_level_observation", upstream_lookup)
 
     try:
         payload = {
@@ -1613,11 +1615,12 @@ def test_risk_assess_uses_persisted_official_realtime_freshness_in_hosted(
         raw_ref="raw/cwa/rainfall/test-station.json",
     )
 
-    def realtime_bundle(**_kwargs):
+    def upstream_lookup(**_kwargs):
         calls["realtime"] += 1
-        return _empty_realtime_bundle()
+        raise AssertionError("hosted risk assess must not hit official upstream")
 
-    monkeypatch.setattr(public_routes, "fetch_official_realtime_bundle", realtime_bundle)
+    monkeypatch.setattr(official_realtime, "_nearest_rainfall_observation", upstream_lookup)
+    monkeypatch.setattr(official_realtime, "_nearest_water_level_observation", upstream_lookup)
     monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: (rainfall_record,))
 
     try:

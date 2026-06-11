@@ -26,3 +26,4 @@
 | [0007](0007-official-and-public-evidence-strategy.md) | Official and Public Evidence Strategy | Accepted | 2026-04-28 |
 | [0008](0008-score-versioning-and-explainability.md) | Score Versioning and Explainability | Accepted | 2026-04-28 |
 | [0009](0009-precomputed-risk-profiles-and-vector-assisted-evidence.md) | Precomputed Risk Profiles and Vector-Assisted Evidence | Accepted | 2026-05-08 |
+| [0010](0010-realtime-bridge-as-local-diagnostic.md) | Realtime Official Bridge as Local Diagnostic Tool | Accepted | 2026-06-11 |

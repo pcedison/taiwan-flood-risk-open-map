@@ -20,6 +20,7 @@ CWA_RAINFALL_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-00
 WRA_WATER_LEVEL_URL = "https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0"
 WRA_STATION_URL = "https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92"
 USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
+HOSTED_RUNTIME_ENVS = frozenset({"staging", "production", "production-beta"})
 RAINFALL_STATION_LIMIT_M = 10_000.0
 WATER_LEVEL_STATION_LIMIT_M = 3_000.0
 TAIPEI_TZ = timezone(timedelta(hours=8))
@@ -105,8 +106,29 @@ def fetch_official_realtime_bundle(
     cwa_enabled: bool = True,
     wra_enabled: bool = True,
     now: datetime | None = None,
+    app_env: str | None = None,
+    diagnostic_fallback_enabled: bool | None = None,
 ) -> OfficialRealtimeBundle:
     checked_at = now or datetime.now(UTC)
+    if _hosted_realtime_fetch_blocked(
+        app_env=app_env,
+        diagnostic_fallback_enabled=diagnostic_fallback_enabled,
+    ):
+        return OfficialRealtimeBundle(
+            observations=(),
+            source_statuses=(
+                diagnostic_realtime_disabled_status(
+                    "cwa-rainfall",
+                    "中央氣象署即時雨量",
+                    checked_at,
+                ),
+                diagnostic_realtime_disabled_status(
+                    "wra-water-level",
+                    "水利署即時水位",
+                    checked_at,
+                ),
+            ),
+        )
     if not enabled:
         return OfficialRealtimeBundle(
             observations=(),
@@ -239,6 +261,55 @@ def _disabled_realtime_status(
         observed_at=None,
         ingested_at=checked_at,
         message=message,
+    )
+
+
+def _hosted_realtime_fetch_blocked(
+    *,
+    app_env: str | None,
+    diagnostic_fallback_enabled: bool | None,
+) -> bool:
+    env = (app_env if app_env is not None else os.getenv("APP_ENV", "local")).strip().lower()
+    if env not in HOSTED_RUNTIME_ENVS:
+        return False
+    if diagnostic_fallback_enabled is None:
+        diagnostic_fallback_enabled = _env_flag_enabled(
+            "REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED"
+        )
+    return not diagnostic_fallback_enabled
+
+
+def diagnostic_realtime_disabled_status(
+    source_id: str,
+    name: str,
+    checked_at: datetime,
+) -> OfficialRealtimeSourceStatus:
+    return OfficialRealtimeSourceStatus(
+        source_id=source_id,
+        name=name,
+        health_status="degraded",
+        observed_at=None,
+        ingested_at=checked_at,
+        message=hosted_realtime_unavailable_message(source_id=source_id, name=name),
+    )
+
+
+def hosted_realtime_unavailable_message(*, source_id: str, name: str) -> str:
+    if source_id == "cwa-rainfall":
+        return (
+            "正式站採用背景工作保存的中央氣象署雨量作為可信來源；"
+            "目前查詢半徑內沒有可用雨量站快照，因此不判定即時雨量風險。"
+            "此訊息代表本次查詢沒有半徑內觀測，不是直接呼叫 CWA API 失敗。"
+        )
+    if source_id == "wra-water-level":
+        return (
+            "正式站採用背景工作保存的水利署水位作為可信來源；"
+            "目前查詢半徑內沒有可用水位站快照，因此不判定即時水位風險。"
+            "此訊息代表本次查詢沒有半徑內觀測，不是直接呼叫水利署 API 失敗。"
+        )
+    return (
+        f"正式站採用系統定期保存的{name}作為可信來源；"
+        "目前尚未取得可用快照，因此不使用未受監控的即時 API 備援查詢。"
     )
 
 
@@ -706,12 +777,11 @@ def _should_retry_with_local_unverified_tls(exc: BaseException) -> bool:
         return False
     if os.getenv("APP_ENV", "local").strip().lower() not in {"local", "development", "test"}:
         return False
-    return os.getenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    return _env_flag_enabled("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED")
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _is_tls_verification_error(exc: BaseException) -> bool:

@@ -82,6 +82,114 @@ def test_official_realtime_global_disable_reports_both_sources_disabled(
     ]
 
 
+@pytest.mark.parametrize("app_env", ["staging", "production", "production-beta"])
+def test_hosted_runtime_blocks_official_upstream_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+    app_env: str,
+) -> None:
+    monkeypatch.setattr(
+        official,
+        "_nearest_rainfall_observation",
+        lambda **_kwargs: pytest.fail("hosted runtime should not hit CWA upstream"),
+    )
+    monkeypatch.setattr(
+        official,
+        "_nearest_water_level_observation",
+        lambda **_kwargs: pytest.fail("hosted runtime should not hit WRA upstream"),
+    )
+
+    bundle = official.fetch_official_realtime_bundle(
+        lat=23.05753,
+        lng=120.20144,
+        radius_m=500,
+        now=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+        app_env=app_env,
+        diagnostic_fallback_enabled=False,
+    )
+
+    assert bundle.observations == ()
+    assert [status.source_id for status in bundle.source_statuses] == [
+        "cwa-rainfall",
+        "wra-water-level",
+    ]
+    assert all(status.health_status == "degraded" for status in bundle.source_statuses)
+    assert all("正式站採用背景工作保存" in (status.message or "") for status in bundle.source_statuses)
+
+
+def test_hosted_runtime_gate_defaults_to_env_when_unspecified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.delenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", raising=False)
+    monkeypatch.setattr(
+        official,
+        "_nearest_rainfall_observation",
+        lambda **_kwargs: pytest.fail("hosted runtime should not hit CWA upstream"),
+    )
+    monkeypatch.setattr(
+        official,
+        "_nearest_water_level_observation",
+        lambda **_kwargs: pytest.fail("hosted runtime should not hit WRA upstream"),
+    )
+
+    bundle = official.fetch_official_realtime_bundle(
+        lat=23.05753,
+        lng=120.20144,
+        radius_m=500,
+        now=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+    )
+
+    assert bundle.observations == ()
+    assert all(status.health_status == "degraded" for status in bundle.source_statuses)
+
+
+def test_hosted_runtime_allows_fetch_with_explicit_diagnostic_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"cwa": 0, "wra": 0}
+
+    def rainfall_lookup(**kwargs):
+        calls["cwa"] += 1
+        return (
+            [],
+            official.OfficialRealtimeSourceStatus(
+                source_id="cwa-rainfall",
+                name="中央氣象署即時雨量",
+                health_status="healthy",
+                observed_at=None,
+                ingested_at=kwargs["checked_at"],
+            ),
+        )
+
+    def water_level_lookup(**kwargs):
+        calls["wra"] += 1
+        return (
+            [],
+            official.OfficialRealtimeSourceStatus(
+                source_id="wra-water-level",
+                name="經濟部水利署即時水位",
+                health_status="healthy",
+                observed_at=None,
+                ingested_at=kwargs["checked_at"],
+            ),
+        )
+
+    monkeypatch.setattr(official, "_nearest_rainfall_observation", rainfall_lookup)
+    monkeypatch.setattr(official, "_nearest_water_level_observation", water_level_lookup)
+
+    bundle = official.fetch_official_realtime_bundle(
+        lat=23.05753,
+        lng=120.20144,
+        radius_m=500,
+        now=datetime(2026, 5, 4, 8, 0, tzinfo=UTC),
+        app_env="production-beta",
+        diagnostic_fallback_enabled=True,
+    )
+
+    assert calls == {"cwa": 1, "wra": 1}
+    assert all(status.health_status == "healthy" for status in bundle.source_statuses)
+
+
 def test_enabled_cwa_without_token_reports_missing_process_secret() -> None:
     observations, status = official._nearest_rainfall_observation(
         lat=23.05753,

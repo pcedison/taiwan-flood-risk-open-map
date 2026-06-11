@@ -67,7 +67,9 @@ Current placeholder boundaries:
   replay policy, poison-job routing/escalation, and deployed singleton
   scheduling are still pending.
 - Official data currently has two different paths that should not be conflated:
-  the API realtime bridge can fetch CWA/WRA observations for risk responses,
+  the API realtime bridge can fetch CWA/WRA observations for risk responses in
+  local/dev runtimes only (hosted runtimes are gated to worker-persisted
+  evidence; see [ADR-0010](docs/adr/0010-realtime-bridge-as-local-diagnostic.md)),
   while the worker official-adapter path has demo persistence plus managed
   persistence for gated CWA rainfall, WRA water-level, and flood-potential
   GeoJSON clients. Flood-potential still needs reviewed upstream URL/license,
@@ -227,9 +229,11 @@ Production pending checklist:
 - Complete real credential review and WRA/CWA/flood-potential production
   egress verification before calling any official-source path production beta
   ready.
-- Decide whether the current API realtime official bridge remains a temporary
-  direct-fetch bridge or is replaced by persisted worker-ingested evidence for
-  public risk responses.
+- Converge the duplicated CWA/WRA parsing logic and URL constants between the
+  API realtime bridge and worker adapters into a shared package. The bridge's
+  role is decided: it is a local diagnostic tool, and hosted risk responses use
+  worker-persisted evidence only (see
+  [ADR-0010](docs/adr/0010-realtime-bridge-as-local-diagnostic.md)).
 - Deploy a singleton scheduler and documented maintenance cadence for
   ingestion, query heat materialization, tile refresh, and retention.
 - Harden the current queue active-job dedupe, final-failed visibility,

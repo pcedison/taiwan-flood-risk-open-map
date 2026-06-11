@@ -16,40 +16,6 @@ from app.domain.realtime import OfficialRealtimeBundle, OfficialRealtimeSourceSt
 OBSERVED_HISTORICAL_EVENT_TYPES = {"flood_report", "road_closure"}
 
 
-def diagnostic_realtime_disabled_status(
-    source_id: str,
-    name: str,
-    checked_at: datetime,
-) -> OfficialRealtimeSourceStatus:
-    return OfficialRealtimeSourceStatus(
-        source_id=source_id,
-        name=name,
-        health_status="degraded",
-        observed_at=None,
-        ingested_at=checked_at,
-        message=hosted_realtime_unavailable_message(source_id=source_id, name=name),
-    )
-
-
-def hosted_realtime_unavailable_message(*, source_id: str, name: str) -> str:
-    if source_id == "cwa-rainfall":
-        return (
-            "正式站採用背景工作保存的中央氣象署雨量作為可信來源；"
-            "目前查詢半徑內沒有可用雨量站快照，因此不判定即時雨量風險。"
-            "此訊息代表本次查詢沒有半徑內觀測，不是直接呼叫 CWA API 失敗。"
-        )
-    if source_id == "wra-water-level":
-        return (
-            "正式站採用背景工作保存的水利署水位作為可信來源；"
-            "目前查詢半徑內沒有可用水位站快照，因此不判定即時水位風險。"
-            "此訊息代表本次查詢沒有半徑內觀測，不是直接呼叫水利署 API 失敗。"
-        )
-    return (
-        f"正式站採用系統定期保存的{name}作為可信來源；"
-        "目前尚未取得可用快照，因此不使用未受監控的即時 API 備援查詢。"
-    )
-
-
 def persisted_official_realtime_data_freshness(
     evidence_items: tuple[Evidence, ...],
     *,

@@ -86,7 +86,6 @@ router = APIRouter(prefix="/v1", tags=["Public"])
 
 LOW_ATTENTION: AttentionLevel = "低"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
-HOSTED_RUNTIME_ENVS = {"staging", "production", "production-beta"}
 _ASSESSMENT_EVIDENCE_CACHE = public_evidence._ASSESSMENT_EVIDENCE_CACHE
 _RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
 _RISK_ASSESSMENT_RESPONSE_CACHE_LOCK = Lock()
@@ -449,25 +448,6 @@ def _official_realtime_bundle_for_risk(
     now: datetime,
 ) -> OfficialRealtimeBundle:
     settings = get_settings()
-    if (
-        settings.app_env.strip().lower() in HOSTED_RUNTIME_ENVS
-        and not settings.realtime_official_diagnostic_fallback_enabled
-    ):
-        return OfficialRealtimeBundle(
-            observations=(),
-            source_statuses=(
-                public_freshness.diagnostic_realtime_disabled_status(
-                    "cwa-rainfall",
-                    "中央氣象署即時雨量",
-                    now,
-                ),
-                public_freshness.diagnostic_realtime_disabled_status(
-                    "wra-water-level",
-                    "水利署即時水位",
-                    now,
-                ),
-            ),
-        )
     return fetch_official_realtime_bundle(
         lat=lat,
         lng=lng,
@@ -477,6 +457,8 @@ def _official_realtime_bundle_for_risk(
         cwa_enabled=cwa_enabled,
         wra_enabled=wra_enabled,
         now=now,
+        app_env=settings.app_env,
+        diagnostic_fallback_enabled=settings.realtime_official_diagnostic_fallback_enabled,
     )
 
 
