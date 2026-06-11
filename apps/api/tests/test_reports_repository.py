@@ -294,6 +294,7 @@ def test_redis_user_report_rate_limiter_maps_script_rejection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_redis = _FakeRedis(eval_result=[0, 41000])
+    monkeypatch.setattr("app.domain.reports.abuse._REDIS_CLIENT_CACHE", {})
     monkeypatch.setattr("app.domain.reports.abuse.redis.Redis.from_url", lambda *_, **__: fake_redis)
     limiter = RedisUserReportRateLimiter(redis_url="redis://example.test:6379/0", clock=lambda: 100.0)
     policy = UserReportRateLimitPolicy(max_requests=2, window_seconds=60)
@@ -302,7 +303,6 @@ def test_redis_user_report_rate_limiter_maps_script_rejection(
         limiter.check(client_key="client-a", policy=policy)
 
     assert exc_info.value.retry_after_seconds == 41
-    assert fake_redis.closed is True
     assert fake_redis.eval_calls[0][1:4] == (
         2,
         "flood-risk:user-report-rate:client-a",
@@ -319,6 +319,7 @@ def test_redis_user_report_rate_limiter_fails_closed_when_redis_unavailable(
         raise redis.RedisError("redis down")
 
     fake_redis = _FakeRedis(eval_side_effect=unavailable)
+    monkeypatch.setattr("app.domain.reports.abuse._REDIS_CLIENT_CACHE", {})
     monkeypatch.setattr("app.domain.reports.abuse.redis.Redis.from_url", lambda *_, **__: fake_redis)
     limiter = RedisUserReportRateLimiter(redis_url="redis://example.test:6379/0", clock=lambda: 100.0)
 
@@ -328,7 +329,28 @@ def test_redis_user_report_rate_limiter_fails_closed_when_redis_unavailable(
             policy=UserReportRateLimitPolicy(max_requests=2, window_seconds=60),
         )
 
-    assert fake_redis.closed is True
+
+def test_redis_rate_limiter_reuses_shared_client_across_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[_FakeRedis] = []
+
+    def make_fake(*_args: object, **_kwargs: object) -> _FakeRedis:
+        fake = _FakeRedis(eval_result=[1, 0])
+        created.append(fake)
+        return fake
+
+    monkeypatch.setattr("app.domain.reports.abuse._REDIS_CLIENT_CACHE", {})
+    monkeypatch.setattr("app.domain.reports.abuse.redis.Redis.from_url", make_fake)
+    limiter = RedisUserReportRateLimiter(redis_url="redis://example.test:6379/0", clock=lambda: 100.0)
+    policy = UserReportRateLimitPolicy(max_requests=2, window_seconds=60)
+
+    limiter.check(client_key="client-a", policy=policy)
+    limiter.check(client_key="client-a", policy=policy)
+
+    assert len(created) == 1
+    assert len(created[0].eval_calls) == 2
+    assert created[0].closed is False
 
 
 def test_static_user_report_challenge_verifier_accepts_expected_token() -> None:

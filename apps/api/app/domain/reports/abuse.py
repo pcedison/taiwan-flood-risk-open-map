@@ -128,6 +128,24 @@ class InMemoryUserReportRateLimiter(InMemoryRateLimiter):
         )
 
 
+_REDIS_CLIENT_CACHE: dict[str, redis.Redis] = {}
+_REDIS_CLIENT_CACHE_LOCK = Lock()
+
+
+def _shared_redis_client(redis_url: str) -> redis.Redis:
+    """Return a process-wide client per URL so checks reuse one connection pool."""
+    with _REDIS_CLIENT_CACHE_LOCK:
+        client = _REDIS_CLIENT_CACHE.get(redis_url)
+        if client is None:
+            client = redis.Redis.from_url(
+                redis_url,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+            )
+            _REDIS_CLIENT_CACHE[redis_url] = client
+        return client
+
+
 class RedisRateLimiter:
     def __init__(
         self,
@@ -146,11 +164,7 @@ class RedisRateLimiter:
         if policy.window_seconds < 1:
             raise ValueError("rate limit window_seconds must be at least 1")
 
-        client = redis.Redis.from_url(
-            self._redis_url,
-            socket_connect_timeout=2,
-            socket_timeout=2,
-        )
+        client = _shared_redis_client(self._redis_url)
         try:
             result = client.eval(
                 _REDIS_RATE_LIMIT_SCRIPT,
@@ -163,8 +177,6 @@ class RedisRateLimiter:
             )
         except redis.RedisError as exc:
             raise RateLimitUnavailable(str(exc)) from exc
-        finally:
-            client.close()
 
         allowed, retry_ms = _parse_redis_rate_limit_result(result)
         if not allowed:
