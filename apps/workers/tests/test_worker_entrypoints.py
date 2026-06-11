@@ -140,7 +140,7 @@ def test_main_gdelt_rehearsal_wires_env_and_argv_without_network(
     monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
     monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
     monkeypatch.setenv("GDELT_REHEARSAL_CADENCE_SECONDS", "45")
-    monkeypatch.setattr("app.main.run_historical_news_backfill_rehearsal", fake_rehearsal)
+    monkeypatch.setattr("app.cli.gdelt.run_historical_news_backfill_rehearsal", fake_rehearsal)
 
     exit_code = main(
         [
@@ -215,7 +215,7 @@ def test_main_gdelt_rehearsal_builds_geocoder_query_plan_without_network(
     monkeypatch.setenv("GDELT_BACKFILL_ENABLED", "true")
     monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
     monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
-    monkeypatch.setattr("app.main.run_historical_news_backfill_rehearsal", fake_rehearsal)
+    monkeypatch.setattr("app.cli.gdelt.run_historical_news_backfill_rehearsal", fake_rehearsal)
 
     exit_code = main(
         [
@@ -264,9 +264,9 @@ def test_main_gdelt_production_candidate_skips_with_rehearsal_gates_only(
     monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
     monkeypatch.delenv("GDELT_PRODUCTION_INGESTION_ENABLED", raising=False)
     monkeypatch.setattr("app.adapters.news.public_web._fetch_json", fail_fetch)
-    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", _fail_constructor)
-    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", _fail_constructor)
-    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", _fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresStagingBatchWriter", _fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresIngestionRunWriter", _fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresEvidencePromotionWriter", _fail_constructor)
 
     exit_code = main(
         [
@@ -307,9 +307,9 @@ def test_main_gdelt_production_candidate_requires_persist_before_writers(
     monkeypatch.setenv("GDELT_PRODUCTION_CADENCE_SECONDS", "22")
     monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
     monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
-    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", _fail_constructor)
-    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", _fail_constructor)
-    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", _fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresStagingBatchWriter", _fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresIngestionRunWriter", _fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresEvidencePromotionWriter", _fail_constructor)
 
     exit_code = main(
         [
@@ -377,12 +377,12 @@ def test_main_gdelt_production_candidate_wires_persistence_and_gates_without_net
     monkeypatch.setenv("SOURCE_NEWS_ENABLED", "true")
     monkeypatch.setenv("SOURCE_TERMS_REVIEW_ACK", "true")
     monkeypatch.setattr(
-        "app.main.run_historical_news_backfill_production_candidate",
+        "app.cli.gdelt.run_historical_news_backfill_production_candidate",
         fake_production_candidate,
     )
-    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", _FakeStagingWriter)
-    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", _FakeRunWriter)
-    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", _FakePromotionWriter)
+    monkeypatch.setattr("app.cli.persistence.PostgresStagingBatchWriter", _FakeStagingWriter)
+    monkeypatch.setattr("app.cli.persistence.PostgresIngestionRunWriter", _FakeRunWriter)
+    monkeypatch.setattr("app.cli.persistence.PostgresEvidencePromotionWriter", _FakePromotionWriter)
 
     exit_code = main(
         [
@@ -453,7 +453,7 @@ def test_main_work_runtime_queue_once_is_a_cli_entrypoint(monkeypatch) -> None:
         captured["settings"] = kwargs["settings"]
         return RuntimeQueueWorkerResult(status="skipped", reason="no_job")
 
-    monkeypatch.setattr("app.main.work_runtime_queue_once", fake_work_once)
+    monkeypatch.setattr("app.cli.queue_cli.work_runtime_queue_once", fake_work_once)
 
     exit_code = main(["--work-runtime-queue", "--once"])
 
@@ -481,8 +481,8 @@ def test_main_work_runtime_queue_persist_wires_runtime_writers(monkeypatch) -> N
         captured["promote"] = kwargs["promote"]
         return RuntimeQueueWorkerResult(status="succeeded", promoted=1)
 
-    monkeypatch.setattr("app.main.build_runtime_persistence_writers", fake_build_writers)
-    monkeypatch.setattr("app.main.work_runtime_queue_once", fake_work_once)
+    monkeypatch.setattr("app.cli.persistence.build_runtime_persistence_writers", fake_build_writers)
+    monkeypatch.setattr("app.cli.queue_cli.work_runtime_queue_once", fake_work_once)
 
     exit_code = main(
         [
@@ -516,7 +516,7 @@ def test_main_enqueue_runtime_jobs_is_a_cli_entrypoint(monkeypatch) -> None:
             job_ids=("job-1",),
         )
 
-    monkeypatch.setattr("app.main.enqueue_enabled_adapters_once", fake_enqueue_once)
+    monkeypatch.setattr("app.cli.queue_cli.enqueue_enabled_adapters_once", fake_enqueue_once)
 
     exit_code = main(["--enqueue-runtime-jobs"])
 
@@ -535,7 +535,7 @@ def test_main_scheduler_enqueue_runtime_jobs_can_be_bounded(monkeypatch) -> None
             RuntimeQueueProducerResult(status="skipped", reason="no_database_url"),
         )
 
-    monkeypatch.setattr("app.main.enqueue_enabled_adapters_loop", fake_enqueue_loop)
+    monkeypatch.setattr("app.cli.queue_cli.enqueue_enabled_adapters_loop", fake_enqueue_loop)
 
     exit_code = main(["--enqueue-runtime-jobs", "--scheduler", "--max-ticks", "2"])
 
@@ -575,8 +575,8 @@ def test_main_list_runtime_dead_letter_jobs_prints_json_lines(monkeypatch, capsy
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -630,8 +630,8 @@ def test_main_summarize_runtime_dead_letter_jobs_prints_json(monkeypatch, capsys
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -669,7 +669,7 @@ def test_main_summarize_runtime_dead_letter_jobs_noops_without_database_url(
 
     monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", fail_constructor)
 
     exit_code = main(
         [
@@ -710,8 +710,8 @@ def test_main_summarize_runtime_dead_letter_jobs_reports_database_unavailable(
             raise RuntimeQueueUnavailable("database unavailable")
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(["--summarize-runtime-dead-letter-jobs"])
 
@@ -757,8 +757,8 @@ def test_main_export_runtime_queue_metrics_prints_prometheus(monkeypatch, capsys
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -806,8 +806,8 @@ def test_main_export_runtime_queue_metrics_writes_textfile(monkeypatch, tmp_path
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -846,8 +846,8 @@ def test_main_export_runtime_queue_metrics_prints_json(monkeypatch, capsys) -> N
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -884,8 +884,8 @@ def test_main_export_runtime_queue_metrics_noops_without_database_url(
 
     monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", fail_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -915,7 +915,7 @@ def test_main_export_runtime_queue_metrics_no_db_prometheus_stdout_is_parseable(
 
     monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", fail_constructor)
 
     exit_code = main(["--export-runtime-queue-metrics"])
 
@@ -943,7 +943,7 @@ def test_main_export_runtime_queue_metrics_reports_database_unavailable(
             raise RuntimeQueueUnavailable("database unavailable")
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
 
     exit_code = main(
         [
@@ -990,9 +990,9 @@ def test_main_requeue_runtime_job_resets_attempts_by_default(monkeypatch, capsys
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", _fail_constructor)
-    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", _fail_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -1056,9 +1056,9 @@ def test_main_requeue_runtime_job_can_keep_attempts_and_database_override(
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", _fail_constructor)
-    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", _fail_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -1098,9 +1098,9 @@ def test_main_requeue_runtime_job_requires_audit_context(monkeypatch) -> None:
         raise AssertionError("requeue must not touch DB without audit context")
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_constructor)
-    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", fail_constructor)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", fail_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueueReplayAudit", fail_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(["--requeue-runtime-job", "job-1"])
 
@@ -1145,8 +1145,8 @@ def test_main_requeue_runtime_job_refuses_active_poison_quarantine(
             )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", fail_queue_constructor)
-    monkeypatch.setattr("app.main.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueue", fail_queue_constructor)
+    monkeypatch.setattr("app.cli.queue_cli.PostgresRuntimeQueueReplayAudit", FakeReplayAudit)
 
     exit_code = main(
         [
@@ -1316,7 +1316,7 @@ def test_main_scheduler_maintenance_wires_overrides_to_bounded_loop(monkeypatch)
         captured.update(kwargs)
         return (MaintenanceCycleResult(status="succeeded"),)
 
-    monkeypatch.setattr("app.main.run_maintenance_loop", fake_maintenance_loop)
+    monkeypatch.setattr("app.cli.maintenance_cli.run_maintenance_loop", fake_maintenance_loop)
 
     exit_code = main(
         [
@@ -1372,9 +1372,9 @@ def test_main_run_official_demo_does_not_persist_by_default(monkeypatch) -> None
         del args, kwargs
         raise AssertionError("default official demo must not construct DB writers")
 
-    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", fail_constructor)
-    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", fail_constructor)
-    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresStagingBatchWriter", fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresIngestionRunWriter", fail_constructor)
+    monkeypatch.setattr("app.cli.persistence.PostgresEvidencePromotionWriter", fail_constructor)
 
     exit_code = main(["--run-official-demo"])
 
@@ -1567,11 +1567,11 @@ def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeyp
         captured["promotion_adapter_keys"] = adapter_keys
         return _PromotionResult()
 
-    monkeypatch.setattr("app.main.run_scheduled_ingestion_cycle", fake_cycle)
-    monkeypatch.setattr("app.main.promote_accepted_staging", fake_promote)
-    monkeypatch.setattr("app.main.PostgresStagingBatchWriter", _FakeStagingWriter)
-    monkeypatch.setattr("app.main.PostgresIngestionRunWriter", _FakeRunWriter)
-    monkeypatch.setattr("app.main.PostgresEvidencePromotionWriter", _FakePromotionWriter)
+    monkeypatch.setattr("app.cli.runtime_cli.run_scheduled_ingestion_cycle", fake_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli.promote_accepted_staging", fake_promote)
+    monkeypatch.setattr("app.cli.persistence.PostgresStagingBatchWriter", _FakeStagingWriter)
+    monkeypatch.setattr("app.cli.persistence.PostgresIngestionRunWriter", _FakeRunWriter)
+    monkeypatch.setattr("app.cli.persistence.PostgresEvidencePromotionWriter", _FakePromotionWriter)
 
     exit_code = main(
         [
@@ -1609,8 +1609,8 @@ def test_main_run_enabled_adapters_persist_uses_managed_runtime(monkeypatch) -> 
             evidence_ids=("evidence-1", "evidence-2"),
         )
 
-    monkeypatch.setattr("app.main.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -1671,10 +1671,10 @@ def test_main_run_enabled_adapters_persist_scheduler_uses_lease(monkeypatch) -> 
     monkeypatch.setenv("WORKER_INSTANCE", "test-scheduler")
     monkeypatch.setenv("SCHEDULER_INTERVAL_SECONDS", "7")
     monkeypatch.setenv("SCHEDULER_LEASE_TTL_SECONDS", "14")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
-    monkeypatch.setattr("app.main.time.sleep", fake_sleep)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli.time.sleep", fake_sleep)
+    monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -1733,9 +1733,9 @@ def test_main_run_enabled_adapters_persist_scheduler_skips_when_lease_held(
         raise AssertionError("managed cycle should not run without a lease")
 
     monkeypatch.setenv("WORKER_INSTANCE", "test-scheduler")
-    monkeypatch.setattr("app.main.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.main.run_managed_runtime_ingestion_cycle", fail_managed_cycle)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fail_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -1783,7 +1783,7 @@ def test_main_aggregate_query_heat_uses_configured_periods(monkeypatch) -> None:
             return _QueryHeatRetentionSummary(buckets_pruned=1)
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresQueryHeatAggregationJob", FakeQueryHeatAggregationJob)
+    monkeypatch.setattr("app.cli.maintenance_cli.PostgresQueryHeatAggregationJob", FakeQueryHeatAggregationJob)
 
     exit_code = main(
         [
@@ -1817,7 +1817,7 @@ def test_main_aggregate_query_heat_noops_without_database_url(monkeypatch) -> No
 
     monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setattr("app.main.PostgresQueryHeatAggregationJob", fail_constructor)
+    monkeypatch.setattr("app.cli.maintenance_cli.PostgresQueryHeatAggregationJob", fail_constructor)
 
     assert main(["--aggregate-query-heat"]) == 0
 
@@ -1835,7 +1835,7 @@ def test_main_refresh_tile_features_uses_layer_and_limit(monkeypatch) -> None:
             return _TileRefreshResult(layer_id=layer_id, refreshed=3)
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.PostgresTileCacheWriter", FakeTileCacheWriter)
+    monkeypatch.setattr("app.cli.maintenance_cli.PostgresTileCacheWriter", FakeTileCacheWriter)
 
     exit_code = main(
         [
@@ -1862,7 +1862,7 @@ def test_main_refresh_tile_features_noops_without_database_url(monkeypatch) -> N
 
     monkeypatch.delenv("WORKER_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setattr("app.main.PostgresTileCacheWriter", fail_constructor)
+    monkeypatch.setattr("app.cli.maintenance_cli.PostgresTileCacheWriter", fail_constructor)
 
     assert main(["--refresh-tile-features"]) == 0
 
@@ -1889,9 +1889,9 @@ def test_main_seed_risk_profiles_runs_admin_and_grid_seeders(monkeypatch, capsys
         )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.seed_admin_area_profiles_from_geocoder", fake_admin_seed)
-    monkeypatch.setattr("app.main.seed_grid_profiles_from_query_heat", fake_grid_seed)
-    monkeypatch.setattr("app.main.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.cli.profiles_cli.seed_admin_area_profiles_from_geocoder", fake_admin_seed)
+    monkeypatch.setattr("app.cli.profiles_cli.seed_grid_profiles_from_query_heat", fake_grid_seed)
+    monkeypatch.setattr("app.cli.profiles_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
         [
@@ -1944,9 +1944,9 @@ def test_main_work_profile_refresh_jobs_claims_rebuilds_and_completes(monkeypatc
         return True
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.claim_profile_refresh_jobs", fake_claim)
-    monkeypatch.setattr("app.main.rebuild_risk_profile", fake_rebuild)
-    monkeypatch.setattr("app.main.complete_profile_refresh_job", fake_complete)
+    monkeypatch.setattr("app.cli.profiles_cli.claim_profile_refresh_jobs", fake_claim)
+    monkeypatch.setattr("app.cli.profiles_cli.rebuild_risk_profile", fake_rebuild)
+    monkeypatch.setattr("app.cli.profiles_cli.complete_profile_refresh_job", fake_complete)
 
     exit_code = main(
         [
@@ -2000,10 +2000,10 @@ def test_main_work_profile_refresh_jobs_sleeps_between_claimed_jobs(monkeypatch,
         )
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.claim_profile_refresh_jobs", fake_claim)
-    monkeypatch.setattr("app.main.rebuild_risk_profile", fake_rebuild)
-    monkeypatch.setattr("app.main.complete_profile_refresh_job", lambda **kwargs: True)
-    monkeypatch.setattr("app.main.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr("app.cli.profiles_cli.claim_profile_refresh_jobs", fake_claim)
+    monkeypatch.setattr("app.cli.profiles_cli.rebuild_risk_profile", fake_rebuild)
+    monkeypatch.setattr("app.cli.profiles_cli.complete_profile_refresh_job", lambda **kwargs: True)
+    monkeypatch.setattr("app.cli.profiles_cli.time.sleep", lambda seconds: sleep_calls.append(seconds))
 
     exit_code = main(
         [
@@ -2049,9 +2049,9 @@ def test_main_work_profile_refresh_jobs_aborts_batch_on_database_connection_erro
         raise ProfileRefreshJobUnavailable("connection timeout expired")
 
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
-    monkeypatch.setattr("app.main.claim_profile_refresh_jobs", fake_claim)
-    monkeypatch.setattr("app.main.rebuild_risk_profile", fake_rebuild)
-    monkeypatch.setattr("app.main.complete_profile_refresh_job", lambda **kwargs: True)
+    monkeypatch.setattr("app.cli.profiles_cli.claim_profile_refresh_jobs", fake_claim)
+    monkeypatch.setattr("app.cli.profiles_cli.rebuild_risk_profile", fake_rebuild)
+    monkeypatch.setattr("app.cli.profiles_cli.complete_profile_refresh_job", lambda **kwargs: True)
 
     exit_code = main(["--work-profile-refresh-jobs", "--profile-refresh-limit", "2"])
 
