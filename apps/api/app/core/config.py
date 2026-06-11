@@ -50,6 +50,7 @@ class Settings:
     official_flood_disaster_points_enabled: bool
     official_flood_disaster_points_path: str | None
     risk_assessment_response_cache_seconds: int
+    risk_assessment_response_cache_backend: RateLimitBackend
     tile_dynamic_fallback_enabled: bool
     public_rate_limit_enabled: bool
     public_rate_limit_backend: RateLimitBackend
@@ -157,6 +158,11 @@ def get_settings() -> Settings:
             "RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS",
             default=120 if _hosted_runtime(app_env) else 0,
             minimum=0,
+        ),
+        risk_assessment_response_cache_backend=_env_choice(
+            "RISK_ASSESSMENT_RESPONSE_CACHE_BACKEND",
+            choices={"redis", "memory"},
+            default="memory" if _local_or_test_runtime(app_env) else "redis",
         ),
         tile_dynamic_fallback_enabled=_env_bool(
             "TILE_DYNAMIC_FALLBACK_ENABLED",

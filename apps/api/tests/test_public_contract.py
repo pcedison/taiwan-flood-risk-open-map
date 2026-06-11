@@ -1512,6 +1512,7 @@ def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
     monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
     monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
     monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "120")
+    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_BACKEND", "memory")
     get_settings.cache_clear()
     public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
 

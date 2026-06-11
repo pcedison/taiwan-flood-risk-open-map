@@ -1,7 +1,6 @@
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from hashlib import sha256
-from threading import Lock
 from typing import Any
 from uuid import UUID
 
@@ -31,6 +30,7 @@ from app.api.services import (
     public_geocoding,
     public_layers,
     public_profiles,
+    public_response_cache,
     public_risk,
 )
 from app.core.config import get_settings
@@ -87,8 +87,7 @@ router = APIRouter(prefix="/v1", tags=["Public"])
 LOW_ATTENTION: AttentionLevel = "低"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
 _ASSESSMENT_EVIDENCE_CACHE = public_evidence._ASSESSMENT_EVIDENCE_CACHE
-_RISK_ASSESSMENT_RESPONSE_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
-_RISK_ASSESSMENT_RESPONSE_CACHE_LOCK = Lock()
+_RISK_ASSESSMENT_RESPONSE_CACHE = public_response_cache._MEMORY_CACHE
 _PUBLIC_RATE_LIMIT_MEMORY_ENVS = {"local", "development", "test"}
 
 
@@ -662,17 +661,14 @@ def _cached_risk_assessment_response(
     now: datetime,
     ttl_seconds: int,
 ) -> RiskAssessmentResponse | None:
-    if ttl_seconds <= 0:
-        return None
-    with _RISK_ASSESSMENT_RESPONSE_CACHE_LOCK:
-        cached = _RISK_ASSESSMENT_RESPONSE_CACHE.get(cache_key)
-        if cached is None:
-            return None
-        cached_at, response = cached
-        if now - cached_at >= timedelta(seconds=ttl_seconds):
-            _RISK_ASSESSMENT_RESPONSE_CACHE.pop(cache_key, None)
-            return None
-        return response
+    settings = get_settings()
+    return public_response_cache.cached_response(
+        cache_key,
+        now=now,
+        ttl_seconds=ttl_seconds,
+        backend=settings.risk_assessment_response_cache_backend,
+        redis_url=settings.redis_url,
+    )
 
 
 def _cache_risk_assessment_response(
@@ -682,13 +678,15 @@ def _cache_risk_assessment_response(
     now: datetime,
     ttl_seconds: int,
 ) -> None:
-    if ttl_seconds <= 0:
-        return
-    with _RISK_ASSESSMENT_RESPONSE_CACHE_LOCK:
-        _RISK_ASSESSMENT_RESPONSE_CACHE[cache_key] = (now, response)
-        while len(_RISK_ASSESSMENT_RESPONSE_CACHE) > 128:
-            oldest_key = next(iter(_RISK_ASSESSMENT_RESPONSE_CACHE))
-            del _RISK_ASSESSMENT_RESPONSE_CACHE[oldest_key]
+    settings = get_settings()
+    public_response_cache.store_response(
+        cache_key,
+        response,
+        now=now,
+        ttl_seconds=ttl_seconds,
+        backend=settings.risk_assessment_response_cache_backend,
+        redis_url=settings.redis_url,
+    )
 
 
 def _persist_assessment(
