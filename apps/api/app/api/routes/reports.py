@@ -20,7 +20,7 @@ router = APIRouter(prefix="/v1", tags=["Public"])
 
 
 @router.post("/reports", response_model=UserReportCreateResponse, status_code=202)
-async def create_user_report(
+def create_user_report(
     request: UserReportCreateRequest,
     http_request: Request,
 ) -> UserReportCreateResponse:

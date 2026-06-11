@@ -20,7 +20,7 @@ router = APIRouter(prefix="/v1", tags=["Tiles"])
         503: {"description": "Tile database unavailable."},
     },
 )
-async def get_vector_tile(
+def get_vector_tile(
     layer_id: str = Path(pattern=r"^[a-z0-9][a-z0-9.-]{0,79}$"),
     z: int = Path(ge=0, le=24),
     x: int = Path(ge=0),

@@ -23,7 +23,7 @@ async def health() -> HealthResponse:
 
 
 @router.get("/ready", response_model=ReadyResponse, responses={503: {"model": ReadyResponse}})
-async def ready(response: Response) -> ReadyResponse:
+def ready(response: Response) -> ReadyResponse:
     settings = get_settings()
     dependencies = {
         "database": _check_database(settings.database_url),
@@ -43,7 +43,7 @@ async def ready(response: Response) -> ReadyResponse:
 
 
 @router.get("/metrics", include_in_schema=False)
-async def metrics() -> PlainTextResponse:
+def metrics() -> PlainTextResponse:
     settings = get_settings()
     content = "\n".join(
         (

@@ -43,7 +43,7 @@ admin_bearer = HTTPBearer(auto_error=False)
 
 
 @router.get("/jobs", response_model=AdminJobsResponse)
-async def list_admin_jobs(
+def list_admin_jobs(
     _admin: Annotated[str, Depends(_require_admin)],
     status: JobStatus | None = None,
     job_key: str | None = Query(default=None, min_length=1, max_length=120),
@@ -62,7 +62,7 @@ async def list_admin_jobs(
 
 
 @router.get("/sources", response_model=AdminSourcesResponse)
-async def list_admin_sources(
+def list_admin_sources(
     _admin: Annotated[str, Depends(_require_admin)],
     health_status: HealthStatus | None = None,
 ) -> AdminSourcesResponse:
@@ -80,7 +80,7 @@ async def list_admin_sources(
 
 
 @router.get("/reports/pending", response_model=AdminUserReportsResponse)
-async def list_pending_admin_reports(
+def list_pending_admin_reports(
     _admin: Annotated[str, Depends(_require_admin)],
     limit: int = Query(default=100, ge=1, le=100),
 ) -> AdminUserReportsResponse:
@@ -99,7 +99,7 @@ async def list_pending_admin_reports(
 
 
 @router.patch("/reports/{report_id}/moderation", response_model=UserReportModerationResponse)
-async def moderate_admin_report(
+def moderate_admin_report(
     report_id: UUID,
     request: UserReportModerationRequest,
     admin_actor: Annotated[str, Depends(_require_admin)],
@@ -134,7 +134,7 @@ async def moderate_admin_report(
     "/reports/{report_id}/privacy-redaction",
     response_model=UserReportPrivacyRedactionResponse,
 )
-async def redact_admin_report_privacy(
+def redact_admin_report_privacy(
     report_id: UUID,
     request: UserReportPrivacyRedactionRequest,
     admin_actor: Annotated[str, Depends(_require_admin)],
