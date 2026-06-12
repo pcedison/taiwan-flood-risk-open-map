@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import math
@@ -6,10 +6,16 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from app.adapters._helpers import optional_str, parse_datetime, stable_evidence_id
+from app.adapters._helpers import (
+    optional_float,
+    optional_str,
+    parse_datetime,
+    parse_observed_at_utc,
+    stable_evidence_id,
+    url_with_query,
+)
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -238,8 +244,8 @@ def _normalize_water_level_record(
     payload = raw_item.payload
     station_name = str(payload.get("station_name", "")).strip()
     observed_at = parse_datetime(payload.get("observed_at"))
-    water_level_m = _optional_float(payload.get("water_level_m"))
-    warning_level_m = _optional_float(payload.get("warning_level_m"))
+    water_level_m = optional_float(payload.get("water_level_m"))
+    warning_level_m = optional_float(payload.get("warning_level_m"))
 
     if not station_name or observed_at is None or water_level_m is None:
         return None
@@ -332,7 +338,7 @@ def _parse_wra_station_record(
         "StationNameEng",
         "observatoryname",
     )
-    observed_at = _parse_wra_observed_at(
+    observed_at = parse_observed_at_utc(
         _first_value(
             item,
             "observed_at",
@@ -343,7 +349,7 @@ def _parse_wra_station_record(
             "datetime",
         )
     )
-    water_level_m = _optional_float(
+    water_level_m = optional_float(
         _first_value(
             item,
             "water_level_m",
@@ -378,7 +384,7 @@ def _parse_wra_station_record(
         metadata,
         "river_name",
     )
-    warning_level_m = _optional_float(
+    warning_level_m = optional_float(
         _first_value(
             item,
             "warning_level_m",
@@ -399,8 +405,8 @@ def _parse_wra_station_record(
     if warning_level_m is not None:
         record["warning_level_m"] = warning_level_m
 
-    lat = _optional_float(_first_value(item, "latitude", "Latitude", "Lat"))
-    lng = _optional_float(_first_value(item, "longitude", "Longitude", "Lon", "Lng"))
+    lat = optional_float(_first_value(item, "latitude", "Latitude", "Lat"))
+    lng = optional_float(_first_value(item, "longitude", "Longitude", "Lon", "Lng"))
     if lat is None:
         lat = _metadata_float(metadata, "latitude")
     if lng is None:
@@ -447,8 +453,8 @@ def _parse_wra_station_metadata_record(item: Mapping[str, Any]) -> Mapping[str, 
     )
     station_name = _first_text(item, "observatoryname", "StationName", "station_name")
     river_name = _first_text(item, "rivername", "RiverName", "river_name")
-    alert_level_1_m = _optional_float(_first_value(item, "alertlevel1", "AlertLevel1"))
-    alert_level_2_m = _optional_float(_first_value(item, "alertlevel2", "AlertLevel2"))
+    alert_level_1_m = optional_float(_first_value(item, "alertlevel1", "AlertLevel1"))
+    alert_level_2_m = optional_float(_first_value(item, "alertlevel2", "AlertLevel2"))
 
     if observatory_identifier is not None:
         record["observatory_identifier"] = observatory_identifier
@@ -476,8 +482,8 @@ def _station_metadata_lookup_keys(record: Mapping[str, Any]) -> tuple[str, ...]:
 
 
 def _wra_station_metadata_coordinate(item: Mapping[str, Any]) -> tuple[float, float] | None:
-    lat = _optional_float(_first_value(item, "latitude", "Latitude", "Lat"))
-    lng = _optional_float(_first_value(item, "longitude", "Longitude", "Lon", "Lng"))
+    lat = optional_float(_first_value(item, "latitude", "Latitude", "Lat"))
+    lng = optional_float(_first_value(item, "longitude", "Longitude", "Lon", "Lng"))
     if lat is not None and lng is not None:
         return (lat, lng)
     return _twd97_xy_to_wgs84(
@@ -499,7 +505,7 @@ def _metadata_text(metadata: Mapping[str, Any] | None, key: str) -> str | None:
 def _metadata_float(metadata: Mapping[str, Any] | None, key: str) -> float | None:
     if metadata is None:
         return None
-    return _optional_float(metadata.get(key))
+    return optional_float(metadata.get(key))
 
 
 def _fetch_json(url: str, timeout_seconds: int) -> Any:
@@ -531,23 +537,11 @@ def _wra_water_level_request_url(api_url: str, api_token: str | None) -> str:
     token = optional_str(api_token)
     if token is not None:
         params["api_key"] = token
-    return _url_with_query(api_url, params)
+    return url_with_query(api_url, params, drop_keys=("api_key",))
 
 
 def _wra_water_level_source_url(api_url: str) -> str:
-    return _url_with_query(api_url, {"format": "JSON"})
-
-
-def _url_with_query(api_url: str, params: Mapping[str, str]) -> str:
-    parts = urlsplit(api_url)
-    replacement_keys = {key.lower() for key in params}
-    existing_params = tuple(
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key.lower() not in replacement_keys and key.lower() != "api_key"
-    )
-    query = urlencode((*existing_params, *params.items()))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+    return url_with_query(api_url, {"format": "JSON"}, drop_keys=("api_key",))
 
 
 def _station_metadata_items(payload: object) -> Iterable[Any]:
@@ -578,34 +572,14 @@ def _first_value(item: Mapping[str, Any], *keys: str) -> object:
     return None
 
 
-def _parse_wra_observed_at(value: object) -> datetime | None:
-    parsed = parse_datetime(value)
-    if parsed is None:
-        return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-def _optional_float(value: object) -> float | None:
-    if value is None:
-        return None
-    if not isinstance(value, (int, float, str)):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _twd97_xy_to_wgs84(value: object) -> tuple[float, float] | None:
     if not isinstance(value, str):
         return None
     parts = value.split()
     if len(parts) != 2:
         return None
-    x = _optional_float(parts[0])
-    y = _optional_float(parts[1])
+    x = optional_float(parts[0])
+    y = optional_float(parts[1])
     if x is None or y is None:
         return None
 

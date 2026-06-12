@@ -48,9 +48,21 @@ path.
 - Local, development, and test runtimes keep direct bridge fetching as the
   default so contributors can diagnose upstream behavior without a worker
   deployment.
-- Convergence of the duplicated parsing logic and URL constants into a shared
-  package is planned as a follow-up phase; retiring the bridge entirely is
-  blocked on a deployed production worker scheduler.
+- Convergence of the duplicated parsing logic into a shared installable
+  package is deferred until the bridge retirement decision (below), rather
+  than planned as its own phase. A 2026-06-12 review found that (a) only
+  small parsing primitives (TWD97 conversion, WGS84 coordinate selection,
+  precipitation/float coercion) and URL constants are duplicated verbatim —
+  the higher-level parsing legitimately differs because the bridge builds
+  typed nearest-station observations while workers build ingestion record
+  mappings; and (b) a path-dependency package would break the standalone
+  `pip install -e .` flows that Docker Compose run commands, the Zeabur
+  single-service image, and CI all rely on. Until then, upstream schema
+  changes must still be applied to both `app/domain/realtime/official.py`
+  and the worker adapters; within the workers app the shared primitives live
+  in `app/adapters/_helpers.py`.
+- Retiring the bridge entirely is blocked on a deployed production worker
+  scheduler.
 
 ## Consequences
 
@@ -65,5 +77,7 @@ Local diagnostics remain cheap: developers still get live CWA/WRA observations
 without running workers.
 
 Parsing logic and URL constants remain duplicated between the API bridge and
-worker adapters until the shared-package phase lands; changes to upstream
-schemas must be applied in both places until then.
+worker adapters until the bridge is retired; changes to upstream schemas must
+be applied in both places until then. The duplication is bounded to the
+bridge's lifetime, which is why a shared package was judged not worth its
+packaging and deployment cost.

@@ -1,14 +1,20 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from app.adapters._helpers import optional_str, parse_datetime, stable_evidence_id
+from app.adapters._helpers import (
+    optional_float,
+    optional_str,
+    parse_datetime,
+    parse_observed_at_utc,
+    stable_evidence_id,
+    url_with_query,
+)
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -222,8 +228,8 @@ def _normalize_rainfall_record(
     payload = raw_item.payload
     station_name = str(payload.get("station_name", "")).strip()
     observed_at = parse_datetime(payload.get("observed_at"))
-    rainfall_1h = _optional_float(payload.get("rainfall_mm_1h"))
-    rainfall_24h = _optional_float(payload.get("rainfall_mm_24h"))
+    rainfall_1h = optional_float(payload.get("rainfall_mm_1h"))
+    rainfall_24h = optional_float(payload.get("rainfall_mm_24h"))
 
     if not station_name or observed_at is None or rainfall_1h is None:
         return None
@@ -278,7 +284,7 @@ def _parse_cwa_station_record(
 
     station_id = optional_str(item.get("StationId"))
     station_name = optional_str(item.get("StationName"))
-    observed_at = _parse_cwa_observed_at(obs_time.get("DateTime"))
+    observed_at = parse_observed_at_utc(obs_time.get("DateTime"))
     rainfall_1h = _precipitation_value(rainfall.get("Past1hr"))
     if station_id is None or station_name is None or observed_at is None or rainfall_1h is None:
         return None
@@ -342,38 +348,18 @@ def _fetch_json(url: str, timeout_seconds: int) -> Mapping[str, Any]:
 
 
 def _cwa_rainfall_request_url(api_url: str, authorization: str) -> str:
-    return _url_with_query(
+    return url_with_query(
         api_url,
         {
             "Authorization": authorization,
             "format": "JSON",
         },
+        drop_keys=("authorization",),
     )
 
 
 def _cwa_rainfall_source_url(api_url: str) -> str:
-    return _url_with_query(api_url, {"format": "JSON"})
-
-
-def _url_with_query(api_url: str, params: Mapping[str, str]) -> str:
-    parts = urlsplit(api_url)
-    replacement_keys = {key.lower() for key in params}
-    existing_params = tuple(
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if key.lower() not in replacement_keys and key.lower() != "authorization"
-    )
-    query = urlencode((*existing_params, *params.items()))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
-
-
-def _parse_cwa_observed_at(value: object) -> datetime | None:
-    parsed = parse_datetime(value)
-    if parsed is None:
-        return None
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+    return url_with_query(api_url, {"format": "JSON"}, drop_keys=("authorization",))
 
 
 def _wgs84_coordinate(coordinates: object) -> tuple[float, float] | None:
@@ -384,8 +370,8 @@ def _wgs84_coordinate(coordinates: object) -> tuple[float, float] | None:
     for coordinate in coordinates:
         if not isinstance(coordinate, Mapping):
             continue
-        lat = _optional_float(coordinate.get("StationLatitude"))
-        lng = _optional_float(coordinate.get("StationLongitude"))
+        lat = optional_float(coordinate.get("StationLatitude"))
+        lng = optional_float(coordinate.get("StationLongitude"))
         if lat is None or lng is None:
             continue
         value = (lat, lng)
@@ -398,18 +384,7 @@ def _wgs84_coordinate(coordinates: object) -> tuple[float, float] | None:
 def _precipitation_value(value: object) -> float | None:
     if isinstance(value, Mapping):
         value = value.get("Precipitation")
-    precipitation = _optional_float(value)
+    precipitation = optional_float(value)
     if precipitation is None or precipitation < 0:
         return None
     return precipitation
-
-
-def _optional_float(value: object) -> float | None:
-    if value is None:
-        return None
-    if not isinstance(value, (int, float, str)):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
