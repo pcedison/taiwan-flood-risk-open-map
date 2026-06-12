@@ -3,64 +3,243 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from app.api.schemas import (
     ConfidenceBlock,
     DataFreshness,
+    Evidence,
+    EvidencePreview,
     Explanation,
+    QueryHeat,
     RiskAssessRequest,
     RiskAssessmentResponse,
     RiskLevelBlock,
 )
+from app.core.config import Settings
+from app.domain.evidence import EvidenceUpsert
 from app.domain.geocoding import stable_uuid
+from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.history.news_enrichment import OnDemandNewsSearchResult
+from app.domain.profiles import RiskProfileRecord
+from app.domain.realtime import (
+    OfficialRealtimeBundle,
+    OfficialRealtimeObservation,
+    OfficialRealtimeSourceStatus,
+)
+from app.domain.risk import RiskEvidenceSignal, RiskScoringResult
+
+HistoricalRecordsWithDistance = tuple[tuple[HistoricalFloodRecord, float], ...]
+
+
+class CachedRiskAssessmentResponse(Protocol):
+    def __call__(
+        self, cache_key: str, /, *, now: datetime, ttl_seconds: int
+    ) -> RiskAssessmentResponse | None: ...
+
+
+class CacheRiskAssessmentResponse(Protocol):
+    def __call__(
+        self,
+        cache_key: str,
+        response: RiskAssessmentResponse,
+        /,
+        *,
+        now: datetime,
+        ttl_seconds: int,
+    ) -> None: ...
+
+
+class FetchOfficialRealtimeBundle(Protocol):
+    def __call__(
+        self,
+        *,
+        lat: float,
+        lng: float,
+        radius_m: int,
+        cwa_authorization: str | None,
+        enabled: bool,
+        cwa_enabled: bool,
+        wra_enabled: bool,
+        now: datetime,
+    ) -> OfficialRealtimeBundle: ...
+
+
+class OfficialFloodDisasterLookupFn(Protocol):
+    def __call__(
+        self, request: RiskAssessRequest, /, *, now: datetime
+    ) -> OfficialFloodDisasterLookup: ...
+
+
+class PrecomputedRiskProfile(Protocol):
+    def __call__(
+        self, request: RiskAssessRequest, /, *, now: datetime
+    ) -> RiskProfileRecord | None: ...
+
+
+class EnqueueProfileRefresh(Protocol):
+    def __call__(
+        self, profile: RiskProfileRecord, /, *, request: RiskAssessRequest
+    ) -> None: ...
+
+
+class ProfileBackedResponse(Protocol):
+    def __call__(
+        self,
+        *,
+        request: RiskAssessRequest,
+        assessment_id: str,
+        profile: RiskProfileRecord,
+        realtime_bundle: OfficialRealtimeBundle,
+        created_at: datetime,
+    ) -> RiskAssessmentResponse: ...
+
+
+class HistoricalLookupGate(Protocol):
+    def __call__(
+        self,
+        *,
+        historical_records: HistoricalRecordsWithDistance,
+        db_evidence_items: tuple[Evidence, ...] | None,
+    ) -> bool: ...
+
+
+class OnDemandPublicNewsLookup(Protocol):
+    def __call__(
+        self, request: RiskAssessRequest, /, *, now: datetime
+    ) -> OnDemandNewsSearchResult: ...
+
+
+class HistoricalRecordEvidence(Protocol):
+    def __call__(
+        self, record: HistoricalFloodRecord, /, *, distance_to_query_m: float
+    ) -> Evidence: ...
+
+
+class SignalFromHistoricalRecord(Protocol):
+    def __call__(
+        self, record: HistoricalFloodRecord, /, *, distance_to_query_m: float
+    ) -> RiskEvidenceSignal: ...
+
+
+class HistoricalScoringDistance(Protocol):
+    def __call__(
+        self,
+        *,
+        record: HistoricalFloodRecord,
+        distance_to_query_m: float,
+        radius_m: int,
+        location_text: str | None,
+    ) -> float: ...
+
+
+class PersistOrBuildOnDemandEvidence(Protocol):
+    def __call__(
+        self, result: OnDemandNewsSearchResult, /, *, writeback_enabled: bool
+    ) -> tuple[Evidence, ...]: ...
+
+
+class HistoricalDataFreshness(Protocol):
+    def __call__(
+        self,
+        *,
+        historical_records: HistoricalRecordsWithDistance,
+        db_evidence_items: tuple[Evidence, ...] | None,
+        now: datetime,
+    ) -> DataFreshness: ...
+
+
+class ScoreRisk(Protocol):
+    def __call__(
+        self, signals: tuple[RiskEvidenceSignal, ...], /, *, now: datetime
+    ) -> RiskScoringResult: ...
+
+
+class PersistedOfficialRealtimeDataFreshness(Protocol):
+    def __call__(
+        self, evidence_items: tuple[Evidence, ...], /, *, now: datetime
+    ) -> list[DataFreshness]: ...
+
+
+class OnDemandDataFreshness(Protocol):
+    def __call__(
+        self, result: OnDemandNewsSearchResult, /, *, now: datetime
+    ) -> list[DataFreshness]: ...
+
+
+class PersistAssessment(Protocol):
+    def __call__(
+        self,
+        *,
+        assessment_id: str,
+        request: RiskAssessRequest,
+        scoring: RiskScoringResult,
+        explanation: Explanation,
+        data_freshness: list[DataFreshness],
+        evidence_items: list[Evidence],
+        created_at: datetime,
+        expires_at: datetime,
+    ) -> None: ...
+
+
+class QueryHeatLookup(Protocol):
+    def __call__(self, request: RiskAssessRequest, /, *, now: datetime) -> QueryHeat: ...
 
 
 @dataclass(frozen=True)
 class RiskAssessmentDependencies:
-    risk_assessment_response_cache_key: Callable[..., str]
-    cached_risk_assessment_response: Callable[..., RiskAssessmentResponse | None]
-    fetch_official_realtime_bundle: Callable[..., Any]
-    nearby_db_evidence: Callable[..., Any]
-    official_flood_disaster_lookup: Callable[..., Any]
-    can_use_profile_fast_path: Callable[..., bool]
-    precomputed_risk_profile: Callable[..., Any]
-    profile_has_public_news: Callable[..., bool]
-    enqueue_profile_refresh: Callable[..., None]
-    profile_backed_response: Callable[..., RiskAssessmentResponse]
-    cache_risk_assessment_response: Callable[..., None]
-    fallback_historical_records: Callable[..., Any]
-    use_local_historical_fallback: Callable[..., bool]
-    should_attempt_public_news_lookup: Callable[..., bool]
-    on_demand_public_news_result: Callable[..., OnDemandNewsSearchResult]
-    historical_record_evidence: Callable[..., Any]
-    evidence_from_upsert: Callable[..., Any]
-    signal_from_historical_record: Callable[..., Any]
-    historical_scoring_distance: Callable[..., float]
-    signal_from_evidence: Callable[..., Any]
-    needs_historical_event_lookup: Callable[..., bool]
-    persist_or_build_on_demand_evidence: Callable[..., Any]
-    historical_data_freshness: Callable[..., Any]
-    official_realtime_evidence: Callable[..., Any]
-    display_evidence_items: Callable[..., Any]
-    score_risk: Callable[..., Any]
-    signal_from_official_realtime: Callable[..., Any]
-    cache_assessment_evidence: Callable[..., None]
-    persisted_official_realtime_data_freshness: Callable[..., list[DataFreshness]]
-    visible_source_limitations: Callable[..., list[str]]
-    freshness_from_status: Callable[..., DataFreshness]
-    official_flood_disaster_data_freshness: Callable[..., list[DataFreshness]]
-    on_demand_data_freshness: Callable[..., list[DataFreshness]]
-    persist_assessment: Callable[..., None]
-    evidence_preview: Callable[..., Any]
-    query_heat: Callable[..., Any]
+    risk_assessment_response_cache_key: Callable[[RiskAssessRequest, Settings], str]
+    cached_risk_assessment_response: CachedRiskAssessmentResponse
+    fetch_official_realtime_bundle: FetchOfficialRealtimeBundle
+    nearby_db_evidence: Callable[[RiskAssessRequest], tuple[Evidence, ...] | None]
+    official_flood_disaster_lookup: OfficialFloodDisasterLookupFn
+    can_use_profile_fast_path: Callable[[tuple[Evidence, ...] | None], bool]
+    precomputed_risk_profile: PrecomputedRiskProfile
+    profile_has_public_news: Callable[[RiskProfileRecord], bool]
+    enqueue_profile_refresh: EnqueueProfileRefresh
+    profile_backed_response: ProfileBackedResponse
+    cache_risk_assessment_response: CacheRiskAssessmentResponse
+    fallback_historical_records: Callable[[RiskAssessRequest], HistoricalRecordsWithDistance]
+    use_local_historical_fallback: Callable[[str], bool]
+    should_attempt_public_news_lookup: HistoricalLookupGate
+    on_demand_public_news_result: OnDemandPublicNewsLookup
+    historical_record_evidence: HistoricalRecordEvidence
+    evidence_from_upsert: Callable[[EvidenceUpsert], Evidence]
+    signal_from_historical_record: SignalFromHistoricalRecord
+    historical_scoring_distance: HistoricalScoringDistance
+    signal_from_evidence: Callable[[Evidence], RiskEvidenceSignal]
+    needs_historical_event_lookup: HistoricalLookupGate
+    persist_or_build_on_demand_evidence: PersistOrBuildOnDemandEvidence
+    historical_data_freshness: HistoricalDataFreshness
+    official_realtime_evidence: Callable[[OfficialRealtimeObservation], Evidence]
+    display_evidence_items: Callable[[list[Evidence]], list[Evidence]]
+    score_risk: ScoreRisk
+    signal_from_official_realtime: Callable[[OfficialRealtimeObservation], RiskEvidenceSignal]
+    cache_assessment_evidence: Callable[[str, list[Evidence]], None]
+    persisted_official_realtime_data_freshness: PersistedOfficialRealtimeDataFreshness
+    visible_source_limitations: Callable[
+        [
+            OfficialRealtimeBundle,
+            HistoricalRecordsWithDistance,
+            tuple[Evidence, ...] | None,
+            OnDemandNewsSearchResult,
+        ],
+        list[str],
+    ]
+    freshness_from_status: Callable[[OfficialRealtimeSourceStatus], DataFreshness]
+    official_flood_disaster_data_freshness: Callable[
+        [OfficialFloodDisasterLookup], list[DataFreshness]
+    ]
+    on_demand_data_freshness: OnDemandDataFreshness
+    persist_assessment: PersistAssessment
+    evidence_preview: Callable[[Evidence], EvidencePreview]
+    query_heat: QueryHeatLookup
 
 
 def assess_risk(
     risk_request: RiskAssessRequest,
     *,
-    settings: Any,
+    settings: Settings,
     created_at: datetime,
     dependencies: RiskAssessmentDependencies,
 ) -> RiskAssessmentResponse:
@@ -354,10 +533,10 @@ def assessment_result_snapshot(
     *,
     assessment_id: str,
     request: RiskAssessRequest,
-    scoring: Any,
+    scoring: RiskScoringResult,
     explanation: Explanation,
     data_freshness: list[DataFreshness],
-    evidence_items: list[Any],
+    evidence_items: list[Evidence],
     created_at: datetime,
     expires_at: datetime,
 ) -> dict[str, Any]:
