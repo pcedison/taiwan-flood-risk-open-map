@@ -4,6 +4,7 @@ import pytest
 import redis
 
 import app.api.services.public_response_cache as response_cache
+from app.api.services.redis_support import FailOpenRedisClients
 from app.api.schemas import (
     ConfidenceBlock,
     Explanation,
@@ -40,9 +41,7 @@ class _FakeRedis:
 @pytest.fixture(autouse=True)
 def isolated_cache_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(response_cache, "_MEMORY_CACHE", {})
-    monkeypatch.setattr(response_cache, "_redis_client", None)
-    monkeypatch.setattr(response_cache, "_redis_client_url", None)
-    monkeypatch.setattr(response_cache, "_redis_retry_at", 0.0)
+    monkeypatch.setattr(response_cache, "_REDIS_CLIENTS", FailOpenRedisClients())
 
 
 def _response(assessment_id: str = "assessment-1") -> RiskAssessmentResponse:
@@ -162,7 +161,7 @@ def test_redis_failure_pauses_redis_attempts_for_cooldown(
         backend="redis",
         redis_url="redis://example.test:6379/0",
     )
-    assert response_cache._redis_retry_at > 0.0
+    assert response_cache._REDIS_CLIENTS.retry_at > 0.0
 
     response_cache.cached_response(
         "key-a",

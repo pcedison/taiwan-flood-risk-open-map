@@ -51,6 +51,8 @@ class Settings:
     official_flood_disaster_points_path: str | None
     risk_assessment_response_cache_seconds: int
     risk_assessment_response_cache_backend: RateLimitBackend
+    risk_assessment_evidence_cache_ttl_seconds: int
+    risk_assessment_evidence_cache_backend: RateLimitBackend
     tile_dynamic_fallback_enabled: bool
     public_rate_limit_enabled: bool
     public_rate_limit_backend: RateLimitBackend
@@ -161,6 +163,16 @@ def get_settings() -> Settings:
         ),
         risk_assessment_response_cache_backend=_env_choice(
             "RISK_ASSESSMENT_RESPONSE_CACHE_BACKEND",
+            choices={"redis", "memory"},
+            default="memory" if _local_or_test_runtime(app_env) else "redis",
+        ),
+        risk_assessment_evidence_cache_ttl_seconds=_env_int(
+            "RISK_ASSESSMENT_EVIDENCE_CACHE_TTL_SECONDS",
+            default=3600,
+            minimum=0,
+        ),
+        risk_assessment_evidence_cache_backend=_env_choice(
+            "RISK_ASSESSMENT_EVIDENCE_CACHE_BACKEND",
             choices={"redis", "memory"},
             default="memory" if _local_or_test_runtime(app_env) else "redis",
         ),

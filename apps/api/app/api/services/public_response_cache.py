@@ -12,24 +12,20 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from hashlib import sha256
 from threading import Lock
-from time import monotonic
 
 import redis
 from pydantic import ValidationError
 
 from app.api.schemas import RiskAssessmentResponse
+from app.api.services.redis_support import FailOpenRedisClients
 
 _REDIS_KEY_PREFIX = "flood-risk:risk-response:"
-_REDIS_FAILURE_COOLDOWN_SECONDS = 30.0
 _MEMORY_CACHE_MAX_ENTRIES = 128
 
 _MEMORY_CACHE: dict[str, tuple[datetime, RiskAssessmentResponse]] = {}
 _MEMORY_CACHE_LOCK = Lock()
 
-_redis_client: redis.Redis | None = None
-_redis_client_url: str | None = None
-_redis_retry_at: float = 0.0
-_REDIS_CLIENT_LOCK = Lock()
+_REDIS_CLIENTS = FailOpenRedisClients()
 
 
 def cached_response(
@@ -96,13 +92,13 @@ def _memory_store_response(
 
 
 def _redis_cached_response(cache_key: str, *, redis_url: str) -> RiskAssessmentResponse | None:
-    client = _shared_redis_client(redis_url)
+    client = _REDIS_CLIENTS.client(redis_url)
     if client is None:
         return None
     try:
         payload = client.get(_redis_key(cache_key))
     except redis.RedisError:
-        _mark_redis_unavailable()
+        _REDIS_CLIENTS.mark_unavailable()
         return None
     if not isinstance(payload, str | bytes | bytearray):
         return None
@@ -119,38 +115,14 @@ def _redis_store_response(
     ttl_seconds: int,
     redis_url: str,
 ) -> None:
-    client = _shared_redis_client(redis_url)
+    client = _REDIS_CLIENTS.client(redis_url)
     if client is None:
         return
     try:
         client.setex(_redis_key(cache_key), ttl_seconds, response.model_dump_json())
     except redis.RedisError:
-        _mark_redis_unavailable()
+        _REDIS_CLIENTS.mark_unavailable()
 
 
 def _redis_key(cache_key: str) -> str:
     return _REDIS_KEY_PREFIX + sha256(cache_key.encode("utf-8")).hexdigest()
-
-
-def _shared_redis_client(redis_url: str) -> redis.Redis | None:
-    global _redis_client, _redis_client_url, _redis_retry_at
-    with _REDIS_CLIENT_LOCK:
-        if monotonic() < _redis_retry_at:
-            return None
-        if _redis_client is None or _redis_client_url != redis_url:
-            try:
-                _redis_client = redis.Redis.from_url(
-                    redis_url,
-                    socket_connect_timeout=2,
-                    socket_timeout=2,
-                )
-            except redis.RedisError:
-                _mark_redis_unavailable()
-                return None
-            _redis_client_url = redis_url
-        return _redis_client
-
-
-def _mark_redis_unavailable() -> None:
-    global _redis_retry_at
-    _redis_retry_at = monotonic() + _REDIS_FAILURE_COOLDOWN_SECONDS

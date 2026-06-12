@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from threading import Lock
 from typing import Any, Protocol, cast
 
 from app.api.schemas import (
@@ -10,6 +9,7 @@ from app.api.schemas import (
     GeoJsonGeometry,
     LatLng,
 )
+from app.api.services import public_evidence_cache
 from app.domain.evidence import EvidenceRecord, EvidenceRepositoryUnavailable, EvidenceUpsert
 from app.domain.geocoding import stable_uuid
 from app.domain.history import HistoricalFloodRecord
@@ -26,8 +26,8 @@ OFFICIAL_DATA_GOV_URLS = {
 
 OFFICIAL_FLOOD_DISASTER_SOURCE_PREFIX = "data-gov-130016:"
 
-_ASSESSMENT_EVIDENCE_CACHE: dict[str, list[Evidence]] = {}
-_ASSESSMENT_EVIDENCE_CACHE_LOCK = Lock()
+# Alias kept for tests that clear the in-process cache between cases.
+_ASSESSMENT_EVIDENCE_CACHE = public_evidence_cache._MEMORY_CACHE
 
 
 class FetchAssessmentEvidence(Protocol):
@@ -44,12 +44,21 @@ class AssessmentDbEvidence(Protocol):
     def __call__(self, assessment_id: str, *, page_size: int) -> tuple[Evidence, ...]: ...
 
 
-def cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence]) -> None:
-    with _ASSESSMENT_EVIDENCE_CACHE_LOCK:
-        _ASSESSMENT_EVIDENCE_CACHE[assessment_id] = evidence_items
-        while len(_ASSESSMENT_EVIDENCE_CACHE) > 256:
-            oldest_key = next(iter(_ASSESSMENT_EVIDENCE_CACHE))
-            del _ASSESSMENT_EVIDENCE_CACHE[oldest_key]
+def cache_assessment_evidence(
+    assessment_id: str,
+    evidence_items: list[Evidence],
+    *,
+    ttl_seconds: int = 0,
+    backend: str = "memory",
+    redis_url: str | None = None,
+) -> None:
+    public_evidence_cache.store_evidence(
+        assessment_id,
+        evidence_items,
+        ttl_seconds=ttl_seconds,
+        backend=backend,
+        redis_url=redis_url,
+    )
 
 
 def evidence_from_record(record: EvidenceRecord) -> Evidence:
@@ -137,8 +146,14 @@ def list_assessment_evidence(
     *,
     page_size: int,
     fetch_db_evidence: AssessmentDbEvidence,
+    backend: str = "memory",
+    redis_url: str | None = None,
 ) -> EvidenceListResponse:
-    cached_items = _ASSESSMENT_EVIDENCE_CACHE.get(assessment_id)
+    cached_items = public_evidence_cache.cached_evidence(
+        assessment_id,
+        backend=backend,
+        redis_url=redis_url,
+    )
     if cached_items is None:
         items = list(fetch_db_evidence(assessment_id, page_size=page_size))
     else:

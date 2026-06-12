@@ -534,6 +534,7 @@ def _profile_backed_response(
         created_at=created_at,
         top_evidence_items=_profile_top_evidence_items(profile),
         query_heat=_query_heat(request, now=created_at),
+        cache_assessment_evidence=_cache_assessment_evidence,
     )
 
 
@@ -613,7 +614,14 @@ _official_flood_disaster_data_freshness = public_freshness.official_flood_disast
 
 
 def _cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence]) -> None:
-    public_evidence.cache_assessment_evidence(assessment_id, evidence_items)
+    settings = get_settings()
+    public_evidence.cache_assessment_evidence(
+        assessment_id,
+        evidence_items,
+        ttl_seconds=settings.risk_assessment_evidence_cache_ttl_seconds,
+        backend=settings.risk_assessment_evidence_cache_backend,
+        redis_url=settings.redis_url,
+    )
 
 
 def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: Any) -> str:
@@ -799,10 +807,13 @@ def list_evidence(
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> EvidenceListResponse:
     del cursor
+    settings = get_settings()
     return public_evidence.list_assessment_evidence(
         str(assessment_id),
         page_size=page_size,
         fetch_db_evidence=_assessment_db_evidence,
+        backend=settings.risk_assessment_evidence_cache_backend,
+        redis_url=settings.redis_url,
     )
 
 

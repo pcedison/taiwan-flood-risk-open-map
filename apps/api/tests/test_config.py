@@ -83,6 +83,8 @@ def test_settings_enables_short_risk_response_cache_for_hosted_runtime(monkeypat
 
     assert settings.risk_assessment_response_cache_seconds == 120
     assert settings.risk_assessment_response_cache_backend == "redis"
+    assert settings.risk_assessment_evidence_cache_backend == "redis"
+    assert settings.risk_assessment_evidence_cache_ttl_seconds == 3600
     assert settings.realtime_official_diagnostic_fallback_enabled is False
     assert settings.tile_dynamic_fallback_enabled is False
     get_settings.cache_clear()
@@ -97,6 +99,7 @@ def test_settings_local_defaults_allow_realtime_diagnostic_fallback(monkeypatch)
 
     assert settings.realtime_official_diagnostic_fallback_enabled is True
     assert settings.risk_assessment_response_cache_backend == "memory"
+    assert settings.risk_assessment_evidence_cache_backend == "memory"
     assert settings.tile_dynamic_fallback_enabled is True
     get_settings.cache_clear()
 
