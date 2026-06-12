@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from app.api.routes import public as public_routes
+from app.api.services import public_geocode_cache
 from app.core.config import get_settings
 from app.domain.geocoding.providers import TaiwanAdminArea, load_taiwan_admin_areas
 from app.domain.realtime import OfficialRealtimeBundle, OfficialRealtimeSourceStatus
@@ -22,8 +23,7 @@ TAIWAN_BOUNDS = {
 @pytest.fixture()
 def no_network_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     get_settings.cache_clear()
-    public_routes._cached_nominatim_candidates.cache_clear()
-    public_routes._cached_wikimedia_candidates.cache_clear()
+    public_geocode_cache._MEMORY_CACHE.clear()
     public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
     public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
 

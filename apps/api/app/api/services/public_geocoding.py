@@ -8,13 +8,13 @@ tests can monkeypatch the lookups without network access.
 from __future__ import annotations
 
 import json
-from functools import lru_cache
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.api.schemas import LatLng, PlaceCandidate
+from app.api.services import public_geocode_cache
 from app.domain.geocoding import (
     candidate_type_for_precision,
     geocode_limitations,
@@ -30,8 +30,33 @@ NOMINATIM_USER_AGENT = "FloodRiskTaiwan/0.1 local-development"
 TAIWAN_VIEWBOX = "119.2,25.5,122.3,21.7"
 
 
-@lru_cache(maxsize=512)
 def cached_nominatim_candidates(
+    query: str,
+    input_type: Literal["address", "landmark", "parcel"],
+    limit: int,
+    *,
+    ttl_seconds: int = 86400,
+    backend: str = "memory",
+    redis_url: str | None = None,
+) -> tuple[PlaceCandidate, ...]:
+    cache_key = f"nominatim:{input_type}:{limit}:{query}"
+    cached = public_geocode_cache.cached_candidates(
+        cache_key, backend=backend, redis_url=redis_url
+    )
+    if cached is not None:
+        return cached
+    candidates = fetch_nominatim_candidates(query, input_type, limit)
+    public_geocode_cache.store_candidates(
+        cache_key,
+        candidates,
+        ttl_seconds=ttl_seconds,
+        backend=backend,
+        redis_url=redis_url,
+    )
+    return candidates
+
+
+def fetch_nominatim_candidates(
     query: str,
     input_type: Literal["address", "landmark", "parcel"],
     limit: int,
@@ -93,8 +118,32 @@ def cached_nominatim_candidates(
     return tuple(candidates)
 
 
-@lru_cache(maxsize=512)
-def cached_wikimedia_candidates(query: str, limit: int) -> tuple[PlaceCandidate, ...]:
+def cached_wikimedia_candidates(
+    query: str,
+    limit: int,
+    *,
+    ttl_seconds: int = 86400,
+    backend: str = "memory",
+    redis_url: str | None = None,
+) -> tuple[PlaceCandidate, ...]:
+    cache_key = f"wikimedia:{limit}:{query}"
+    cached = public_geocode_cache.cached_candidates(
+        cache_key, backend=backend, redis_url=redis_url
+    )
+    if cached is not None:
+        return cached
+    candidates = fetch_wikimedia_candidates(query, limit)
+    public_geocode_cache.store_candidates(
+        cache_key,
+        candidates,
+        ttl_seconds=ttl_seconds,
+        backend=backend,
+        redis_url=redis_url,
+    )
+    return candidates
+
+
+def fetch_wikimedia_candidates(query: str, limit: int) -> tuple[PlaceCandidate, ...]:
     search_params = urlencode(
         {
             "action": "query",

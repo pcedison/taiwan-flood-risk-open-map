@@ -53,6 +53,8 @@ class Settings:
     risk_assessment_response_cache_backend: RateLimitBackend
     risk_assessment_evidence_cache_ttl_seconds: int
     risk_assessment_evidence_cache_backend: RateLimitBackend
+    geocode_cache_ttl_seconds: int
+    geocode_cache_backend: RateLimitBackend
     tile_dynamic_fallback_enabled: bool
     public_rate_limit_enabled: bool
     public_rate_limit_backend: RateLimitBackend
@@ -173,6 +175,16 @@ def get_settings() -> Settings:
         ),
         risk_assessment_evidence_cache_backend=_env_choice(
             "RISK_ASSESSMENT_EVIDENCE_CACHE_BACKEND",
+            choices={"redis", "memory"},
+            default="memory" if _local_or_test_runtime(app_env) else "redis",
+        ),
+        geocode_cache_ttl_seconds=_env_int(
+            "GEOCODE_CACHE_TTL_SECONDS",
+            default=86400,
+            minimum=0,
+        ),
+        geocode_cache_backend=_env_choice(
+            "GEOCODE_CACHE_BACKEND",
             choices={"redis", "memory"},
             default="memory" if _local_or_test_runtime(app_env) else "redis",
         ),

@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request as FastAPIRequest
@@ -19,6 +19,7 @@ from app.api.schemas import (
     LatLng,  # noqa: F401  (re-exported for tests building Evidence payloads)
     LayersResponse,
     MapLayer,
+    PlaceCandidate,
     QueryHeat,
     RiskAssessRequest,
     RiskAssessmentResponse,
@@ -95,10 +96,33 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
 
 
-# Module-level aliases keep these lookups monkeypatchable on this module while
+# Module-level wrappers keep these lookups monkeypatchable on this module while
 # the implementations live in the geocoding service.
-_cached_nominatim_candidates = public_geocoding.cached_nominatim_candidates
-_cached_wikimedia_candidates = public_geocoding.cached_wikimedia_candidates
+def _cached_nominatim_candidates(
+    query: str,
+    input_type: Literal["address", "landmark", "parcel"],
+    limit: int,
+) -> tuple[PlaceCandidate, ...]:
+    settings = get_settings()
+    return public_geocoding.cached_nominatim_candidates(
+        query,
+        input_type,
+        limit,
+        ttl_seconds=settings.geocode_cache_ttl_seconds,
+        backend=settings.geocode_cache_backend,
+        redis_url=settings.redis_url,
+    )
+
+
+def _cached_wikimedia_candidates(query: str, limit: int) -> tuple[PlaceCandidate, ...]:
+    settings = get_settings()
+    return public_geocoding.cached_wikimedia_candidates(
+        query,
+        limit,
+        ttl_seconds=settings.geocode_cache_ttl_seconds,
+        backend=settings.geocode_cache_backend,
+        redis_url=settings.redis_url,
+    )
 
 
 def _build_geocoder():
