@@ -3,6 +3,10 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from app.adapters.contracts import AdapterMetadata, SourceFamily
+from app.adapters.civil_iot import (
+    FLOOD_SENSOR_METADATA,
+    RIVER_WATER_LEVEL_METADATA,
+)
 from app.adapters.cwa import CWA_RAINFALL_METADATA
 from app.adapters.dcard import METADATA as DCARD_METADATA
 from app.adapters.flood_potential import FLOOD_POTENTIAL_GEOJSON_METADATA
@@ -28,6 +32,8 @@ ADAPTER_REGISTRY = MappingProxyType(
         ),
         CWA_RAINFALL_METADATA.key: CWA_RAINFALL_METADATA,
         WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
+        FLOOD_SENSOR_METADATA.key: FLOOD_SENSOR_METADATA,
+        RIVER_WATER_LEVEL_METADATA.key: RIVER_WATER_LEVEL_METADATA,
         FLOOD_POTENTIAL_GEOJSON_METADATA.key: FLOOD_POTENTIAL_GEOJSON_METADATA,
         PTT_METADATA.key: PTT_METADATA,
         DCARD_METADATA.key: DCARD_METADATA,
@@ -67,6 +73,16 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
             metadata.enabled_by_default,
             settings.source_flood_potential_enabled,
         )
+    if metadata.key == "official.civil_iot.flood_sensor":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_flood_sensor_enabled,
+        )
+    if metadata.key == "official.civil_iot.river_water_level":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_civil_iot_river_enabled,
+        )
     if metadata.key == "ptt":
         return settings.source_forum_enabled is True and settings.source_ptt_enabled is True
     if metadata.key == "dcard":
@@ -99,6 +115,10 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_wra_enabled is not False
     if metadata.key == "official.flood_potential.geojson":
         return settings.source_flood_potential_enabled is not False
+    if metadata.key == "official.civil_iot.flood_sensor":
+        return settings.source_flood_sensor_enabled is not False
+    if metadata.key == "official.civil_iot.river_water_level":
+        return settings.source_civil_iot_river_enabled is not False
     if metadata.key == "ptt":
         return settings.source_forum_enabled is True and settings.source_ptt_enabled is True
     if metadata.key == "dcard":

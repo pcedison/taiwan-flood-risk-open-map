@@ -18,6 +18,10 @@ class WorkerSettings:
     source_wra_api_enabled: bool
     source_flood_potential_enabled: bool | None
     source_flood_potential_geojson_enabled: bool
+    source_flood_sensor_enabled: bool | None
+    source_flood_sensor_api_enabled: bool
+    source_civil_iot_river_enabled: bool | None
+    source_civil_iot_river_api_enabled: bool
     source_news_enabled: bool | None
     source_forum_enabled: bool | None
     source_ptt_enabled: bool | None
@@ -43,6 +47,9 @@ class WorkerSettings:
     wra_api_timeout_seconds: int
     flood_potential_geojson_url: str | None
     flood_potential_geojson_timeout_seconds: int
+    civil_iot_flood_sensor_url: str | None
+    civil_iot_river_url: str | None
+    civil_iot_api_timeout_seconds: int
     metrics_instance: str
     worker_metrics_textfile_path: str | None
     scheduler_metrics_textfile_path: str | None
@@ -60,6 +67,13 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_flood_potential_geojson_enabled=env_flag(
             values,
             "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED",
+        ),
+        source_flood_sensor_enabled=env_bool(values, "SOURCE_FLOOD_SENSOR_ENABLED"),
+        source_flood_sensor_api_enabled=env_flag(values, "SOURCE_FLOOD_SENSOR_API_ENABLED"),
+        source_civil_iot_river_enabled=env_bool(values, "SOURCE_CIVIL_IOT_RIVER_ENABLED"),
+        source_civil_iot_river_api_enabled=env_flag(
+            values,
+            "SOURCE_CIVIL_IOT_RIVER_API_ENABLED",
         ),
         source_news_enabled=env_bool(values, "SOURCE_NEWS_ENABLED"),
         source_forum_enabled=env_bool(values, "SOURCE_FORUM_ENABLED"),
@@ -102,6 +116,13 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         flood_potential_geojson_timeout_seconds=env_int(
             values,
             "FLOOD_POTENTIAL_GEOJSON_TIMEOUT_SECONDS",
+            default=8,
+        ),
+        civil_iot_flood_sensor_url=env_str(values, "CIVIL_IOT_FLOOD_SENSOR_URL"),
+        civil_iot_river_url=env_str(values, "CIVIL_IOT_RIVER_URL"),
+        civil_iot_api_timeout_seconds=env_int(
+            values,
+            "CIVIL_IOT_API_TIMEOUT_SECONDS",
             default=8,
         ),
         metrics_instance=(
