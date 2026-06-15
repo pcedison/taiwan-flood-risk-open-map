@@ -230,14 +230,22 @@ def _normalize_rainfall_record(
     observed_at = parse_datetime(payload.get("observed_at"))
     rainfall_1h = optional_float(payload.get("rainfall_mm_1h"))
     rainfall_24h = optional_float(payload.get("rainfall_mm_24h"))
+    rainfall_10m = optional_float(payload.get("rainfall_mm_10m"))
 
-    if not station_name or observed_at is None or rainfall_1h is None:
+    if not station_name or observed_at is None:
+        return None
+    if rainfall_1h is None and rainfall_24h is None and rainfall_10m is None:
         return None
 
     county = optional_str(payload.get("county"))
     town = optional_str(payload.get("town"))
     location_text = " ".join(part for part in (county, town, station_name) if part)
-    summary = f"Observed rainfall: {rainfall_1h:.1f} mm in 1 hour"
+    if rainfall_1h is not None:
+        summary = f"Observed rainfall: {rainfall_1h:.1f} mm in 1 hour"
+    elif rainfall_10m is not None:
+        summary = f"Observed rainfall: {rainfall_10m:.1f} mm in 10 minutes"
+    else:
+        summary = "Observed rainfall station online (no 1-hour reading)"
     if rainfall_24h is not None:
         summary = f"{summary}; {rainfall_24h:.1f} mm in 24 hours"
 
@@ -286,14 +294,22 @@ def _parse_cwa_station_record(
     station_name = optional_str(item.get("StationName"))
     observed_at = parse_observed_at_utc(obs_time.get("DateTime"))
     rainfall_1h = _precipitation_value(rainfall.get("Past1hr"))
-    if station_id is None or station_name is None or observed_at is None or rainfall_1h is None:
+    rainfall_10m = _precipitation_value(rainfall.get("Past10Min"))
+    rainfall_24h = _precipitation_value(rainfall.get("Past24hr"))
+    # Keep a station as soon as any precipitation window reports a valid value.
+    # A station whose 1-hour value is a sentinel/missing but which still reports
+    # 10-minute or 24-hour rainfall (or 0 mm = dry) is a live station and should
+    # contribute coverage, not be dropped into "即時資料不足". A station with no
+    # valid window at all is genuinely not reporting and is rejected.
+    if station_id is None or station_name is None or observed_at is None:
+        return None
+    if rainfall_1h is None and rainfall_10m is None and rainfall_24h is None:
         return None
 
     record: dict[str, Any] = {
         "station_id": station_id,
         "station_name": station_name,
         "observed_at": observed_at.isoformat(),
-        "rainfall_mm_1h": rainfall_1h,
         "source_url": source_url,
         "attribution": CWA_RAINFALL_ATTRIBUTION,
         "confidence": 0.93,
@@ -301,8 +317,8 @@ def _parse_cwa_station_record(
     if resource_url is not None:
         record["resource_url"] = resource_url
 
-    rainfall_10m = _precipitation_value(rainfall.get("Past10Min"))
-    rainfall_24h = _precipitation_value(rainfall.get("Past24hr"))
+    if rainfall_1h is not None:
+        record["rainfall_mm_1h"] = rainfall_1h
     if rainfall_10m is not None:
         record["rainfall_mm_10m"] = rainfall_10m
     if rainfall_24h is not None:

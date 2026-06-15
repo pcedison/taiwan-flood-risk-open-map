@@ -61,6 +61,31 @@ def cache_assessment_evidence(
     )
 
 
+def rainfall_realtime_risk_factor(rainfall_1h_mm: float) -> float:
+    """Intensity-aware realtime risk factor for a CWA rainfall reading.
+
+    Mirrors the realtime bridge's thresholds so worker-persisted rainfall scores
+    by actual intensity instead of mere station presence: a dry/light station
+    contributes ~0 (realtime "低", not "即時資料不足"), heavy rain contributes high.
+    """
+
+    if rainfall_1h_mm >= 80:
+        return 1.0
+    if rainfall_1h_mm >= 40:
+        return 0.7
+    if rainfall_1h_mm >= 20:
+        return 0.35
+    if rainfall_1h_mm >= 10:
+        return 0.15
+    return 0.0
+
+
+def _evidence_realtime_risk_factor(record: EvidenceRecord) -> float | None:
+    if record.event_type == "rainfall" and record.rainfall_mm_1h is not None:
+        return rainfall_realtime_risk_factor(record.rainfall_mm_1h)
+    return None
+
+
 def evidence_from_record(record: EvidenceRecord) -> Evidence:
     point = (
         LatLng(lat=record.lat, lng=record.lng)
@@ -99,6 +124,7 @@ def evidence_from_record(record: EvidenceRecord) -> Evidence:
         source_weight=record.source_weight,
         privacy_level=cast(Any, record.privacy_level),
         raw_ref=record.raw_ref,
+        realtime_risk_factor=_evidence_realtime_risk_factor(record),
     )
 
 
@@ -300,7 +326,11 @@ def signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
         distance_to_query_m=evidence.distance_to_query_m,
         freshness_score=evidence.freshness_score,
         source_weight=evidence.source_weight,
-        risk_factor=1.0,
+        risk_factor=(
+            evidence.realtime_risk_factor
+            if evidence.realtime_risk_factor is not None
+            else 1.0
+        ),
         observed_at=evidence.observed_at or evidence.occurred_at,
     )
 

@@ -296,6 +296,9 @@ class Evidence(EvidencePreview):
     source_weight: float = Field(ge=0)
     privacy_level: Literal["public", "aggregated", "redacted"]
     raw_ref: str | None = None
+    # Internal-only: intensity-aware realtime risk factor for official rainfall/
+    # water_level evidence (None = use the default 1.0). Excluded from responses.
+    realtime_risk_factor: float | None = Field(default=None, exclude=True)
 
 
 class EvidenceListResponse(ContractModel):

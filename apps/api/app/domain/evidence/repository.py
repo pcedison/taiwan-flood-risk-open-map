@@ -40,6 +40,7 @@ class EvidenceRecord:
     source_weight: float
     privacy_level: str
     raw_ref: str | None
+    rainfall_mm_1h: float | None = None
 
 
 @dataclass(frozen=True)
@@ -271,7 +272,8 @@ def query_nearby_evidence(
             COALESCE(e.source_weight, CASE WHEN e.source_type = 'official' THEN 1.0 ELSE 0.85 END)
                 AS source_weight,
             e.privacy_level,
-            e.raw_ref
+            e.raw_ref,
+            (e.properties->>'rainfall_mm_1h')::double precision AS rainfall_mm_1h
         FROM evidence e
         CROSS JOIN query_point qp
         WHERE e.ingestion_status = 'accepted'
@@ -638,6 +640,7 @@ def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
         source_weight=float(row["source_weight"]),
         privacy_level=str(row["privacy_level"]),
         raw_ref=str(row["raw_ref"]) if row.get("raw_ref") is not None else None,
+        rainfall_mm_1h=_optional_float(row.get("rainfall_mm_1h")),
     )
 
 

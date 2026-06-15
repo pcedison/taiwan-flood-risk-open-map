@@ -162,10 +162,33 @@ def _to_staging_upsert(
         payload={
             "location_text": evidence.location_text,
             **_location_payload(raw_item),
+            **_realtime_metrics_payload(raw_item),
             "attribution": evidence.attribution,
             "tags": list(evidence.tags),
         },
     )
+
+
+# Realtime station intensity metrics carried into evidence.properties so the API
+# can derive an intensity-aware risk factor (a dry rainfall station then scores
+# low instead of inflating realtime risk by mere presence).
+_REALTIME_METRIC_KEYS: tuple[str, ...] = (
+    "rainfall_mm_1h",
+    "rainfall_mm_24h",
+    "water_level_m",
+    "warning_level_m",
+)
+
+
+def _realtime_metrics_payload(raw_item: Any | None) -> dict[str, Any]:
+    if raw_item is None or not isinstance(raw_item.payload, Mapping):
+        return {}
+    metrics: dict[str, Any] = {}
+    for key in _REALTIME_METRIC_KEYS:
+        value = raw_item.payload.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            metrics[key] = float(value)
+    return metrics
 
 
 def _location_payload(raw_item: Any | None) -> dict[str, Any]:
