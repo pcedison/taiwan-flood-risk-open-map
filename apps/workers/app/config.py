@@ -41,6 +41,7 @@ class WorkerSettings:
     scheduler_interval_seconds: int
     scheduler_max_ticks: int | None
     scheduler_lease_ttl_seconds: int
+    evidence_realtime_retention_hours: int
     freshness_max_age_seconds: int
     runtime_fixtures_enabled: bool
     runtime_job_lease_seconds: int
@@ -121,6 +122,11 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "SCHEDULER_LEASE_TTL_SECONDS",
             default=600,
+        ),
+        evidence_realtime_retention_hours=env_int(
+            values,
+            "EVIDENCE_REALTIME_RETENTION_HOURS",
+            default=48,
         ),
         freshness_max_age_seconds=env_int(
             values,

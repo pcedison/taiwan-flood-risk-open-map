@@ -75,9 +75,12 @@ Both adapters are off until two external prerequisites are met:
    operator; they are read from env, never committed.
 2. **Hosted memory headroom.** The Zeabur node is 2C/2GB with PostGIS OOM
    history. Ingesting 2,000+ flood sensors plus river levels every few minutes
-   multiplies evidence volume and can pressure the node. Before live enablement,
-   decide on a station/geography subset, retention/pruning, and cadence — or wait
-   for a 4 GB upgrade.
+   multiplies evidence volume and can pressure the node. Realtime evidence is now
+   bounded by retention pruning (`EVIDENCE_REALTIME_RETENTION_HOURS`, default 48,
+   run in scheduler maintenance — prunes only official `rainfall`/`water_level`
+   rows, keeps historical evidence), but before live enablement still target a
+   4 GB node and follow the step-by-step
+   `docs/runbooks/civil-iot-live-enablement.md`.
 
 Enable (after the gates above) with, e.g.:
 

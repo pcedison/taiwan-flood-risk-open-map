@@ -10,6 +10,11 @@ from typing import Literal
 from app.adapters.contracts import DataSourceAdapter
 from app.adapters.registry import enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
+from app.jobs.evidence_retention import (
+    EvidenceRetentionSummary,
+    EvidenceRetentionUnavailable,
+    PostgresEvidenceRetentionJob,
+)
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.ingestion import (
     AdapterBatchRunSummary,
@@ -75,6 +80,7 @@ class MaintenanceCycleResult:
     reason: str | None = None
     query_heat_summaries: tuple[QueryHeatAggregationSummary, ...] = ()
     query_heat_retention: QueryHeatRetentionSummary | None = None
+    evidence_retention: EvidenceRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
 
@@ -196,9 +202,15 @@ def run_maintenance_once(
     tile_feature_limit: int | None = DEFAULT_TILE_FEATURE_LIMIT,
     tile_prune_limit: int = DEFAULT_TILE_PRUNE_LIMIT,
     tile_expired_before: datetime | None = None,
+    evidence_retention_hours: int | None = None,
 ) -> MaintenanceCycleResult:
     resolved_settings = settings or load_worker_settings()
     resolved_periods = tuple(dict.fromkeys(periods))
+    resolved_retention_hours = (
+        evidence_retention_hours
+        if evidence_retention_hours is not None
+        else resolved_settings.evidence_realtime_retention_hours
+    )
     if not resolved_settings.database_url:
         log_event(
             "scheduler.maintenance.noop",
@@ -210,6 +222,7 @@ def run_maintenance_once(
 
     query_heat_summaries: tuple[QueryHeatAggregationSummary, ...] = ()
     query_heat_retention: QueryHeatRetentionSummary | None = None
+    evidence_retention: EvidenceRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
     expired_before = tile_expired_before or datetime.now(UTC)
@@ -224,6 +237,10 @@ def run_maintenance_once(
             retention_days=retention_days,
         )
 
+        evidence_retention = PostgresEvidenceRetentionJob(
+            database_url=resolved_settings.database_url,
+        ).prune_realtime(retention_hours=resolved_retention_hours)
+
         tile_cache_writer = PostgresTileCacheWriter(database_url=resolved_settings.database_url)
         tile_refresh = tile_cache_writer.refresh_layer_features(
             layer_id=tile_layer_id,
@@ -236,6 +253,7 @@ def run_maintenance_once(
         )
     except (
         QueryHeatAggregationUnavailable,
+        EvidenceRetentionUnavailable,
         TileCacheUnavailable,
         TileLayerUnsupported,
         ValueError,
@@ -251,6 +269,7 @@ def run_maintenance_once(
             reason=str(exc),
             query_heat_summaries=query_heat_summaries,
             query_heat_retention=query_heat_retention,
+            evidence_retention=evidence_retention,
             tile_refresh=tile_refresh,
             tile_prune=tile_prune,
         )
@@ -265,6 +284,10 @@ def run_maintenance_once(
         query_heat_buckets_pruned=(
             query_heat_retention.buckets_pruned if query_heat_retention else 0
         ),
+        evidence_retention_hours=resolved_retention_hours,
+        evidence_rows_pruned=(
+            evidence_retention.rows_deleted if evidence_retention else 0
+        ),
         tile_layer_id=tile_refresh.layer_id if tile_refresh else tile_layer_id,
         tile_features_refreshed=tile_refresh.refreshed if tile_refresh else 0,
         tile_cache_deleted=tile_prune.tile_cache_deleted if tile_prune else 0,
@@ -274,6 +297,7 @@ def run_maintenance_once(
         status="succeeded",
         query_heat_summaries=query_heat_summaries,
         query_heat_retention=query_heat_retention,
+        evidence_retention=evidence_retention,
         tile_refresh=tile_refresh,
         tile_prune=tile_prune,
     )
