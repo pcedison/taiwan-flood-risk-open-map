@@ -1,0 +1,158 @@
+# PTT forum source approval request (groundwork draft).
+#
+# Purpose: move PTT from `blocked` toward acceptance by documenting the
+# proposed collection boundary, data minimization, retention, moderation,
+# opt-out, and rate-limit DESIGN. This file is approval-only governance: it
+# does NOT authorize or implement crawling, scraping, HTTP fetch, login bypass,
+# anti-bot circumvention, raw-content storage, or identity storage.
+#
+# Status: pending_review. The evidence sections below are PROPOSED policy
+# drafted by engineering on 2026-06-15. They are intentionally `reviewed: false`
+# until a human legal/privacy reviewer verifies PTT terms/robots/board rules,
+# fills reviewed_by / reviewed_on / references, and flips acceptance. Only then
+# may the manifest entry move from accepted=false to accepted=true with evidence.
+#
+# Validated with:
+#   python infra/scripts/validate_source_allowlist.py \
+#     docs/data-sources/forum/source-approval-request.ptt.yaml
+version: 1
+request:
+  source_key: ptt
+  platform: PTT
+  requested_acceptance:
+    accepted: false
+    decision: pending_review
+    reason: >-
+      Collection boundary, data minimization, retention, moderation, opt-out,
+      and rate-limit policy have been drafted (groundwork) but not yet reviewed
+      or approved by a legal/privacy reviewer. PTT remains blocked until terms,
+      robots, and board-rule review are completed and the evidence sections are
+      signed off.
+  proposed_collection:
+    # Access is to public, logged-out PTT web pages only. Gossiping and any board
+    # gated behind the over18 interstitial are EXCLUDED to avoid over18 bypass.
+    access_method: >-
+      Read-only retrieval of public PTT web index/article pages
+      (https://www.ptt.cc/bbs/<board>/...) for an approved flood-relevant board
+      allowlist. No login, no over18 cookie automation, no private/deleted
+      content, no anti-bot circumvention.
+    proposed_board_allowlist:
+      # Flood/weather-relevant regional life and research boards. Final
+      # allowlist is subject to per-board robots/rules review before enablement.
+      - TY_Research      # 颱風天氣研究板：降雨/淹水討論密度高
+      - Kaohsiung
+      - Tainan
+      - TaichungBun
+      - Yunlin
+      - ChanghuaLiv
+      - ChiaYi
+      - PingTung
+      - TaoYuan
+      - Hsinchu
+    excluded_boards:
+      - Gossiping        # over18 gate + 高雜訊/指名私人風險，排除
+    allowed_operations: []      # approval-only; no operations authorized here
+    requested_operations: []    # implementation authorization is a later step
+    prohibited_operations_ack:
+      - real_crawling
+      - scraping
+      - http_fetch
+      - login_bypass
+      - anti_bot_circumvention
+      - private_content_access
+      - raw_content_storage
+      - identity_storage
+    no_login_bypass: true
+    no_antibot_circumvention: true
+    no_private_deleted_or_hidden_content: true
+  evidence:
+    terms:
+      status: pending_review
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: >-
+        PROPOSED: only public ptt.cc web pages on the approved board allowlist
+        are in scope; robots.txt, PTT site rules (站規), and each board's posting
+        norms must be reviewed and linked before enablement. Boards that
+        disallow automated collection are excluded. A human reviewer must verify
+        robots/ToS and attach references before this becomes approved.
+      references: []
+    privacy:
+      status: pending_review
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: >-
+        PROPOSED stored field inventory (derived evidence only): source_url,
+        board, post_timestamp, derived short summary, location_hints,
+        confidence, source_weight, moderation_state. NOT stored: username (by
+        default), raw post body, full comment text, avatars, contact fields,
+        screenshots. If deduplication requires an actor key, use a per-environment
+        salted hash with no public display and a defined rotation/deletion path.
+      references: []
+    retention:
+      status: pending_review
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: >-
+        PROPOSED: raw fetch snapshots are disabled by default; if enabled for
+        parser debugging they are capped to a short window (<= 7 days) and never
+        served to users. Derived evidence retention is bounded and removable on
+        opt-out/delete, aligned with the project Evidence retention policy.
+      references: []
+    moderation:
+      status: pending_review
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: >-
+        PROPOSED rejection rules: drop posts that are gossip, name or identify
+        private persons, doxxing, harassment, contain screenshots with visible
+        accounts, are rumor-only, or have no flood relevance. False-positive
+        fixtures must cover local slang, sarcasm, historical flood references,
+        and non-flood water mentions before enablement. Non-official evidence
+        cannot be the sole basis for a high-confidence flood assertion.
+      references: []
+    opt_out:
+      status: pending_review
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: >-
+        PROPOSED: source URL or hashed actor reference can be suppressed via a
+        documented opt-out/delete workflow with an owner, SLA, and public contact
+        path; suppressed/deleted posts are not re-promoted. A test fixture must
+        prove evidence can be hidden/removed by source URL.
+      references: []
+    rate_limit:
+      status: pending_review
+      reviewed: false
+      reviewed_by: ""
+      reviewed_on: ""
+      summary: >-
+        PROPOSED: conservative per-board cadence honoring crawl-delay, backoff on
+        4xx/5xx, duplicate-post canonicalization, quote-chain truncation, and an
+        emergency disable flag (SOURCE_PTT_ENABLED=false) that immediately stops
+        fetching. Approved quota and backoff thresholds must be set by the
+        reviewer.
+      references: []
+  governance:
+    requested_by: engineering-groundwork-2026-06-15
+    reviewed_by: []
+    review_date: ""
+    public_contact_or_opt_out: ""      # to be assigned by the source owner
+    emergency_disable_owner: ""        # to be assigned before enablement
+    notes: >-
+      Groundwork draft per docs/reviews/social-source-strategy-2026-06-15.md
+      (decision: defer FB/IG/Threads; focus PTT first, Dcard next). This request
+      documents proposed policy only. It is not an approval and PTT must remain
+      accepted=false in source-approval-manifest.yaml until legal/privacy review
+      is complete.
+  boundary:
+    implementation_included: false
+    fetcher_included: false
+    crawler_included: false
+    scraper_included: false
+    http_fetch_included: false

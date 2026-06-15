@@ -285,6 +285,11 @@ Implementation rule:
 - Priority order：news/RSS/public web, PTT, Dcard, then authorized Meta-related sources.
 - Facebook, Instagram, and Threads require official API, Meta Content Library, research access, explicit permission, or a later ADR. Unauthenticated anti-bot bypass is not allowed.
 
+Decision (2026-06-15, see `docs/reviews/social-source-strategy-2026-06-15.md`):
+
+- FB/IG/Threads are **deferred** as a product evidence source. The only compliant path, the Meta Content Library, is an enclave-only, no-export research tool whose data cannot be ingested into the production PostGIS evidence pipeline for live serving. It remains usable only as an offline research/calibration aid and requires a qualifying academic/non-profit affiliation. This deferral records the priority order above; it does not change it and needs no new ADR.
+- Non-official social evidence effort focuses on **PTT first, then Dcard**, each only after completing its per-source legal/privacy gate in `docs/privacy/public-discussion-user-report-gates.md` and `docs/data-sources/forum/source-approval-manifest.yaml`.
+
 ---
 
 ## 5. 系統總體架構
