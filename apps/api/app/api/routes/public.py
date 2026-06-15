@@ -205,6 +205,15 @@ def _use_local_historical_fallback(app_env: str) -> bool:
     return app_env.strip().lower() in LOCAL_HISTORICAL_FALLBACK_ENVS
 
 
+# Realtime official station relevance: a cold small-radius lookup still surfaces
+# the nearest rainfall/water station so realtime risk is not reported as
+# "即時資料不足" when a station sits just outside the query radius. Conservative
+# vs the bridge's 10 km rainfall relevance to avoid overstating far rainfall at
+# the coarse scoring distance floor.
+REALTIME_RAINFALL_RELEVANCE_M = 5000
+REALTIME_WATER_RELEVANCE_M = 3000
+
+
 def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | None:
     settings = get_settings()
     if not settings.evidence_repository_enabled:
@@ -216,6 +225,8 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
             lng=request.point.lng,
             radius_m=request.radius_m,
             limit=50,
+            rainfall_relevance_m=REALTIME_RAINFALL_RELEVANCE_M,
+            water_relevance_m=REALTIME_WATER_RELEVANCE_M,
         )
     except EvidenceRepositoryUnavailable:
         if settings.app_env in {"staging", "production", "production-beta"}:

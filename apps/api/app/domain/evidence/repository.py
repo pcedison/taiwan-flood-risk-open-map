@@ -225,14 +225,31 @@ def query_nearby_evidence(
     lng: float,
     radius_m: int,
     limit: int = 50,
+    rainfall_relevance_m: int | None = None,
+    water_relevance_m: int | None = None,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
+    """Fetch accepted evidence near a query point.
+
+    All evidence is selected within ``radius_m``. Official realtime station
+    observations (``rainfall``/``water_level``) may additionally be selected out
+    to ``rainfall_relevance_m`` / ``water_relevance_m`` so a cold small-radius
+    lookup still sees the nearest rainfall/water station instead of reporting
+    "即時資料不足"; the scoring distance factor down-weights the farther station.
+    When the relevance arguments are omitted they default to ``radius_m`` (no
+    extension), preserving the strict-radius behavior.
+    """
+
+    rainfall_relevance = max(radius_m, rainfall_relevance_m or radius_m)
+    water_relevance = max(radius_m, water_relevance_m or radius_m)
+    max_relevance = max(radius_m, rainfall_relevance, water_relevance)
     sql = """
         WITH query_point AS (
             SELECT
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
-                (%s::double precision / 90000.0) AS degree_radius
+                (%s::double precision / 90000.0) AS degree_radius,
+                (%s::double precision / 90000.0) AS relevance_degree
         )
         SELECT
             e.id::text AS id,
@@ -260,8 +277,20 @@ def query_nearby_evidence(
         WHERE e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
             AND e.geom IS NOT NULL
-            AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
-            AND ST_DWithin(e.geom::geography, qp.geog, %s)
+            AND e.geom && ST_Expand(qp.geom, qp.relevance_degree)
+            AND (
+                ST_DWithin(e.geom::geography, qp.geog, %s)
+                OR (
+                    e.source_type = 'official'
+                    AND e.event_type = 'rainfall'
+                    AND ST_DWithin(e.geom::geography, qp.geog, %s)
+                )
+                OR (
+                    e.source_type = 'official'
+                    AND e.event_type = 'water_level'
+                    AND ST_DWithin(e.geom::geography, qp.geog, %s)
+                )
+            )
         ORDER BY
             distance_to_query_m ASC,
             e.occurred_at DESC NULLS LAST,
@@ -270,7 +299,18 @@ def query_nearby_evidence(
     """
     return _fetch_records(
         sql,
-        (lng, lat, lng, lat, radius_m, radius_m, max(1, min(limit, 100))),
+        (
+            lng,
+            lat,
+            lng,
+            lat,
+            radius_m,
+            max_relevance,
+            radius_m,
+            rainfall_relevance,
+            water_relevance,
+            max(1, min(limit, 100)),
+        ),
         database_url=database_url,
         connection_factory=connection_factory,
     )
