@@ -6,9 +6,13 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from app.adapters.civil_iot import (
+    POND_WATER_LEVEL,
+    PUMP_WATER_LEVEL,
+    SEWER_WATER_LEVEL,
     CivilIotRiverApiAdapter,
     FloodSensorStaApiAdapter,
     StaFetchJson,
+    StaWaterLevelApiAdapter,
 )
 from app.adapters.contracts import DataSourceAdapter
 from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
@@ -94,6 +98,9 @@ def build_runtime_adapters(
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
     civil_iot_river_fetch_json: StaFetchJson | None = None,
+    civil_iot_pond_fetch_json: StaFetchJson | None = None,
+    civil_iot_sewer_fetch_json: StaFetchJson | None = None,
+    civil_iot_pump_fetch_json: StaFetchJson | None = None,
 ) -> Mapping[str, DataSourceAdapter]:
     if settings.runtime_fixtures_enabled:
         resolved_fetched_at = fetched_at or datetime.now(UTC)
@@ -178,6 +185,36 @@ def build_runtime_adapters(
             fetch_json=civil_iot_river_fetch_json,
         )
         live_adapters[civil_iot_river_adapter.metadata.key] = civil_iot_river_adapter
+
+    for source, api_enabled, sta_url, fetch_json in (
+        (
+            POND_WATER_LEVEL,
+            settings.source_civil_iot_pond_api_enabled,
+            settings.civil_iot_pond_url,
+            civil_iot_pond_fetch_json,
+        ),
+        (
+            SEWER_WATER_LEVEL,
+            settings.source_civil_iot_sewer_api_enabled,
+            settings.civil_iot_sewer_url,
+            civil_iot_sewer_fetch_json,
+        ),
+        (
+            PUMP_WATER_LEVEL,
+            settings.source_civil_iot_pump_api_enabled,
+            settings.civil_iot_pump_url,
+            civil_iot_pump_fetch_json,
+        ),
+    ):
+        if api_enabled and source.metadata.key in enabled_keys:
+            water_level_adapter = StaWaterLevelApiAdapter(
+                source,
+                sta_url=sta_url,
+                timeout_seconds=settings.civil_iot_api_timeout_seconds,
+                fetched_at=fetched_at,
+                fetch_json=fetch_json,
+            )
+            live_adapters[water_level_adapter.metadata.key] = water_level_adapter
 
     if not live_adapters:
         log_event(

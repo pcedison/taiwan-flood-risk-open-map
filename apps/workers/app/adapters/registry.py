@@ -5,7 +5,10 @@ from types import MappingProxyType
 from app.adapters.contracts import AdapterMetadata, SourceFamily
 from app.adapters.civil_iot import (
     FLOOD_SENSOR_METADATA,
+    POND_WATER_LEVEL,
+    PUMP_WATER_LEVEL,
     RIVER_WATER_LEVEL_METADATA,
+    SEWER_WATER_LEVEL,
 )
 from app.adapters.cwa import CWA_RAINFALL_METADATA
 from app.adapters.dcard import METADATA as DCARD_METADATA
@@ -34,6 +37,9 @@ ADAPTER_REGISTRY = MappingProxyType(
         WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
         FLOOD_SENSOR_METADATA.key: FLOOD_SENSOR_METADATA,
         RIVER_WATER_LEVEL_METADATA.key: RIVER_WATER_LEVEL_METADATA,
+        POND_WATER_LEVEL.metadata.key: POND_WATER_LEVEL.metadata,
+        SEWER_WATER_LEVEL.metadata.key: SEWER_WATER_LEVEL.metadata,
+        PUMP_WATER_LEVEL.metadata.key: PUMP_WATER_LEVEL.metadata,
         FLOOD_POTENTIAL_GEOJSON_METADATA.key: FLOOD_POTENTIAL_GEOJSON_METADATA,
         PTT_METADATA.key: PTT_METADATA,
         DCARD_METADATA.key: DCARD_METADATA,
@@ -83,6 +89,21 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
             metadata.enabled_by_default,
             settings.source_civil_iot_river_enabled,
         )
+    if metadata.key == "official.civil_iot.pond_water_level":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_civil_iot_pond_enabled,
+        )
+    if metadata.key == "official.civil_iot.sewer_water_level":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_civil_iot_sewer_enabled,
+        )
+    if metadata.key == "official.civil_iot.pump_water_level":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_civil_iot_pump_enabled,
+        )
     if metadata.key == "ptt":
         return settings.source_forum_enabled is True and settings.source_ptt_enabled is True
     if metadata.key == "dcard":
@@ -119,6 +140,12 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_flood_sensor_enabled is not False
     if metadata.key == "official.civil_iot.river_water_level":
         return settings.source_civil_iot_river_enabled is not False
+    if metadata.key == "official.civil_iot.pond_water_level":
+        return settings.source_civil_iot_pond_enabled is not False
+    if metadata.key == "official.civil_iot.sewer_water_level":
+        return settings.source_civil_iot_sewer_enabled is not False
+    if metadata.key == "official.civil_iot.pump_water_level":
+        return settings.source_civil_iot_pump_enabled is not False
     if metadata.key == "ptt":
         return settings.source_forum_enabled is True and settings.source_ptt_enabled is True
     if metadata.key == "dcard":

@@ -52,6 +52,7 @@ def parse_sta_things_payload(
     payload: object,
     *,
     source_url: str,
+    datastream_name_contains: str | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     """Flatten an STA ``Things`` collection into latest-observation records.
 
@@ -59,6 +60,11 @@ def parse_sta_things_payload(
     UTC), ``value`` (float), ``unit``, optional ``latitude``/``longitude``/
     ``geometry`` (WGS84), ``authority``, ``location_text``, ``datastream_name``,
     and ``source_url``. Stations without a usable latest observation are skipped.
+
+    When ``datastream_name_contains`` is set, the observation is read from the
+    first datastream whose name contains that substring (e.g. ``外水位`` for pump
+    stations that expose several datastreams); otherwise the first datastream with
+    a usable observation is used.
     """
 
     things = _things_items(payload)
@@ -66,7 +72,11 @@ def parse_sta_things_payload(
     for thing in things:
         if not isinstance(thing, Mapping):
             continue
-        record = _parse_thing(thing, source_url=source_url)
+        record = _parse_thing(
+            thing,
+            source_url=source_url,
+            datastream_name_contains=datastream_name_contains,
+        )
         if record is not None:
             records.append(record)
     return tuple(records)
@@ -85,7 +95,12 @@ def _things_items(payload: object) -> Iterable[Any]:
     )
 
 
-def _parse_thing(thing: Mapping[str, Any], *, source_url: str) -> Mapping[str, Any] | None:
+def _parse_thing(
+    thing: Mapping[str, Any],
+    *,
+    source_url: str,
+    datastream_name_contains: str | None = None,
+) -> Mapping[str, Any] | None:
     properties = thing.get("properties")
     properties = properties if isinstance(properties, Mapping) else {}
 
@@ -103,7 +118,10 @@ def _parse_thing(thing: Mapping[str, Any], *, source_url: str) -> Mapping[str, A
 
     station_name = _first_text(thing, "name", "description") or station_id
 
-    observation = _latest_observation(thing)
+    datastream = _select_datastream(thing, datastream_name_contains)
+    if datastream is None:
+        return None
+    observation = _latest_observation(datastream)
     if observation is None:
         return None
     observed_at = parse_observed_at_utc(
@@ -121,10 +139,10 @@ def _parse_thing(thing: Mapping[str, Any], *, source_url: str) -> Mapping[str, A
         "source_url": source_url,
     }
 
-    unit = _datastream_unit(thing)
+    unit = _datastream_unit(datastream)
     if unit is not None:
         record["unit"] = unit
-    datastream_name = _datastream_name(thing)
+    datastream_name = optional_str(datastream.get("name"))
     if datastream_name is not None:
         record["datastream_name"] = datastream_name
 
@@ -153,32 +171,37 @@ def _datastreams(thing: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
     return tuple(item for item in raw if isinstance(item, Mapping))
 
 
-def _latest_observation(thing: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    for datastream in _datastreams(thing):
-        observations = datastream.get("Observations")
-        if not isinstance(observations, list):
-            continue
-        for observation in observations:
-            if isinstance(observation, Mapping) and observation.get("result") is not None:
-                return observation
+def _select_datastream(
+    thing: Mapping[str, Any],
+    name_contains: str | None,
+) -> Mapping[str, Any] | None:
+    datastreams = _datastreams(thing)
+    if name_contains:
+        for datastream in datastreams:
+            name = optional_str(datastream.get("name")) or ""
+            if name_contains in name and _latest_observation(datastream) is not None:
+                return datastream
+        return None
+    for datastream in datastreams:
+        if _latest_observation(datastream) is not None:
+            return datastream
     return None
 
 
-def _datastream_unit(thing: Mapping[str, Any]) -> str | None:
-    for datastream in _datastreams(thing):
-        unit = datastream.get("unitOfMeasurement")
-        if isinstance(unit, Mapping):
-            symbol = _first_text(unit, "symbol", "name")
-            if symbol is not None:
-                return symbol
+def _latest_observation(datastream: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    observations = datastream.get("Observations")
+    if not isinstance(observations, list):
+        return None
+    for observation in observations:
+        if isinstance(observation, Mapping) and observation.get("result") is not None:
+            return observation
     return None
 
 
-def _datastream_name(thing: Mapping[str, Any]) -> str | None:
-    for datastream in _datastreams(thing):
-        name = optional_str(datastream.get("name"))
-        if name is not None:
-            return name
+def _datastream_unit(datastream: Mapping[str, Any]) -> str | None:
+    unit = datastream.get("unitOfMeasurement")
+    if isinstance(unit, Mapping):
+        return _first_text(unit, "symbol", "name")
     return None
 
 

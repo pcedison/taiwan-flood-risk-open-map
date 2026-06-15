@@ -22,6 +22,12 @@ class WorkerSettings:
     source_flood_sensor_api_enabled: bool
     source_civil_iot_river_enabled: bool | None
     source_civil_iot_river_api_enabled: bool
+    source_civil_iot_pond_enabled: bool | None
+    source_civil_iot_pond_api_enabled: bool
+    source_civil_iot_sewer_enabled: bool | None
+    source_civil_iot_sewer_api_enabled: bool
+    source_civil_iot_pump_enabled: bool | None
+    source_civil_iot_pump_api_enabled: bool
     source_news_enabled: bool | None
     source_forum_enabled: bool | None
     source_ptt_enabled: bool | None
@@ -49,6 +55,9 @@ class WorkerSettings:
     flood_potential_geojson_timeout_seconds: int
     civil_iot_flood_sensor_url: str | None
     civil_iot_river_url: str | None
+    civil_iot_pond_url: str | None
+    civil_iot_sewer_url: str | None
+    civil_iot_pump_url: str | None
     civil_iot_api_timeout_seconds: int
     metrics_instance: str
     worker_metrics_textfile_path: str | None
@@ -74,6 +83,21 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_civil_iot_river_api_enabled=env_flag(
             values,
             "SOURCE_CIVIL_IOT_RIVER_API_ENABLED",
+        ),
+        source_civil_iot_pond_enabled=env_bool(values, "SOURCE_CIVIL_IOT_POND_ENABLED"),
+        source_civil_iot_pond_api_enabled=env_flag(
+            values,
+            "SOURCE_CIVIL_IOT_POND_API_ENABLED",
+        ),
+        source_civil_iot_sewer_enabled=env_bool(values, "SOURCE_CIVIL_IOT_SEWER_ENABLED"),
+        source_civil_iot_sewer_api_enabled=env_flag(
+            values,
+            "SOURCE_CIVIL_IOT_SEWER_API_ENABLED",
+        ),
+        source_civil_iot_pump_enabled=env_bool(values, "SOURCE_CIVIL_IOT_PUMP_ENABLED"),
+        source_civil_iot_pump_api_enabled=env_flag(
+            values,
+            "SOURCE_CIVIL_IOT_PUMP_API_ENABLED",
         ),
         source_news_enabled=env_bool(values, "SOURCE_NEWS_ENABLED"),
         source_forum_enabled=env_bool(values, "SOURCE_FORUM_ENABLED"),
@@ -120,6 +144,9 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         ),
         civil_iot_flood_sensor_url=env_str(values, "CIVIL_IOT_FLOOD_SENSOR_URL"),
         civil_iot_river_url=env_str(values, "CIVIL_IOT_RIVER_URL"),
+        civil_iot_pond_url=env_str(values, "CIVIL_IOT_POND_URL"),
+        civil_iot_sewer_url=env_str(values, "CIVIL_IOT_SEWER_URL"),
+        civil_iot_pump_url=env_str(values, "CIVIL_IOT_PUMP_URL"),
         civil_iot_api_timeout_seconds=env_int(
             values,
             "CIVIL_IOT_API_TIMEOUT_SECONDS",

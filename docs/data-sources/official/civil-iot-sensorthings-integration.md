@@ -34,9 +34,20 @@ fixture-backed variant), are registered in `app/adapters/registry.py`, and are
 |---|---|---|---|
 | `official.civil_iot.flood_sensor` | 淹水感測器 (`water_12`) | `flood_report` | Road surface flood depth. |
 | `official.civil_iot.river_water_level` | 河川水位站 (`iow01`) | `water_level` | Overlaps `official.wra.water_level`. |
+| `official.civil_iot.pond_water_level` | 埤塘水位 (`iow12`) | `water_level` | Agricultural; indirect signal. |
+| `official.civil_iot.sewer_water_level` | 雨水下水道 (國土署) | `water_level` | Urban drainage loading. |
+| `official.civil_iot.pump_water_level` | 抽水站 (`pump_taipei`) | `water_level` | Reads external (外水位) level. |
 
 Shared STA client: `app/adapters/civil_iot/sta_client.py`
-(`parse_sta_things_payload`, `fetch_sta_json`).
+(`parse_sta_things_payload`, `fetch_sta_json`). Pond/sewer/pump share one
+configurable adapter in `app/adapters/civil_iot/sta_water_level.py`.
+
+### CWA full station network is already integrated
+
+The full CWA automatic rainfall network (`O-A0002-001`, ~570 stations) is
+**already** ingested by the existing `official.cwa.rainfall` adapter via
+`opendata.cwa.gov.tw`; it only needs an API key and live enablement, not a new
+adapter.
 
 ### Modeling decision — flood sensor event type
 
@@ -78,9 +89,11 @@ CIVIL_IOT_FLOOD_SENSOR_URL=
 CIVIL_IOT_API_TIMEOUT_SECONDS=8
 ```
 
-## Follow-up sources (not in this pass)
+## Follow-up sources
 
-Same STA client, additional adapters when prioritized: agricultural pond levels
-(`iow12`), sewer/雨水下水道 levels (國土署), pump stations (`pump_taipei`), and the
-full CWA station network via `opendata.cwa.gov.tw` (`O-A0002-001` rainfall,
-`O-A0001-001`/`O-A0003-001` weather; needs an API key).
+Pond (`iow12`), sewer (國土署), and pump (`pump_taipei`) adapters landed
+2026-06-15 (above). Remaining optional networks on the same STA client when
+prioritized: CWA automatic weather stations (`O-A0001-001`, which also report
+rainfall and would complement `O-A0002-001`), CCTV-derived signals, and other
+agency water datastreams. The full CWA rainfall network itself is already
+covered by `official.cwa.rainfall`.
