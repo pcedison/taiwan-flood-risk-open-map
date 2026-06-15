@@ -3,7 +3,21 @@ FROM node:22-bookworm-slim AS web-builder
 WORKDIR /app/apps/web
 
 COPY apps/web/package.json apps/web/package-lock.json ./
-RUN npm ci
+# Harden against transient registry network flakes ("npm error network aborted")
+# on the build host: longer npm fetch retries/timeouts plus an outer retry loop,
+# and skip audit/fund to cut extra registry calls. Registry is unchanged so the
+# package-lock integrity hashes still match.
+RUN npm config set fetch-retries 5 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm config set fetch-timeout 300000
+RUN for attempt in 1 2 3 4 5; do \
+      echo "npm ci attempt $attempt"; \
+      if npm ci --no-audit --no-fund; then exit 0; fi; \
+      echo "npm ci failed (attempt $attempt); retrying in 15s..." >&2; \
+      sleep 15; \
+    done; \
+    echo "npm ci failed after 5 attempts" >&2; exit 1
 
 COPY apps/web ./
 
