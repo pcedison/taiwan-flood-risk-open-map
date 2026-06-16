@@ -470,7 +470,7 @@ def fetch_query_heat_snapshot(
             with connection.cursor() as cursor:
                 if statement_timeout_ms > 0:
                     cursor.execute(
-                        "SET LOCAL statement_timeout = %s",
+                        "SELECT set_config('statement_timeout', %s, true)",
                         (f"{statement_timeout_ms}ms",),
                     )
                 cursor.execute(
