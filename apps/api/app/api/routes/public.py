@@ -235,7 +235,7 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
         )
     except EvidenceRepositoryUnavailable:
         if settings.app_env in {"staging", "production", "production-beta"}:
-            return ()
+            return None
         return None
     return tuple(_evidence_from_record(record) for record in records)
 
@@ -673,6 +673,7 @@ def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: An
             "time_context": request.time_context,
             "location_text": (request.location_text or "").strip(),
             "app_env": settings.app_env,
+            "cache_version": "realtime-evidence-v2",
             "realtime_official_enabled": settings.realtime_official_enabled,
             "realtime_official_diagnostic_fallback_enabled": (
                 settings.realtime_official_diagnostic_fallback_enabled

@@ -269,6 +269,7 @@ def assess_risk(
         now=created_at,
     )
     db_evidence_items = dependencies.nearby_db_evidence(risk_request)
+    can_cache_response = db_evidence_items is not None or not settings.evidence_repository_enabled
     official_history_lookup = dependencies.official_flood_disaster_lookup(
         risk_request,
         now=created_at,
@@ -505,12 +506,13 @@ def assess_risk(
         data_freshness=data_freshness,
         query_heat=dependencies.query_heat(risk_request, now=created_at),
     )
-    dependencies.cache_risk_assessment_response(
-        response_cache_key,
-        response,
-        now=created_at,
-        ttl_seconds=settings.risk_assessment_response_cache_seconds,
-    )
+    if can_cache_response:
+        dependencies.cache_risk_assessment_response(
+            response_cache_key,
+            response,
+            now=created_at,
+            ttl_seconds=settings.risk_assessment_response_cache_seconds,
+        )
     return response
 
 

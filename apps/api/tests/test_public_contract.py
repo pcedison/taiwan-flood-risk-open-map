@@ -1555,6 +1555,47 @@ def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
     assert len(set(messages)) == 2
 
 
+def test_risk_assess_does_not_cache_repository_unavailable_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
+    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "120")
+    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_BACKEND", "memory")
+    get_settings.cache_clear()
+    public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
+
+    calls = {"query": 0}
+
+    def flaky_query(**_kwargs):
+        calls["query"] += 1
+        if calls["query"] == 1:
+            raise EvidenceRepositoryUnavailable("temporary timeout")
+        return (_db_evidence_record(),)
+
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", flaky_query)
+
+    try:
+        payload = {
+            "point": {"lat": 23.05753, "lng": 120.20144},
+            "radius_m": 500,
+            "time_context": "now",
+            "location_text": "台南市安南區長溪路二段",
+        }
+        first_response = client.post("/v1/risk/assess", json=payload)
+        second_response = client.post("/v1/risk/assess", json=payload)
+    finally:
+        public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
+        get_settings.cache_clear()
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert calls["query"] == 2
+    assert not any(
+        item["source_id"] == "db-evidence"
+        for item in first_response.json()["data_freshness"]
+    )
+    assert any(item["source_id"] == "db-evidence" for item in second_response.json()["data_freshness"])
+
+
 def test_risk_assess_allows_hosted_realtime_diagnostic_fallback_when_explicit(
     monkeypatch,
 ) -> None:

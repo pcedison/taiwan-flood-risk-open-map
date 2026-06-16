@@ -134,6 +134,9 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert "candidate_rows AS" in sql
     assert "e.geom && ST_Expand(qp.geom, qp.degree_radius)" in sql
     assert "event_type IN ('rainfall', 'water_level')" in sql
+    assert "MATERIALIZED" not in sql
+    assert "FROM recent_rainfall" not in sql
+    assert "FROM recent_water_level" not in sql
     # Without relevance arguments the realtime relevance collapses to the radius.
     assert params == (
         121.5654,
@@ -143,15 +146,15 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
         500,
         500,
         500,
-        None,
-        None,
-        None,
-        None,
         500,
         50,
         500,
+        None,
+        None,
         1,
         500,
+        None,
+        None,
         1,
         50,
     )
@@ -176,6 +179,7 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
     assert "event_type = 'rainfall'" in sql
     assert "event_type = 'water_level'" in sql
     assert "observed_at >= %s::timestamptz" in sql
+    assert "MATERIALIZED" not in sql
     # bbox uses the max relevance (5000); radius=500, rainfall=5000, water=3000.
     assert params == (
         121.5654,
@@ -185,15 +189,15 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
         500,
         5000,
         3000,
-        realtime_since,
-        realtime_since,
-        realtime_since,
-        realtime_since,
         500,
         50,
         5000,
+        realtime_since,
+        realtime_since,
         1,
         3000,
+        realtime_since,
+        realtime_since,
         1,
         50,
     )
