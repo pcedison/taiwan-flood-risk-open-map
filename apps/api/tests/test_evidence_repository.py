@@ -129,15 +129,37 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
 
     sql, params = connection.cursor_instance.executions[0]
     assert records == ()
-    assert "ST_PointOnSurface(e.geom::geometry)" in sql
-    assert "ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry" in sql
-    assert "e.geom && ST_Expand(qp.geom, qp.relevance_degree)" in sql
+    assert "ST_PointOnSurface(c.geom::geometry)" in sql
+    assert "ST_AsGeoJSON(ST_PointOnSurface(c.geom::geometry)) AS geometry" in sql
+    assert "candidate_rows AS" in sql
+    assert "e.geom && ST_Expand(qp.geom, qp.degree_radius)" in sql
+    assert "event_type IN ('rainfall', 'water_level')" in sql
     # Without relevance arguments the realtime relevance collapses to the radius.
-    assert params == (121.5654, 25.033, 121.5654, 25.033, 500, 500, 500, 500, 500, 50)
+    assert params == (
+        121.5654,
+        25.033,
+        121.5654,
+        25.033,
+        500,
+        500,
+        500,
+        None,
+        None,
+        None,
+        None,
+        500,
+        50,
+        500,
+        1,
+        500,
+        1,
+        50,
+    )
 
 
 def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
     connection = _FakeConnection(rows=[])
+    realtime_since = datetime(2026, 6, 16, 5, 0, tzinfo=timezone.utc)
 
     query_nearby_evidence(
         database_url="postgresql://example.test/flood",
@@ -146,14 +168,35 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
         radius_m=500,
         rainfall_relevance_m=5000,
         water_relevance_m=3000,
+        official_realtime_since=realtime_since,
         connection_factory=lambda: connection,
     )
 
     sql, params = connection.cursor_instance.executions[0]
-    assert "e.event_type = 'rainfall'" in sql
-    assert "e.event_type = 'water_level'" in sql
+    assert "event_type = 'rainfall'" in sql
+    assert "event_type = 'water_level'" in sql
+    assert "observed_at >= %s::timestamptz" in sql
     # bbox uses the max relevance (5000); radius=500, rainfall=5000, water=3000.
-    assert params == (121.5654, 25.033, 121.5654, 25.033, 500, 5000, 500, 5000, 3000, 50)
+    assert params == (
+        121.5654,
+        25.033,
+        121.5654,
+        25.033,
+        500,
+        5000,
+        3000,
+        realtime_since,
+        realtime_since,
+        realtime_since,
+        realtime_since,
+        500,
+        50,
+        5000,
+        1,
+        3000,
+        1,
+        50,
+    )
 
 
 def test_fetch_evidence_by_ids_preserves_requested_order() -> None:

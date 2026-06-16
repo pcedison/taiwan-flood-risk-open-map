@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any, Literal
 from uuid import UUID
@@ -212,7 +212,8 @@ def _use_local_historical_fallback(app_env: str) -> bool:
 # rain from overstating far-station risk.
 REALTIME_RAINFALL_RELEVANCE_M = 10000
 REALTIME_WATER_RELEVANCE_M = 3000
-EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS = 3500
+REALTIME_OFFICIAL_LOOKBACK = timedelta(hours=3)
+EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS = 6000
 ASSESSMENT_PERSIST_STATEMENT_TIMEOUT_MS = 1500
 
 
@@ -229,6 +230,7 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
             limit=50,
             rainfall_relevance_m=REALTIME_RAINFALL_RELEVANCE_M,
             water_relevance_m=REALTIME_WATER_RELEVANCE_M,
+            official_realtime_since=_now() - REALTIME_OFFICIAL_LOOKBACK,
             statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
     except EvidenceRepositoryUnavailable:

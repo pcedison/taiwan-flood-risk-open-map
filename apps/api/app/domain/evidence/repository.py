@@ -230,6 +230,7 @@ def query_nearby_evidence(
     limit: int = 50,
     rainfall_relevance_m: int | None = None,
     water_relevance_m: int | None = None,
+    official_realtime_since: datetime | None = None,
     statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
@@ -240,66 +241,137 @@ def query_nearby_evidence(
     to ``rainfall_relevance_m`` / ``water_relevance_m`` so a cold small-radius
     lookup still sees the nearest rainfall/water station instead of reporting
     "即時資料不足"; the scoring distance factor down-weights the farther station.
+    ``official_realtime_since`` bounds official station snapshots to recent data.
     When the relevance arguments are omitted they default to ``radius_m`` (no
     extension), preserving the strict-radius behavior.
     """
 
     rainfall_relevance = max(radius_m, rainfall_relevance_m or radius_m)
     water_relevance = max(radius_m, water_relevance_m or radius_m)
-    max_relevance = max(radius_m, rainfall_relevance, water_relevance)
+    bounded_limit = max(1, min(limit, 100))
+    official_realtime_limit = 1
     sql = """
         WITH query_point AS (
             SELECT
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
                 (%s::double precision / 90000.0) AS degree_radius,
-                (%s::double precision / 90000.0) AS relevance_degree
+                (%s::double precision / 90000.0) AS rainfall_degree,
+                (%s::double precision / 90000.0) AS water_degree
+        ),
+        recent_rainfall AS MATERIALIZED (
+            SELECT *
+            FROM evidence
+            WHERE ingestion_status = 'accepted'
+                AND privacy_level IN ('public', 'aggregated')
+                AND geom IS NOT NULL
+                AND source_type = 'official'
+                AND event_type = 'rainfall'
+                AND (%s::timestamptz IS NULL OR observed_at >= %s::timestamptz)
+        ),
+        recent_water_level AS MATERIALIZED (
+            SELECT *
+            FROM evidence
+            WHERE ingestion_status = 'accepted'
+                AND privacy_level IN ('public', 'aggregated')
+                AND geom IS NOT NULL
+                AND source_type = 'official'
+                AND event_type = 'water_level'
+                AND (%s::timestamptz IS NULL OR observed_at >= %s::timestamptz)
+        ),
+        candidate_rows AS (
+            SELECT *
+            FROM (
+                SELECT
+                    e.*,
+                    (ST_Distance(e.geom, qp.geom) * 90000.0) AS computed_distance_to_query_m,
+                    %s::double precision AS branch_relevance_m
+                FROM evidence e
+                CROSS JOIN query_point qp
+                WHERE e.ingestion_status = 'accepted'
+                    AND e.privacy_level IN ('public', 'aggregated')
+                    AND e.geom IS NOT NULL
+                    AND NOT (
+                        e.source_type = 'official'
+                        AND e.event_type IN ('rainfall', 'water_level')
+                    )
+                    AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
+                    AND ST_DWithin(e.geom, qp.geom, qp.degree_radius)
+                ORDER BY
+                    computed_distance_to_query_m ASC,
+                    e.occurred_at DESC NULLS LAST,
+                    e.created_at DESC
+                LIMIT %s
+            ) nearby_evidence
+            UNION ALL
+            SELECT *
+            FROM (
+                SELECT
+                    e.*,
+                    ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
+                    %s::double precision AS branch_relevance_m
+                FROM recent_rainfall e
+                CROSS JOIN query_point qp
+                WHERE e.geom && ST_Expand(qp.geom, qp.rainfall_degree)
+                    AND ST_DWithin(e.geom, qp.geom, qp.rainfall_degree)
+                ORDER BY
+                    computed_distance_to_query_m ASC,
+                    e.observed_at DESC NULLS LAST,
+                    e.created_at DESC
+                LIMIT %s
+            ) rainfall_evidence
+            UNION ALL
+            SELECT *
+            FROM (
+                SELECT
+                    e.*,
+                    ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
+                    %s::double precision AS branch_relevance_m
+                FROM recent_water_level e
+                CROSS JOIN query_point qp
+                WHERE e.geom && ST_Expand(qp.geom, qp.water_degree)
+                    AND ST_DWithin(e.geom, qp.geom, qp.water_degree)
+                ORDER BY
+                    computed_distance_to_query_m ASC,
+                    e.observed_at DESC NULLS LAST,
+                    e.created_at DESC
+                LIMIT %s
+            ) water_level_evidence
         )
         SELECT
-            e.id::text AS id,
-            e.source_id,
-            e.source_type,
-            e.event_type,
-            e.title,
-            e.summary,
-            e.url,
-            e.occurred_at,
-            e.observed_at,
-            e.ingested_at,
-            ST_Y(ST_PointOnSurface(e.geom::geometry)) AS lat,
-            ST_X(ST_PointOnSurface(e.geom::geometry)) AS lng,
-            ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry,
-            ST_Distance(e.geom::geography, qp.geog) AS distance_to_query_m,
-            e.confidence,
-            COALESCE(e.freshness_score, 0.8) AS freshness_score,
-            COALESCE(e.source_weight, CASE WHEN e.source_type = 'official' THEN 1.0 ELSE 0.85 END)
+            c.id::text AS id,
+            c.source_id,
+            c.source_type,
+            c.event_type,
+            c.title,
+            c.summary,
+            c.url,
+            c.occurred_at,
+            c.observed_at,
+            c.ingested_at,
+            ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
+            ST_AsGeoJSON(ST_PointOnSurface(c.geom::geometry)) AS geometry,
+            c.computed_distance_to_query_m AS distance_to_query_m,
+            c.confidence,
+            COALESCE(c.freshness_score, 0.8) AS freshness_score,
+            COALESCE(c.source_weight, CASE WHEN c.source_type = 'official' THEN 1.0 ELSE 0.85 END)
                 AS source_weight,
-            e.privacy_level,
-            e.raw_ref,
-            (e.properties->>'rainfall_mm_1h')::double precision AS rainfall_mm_1h
-        FROM evidence e
-        CROSS JOIN query_point qp
-        WHERE e.ingestion_status = 'accepted'
-            AND e.privacy_level IN ('public', 'aggregated')
-            AND e.geom IS NOT NULL
-            AND e.geom && ST_Expand(qp.geom, qp.relevance_degree)
-            AND (
-                ST_DWithin(e.geom::geography, qp.geog, %s)
-                OR (
-                    e.source_type = 'official'
-                    AND e.event_type = 'rainfall'
-                    AND ST_DWithin(e.geom::geography, qp.geog, %s)
-                )
-                OR (
-                    e.source_type = 'official'
-                    AND e.event_type = 'water_level'
-                    AND ST_DWithin(e.geom::geography, qp.geog, %s)
-                )
-            )
+            c.privacy_level,
+            c.raw_ref,
+            (c.properties->>'rainfall_mm_1h')::double precision AS rainfall_mm_1h
+        FROM candidate_rows c
+        WHERE c.computed_distance_to_query_m <= c.branch_relevance_m
         ORDER BY
-            distance_to_query_m ASC,
-            e.occurred_at DESC NULLS LAST,
-            e.created_at DESC
+            CASE
+                WHEN c.source_type = 'official'
+                    AND c.event_type IN ('rainfall', 'water_level')
+                THEN 0
+                ELSE 1
+            END ASC,
+            computed_distance_to_query_m ASC,
+            c.occurred_at DESC NULLS LAST,
+            c.created_at DESC
         LIMIT %s
     """
     return _fetch_records(
@@ -310,11 +382,19 @@ def query_nearby_evidence(
             lng,
             lat,
             radius_m,
-            max_relevance,
-            radius_m,
             rainfall_relevance,
             water_relevance,
-            max(1, min(limit, 100)),
+            official_realtime_since,
+            official_realtime_since,
+            official_realtime_since,
+            official_realtime_since,
+            radius_m,
+            bounded_limit,
+            rainfall_relevance,
+            official_realtime_limit,
+            water_relevance,
+            official_realtime_limit,
+            bounded_limit,
         ),
         database_url=database_url,
         statement_timeout_ms=statement_timeout_ms,
