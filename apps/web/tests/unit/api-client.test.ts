@@ -53,9 +53,11 @@ test("fetchJson aborts when a caller supersedes an in-flight request", async () 
 
 test("fetchJson preserves structured API error metadata for public-safe mapping", async () => {
   const originalFetch = globalThis.fetch;
+  let calls = 0;
 
-  globalThis.fetch = (async () =>
-    jsonResponse(
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return jsonResponse(
       {
         error: {
           code: "rate_limited",
@@ -68,7 +70,8 @@ test("fetchJson preserves structured API error metadata for public-safe mapping"
       },
       429,
       { "Retry-After": "60" },
-    )) as typeof fetch;
+    );
+  }) as typeof fetch;
 
   try {
     await assert.rejects(
@@ -83,6 +86,7 @@ test("fetchJson preserves structured API error metadata for public-safe mapping"
         assert.equal(error.retryAfterSeconds, 42);
         assert.equal(error.serverMessage, "Internal policy detail should not be rendered directly.");
         assert.equal(publicApiErrorMessage(error), RATE_LIMITED_API_ERROR_MESSAGE);
+        assert.equal(calls, 1);
         return true;
       },
     );
@@ -121,6 +125,35 @@ test("fetchJson parses nested FastAPI detail errors", async () => {
         return true;
       },
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchJson retries transient proxy failures once", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+
+  globalThis.fetch = (async () => {
+    calls += 1;
+    if (calls === 1) {
+      return new Response("temporary gateway failure", {
+        headers: { "Content-Type": "text/plain" },
+        status: 502,
+      });
+    }
+    return jsonResponse({ ok: true }, 200);
+  }) as typeof fetch;
+
+  try {
+    const response = await fetchJson<{ ok: boolean }>("/v1/risk/assess", {
+      baseUrl: "",
+      retryDelayMs: 0,
+      timeoutMs: 10_000,
+    });
+
+    assert.deepEqual(response, { ok: true });
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }

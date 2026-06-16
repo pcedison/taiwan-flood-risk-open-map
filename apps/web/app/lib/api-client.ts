@@ -1,6 +1,8 @@
 export const DEFAULT_API_BASE_URL = "http://localhost:8000";
-export const API_REQUEST_TIMEOUT_MS = 15_000;
+export const API_REQUEST_TIMEOUT_MS = 25_000;
 export const EVIDENCE_REQUEST_TIMEOUT_MS = 8_000;
+export const TRANSIENT_API_RETRY_DELAY_MS = 400;
+export const TRANSIENT_API_RETRY_ATTEMPTS = 1;
 
 export const REQUEST_ABORTED_MESSAGE = "Request aborted";
 export const REQUEST_TIMEOUT_MESSAGE = "Request timed out";
@@ -15,6 +17,8 @@ export const BAD_REQUEST_API_ERROR_MESSAGE = "查詢內容無法處理，請調�
 type FetchJsonOptions = {
   baseUrl?: string;
   init?: RequestInit;
+  retryAttempts?: number;
+  retryDelayMs?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
 };
@@ -139,6 +143,72 @@ export async function fetchJson<T>(
   {
     baseUrl = apiBaseUrl,
     init = {},
+    retryAttempts = TRANSIENT_API_RETRY_ATTEMPTS,
+    retryDelayMs = TRANSIENT_API_RETRY_DELAY_MS,
+    signal,
+    timeoutMs = API_REQUEST_TIMEOUT_MS,
+  }: FetchJsonOptions = {},
+): Promise<T> {
+  let attempt = 0;
+  const maxAttempts = Math.max(0, retryAttempts);
+
+  while (true) {
+    try {
+      return await fetchJsonOnce<T>(path, { baseUrl, init, signal, timeoutMs });
+    } catch (error) {
+      if (
+        attempt >= maxAttempts ||
+        signal?.aborted ||
+        !isTransientApiRequestError(error)
+      ) {
+        throw error;
+      }
+      attempt += 1;
+      await waitForRetryDelay(retryDelayMs, signal);
+    }
+  }
+}
+
+export async function postJson<T>(
+  path: string,
+  payload: unknown,
+  options: FetchJsonOptions = {},
+): Promise<T> {
+  const init = options.init ?? {};
+  const headers = new Headers(init.headers);
+  headers.set("Content-Type", "application/json");
+
+  return fetchJson<T>(path, {
+    ...options,
+    init: {
+      ...init,
+      body: JSON.stringify(payload),
+      headers,
+      method: "POST",
+    },
+  });
+}
+
+async function apiRequestErrorFromResponse(
+  path: string,
+  response: Response,
+): Promise<ApiRequestError> {
+  const structuredError = await structuredApiErrorFromResponse(response);
+  return new ApiRequestError({
+    code: structuredError?.code ?? null,
+    details: structuredError?.details ?? {},
+    path,
+    retryAfterSeconds: retryAfterSeconds(response.headers, structuredError?.details),
+    serverMessage: structuredError?.message ?? null,
+    status: response.status,
+  });
+}
+
+async function fetchJsonOnce<T>(
+  path: string,
+  {
+    baseUrl = apiBaseUrl,
+    init = {},
     signal,
     timeoutMs = API_REQUEST_TIMEOUT_MS,
   }: FetchJsonOptions = {},
@@ -184,38 +254,32 @@ export async function fetchJson<T>(
   }
 }
 
-export async function postJson<T>(
-  path: string,
-  payload: unknown,
-  options: FetchJsonOptions = {},
-): Promise<T> {
-  const init = options.init ?? {};
-  const headers = new Headers(init.headers);
-  headers.set("Content-Type", "application/json");
-
-  return fetchJson<T>(path, {
-    ...options,
-    init: {
-      ...init,
-      body: JSON.stringify(payload),
-      headers,
-      method: "POST",
-    },
-  });
+function isTransientApiRequestError(error: unknown): boolean {
+  return (
+    error instanceof ApiRequestError &&
+    (error.status === 502 || error.status === 503 || error.status === 504)
+  );
 }
 
-async function apiRequestErrorFromResponse(
-  path: string,
-  response: Response,
-): Promise<ApiRequestError> {
-  const structuredError = await structuredApiErrorFromResponse(response);
-  return new ApiRequestError({
-    code: structuredError?.code ?? null,
-    details: structuredError?.details ?? {},
-    path,
-    retryAfterSeconds: retryAfterSeconds(response.headers, structuredError?.details),
-    serverMessage: structuredError?.message ?? null,
-    status: response.status,
+function waitForRetryDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0) {
+    return Promise.resolve();
+  }
+  if (signal?.aborted) {
+    return Promise.reject(new Error(REQUEST_ABORTED_MESSAGE));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    const abort = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", abort);
+      reject(new Error(REQUEST_ABORTED_MESSAGE));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
   });
 }
 
