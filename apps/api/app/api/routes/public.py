@@ -207,11 +207,13 @@ def _use_local_historical_fallback(app_env: str) -> bool:
 
 # Realtime official station relevance: a cold small-radius lookup still surfaces
 # the nearest rainfall/water station so realtime risk is not reported as
-# "即時資料不足" when a station sits just outside the query radius. Conservative
-# vs the bridge's 10 km rainfall relevance to avoid overstating far rainfall at
-# the coarse scoring distance floor.
-REALTIME_RAINFALL_RELEVANCE_M = 5000
+# "即時資料不足" when a station sits just outside the query radius. Match the
+# bridge's 10 km rainfall relevance; intensity-aware scoring keeps dry or light
+# rain from overstating far-station risk.
+REALTIME_RAINFALL_RELEVANCE_M = 10000
 REALTIME_WATER_RELEVANCE_M = 3000
+EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS = 3500
+ASSESSMENT_PERSIST_STATEMENT_TIMEOUT_MS = 1500
 
 
 def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | None:
@@ -227,6 +229,7 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
             limit=50,
             rainfall_relevance_m=REALTIME_RAINFALL_RELEVANCE_M,
             water_relevance_m=REALTIME_WATER_RELEVANCE_M,
+            statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
     except EvidenceRepositoryUnavailable:
         if settings.app_env in {"staging", "production", "production-beta"}:
@@ -777,6 +780,7 @@ def _persist_assessment(
                 created_at=created_at,
                 expires_at=expires_at,
             ),
+            statement_timeout_ms=ASSESSMENT_PERSIST_STATEMENT_TIMEOUT_MS,
         )
     except EvidenceRepositoryUnavailable:
         return

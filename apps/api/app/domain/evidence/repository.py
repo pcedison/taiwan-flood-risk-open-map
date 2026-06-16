@@ -103,6 +103,7 @@ def persist_risk_assessment(
     *,
     database_url: str,
     assessment: RiskAssessmentPersistence,
+    statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> None:
     sql = """
@@ -214,6 +215,7 @@ def persist_risk_assessment(
     try:
         with _connect(database_url, connection_factory) as connection:
             with connection.cursor() as cursor:
+                _apply_statement_timeout(cursor, statement_timeout_ms)
                 cursor.execute(sql, params)
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
@@ -228,6 +230,7 @@ def query_nearby_evidence(
     limit: int = 50,
     rainfall_relevance_m: int | None = None,
     water_relevance_m: int | None = None,
+    statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
     """Fetch accepted evidence near a query point.
@@ -314,6 +317,7 @@ def query_nearby_evidence(
             max(1, min(limit, 100)),
         ),
         database_url=database_url,
+        statement_timeout_ms=statement_timeout_ms,
         connection_factory=connection_factory,
     )
 
@@ -602,11 +606,13 @@ def _fetch_records(
     params: tuple[object, ...],
     *,
     database_url: str,
+    statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None,
 ) -> tuple[EvidenceRecord, ...]:
     try:
         with _connect(database_url, connection_factory) as connection:
             with connection.cursor() as cursor:
+                _apply_statement_timeout(cursor, statement_timeout_ms)
                 cursor.execute(sql, params)
                 return tuple(_record_from_row(row) for row in cursor.fetchall())
     except (OSError, psycopg.Error) as exc:
@@ -617,6 +623,15 @@ def _connect(database_url: str, connection_factory: ConnectionFactory | None) ->
     if connection_factory is not None:
         return connection_factory()
     return psycopg.connect(database_url, connect_timeout=2, row_factory=dict_row)
+
+
+def _apply_statement_timeout(cursor: Any, statement_timeout_ms: int) -> None:
+    if statement_timeout_ms <= 0:
+        return
+    cursor.execute(
+        "SELECT set_config('statement_timeout', %s, true)",
+        (f"{statement_timeout_ms}ms",),
+    )
 
 
 def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
