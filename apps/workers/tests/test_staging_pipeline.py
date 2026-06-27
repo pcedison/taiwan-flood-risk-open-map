@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from app.adapters.civil_iot.flood_sensor import FloodSensorAdapter
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.pipelines.staging import AdapterStagingBatch, build_staging_batch, persist_staging_batch
 
@@ -74,6 +75,32 @@ def test_build_staging_batch_keeps_validation_rejections_separate_from_raw_rejec
     assert batch.rejected[0].validation_status == "rejected"
     assert batch.rejected[0].rejection_reason == "confidence must be between 0.0 and 1.0"
     assert batch.rejected_raw_source_ids == ("missing-summary",)
+
+
+def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:
+    source_ts = datetime(2026, 6, 27, 10, 0, tzinfo=timezone.utc)
+    fetched_at = datetime(2026, 6, 27, 10, 5, tzinfo=timezone.utc)
+    adapter = FloodSensorAdapter(
+        (
+            {
+                "station_id": "FS-001",
+                "station_name": "淹水感測器",
+                "observed_at": source_ts.isoformat(),
+                "value": 12.0,
+                "source_url": "https://example.test/official/civil-iot/flood-sensor",
+                "authority": "水利署",
+                "datastream_name": "淹水深度",
+            },
+        ),
+        fetched_at=fetched_at,
+    )
+
+    batch = build_staging_batch(adapter.run())
+
+    assert batch.accepted[0].observed_at == source_ts
+    assert batch.accepted[0].occurred_at == source_ts
+    assert batch.raw_snapshot.fetched_at == fetched_at
+    assert batch.accepted[0].payload["flood_depth_cm"] == 12.0
 
 
 def test_persist_staging_batch_uses_writer_protocol() -> None:

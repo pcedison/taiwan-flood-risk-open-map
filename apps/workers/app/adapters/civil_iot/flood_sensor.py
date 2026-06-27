@@ -120,7 +120,7 @@ class FloodSensorStaApiAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=fetched_at,
-                payload=record,
+                payload=_normalize_raw_payload(record, source_url=str(record["source_url"])),
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in records
@@ -155,7 +155,10 @@ class FloodSensorAdapter:
                 source_id=_source_id(record),
                 source_url=str(record.get("source_url", FLOOD_SENSOR_CIVIL_IOT_URL)),
                 fetched_at=self._fetched_at,
-                payload=record,
+                payload=_normalize_raw_payload(
+                    record,
+                    source_url=str(record.get("source_url", FLOOD_SENSOR_CIVIL_IOT_URL)),
+                ),
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in self._records
@@ -208,6 +211,19 @@ def _source_id(record: Mapping[str, Any]) -> str:
     station_id = str(record["station_id"])
     observed_at = str(record["observed_at"])
     return f"{station_id}:{observed_at}"
+
+
+def _normalize_raw_payload(
+    record: Mapping[str, Any],
+    *,
+    source_url: str,
+) -> dict[str, Any]:
+    payload = dict(record)
+    payload["source_url"] = source_url
+    value = optional_float(payload.get("value"))
+    if value is not None:
+        payload["flood_depth_cm"] = float(value)
+    return payload
 
 
 def _run(adapter: FloodSensorStaApiAdapter | FloodSensorAdapter) -> AdapterRunResult:

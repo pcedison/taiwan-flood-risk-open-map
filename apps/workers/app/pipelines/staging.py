@@ -155,7 +155,7 @@ def _to_staging_upsert(
         summary=evidence.summary,
         url=evidence.source_url,
         occurred_at=evidence.source_timestamp,
-        observed_at=evidence.fetched_at,
+        observed_at=evidence.source_timestamp,
         confidence=evidence.confidence,
         validation_status=validation_status,
         rejection_reason=rejection_reason,
@@ -175,6 +175,7 @@ def _to_staging_upsert(
 _REALTIME_METRIC_KEYS: tuple[str, ...] = (
     "rainfall_mm_1h",
     "rainfall_mm_24h",
+    "flood_depth_cm",
     "water_level_m",
     "warning_level_m",
 )

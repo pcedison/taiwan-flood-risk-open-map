@@ -153,6 +153,13 @@ def test_flood_sensor_api_adapter_rejects_below_threshold() -> None:
     assert evidence.source_family is SourceFamily.OFFICIAL
     assert "水深 18 公分" in evidence.summary
     assert "flood_sensor" in evidence.tags
+    raw_payload = result.fetched[0].payload
+    assert raw_payload["flood_depth_cm"] == 18.0
+    assert raw_payload["station_id"] == "FS-001"
+    assert raw_payload["station_name"] == "中正路淹水感測器"
+    assert raw_payload["authority"] == "水利署"
+    assert raw_payload["datastream_name"] == "淹水深度"
+    assert raw_payload["source_url"] == "https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=water_12"
 
 
 def test_flood_sensor_fixture_adapter_matches_threshold_rule() -> None:
