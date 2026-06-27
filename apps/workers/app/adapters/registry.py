@@ -13,6 +13,7 @@ from app.adapters.civil_iot import (
 from app.adapters.cwa import CWA_RAINFALL_METADATA
 from app.adapters.dcard import METADATA as DCARD_METADATA
 from app.adapters.flood_potential import FLOOD_POTENTIAL_GEOJSON_METADATA
+from app.adapters.local_tainan import TAINAN_FLOOD_SENSOR_METADATA
 from app.adapters.ncdr import NCDR_CAP_METADATA
 from app.adapters.ptt import METADATA as PTT_METADATA
 from app.adapters.wra import WRA_WATER_LEVEL_METADATA
@@ -43,6 +44,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         SEWER_WATER_LEVEL.metadata.key: SEWER_WATER_LEVEL.metadata,
         PUMP_WATER_LEVEL.metadata.key: PUMP_WATER_LEVEL.metadata,
         FLOOD_POTENTIAL_GEOJSON_METADATA.key: FLOOD_POTENTIAL_GEOJSON_METADATA,
+        TAINAN_FLOOD_SENSOR_METADATA.key: TAINAN_FLOOD_SENSOR_METADATA,
         PTT_METADATA.key: PTT_METADATA,
         DCARD_METADATA.key: DCARD_METADATA,
     }
@@ -87,6 +89,11 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return _with_optional_override(
             metadata.enabled_by_default,
             settings.source_flood_sensor_enabled,
+        )
+    if metadata.key == "local.tainan.flood_sensor":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_tainan_flood_sensor_enabled,
         )
     if metadata.key == "official.civil_iot.river_water_level":
         return _with_optional_override(
@@ -144,6 +151,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_flood_potential_enabled is not False
     if metadata.key == "official.civil_iot.flood_sensor":
         return settings.source_flood_sensor_enabled is not False
+    if metadata.key == "local.tainan.flood_sensor":
+        return settings.source_tainan_flood_sensor_enabled is not False
     if metadata.key == "official.civil_iot.river_water_level":
         return settings.source_civil_iot_river_enabled is not False
     if metadata.key == "official.civil_iot.pond_water_level":

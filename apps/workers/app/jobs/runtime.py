@@ -18,6 +18,8 @@ from app.adapters.contracts import DataSourceAdapter
 from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
+from app.adapters.local_tainan import FetchJson as TainanFetchJson
+from app.adapters.local_tainan import TainanFloodSensorApiAdapter
 from app.adapters.ncdr import FetchText as NcdrFetchText
 from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.registry import enabled_adapter_keys
@@ -100,6 +102,7 @@ def build_runtime_adapters(
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
+    tainan_flood_sensor_fetch_json: TainanFetchJson | None = None,
     civil_iot_river_fetch_json: StaFetchJson | None = None,
     civil_iot_pond_fetch_json: StaFetchJson | None = None,
     civil_iot_sewer_fetch_json: StaFetchJson | None = None,
@@ -201,6 +204,19 @@ def build_runtime_adapters(
         )
 
     if (
+        settings.source_tainan_flood_sensor_api_enabled
+        and "local.tainan.flood_sensor" in enabled_keys
+    ):
+        tainan_flood_sensor_adapter = TainanFloodSensorApiAdapter(
+            api_url=settings.tainan_flood_sensor_api_url,
+            metadata_api_url=settings.tainan_flood_sensor_metadata_api_url,
+            timeout_seconds=settings.source_tainan_flood_sensor_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=tainan_flood_sensor_fetch_json,
+        )
+        live_adapters[tainan_flood_sensor_adapter.metadata.key] = tainan_flood_sensor_adapter
+
+    if (
         settings.source_civil_iot_river_api_enabled
         and "official.civil_iot.river_water_level" in enabled_keys
     ):
@@ -253,6 +269,7 @@ def build_runtime_adapters(
             flood_potential_geojson_enabled=settings.source_flood_potential_geojson_enabled,
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,
             flood_sensor_use_live=settings.source_flood_sensor_use_live,
+            tainan_flood_sensor_api_enabled=settings.source_tainan_flood_sensor_api_enabled,
             civil_iot_river_api_enabled=settings.source_civil_iot_river_api_enabled,
         )
         return {}
