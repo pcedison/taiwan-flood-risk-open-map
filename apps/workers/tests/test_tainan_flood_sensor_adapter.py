@@ -186,6 +186,34 @@ def test_tainan_adapter_registry_and_config_are_default_off() -> None:
     )
 
 
+def test_configured_tainan_key_cannot_bypass_source_and_api_gates() -> None:
+    adapter_key = "local.tainan.flood_sensor"
+    api_only_settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": adapter_key,
+            "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED": "true",
+        }
+    )
+    source_only_settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": adapter_key,
+            "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED": "true",
+        }
+    )
+    live_settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": adapter_key,
+            "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED": "true",
+            "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED": "true",
+        }
+    )
+
+    assert adapter_key not in enabled_adapter_keys(api_only_settings)
+    assert adapter_key not in build_runtime_adapters(api_only_settings, fetched_at=FETCHED_AT)
+    assert adapter_key not in build_runtime_adapters(source_only_settings, fetched_at=FETCHED_AT)
+    assert adapter_key in build_runtime_adapters(live_settings, fetched_at=FETCHED_AT)
+
+
 def test_build_runtime_adapters_includes_tainan_only_when_both_gates_are_on() -> None:
     source_only_settings = load_worker_settings({"SOURCE_TAINAN_FLOOD_SENSOR_ENABLED": "true"})
 
