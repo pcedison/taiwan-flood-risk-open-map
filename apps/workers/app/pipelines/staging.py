@@ -163,6 +163,7 @@ def _to_staging_upsert(
             "location_text": evidence.location_text,
             **_location_payload(raw_item),
             **_realtime_metrics_payload(raw_item),
+            **_passthrough_payload(raw_item),
             "attribution": evidence.attribution,
             "tags": list(evidence.tags),
         },
@@ -180,6 +181,18 @@ _REALTIME_METRIC_KEYS: tuple[str, ...] = (
     "warning_level_m",
 )
 
+_STAGING_PAYLOAD_PASSTHROUGH_KEYS: tuple[str, ...] = (
+    "station_id",
+    "areaDesc",
+    "identifier",
+    "effective",
+    "expires",
+    "expired",
+    "severity",
+    "certainty",
+    "urgency",
+)
+
 
 def _realtime_metrics_payload(raw_item: Any | None) -> dict[str, Any]:
     if raw_item is None or not isinstance(raw_item.payload, Mapping):
@@ -190,6 +203,27 @@ def _realtime_metrics_payload(raw_item: Any | None) -> dict[str, Any]:
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             metrics[key] = float(value)
     return metrics
+
+
+def _passthrough_payload(raw_item: Any | None) -> dict[str, Any]:
+    if raw_item is None or not isinstance(raw_item.payload, Mapping):
+        return {}
+
+    payload: dict[str, Any] = {}
+    for key in _STAGING_PAYLOAD_PASSTHROUGH_KEYS:
+        value = raw_item.payload.get(key)
+        if value is not None:
+            payload[key] = value
+
+    status = raw_item.payload.get("status")
+    if status is not None:
+        payload["cap_status"] = status
+
+    quality_flags = raw_item.payload.get("quality_flags")
+    if isinstance(quality_flags, Mapping):
+        payload["quality_flags"] = dict(quality_flags)
+
+    return payload
 
 
 def _location_payload(raw_item: Any | None) -> dict[str, Any]:

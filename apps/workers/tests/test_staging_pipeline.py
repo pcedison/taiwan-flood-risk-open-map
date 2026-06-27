@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.adapters.civil_iot.flood_sensor import FloodSensorAdapter
+from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.pipelines.staging import AdapterStagingBatch, build_staging_batch, persist_staging_batch
 
@@ -101,6 +102,59 @@ def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:
     assert batch.accepted[0].occurred_at == source_ts
     assert batch.raw_snapshot.fetched_at == fetched_at
     assert batch.accepted[0].payload["flood_depth_cm"] == 12.0
+
+
+def test_build_staging_batch_preserves_cap_fields_needed_for_promotion() -> None:
+    adapter = NcdrCapAlertAdapter(
+        payload={
+            "alerts": [
+                {
+                    "identifier": "NCDR-CAP-001",
+                    "sender": "ncdr@example.test",
+                    "sent": "2026-06-15T02:30:00+08:00",
+                    "status": "Actual",
+                    "msgType": "Alert",
+                    "scope": "Public",
+                    "info": [
+                        {
+                            "event": "豪雨淹水警戒",
+                            "headline": "臺南市豪雨淹水警戒",
+                            "description": "豪雨造成局部淹水風險升高",
+                            "effective": "2026-06-15T02:30:00+08:00",
+                            "expires": "2026-06-15T15:00:00+08:00",
+                            "severity": "Severe",
+                            "certainty": "Likely",
+                            "urgency": "Immediate",
+                            "area": [
+                                {
+                                    "areaDesc": "臺南市",
+                                    "geocode": [
+                                        {"valueName": "TOWNCODE", "value": "67000"}
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        },
+        fetched_at=datetime(2026, 6, 15, 3, 10, tzinfo=timezone.utc),
+    )
+
+    batch = build_staging_batch(adapter.run())
+
+    staged_payload = batch.accepted[0].payload
+    assert staged_payload["station_id"] == "67000"
+    assert staged_payload["areaDesc"] == "臺南市"
+    assert staged_payload["identifier"] == "NCDR-CAP-001"
+    assert staged_payload["quality_flags"] == {"location_inferred": True}
+    assert staged_payload["expired"] is False
+    assert staged_payload["cap_status"] == "Actual"
+    assert staged_payload["effective"] == "2026-06-15T02:30:00+08:00"
+    assert staged_payload["expires"] == "2026-06-15T15:00:00+08:00"
+    assert staged_payload["severity"] == "Severe"
+    assert staged_payload["certainty"] == "Likely"
+    assert staged_payload["urgency"] == "Immediate"
 
 
 def test_persist_staging_batch_uses_writer_protocol() -> None:

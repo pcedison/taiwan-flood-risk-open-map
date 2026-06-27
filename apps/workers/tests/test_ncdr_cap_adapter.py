@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.ncdr import NCDR_CAP_METADATA, NcdrCapAlertAdapter
@@ -164,6 +165,20 @@ def test_ncdr_cap_atom_feed_uses_polygon_centroid_without_inferred_flag() -> Non
     assert raw_payload["quality_flags"]["location_inferred"] is False
     assert raw_payload["geometry"]["type"] == "Point"
     assert evidence.location_text == "高雄市前鎮區"
+
+
+def test_ncdr_cap_fetch_text_json_string_is_parsed_as_json_payload() -> None:
+    adapter = NcdrCapAlertAdapter(
+        fetch_text=lambda _url, _timeout: json.dumps({"alerts": [_json_alert()]}),
+        fetched_at=FETCHED_AT,
+    )
+
+    result = adapter.run()
+
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+    assert result.fetched[0].payload["station_id"] == "67000"
+    assert result.normalized[0].event_type is EventType.FLOOD_WARNING
 
 
 def test_ncdr_cap_registry_and_runtime_gates_are_off_by_default() -> None:

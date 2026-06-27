@@ -157,6 +157,9 @@ def parse_ncdr_cap_payload(
     source_url: str,
 ) -> tuple[Mapping[str, Any], ...]:
     if isinstance(payload, str):
+        parsed_json = _parse_json_string_payload(payload)
+        if parsed_json is not None:
+            return parse_ncdr_cap_payload(parsed_json, source_url=source_url)
         return _parse_xml_payload(payload, source_url=source_url)
     if isinstance(payload, list):
         return tuple(
@@ -185,6 +188,16 @@ def parse_ncdr_cap_payload(
             )
 
     raise NcdrCapAlertPayloadError("NCDR CAP object payload is missing an alert list")
+
+
+def _parse_json_string_payload(payload: str) -> object | None:
+    text = payload.lstrip()
+    if not text or text[0] not in ("{", "["):
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
 
 
 def _prepare_record(
