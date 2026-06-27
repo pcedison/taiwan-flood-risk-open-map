@@ -264,8 +264,80 @@ def test_write_evidence_skips_latest_when_station_id_missing() -> None:
     assert "INSERT INTO evidence" in connection.cursor_instance.executions[0][0]
 
 
-def test_write_evidence_does_not_overwrite_newer_latest_with_older_observation() -> None:
+def test_write_evidence_does_not_fallback_station_id_for_cap_source_prefix() -> None:
     connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.ncdr.cap",
+        source_id="ALERT01:2026-06-15T03:00:00+00:00",
+        source_type="official",
+        event_type="flood_warning",
+        title="Flood warning",
+        summary="Regional flood warning",
+        url="https://example.test/cap/flood-warning",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.95,
+        raw_ref="raw/ncdr/cap/flood-warning.xml",
+        properties={
+            "adapter_key": "official.ncdr.cap",
+            "authority": "NCDR",
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [121.5, 25.0]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 1
+    assert "INSERT INTO evidence" in connection.cursor_instance.executions[0][0]
+
+
+def test_write_evidence_does_not_fallback_station_id_from_generic_word_prefix() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.cwa.rainfall",
+        source_id="alert:2026-06-15T03:00:00+00:00",
+        source_type="official",
+        event_type="rainfall",
+        title="Rainfall observation",
+        summary="Observed rainfall 42 mm",
+        url="https://example.test/rainfall/alert",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.92,
+        raw_ref="raw/cwa/rainfall/alert.json",
+        properties={
+            "adapter_key": "official.cwa.rainfall",
+            "station_name": "Unknown",
+            "authority": "CWA",
+            "rainfall_mm_1h": 42.0,
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [121.0, 24.0]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 1
+    assert "INSERT INTO evidence" in connection.cursor_instance.executions[0][0]
+
+
+def test_write_evidence_does_not_overwrite_newer_latest_with_older_observation() -> None:
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        existing_latest_observed_at=datetime(2026, 4, 28, 10, 5, tzinfo=timezone.utc),
+    )
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
     payload = EvidencePromotionPayload(
         data_source_id="data-source-id",
@@ -298,6 +370,55 @@ def test_write_evidence_does_not_overwrite_newer_latest_with_older_observation()
     latest_sql, latest_params = connection.cursor_instance.executions[1]
     assert "WHERE EXCLUDED.observed_at >= official_realtime_latest.observed_at" in latest_sql
     assert latest_params[6] == datetime(2026, 4, 28, 9, 50, tzinfo=timezone.utc)
+    assert connection.cursor_instance.latest_attempted is True
+    assert connection.cursor_instance.latest_has_freshness_guard is True
+    assert connection.cursor_instance.latest_updated is False
+
+
+def test_write_evidence_skips_latest_upsert_for_non_point_geometry() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.civil_iot.flood_sensor",
+        source_id="FS-001:2026-06-15T03:00:00+00:00",
+        source_type="official",
+        event_type="flood_report",
+        title="Flood sensor report",
+        summary="Observed flood depth 18 cm",
+        url="https://example.test/flood-sensor/FS-001",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.91,
+        raw_ref="raw/civil-iot/flood-sensor/fs-001.json",
+        properties={
+            "adapter_key": "official.civil_iot.flood_sensor",
+            "station_name": "Zhongzheng Road Sensor",
+            "authority": "Water Resources Agency",
+            "flood_depth_cm": 18.0,
+            "location_payload": {
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [120.2, 23.0],
+                            [120.3, 23.0],
+                            [120.3, 23.1],
+                            [120.2, 23.1],
+                            [120.2, 23.0],
+                        ]
+                    ],
+                }
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 1
+    assert "INSERT INTO evidence" in connection.cursor_instance.executions[0][0]
 
 
 def test_promotion_idempotency_migration_handles_null_raw_ref_uniqueness() -> None:
@@ -390,8 +511,18 @@ class _MemoryPromotionWriter:
 
 
 class _FakeConnection:
-    def __init__(self, *, rows: list[tuple[object, ...]], evidence_id: str) -> None:
-        self.cursor_instance = _FakeCursor(rows=rows, evidence_id=evidence_id)
+    def __init__(
+        self,
+        *,
+        rows: list[tuple[object, ...]],
+        evidence_id: str,
+        existing_latest_observed_at: datetime | None = None,
+    ) -> None:
+        self.cursor_instance = _FakeCursor(
+            rows=rows,
+            evidence_id=evidence_id,
+            existing_latest_observed_at=existing_latest_observed_at,
+        )
         self.committed = False
 
     def __enter__(self) -> _FakeConnection:
@@ -408,10 +539,20 @@ class _FakeConnection:
 
 
 class _FakeCursor:
-    def __init__(self, *, rows: list[tuple[object, ...]], evidence_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        rows: list[tuple[object, ...]],
+        evidence_id: str,
+        existing_latest_observed_at: datetime | None,
+    ) -> None:
         self._rows = tuple(rows)
         self._evidence_id = evidence_id
         self.executions: list[tuple[str, tuple[object, ...]]] = []
+        self._existing_latest_observed_at = existing_latest_observed_at
+        self.latest_attempted = False
+        self.latest_has_freshness_guard = False
+        self.latest_updated: bool | None = None
 
     def __enter__(self) -> _FakeCursor:
         return self
@@ -421,6 +562,24 @@ class _FakeCursor:
 
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executions.append((sql, params))
+        if "INSERT INTO official_realtime_latest" not in sql:
+            return
+
+        self.latest_attempted = True
+        self.latest_has_freshness_guard = (
+            "WHERE EXCLUDED.observed_at >= official_realtime_latest.observed_at" in sql
+        )
+
+        incoming_observed_at = params[6]
+        if self._existing_latest_observed_at is None:
+            self.latest_updated = True
+            return
+
+        if self.latest_has_freshness_guard:
+            self.latest_updated = incoming_observed_at >= self._existing_latest_observed_at
+            return
+
+        self.latest_updated = True
 
     def fetchall(self) -> tuple[tuple[object, ...], ...]:
         return self._rows

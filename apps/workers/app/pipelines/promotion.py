@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import json
 import math
+import re
 from typing import Any, Protocol
 
 
@@ -470,6 +471,8 @@ def _official_realtime_station_id(payload: EvidencePromotionPayload) -> str | No
     station_id = _optional_text(payload.properties.get("station_id"))
     if station_id is not None:
         return station_id
+    if not _can_fallback_station_id(payload):
+        return None
     return _station_id_from_source_id(payload.source_id)
 
 
@@ -477,9 +480,25 @@ def _station_id_from_source_id(source_id: str) -> str | None:
     for separator in (":", "|", "@"):
         head, found, _tail = source_id.partition(separator)
         candidate = head.strip()
-        if found and candidate and "." not in candidate:
+        if found and _looks_like_station_id(candidate):
             return candidate
     return None
+
+
+def _can_fallback_station_id(payload: EvidencePromotionPayload) -> bool:
+    return (payload.adapter_key, payload.event_type) in {
+        ("official.cwa.rainfall", "rainfall"),
+        ("official.wra.water_level", "water_level"),
+        ("official.civil_iot.flood_sensor", "flood_report"),
+    }
+
+
+def _looks_like_station_id(candidate: str) -> bool:
+    if "." in candidate:
+        return False
+    if re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9_-]{1,30}[A-Za-z0-9])?", candidate) is None:
+        return False
+    return any(char.isdigit() for char in candidate) or any(char.isupper() for char in candidate)
 
 
 def _is_expired_cap(properties: dict[str, Any]) -> bool:
