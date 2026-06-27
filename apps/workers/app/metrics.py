@@ -293,6 +293,7 @@ def _age_seconds(collected_at: datetime, then: datetime | None) -> int:
 def _freshness_health_status(check: FreshnessCheck) -> str:
     return {
         "fresh": "healthy",
+        "degraded": "degraded",
         "stale": "degraded",
         "failed": "failed",
     }[check.status]

@@ -40,6 +40,7 @@ class FakeCursor:
     def __init__(self, rows: list[dict]) -> None:
         self.rows = rows
         self.params: list[str] | None = None
+        self.query: str | None = None
 
     def __enter__(self) -> "FakeCursor":
         return self
@@ -48,6 +49,7 @@ class FakeCursor:
         return None
 
     def execute(self, query: str, params: list[str]) -> None:
+        self.query = query
         self.params = params
 
     def fetchall(self) -> list[dict]:
@@ -200,6 +202,95 @@ def test_admin_sources_contract_filters_and_null_serialization(
     assert source["license"] == ""
     assert source["update_frequency"] == ""
     assert cursor.params == ["unknown"]
+    assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
+def test_admin_sources_include_realtime_diagnostics_and_disabled_sources_are_not_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    monkeypatch.setenv("SOURCE_CWA_API_ENABLED", "true")
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-04-28T13:00:00+00:00"),
+    )
+    get_settings.cache_clear()
+    cursor = FakeCursor(
+        [
+            {
+                "id": "cwa-rainfall",
+                "name": "CWA rainfall observations",
+                "adapter_key": "official.cwa.rainfall",
+                "source_type": "official",
+                "license": "Government open data",
+                "update_frequency": "PT10M",
+                "last_success_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
+                "last_failure_at": None,
+                "health_status": "healthy",
+                "legal_basis": "L1",
+                "source_timestamp_min": datetime.fromisoformat("2026-04-28T12:40:00+00:00"),
+                "source_timestamp_max": datetime.fromisoformat("2026-04-28T12:50:00+00:00"),
+                "is_enabled": True,
+                "latest_observed_at": datetime.fromisoformat("2026-04-28T12:50:00+00:00"),
+                "latest_fetched_at": datetime.fromisoformat("2026-04-28T12:55:00+00:00"),
+                "latest_ingested_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
+                "row_count": 7,
+                "upstream_status": "succeeded",
+            },
+            {
+                "id": "ncdr-cap",
+                "name": "NCDR CAP alert feed",
+                "adapter_key": "official.ncdr.cap",
+                "source_type": "official",
+                "license": "Government open data",
+                "update_frequency": "event_driven",
+                "last_success_at": None,
+                "last_failure_at": None,
+                "health_status": "failed",
+                "legal_basis": "L1",
+                "source_timestamp_min": None,
+                "source_timestamp_max": None,
+                "is_enabled": False,
+                "latest_observed_at": None,
+                "latest_fetched_at": None,
+                "latest_ingested_at": None,
+                "row_count": 0,
+                "upstream_status": "failed",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        admin_route.psycopg,
+        "connect",
+        lambda *args, **kwargs: FakeConnection(cursor),
+    )
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/sources",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "official_realtime_latest" in (cursor.query or "")
+    cwa = next(source for source in payload["sources"] if source["adapter_key"] == "official.cwa.rainfall")
+    assert cwa["latest_observed_at"] == "2026-04-28T12:50:00Z"
+    assert cwa["latest_fetched_at"] == "2026-04-28T12:55:00Z"
+    assert cwa["latest_ingested_at"] == "2026-04-28T12:56:00Z"
+    assert cwa["lag_seconds"] == 600
+    assert cwa["row_count"] == 7
+    assert cwa["freshness_state"] == "fresh"
+    assert cwa["upstream_status"] == "succeeded"
+    assert cwa["is_enabled"] is True
+    assert cwa["enabled_gates"] == ["data_sources.is_enabled", "SOURCE_CWA_API_ENABLED"]
+    disabled = next(source for source in payload["sources"] if source["adapter_key"] == "official.ncdr.cap")
+    assert disabled["health_status"] == "disabled"
+    assert disabled["freshness_state"] == "stale"
+    assert disabled["upstream_status"] == "disabled"
+    assert disabled["is_enabled"] is False
+    assert disabled["enabled_gates"] == []
     assert_openapi_schema(payload, "AdminSourcesResponse")
 
 

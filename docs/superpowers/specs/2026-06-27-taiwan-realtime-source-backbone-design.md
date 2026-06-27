@@ -1,7 +1,8 @@
 # 台灣即時資料來源主幹設計
 
 日期：2026-06-27
-狀態：方向已確認，待撰寫實作計畫
+狀態：方向已確認；Task 8 已加入 freshness state 與 admin diagnostics 主幹，
+仍待 production cadence、alert ownership 與 live-source smoke evidence
 
 ## 目的
 
@@ -279,6 +280,35 @@ bypass。
 
 資料新鮮度應從 source observation timestamps 計算，而不是從 fetch time 計算。
 
+Task 8 實作狀態：
+
+- Worker freshness checks 現在輸出 `fresh`、`degraded`、`stale`、`failed`。
+- CWA、WRA、Civil IoT 與經審核地方即時來源先採 10 分鐘 fresh、30 分鐘
+  degraded、60 分鐘 stale/failed。
+- NCDR CAP 已有 `effective`/`expires` 判斷 helper；production diagnostics
+  仍需在 CAP promotion/read model 中保存 expires 才能完整呈現事件有效窗。
+- `official.flood_potential.geojson` 標示為 static/slow cadence，不納入即時
+  freshness failure。
+- Disabled sources 在 admin diagnostics 中顯示為 disabled/stale，而不是
+  failed upstream fetch。
+
+Admin 診斷 contract：
+
+`/admin/v1/sources` 維持既有 wrapper 與原始欄位，並新增：
+
+- `latest_observed_at`：優先取 `official_realtime_latest.observed_at`，再退回
+  `data_sources.source_timestamp_max`。
+- `latest_fetched_at`：取最新 `raw_snapshots.fetched_at`。
+- `latest_ingested_at`：優先取 latest read model ingestion，再退回 adapter/job
+  finished time 或 `data_sources.last_success_at`。
+- `lag_seconds`：以最新 observed timestamp 計算，不以 fetch time 假裝資料新鮮。
+- `row_count`：目前 latest read model 中該 adapter 的列數。
+- `upstream_status`：最近 adapter run 或 ingestion job 狀態；source gate 關閉時
+  顯示 `disabled`。
+- `enabled_gates` 與 `is_enabled`：顯示 data-source gate 與目前開啟的環境 gate。
+- `freshness_state`：四態 source freshness，供 operator dashboard 與 public
+  copy 後續引用。
+
 ## 風險與信心
 
 在另一個 calibration review 變更前，維持既有 scoring model。新的 backbone
@@ -300,6 +330,10 @@ Production traffic 啟用前，必須加入 source diagnostics：
 - 指標：observed age、fetch lag、ingest lag、items fetched、items
   normalized、items rejected、latest-row count、source-health status。
 - 警示：official source stale 或 failed state。
+
+Task 8 已先落地 API/admin diagnostics 與 worker freshness helper。CLI
+`--diagnose-source`、`--source-status`、hosted dashboard panels、alert routing
+與 incident ownership 仍列為後續工作。
 
 ## 測試策略
 
@@ -334,6 +368,13 @@ opt-in，且不得讓一般 CI 不穩定。
 7. 加入台南 open-data fallback 作為 reviewed local POC。
 8. 加入 dashboards、alerts 與 opt-in live smoke tests。
 9. 累積足夠 fixture 與 live observation evidence 後，才重新校準 scoring。
+
+Task 8 後續工作：
+
+- 將 CAP expires/event-window 資料寫入 latest diagnostics 或 source metadata。
+- 用 live smoke evidence 決定是否調整 10/30/60 分鐘初始閾值。
+- 將 `/admin/v1/sources` freshness state 接到 hosted monitor/alert owner。
+- 補 worker/API 對 Civil IoT latest read model 的 production promotion smoke。
 
 ## OpenDesign 使用狀態
 

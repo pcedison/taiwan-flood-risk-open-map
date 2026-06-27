@@ -74,6 +74,17 @@ Current placeholder boundaries:
   persistence for gated CWA rainfall, WRA water-level, and flood-potential
   GeoJSON clients. Flood-potential still needs reviewed upstream URL/license,
   credential, cadence, and egress approval before production use.
+- Realtime source freshness now uses a four-state source model:
+  `fresh`, `degraded`, `stale`, and `failed`. CWA, WRA, Civil IoT, and reviewed
+  local realtime adapters start with 10-minute fresh, 30-minute degraded, and
+  60-minute stale/failed thresholds. NCDR CAP is evaluated by
+  `effective`/`expires`; flood-potential remains static/slow-cadence context
+  and is not treated as a realtime freshness failure.
+- `/admin/v1/sources` remains the source-health endpoint and now includes
+  diagnostics for the latest observed, fetched, and ingested timestamps, lag
+  seconds, latest-row count, upstream adapter/job status, freshness state,
+  `is_enabled`, and currently open source gates. Disabled sources are reported
+  as disabled/stale diagnostics, not failed upstream ingestion.
 - PTT, Dcard, and user report adapters are phase-delayed/pending
   implementation and must remain disabled until the required legal, privacy, and
   governance work lands.
@@ -176,6 +187,18 @@ docker compose run --rm `
   -e WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level `
   -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
   worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters --persist"
+
+# Local fixture smoke for the realtime-source backbone. Live gates stay closed;
+# fixture mode proves worker ingestion, source health, and admin diagnostics.
+docker compose run --rm `
+  -e WORKER_DATABASE_URL=postgresql://flood_risk:change-me-local@postgres:5432/flood_risk `
+  -e WORKER_RUNTIME_FIXTURES_ENABLED=true `
+  -e WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.wra.water_level `
+  worker sh -c "pip install -e . && python -m app.main --run-enabled-adapters --persist"
+
+# Inspect source freshness and enabled gates through the admin contract.
+curl.exe -H "Authorization: Bearer $env:ADMIN_BEARER_TOKEN" `
+  http://localhost:8000/admin/v1/sources
 
 # Run the gated CWA rainfall live adapter once.
 docker compose run --rm `

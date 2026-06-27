@@ -45,6 +45,7 @@ class ReadyResponse(ContractModel):
 
 JobStatus = Literal["queued", "running", "succeeded", "failed", "skipped", "disabled"]
 HealthStatus = Literal["healthy", "degraded", "failed", "disabled", "unknown"]
+FreshnessState = Literal["fresh", "degraded", "stale", "failed"]
 SourceType = Literal["official", "news", "forum", "social", "user_report", "derived"]
 LegalBasis = Literal["L1", "L2", "L3", "L4", "L5"]
 
@@ -81,6 +82,15 @@ class DataSource(ContractModel):
     last_failure_at: datetime | None = None
     source_timestamp_min: datetime | None = None
     source_timestamp_max: datetime | None = None
+    is_enabled: bool = True
+    latest_observed_at: datetime | None = None
+    latest_fetched_at: datetime | None = None
+    latest_ingested_at: datetime | None = None
+    lag_seconds: int | None = Field(default=None, ge=0)
+    row_count: int = Field(default=0, ge=0)
+    upstream_status: str = "unknown"
+    enabled_gates: list[str] = Field(default_factory=list)
+    freshness_state: FreshnessState = "stale"
 
 
 class AdminSourcesResponse(ContractModel):

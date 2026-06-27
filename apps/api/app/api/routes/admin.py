@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import os
 import secrets
 from typing import Annotated
 from uuid import UUID
@@ -18,6 +19,7 @@ from app.api.schemas import (
     AdminUserReport,
     AdminUserReportsResponse,
     DataSource,
+    FreshnessState,
     HealthStatus,
     IngestionJob,
     JobStatus,
@@ -40,6 +42,56 @@ from app.domain.reports import (
 
 router = APIRouter(prefix="/admin/v1", tags=["Admin"])
 admin_bearer = HTTPBearer(auto_error=False)
+REALTIME_FRESH_SECONDS = 10 * 60
+REALTIME_DEGRADED_SECONDS = 30 * 60
+REALTIME_STALE_SECONDS = 60 * 60
+REALTIME_ADAPTER_KEYS = frozenset(
+    {
+        "official.cwa.rainfall",
+        "official.wra.water_level",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.river_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "local.tainan.flood_sensor",
+    }
+)
+STATIC_SLOW_CADENCE_ADAPTER_KEYS = frozenset({"official.flood_potential.geojson"})
+SOURCE_GATE_NAMES = {
+    "official.cwa.rainfall": ("SOURCE_CWA_ENABLED", "SOURCE_CWA_API_ENABLED"),
+    "official.wra.water_level": ("SOURCE_WRA_ENABLED", "SOURCE_WRA_API_ENABLED"),
+    "official.ncdr.cap": ("SOURCE_NCDR_CAP_ENABLED", "SOURCE_NCDR_CAP_API_ENABLED"),
+    "official.flood_potential.geojson": (
+        "SOURCE_FLOOD_POTENTIAL_ENABLED",
+        "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED",
+    ),
+    "official.civil_iot.flood_sensor": (
+        "SOURCE_FLOOD_SENSOR_ENABLED",
+        "SOURCE_FLOOD_SENSOR_API_ENABLED",
+    ),
+    "official.civil_iot.river_water_level": (
+        "SOURCE_CIVIL_IOT_RIVER_ENABLED",
+        "SOURCE_CIVIL_IOT_RIVER_API_ENABLED",
+    ),
+    "official.civil_iot.pond_water_level": (
+        "SOURCE_CIVIL_IOT_POND_ENABLED",
+        "SOURCE_CIVIL_IOT_POND_API_ENABLED",
+    ),
+    "official.civil_iot.sewer_water_level": (
+        "SOURCE_CIVIL_IOT_SEWER_ENABLED",
+        "SOURCE_CIVIL_IOT_SEWER_API_ENABLED",
+    ),
+    "official.civil_iot.pump_water_level": (
+        "SOURCE_CIVIL_IOT_PUMP_ENABLED",
+        "SOURCE_CIVIL_IOT_PUMP_API_ENABLED",
+    ),
+    "local.tainan.flood_sensor": (
+        "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED",
+        "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED",
+    ),
+}
+TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 @router.get("/jobs", response_model=AdminJobsResponse)
@@ -242,28 +294,72 @@ def _db_sources(*, health_status: HealthStatus | None) -> list[DataSource]:
     where: list[str] = []
     params: list[str] = []
     if health_status is not None:
-        where.append("health_status = %s")
+        where.append("ds.health_status = %s")
         params.append(health_status)
 
     query = """
         SELECT
-            id::text AS id,
-            name,
-            adapter_key,
-            source_type,
-            license,
-            update_frequency,
-            last_success_at,
-            last_failure_at,
-            health_status,
-            legal_basis,
-            source_timestamp_min,
-            source_timestamp_max
-        FROM data_sources
+            ds.id::text AS id,
+            ds.name,
+            ds.adapter_key,
+            ds.source_type,
+            ds.license,
+            ds.update_frequency,
+            ds.last_success_at,
+            ds.last_failure_at,
+            ds.health_status,
+            ds.legal_basis,
+            ds.source_timestamp_min,
+            ds.source_timestamp_max,
+            ds.is_enabled,
+            COALESCE(latest.latest_observed_at, ds.source_timestamp_max) AS latest_observed_at,
+            raw.latest_fetched_at,
+            COALESCE(
+                latest.latest_ingested_at,
+                latest_run.finished_at,
+                latest_job.finished_at,
+                ds.last_success_at
+            ) AS latest_ingested_at,
+            COALESCE(latest.row_count, 0)::integer AS row_count,
+            COALESCE(latest_run.status, latest_job.status, ds.health_status, 'unknown') AS upstream_status
+        FROM data_sources ds
+        LEFT JOIN (
+            SELECT
+                adapter_key,
+                max(observed_at) AS latest_observed_at,
+                max(ingested_at) AS latest_ingested_at,
+                count(*) AS row_count
+            FROM official_realtime_latest
+            GROUP BY adapter_key
+        ) latest ON latest.adapter_key = ds.adapter_key
+        LEFT JOIN (
+            SELECT DISTINCT ON (adapter_key)
+                adapter_key,
+                fetched_at AS latest_fetched_at
+            FROM raw_snapshots
+            ORDER BY adapter_key, fetched_at DESC
+        ) raw ON raw.adapter_key = ds.adapter_key
+        LEFT JOIN (
+            SELECT DISTINCT ON (adapter_key)
+                adapter_key,
+                status,
+                finished_at
+            FROM adapter_runs
+            ORDER BY adapter_key, COALESCE(finished_at, created_at) DESC
+        ) latest_run ON latest_run.adapter_key = ds.adapter_key
+        LEFT JOIN (
+            SELECT DISTINCT ON (adapter_key)
+                adapter_key,
+                status,
+                finished_at
+            FROM ingestion_jobs
+            WHERE adapter_key IS NOT NULL
+            ORDER BY adapter_key, COALESCE(finished_at, created_at) DESC
+        ) latest_job ON latest_job.adapter_key = ds.adapter_key
     """
     if where:
         query += " WHERE " + " AND ".join(where)
-    query += " ORDER BY name ASC, adapter_key ASC LIMIT 100"
+    query += " ORDER BY ds.name ASC, ds.adapter_key ASC LIMIT 100"
 
     settings = get_settings()
     with psycopg.connect(settings.database_url, connect_timeout=2, row_factory=dict_row) as connection:
@@ -291,13 +387,116 @@ def _filter_sources(
 
 
 def _data_source_from_row(row: dict) -> DataSource:
+    is_enabled = bool(row.get("is_enabled", True))
+    health_status = row.get("health_status") or "unknown"
+    if not is_enabled:
+        health_status = "disabled"
+    latest_observed_at = row.get("latest_observed_at") or row.get("source_timestamp_max")
+    latest_ingested_at = row.get("latest_ingested_at") or row.get("last_success_at")
+    upstream_status = _upstream_status(row, is_enabled=is_enabled)
     return DataSource(
         **{
-            **row,
+            "id": row["id"],
+            "name": row["name"],
+            "adapter_key": row["adapter_key"],
+            "source_type": row["source_type"],
             "license": row.get("license") or "",
             "update_frequency": row.get("update_frequency") or "",
+            "last_success_at": row.get("last_success_at"),
+            "last_failure_at": row.get("last_failure_at"),
+            "health_status": health_status,
+            "legal_basis": row["legal_basis"],
+            "source_timestamp_min": row.get("source_timestamp_min"),
+            "source_timestamp_max": row.get("source_timestamp_max"),
+            "is_enabled": is_enabled,
+            "latest_observed_at": latest_observed_at,
+            "latest_fetched_at": row.get("latest_fetched_at"),
+            "latest_ingested_at": latest_ingested_at,
+            "lag_seconds": _lag_seconds(latest_observed_at),
+            "row_count": row.get("row_count") or 0,
+            "upstream_status": upstream_status,
+            "enabled_gates": _enabled_gates(row["adapter_key"], is_enabled=is_enabled),
+            "freshness_state": _freshness_state(
+                adapter_key=row["adapter_key"],
+                health_status=health_status,
+                is_enabled=is_enabled,
+                latest_observed_at=latest_observed_at,
+                upstream_status=upstream_status,
+            ),
         }
     )
+
+
+def _upstream_status(row: dict, *, is_enabled: bool) -> str:
+    if not is_enabled:
+        return "disabled"
+    return str(row.get("upstream_status") or row.get("health_status") or "unknown")
+
+
+def _lag_seconds(latest_observed_at: datetime | None) -> int | None:
+    if latest_observed_at is None:
+        return None
+    observed_at = _aware_utc(latest_observed_at)
+    return max(0, int((_now() - observed_at).total_seconds()))
+
+
+def _freshness_state(
+    *,
+    adapter_key: str,
+    health_status: HealthStatus,
+    is_enabled: bool,
+    latest_observed_at: datetime | None,
+    upstream_status: str,
+) -> FreshnessState:
+    if not is_enabled:
+        return "stale"
+    if upstream_status == "failed" or health_status == "failed":
+        return "failed"
+    if adapter_key in STATIC_SLOW_CADENCE_ADAPTER_KEYS:
+        if latest_observed_at is not None or upstream_status == "succeeded":
+            return "fresh"
+        return "stale"
+    if latest_observed_at is None:
+        return "stale"
+    if adapter_key in REALTIME_ADAPTER_KEYS:
+        age_seconds = _lag_seconds(latest_observed_at)
+        if age_seconds is None:
+            return "stale"
+        if age_seconds <= REALTIME_FRESH_SECONDS:
+            return "fresh"
+        if age_seconds <= REALTIME_DEGRADED_SECONDS:
+            return "degraded"
+        if age_seconds <= REALTIME_STALE_SECONDS:
+            return "stale"
+        return "failed"
+    if health_status == "healthy":
+        return "fresh"
+    if health_status == "degraded":
+        return "degraded"
+    return "stale"
+
+
+def _enabled_gates(adapter_key: str, *, is_enabled: bool) -> list[str]:
+    if not is_enabled:
+        return []
+    gates = ["data_sources.is_enabled"]
+    gates.extend(
+        gate_name
+        for gate_name in SOURCE_GATE_NAMES.get(adapter_key, ())
+        if _env_flag_enabled(gate_name)
+    )
+    return gates
+
+
+def _env_flag_enabled(name: str) -> bool:
+    raw_value = os.getenv(name)
+    return raw_value is not None and raw_value.strip().lower() in TRUE_VALUES
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _admin_report_from_record(report: UserReportModerationRecord) -> AdminUserReport:

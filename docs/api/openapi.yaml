@@ -1919,6 +1919,11 @@ components:
         - update_frequency
         - health_status
         - legal_basis
+        - is_enabled
+        - row_count
+        - upstream_status
+        - enabled_gates
+        - freshness_state
       properties:
         id:
           type: string
@@ -1957,6 +1962,46 @@ components:
             - string
             - "null"
           format: date-time
+        is_enabled:
+          type: boolean
+        latest_observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        latest_fetched_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        latest_ingested_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        lag_seconds:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+        row_count:
+          type: integer
+          minimum: 0
+        upstream_status:
+          type: string
+          description: Latest upstream adapter/job state, or disabled when the source gate is closed.
+        enabled_gates:
+          type: array
+          items:
+            type: string
+          description: Source/database and environment gates currently open for this source.
+        freshness_state:
+          type: string
+          enum:
+            - fresh
+            - degraded
+            - stale
+            - failed
       additionalProperties: false
 
     HealthStatus:
