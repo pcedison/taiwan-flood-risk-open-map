@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import psycopg
+
 from app.domain.layers import fetch_map_layer, fetch_map_layers
 from app.domain.evidence.repository import (
     EvidenceUpsert,
@@ -10,6 +12,7 @@ from app.domain.evidence.repository import (
     fetch_query_heat_snapshot,
     persist_risk_assessment,
     query_nearby_evidence,
+    query_nearby_latest_official,
     upsert_public_evidence,
 )
 
@@ -201,6 +204,51 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
         1,
         50,
     )
+
+
+def test_query_nearby_latest_official_uses_flood_depth_radius() -> None:
+    connection = _FakeConnection(rows=[])
+
+    records = query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        connection_factory=lambda: connection,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert records == ()
+    assert "FROM official_realtime_latest latest" in sql
+    assert "event_type = 'flood_report'" in sql
+    assert "event_type = 'flood_warning'" in sql
+    assert "flood_depth_degree" in sql
+    assert params == (
+        121.5654,
+        25.033,
+        121.5654,
+        25.033,
+        10000,
+        3000,
+        1000,
+        10000,
+        50,
+    )
+
+
+def test_query_nearby_latest_official_falls_back_when_table_missing() -> None:
+    connection = _FakeConnection(
+        rows=[],
+        execute_side_effects=[psycopg.errors.UndefinedTable("relation does not exist")],
+    )
+
+    records = query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        connection_factory=lambda: connection,
+    )
+
+    assert records == ()
 
 
 def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
@@ -409,8 +457,13 @@ class _FakeConnection:
         *,
         row: dict[str, object] | None = None,
         rows: list[dict[str, object]] | None = None,
+        execute_side_effects: list[BaseException] | None = None,
     ) -> None:
-        self.cursor_instance = _FakeCursor(row=row, rows=rows)
+        self.cursor_instance = _FakeCursor(
+            row=row,
+            rows=rows,
+            execute_side_effects=execute_side_effects,
+        )
 
     def __enter__(self) -> _FakeConnection:
         return self
@@ -428,9 +481,11 @@ class _FakeCursor:
         *,
         row: dict[str, object] | None = None,
         rows: list[dict[str, object]] | None = None,
+        execute_side_effects: list[BaseException] | None = None,
     ) -> None:
         self._row = row
         self._rows = rows
+        self._execute_side_effects = list(execute_side_effects or [])
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
     def __enter__(self) -> "_FakeCursor":
@@ -441,6 +496,8 @@ class _FakeCursor:
 
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executions.append((sql, params))
+        if self._execute_side_effects:
+            raise self._execute_side_effects.pop(0)
 
     def fetchone(self) -> dict[str, object]:
         assert self._row is not None

@@ -16,7 +16,9 @@ from app.api.schemas import (
     RiskAssessmentResponse,
     RiskLevelBlock,
 )
+from app.api.routes import public as public_routes
 from app.api.services import public_risk
+from app.domain.evidence.repository import EvidenceRecord
 from app.domain.realtime import OfficialRealtimeBundle
 
 
@@ -123,6 +125,36 @@ def _dependencies(**overrides: Any) -> public_risk.RiskAssessmentDependencies:
     return public_risk.RiskAssessmentDependencies(**values)
 
 
+def _db_evidence_record(
+    *,
+    source_id: str,
+    event_type: str,
+    raw_ref: str | None = None,
+) -> EvidenceRecord:
+    observed_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    return EvidenceRecord(
+        id=f"{source_id}-id",
+        source_id=source_id,
+        source_type="official",
+        event_type=event_type,
+        title=f"{event_type} evidence",
+        summary="db evidence",
+        url=None,
+        occurred_at=observed_at,
+        observed_at=observed_at,
+        ingested_at=observed_at,
+        lat=25.033,
+        lng=121.5654,
+        geometry={"type": "Point", "coordinates": [121.5654, 25.033]},
+        distance_to_query_m=120.0,
+        confidence=0.9,
+        freshness_score=0.9,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref=raw_ref,
+    )
+
+
 def test_assess_risk_returns_cached_response_before_source_work() -> None:
     request = _risk_request()
     created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
@@ -139,6 +171,52 @@ def test_assess_risk_returns_cached_response_before_source_work() -> None:
     )
 
     assert result is cached_response
+
+
+def test_nearby_db_evidence_uses_latest_first_and_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = _risk_request()
+    latest_record = _db_evidence_record(
+        source_id="cwa-rainfall:station-1:2026-06-09T03:00:00+00:00",
+        event_type="rainfall",
+        raw_ref="official-realtime-latest:official.cwa.rainfall:rainfall:station-1",
+    )
+    duplicate_history = _db_evidence_record(
+        source_id="cwa-rainfall:station-1:2026-06-09T02:00:00+00:00",
+        event_type="rainfall",
+    )
+    historical_record = _db_evidence_record(
+        source_id="flood-potential:profile-1",
+        event_type="flood_potential",
+        raw_ref="profile-top:official",
+    )
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+            app_env="test",
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_latest_official",
+        lambda **_kwargs: (latest_record,),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (duplicate_history, historical_record),
+    )
+    monkeypatch.setattr(public_routes, "_evidence_from_record", lambda record: record.source_id)
+
+    records = public_routes._nearby_db_evidence(request)
+
+    assert records == (
+        "cwa-rainfall:station-1:2026-06-09T03:00:00+00:00",
+        "flood-potential:profile-1",
+    )
 
 
 def test_assess_risk_profile_fast_path_refreshes_and_caches_response() -> None:

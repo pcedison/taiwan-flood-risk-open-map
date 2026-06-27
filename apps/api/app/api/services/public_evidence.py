@@ -80,9 +80,52 @@ def rainfall_realtime_risk_factor(rainfall_1h_mm: float) -> float:
     return 0.0
 
 
+def water_level_realtime_risk_factor(
+    *,
+    water_level_m: float,
+    warning_level_m: float,
+) -> float:
+    ratio = water_level_m / warning_level_m
+    if ratio >= 1.0:
+        return 1.0
+    if ratio >= 0.8:
+        return 0.8
+    if ratio >= 0.5:
+        return 0.5
+    if ratio >= 0.25:
+        return 0.25
+    return 0.0
+
+
+def flood_depth_realtime_risk_factor(flood_depth_cm: float) -> float:
+    if flood_depth_cm >= 50:
+        return 1.0
+    if flood_depth_cm >= 30:
+        return 0.8
+    if flood_depth_cm >= 15:
+        return 0.5
+    if flood_depth_cm >= 3:
+        return 0.25
+    return 0.0
+
+
 def _evidence_realtime_risk_factor(record: EvidenceRecord) -> float | None:
+    if record.realtime_risk_factor is not None:
+        return record.realtime_risk_factor
     if record.event_type == "rainfall" and record.rainfall_mm_1h is not None:
         return rainfall_realtime_risk_factor(record.rainfall_mm_1h)
+    if (
+        record.event_type == "water_level"
+        and record.water_level_m is not None
+        and record.warning_level_m is not None
+        and record.warning_level_m > 0
+    ):
+        return water_level_realtime_risk_factor(
+            water_level_m=record.water_level_m,
+            warning_level_m=record.warning_level_m,
+        )
+    if record.event_type == "flood_report" and record.flood_depth_cm is not None:
+        return flood_depth_realtime_risk_factor(record.flood_depth_cm)
     return None
 
 

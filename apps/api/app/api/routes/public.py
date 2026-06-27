@@ -46,6 +46,7 @@ from app.domain.evidence import (
     RiskAssessmentPersistence,
     upsert_public_evidence,
 )
+from app.domain.evidence.repository import query_nearby_latest_official
 from app.domain.geocoding import build_open_data_geocoder
 from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
 from app.domain.history import (
@@ -212,6 +213,8 @@ def _use_local_historical_fallback(app_env: str) -> bool:
 # rain from overstating far-station risk.
 REALTIME_RAINFALL_RELEVANCE_M = 10000
 REALTIME_WATER_RELEVANCE_M = 3000
+REALTIME_FLOOD_DEPTH_RELEVANCE_M = 1000
+REALTIME_FLOOD_WARNING_RELEVANCE_M = 10000
 REALTIME_OFFICIAL_LOOKBACK = timedelta(hours=3)
 EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS = 6000
 ASSESSMENT_PERSIST_STATEMENT_TIMEOUT_MS = 1500
@@ -222,7 +225,18 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
     if not settings.evidence_repository_enabled:
         return None
     try:
-        records = query_nearby_evidence(
+        latest_records = query_nearby_latest_official(
+            database_url=settings.database_url,
+            lat=request.point.lat,
+            lng=request.point.lng,
+            limit=50,
+            rainfall_radius_m=REALTIME_RAINFALL_RELEVANCE_M,
+            water_level_radius_m=REALTIME_WATER_RELEVANCE_M,
+            flood_depth_radius_m=REALTIME_FLOOD_DEPTH_RELEVANCE_M,
+            flood_warning_radius_m=REALTIME_FLOOD_WARNING_RELEVANCE_M,
+            statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
+        )
+        evidence_records = query_nearby_evidence(
             database_url=settings.database_url,
             lat=request.point.lat,
             lng=request.point.lng,
@@ -237,7 +251,59 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
         if settings.app_env in {"staging", "production", "production-beta"}:
             return None
         return None
+    records = _merge_nearby_evidence_records(
+        latest_records,
+        evidence_records,
+        limit=50,
+    )
     return tuple(_evidence_from_record(record) for record in records)
+
+
+def _merge_nearby_evidence_records(
+    latest_records: tuple[EvidenceRecord, ...],
+    evidence_records: tuple[EvidenceRecord, ...],
+    *,
+    limit: int,
+) -> tuple[EvidenceRecord, ...]:
+    merged: list[EvidenceRecord] = []
+    seen: set[tuple[str, str]] = set()
+    for record in (*latest_records, *evidence_records):
+        dedupe_key = _nearby_evidence_dedupe_key(record)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        merged.append(record)
+        if len(merged) >= limit:
+            break
+    return tuple(merged)
+
+
+def _nearby_evidence_dedupe_key(record: EvidenceRecord) -> tuple[str, str]:
+    station_key = _official_realtime_station_key(record)
+    if station_key is not None:
+        return (record.event_type, station_key)
+    return (record.event_type, record.raw_ref or record.source_id)
+
+
+def _official_realtime_station_key(record: EvidenceRecord) -> str | None:
+    if record.raw_ref and record.raw_ref.startswith("official-realtime-latest:"):
+        parts = record.raw_ref.split(":", 3)
+        if len(parts) == 4:
+            return f"{record.event_type}:{parts[3]}"
+
+    if record.source_type != "official":
+        return None
+    if record.event_type not in {"rainfall", "water_level", "flood_report", "flood_warning"}:
+        return None
+
+    parts = record.source_id.split(":", 2)
+    if len(parts) == 3 and parts[0] in {"cwa-rainfall", "wra-water-level"}:
+        return f"{record.event_type}:{parts[1]}"
+
+    head, found, tail = record.source_id.partition(":")
+    if found and tail.startswith("20"):
+        return f"{record.event_type}:{head}"
+    return None
 
 
 def _evidence_from_record(record: EvidenceRecord) -> Evidence:

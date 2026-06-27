@@ -41,6 +41,10 @@ class EvidenceRecord:
     privacy_level: str
     raw_ref: str | None
     rainfall_mm_1h: float | None = None
+    water_level_m: float | None = None
+    warning_level_m: float | None = None
+    flood_depth_cm: float | None = None
+    realtime_risk_factor: float | None = None
 
 
 @dataclass(frozen=True)
@@ -351,7 +355,11 @@ def query_nearby_evidence(
                 AS source_weight,
             c.privacy_level,
             c.raw_ref,
-            (c.properties->>'rainfall_mm_1h')::double precision AS rainfall_mm_1h
+            (c.properties->>'rainfall_mm_1h')::double precision AS rainfall_mm_1h,
+            (c.properties->>'water_level_m')::double precision AS water_level_m,
+            (c.properties->>'warning_level_m')::double precision AS warning_level_m,
+            (c.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor
         FROM candidate_rows c
         WHERE c.computed_distance_to_query_m <= c.branch_relevance_m
         ORDER BY
@@ -392,6 +400,146 @@ def query_nearby_evidence(
         statement_timeout_ms=statement_timeout_ms,
         connection_factory=connection_factory,
     )
+
+
+def query_nearby_latest_official(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    limit: int = 50,
+    rainfall_radius_m: int = 10_000,
+    water_level_radius_m: int = 3_000,
+    flood_depth_radius_m: int = 1_000,
+    flood_warning_radius_m: int = 10_000,
+    statement_timeout_ms: int = 0,
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[EvidenceRecord, ...]:
+    bounded_limit = max(1, min(limit, 100))
+    sql = """
+        WITH query_point_base AS (
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                %s::double precision AS rainfall_m,
+                %s::double precision AS water_level_m,
+                %s::double precision AS flood_depth_m,
+                %s::double precision AS flood_warning_m
+        ),
+        query_point AS (
+            SELECT
+                *,
+                (rainfall_m / 90000.0) AS rainfall_degree,
+                (water_level_m / 90000.0) AS water_level_degree,
+                (flood_depth_m / 90000.0) AS flood_depth_degree,
+                (flood_warning_m / 90000.0) AS flood_warning_degree
+            FROM query_point_base
+        )
+        SELECT
+            COALESCE(e.id::text, latest.source_id) AS id,
+            latest.source_id,
+            'official' AS source_type,
+            latest.event_type,
+            COALESCE(
+                e.title,
+                CASE latest.event_type
+                    WHEN 'rainfall' THEN '官方最新雨量站觀測'
+                    WHEN 'water_level' THEN '官方最新水位站觀測'
+                    WHEN 'flood_report' THEN '官方最新淹水觀測'
+                    WHEN 'flood_warning' THEN '官方最新淹水警戒'
+                    ELSE '官方最新即時觀測'
+                END
+            ) AS title,
+            COALESCE(
+                e.summary,
+                CASE latest.event_type
+                    WHEN 'rainfall' THEN '官方最新雨量站觀測值。'
+                    WHEN 'water_level' THEN '官方最新水位站觀測值。'
+                    WHEN 'flood_report' THEN '官方最新淹水感測觀測值。'
+                    WHEN 'flood_warning' THEN '官方最新淹水警戒。'
+                    ELSE '官方最新即時觀測值。'
+                END
+            ) AS summary,
+            COALESCE(e.url, latest.source_url) AS url,
+            e.occurred_at,
+            latest.observed_at,
+            latest.ingested_at,
+            ST_Y(ST_PointOnSurface(latest.geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(latest.geom::geometry)) AS lng,
+            ST_AsGeoJSON(ST_PointOnSurface(latest.geom::geometry)) AS geometry,
+            ST_Distance(latest.geom::geography, qp.geog) AS distance_to_query_m,
+            COALESCE(latest.confidence, e.confidence, 0.9) AS confidence,
+            COALESCE(latest.freshness_score, e.freshness_score, 0.8) AS freshness_score,
+            COALESCE(latest.source_weight, e.source_weight, 1.0) AS source_weight,
+            'public' AS privacy_level,
+            CONCAT(
+                'official-realtime-latest:',
+                latest.adapter_key,
+                ':',
+                latest.event_type,
+                ':',
+                latest.station_id
+            ) AS raw_ref,
+            latest.rainfall_mm_1h,
+            latest.water_level_m,
+            latest.warning_level_m,
+            latest.flood_depth_cm,
+            latest.risk_factor AS realtime_risk_factor
+        FROM official_realtime_latest latest
+        CROSS JOIN query_point qp
+        LEFT JOIN evidence e ON e.id = latest.evidence_id
+        WHERE latest.geom IS NOT NULL
+            AND (
+                (
+                    latest.event_type = 'rainfall'
+                    AND latest.geom && ST_Expand(qp.geom, qp.rainfall_degree)
+                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.rainfall_m)
+                )
+                OR (
+                    latest.event_type = 'water_level'
+                    AND latest.geom && ST_Expand(qp.geom, qp.water_level_degree)
+                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.water_level_m)
+                )
+                OR (
+                    latest.event_type = 'flood_report'
+                    AND latest.geom && ST_Expand(qp.geom, qp.flood_depth_degree)
+                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.flood_depth_m)
+                )
+                OR (
+                    latest.event_type = 'flood_warning'
+                    AND latest.geom && ST_Expand(qp.geom, qp.flood_warning_degree)
+                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.flood_warning_m)
+                )
+            )
+        ORDER BY
+            distance_to_query_m ASC,
+            latest.observed_at DESC,
+            latest.updated_at DESC
+        LIMIT %s
+    """
+    try:
+        with _connect(database_url, connection_factory) as connection:
+            with connection.cursor() as cursor:
+                _apply_statement_timeout(cursor, statement_timeout_ms)
+                cursor.execute(
+                    sql,
+                    (
+                        lng,
+                        lat,
+                        lng,
+                        lat,
+                        rainfall_radius_m,
+                        water_level_radius_m,
+                        flood_depth_radius_m,
+                        flood_warning_radius_m,
+                        bounded_limit,
+                    ),
+                )
+                return tuple(_record_from_row(row) for row in cursor.fetchall())
+    except psycopg.errors.UndefinedTable:
+        return ()
+    except (OSError, psycopg.Error) as exc:
+        raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
 
 def upsert_public_evidence(
@@ -601,7 +749,12 @@ def fetch_assessment_evidence(
             COALESCE(e.source_weight, CASE WHEN e.source_type = 'official' THEN 1.0 ELSE 0.85 END)
                 AS source_weight,
             e.privacy_level,
-            e.raw_ref
+            e.raw_ref,
+            (e.properties->>'rainfall_mm_1h')::double precision AS rainfall_mm_1h,
+            (e.properties->>'water_level_m')::double precision AS water_level_m,
+            (e.properties->>'warning_level_m')::double precision AS warning_level_m,
+            (e.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor
         FROM risk_assessment_evidence rae
         JOIN risk_assessments ra ON ra.id = rae.risk_assessment_id
         JOIN location_queries lq ON lq.id = ra.query_id
@@ -658,7 +811,12 @@ def fetch_evidence_by_ids(
             COALESCE(e.source_weight, CASE WHEN e.source_type = 'official' THEN 1.0 ELSE 0.85 END)
                 AS source_weight,
             e.privacy_level,
-            e.raw_ref
+            e.raw_ref,
+            (e.properties->>'rainfall_mm_1h')::double precision AS rainfall_mm_1h,
+            (e.properties->>'water_level_m')::double precision AS water_level_m,
+            (e.properties->>'warning_level_m')::double precision AS warning_level_m,
+            (e.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor
         FROM requested
         JOIN evidence e ON e.id = requested.id
         WHERE e.ingestion_status = 'accepted'
@@ -728,6 +886,10 @@ def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
         privacy_level=str(row["privacy_level"]),
         raw_ref=str(row["raw_ref"]) if row.get("raw_ref") is not None else None,
         rainfall_mm_1h=_optional_float(row.get("rainfall_mm_1h")),
+        water_level_m=_optional_float(row.get("water_level_m")),
+        warning_level_m=_optional_float(row.get("warning_level_m")),
+        flood_depth_cm=_optional_float(row.get("flood_depth_cm")),
+        realtime_risk_factor=_optional_float(row.get("realtime_risk_factor")),
     )
 
 
