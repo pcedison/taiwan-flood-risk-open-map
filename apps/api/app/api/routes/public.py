@@ -231,6 +231,7 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
     settings = get_settings()
     if not settings.evidence_repository_enabled:
         return None
+    official_realtime_since = _now() - REALTIME_OFFICIAL_LOOKBACK
     try:
         latest_records = query_nearby_latest_official(
             database_url=settings.database_url,
@@ -241,6 +242,7 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
             water_level_radius_m=REALTIME_WATER_RELEVANCE_M,
             flood_depth_radius_m=REALTIME_FLOOD_DEPTH_RELEVANCE_M,
             flood_warning_radius_m=REALTIME_FLOOD_WARNING_RELEVANCE_M,
+            observed_since=official_realtime_since,
             statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
     except EvidenceRepositoryUnavailable:
@@ -255,7 +257,7 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
             limit=50,
             rainfall_relevance_m=REALTIME_RAINFALL_RELEVANCE_M,
             water_relevance_m=REALTIME_WATER_RELEVANCE_M,
-            official_realtime_since=_now() - REALTIME_OFFICIAL_LOOKBACK,
+            official_realtime_since=official_realtime_since,
             statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
     except EvidenceRepositoryUnavailable:

@@ -237,6 +237,35 @@ def test_query_nearby_latest_official_uses_flood_depth_radius() -> None:
     )
 
 
+def test_query_nearby_latest_official_filters_rows_by_observed_since() -> None:
+    connection = _FakeConnection(rows=[])
+    observed_since = datetime(2026, 6, 16, 2, 0, tzinfo=timezone.utc)
+
+    records = query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        observed_since=observed_since,
+        connection_factory=lambda: connection,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert records == ()
+    assert "latest.observed_at >= %s::timestamptz" in sql
+    assert params == (
+        121.5654,
+        25.033,
+        121.5654,
+        25.033,
+        10000,
+        3000,
+        1000,
+        10000,
+        observed_since,
+        50,
+    )
+
+
 def test_query_nearby_latest_official_falls_back_when_table_missing() -> None:
     connection = _FakeConnection(
         rows=[],

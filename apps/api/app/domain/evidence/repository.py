@@ -414,11 +414,17 @@ def query_nearby_latest_official(
     water_level_radius_m: int = 3_000,
     flood_depth_radius_m: int = 1_000,
     flood_warning_radius_m: int = 10_000,
+    observed_since: datetime | None = None,
     statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
     bounded_limit = max(1, min(limit, 100))
-    sql = """
+    observed_since_filter = ""
+    observed_since_params: tuple[datetime, ...] = ()
+    if observed_since is not None:
+        observed_since_filter = "AND latest.observed_at >= %s::timestamptz"
+        observed_since_params = (observed_since,)
+    sql = f"""
         WITH query_point_base AS (
             SELECT
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
@@ -491,6 +497,7 @@ def query_nearby_latest_official(
         CROSS JOIN query_point qp
         LEFT JOIN evidence e ON e.id = latest.evidence_id
         WHERE latest.geom IS NOT NULL
+            {observed_since_filter}
             AND (
                 (
                     latest.event_type = 'rainfall'
@@ -534,6 +541,7 @@ def query_nearby_latest_official(
                         water_level_radius_m,
                         flood_depth_radius_m,
                         flood_warning_radius_m,
+                        *observed_since_params,
                         bounded_limit,
                     ),
                 )

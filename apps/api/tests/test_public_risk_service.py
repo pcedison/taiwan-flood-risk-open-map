@@ -223,11 +223,16 @@ def test_nearby_db_evidence_falls_back_to_legacy_when_latest_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request = _risk_request()
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    expected_cutoff = now - public_routes.REALTIME_OFFICIAL_LOOKBACK
+    captured_latest_kwargs: dict[str, Any] = {}
+    captured_legacy_kwargs: dict[str, Any] = {}
     legacy_record = _db_evidence_record(
         source_id="legacy-flood-report:1",
         event_type="flood_report",
     )
 
+    monkeypatch.setattr(public_routes, "_now", lambda: now)
     monkeypatch.setattr(
         public_routes,
         "get_settings",
@@ -238,8 +243,13 @@ def test_nearby_db_evidence_falls_back_to_legacy_when_latest_unavailable(
         ),
     )
 
-    def latest_unavailable(**_kwargs: object) -> tuple[EvidenceRecord, ...]:
+    def latest_unavailable(**kwargs: object) -> tuple[EvidenceRecord, ...]:
+        captured_latest_kwargs.update(kwargs)
         raise public_routes.EvidenceRepositoryUnavailable("latest table unavailable")
+
+    def legacy_query(**kwargs: object) -> tuple[EvidenceRecord, ...]:
+        captured_legacy_kwargs.update(kwargs)
+        return (legacy_record,)
 
     monkeypatch.setattr(
         public_routes,
@@ -249,13 +259,15 @@ def test_nearby_db_evidence_falls_back_to_legacy_when_latest_unavailable(
     monkeypatch.setattr(
         public_routes,
         "query_nearby_evidence",
-        lambda **_kwargs: (legacy_record,),
+        legacy_query,
     )
     monkeypatch.setattr(public_routes, "_evidence_from_record", lambda record: record.source_id)
 
     records = public_routes._nearby_db_evidence(request)
 
     assert records == ("legacy-flood-report:1",)
+    assert captured_latest_kwargs["observed_since"] == expected_cutoff
+    assert captured_legacy_kwargs["official_realtime_since"] == expected_cutoff
 
 
 def test_nearby_db_evidence_does_not_false_positive_dedupe_unknown_official_source(
