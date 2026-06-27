@@ -127,7 +127,7 @@ def test_tainan_api_adapter_outputs_local_flood_report_evidence() -> None:
     ]
     assert result.adapter_key == "local.tainan.flood_sensor"
     assert len(result.fetched) == 2
-    assert len(result.normalized) == 2
+    assert len(result.normalized) == 1
     evidence = result.normalized[0]
     assert evidence.adapter_key == "local.tainan.flood_sensor"
     assert evidence.source_family is SourceFamily.OFFICIAL
@@ -140,7 +140,7 @@ def test_tainan_api_adapter_outputs_local_flood_report_evidence() -> None:
     assert result.fetched[0].payload["resource_url"] == TAINAN_FLOOD_SENSOR_API_URL
 
 
-def test_tainan_records_missing_coordinates_keep_quality_flag_without_point_payload() -> None:
+def test_tainan_records_missing_coordinates_keep_quality_flag_and_are_not_normalized() -> None:
     def fetch_json(url: str, timeout_seconds: int) -> dict:
         del timeout_seconds
         if url == TAINAN_FLOOD_SENSOR_METADATA_API_URL:
@@ -154,18 +154,26 @@ def test_tainan_records_missing_coordinates_keep_quality_flag_without_point_payl
 
     result = adapter.run()
     missing_coordinate_raw = result.fetched[1]
+    missing_coordinate_source_id = "f002:2026-06-27T03:26:03+00:00"
 
+    assert missing_coordinate_raw.source_id == missing_coordinate_source_id
     assert "geometry" not in missing_coordinate_raw.payload
     assert missing_coordinate_raw.payload["quality_flags"] == {
         "missing_station_coordinates": True,
         "station_metadata_missing": False,
         "water_inner_doubt": True,
     }
-    assert "missing_station_coordinates" in result.normalized[1].tags
+    assert [evidence.source_id for evidence in result.normalized] == [
+        "f001:2026-06-27T03:25:03+00:00"
+    ]
+    assert result.rejected == (missing_coordinate_source_id,)
+
     staging = build_staging_batch(result, raw_ref="raw/local/tainan/flood_sensor/test.json")
-    missing_coordinate_staged = staging.accepted[1]
-    assert "location_payload" not in missing_coordinate_staged.payload
-    assert missing_coordinate_staged.payload["quality_flags"]["missing_station_coordinates"] is True
+    assert [candidate.source_id for candidate in staging.accepted] == [
+        "f001:2026-06-27T03:25:03+00:00"
+    ]
+    assert missing_coordinate_source_id not in {candidate.source_id for candidate in staging.accepted}
+    assert staging.rejected_raw_source_ids == (missing_coordinate_source_id,)
 
 
 def test_tainan_adapter_registry_and_config_are_default_off() -> None:
@@ -245,7 +253,7 @@ def test_build_runtime_adapters_includes_tainan_only_when_both_gates_are_on() ->
     )
 
     assert "local.tainan.flood_sensor" in adapters
-    assert len(adapters["local.tainan.flood_sensor"].run().normalized) == 2
+    assert len(adapters["local.tainan.flood_sensor"].run().normalized) == 1
     assert calls == [
         (TAINAN_FLOOD_SENSOR_METADATA_API_URL, 5),
         (TAINAN_FLOOD_SENSOR_API_URL, 5),

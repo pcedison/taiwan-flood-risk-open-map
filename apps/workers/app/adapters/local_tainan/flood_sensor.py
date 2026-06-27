@@ -304,6 +304,13 @@ def _normalize_tainan_flood_sensor_record(
     raw_item: RawSourceItem,
 ) -> NormalizedEvidence | None:
     payload = raw_item.payload
+    quality_flags = payload.get("quality_flags")
+    if (
+        isinstance(quality_flags, Mapping)
+        and quality_flags.get("missing_station_coordinates") is True
+    ):
+        return None
+
     station_name = optional_str(payload.get("station_name"))
     observed_at = parse_datetime(payload.get("observed_at"))
     flood_depth_cm = optional_float(payload.get("flood_depth_cm"))
