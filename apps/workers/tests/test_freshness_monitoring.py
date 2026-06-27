@@ -153,7 +153,7 @@ def test_ncdr_cap_freshness_uses_effective_expires_window() -> None:
     assert degraded.reason == "CAP alert is not yet effective"
     assert stale.status == "stale"
     assert stale.reason == "CAP alert expired; no active alert"
-    assert stale.is_alert()
+    assert not stale.is_alert()
 
 
 def test_summary_freshness_uses_ncdr_cap_effective_expires_window() -> None:
@@ -189,7 +189,7 @@ def test_summary_freshness_uses_ncdr_cap_effective_expires_window() -> None:
     assert degraded.status == "degraded"
     assert stale.status == "stale"
     assert stale.reason == "CAP alert expired; no active alert"
-    assert stale.is_alert()
+    assert not stale.is_alert()
 
 
 def test_ncdr_cap_failed_batch_is_the_only_failed_no_active_alert_case() -> None:
@@ -216,8 +216,35 @@ def test_ncdr_cap_failed_batch_is_the_only_failed_no_active_alert_case() -> None
 
     assert no_active_alert.status == "stale"
     assert no_active_alert.reason == "CAP alert is missing effective or expires timestamp"
+    assert not no_active_alert.is_alert()
     assert failed_batch.status == "failed"
     assert failed_batch.reason == "upstream 500"
+    assert failed_batch.is_alert()
+
+
+def test_ncdr_cap_batch_summary_preserves_expired_raw_window_without_normalized_alert() -> None:
+    effective_at = CHECKED_AT - timedelta(hours=2)
+    expires_at = CHECKED_AT - timedelta(hours=1)
+
+    summary = run_adapter_batch(
+        _CapAdapter(
+            effective_at=effective_at,
+            expires_at=expires_at,
+            fetched_at=CHECKED_AT,
+            normalize=False,
+        )
+    )
+    check = check_summary_freshness(
+        summary,
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert summary.source_timestamp_min == effective_at
+    assert summary.source_timestamp_max == expires_at
+    assert check.status == "stale"
+    assert check.reason == "CAP alert expired; no active alert"
+    assert not check.is_alert()
 
 
 def test_ncdr_cap_batch_summary_preserves_effective_expires_window() -> None:
@@ -278,10 +305,12 @@ class _CapAdapter:
         effective_at: datetime,
         expires_at: datetime,
         fetched_at: datetime,
+        normalize: bool = True,
     ) -> None:
         self.effective_at = effective_at
         self.expires_at = expires_at
         self.fetched_at = fetched_at
+        self.normalize = normalize
 
     def run(self) -> AdapterRunResult:
         raw_item = RawSourceItem(
@@ -312,5 +341,6 @@ class _CapAdapter:
         return AdapterRunResult(
             adapter_key="official.ncdr.cap",
             fetched=(raw_item,),
-            normalized=(evidence,),
+            normalized=(evidence,) if self.normalize else (),
+            rejected=() if self.normalize else (raw_item.source_id,),
         )

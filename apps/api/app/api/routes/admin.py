@@ -430,6 +430,8 @@ def _data_source_from_row(row: dict) -> DataSource:
                 adapter_key=row["adapter_key"],
                 health_status=health_status,
                 is_enabled=is_enabled,
+                source_timestamp_min=row.get("source_timestamp_min"),
+                source_timestamp_max=row.get("source_timestamp_max"),
                 latest_observed_at=latest_observed_at,
                 upstream_status=upstream_status,
             ),
@@ -455,6 +457,8 @@ def _freshness_state(
     adapter_key: str,
     health_status: HealthStatus,
     is_enabled: bool,
+    source_timestamp_min: datetime | None,
+    source_timestamp_max: datetime | None,
     latest_observed_at: datetime | None,
     upstream_status: str,
 ) -> FreshnessState:
@@ -462,6 +466,12 @@ def _freshness_state(
         return "stale"
     if upstream_status == "failed" or health_status == "failed":
         return "failed"
+    if adapter_key == "official.ncdr.cap":
+        return _ncdr_cap_freshness_state(
+            effective_at=source_timestamp_min,
+            expires_at=source_timestamp_max,
+            health_status=health_status,
+        )
     if adapter_key in STATIC_SLOW_CADENCE_ADAPTER_KEYS:
         if latest_observed_at is not None or upstream_status == "succeeded":
             return "fresh"
@@ -484,6 +494,26 @@ def _freshness_state(
     if health_status == "degraded":
         return "degraded"
     return "stale"
+
+
+def _ncdr_cap_freshness_state(
+    *,
+    effective_at: datetime | None,
+    expires_at: datetime | None,
+    health_status: HealthStatus,
+) -> FreshnessState:
+    if effective_at is None or expires_at is None:
+        return "stale"
+    resolved_effective_at = _aware_utc(effective_at)
+    resolved_expires_at = _aware_utc(expires_at)
+    now = _now()
+    if resolved_expires_at < now:
+        return "stale"
+    if resolved_effective_at > now:
+        return "degraded"
+    if health_status == "degraded":
+        return "degraded"
+    return "fresh"
 
 
 def _enabled_gates(adapter_key: str, *, is_enabled: bool) -> list[str]:
@@ -563,6 +593,10 @@ def _sample_jobs() -> list[IngestionJob]:
 
 def _sample_sources() -> list[DataSource]:
     now = _now()
+    cwa_latest_observed_at = now - timedelta(minutes=5)
+    cwa_latest_ingested_at = now - timedelta(minutes=4)
+    news_latest_observed_at = now - timedelta(minutes=45)
+    news_latest_ingested_at = now - timedelta(minutes=29)
     return [
         DataSource(
             id="cwa-rainfall",
@@ -571,11 +605,18 @@ def _sample_sources() -> list[DataSource]:
             source_type="official",
             license="Government open data",
             update_frequency="PT10M",
-            last_success_at=now - timedelta(minutes=11),
+            last_success_at=cwa_latest_ingested_at,
             health_status="healthy",
             legal_basis="L1",
             source_timestamp_min=now - timedelta(minutes=20),
-            source_timestamp_max=now - timedelta(minutes=15),
+            source_timestamp_max=cwa_latest_observed_at,
+            latest_observed_at=cwa_latest_observed_at,
+            latest_fetched_at=now - timedelta(minutes=4),
+            latest_ingested_at=cwa_latest_ingested_at,
+            lag_seconds=5 * 60,
+            row_count=2,
+            upstream_status="succeeded",
+            freshness_state="fresh",
         ),
         DataSource(
             id="news-public-web-sample",
@@ -584,10 +625,17 @@ def _sample_sources() -> list[DataSource]:
             source_type="news",
             license="Fixture only",
             update_frequency="fixture_only",
-            last_success_at=now - timedelta(minutes=29),
+            last_success_at=news_latest_ingested_at,
             health_status="healthy",
             legal_basis="L2",
             source_timestamp_min=now - timedelta(hours=1),
-            source_timestamp_max=now - timedelta(minutes=45),
+            source_timestamp_max=news_latest_observed_at,
+            latest_observed_at=news_latest_observed_at,
+            latest_fetched_at=news_latest_ingested_at,
+            latest_ingested_at=news_latest_ingested_at,
+            lag_seconds=45 * 60,
+            row_count=2,
+            upstream_status="succeeded",
+            freshness_state="fresh",
         ),
     ]

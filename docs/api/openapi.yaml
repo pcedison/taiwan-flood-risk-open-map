@@ -585,7 +585,7 @@ paths:
                     sources:
                       - id: cwa-rainfall
                         name: "中央氣象署雨量資料"
-                        adapter_key: cwa.rainfall
+                        adapter_key: official.cwa.rainfall
                         source_type: official
                         license: "Open Government Data License"
                         update_frequency: PT10M
@@ -595,6 +595,17 @@ paths:
                         legal_basis: L1
                         source_timestamp_min: "2026-04-28T12:00:00Z"
                         source_timestamp_max: "2026-04-28T12:50:00Z"
+                        is_enabled: true
+                        latest_observed_at: "2026-04-28T12:50:00Z"
+                        latest_fetched_at: "2026-04-28T12:55:00Z"
+                        latest_ingested_at: "2026-04-28T12:56:00Z"
+                        lag_seconds: 600
+                        row_count: 7
+                        upstream_status: succeeded
+                        enabled_gates:
+                          - data_sources.is_enabled
+                          - SOURCE_CWA_API_ENABLED
+                        freshness_state: fresh
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":

@@ -223,12 +223,12 @@ def _summary_from_result(
 def _ncdr_cap_effective_expires_window(
     result: AdapterRunResult,
 ) -> tuple[datetime, datetime] | None:
-    normalized_source_ids = {evidence.source_id for evidence in result.normalized}
+    if result.adapter_key != NCDR_CAP_ADAPTER_KEY:
+        return None
+
     effective_values: list[datetime] = []
     expires_values: list[datetime] = []
     for raw_item in result.fetched:
-        if raw_item.source_id not in normalized_source_ids:
-            continue
         effective_at = parse_observed_at_utc(raw_item.payload.get("effective"))
         expires_at = parse_observed_at_utc(raw_item.payload.get("expires"))
         if effective_at is None or expires_at is None:

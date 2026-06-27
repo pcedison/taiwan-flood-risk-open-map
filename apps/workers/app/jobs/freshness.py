@@ -41,6 +41,8 @@ class FreshnessCheck:
     reason: str | None = None
 
     def is_alert(self) -> bool:
+        if self.cadence == "event":
+            return self.status == "failed"
         return self.status in {"stale", "failed"}
 
     def log_fields(self) -> dict[str, object]:

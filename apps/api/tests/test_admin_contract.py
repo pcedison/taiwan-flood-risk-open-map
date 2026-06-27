@@ -294,6 +294,66 @@ def test_admin_sources_include_realtime_diagnostics_and_disabled_sources_are_not
     assert_openapi_schema(payload, "AdminSourcesResponse")
 
 
+def test_admin_sources_marks_expired_ncdr_cap_window_stale_not_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-04-28T13:00:00+00:00"),
+    )
+    get_settings.cache_clear()
+    cursor = FakeCursor(
+        [
+            {
+                "id": "ncdr-cap",
+                "name": "NCDR CAP alert feed",
+                "adapter_key": "official.ncdr.cap",
+                "source_type": "official",
+                "license": "Government open data",
+                "update_frequency": "event_driven",
+                "last_success_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
+                "last_failure_at": None,
+                "health_status": "healthy",
+                "legal_basis": "L1",
+                "source_timestamp_min": datetime.fromisoformat("2026-04-28T11:00:00+00:00"),
+                "source_timestamp_max": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
+                "is_enabled": True,
+                "latest_observed_at": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
+                "latest_fetched_at": datetime.fromisoformat("2026-04-28T12:55:00+00:00"),
+                "latest_ingested_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
+                "row_count": 0,
+                "upstream_status": "succeeded",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        admin_route.psycopg,
+        "connect",
+        lambda *args, **kwargs: FakeConnection(cursor),
+    )
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/sources",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    source = payload["sources"][0]
+    assert source["adapter_key"] == "official.ncdr.cap"
+    assert source["health_status"] == "healthy"
+    assert source["upstream_status"] == "succeeded"
+    assert source["freshness_state"] == "stale"
+    assert source["latest_observed_at"] == "2026-04-28T12:00:00Z"
+    assert source["latest_fetched_at"] == "2026-04-28T12:55:00Z"
+    assert source["latest_ingested_at"] == "2026-04-28T12:56:00Z"
+    assert source["lag_seconds"] == 3600
+    assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
 def test_admin_sources_disabled_filter_includes_disabled_rows_with_unknown_health(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -611,6 +671,18 @@ def test_admin_sources_fall_back_to_sample_data_when_database_is_unavailable(
     payload = response.json()
     assert len(payload["sources"]) >= 2
     assert {source["health_status"] for source in payload["sources"]} == {"healthy"}
+    cwa = next(
+        source
+        for source in payload["sources"]
+        if source["adapter_key"] == "official.cwa.rainfall"
+    )
+    assert cwa["latest_observed_at"] is not None
+    assert cwa["latest_fetched_at"] is not None
+    assert cwa["latest_ingested_at"] is not None
+    assert cwa["lag_seconds"] is not None
+    assert cwa["row_count"] == 2
+    assert cwa["upstream_status"] == "succeeded"
+    assert cwa["freshness_state"] in {"fresh", "degraded"}
     assert_openapi_schema(payload, "AdminSourcesResponse")
 
 
