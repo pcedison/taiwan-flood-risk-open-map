@@ -17,6 +17,7 @@ otherwise the fixture-backed adapter runs on synthetic records.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Iterable, Mapping
 
 from app.adapters._helpers import (
@@ -259,5 +260,5 @@ def _run(adapter: FloodSensorStaApiAdapter | FloodSensorAdapter) -> AdapterRunRe
 def _format_depth_cm(depth_cm: float) -> str:
     if depth_cm == 0:
         return "0"
-    formatted = f"{depth_cm:.1f}"
+    formatted = format(Decimal(str(depth_cm)).normalize(), "f")
     return formatted.rstrip("0").rstrip(".")
