@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
+import math
 from typing import Any, Protocol
 
 
@@ -200,9 +201,16 @@ class PostgresEvidencePromotionWriter:
                 row = cursor.fetchone()
                 if row is None:
                     raise RuntimeError("evidence insert did not return an id")
+                evidence_id = str(row[0])
+                if _should_upsert_official_realtime_latest(payload):
+                    self._upsert_official_realtime_latest(
+                        cursor,
+                        payload=payload,
+                        evidence_id=evidence_id,
+                    )
             connection.commit()
 
-        return str(row[0])
+        return evidence_id
 
     def _connect(self) -> Any:
         if self._connection_factory is not None:
@@ -212,6 +220,118 @@ class PostgresEvidencePromotionWriter:
 
         assert self._database_url is not None
         return psycopg.connect(self._database_url)
+
+    def _upsert_official_realtime_latest(
+        self,
+        cursor: Any,
+        *,
+        payload: EvidencePromotionPayload,
+        evidence_id: str,
+    ) -> None:
+        station_id = _official_realtime_station_id(payload)
+        if station_id is None:
+            return
+
+        point_geometry = _geojson_point_geometry(payload.properties)
+        if point_geometry is None:
+            return
+
+        cursor.execute(
+            """
+            INSERT INTO official_realtime_latest (
+                source_id,
+                adapter_key,
+                event_type,
+                station_id,
+                station_name,
+                authority,
+                observed_at,
+                geom,
+                rainfall_mm_1h,
+                rainfall_mm_24h,
+                water_level_m,
+                flood_depth_cm,
+                warning_level_m,
+                confidence,
+                freshness_score,
+                risk_factor,
+                evidence_id,
+                source_url,
+                attribution,
+                quality_flags
+            )
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                CASE
+                    WHEN %s::text IS NULL THEN NULL
+                    ELSE ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326)
+                END,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s::jsonb
+            )
+            ON CONFLICT (adapter_key, event_type, station_id)
+            DO UPDATE SET
+                source_id = EXCLUDED.source_id,
+                station_name = EXCLUDED.station_name,
+                authority = EXCLUDED.authority,
+                observed_at = EXCLUDED.observed_at,
+                ingested_at = now(),
+                geom = EXCLUDED.geom,
+                rainfall_mm_1h = EXCLUDED.rainfall_mm_1h,
+                rainfall_mm_24h = EXCLUDED.rainfall_mm_24h,
+                water_level_m = EXCLUDED.water_level_m,
+                flood_depth_cm = EXCLUDED.flood_depth_cm,
+                warning_level_m = EXCLUDED.warning_level_m,
+                confidence = EXCLUDED.confidence,
+                freshness_score = EXCLUDED.freshness_score,
+                risk_factor = EXCLUDED.risk_factor,
+                evidence_id = EXCLUDED.evidence_id,
+                source_url = EXCLUDED.source_url,
+                attribution = EXCLUDED.attribution,
+                quality_flags = EXCLUDED.quality_flags,
+                updated_at = now()
+            WHERE EXCLUDED.observed_at >= official_realtime_latest.observed_at
+            """,
+            (
+                payload.source_id,
+                payload.adapter_key,
+                payload.event_type,
+                station_id,
+                _optional_text(payload.properties.get("station_name")),
+                _optional_text(payload.properties.get("authority")),
+                payload.observed_at,
+                point_geometry,
+                point_geometry,
+                _optional_float(payload.properties.get("rainfall_mm_1h")),
+                _optional_float(payload.properties.get("rainfall_mm_24h")),
+                _optional_float(payload.properties.get("water_level_m")),
+                _optional_float(payload.properties.get("flood_depth_cm")),
+                _optional_float(payload.properties.get("warning_level_m")),
+                payload.confidence,
+                _optional_float(payload.properties.get("freshness_score")),
+                _official_realtime_risk_factor(payload),
+                evidence_id,
+                _optional_text(payload.properties.get("source_url")),
+                _optional_text(payload.properties.get("attribution")),
+                _json(_quality_flags(payload.properties)),
+            ),
+        )
 
 
 def _accepted_staging_sql(
@@ -315,6 +435,139 @@ def _geojson_geometry(properties: dict[str, Any]) -> str | None:
     if not isinstance(geometry, dict):
         return None
     return json.dumps(geometry, sort_keys=True, separators=(",", ":"))
+
+
+def _geojson_point_geometry(properties: dict[str, Any]) -> str | None:
+    location_payload = properties.get("location_payload")
+    if not isinstance(location_payload, dict):
+        return None
+    geometry = location_payload.get("geometry")
+    if not isinstance(geometry, dict):
+        return None
+    if geometry.get("type") != "Point":
+        return None
+    return json.dumps(geometry, sort_keys=True, separators=(",", ":"))
+
+
+def _should_upsert_official_realtime_latest(payload: EvidencePromotionPayload) -> bool:
+    if payload.source_type != "official":
+        return False
+    if payload.adapter_key is None:
+        return False
+    if payload.event_type not in {
+        "rainfall",
+        "water_level",
+        "flood_report",
+        "flood_warning",
+    }:
+        return False
+    if payload.event_type == "flood_warning" and _is_expired_cap(payload.properties):
+        return False
+    return payload.observed_at is not None
+
+
+def _official_realtime_station_id(payload: EvidencePromotionPayload) -> str | None:
+    station_id = _optional_text(payload.properties.get("station_id"))
+    if station_id is not None:
+        return station_id
+    return _station_id_from_source_id(payload.source_id)
+
+
+def _station_id_from_source_id(source_id: str) -> str | None:
+    for separator in (":", "|", "@"):
+        head, found, _tail = source_id.partition(separator)
+        candidate = head.strip()
+        if found and candidate and "." not in candidate:
+            return candidate
+    return None
+
+
+def _is_expired_cap(properties: dict[str, Any]) -> bool:
+    if properties.get("expired") is True:
+        return True
+    status = _optional_text(properties.get("cap_status"))
+    return status in {"expired", "cancelled", "canceled"}
+
+
+def _official_realtime_risk_factor(payload: EvidencePromotionPayload) -> float | None:
+    if payload.event_type == "rainfall":
+        rainfall_1h = _optional_float(payload.properties.get("rainfall_mm_1h"))
+        if rainfall_1h is None:
+            return None
+        return _rainfall_realtime_risk_factor(rainfall_1h)
+
+    if payload.event_type == "water_level":
+        water_level_m = _optional_float(payload.properties.get("water_level_m"))
+        warning_level_m = _optional_float(payload.properties.get("warning_level_m"))
+        if water_level_m is None or warning_level_m is None or warning_level_m <= 0:
+            return None
+        ratio = water_level_m / warning_level_m
+        if ratio >= 1.0:
+            return 1.0
+        if ratio >= 0.8:
+            return 0.8
+        if ratio >= 0.5:
+            return 0.5
+        if ratio >= 0.25:
+            return 0.25
+        return 0.0
+
+    if payload.event_type == "flood_report":
+        flood_depth_cm = _optional_float(payload.properties.get("flood_depth_cm"))
+        if flood_depth_cm is None:
+            return None
+        if flood_depth_cm >= 50:
+            return 1.0
+        if flood_depth_cm >= 30:
+            return 0.8
+        if flood_depth_cm >= 15:
+            return 0.5
+        if flood_depth_cm >= 3:
+            return 0.25
+        return 0.0
+
+    if payload.event_type == "flood_warning":
+        return 1.0
+
+    return None
+
+
+def _rainfall_realtime_risk_factor(rainfall_1h_mm: float) -> float:
+    if rainfall_1h_mm >= 80:
+        return 1.0
+    if rainfall_1h_mm >= 40:
+        return 0.7
+    if rainfall_1h_mm >= 20:
+        return 0.35
+    if rainfall_1h_mm >= 10:
+        return 0.15
+    return 0.0
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(result):
+        return None
+    return result
+
+
+def _quality_flags(properties: dict[str, Any]) -> dict[str, Any]:
+    quality_flags = properties.get("quality_flags")
+    if isinstance(quality_flags, dict):
+        return quality_flags
+    return {}
 
 
 def _json(value: dict[str, Any]) -> str:

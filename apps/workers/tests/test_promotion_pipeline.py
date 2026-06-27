@@ -182,6 +182,124 @@ def test_postgres_promotion_writer_inserts_geojson_geometry_when_present() -> No
     assert insert_params[11] == insert_params[12]
 
 
+def test_write_evidence_upserts_official_realtime_latest_for_flood_depth() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.civil_iot.flood_sensor",
+        source_id="FS-001:2026-06-15T03:00:00+00:00",
+        source_type="official",
+        event_type="flood_report",
+        title="Flood sensor report",
+        summary="Observed flood depth 18 cm",
+        url="https://example.test/flood-sensor/FS-001",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.91,
+        raw_ref="raw/civil-iot/flood-sensor/fs-001.json",
+        properties={
+            "adapter_key": "official.civil_iot.flood_sensor",
+            "station_name": "Zhongzheng Road Sensor",
+            "authority": "Water Resources Agency",
+            "source_url": "https://example.test/flood-sensor/FS-001",
+            "flood_depth_cm": 18.0,
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [120.2, 23.0]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 2
+    latest_sql, latest_params = connection.cursor_instance.executions[1]
+    assert "INSERT INTO official_realtime_latest" in latest_sql
+    assert "WHERE EXCLUDED.observed_at >= official_realtime_latest.observed_at" in latest_sql
+    assert latest_params[0] == "FS-001:2026-06-15T03:00:00+00:00"
+    assert latest_params[1] == "official.civil_iot.flood_sensor"
+    assert latest_params[2] == "flood_report"
+    assert latest_params[3] == "FS-001"
+    assert latest_params[4] == "Zhongzheng Road Sensor"
+    assert latest_params[5] == "Water Resources Agency"
+    assert latest_params[6] == OBSERVED_AT
+    assert json.loads(str(latest_params[7])) == {"type": "Point", "coordinates": [120.2, 23.0]}
+    assert latest_params[12] == 18.0
+    assert latest_params[16] == 0.5
+    assert latest_params[17] == "evidence-id"
+
+
+def test_write_evidence_skips_latest_when_station_id_missing() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.ncdr.cap",
+        source_id="official.ncdr.cap",
+        source_type="official",
+        event_type="flood_warning",
+        title="Flood warning",
+        summary="Regional warning",
+        url="https://example.test/cap/flood-warning",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.95,
+        raw_ref="raw/ncdr/cap/flood-warning.xml",
+        properties={
+            "adapter_key": "official.ncdr.cap",
+            "authority": "NCDR",
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [121.5, 25.0]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 1
+    assert "INSERT INTO evidence" in connection.cursor_instance.executions[0][0]
+
+
+def test_write_evidence_does_not_overwrite_newer_latest_with_older_observation() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.wra.water_level",
+        source_id="WRA-001:2026-04-28T09:50:00+00:00",
+        source_type="official",
+        event_type="water_level",
+        title="Water level observation",
+        summary="Observed water level 3.2 m",
+        url="https://example.test/wra/WRA-001",
+        occurred_at=OCCURRED_AT,
+        observed_at=datetime(2026, 4, 28, 9, 50, tzinfo=timezone.utc),
+        confidence=0.88,
+        raw_ref="raw/wra/water-level/wra-001.json",
+        properties={
+            "adapter_key": "official.wra.water_level",
+            "station_id": "WRA-001",
+            "station_name": "Dahan Bridge",
+            "authority": "Water Resources Agency",
+            "water_level_m": 3.2,
+            "warning_level_m": 4.0,
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [121.48, 25.03]}
+            },
+        },
+    )
+
+    writer.write_evidence(payload)
+
+    latest_sql, latest_params = connection.cursor_instance.executions[1]
+    assert "WHERE EXCLUDED.observed_at >= official_realtime_latest.observed_at" in latest_sql
+    assert latest_params[6] == datetime(2026, 4, 28, 9, 50, tzinfo=timezone.utc)
+
+
 def test_promotion_idempotency_migration_handles_null_raw_ref_uniqueness() -> None:
     migration_sql = (
         Path(__file__).resolve().parents[3]
