@@ -243,6 +243,10 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
             flood_warning_radius_m=REALTIME_FLOOD_WARNING_RELEVANCE_M,
             statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
+    except EvidenceRepositoryUnavailable:
+        latest_records = ()
+
+    try:
         evidence_records = query_nearby_evidence(
             database_url=settings.database_url,
             lat=request.point.lat,

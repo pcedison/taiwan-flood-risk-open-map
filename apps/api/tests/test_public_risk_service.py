@@ -219,6 +219,45 @@ def test_nearby_db_evidence_uses_latest_first_and_deduplicates(monkeypatch: pyte
     )
 
 
+def test_nearby_db_evidence_falls_back_to_legacy_when_latest_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    legacy_record = _db_evidence_record(
+        source_id="legacy-flood-report:1",
+        event_type="flood_report",
+    )
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+            app_env="test",
+        ),
+    )
+
+    def latest_unavailable(**_kwargs: object) -> tuple[EvidenceRecord, ...]:
+        raise public_routes.EvidenceRepositoryUnavailable("latest table unavailable")
+
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_latest_official",
+        latest_unavailable,
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_evidence",
+        lambda **_kwargs: (legacy_record,),
+    )
+    monkeypatch.setattr(public_routes, "_evidence_from_record", lambda record: record.source_id)
+
+    records = public_routes._nearby_db_evidence(request)
+
+    assert records == ("legacy-flood-report:1",)
+
+
 def test_nearby_db_evidence_does_not_false_positive_dedupe_unknown_official_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
