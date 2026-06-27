@@ -73,3 +73,15 @@ and precomputed risk profile tables:
 - `profile_evidence_links`
 - `profile_refresh_jobs`
 - `evidence_embeddings`
+- `official_realtime_latest`
+
+`0018_official_realtime_latest.sql` also seeds additional disabled data-source
+candidates for the official realtime read model rollout:
+
+- `official.civil_iot.flood_sensor`
+- `official.civil_iot.river_water_level`
+- `official.civil_iot.pond_water_level`
+- `official.civil_iot.sewer_water_level`
+- `official.civil_iot.pump_water_level`
+- `official.ncdr.cap`
+- `local.tainan.flood_sensor`
