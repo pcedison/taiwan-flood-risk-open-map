@@ -294,6 +294,24 @@ def test_admin_sources_include_realtime_diagnostics_and_disabled_sources_are_not
     assert_openapi_schema(payload, "AdminSourcesResponse")
 
 
+def test_admin_enabled_gates_include_flood_sensor_live_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SOURCE_FLOOD_SENSOR_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_FLOOD_SENSOR_API_ENABLED", "true")
+    monkeypatch.setenv("SOURCE_FLOOD_SENSOR_USE_LIVE", "true")
+
+    assert admin_route._enabled_gates(
+        "official.civil_iot.flood_sensor",
+        is_enabled=True,
+    ) == [
+        "data_sources.is_enabled",
+        "SOURCE_FLOOD_SENSOR_ENABLED",
+        "SOURCE_FLOOD_SENSOR_API_ENABLED",
+        "SOURCE_FLOOD_SENSOR_USE_LIVE",
+    ]
+
+
 def test_admin_sources_marks_expired_ncdr_cap_window_stale_not_fresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

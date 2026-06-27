@@ -306,6 +306,75 @@ def test_explicit_adapter_allowlist_does_not_bypass_sample_data_gate() -> None:
     assert enabled_adapter_keys(with_sample_flag) == ("news.public_web.sample",)
 
 
+@pytest.mark.parametrize(
+    ("adapter_key", "source_gate", "runtime_gates"),
+    (
+        (
+            "official.ncdr.cap",
+            "SOURCE_NCDR_CAP_ENABLED",
+            {"SOURCE_NCDR_CAP_API_ENABLED": "true"},
+        ),
+        (
+            "official.civil_iot.flood_sensor",
+            "SOURCE_FLOOD_SENSOR_ENABLED",
+            {
+                "SOURCE_FLOOD_SENSOR_API_ENABLED": "true",
+                "SOURCE_FLOOD_SENSOR_USE_LIVE": "true",
+            },
+        ),
+        (
+            "official.civil_iot.river_water_level",
+            "SOURCE_CIVIL_IOT_RIVER_ENABLED",
+            {"SOURCE_CIVIL_IOT_RIVER_API_ENABLED": "true"},
+        ),
+        (
+            "official.civil_iot.pond_water_level",
+            "SOURCE_CIVIL_IOT_POND_ENABLED",
+            {"SOURCE_CIVIL_IOT_POND_API_ENABLED": "true"},
+        ),
+        (
+            "official.civil_iot.sewer_water_level",
+            "SOURCE_CIVIL_IOT_SEWER_ENABLED",
+            {"SOURCE_CIVIL_IOT_SEWER_API_ENABLED": "true"},
+        ),
+        (
+            "official.civil_iot.pump_water_level",
+            "SOURCE_CIVIL_IOT_PUMP_ENABLED",
+            {"SOURCE_CIVIL_IOT_PUMP_API_ENABLED": "true"},
+        ),
+    ),
+)
+def test_explicit_adapter_allowlist_requires_new_source_gates(
+    adapter_key: str,
+    source_gate: str,
+    runtime_gates: dict[str, str],
+) -> None:
+    allowlisted_without_source_gate = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": adapter_key,
+            **runtime_gates,
+        }
+    )
+    allowlisted_with_source_gate_false = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": adapter_key,
+            source_gate: "false",
+            **runtime_gates,
+        }
+    )
+    allowlisted_with_source_gate_true = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": adapter_key,
+            source_gate: "true",
+            **runtime_gates,
+        }
+    )
+
+    assert enabled_adapter_keys(allowlisted_without_source_gate) == ()
+    assert enabled_adapter_keys(allowlisted_with_source_gate_false) == ()
+    assert enabled_adapter_keys(allowlisted_with_source_gate_true) == (adapter_key,)
+
+
 def test_source_flags_can_disable_allowlisted_adapters() -> None:
     settings = load_worker_settings(
         {

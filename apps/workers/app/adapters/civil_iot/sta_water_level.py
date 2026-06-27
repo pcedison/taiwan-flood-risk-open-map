@@ -175,7 +175,7 @@ class StaWaterLevelApiAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=fetched_at,
-                payload=record,
+                payload=_raw_payload_with_water_level_metric(record),
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in records
@@ -211,7 +211,7 @@ class StaWaterLevelAdapter:
                 source_id=_source_id(record),
                 source_url=str(record.get("source_url", self._source.source_url)),
                 fetched_at=self._fetched_at,
-                payload=record,
+                payload=_raw_payload_with_water_level_metric(record),
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in self._records
@@ -231,7 +231,9 @@ def _normalize(
     payload = raw_item.payload
     station_name = optional_str(payload.get("station_name"))
     observed_at = parse_datetime(payload.get("observed_at"))
-    water_level_m = optional_float(payload.get("value"))
+    water_level_m = optional_float(payload.get("water_level_m"))
+    if water_level_m is None:
+        water_level_m = optional_float(payload.get("value"))
     if station_name is None or observed_at is None or water_level_m is None:
         return None
     if water_level_m <= WATER_LEVEL_INVALID_BELOW:
@@ -258,6 +260,20 @@ def _normalize(
         attribution=optional_str(payload.get("attribution")) or source.attribution,
         tags=("official", "civil_iot", "water_level"),
     )
+
+
+def _raw_payload_with_water_level_metric(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    payload = dict(record)
+    water_level_m = optional_float(payload.get("water_level_m"))
+    if water_level_m is None:
+        water_level_m = optional_float(payload.get("value"))
+    if water_level_m is not None:
+        payload["water_level_m"] = water_level_m
+
+    warning_level_m = optional_float(payload.get("warning_level_m"))
+    if warning_level_m is not None:
+        payload["warning_level_m"] = warning_level_m
+    return payload
 
 
 def _source_id(record: Mapping[str, Any]) -> str:

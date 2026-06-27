@@ -69,6 +69,7 @@ SOURCE_GATE_NAMES = {
     "official.civil_iot.flood_sensor": (
         "SOURCE_FLOOD_SENSOR_ENABLED",
         "SOURCE_FLOOD_SENSOR_API_ENABLED",
+        "SOURCE_FLOOD_SENSOR_USE_LIVE",
     ),
     "official.civil_iot.river_water_level": (
         "SOURCE_CIVIL_IOT_RIVER_ENABLED",

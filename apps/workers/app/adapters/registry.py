@@ -146,21 +146,21 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
     if metadata.key == "official.wra.water_level":
         return settings.source_wra_enabled is not False
     if metadata.key == "official.ncdr.cap":
-        return settings.source_ncdr_cap_enabled is not False
+        return settings.source_ncdr_cap_enabled is True
     if metadata.key == "official.flood_potential.geojson":
         return settings.source_flood_potential_enabled is not False
     if metadata.key == "official.civil_iot.flood_sensor":
-        return settings.source_flood_sensor_enabled is not False
+        return settings.source_flood_sensor_enabled is True
     if metadata.key == "local.tainan.flood_sensor":
         return settings.source_tainan_flood_sensor_enabled is True
     if metadata.key == "official.civil_iot.river_water_level":
-        return settings.source_civil_iot_river_enabled is not False
+        return settings.source_civil_iot_river_enabled is True
     if metadata.key == "official.civil_iot.pond_water_level":
-        return settings.source_civil_iot_pond_enabled is not False
+        return settings.source_civil_iot_pond_enabled is True
     if metadata.key == "official.civil_iot.sewer_water_level":
-        return settings.source_civil_iot_sewer_enabled is not False
+        return settings.source_civil_iot_sewer_enabled is True
     if metadata.key == "official.civil_iot.pump_water_level":
-        return settings.source_civil_iot_pump_enabled is not False
+        return settings.source_civil_iot_pump_enabled is True
     if metadata.key == "ptt":
         return settings.source_forum_enabled is True and settings.source_ptt_enabled is True
     if metadata.key == "dcard":
