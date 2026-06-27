@@ -31,8 +31,8 @@ from app.adapters.civil_iot.sta_client import (
     DEFAULT_STA_TIMEOUT_SECONDS,
     STA_WATER_RESOURCE_BASE,
     StaFetchJson,
+    fetch_paginated_sta_things_records,
     fetch_sta_json,
-    parse_sta_things_payload,
 )
 from app.adapters.contracts import (
     AdapterMetadata,
@@ -65,7 +65,7 @@ FLOOD_SENSOR_METADATA = AdapterMetadata(
     key="official.civil_iot.flood_sensor",
     family=SourceFamily.OFFICIAL,
     enabled_by_default=False,
-    display_name="WRA road flood sensor adapter (Civil IoT)",
+    display_name="Civil IoT official national flood sensor backbone",
     resource_url=FLOOD_SENSOR_STA_URL,
     data_gov_url=FLOOD_SENSOR_CIVIL_IOT_URL,
     update_frequency="Civil IoT SensorThings observations refresh roughly every 10 minutes",
@@ -75,8 +75,11 @@ FLOOD_SENSOR_METADATA = AdapterMetadata(
         "concentrates on known flood-prone roads and is sparse elsewhere.",
         "Readings are raw IoT telemetry and can be distorted by sensor or "
         "transmission faults.",
-        f"Only readings at or above {FLOOD_SENSOR_MIN_DEPTH_CM:.0f} cm are recorded "
-        "as flood events; lower readings are treated as no observed flooding.",
+        "This worker treats Civil IoT flood sensors as the official nationwide "
+        "flood-sensor backbone for live ingestion, but the live gate remains "
+        "disabled by default.",
+        f"Readings below {FLOOD_SENSOR_MIN_DEPTH_CM:.0f} cm are retained as dry/no "
+        "observed flooding telemetry instead of flood-risk events.",
     ),
 )
 
@@ -107,13 +110,17 @@ class FloodSensorStaApiAdapter:
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         try:
-            payload = self._fetch_json(self._sta_url, self._timeout_seconds)
+            records = fetch_paginated_sta_things_records(
+                self._sta_url,
+                timeout_seconds=self._timeout_seconds,
+                fetch_json=self._fetch_json,
+                source_url=FLOOD_SENSOR_CIVIL_IOT_URL,
+            )
         except CivilIotStaError:
             raise
         except Exception as exc:  # pragma: no cover - defensive
             raise CivilIotStaFetchError(f"Flood sensor fetcher failed: {exc}") from exc
 
-        records = parse_sta_things_payload(payload, source_url=FLOOD_SENSOR_CIVIL_IOT_URL)
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
             RawSourceItem(
@@ -181,12 +188,14 @@ def _normalize_flood_sensor_record(
     depth_cm = optional_float(payload.get("value"))
     if station_name is None or observed_at is None or depth_cm is None:
         return None
-    if depth_cm < FLOOD_SENSOR_MIN_DEPTH_CM:
-        return None
 
     location_text = optional_str(payload.get("location_text")) or station_name
-    summary = f"路面淹水感測：水深 {depth_cm:.0f} 公分（{station_name}）"
     tags = ["official", "wra", "flood_sensor", "civil_iot"]
+    if depth_cm < FLOOD_SENSOR_MIN_DEPTH_CM:
+        summary = f"路面淹水感測：無觀測到淹水（乾燥，{depth_cm:.0f} 公分）（{station_name}）"
+        tags.extend(["dry", "no_flooding_observed"])
+    else:
+        summary = f"路面淹水感測：水深 {depth_cm:.0f} 公分（{station_name}）"
 
     return NormalizedEvidence(
         evidence_id=stable_evidence_id(metadata.key, raw_item.source_id),

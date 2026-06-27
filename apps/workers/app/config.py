@@ -20,6 +20,7 @@ class WorkerSettings:
     source_flood_potential_geojson_enabled: bool
     source_flood_sensor_enabled: bool | None
     source_flood_sensor_api_enabled: bool
+    source_flood_sensor_use_live: bool
     source_civil_iot_river_enabled: bool | None
     source_civil_iot_river_api_enabled: bool
     source_civil_iot_pond_enabled: bool | None
@@ -55,6 +56,7 @@ class WorkerSettings:
     flood_potential_geojson_url: str | None
     flood_potential_geojson_timeout_seconds: int
     civil_iot_flood_sensor_url: str | None
+    source_flood_sensor_timeout_seconds: int
     civil_iot_river_url: str | None
     civil_iot_pond_url: str | None
     civil_iot_sewer_url: str | None
@@ -80,6 +82,7 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         ),
         source_flood_sensor_enabled=env_bool(values, "SOURCE_FLOOD_SENSOR_ENABLED"),
         source_flood_sensor_api_enabled=env_flag(values, "SOURCE_FLOOD_SENSOR_API_ENABLED"),
+        source_flood_sensor_use_live=env_flag(values, "SOURCE_FLOOD_SENSOR_USE_LIVE"),
         source_civil_iot_river_enabled=env_bool(values, "SOURCE_CIVIL_IOT_RIVER_ENABLED"),
         source_civil_iot_river_api_enabled=env_flag(
             values,
@@ -149,6 +152,11 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             default=8,
         ),
         civil_iot_flood_sensor_url=env_str(values, "CIVIL_IOT_FLOOD_SENSOR_URL"),
+        source_flood_sensor_timeout_seconds=env_int(
+            values,
+            "SOURCE_FLOOD_SENSOR_TIMEOUT_SECONDS",
+            default=8,
+        ),
         civil_iot_river_url=env_str(values, "CIVIL_IOT_RIVER_URL"),
         civil_iot_pond_url=env_str(values, "CIVIL_IOT_POND_URL"),
         civil_iot_sewer_url=env_str(values, "CIVIL_IOT_SEWER_URL"),

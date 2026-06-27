@@ -163,16 +163,30 @@ def build_runtime_adapters(
         live_adapters[flood_potential_adapter.metadata.key] = flood_potential_adapter
 
     if (
-        settings.source_flood_sensor_api_enabled
+        settings.source_flood_sensor_use_live
+        and settings.source_flood_sensor_api_enabled
         and "official.civil_iot.flood_sensor" in enabled_keys
     ):
         flood_sensor_adapter = FloodSensorStaApiAdapter(
             sta_url=settings.civil_iot_flood_sensor_url,
-            timeout_seconds=settings.civil_iot_api_timeout_seconds,
+            timeout_seconds=settings.source_flood_sensor_timeout_seconds,
             fetched_at=fetched_at,
             fetch_json=flood_sensor_fetch_json,
         )
         live_adapters[flood_sensor_adapter.metadata.key] = flood_sensor_adapter
+
+    if (
+        settings.source_flood_sensor_api_enabled
+        and settings.source_flood_sensor_use_live
+        is False
+        and "official.civil_iot.flood_sensor" in enabled_keys
+    ):
+        log_event(
+            "runtime.adapters.gated",
+            adapter_key="official.civil_iot.flood_sensor",
+            gate="SOURCE_FLOOD_SENSOR_USE_LIVE",
+            source_intent="civil_iot_official_national_backbone",
+        )
 
     if (
         settings.source_civil_iot_river_api_enabled
@@ -225,11 +239,16 @@ def build_runtime_adapters(
             wra_api_enabled=settings.source_wra_api_enabled,
             flood_potential_geojson_enabled=settings.source_flood_potential_geojson_enabled,
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,
+            flood_sensor_use_live=settings.source_flood_sensor_use_live,
             civil_iot_river_api_enabled=settings.source_civil_iot_river_api_enabled,
         )
         return {}
 
-    log_event("runtime.adapters.live_mode.enabled", available_adapter_keys=tuple(live_adapters))
+    log_event(
+        "runtime.adapters.live_mode.enabled",
+        available_adapter_keys=tuple(live_adapters),
+        flood_sensor_source_intent="civil_iot_official_national_backbone",
+    )
     return live_adapters
 
 

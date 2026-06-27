@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 
+from app.adapters.civil_iot import FloodSensorStaApiAdapter
 from app.jobs.ingestion import AdapterBatchRunSummary, run_adapter_batch
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from tests.test_ingestion_job_runner import _EmptyAdapter, _MemoryWriter
@@ -134,6 +135,31 @@ def test_run_adapter_batch_surfaces_operational_summary_write_failure() -> None:
     assert summary.items_fetched == 0
     assert summary.error_code == "RuntimeError"
     assert summary.error_message == "run summary write failed: run write failed"
+
+
+def test_civil_iot_flood_sensor_upstream_failure_marks_failed_summary_and_source_health() -> None:
+    adapter = FloodSensorStaApiAdapter(
+        fetch_json=lambda url, timeout: (_ for _ in ()).throw(RuntimeError("upstream timeout"))
+    )
+    connection = _FakeConnection(job_id="job-id")
+    run_writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    summary = run_adapter_batch(
+        adapter,
+        writer=_MemoryWriter(),
+        run_writer=run_writer,
+        job_key="ingest.official.civil_iot.flood_sensor",
+    )
+
+    assert summary.adapter_key == "official.civil_iot.flood_sensor"
+    assert summary.status == "failed"
+    assert summary.items_fetched == 0
+    assert summary.error_code == "CivilIotStaFetchError"
+    assert summary.error_message == "Flood sensor fetcher failed: upstream timeout"
+    source_sql, source_params = connection.cursor_instance.executions[-1]
+    assert "UPDATE data_sources" in source_sql
+    assert source_params[6] == "failed"
+    assert source_params[-1] == "official.civil_iot.flood_sensor"
 
 
 class _MemoryRunWriter:

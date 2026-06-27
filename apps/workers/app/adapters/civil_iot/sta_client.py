@@ -82,6 +82,37 @@ def parse_sta_things_payload(
     return tuple(records)
 
 
+def fetch_paginated_sta_things_records(
+    start_url: str,
+    *,
+    timeout_seconds: int,
+    fetch_json: StaFetchJson,
+    source_url: str,
+    datastream_name_contains: str | None = None,
+) -> tuple[Mapping[str, Any], ...]:
+    """Fetch a paginated STA Things collection and flatten all pages."""
+
+    next_url = start_url
+    seen_urls: set[str] = set()
+    records: list[Mapping[str, Any]] = []
+    while next_url:
+        if next_url in seen_urls:
+            raise CivilIotStaPayloadError(
+                f"Civil IoT SensorThings payload repeated @iot.nextLink: {next_url}"
+            )
+        seen_urls.add(next_url)
+        payload = fetch_json(next_url, timeout_seconds)
+        records.extend(
+            parse_sta_things_payload(
+                payload,
+                source_url=source_url,
+                datastream_name_contains=datastream_name_contains,
+            )
+        )
+        next_url = _sta_next_link(payload)
+    return tuple(records)
+
+
 def _things_items(payload: object) -> Iterable[Any]:
     if isinstance(payload, list):
         return payload
@@ -93,6 +124,13 @@ def _things_items(payload: object) -> Iterable[Any]:
     raise CivilIotStaPayloadError(
         "Civil IoT SensorThings payload is missing a Things value list"
     )
+
+
+def _sta_next_link(payload: object) -> str | None:
+    if not isinstance(payload, Mapping):
+        return None
+    next_link = optional_str(payload.get("@iot.nextLink"))
+    return next_link or None
 
 
 def _parse_thing(
