@@ -192,13 +192,13 @@ def _normalize_flood_sensor_record(
     location_text = optional_str(payload.get("location_text")) or station_name
     tags = ["official", "wra", "flood_sensor", "civil_iot"]
     if depth_cm == 0:
-        summary = f"路面淹水感測：無觀測到淹水（乾燥，{depth_cm:.0f} 公分）（{station_name}）"
+        summary = f"路面淹水感測：無觀測到淹水（乾燥，{_format_depth_cm(depth_cm)} 公分）（{station_name}）"
         tags.extend(["dry", "no_flooding_observed"])
     elif depth_cm < FLOOD_SENSOR_MIN_DEPTH_CM:
-        summary = f"路面淹水感測：低水深觀測 {depth_cm:.0f} 公分（{station_name}）"
+        summary = f"路面淹水感測：低水深觀測 {_format_depth_cm(depth_cm)} 公分（{station_name}）"
         tags.extend(["below_flood_threshold", "low_depth_observation"])
     else:
-        summary = f"路面淹水感測：水深 {depth_cm:.0f} 公分（{station_name}）"
+        summary = f"路面淹水感測：水深 {_format_depth_cm(depth_cm)} 公分（{station_name}）"
 
     return NormalizedEvidence(
         evidence_id=stable_evidence_id(metadata.key, raw_item.source_id),
@@ -254,3 +254,10 @@ def _run(adapter: FloodSensorStaApiAdapter | FloodSensorAdapter) -> AdapterRunRe
         normalized=tuple(normalized),
         rejected=tuple(rejected),
     )
+
+
+def _format_depth_cm(depth_cm: float) -> str:
+    if depth_cm == 0:
+        return "0"
+    formatted = f"{depth_cm:.1f}"
+    return formatted.rstrip("0").rstrip(".")

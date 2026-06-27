@@ -199,6 +199,26 @@ def test_flood_sensor_api_adapter_keeps_zero_and_low_depth_readings_distinct() -
     assert "no_flooding_observed" not in low_depth_evidence.tags
 
 
+def test_flood_sensor_api_adapter_preserves_fractional_low_depth_readings() -> None:
+    payload = _flood_sensor_payload()
+    payload["value"][1]["Datastreams"][0]["Observations"][0]["result"] = 0.4
+    payload["value"][2]["Datastreams"][0]["Observations"][0]["result"] = 2.6
+
+    adapter = FloodSensorStaApiAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: payload,
+    )
+
+    result = adapter.run()
+
+    assert result.normalized[1].summary == "路面淹水感測：低水深觀測 0.4 公分（乾燥路段感測器）"
+    assert result.normalized[2].summary == "路面淹水感測：低水深觀測 2.6 公分（低水深路段感測器）"
+    assert "dry" not in result.normalized[1].tags
+    assert "dry" not in result.normalized[2].tags
+    assert "no_flooding_observed" not in result.normalized[1].tags
+    assert "no_flooding_observed" not in result.normalized[2].tags
+
+
 def test_flood_sensor_fixture_adapter_matches_threshold_rule() -> None:
     records = parse_sta_things_payload(
         _flood_sensor_payload(), source_url="https://example.test/water_12"
