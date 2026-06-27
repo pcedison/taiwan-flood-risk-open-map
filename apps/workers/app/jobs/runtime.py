@@ -18,6 +18,8 @@ from app.adapters.contracts import DataSourceAdapter
 from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
+from app.adapters.ncdr import FetchText as NcdrFetchText
+from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.registry import enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import WraWaterLevelApiAdapter
@@ -95,6 +97,7 @@ def build_runtime_adapters(
     fetched_at: datetime | None = None,
     cwa_fetch_json: FetchJson | None = None,
     wra_fetch_json: WraFetchJson | None = None,
+    ncdr_cap_fetch_text: NcdrFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
     civil_iot_river_fetch_json: StaFetchJson | None = None,
@@ -149,6 +152,15 @@ def build_runtime_adapters(
             fetch_json=wra_fetch_json,
         )
         live_adapters[wra_adapter.metadata.key] = wra_adapter
+
+    if settings.source_ncdr_cap_api_enabled and "official.ncdr.cap" in enabled_keys:
+        ncdr_cap_adapter = NcdrCapAlertAdapter(
+            api_url=settings.ncdr_cap_api_url,
+            timeout_seconds=settings.ncdr_cap_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=ncdr_cap_fetch_text,
+        )
+        live_adapters[ncdr_cap_adapter.metadata.key] = ncdr_cap_adapter
 
     if (
         settings.source_flood_potential_geojson_enabled
@@ -237,6 +249,7 @@ def build_runtime_adapters(
             enabled_adapter_keys=enabled_keys,
             cwa_api_enabled=settings.source_cwa_api_enabled,
             wra_api_enabled=settings.source_wra_api_enabled,
+            ncdr_cap_api_enabled=settings.source_ncdr_cap_api_enabled,
             flood_potential_geojson_enabled=settings.source_flood_potential_geojson_enabled,
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,
             flood_sensor_use_live=settings.source_flood_sensor_use_live,

@@ -16,6 +16,8 @@ class WorkerSettings:
     source_cwa_api_enabled: bool
     source_wra_enabled: bool | None
     source_wra_api_enabled: bool
+    source_ncdr_cap_enabled: bool | None
+    source_ncdr_cap_api_enabled: bool
     source_flood_potential_enabled: bool | None
     source_flood_potential_geojson_enabled: bool
     source_flood_sensor_enabled: bool | None
@@ -53,6 +55,8 @@ class WorkerSettings:
     wra_station_api_url: str | None
     wra_api_token: str | None
     wra_api_timeout_seconds: int
+    ncdr_cap_api_url: str | None
+    ncdr_cap_timeout_seconds: int
     flood_potential_geojson_url: str | None
     flood_potential_geojson_timeout_seconds: int
     civil_iot_flood_sensor_url: str | None
@@ -75,6 +79,8 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_cwa_api_enabled=env_flag(values, "SOURCE_CWA_API_ENABLED"),
         source_wra_enabled=env_bool(values, "SOURCE_WRA_ENABLED"),
         source_wra_api_enabled=env_flag(values, "SOURCE_WRA_API_ENABLED"),
+        source_ncdr_cap_enabled=env_bool(values, "SOURCE_NCDR_CAP_ENABLED"),
+        source_ncdr_cap_api_enabled=env_flag(values, "SOURCE_NCDR_CAP_API_ENABLED"),
         source_flood_potential_enabled=env_bool(values, "SOURCE_FLOOD_POTENTIAL_ENABLED"),
         source_flood_potential_geojson_enabled=env_flag(
             values,
@@ -145,6 +151,8 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         wra_station_api_url=env_str(values, "WRA_STATION_API_URL"),
         wra_api_token=env_str(values, "WRA_API_TOKEN"),
         wra_api_timeout_seconds=env_int(values, "WRA_API_TIMEOUT_SECONDS", default=8),
+        ncdr_cap_api_url=env_str(values, "NCDR_CAP_API_URL"),
+        ncdr_cap_timeout_seconds=env_int(values, "NCDR_CAP_TIMEOUT_SECONDS", default=8),
         flood_potential_geojson_url=env_str(values, "FLOOD_POTENTIAL_GEOJSON_URL"),
         flood_potential_geojson_timeout_seconds=env_int(
             values,
