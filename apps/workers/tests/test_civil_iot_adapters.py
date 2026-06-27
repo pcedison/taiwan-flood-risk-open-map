@@ -69,6 +69,26 @@ def _flood_sensor_payload() -> dict:
                     }
                 ],
             },
+            {
+                "@iot.id": 1003,
+                "name": "低水深路段感測器",
+                "properties": {"stationID": "FS-003", "authority": "水利署"},
+                "Locations": [
+                    {"location": {"type": "Point", "coordinates": [120.22, 23.02]}}
+                ],
+                "Datastreams": [
+                    {
+                        "name": "淹水深度",
+                        "unitOfMeasurement": {"symbol": "cm"},
+                        "Observations": [
+                            {
+                                "phenomenonTime": "2026-06-15T03:00:00.000Z",
+                                "result": 2.0,
+                            }
+                        ],
+                    }
+                ],
+            },
         ]
     }
 
@@ -125,7 +145,7 @@ def test_parse_sta_things_payload_flattens_latest_observation() -> None:
         _flood_sensor_payload(), source_url="https://example.test/water_12"
     )
 
-    assert len(records) == 2
+    assert len(records) == 3
     first = records[0]
     assert first["station_id"] == "FS-001"
     assert first["station_name"] == "中正路淹水感測器"
@@ -138,7 +158,7 @@ def test_parse_sta_things_payload_flattens_latest_observation() -> None:
     assert first["authority"] == "水利署"
 
 
-def test_flood_sensor_api_adapter_rejects_below_threshold() -> None:
+def test_flood_sensor_api_adapter_keeps_zero_and_low_depth_readings_distinct() -> None:
     adapter = FloodSensorStaApiAdapter(
         fetched_at=FETCHED_AT,
         fetch_json=lambda url, timeout: _flood_sensor_payload(),
@@ -146,8 +166,8 @@ def test_flood_sensor_api_adapter_rejects_below_threshold() -> None:
 
     result = adapter.run()
 
-    assert len(result.fetched) == 2
-    assert len(result.normalized) == 2
+    assert len(result.fetched) == 3
+    assert len(result.normalized) == 3
     assert len(result.rejected) == 0
     evidence = result.normalized[0]
     assert evidence.event_type is EventType.FLOOD_REPORT
@@ -168,6 +188,15 @@ def test_flood_sensor_api_adapter_rejects_below_threshold() -> None:
     assert "dry" in dry_evidence.tags
     assert "no_flooding_observed" in dry_evidence.tags
     assert "水深" not in dry_evidence.summary
+    low_depth_raw_payload = result.fetched[2].payload
+    low_depth_evidence = result.normalized[2]
+    assert low_depth_raw_payload["flood_depth_cm"] == 2.0
+    assert low_depth_evidence.event_type is EventType.FLOOD_REPORT
+    assert low_depth_evidence.summary == "路面淹水感測：低水深觀測 2 公分（低水深路段感測器）"
+    assert "below_flood_threshold" in low_depth_evidence.tags
+    assert "low_depth_observation" in low_depth_evidence.tags
+    assert "dry" not in low_depth_evidence.tags
+    assert "no_flooding_observed" not in low_depth_evidence.tags
 
 
 def test_flood_sensor_fixture_adapter_matches_threshold_rule() -> None:
@@ -178,9 +207,10 @@ def test_flood_sensor_fixture_adapter_matches_threshold_rule() -> None:
 
     result = adapter.run()
 
-    assert len(result.normalized) == 2
+    assert len(result.normalized) == 3
     assert result.normalized[0].source_id == "FS-001:2026-06-15T03:00:00+00:00"
     assert result.normalized[1].source_id == "FS-002:2026-06-15T03:00:00+00:00"
+    assert result.normalized[2].source_id == "FS-003:2026-06-15T03:00:00+00:00"
 
 
 def test_flood_sensor_api_adapter_fetches_paginated_sta_payload() -> None:
@@ -211,10 +241,15 @@ def test_flood_sensor_api_adapter_fetches_paginated_sta_payload() -> None:
         ("https://example.test/sta/flood?page=1", 8),
         ("https://example.test/sta/flood?page=2", 8),
     ]
-    assert [item.payload["station_id"] for item in result.fetched] == ["FS-001", "FS-002"]
+    assert [item.payload["station_id"] for item in result.fetched] == [
+        "FS-001",
+        "FS-002",
+        "FS-003",
+    ]
     assert [item.source_id for item in result.normalized] == [
         "FS-001:2026-06-15T03:00:00+00:00",
         "FS-002:2026-06-15T03:00:00+00:00",
+        "FS-003:2026-06-15T03:00:00+00:00",
     ]
 
 
@@ -334,7 +369,7 @@ def test_build_runtime_adapters_includes_enabled_civil_iot_live_adapters() -> No
     assert "official.civil_iot.flood_sensor" in adapters
     assert "official.civil_iot.river_water_level" in adapters
     flood_result = adapters["official.civil_iot.flood_sensor"].run()
-    assert len(flood_result.normalized) == 2
+    assert len(flood_result.normalized) == 3
     assert flood_sensor_calls == [(adapters["official.civil_iot.flood_sensor"]._sta_url, 5)]
 
 

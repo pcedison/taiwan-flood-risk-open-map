@@ -4,14 +4,14 @@ The Water Resources Agency and county governments operate 2,000+ IoT road flood
 sensors that report surface flood depth. They are published through the Civil
 IoT Taiwan SensorThings API (dataset ``淹水感測器`` / ``water_12``).
 
-A sensor reading above :data:`FLOOD_SENSOR_MIN_DEPTH_CM` is treated as an
-observed flood event (``flood_report``) so it strengthens both the realtime and
-historical layers; readings below the threshold (including dry 0 cm readings) are
-rejected to avoid turning routine no-flood telemetry into evidence noise.
+Readings at or above :data:`FLOOD_SENSOR_MIN_DEPTH_CM` are treated as observed
+flood events (``flood_report``). Exact ``0 cm`` readings are preserved as dry
+telemetry, while nonzero subthreshold readings remain low-depth telemetry so the
+latest model keeps the measured depth without overstating flood conditions.
 
-Disabled by default. Live fetching requires ``SOURCE_FLOOD_SENSOR_ENABLED`` plus
-``SOURCE_FLOOD_SENSOR_API_ENABLED``; otherwise the fixture-backed adapter runs on
-synthetic records.
+Disabled by default. Live fetching requires ``SOURCE_FLOOD_SENSOR_ENABLED``,
+``SOURCE_FLOOD_SENSOR_API_ENABLED``, and ``SOURCE_FLOOD_SENSOR_USE_LIVE``;
+otherwise the fixture-backed adapter runs on synthetic records.
 """
 
 from __future__ import annotations
@@ -78,8 +78,8 @@ FLOOD_SENSOR_METADATA = AdapterMetadata(
         "This worker treats Civil IoT flood sensors as the official nationwide "
         "flood-sensor backbone for live ingestion, but the live gate remains "
         "disabled by default.",
-        f"Readings below {FLOOD_SENSOR_MIN_DEPTH_CM:.0f} cm are retained as dry/no "
-        "observed flooding telemetry instead of flood-risk events.",
+        f"Readings below {FLOOD_SENSOR_MIN_DEPTH_CM:.0f} cm are retained as "
+        "telemetry; only exact 0 cm readings are marked dry/no flooding observed.",
     ),
 )
 
@@ -191,9 +191,12 @@ def _normalize_flood_sensor_record(
 
     location_text = optional_str(payload.get("location_text")) or station_name
     tags = ["official", "wra", "flood_sensor", "civil_iot"]
-    if depth_cm < FLOOD_SENSOR_MIN_DEPTH_CM:
+    if depth_cm == 0:
         summary = f"路面淹水感測：無觀測到淹水（乾燥，{depth_cm:.0f} 公分）（{station_name}）"
         tags.extend(["dry", "no_flooding_observed"])
+    elif depth_cm < FLOOD_SENSOR_MIN_DEPTH_CM:
+        summary = f"路面淹水感測：低水深觀測 {depth_cm:.0f} 公分（{station_name}）"
+        tags.extend(["below_flood_threshold", "low_depth_observation"])
     else:
         summary = f"路面淹水感測：水深 {depth_cm:.0f} 公分（{station_name}）"
 
