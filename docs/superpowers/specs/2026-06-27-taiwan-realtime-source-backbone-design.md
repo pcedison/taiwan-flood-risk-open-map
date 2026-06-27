@@ -144,11 +144,14 @@ Task 7 的 POC adapter 使用 `local.tainan.flood_sensor` 作為 adapter key，
 
 限制與品質規則：
 
-- 缺 metadata 或缺 `Point` 座標時，adapter 仍可保留 raw/staging evidence，
-  但不輸出 `geometry`，並設定 `quality_flags.missing_station_coordinates=true`；
-  因此 promotion path 不會 upsert latest station point。
-- 缺座標、缺 metadata 或 `IsWaterInnerDoubt=true` 會降低 confidence 並加上
-  quality tags，讓 API/scoring 可以保守處理。
+- 缺 metadata 或缺 `Point` 座標的 realtime raw item 只可保留在 raw
+  snapshot 與 adapter-run rejection evidence：raw payload 必須設定
+  `quality_flags.missing_station_coordinates=true`，metadata 缺失時也必須設定
+  `quality_flags.station_metadata_missing=true`，adapter run 的 `rejected` 必須記錄
+  該 source id。此類資料不得輸出 normalized evidence，不得成為 accepted
+  staging candidate，也不得進入 promotion/upsert path。
+- 有合法座標但 `IsWaterInnerDoubt=true` 時，adapter 可輸出 normalized evidence，
+  但必須降低 confidence 並加上 quality tags，讓 API/scoring 可以保守處理。
 - 第一版只做 POC ingestion，不做地方資料覆蓋 Civil IoT 的 duplicate
   suppression 或 scoring override。
 - 若後續要把台南地方來源納入 production scoring，必須先完成 freshness
