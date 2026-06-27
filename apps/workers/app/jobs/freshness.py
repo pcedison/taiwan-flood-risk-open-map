@@ -75,6 +75,14 @@ def check_summary_freshness(
             reason=summary.error_message or summary.error_code or "adapter batch failed",
         )
 
+    if summary.adapter_key == "official.ncdr.cap":
+        return check_ncdr_cap_freshness(
+            adapter_key=summary.adapter_key,
+            effective_at=summary.source_timestamp_min,
+            expires_at=summary.source_timestamp_max,
+            checked_at=resolved_checked_at,
+        )
+
     if summary.source_timestamp_max is None:
         return FreshnessCheck(
             adapter_key=summary.adapter_key,
@@ -183,13 +191,13 @@ def check_ncdr_cap_freshness(
     if resolved_expires_at < resolved_checked_at:
         return FreshnessCheck(
             adapter_key=adapter_key,
-            status="failed",
+            status="stale",
             checked_at=resolved_checked_at,
             max_age_seconds=max_age_seconds,
             cadence="event",
             source_timestamp_max=resolved_effective_at,
             age_seconds=age_seconds,
-            reason="CAP alert expired",
+            reason="CAP alert expired; no active alert",
         )
     if resolved_effective_at > resolved_checked_at:
         return FreshnessCheck(

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from app.adapters._helpers import parse_observed_at_utc
 from app.adapters.registry import enabled_adapter_keys
 from app.config import WorkerSettings
 from app.adapters.contracts import AdapterRunResult, DataSourceAdapter
@@ -13,6 +14,7 @@ from app.pipelines.staging import StagingBatchWriter, build_staging_batch, persi
 
 
 AdapterBatchStatus = Literal["succeeded", "partial", "failed", "skipped"]
+NCDR_CAP_ADAPTER_KEY = "official.ncdr.cap"
 
 
 @dataclass(frozen=True)
@@ -197,6 +199,13 @@ def _summary_from_result(
 
     items_rejected = len(batch.rejected) + len(batch.rejected_raw_source_ids)
     status: AdapterBatchStatus = "succeeded" if items_rejected == 0 else "partial"
+    source_timestamp_min = batch.raw_snapshot.source_timestamp_min
+    source_timestamp_max = batch.raw_snapshot.source_timestamp_max
+    if result.adapter_key == NCDR_CAP_ADAPTER_KEY:
+        cap_window = _ncdr_cap_effective_expires_window(result)
+        if cap_window is not None:
+            source_timestamp_min, source_timestamp_max = cap_window
+
     return AdapterBatchRunSummary(
         adapter_key=result.adapter_key,
         status=status,
@@ -206,9 +215,30 @@ def _summary_from_result(
         items_promoted=len(batch.accepted),
         items_rejected=items_rejected,
         raw_ref=batch.raw_snapshot.raw_ref,
-        source_timestamp_min=batch.raw_snapshot.source_timestamp_min,
-        source_timestamp_max=batch.raw_snapshot.source_timestamp_max,
+        source_timestamp_min=source_timestamp_min,
+        source_timestamp_max=source_timestamp_max,
     )
+
+
+def _ncdr_cap_effective_expires_window(
+    result: AdapterRunResult,
+) -> tuple[datetime, datetime] | None:
+    normalized_source_ids = {evidence.source_id for evidence in result.normalized}
+    effective_values: list[datetime] = []
+    expires_values: list[datetime] = []
+    for raw_item in result.fetched:
+        if raw_item.source_id not in normalized_source_ids:
+            continue
+        effective_at = parse_observed_at_utc(raw_item.payload.get("effective"))
+        expires_at = parse_observed_at_utc(raw_item.payload.get("expires"))
+        if effective_at is None or expires_at is None:
+            continue
+        effective_values.append(effective_at)
+        expires_values.append(expires_at)
+
+    if not effective_values or not expires_values:
+        return None
+    return min(effective_values), max(expires_values)
 
 
 def _now() -> datetime:

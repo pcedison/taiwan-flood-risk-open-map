@@ -294,6 +294,63 @@ def test_admin_sources_include_realtime_diagnostics_and_disabled_sources_are_not
     assert_openapi_schema(payload, "AdminSourcesResponse")
 
 
+def test_admin_sources_disabled_filter_includes_disabled_rows_with_unknown_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    cursor = FakeCursor(
+        [
+            {
+                "id": "seeded-disabled",
+                "name": "Seeded disabled source",
+                "adapter_key": "official.seeded.disabled",
+                "source_type": "official",
+                "license": None,
+                "update_frequency": None,
+                "last_success_at": None,
+                "last_failure_at": None,
+                "health_status": "unknown",
+                "legal_basis": "L1",
+                "source_timestamp_min": None,
+                "source_timestamp_max": None,
+                "is_enabled": False,
+                "latest_observed_at": None,
+                "latest_fetched_at": None,
+                "latest_ingested_at": None,
+                "row_count": 0,
+                "upstream_status": "unknown",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        admin_route.psycopg,
+        "connect",
+        lambda *args, **kwargs: FakeConnection(cursor),
+    )
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/sources",
+        params={"health_status": "disabled"},
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    assert "(ds.health_status = %s OR ds.is_enabled = false)" in (cursor.query or "")
+    assert cursor.params == ["disabled"]
+    payload = response.json()
+    assert len(payload["sources"]) == 1
+    source = payload["sources"][0]
+    assert source["adapter_key"] == "official.seeded.disabled"
+    assert source["is_enabled"] is False
+    assert source["health_status"] == "disabled"
+    assert source["freshness_state"] == "stale"
+    assert source["upstream_status"] == "disabled"
+    assert source["enabled_gates"] == []
+    assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
 def test_admin_pending_reports_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
     get_settings.cache_clear()

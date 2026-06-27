@@ -294,7 +294,10 @@ def _db_sources(*, health_status: HealthStatus | None) -> list[DataSource]:
     where: list[str] = []
     params: list[str] = []
     if health_status is not None:
-        where.append("ds.health_status = %s")
+        if health_status == "disabled":
+            where.append("(ds.health_status = %s OR ds.is_enabled = false)")
+        else:
+            where.append("ds.health_status = %s")
         params.append(health_status)
 
     query = """
@@ -382,7 +385,14 @@ def _filter_sources(
     sources: list[DataSource], *, health_status: HealthStatus | None
 ) -> list[DataSource]:
     if health_status is not None:
-        sources = [source for source in sources if source.health_status == health_status]
+        if health_status == "disabled":
+            sources = [
+                source
+                for source in sources
+                if source.health_status == health_status or not source.is_enabled
+            ]
+        else:
+            sources = [source for source in sources if source.health_status == health_status]
     return sources
 
 

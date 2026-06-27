@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from app.adapters.contracts import (
+    AdapterMetadata,
+    AdapterRunResult,
+    EventType,
+    NormalizedEvidence,
+    RawSourceItem,
+    SourceFamily,
+)
 from app.jobs.freshness import (
     check_batch_freshness,
     check_ncdr_cap_freshness,
     check_summary_freshness,
 )
-from app.jobs.ingestion import AdapterBatchRunSummary, AdapterBatchStatus
+from app.jobs.ingestion import AdapterBatchRunSummary, AdapterBatchStatus, run_adapter_batch
 
 
 CHECKED_AT = datetime(2026, 4, 30, 4, 0, tzinfo=UTC)
@@ -133,7 +141,7 @@ def test_ncdr_cap_freshness_uses_effective_expires_window() -> None:
         expires_at=CHECKED_AT + timedelta(minutes=35),
         checked_at=CHECKED_AT,
     )
-    failed = check_ncdr_cap_freshness(
+    stale = check_ncdr_cap_freshness(
         adapter_key="official.ncdr.cap",
         effective_at=CHECKED_AT - timedelta(hours=1),
         expires_at=CHECKED_AT - timedelta(minutes=1),
@@ -143,14 +151,102 @@ def test_ncdr_cap_freshness_uses_effective_expires_window() -> None:
     assert fresh.status == "fresh"
     assert degraded.status == "degraded"
     assert degraded.reason == "CAP alert is not yet effective"
-    assert failed.status == "failed"
-    assert failed.reason == "CAP alert expired"
+    assert stale.status == "stale"
+    assert stale.reason == "CAP alert expired; no active alert"
+    assert stale.is_alert()
+
+
+def test_summary_freshness_uses_ncdr_cap_effective_expires_window() -> None:
+    fresh = check_summary_freshness(
+        _summary(
+            adapter_key="official.ncdr.cap",
+            source_timestamp_min=CHECKED_AT - timedelta(minutes=5),
+            source_timestamp_max=CHECKED_AT + timedelta(minutes=25),
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+    degraded = check_summary_freshness(
+        _summary(
+            adapter_key="official.ncdr.cap",
+            source_timestamp_min=CHECKED_AT + timedelta(minutes=5),
+            source_timestamp_max=CHECKED_AT + timedelta(minutes=35),
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+    stale = check_summary_freshness(
+        _summary(
+            adapter_key="official.ncdr.cap",
+            source_timestamp_min=CHECKED_AT - timedelta(hours=1),
+            source_timestamp_max=CHECKED_AT - timedelta(minutes=1),
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert fresh.status == "fresh"
+    assert degraded.status == "degraded"
+    assert stale.status == "stale"
+    assert stale.reason == "CAP alert expired; no active alert"
+    assert stale.is_alert()
+
+
+def test_ncdr_cap_failed_batch_is_the_only_failed_no_active_alert_case() -> None:
+    no_active_alert = check_summary_freshness(
+        _summary(
+            adapter_key="official.ncdr.cap",
+            source_timestamp_min=None,
+            source_timestamp_max=None,
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+    failed_batch = check_summary_freshness(
+        _summary(
+            adapter_key="official.ncdr.cap",
+            status="failed",
+            source_timestamp_min=CHECKED_AT - timedelta(hours=1),
+            source_timestamp_max=CHECKED_AT - timedelta(minutes=1),
+            error_message="upstream 500",
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert no_active_alert.status == "stale"
+    assert no_active_alert.reason == "CAP alert is missing effective or expires timestamp"
+    assert failed_batch.status == "failed"
+    assert failed_batch.reason == "upstream 500"
+
+
+def test_ncdr_cap_batch_summary_preserves_effective_expires_window() -> None:
+    effective_at = CHECKED_AT - timedelta(minutes=5)
+    expires_at = CHECKED_AT + timedelta(minutes=25)
+
+    summary = run_adapter_batch(
+        _CapAdapter(
+            effective_at=effective_at,
+            expires_at=expires_at,
+            fetched_at=CHECKED_AT,
+        )
+    )
+    check = check_summary_freshness(
+        summary,
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert summary.source_timestamp_min == effective_at
+    assert summary.source_timestamp_max == expires_at
+    assert check.status == "fresh"
 
 
 def _summary(
     *,
     adapter_key: str = "official.cwa.rainfall",
     status: AdapterBatchStatus = "succeeded",
+    source_timestamp_min: datetime | None = CHECKED_AT,
     source_timestamp_max: datetime | None = CHECKED_AT,
     error_message: str | None = None,
 ) -> AdapterBatchRunSummary:
@@ -163,5 +259,58 @@ def _summary(
         items_promoted=1,
         items_rejected=0,
         error_message=error_message,
+        source_timestamp_min=source_timestamp_min,
         source_timestamp_max=source_timestamp_max,
     )
+
+
+class _CapAdapter:
+    metadata = AdapterMetadata(
+        key="official.ncdr.cap",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="NCDR CAP alert adapter",
+    )
+
+    def __init__(
+        self,
+        *,
+        effective_at: datetime,
+        expires_at: datetime,
+        fetched_at: datetime,
+    ) -> None:
+        self.effective_at = effective_at
+        self.expires_at = expires_at
+        self.fetched_at = fetched_at
+
+    def run(self) -> AdapterRunResult:
+        raw_item = RawSourceItem(
+            source_id="NCDR-CAP-001",
+            source_url="https://example.test/ncdr/cap",
+            fetched_at=self.fetched_at,
+            payload={
+                "identifier": "NCDR-CAP-001",
+                "effective": self.effective_at.isoformat(),
+                "expires": self.expires_at.isoformat(),
+                "areaDesc": "Tainan City",
+            },
+        )
+        evidence = NormalizedEvidence(
+            evidence_id="ev_ncdr_cap_001",
+            adapter_key="official.ncdr.cap",
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_WARNING,
+            source_id="NCDR-CAP-001",
+            source_url="https://example.test/ncdr/cap",
+            source_title="NCDR CAP alert",
+            source_timestamp=self.effective_at,
+            fetched_at=self.fetched_at,
+            summary="NCDR CAP flood warning",
+            location_text="Tainan City",
+            confidence=0.95,
+        )
+        return AdapterRunResult(
+            adapter_key="official.ncdr.cap",
+            fetched=(raw_item,),
+            normalized=(evidence,),
+        )
