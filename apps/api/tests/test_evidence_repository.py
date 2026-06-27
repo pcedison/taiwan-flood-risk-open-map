@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import psycopg
+import pytest
 
 from app.domain.layers import fetch_map_layer, fetch_map_layers
 from app.domain.evidence.repository import (
     EvidenceUpsert,
+    EvidenceRepositoryUnavailable,
     RiskAssessmentPersistence,
     fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
@@ -238,7 +240,7 @@ def test_query_nearby_latest_official_uses_flood_depth_radius() -> None:
 def test_query_nearby_latest_official_falls_back_when_table_missing() -> None:
     connection = _FakeConnection(
         rows=[],
-        execute_side_effects=[psycopg.errors.UndefinedTable("relation does not exist")],
+        execute_side_effects=[_undefined_table_error(table_name="official_realtime_latest")],
     )
 
     records = query_nearby_latest_official(
@@ -249,6 +251,69 @@ def test_query_nearby_latest_official_falls_back_when_table_missing() -> None:
     )
 
     assert records == ()
+
+
+def test_query_nearby_latest_official_raises_when_other_relation_missing() -> None:
+    connection = _FakeConnection(
+        rows=[],
+        execute_side_effects=[_undefined_table_error(table_name="evidence")],
+    )
+
+    with pytest.raises(EvidenceRepositoryUnavailable, match="evidence"):
+        query_nearby_latest_official(
+            database_url="postgresql://example.test/flood",
+            lat=25.033,
+            lng=121.5654,
+            connection_factory=lambda: connection,
+        )
+
+
+def test_query_nearby_latest_official_decodes_latest_row_metrics() -> None:
+    observed_at = datetime(2026, 6, 16, 5, 0, tzinfo=timezone.utc)
+    connection = _FakeConnection(
+        rows=[
+            {
+                "id": "latest-rainfall-1",
+                "source_id": "cwa-rainfall:C0A520:2026-06-16T05:00:00+00:00",
+                "source_type": "official",
+                "event_type": "rainfall",
+                "title": "官方最新雨量站觀測",
+                "summary": "官方最新雨量站觀測值。",
+                "url": "https://example.test/latest",
+                "occurred_at": None,
+                "observed_at": observed_at,
+                "ingested_at": observed_at,
+                "lat": 25.033,
+                "lng": 121.5654,
+                "geometry": '{"type":"Point","coordinates":[121.5654,25.033]}',
+                "distance_to_query_m": 88.0,
+                "confidence": 0.91,
+                "freshness_score": 0.87,
+                "source_weight": 1.0,
+                "privacy_level": "public",
+                "raw_ref": "official-realtime-latest:official.cwa.rainfall:rainfall:C0A520",
+                "rainfall_mm_1h": 42.5,
+                "water_level_m": 1.75,
+                "warning_level_m": 2.25,
+                "flood_depth_cm": 18.0,
+                "realtime_risk_factor": 0.6,
+            }
+        ]
+    )
+
+    records = query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        connection_factory=lambda: connection,
+    )
+
+    assert len(records) == 1
+    assert records[0].rainfall_mm_1h == 42.5
+    assert records[0].water_level_m == 1.75
+    assert records[0].warning_level_m == 2.25
+    assert records[0].flood_depth_cm == 18.0
+    assert records[0].realtime_risk_factor == 0.6
 
 
 def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
@@ -506,3 +571,26 @@ class _FakeCursor:
     def fetchall(self) -> list[dict[str, object]]:
         assert self._rows is not None
         return self._rows
+
+
+class _Diagnostic:
+    def __init__(self, table_name: str | None) -> None:
+        self.table_name = table_name
+
+
+class _UndefinedTableWithDiag(psycopg.errors.UndefinedTable):
+    def __init__(self, message: str, *, table_name: str | None) -> None:
+        super().__init__(message)
+        self._diag = _Diagnostic(table_name)
+
+    @property
+    def diag(self) -> _Diagnostic:
+        return self._diag
+
+
+def _undefined_table_error(*, table_name: str | None, message: str | None = None) -> psycopg.errors.UndefinedTable:
+    relation = table_name or "unknown"
+    return _UndefinedTableWithDiag(
+        message or f'relation "{relation}" does not exist',
+        table_name=table_name,
+    )

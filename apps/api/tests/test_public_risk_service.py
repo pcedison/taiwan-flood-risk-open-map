@@ -219,6 +219,108 @@ def test_nearby_db_evidence_uses_latest_first_and_deduplicates(monkeypatch: pyte
     )
 
 
+def test_nearby_db_evidence_does_not_false_positive_dedupe_unknown_official_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    latest_record = _db_evidence_record(
+        source_id="station-1-latest",
+        event_type="flood_warning",
+        raw_ref="official-realtime-latest:official.wra.warning:flood_warning:station-1",
+    )
+    legacy_record = _db_evidence_record(
+        source_id="station-1:2026-06-09T02:00:00+00:00",
+        event_type="flood_warning",
+    )
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+            app_env="test",
+        ),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_latest_official", lambda **_kwargs: (latest_record,))
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: (legacy_record,))
+    monkeypatch.setattr(public_routes, "_evidence_from_record", lambda record: record.source_id)
+
+    records = public_routes._nearby_db_evidence(request)
+
+    assert records == (
+        "station-1-latest",
+        "station-1:2026-06-09T02:00:00+00:00",
+    )
+
+
+def test_nearby_db_evidence_deduplicates_validated_legacy_cwa_station_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    latest_record = _db_evidence_record(
+        source_id="cwa-rainfall:C0A520:2026-06-09T03:00:00+00:00",
+        event_type="rainfall",
+        raw_ref="official-realtime-latest:official.cwa.rainfall:rainfall:C0A520",
+    )
+    legacy_record = _db_evidence_record(
+        source_id="cwa-rainfall:C0A520:2026-06-09T02:00:00+00:00",
+        event_type="rainfall",
+    )
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+            app_env="test",
+        ),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_latest_official", lambda **_kwargs: (latest_record,))
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: (legacy_record,))
+    monkeypatch.setattr(public_routes, "_evidence_from_record", lambda record: record.source_id)
+
+    records = public_routes._nearby_db_evidence(request)
+
+    assert records == ("cwa-rainfall:C0A520:2026-06-09T03:00:00+00:00",)
+
+
+def test_nearby_db_evidence_keeps_invalid_legacy_cwa_station_shape_distinct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    latest_record = _db_evidence_record(
+        source_id="cwa-rainfall:C0A520:2026-06-09T03:00:00+00:00",
+        event_type="rainfall",
+        raw_ref="official-realtime-latest:official.cwa.rainfall:rainfall:C0A520",
+    )
+    legacy_record = _db_evidence_record(
+        source_id="cwa-rainfall:not a station:2026-06-09T02:00:00+00:00",
+        event_type="rainfall",
+    )
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+            app_env="test",
+        ),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_latest_official", lambda **_kwargs: (latest_record,))
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: (legacy_record,))
+    monkeypatch.setattr(public_routes, "_evidence_from_record", lambda record: record.source_id)
+
+    records = public_routes._nearby_db_evidence(request)
+
+    assert records == (
+        "cwa-rainfall:C0A520:2026-06-09T03:00:00+00:00",
+        "cwa-rainfall:not a station:2026-06-09T02:00:00+00:00",
+    )
+
+
 def test_assess_risk_profile_fast_path_refreshes_and_caches_response() -> None:
     request = _risk_request()
     created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")

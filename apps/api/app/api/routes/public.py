@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+import re
 from typing import Any, Literal
 from uuid import UUID
 
@@ -91,6 +92,12 @@ LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "pr
 _ASSESSMENT_EVIDENCE_CACHE = public_evidence._ASSESSMENT_EVIDENCE_CACHE
 _RISK_ASSESSMENT_RESPONSE_CACHE = public_response_cache._MEMORY_CACHE
 _PUBLIC_RATE_LIMIT_MEMORY_ENVS = {"local", "development", "test"}
+_LATEST_OFFICIAL_RAW_REF_PREFIX = "official-realtime-latest:"
+_LEGACY_OFFICIAL_STATION_SOURCES = {
+    ("rainfall", "cwa-rainfall"): "official.cwa.rainfall",
+    ("water_level", "wra-water-level"): "official.wra.water_level",
+}
+_STATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _now() -> datetime:
@@ -286,24 +293,52 @@ def _nearby_evidence_dedupe_key(record: EvidenceRecord) -> tuple[str, str]:
 
 
 def _official_realtime_station_key(record: EvidenceRecord) -> str | None:
-    if record.raw_ref and record.raw_ref.startswith("official-realtime-latest:"):
-        parts = record.raw_ref.split(":", 3)
-        if len(parts) == 4:
-            return f"{record.event_type}:{parts[3]}"
+    if record.raw_ref and record.raw_ref.startswith(_LATEST_OFFICIAL_RAW_REF_PREFIX):
+        latest_key = _latest_official_station_key(record.raw_ref)
+        if latest_key is not None:
+            return latest_key
 
     if record.source_type != "official":
         return None
-    if record.event_type not in {"rainfall", "water_level", "flood_report", "flood_warning"}:
+    return _legacy_official_station_key(record)
+
+
+def _latest_official_station_key(raw_ref: str) -> str | None:
+    payload = raw_ref.removeprefix(_LATEST_OFFICIAL_RAW_REF_PREFIX)
+    parts = payload.split(":", 2)
+    if len(parts) != 3:
         return None
+    adapter_key, event_type, station_id = parts
+    if not _is_valid_station_id(station_id):
+        return None
+    return f"{adapter_key}:{event_type}:{station_id}"
 
+
+def _legacy_official_station_key(record: EvidenceRecord) -> str | None:
     parts = record.source_id.split(":", 2)
-    if len(parts) == 3 and parts[0] in {"cwa-rainfall", "wra-water-level"}:
-        return f"{record.event_type}:{parts[1]}"
+    if len(parts) != 3:
+        return None
+    source_head, station_id, observed_at = parts
+    adapter_key = _LEGACY_OFFICIAL_STATION_SOURCES.get((record.event_type, source_head))
+    if adapter_key is None:
+        return None
+    if not _is_valid_station_id(station_id):
+        return None
+    if not _is_iso_observed_at(observed_at):
+        return None
+    return f"{adapter_key}:{record.event_type}:{station_id}"
 
-    head, found, tail = record.source_id.partition(":")
-    if found and tail.startswith("20"):
-        return f"{record.event_type}:{head}"
-    return None
+
+def _is_valid_station_id(station_id: str) -> bool:
+    return bool(_STATION_ID_RE.fullmatch(station_id))
+
+
+def _is_iso_observed_at(value: str) -> bool:
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
 
 
 def _evidence_from_record(record: EvidenceRecord) -> Evidence:

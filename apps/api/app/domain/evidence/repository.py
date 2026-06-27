@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 import json
+import re
 from typing import Any, cast
 
 import psycopg
@@ -13,6 +14,7 @@ from psycopg.rows import dict_row
 
 ConnectionFactory = Callable[[], Any]
 QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
+_LATEST_OFFICIAL_RELATION = "official_realtime_latest"
 
 
 class EvidenceRepositoryUnavailable(RuntimeError):
@@ -536,8 +538,10 @@ def query_nearby_latest_official(
                     ),
                 )
                 return tuple(_record_from_row(row) for row in cursor.fetchall())
-    except psycopg.errors.UndefinedTable:
-        return ()
+    except psycopg.errors.UndefinedTable as exc:
+        if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
+            return ()
+        raise EvidenceRepositoryUnavailable(str(exc)) from exc
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -933,6 +937,14 @@ def _geometry(value: object) -> dict[str, Any] | None:
         payload = json.loads(value)
         return payload if isinstance(payload, dict) else None
     return None
+
+
+def _is_missing_relation(exc: psycopg.errors.UndefinedTable, relation: str) -> bool:
+    diag = getattr(exc, "diag", None)
+    table_name = getattr(diag, "table_name", None)
+    if isinstance(table_name, str) and table_name:
+        return table_name == relation
+    return re.search(rf'relation "{re.escape(relation)}"', str(exc)) is not None
 
 
 def _period_to_interval(period: str) -> str:
