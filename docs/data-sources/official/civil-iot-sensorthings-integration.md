@@ -15,11 +15,12 @@ coverage (especially road flood sensors) directly reduces that gap.
 
 `ci.taiwan.gov.tw/dsp` (民生公共物聯網) publishes WRA flood sensors, river/
 drainage water levels, agricultural pond levels, sewer levels, pump stations, and
-CWA rainfall through one **OGC SensorThings API (STA)**. Integrating the STA hub
-covers most requested networks with one client instead of 2,000+ per-sensor
+CWA rainfall through **OGC SensorThings API (STA)** services. Integrating the STA
+hub covers most requested networks with one client instead of 2,000+ per-sensor
 connectors.
 
-- Water-resource STA base: `https://sta.ci.taiwan.gov.tw/STA_WaterResource_v2/v1.0/`
+- Water-resource STA base: `https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/`
+- Rain-sewer STA base: `https://sta.colife.org.tw/STA_RainSewer/v1.0/`
 - Shape: `Things` → `Locations` (GeoJSON Point, WGS84 `[lng, lat]`) →
   `Datastreams` → `Observations` (`phenomenonTime`, `result`).
 - License: Government Open Data License v1.0 (compatible per SDD OQ-003).
@@ -35,12 +36,19 @@ fixture-backed variant), are registered in `app/adapters/registry.py`, and are
 | `official.civil_iot.flood_sensor` | 淹水感測器 (`water_12`) | `flood_report` | Road surface flood depth. |
 | `official.civil_iot.river_water_level` | 河川水位站 (`iow01`) | `water_level` | Overlaps `official.wra.water_level`. |
 | `official.civil_iot.pond_water_level` | 埤塘水位 (`iow12`) | `water_level` | Agricultural; indirect signal. |
-| `official.civil_iot.sewer_water_level` | 雨水下水道 (國土署) | `water_level` | Urban drainage loading. |
+| `official.civil_iot.sewer_water_level` | 雨水下水道 (國土署 `nlma1`) | `water_level` | Urban drainage loading via `STA_RainSewer`. |
 | `official.civil_iot.pump_water_level` | 抽水站 (`pump_taipei`) | `water_level` | Reads external (外水位) level. |
 
 Shared STA client: `app/adapters/civil_iot/sta_client.py`
 (`parse_sta_things_payload`, `fetch_sta_json`). Pond/sewer/pump share one
-configurable adapter in `app/adapters/civil_iot/sta_water_level.py`.
+configurable adapter in `app/adapters/civil_iot/sta_water_level.py`; sewer uses
+the separate `STA_RainSewer` service while pond and pump remain on
+`STA_WaterResource_v2`.
+
+Pagination note (2026-06-28): Civil IoT `@iot.nextLink` values are already
+percent-encoded and use `+` for spaces inside generated OData clauses. The STA
+client must preserve `+` when preparing request URLs; double-encoding it to
+`%2B` causes second-page requests to return HTTP 400.
 
 ### CWA full station network is already integrated
 

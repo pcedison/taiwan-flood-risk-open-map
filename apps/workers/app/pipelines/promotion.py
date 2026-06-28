@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 import json
 import math
@@ -139,6 +139,8 @@ class PostgresEvidencePromotionWriter:
     def write_evidence(self, payload: EvidencePromotionPayload) -> str:
         with self._connect() as connection:
             with connection.cursor() as cursor:
+                enriched_payload = _with_admin_area_enrichment(cursor, payload)
+                weighted_payload = _with_local_duplicate_suppression(cursor, enriched_payload)
                 cursor.execute(
                     """
                     INSERT INTO evidence (
@@ -182,31 +184,31 @@ class PostgresEvidencePromotionWriter:
                     RETURNING id
                     """,
                     (
-                        payload.data_source_id,
-                        payload.adapter_key,
-                        payload.source_id,
-                        payload.source_type,
-                        payload.event_type,
-                        payload.title,
-                        payload.summary,
-                        payload.url,
-                        payload.occurred_at,
-                        payload.observed_at,
-                        payload.confidence,
-                        _geojson_geometry(payload.properties),
-                        _geojson_geometry(payload.properties),
-                        payload.raw_ref,
-                        _json(payload.properties),
+                        weighted_payload.data_source_id,
+                        weighted_payload.adapter_key,
+                        weighted_payload.source_id,
+                        weighted_payload.source_type,
+                        weighted_payload.event_type,
+                        weighted_payload.title,
+                        weighted_payload.summary,
+                        weighted_payload.url,
+                        weighted_payload.occurred_at,
+                        weighted_payload.observed_at,
+                        weighted_payload.confidence,
+                        _geojson_geometry(weighted_payload.properties),
+                        _geojson_geometry(weighted_payload.properties),
+                        weighted_payload.raw_ref,
+                        _json(weighted_payload.properties),
                     ),
                 )
                 row = cursor.fetchone()
                 if row is None:
                     raise RuntimeError("evidence insert did not return an id")
                 evidence_id = str(row[0])
-                if _should_upsert_official_realtime_latest(payload):
+                if _should_upsert_official_realtime_latest(weighted_payload):
                     self._upsert_official_realtime_latest(
                         cursor,
-                        payload=payload,
+                        payload=weighted_payload,
                         evidence_id=evidence_id,
                     )
             connection.commit()
@@ -255,6 +257,7 @@ class PostgresEvidencePromotionWriter:
                 warning_level_m,
                 confidence,
                 freshness_score,
+                source_weight,
                 risk_factor,
                 evidence_id,
                 source_url,
@@ -284,6 +287,7 @@ class PostgresEvidencePromotionWriter:
                 %s,
                 %s,
                 %s,
+                %s,
                 %s::jsonb
             )
             ON CONFLICT (adapter_key, event_type, station_id)
@@ -301,6 +305,7 @@ class PostgresEvidencePromotionWriter:
                 warning_level_m = EXCLUDED.warning_level_m,
                 confidence = EXCLUDED.confidence,
                 freshness_score = EXCLUDED.freshness_score,
+                source_weight = EXCLUDED.source_weight,
                 risk_factor = EXCLUDED.risk_factor,
                 evidence_id = EXCLUDED.evidence_id,
                 source_url = EXCLUDED.source_url,
@@ -326,6 +331,7 @@ class PostgresEvidencePromotionWriter:
                 _optional_float(payload.properties.get("warning_level_m")),
                 payload.confidence,
                 _optional_float(payload.properties.get("freshness_score")),
+                _official_realtime_source_weight(payload),
                 _official_realtime_risk_factor(payload),
                 evidence_id,
                 _optional_text(payload.properties.get("source_url")),
@@ -421,6 +427,152 @@ def _candidate_from_row(row: tuple[Any, ...]) -> PromotionCandidate:
         validation_status=str(row[13]),
         payload=dict(payload),
     )
+
+
+def _with_admin_area_enrichment(
+    cursor: Any,
+    payload: EvidencePromotionPayload,
+) -> EvidencePromotionPayload:
+    if not _should_upsert_official_realtime_latest(payload):
+        return payload
+    if _official_realtime_station_id(payload) is None:
+        return payload
+    if not _needs_admin_area_enrichment(payload.properties):
+        return payload
+
+    point_geometry = _geojson_point_geometry(payload.properties)
+    if point_geometry is None:
+        return payload
+
+    cursor.execute(
+        """
+        SELECT county_name, town_name, village_name
+        FROM admin_area_profiles
+        WHERE ST_Covers(geom, ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326))
+        ORDER BY
+            CASE scope
+                WHEN 'village' THEN 0
+                WHEN 'town' THEN 1
+                WHEN 'county' THEN 2
+                ELSE 3
+            END,
+            ST_Area(geom::geography) ASC
+        LIMIT 1
+        """,
+        (point_geometry,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return payload
+
+    admin_area = _admin_area_from_row(row)
+    if not admin_area:
+        return payload
+
+    enriched = dict(payload.properties)
+    for key, value in admin_area.items():
+        if _optional_text(enriched.get(key)) is None:
+            enriched[key] = value
+    return replace(payload, properties=enriched)
+
+
+def _with_local_duplicate_suppression(
+    cursor: Any,
+    payload: EvidencePromotionPayload,
+) -> EvidencePromotionPayload:
+    if not _should_check_local_duplicate(payload):
+        return payload
+
+    point_geometry = _geojson_point_geometry(payload.properties)
+    if point_geometry is None:
+        return payload
+
+    cursor.execute(
+        """
+        SELECT adapter_key, station_id
+        FROM official_realtime_latest
+        WHERE adapter_key NOT LIKE 'local.%'
+            AND event_type = %s
+            AND observed_at >= %s - interval '30 minutes'
+            AND observed_at <= %s + interval '30 minutes'
+            AND ST_DWithin(
+                geom::geography,
+                ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326)::geography,
+                150
+            )
+        ORDER BY
+            ST_Distance(
+                geom::geography,
+                ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326)::geography
+            ) ASC,
+            observed_at DESC
+        LIMIT 1
+        """,
+        (
+            payload.event_type,
+            payload.observed_at,
+            payload.observed_at,
+            point_geometry,
+            point_geometry,
+        ),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return payload
+
+    duplicate_adapter_key = _row_value(row, 0, "adapter_key")
+    duplicate_station_id = _row_value(row, 1, "station_id")
+    if duplicate_adapter_key is None or duplicate_station_id is None:
+        return payload
+
+    properties = dict(payload.properties)
+    quality_flags = _quality_flags(properties)
+    quality_flags.update(
+        {
+            "duplicate_candidate": True,
+            "duplicate_of_adapter_key": duplicate_adapter_key,
+            "duplicate_of_station_id": duplicate_station_id,
+        }
+    )
+    properties["quality_flags"] = quality_flags
+    properties["source_weight"] = min(
+        _optional_float(properties.get("source_weight")) or 1.0,
+        0.45,
+    )
+    return replace(payload, properties=properties)
+
+
+def _should_check_local_duplicate(payload: EvidencePromotionPayload) -> bool:
+    if not _should_upsert_official_realtime_latest(payload):
+        return False
+    if payload.adapter_key is None or not payload.adapter_key.startswith("local."):
+        return False
+    return payload.observed_at is not None
+
+
+def _needs_admin_area_enrichment(properties: dict[str, Any]) -> bool:
+    return any(
+        _optional_text(properties.get(key)) is None
+        for key in ("county", "town", "village")
+    )
+
+
+def _admin_area_from_row(row: Any) -> dict[str, str]:
+    values = {
+        "county": _row_value(row, 0, "county_name"),
+        "town": _row_value(row, 1, "town_name"),
+        "village": _row_value(row, 2, "village_name"),
+    }
+    return {key: value for key, value in values.items() if value is not None}
+
+
+def _row_value(row: Any, index: int, key: str) -> str | None:
+    if isinstance(row, dict):
+        return _optional_text(row.get(key))
+    try:
+        return _optional_text(row[index])
+    except (IndexError, TypeError, KeyError):
+        return None
 
 
 def _payload_adapter_key(payload: dict[str, Any]) -> str | None:
@@ -549,6 +701,10 @@ def _official_realtime_risk_factor(payload: EvidencePromotionPayload) -> float |
         return 1.0
 
     return None
+
+
+def _official_realtime_source_weight(payload: EvidencePromotionPayload) -> float | None:
+    return _optional_float(payload.properties.get("source_weight"))
 
 
 def _rainfall_realtime_risk_factor(rainfall_1h_mm: float) -> float:

@@ -10,6 +10,7 @@ This bridge is not Phase 2 completion by itself. Phase 2 acceptance still requir
 |---|---|---|---|
 | `official.cwa.rainfall` | `official` | `rainfall` | Fixture parser + API bridge + gated worker live client implemented |
 | `official.wra.water_level` | `official` | `water_level` | Fixture parser + API bridge + gated worker live client implemented |
+| `official.wra_iow.flood_depth` | `official` | `flood_report` | Gated worker live client implemented; joins latest flood depth with station metadata |
 | `official.flood_potential.geojson` | `official` | `flood_potential` | Fixture parser implemented |
 | `official.nstc.flood_disaster_points` | `official` | `flood_report` | API bundled historical snapshot fallback implemented; not a rolling current-year source |
 
@@ -18,6 +19,8 @@ Current official endpoints used by the MVP bridge:
 - CWA automatic rainfall observations: `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001`
 - WRA realtime water level observations: `https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0`
 - WRA water-level station metadata: `https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92`
+- WRA IoW latest flood depth observations: `https://opendata.wra.gov.tw/api/v2/1b991bbb-ad85-4e7a-b931-06ce8749d3ed`
+- WRA IoW flood sensor metadata: `https://opendata.wra.gov.tw/api/v2/21c50be1-7c4a-4fdf-a386-790625e984e7`
 
 Latest data.gov.tw review:
 

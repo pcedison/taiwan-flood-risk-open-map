@@ -81,8 +81,17 @@ manager when the owning operator has approved it."
 Do not add custom build or start commands for this mode. The root `Dockerfile`
 already builds the web app, installs the API and worker packages, starts
 FastAPI internally, and starts Next.js on Zeabur's public `$PORT`. When
-`HOSTED_INGESTION_SCHEDULER_ENABLED=true`, the same start script also launches a
-beta official-ingestion scheduler that persists CWA/WRA snapshots to Postgres.
+`DATABASE_URL` or `WORKER_DATABASE_URL` is attached, the same start script
+defaults `HOSTED_INGESTION_SCHEDULER_ENABLED=auto` and launches a beta
+official-ingestion scheduler that persists CWA/WRA, WRA IoW, NCDR CAP, and
+Civil IoT backbone snapshots to Postgres. The production beta start script
+forces this realtime backbone on when a database URL is present, so a legacy
+`HOSTED_INGESTION_SCHEDULER_ENABLED=false` value does not keep it disabled. Set
+`REALTIME_BACKBONE_INGESTION_DISABLED=true` only as the explicit kill switch.
+When a database URL is present, the start script applies unrecorded
+`infra/migrations/*.sql` files before launching API/Web; set
+`RUN_DATABASE_MIGRATIONS_ON_START=false` only if an operator is applying
+migrations separately.
 
 ### Health Check
 
@@ -131,15 +140,34 @@ Optional:
 | `API_VERSION` | release label | Optional label returned by `/health`. |
 | `CORS_ORIGINS` | Zeabur domain origin, for example `https://your-service.zeabur.app` | Usually not needed in single-service mode because browser requests are same-origin. Set it if a separate test page calls the API directly. |
 
-Optional official ingestion scheduler for the single-service beta:
+Official ingestion scheduler for the single-service beta:
 
 | Variable | Value | When to set it |
 |---|---|---|
-| `HOSTED_INGESTION_SCHEDULER_ENABLED` | `true` | Starts the in-container managed ingestion loop. |
+| `HOSTED_INGESTION_SCHEDULER_ENABLED` | leave unset or `auto` | Starts the in-container managed ingestion loop when Postgres is attached; legacy `false` is overridden by `REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true`. |
 | `DATABASE_URL` | Zeabur Postgres URL | Required for persisted official evidence. |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level` | Selects official rainfall and water-level adapters. |
+| `REALTIME_BACKBONE_FORCE_INGESTION_ON_START` | leave unset or `true` | Forces the realtime backbone on when DB is attached. |
+| `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Set `true` only as the explicit kill switch. |
+| `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional override that replaces old `WORKER_ENABLED_ADAPTER_KEYS` values during forced backbone startup. |
+| `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level` | Selects the official realtime backbone adapters. |
+| `SOURCE_CWA_ENABLED` | `true` or leave unset | Enables the CWA adapter selection; `false` disables it. |
 | `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |
+| `SOURCE_WRA_ENABLED` | `true` or leave unset | Enables the WRA adapter selection; `false` disables it. |
 | `SOURCE_WRA_API_ENABLED` | `true` | Enables the WRA live client. |
+| `SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED` | `true` | Enables the WRA IoW adapter selection. |
+| `SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED` | `true` | Enables WRA IoW realtime flood-depth observations. |
+| `SOURCE_NCDR_CAP_ENABLED` | `true` | Enables the NCDR CAP adapter selection. |
+| `SOURCE_NCDR_CAP_API_ENABLED` | `true` | Enables NCDR CAP alert ingestion. |
+| `SOURCE_FLOOD_SENSOR_ENABLED` | `true` | Enables Civil IoT flood-sensor adapter selection. |
+| `SOURCE_FLOOD_SENSOR_API_ENABLED` | `true` | Enables Civil IoT flood-sensor ingestion. |
+| `SOURCE_FLOOD_SENSOR_USE_LIVE` | `true` | Uses the Civil IoT live STA endpoint instead of fixture gating. |
+| `SOURCE_CIVIL_IOT_SEWER_ENABLED` | `true` | Enables Civil IoT sewer water-level adapter selection. |
+| `SOURCE_CIVIL_IOT_SEWER_API_ENABLED` | `true` | Enables Civil IoT sewer water-level ingestion. |
+| `SOURCE_CIVIL_IOT_PUMP_ENABLED` | `true` | Enables Civil IoT pump external water-level adapter selection. |
+| `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `true` | Enables Civil IoT pump external water-level ingestion. |
+| `SOURCE_CIVIL_IOT_GATE_ENABLED` | `true` | Enables Civil IoT gate water-level adapter selection. |
+| `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` | Enables Civil IoT gate water-level ingestion. |
 | `WRA_STATION_API_URL` | leave blank | Optional override for the WRA station metadata endpoint used to add coordinates to realtime water-level rows. |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` | Five-minute beta cadence. |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` | Postgres scheduler lease TTL. |

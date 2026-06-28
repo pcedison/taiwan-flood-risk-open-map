@@ -83,5 +83,6 @@ candidates for the official realtime read model rollout:
 - `official.civil_iot.pond_water_level`
 - `official.civil_iot.sewer_water_level`
 - `official.civil_iot.pump_water_level`
+- `official.civil_iot.gate_water_level`
 - `official.ncdr.cap`
 - `local.tainan.flood_sensor`

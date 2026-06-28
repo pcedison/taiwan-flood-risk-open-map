@@ -12,7 +12,10 @@ def test_public_beta_local_gate_includes_roadmap_checks() -> None:
 
     required_snippets = [
         "[switch]$SkipDockerConfig",
+        "[switch]$SkipRealtimeSourceGate",
         '"Docker compose config"',
+        '"Realtime source gate"',
+        '"scripts\\realtime-source-gate.py"',
         '"docker"',
         '"compose", "config", "--quiet"',
         '"API mypy"',

@@ -601,6 +601,17 @@ paths:
                         latest_ingested_at: "2026-04-28T12:56:00Z"
                         lag_seconds: 600
                         row_count: 7
+                        covered_counties:
+                          - 新北市
+                          - 臺北市
+                        covered_county_count: 2
+                        fresh_county_count: 2
+                        stale_county_count: 0
+                        station_count_by_county:
+                          新北市: 4
+                          臺北市: 3
+                        missing_counties:
+                          - 連江縣
                         upstream_status: succeeded
                         enabled_gates:
                           - data_sources.is_enabled
@@ -618,6 +629,178 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/local-source-coverage:
+    get:
+      tags:
+        - Admin
+      operationId: listAdminLocalSourceCoverage
+      summary: List 22-county local realtime water-source coverage.
+      description: >
+        Returns the conservative machine-readable catalog for Taiwan local
+        government realtime water-source coverage. Counties without a public,
+        documented live read API stay visible as candidate, metadata-only,
+        needs-application, or not-found; central backbone source keys are
+        listed separately and do not imply local direct completion.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
+      responses:
+        "200":
+          description: Local direct source status and central-backbone fallback catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLocalSourceCoverageResponse"
+              examples:
+                coverage:
+                  value:
+                    generated_at: "2026-06-28T00:00:00Z"
+                    summary:
+                      total_counties: 22
+                      local_direct_complete_count: 20
+                      local_direct_incomplete_count: 2
+                      local_direct_incomplete_counties:
+                        - 金門縣
+                        - 連江縣
+                      central_backbone_minimum_complete_count: 21
+                      central_backbone_minimum_incomplete_count: 1
+                      counties_missing_hydrologic_backbone:
+                        - 連江縣
+                      central_backbone_required_families:
+                        - CWA
+                        - WRA
+                        - NCDR
+                        - Civil IoT
+                      central_backbone_missing_families: []
+                      central_backbone_family_complete: true
+                      central_backbone_required_adapter_keys:
+                        - official.cwa.rainfall
+                        - official.wra.water_level
+                        - official.ncdr.cap
+                        - official.wra_iow.flood_depth
+                        - official.civil_iot.flood_sensor
+                        - official.civil_iot.sewer_water_level
+                      central_backbone_missing_adapter_keys: []
+                      request_official_authorization_count: 1
+                      verify_live_smoke_count: 0
+                      verify_public_api_contract_count: 0
+                      counties_requiring_official_authorization:
+                        - 金門縣
+                      counties_requiring_live_smoke: []
+                      counties_requiring_public_api_contract: []
+                      counties_requiring_metadata_release_monitoring:
+                        - 連江縣
+                      counties_requiring_official_discovery: []
+                    counties:
+                      - county: 臺南市
+                        local_direct_statuses:
+                          - ready_implemented
+                        local_direct_complete: true
+                        central_backbone_available: true
+                        production_adapter_keys:
+                          - local.tainan.flood_sensor
+                        production_source_urls:
+                          - https://soa.tainan.gov.tw/Api/Service/Get/21b31a27-3e61-48b8-8259-83c2001bec8c
+                        central_backbone_adapter_keys:
+                          - official.cwa.rainfall
+                          - official.wra.water_level
+                          - official.ncdr.cap
+                          - official.wra_iow.flood_depth
+                          - official.civil_iot.flood_sensor
+                        central_backbone_signal_types:
+                          - rainfall
+                          - river_water_level
+                          - cap_alert
+                          - flood_depth
+                        central_backbone_required_signal_types:
+                          - rainfall
+                          - cap_alert
+                          - hydrologic_observation
+                        central_backbone_minimum_complete: true
+                        central_backbone_missing_signal_types: []
+                        central_backbone_coverage_level: minimum_met
+                        candidate_source_names: []
+                        candidate_source_urls: []
+                        metadata_source_names: []
+                        metadata_source_urls: []
+                        application_urls: []
+                        requires_application: false
+                        application_note: null
+                        next_action_code: operate_adapter
+                        upgrade_priority: 5
+                        blocking_reason: null
+                        notes: []
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/local-source-action-plan:
+    get:
+      tags:
+        - Admin
+      operationId: listAdminLocalSourceActionPlan
+      summary: List actionable follow-up queues for local realtime water sources.
+      description: >
+        Returns machine-readable follow-up queues derived from the 22-county
+        local source coverage catalog. The response separates local-government
+        authorization requests, metadata-release monitoring, public API contract
+        reviews, and live-smoke reviews, while preserving central-backbone
+        completion counts.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
+      responses:
+        "200":
+          description: Local realtime water-source follow-up action plan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLocalSourceActionPlanResponse"
+              examples:
+                action_plan:
+                  value:
+                    generated_at: "2026-06-28T00:00:00Z"
+                    plan:
+                      total_counties: 22
+                      local_direct_complete_count: 20
+                      local_direct_remaining_count: 2
+                      central_backbone_minimum_complete_count: 21
+                      central_backbone_remaining_count: 1
+                      authorization_requests:
+                        - county: 金門縣
+                          reason: "KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。"
+                          application_urls:
+                            - https://kwis.kinmen.gov.tw/
+                          application_note: "KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。"
+                          required_read_api_fields:
+                            - observed_at
+                            - station_or_device_id
+                            - measurement_value
+                          request_focus: "請官方提供可查詢最新觀測值的 read API contract，而不是設備上傳 API。"
+                      metadata_release_monitors:
+                        - county: 連江縣
+                          reason: "目前只有靜態清冊、站點、抽水站、水門或易淹區 metadata，尚無即時觀測欄位。"
+                          metadata_source_names:
+                            - 連江縣大潮、豪雨易淹水地區 ODS
+                          metadata_source_urls:
+                            - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
+                          central_backbone_missing_signal_types:
+                            - hydrologic_observation
+                          request_focus: "請官方釋出即時水文觀測 read API。"
+                      public_api_contract_reviews: []
+                      live_smoke_reviews: []
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1919,6 +2102,456 @@ components:
             $ref: "#/components/schemas/DataSource"
       additionalProperties: false
 
+    AdminLocalSourceCoverageResponse:
+      type: object
+      required:
+        - generated_at
+        - summary
+        - counties
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+          description: Catalog generation/review timestamp.
+        summary:
+          $ref: "#/components/schemas/LocalSourceCoverageSummary"
+        counties:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceCoverage"
+      additionalProperties: false
+
+    AdminLocalSourceActionPlanResponse:
+      type: object
+      required:
+        - generated_at
+        - plan
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+          description: Catalog generation/review timestamp used for the source action plan.
+        plan:
+          $ref: "#/components/schemas/LocalSourceActionPlan"
+      additionalProperties: false
+
+    LocalSourceActionPlan:
+      type: object
+      required:
+        - total_counties
+        - local_direct_complete_count
+        - local_direct_remaining_count
+        - central_backbone_minimum_complete_count
+        - central_backbone_remaining_count
+        - authorization_requests
+        - metadata_release_monitors
+        - public_api_contract_reviews
+        - live_smoke_reviews
+      properties:
+        total_counties:
+          type: integer
+          minimum: 0
+        local_direct_complete_count:
+          type: integer
+          minimum: 0
+        local_direct_remaining_count:
+          type: integer
+          minimum: 0
+        central_backbone_minimum_complete_count:
+          type: integer
+          minimum: 0
+        central_backbone_remaining_count:
+          type: integer
+          minimum: 0
+        authorization_requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceAuthorizationRequest"
+        metadata_release_monitors:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceMetadataReleaseMonitor"
+        public_api_contract_reviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourcePublicApiContractReview"
+        live_smoke_reviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceLiveSmokeReview"
+      additionalProperties: false
+
+    LocalSourceAuthorizationRequest:
+      type: object
+      required:
+        - county
+        - reason
+        - application_urls
+        - application_note
+        - required_read_api_fields
+        - request_focus
+      properties:
+        county:
+          type: string
+        reason:
+          type:
+            - string
+            - "null"
+        application_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        application_note:
+          type:
+            - string
+            - "null"
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
+        request_focus:
+          type: string
+      additionalProperties: false
+
+    LocalSourceMetadataReleaseMonitor:
+      type: object
+      required:
+        - county
+        - reason
+        - metadata_source_names
+        - metadata_source_urls
+        - central_backbone_missing_signal_types
+        - request_focus
+      properties:
+        county:
+          type: string
+        reason:
+          type:
+            - string
+            - "null"
+        metadata_source_names:
+          type: array
+          items:
+            type: string
+        metadata_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        central_backbone_missing_signal_types:
+          type: array
+          items:
+            type: string
+        request_focus:
+          type: string
+      additionalProperties: false
+
+    LocalSourcePublicApiContractReview:
+      type: object
+      required:
+        - county
+        - reason
+        - candidate_source_names
+        - candidate_source_urls
+        - required_read_api_fields
+      properties:
+        county:
+          type: string
+        reason:
+          type:
+            - string
+            - "null"
+        candidate_source_names:
+          type: array
+          items:
+            type: string
+        candidate_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    LocalSourceLiveSmokeReview:
+      type: object
+      required:
+        - county
+        - reason
+        - candidate_source_names
+        - candidate_source_urls
+        - production_adapter_keys
+      properties:
+        county:
+          type: string
+        reason:
+          type:
+            - string
+            - "null"
+        candidate_source_names:
+          type: array
+          items:
+            type: string
+        candidate_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        production_adapter_keys:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    LocalSourceCoverageSummary:
+      type: object
+      required:
+        - total_counties
+        - local_direct_complete_count
+        - local_direct_incomplete_count
+        - local_direct_incomplete_counties
+        - central_backbone_minimum_complete_count
+        - central_backbone_minimum_incomplete_count
+        - counties_missing_hydrologic_backbone
+        - central_backbone_required_families
+        - central_backbone_missing_families
+        - central_backbone_family_complete
+        - central_backbone_required_adapter_keys
+        - central_backbone_missing_adapter_keys
+        - request_official_authorization_count
+        - verify_live_smoke_count
+        - verify_public_api_contract_count
+        - counties_requiring_official_authorization
+        - counties_requiring_live_smoke
+        - counties_requiring_public_api_contract
+        - counties_requiring_metadata_release_monitoring
+        - counties_requiring_official_discovery
+      properties:
+        total_counties:
+          type: integer
+          minimum: 0
+        local_direct_complete_count:
+          type: integer
+          minimum: 0
+        local_direct_incomplete_count:
+          type: integer
+          minimum: 0
+        local_direct_incomplete_counties:
+          type: array
+          items:
+            type: string
+        central_backbone_minimum_complete_count:
+          type: integer
+          minimum: 0
+        central_backbone_minimum_incomplete_count:
+          type: integer
+          minimum: 0
+        counties_missing_hydrologic_backbone:
+          type: array
+          items:
+            type: string
+        central_backbone_required_families:
+          type: array
+          items:
+            type: string
+        central_backbone_missing_families:
+          type: array
+          items:
+            type: string
+        central_backbone_family_complete:
+          type: boolean
+        central_backbone_required_adapter_keys:
+          type: array
+          items:
+            type: string
+        central_backbone_missing_adapter_keys:
+          type: array
+          items:
+            type: string
+        request_official_authorization_count:
+          type: integer
+          minimum: 0
+        verify_live_smoke_count:
+          type: integer
+          minimum: 0
+        verify_public_api_contract_count:
+          type: integer
+          minimum: 0
+        counties_requiring_official_authorization:
+          type: array
+          items:
+            type: string
+        counties_requiring_live_smoke:
+          type: array
+          items:
+            type: string
+        counties_requiring_public_api_contract:
+          type: array
+          items:
+            type: string
+        counties_requiring_metadata_release_monitoring:
+          type: array
+          items:
+            type: string
+        counties_requiring_official_discovery:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    LocalSourceCoverage:
+      type: object
+      required:
+        - county
+        - local_direct_statuses
+        - local_direct_complete
+        - central_backbone_available
+        - production_adapter_keys
+        - production_source_urls
+        - central_backbone_adapter_keys
+        - central_backbone_signal_types
+        - central_backbone_required_signal_types
+        - central_backbone_minimum_complete
+        - central_backbone_missing_signal_types
+        - central_backbone_coverage_level
+        - candidate_source_names
+        - candidate_source_urls
+        - metadata_source_names
+        - metadata_source_urls
+        - application_urls
+        - requires_application
+        - application_note
+        - next_action_code
+        - upgrade_priority
+        - blocking_reason
+        - notes
+      properties:
+        county:
+          type: string
+        local_direct_statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalDirectSourceStatus"
+          description: Conservative local-government direct source states for this county/city.
+        local_direct_complete:
+          type: boolean
+          description: True only when at least one official local-government direct live adapter is implemented.
+        central_backbone_available:
+          type: boolean
+          description: True when central official backbone adapters remain available for baseline realtime context.
+        production_adapter_keys:
+          type: array
+          items:
+            type: string
+          description: Implemented local adapter keys that can ingest official public live data.
+        production_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Official source/API URLs backing implemented local adapters.
+        central_backbone_adapter_keys:
+          type: array
+          items:
+            type: string
+          description: Central official adapters available as fallback/context; this does not mark local direct completion.
+        central_backbone_signal_types:
+          type: array
+          items:
+            type: string
+          description: Deduplicated realtime signal categories supplied by central official backbone adapters for this county/city.
+        central_backbone_required_signal_types:
+          type: array
+          items:
+            type: string
+          description: Minimum signal categories expected for baseline county/city realtime coverage.
+        central_backbone_minimum_complete:
+          type: boolean
+          description: True when rainfall, CAP alert context, and at least one hydrologic observation signal are available.
+        central_backbone_missing_signal_types:
+          type: array
+          items:
+            type: string
+          description: Missing minimum baseline categories. hydrologic_observation is satisfied by any water-level, flood-depth, sewer, pump, gate, or pond signal.
+        central_backbone_coverage_level:
+          type: string
+          description: minimum_met, needs_hydrologic_backbone, or incomplete.
+        candidate_source_names:
+          type: array
+          items:
+            type: string
+          description: Official candidate systems that still lack public live API documentation.
+        candidate_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Official candidate pages, API contracts, or system URLs that need contract/live-smoke verification before adapter work.
+        metadata_source_names:
+          type: array
+          items:
+            type: string
+          description: Static station, pump, gate, or flood-prone-area datasets that cannot be ingested as realtime observations.
+        metadata_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Official static metadata dataset URLs useful for station joins or release monitoring.
+        application_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Official application, system, or documentation URLs needed for authorization follow-up.
+        requires_application:
+          type: boolean
+        application_note:
+          type:
+            - string
+            - "null"
+        next_action_code:
+          $ref: "#/components/schemas/LocalSourceNextAction"
+        upgrade_priority:
+          type: integer
+          minimum: 1
+          maximum: 5
+          description: Lower values should be addressed first when improving local-direct coverage.
+        blocking_reason:
+          type:
+            - string
+            - "null"
+          description: Why this county/city is not yet local-direct complete, or null for implemented adapters.
+        notes:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    LocalDirectSourceStatus:
+      type: string
+      enum:
+        - ready_implemented
+        - candidate
+        - needs_review
+        - metadata_only
+        - not_found
+        - needs_application
+
+    LocalSourceNextAction:
+      type: string
+      enum:
+        - operate_adapter
+        - verify_public_api_contract
+        - verify_live_smoke
+        - request_official_authorization
+        - monitor_open_data_release
+        - continue_official_discovery
+
     DataSource:
       type: object
       required:
@@ -1932,6 +2565,12 @@ components:
         - legal_basis
         - is_enabled
         - row_count
+        - covered_counties
+        - covered_county_count
+        - fresh_county_count
+        - stale_county_count
+        - station_count_by_county
+        - missing_counties
         - upstream_status
         - enabled_gates
         - freshness_state
@@ -1998,6 +2637,33 @@ components:
         row_count:
           type: integer
           minimum: 0
+        covered_counties:
+          type: array
+          items:
+            type: string
+          description: Taiwan counties/cities with at least one latest official observation for this source.
+        covered_county_count:
+          type: integer
+          minimum: 0
+        fresh_county_count:
+          type: integer
+          minimum: 0
+          description: Covered counties/cities whose latest observation is within the realtime freshness window.
+        stale_county_count:
+          type: integer
+          minimum: 0
+          description: Covered counties/cities whose latest observation is outside the realtime freshness window.
+        station_count_by_county:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+          description: Latest station count grouped by Taiwan county/city.
+        missing_counties:
+          type: array
+          items:
+            type: string
+          description: Taiwan counties/cities not currently represented by this source's latest observations.
         upstream_status:
           type: string
           description: Latest upstream adapter/job state, or disabled when the source gate is closed.

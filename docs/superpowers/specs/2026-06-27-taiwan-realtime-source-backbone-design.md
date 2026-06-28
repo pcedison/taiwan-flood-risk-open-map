@@ -65,7 +65,8 @@ source freshness 不可信。
 
 - Civil IoT 淹水感測器，dataset `water_12`
 - 官方頁面：`https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=water_12`
-- SensorThings base：`https://sta.ci.taiwan.gov.tw/STA_WaterResource_v2/v1.0/`
+- SensorThings base：`https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/`
+  （雨水下水道另用 `https://sta.colife.org.tw/STA_RainSewer/v1.0/`）
 - 主要 event type：超過門檻的道路淹水深度作為 `flood_report`
 - 輔助 metrics：`flood_depth_cm`、signal quality、station authority、
   station code、station name、geometry、latest observation time
@@ -160,6 +161,24 @@ Task 7 的 POC adapter 使用 `local.tainan.flood_sensor` 作為 adapter key，
 
 台南 WMap 與其內部端點可用來理解 derived overlay，但它們沒有作為公開 API
 被獨立文件化，因此不是 canonical source。
+
+2026-06-28 實作狀態：
+
+- 地方直連 production adapter 已由台南拓展為 12 個縣市：臺北市、基隆市、
+  桃園市、新竹市、臺中市、南投縣、雲林縣、嘉義市、嘉義縣、臺南市、
+  高雄市、宜蘭縣。
+- 新增來源包含新竹市雨水下水道水位與 FHY 淹水感測、南投 KML 下水道水位、
+  嘉義縣公開 RFD 淹水感測、高雄 SFC 下水道水位與淹水感測、宜蘭 ArcGIS
+  REST 淹水感測與水位計、基隆智慧防汛網水位/淹水/雨量 JSON，以及雲林
+  iflood 水位站 JSON。
+- `CWA_API_AUTHORIZATION` 只影響 CWA 中央雨量 adapter；本輪地方直連缺口
+  不是 CWA token，而是各縣市是否有可追溯、免登入或已授權、含觀測時間/
+  座標/水情數值的地方 API。
+- 其餘縣市不以中央主幹冒充地方直連完成；`GET /admin/v1/local-source-coverage`
+  會明確輸出 `ready_implemented`、`candidate`、`needs_review`、
+  `metadata_only`、`not_found`、`needs_application`。
+- 最新逐縣市來源矩陣與 smoke 結果見
+  `docs/data-sources/local/taiwan-local-realtime-water-source-matrix.md`。
 
 ## 架構
 

@@ -26,10 +26,11 @@ from app.adapters.civil_iot.sta_client import (
     CivilIotStaError,
     CivilIotStaFetchError,
     DEFAULT_STA_TIMEOUT_SECONDS,
+    STA_RAIN_SEWER_BASE,
     STA_WATER_RESOURCE_BASE,
     StaFetchJson,
+    fetch_paginated_sta_things_records,
     fetch_sta_json,
-    parse_sta_things_payload,
 )
 from app.adapters.contracts import (
     AdapterMetadata,
@@ -53,7 +54,7 @@ class StaWaterLevelSource:
     sta_url: str
     source_url: str
     attribution: str
-    datastream_name_contains: str | None = None
+    datastream_name_contains: str | tuple[str, ...] | None = None
 
 
 def _build_sta_url(*, filter_expr: str, top: int = 2000) -> str:
@@ -62,6 +63,15 @@ def _build_sta_url(*, filter_expr: str, top: int = 2000) -> str:
         "?$expand=Locations,Datastreams($expand=Observations("
         "$orderby=phenomenonTime desc;$top=1))"
         f"&$filter={filter_expr}"
+        f"&$top={top}"
+    )
+
+
+def _build_rain_sewer_url(*, top: int = 2000) -> str:
+    return (
+        f"{STA_RAIN_SEWER_BASE}Things"
+        "?$expand=Locations,Datastreams($expand=Observations("
+        "$orderby=phenomenonTime desc;$top=1))"
         f"&$top={top}"
     )
 
@@ -93,8 +103,8 @@ SEWER_WATER_LEVEL = StaWaterLevelSource(
         family=SourceFamily.OFFICIAL,
         enabled_by_default=False,
         display_name="Storm sewer water level adapter (Civil IoT)",
-        resource_url=_build_sta_url(filter_expr="substringof('下水道',Datastreams/name)"),
-        data_gov_url="https://ci.taiwan.gov.tw/dsp/dataset_weather.aspx",
+        resource_url=_build_rain_sewer_url(),
+        data_gov_url="https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=nlma1",
         update_frequency="Civil IoT SensorThings observations refresh roughly every 10 minutes",
         license="Government Open Data License, version 1.0",
         limitations=(
@@ -103,8 +113,8 @@ SEWER_WATER_LEVEL = StaWaterLevelSource(
             "Raw IoT telemetry can be distorted by sensor or transmission faults.",
         ),
     ),
-    sta_url=_build_sta_url(filter_expr="substringof('下水道',Datastreams/name)"),
-    source_url="https://ci.taiwan.gov.tw/dsp/dataset_weather.aspx",
+    sta_url=_build_rain_sewer_url(),
+    source_url="https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=nlma1",
     attribution="National Land Management Agency / Civil IoT Taiwan",
 )
 
@@ -113,23 +123,50 @@ PUMP_WATER_LEVEL = StaWaterLevelSource(
         key="official.civil_iot.pump_water_level",
         family=SourceFamily.OFFICIAL,
         enabled_by_default=False,
-        display_name="Pump station external water level adapter (Civil IoT)",
-        resource_url=_build_sta_url(filter_expr="substringof('外水位',Datastreams/name)"),
-        data_gov_url="https://ci.taiwan.gov.tw/dsp/dataset_pump_taipei.aspx",
+        display_name="Pump station water level adapter (Civil IoT)",
+        resource_url=_build_sta_url(
+            filter_expr="substringof('抽水',properties/stationName) and substringof('水位',Datastreams/name)"
+        ),
+        data_gov_url="https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=water_14",
         update_frequency="Civil IoT SensorThings observations refresh roughly every 10 minutes",
         license="Government Open Data License, version 1.0",
         limitations=(
-            "Pump stations expose internal/external water levels; this adapter "
-            "reads the external (外水位) level as the flood-relevant signal.",
-            "Operational data; confirm the external-level datastream name against "
-            "the live dataset before enabling.",
+            "Pump stations expose different water-level datastream names by county; "
+            "this adapter prefers external water level (外水位) and falls back to "
+            "generic water level (水位) when no external stream exists.",
+            "Operational data can mix drainage, retention-basin, and station-channel "
+            "levels; treat it as hydrologic context rather than a direct flood warning.",
         ),
     ),
-    sta_url=_build_sta_url(filter_expr="substringof('外水位',Datastreams/name)"),
-    source_url="https://ci.taiwan.gov.tw/dsp/dataset_pump_taipei.aspx",
-    attribution="Taipei City Government / Civil IoT Taiwan",
-    # Pump things carry several datastreams; read the external water level.
-    datastream_name_contains="外水位",
+    sta_url=_build_sta_url(
+        filter_expr="substringof('抽水',properties/stationName) and substringof('水位',Datastreams/name)"
+    ),
+    source_url="https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=water_14",
+    attribution="Water Resources Agency / local governments / Civil IoT Taiwan",
+    datastream_name_contains=("外水位", "水位"),
+)
+
+GATE_WATER_LEVEL = StaWaterLevelSource(
+    metadata=AdapterMetadata(
+        key="official.civil_iot.gate_water_level",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="Water gate external water level adapter (Civil IoT)",
+        resource_url=_build_sta_url(filter_expr="substringof('閘門外水位',Datastreams/name)"),
+        data_gov_url="https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=water_15",
+        update_frequency="Civil IoT SensorThings observations refresh roughly every 10 minutes",
+        license="Government Open Data License, version 1.0",
+        limitations=(
+            "Water-gate external level is an infrastructure context signal and is not "
+            "itself an official flood warning.",
+            "Some gate stations expose many image/opening datastreams; this adapter "
+            "selects only the external water-level stream named 閘門外水位.",
+        ),
+    ),
+    sta_url=_build_sta_url(filter_expr="substringof('閘門外水位',Datastreams/name)"),
+    source_url="https://ci.taiwan.gov.tw/dsp/Views/dataset/detail.aspx?id=water_15",
+    attribution="Water Resources Agency / local governments / Civil IoT Taiwan",
+    datastream_name_contains="閘門外水位",
 )
 
 
@@ -156,19 +193,19 @@ class StaWaterLevelApiAdapter:
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         try:
-            payload = self._fetch_json(self._sta_url, self._timeout_seconds)
+            records = fetch_paginated_sta_things_records(
+                self._sta_url,
+                timeout_seconds=self._timeout_seconds,
+                fetch_json=self._fetch_json,
+                source_url=self._source.source_url,
+                datastream_name_contains=self._source.datastream_name_contains,
+            )
         except CivilIotStaError:
             raise
         except Exception as exc:  # pragma: no cover - defensive
             raise CivilIotStaFetchError(
                 f"{self.metadata.display_name} fetcher failed: {exc}"
             ) from exc
-
-        records = parse_sta_things_payload(
-            payload,
-            source_url=self._source.source_url,
-            datastream_name_contains=self._source.datastream_name_contains,
-        )
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
             RawSourceItem(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import os
 import secrets
-from typing import Annotated
+from typing import Annotated, Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +14,8 @@ from psycopg.rows import dict_row
 from app.api.errors import error_payload
 from app.api.schemas import (
     AdminJobsResponse,
+    AdminLocalSourceActionPlanResponse,
+    AdminLocalSourceCoverageResponse,
     AdminSourcesResponse,
     AdminUserReportPrivacyRedaction,
     AdminUserReport,
@@ -24,12 +26,21 @@ from app.api.schemas import (
     IngestionJob,
     JobStatus,
     LatLng,
+    LocalSourceActionPlan,
+    LocalSourceCoverage,
+    LocalSourceCoverageSummary,
     UserReportModerationRequest,
     UserReportModerationResponse,
     UserReportPrivacyRedactionRequest,
     UserReportPrivacyRedactionResponse,
 )
 from app.core.config import get_settings
+from app.domain.realtime.local_source_coverage import (
+    LocalSourceCoverageRecord,
+    list_local_source_coverage,
+    local_source_coverage_generated_at,
+)
+from app.domain.realtime.local_source_action_plan import build_local_source_action_plan
 from app.domain.reports import (
     UserReportModerationRecord,
     UserReportPrivacyRedactionRecord,
@@ -45,6 +56,27 @@ admin_bearer = HTTPBearer(auto_error=False)
 REALTIME_FRESH_SECONDS = 10 * 60
 REALTIME_DEGRADED_SECONDS = 30 * 60
 REALTIME_STALE_SECONDS = 60 * 60
+CENTRAL_BACKBONE_REQUIRED_FAMILIES = ("CWA", "WRA", "NCDR", "Civil IoT")
+CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS = (
+    "official.cwa.rainfall",
+    "official.wra.water_level",
+    "official.ncdr.cap",
+    "official.wra_iow.flood_depth",
+    "official.civil_iot.flood_sensor",
+    "official.civil_iot.sewer_water_level",
+    "official.civil_iot.pump_water_level",
+    "official.civil_iot.gate_water_level",
+)
+CENTRAL_BACKBONE_FAMILY_BY_ADAPTER_KEY = {
+    "official.cwa.rainfall": "CWA",
+    "official.wra.water_level": "WRA",
+    "official.wra_iow.flood_depth": "WRA",
+    "official.ncdr.cap": "NCDR",
+    "official.civil_iot.flood_sensor": "Civil IoT",
+    "official.civil_iot.sewer_water_level": "Civil IoT",
+    "official.civil_iot.pump_water_level": "Civil IoT",
+    "official.civil_iot.gate_water_level": "Civil IoT",
+}
 REALTIME_ADAPTER_KEYS = frozenset(
     {
         "official.cwa.rainfall",
@@ -54,6 +86,29 @@ REALTIME_ADAPTER_KEYS = frozenset(
         "official.civil_iot.pond_water_level",
         "official.civil_iot.sewer_water_level",
         "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "official.wra_iow.flood_depth",
+        "local.taipei.sewer_water_level",
+        "local.taipei.river_water_level",
+        "local.taipei.pump_station",
+        "local.taoyuan.flood_sensor",
+        "local.taoyuan.water_level",
+        "local.taoyuan.rainfall",
+        "local.chiayi_city.water_level",
+        "local.chiayi_city.rainfall",
+        "local.taichung.water_level",
+        "local.hsinchu_city.sewer_water_level",
+        "local.hsinchu_city.flood_sensor",
+        "local.nantou.sewer_water_level",
+        "local.chiayi_county.flood_sensor",
+        "local.kaohsiung.sewer_water_level",
+        "local.kaohsiung.flood_sensor",
+        "local.keelung.water_level",
+        "local.keelung.flood_sensor",
+        "local.keelung.rainfall",
+        "local.yunlin.water_level",
+        "local.yilan.flood_sensor",
+        "local.yilan.water_level",
         "local.tainan.flood_sensor",
     }
 )
@@ -87,12 +142,128 @@ SOURCE_GATE_NAMES = {
         "SOURCE_CIVIL_IOT_PUMP_ENABLED",
         "SOURCE_CIVIL_IOT_PUMP_API_ENABLED",
     ),
+    "official.civil_iot.gate_water_level": (
+        "SOURCE_CIVIL_IOT_GATE_ENABLED",
+        "SOURCE_CIVIL_IOT_GATE_API_ENABLED",
+    ),
+    "official.wra_iow.flood_depth": (
+        "SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED",
+        "SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED",
+    ),
+    "local.taipei.sewer_water_level": (
+        "SOURCE_TAIPEI_SEWER_WATER_LEVEL_ENABLED",
+        "SOURCE_TAIPEI_SEWER_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.taipei.river_water_level": (
+        "SOURCE_TAIPEI_RIVER_WATER_LEVEL_ENABLED",
+        "SOURCE_TAIPEI_RIVER_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.taipei.pump_station": (
+        "SOURCE_TAIPEI_PUMP_STATION_ENABLED",
+        "SOURCE_TAIPEI_PUMP_STATION_API_ENABLED",
+    ),
+    "local.taoyuan.flood_sensor": (
+        "SOURCE_TAOYUAN_FLOOD_SENSOR_ENABLED",
+        "SOURCE_TAOYUAN_FLOOD_SENSOR_API_ENABLED",
+    ),
+    "local.taoyuan.water_level": (
+        "SOURCE_TAOYUAN_WATER_LEVEL_ENABLED",
+        "SOURCE_TAOYUAN_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.taoyuan.rainfall": (
+        "SOURCE_TAOYUAN_RAINFALL_ENABLED",
+        "SOURCE_TAOYUAN_RAINFALL_API_ENABLED",
+    ),
+    "local.chiayi_city.water_level": (
+        "SOURCE_CHIAYI_CITY_WATER_LEVEL_ENABLED",
+        "SOURCE_CHIAYI_CITY_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.chiayi_city.rainfall": (
+        "SOURCE_CHIAYI_CITY_RAINFALL_ENABLED",
+        "SOURCE_CHIAYI_CITY_RAINFALL_API_ENABLED",
+    ),
+    "local.taichung.water_level": (
+        "SOURCE_TAICHUNG_WATER_LEVEL_ENABLED",
+        "SOURCE_TAICHUNG_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.hsinchu_city.sewer_water_level": (
+        "SOURCE_HSINCHU_CITY_SEWER_WATER_LEVEL_ENABLED",
+        "SOURCE_HSINCHU_CITY_SEWER_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.hsinchu_city.flood_sensor": (
+        "SOURCE_HSINCHU_CITY_FLOOD_SENSOR_ENABLED",
+        "SOURCE_HSINCHU_CITY_FLOOD_SENSOR_API_ENABLED",
+    ),
+    "local.nantou.sewer_water_level": (
+        "SOURCE_NANTOU_SEWER_WATER_LEVEL_ENABLED",
+        "SOURCE_NANTOU_SEWER_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.chiayi_county.flood_sensor": (
+        "SOURCE_CHIAYI_COUNTY_FLOOD_SENSOR_ENABLED",
+        "SOURCE_CHIAYI_COUNTY_FLOOD_SENSOR_API_ENABLED",
+    ),
+    "local.kaohsiung.sewer_water_level": (
+        "SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_ENABLED",
+        "SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.kaohsiung.flood_sensor": (
+        "SOURCE_KAOHSIUNG_FLOOD_SENSOR_ENABLED",
+        "SOURCE_KAOHSIUNG_FLOOD_SENSOR_API_ENABLED",
+    ),
+    "local.keelung.water_level": (
+        "SOURCE_KEELUNG_WATER_LEVEL_ENABLED",
+        "SOURCE_KEELUNG_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.keelung.flood_sensor": (
+        "SOURCE_KEELUNG_FLOOD_SENSOR_ENABLED",
+        "SOURCE_KEELUNG_FLOOD_SENSOR_API_ENABLED",
+    ),
+    "local.keelung.rainfall": (
+        "SOURCE_KEELUNG_RAINFALL_ENABLED",
+        "SOURCE_KEELUNG_RAINFALL_API_ENABLED",
+    ),
+    "local.yunlin.water_level": (
+        "SOURCE_YUNLIN_WATER_LEVEL_ENABLED",
+        "SOURCE_YUNLIN_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.yilan.flood_sensor": (
+        "SOURCE_YILAN_FLOOD_SENSOR_ENABLED",
+        "SOURCE_YILAN_FLOOD_SENSOR_API_ENABLED",
+    ),
+    "local.yilan.water_level": (
+        "SOURCE_YILAN_WATER_LEVEL_ENABLED",
+        "SOURCE_YILAN_WATER_LEVEL_API_ENABLED",
+    ),
     "local.tainan.flood_sensor": (
         "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED",
         "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED",
     ),
 }
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+TAIWAN_COUNTIES = (
+    "臺北市",
+    "新北市",
+    "基隆市",
+    "桃園市",
+    "新竹市",
+    "新竹縣",
+    "苗栗縣",
+    "臺中市",
+    "彰化縣",
+    "南投縣",
+    "雲林縣",
+    "嘉義市",
+    "嘉義縣",
+    "臺南市",
+    "高雄市",
+    "屏東縣",
+    "宜蘭縣",
+    "花蓮縣",
+    "臺東縣",
+    "澎湖縣",
+    "金門縣",
+    "連江縣",
+)
 
 
 @router.get("/jobs", response_model=AdminJobsResponse)
@@ -130,6 +301,162 @@ def list_admin_sources(
                 "Admin sources repository is temporarily unavailable."
             ) from exc
     return AdminSourcesResponse(sources=sources)
+
+
+@router.get("/local-source-coverage", response_model=AdminLocalSourceCoverageResponse)
+def list_admin_local_source_coverage(
+    _admin: Annotated[str, Depends(_require_admin)],
+) -> AdminLocalSourceCoverageResponse:
+    records = list_local_source_coverage()
+    return AdminLocalSourceCoverageResponse(
+        generated_at=local_source_coverage_generated_at(),
+        summary=_local_source_coverage_summary(records),
+        counties=[
+            LocalSourceCoverage(
+                county=record.county,
+                local_direct_statuses=list(record.local_direct_statuses),
+                local_direct_complete=record.local_direct_complete,
+                central_backbone_available=record.central_backbone_available,
+                production_adapter_keys=list(record.production_adapter_keys),
+                production_source_urls=list(record.production_source_urls),
+                central_backbone_adapter_keys=list(record.central_backbone_adapter_keys),
+                central_backbone_signal_types=list(record.central_backbone_signal_types),
+                central_backbone_required_signal_types=list(
+                    record.central_backbone_required_signal_types
+                ),
+                central_backbone_minimum_complete=record.central_backbone_minimum_complete,
+                central_backbone_missing_signal_types=list(
+                    record.central_backbone_missing_signal_types
+                ),
+                central_backbone_coverage_level=record.central_backbone_coverage_level,
+                candidate_source_names=list(record.candidate_source_names),
+                candidate_source_urls=list(record.candidate_source_urls),
+                metadata_source_names=list(record.metadata_source_names),
+                metadata_source_urls=list(record.metadata_source_urls),
+                application_urls=list(record.application_urls),
+                requires_application=record.requires_application,
+                application_note=record.application_note,
+                next_action_code=record.next_action_code,
+                upgrade_priority=record.upgrade_priority,
+                blocking_reason=record.blocking_reason,
+                notes=list(record.notes),
+            )
+            for record in records
+        ],
+    )
+
+
+@router.get("/local-source-action-plan", response_model=AdminLocalSourceActionPlanResponse)
+def list_admin_local_source_action_plan(
+    _admin: Annotated[str, Depends(_require_admin)],
+) -> AdminLocalSourceActionPlanResponse:
+    records = list_local_source_coverage()
+    return AdminLocalSourceActionPlanResponse(
+        generated_at=local_source_coverage_generated_at(),
+        plan=LocalSourceActionPlan.model_validate(build_local_source_action_plan(records)),
+    )
+
+
+def _local_source_coverage_summary(
+    records: tuple[LocalSourceCoverageRecord, ...],
+) -> LocalSourceCoverageSummary:
+    total_counties = len(records)
+    local_direct_complete_count = sum(1 for record in records if record.local_direct_complete)
+    central_backbone_minimum_complete_count = sum(
+        1 for record in records if record.central_backbone_minimum_complete
+    )
+    available_central_adapter_keys = {
+        adapter_key
+        for record in records
+        for adapter_key in record.central_backbone_adapter_keys
+    }
+    central_backbone_missing_adapter_keys = [
+        adapter_key
+        for adapter_key in CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS
+        if adapter_key not in available_central_adapter_keys
+    ]
+    available_central_families = {
+        family
+        for adapter_key in available_central_adapter_keys
+        if (family := CENTRAL_BACKBONE_FAMILY_BY_ADAPTER_KEY.get(adapter_key)) is not None
+    }
+    central_backbone_missing_families = [
+        family
+        for family in CENTRAL_BACKBONE_REQUIRED_FAMILIES
+        if family not in available_central_families
+    ]
+    return LocalSourceCoverageSummary(
+        total_counties=total_counties,
+        local_direct_complete_count=local_direct_complete_count,
+        local_direct_incomplete_count=total_counties - local_direct_complete_count,
+        local_direct_incomplete_counties=[
+            record.county for record in records if not record.local_direct_complete
+        ],
+        central_backbone_minimum_complete_count=central_backbone_minimum_complete_count,
+        central_backbone_minimum_incomplete_count=(
+            total_counties - central_backbone_minimum_complete_count
+        ),
+        counties_missing_hydrologic_backbone=[
+            record.county
+            for record in records
+            if "hydrologic_observation" in record.central_backbone_missing_signal_types
+        ],
+        request_official_authorization_count=_count_local_source_action(
+            records,
+            "request_official_authorization",
+        ),
+        verify_live_smoke_count=_count_local_source_action(records, "verify_live_smoke"),
+        verify_public_api_contract_count=_count_local_source_action(
+            records,
+            "verify_public_api_contract",
+        ),
+        counties_requiring_official_authorization=_counties_for_local_source_action(
+            records,
+            "request_official_authorization",
+        ),
+        counties_requiring_live_smoke=_counties_for_local_source_action(
+            records,
+            "verify_live_smoke",
+        ),
+        counties_requiring_public_api_contract=_counties_for_local_source_action(
+            records,
+            "verify_public_api_contract",
+        ),
+        counties_requiring_metadata_release_monitoring=_counties_with_local_source_status(
+            records,
+            "metadata_only",
+        ),
+        counties_requiring_official_discovery=_counties_with_local_source_status(
+            records,
+            "not_found",
+        ),
+        central_backbone_required_families=list(CENTRAL_BACKBONE_REQUIRED_FAMILIES),
+        central_backbone_missing_families=central_backbone_missing_families,
+        central_backbone_family_complete=not central_backbone_missing_families,
+        central_backbone_required_adapter_keys=list(CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS),
+        central_backbone_missing_adapter_keys=central_backbone_missing_adapter_keys,
+    )
+
+
+def _count_local_source_action(
+    records: tuple[LocalSourceCoverageRecord, ...],
+    action_code: str,
+) -> int:
+    return sum(1 for record in records if record.next_action_code == action_code)
+
+
+def _counties_for_local_source_action(
+    records: tuple[LocalSourceCoverageRecord, ...],
+    action_code: str,
+) -> list[str]:
+    return [record.county for record in records if record.next_action_code == action_code]
+
+
+def _counties_with_local_source_status(
+    records: tuple[LocalSourceCoverageRecord, ...],
+    status: str,
+) -> list[str]:
+    return [record.county for record in records if status in record.local_direct_statuses]
 
 
 @router.get("/reports/pending", response_model=AdminUserReportsResponse)
@@ -325,6 +652,11 @@ def _db_sources(*, health_status: HealthStatus | None) -> list[DataSource]:
                 ds.last_success_at
             ) AS latest_ingested_at,
             COALESCE(latest.row_count, 0)::integer AS row_count,
+            COALESCE(coverage.covered_counties, ARRAY[]::text[]) AS covered_counties,
+            COALESCE(coverage.covered_county_count, 0)::integer AS covered_county_count,
+            COALESCE(coverage.fresh_county_count, 0)::integer AS fresh_county_count,
+            COALESCE(coverage.stale_county_count, 0)::integer AS stale_county_count,
+            COALESCE(coverage.station_count_by_county, '{}'::jsonb) AS station_count_by_county,
             COALESCE(latest_run.status, latest_job.status, ds.health_status, 'unknown') AS upstream_status
         FROM data_sources ds
         LEFT JOIN (
@@ -336,6 +668,31 @@ def _db_sources(*, health_status: HealthStatus | None) -> list[DataSource]:
             FROM official_realtime_latest
             GROUP BY adapter_key
         ) latest ON latest.adapter_key = ds.adapter_key
+        LEFT JOIN (
+            SELECT
+                adapter_key,
+                array_agg(county ORDER BY county) AS covered_counties,
+                count(*)::integer AS covered_county_count,
+                count(*) FILTER (
+                    WHERE latest_county_observed_at >= now() - interval '1 hour'
+                )::integer AS fresh_county_count,
+                count(*) FILTER (
+                    WHERE latest_county_observed_at < now() - interval '1 hour'
+                )::integer AS stale_county_count,
+                jsonb_object_agg(county, station_count ORDER BY county) AS station_count_by_county
+            FROM (
+                SELECT
+                    latest.adapter_key,
+                    NULLIF(e.properties ->> 'county', '') AS county,
+                    count(DISTINCT latest.station_id)::integer AS station_count,
+                    max(latest.observed_at) AS latest_county_observed_at
+                FROM official_realtime_latest latest
+                LEFT JOIN evidence e ON e.id = latest.evidence_id
+                WHERE NULLIF(e.properties ->> 'county', '') IS NOT NULL
+                GROUP BY latest.adapter_key, NULLIF(e.properties ->> 'county', '')
+            ) county_coverage
+            GROUP BY adapter_key
+        ) coverage ON coverage.adapter_key = ds.adapter_key
         LEFT JOIN (
             SELECT DISTINCT ON (adapter_key)
                 adapter_key,
@@ -399,12 +756,23 @@ def _filter_sources(
 
 def _data_source_from_row(row: dict) -> DataSource:
     is_enabled = bool(row.get("is_enabled", True))
-    health_status = row.get("health_status") or "unknown"
+    health_status = cast(HealthStatus, row.get("health_status") or "unknown")
     if not is_enabled:
         health_status = "disabled"
     latest_observed_at = row.get("latest_observed_at") or row.get("source_timestamp_max")
     latest_ingested_at = row.get("latest_ingested_at") or row.get("last_success_at")
     upstream_status = _upstream_status(row, is_enabled=is_enabled)
+    covered_counties = _string_list(row.get("covered_counties"))
+    station_count_by_county = _int_mapping(row.get("station_count_by_county"))
+    covered_county_count = _optional_nonnegative_int(
+        row.get("covered_county_count"),
+        default=len(covered_counties),
+    )
+    fresh_county_count = _optional_nonnegative_int(row.get("fresh_county_count"), default=0)
+    stale_county_count = _optional_nonnegative_int(
+        row.get("stale_county_count"),
+        default=max(0, covered_county_count - fresh_county_count),
+    )
     return DataSource(
         **{
             "id": row["id"],
@@ -425,6 +793,12 @@ def _data_source_from_row(row: dict) -> DataSource:
             "latest_ingested_at": latest_ingested_at,
             "lag_seconds": _lag_seconds(latest_observed_at),
             "row_count": row.get("row_count") or 0,
+            "covered_counties": covered_counties,
+            "covered_county_count": covered_county_count,
+            "fresh_county_count": fresh_county_count,
+            "stale_county_count": stale_county_count,
+            "station_count_by_county": station_count_by_county,
+            "missing_counties": _missing_counties(covered_counties),
             "upstream_status": upstream_status,
             "enabled_gates": _enabled_gates(row["adapter_key"], is_enabled=is_enabled),
             "freshness_state": _freshness_state(
@@ -444,6 +818,43 @@ def _upstream_status(row: dict, *, is_enabled: bool) -> str:
     if not is_enabled:
         return "disabled"
     return str(row.get("upstream_status") or row.get("health_status") or "unknown")
+
+
+def _string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, (list, tuple, set)):
+        return []
+    return sorted({str(item) for item in value if str(item or "").strip()})
+
+
+def _int_mapping(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    parsed: dict[str, int] = {}
+    for key, raw_count in value.items():
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            continue
+        if count >= 0:
+            parsed[str(key)] = count
+    return dict(sorted(parsed.items()))
+
+
+def _optional_nonnegative_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, parsed)
+
+
+def _missing_counties(covered_counties: list[str]) -> list[str]:
+    covered = set(covered_counties)
+    return [county for county in TAIWAN_COUNTIES if county not in covered]
 
 
 def _lag_seconds(latest_observed_at: datetime | None) -> int | None:

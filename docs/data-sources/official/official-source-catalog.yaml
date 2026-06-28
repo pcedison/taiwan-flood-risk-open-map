@@ -37,6 +37,23 @@ sources:
     limitations:
       - "Realtime observations are raw and not fully quality checked."
       - "Transmission interruption or instrument failure can stop or distort station data."
+  - key: official.wra_iow.flood_depth
+    need: realtime_flood_depth
+    status: primary
+    data_gov_dataset_id: "142980"
+    data_gov_url: "https://data.gov.tw/dataset/142980"
+    title: "WRA IoW latest flood depth observations"
+    provider: "Water Resources Agency"
+    resource_url: "https://opendata.wra.gov.tw/api/v2/1b991bbb-ad85-4e7a-b931-06ce8749d3ed"
+    station_metadata_url: "https://opendata.wra.gov.tw/api/v2/21c50be1-7c4a-4fdf-a386-790625e984e7"
+    station_metadata_dataset_id: "142979"
+    resource_format: "JSON API"
+    update_frequency: "sensor telemetry; validate from each timestamp"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use as the canonical WRA IoW road flood-depth source, joined with dataset 142979 station metadata for coordinates and county/town attribution."
+    limitations:
+      - "Latest values are raw IoW telemetry and may be affected by sensor or transmission faults."
+      - "Rows without joined station coordinates are rejected from normalization."
   - key: official.flood_potential.geojson
     need: planning_flood_potential
     status: primary_reference

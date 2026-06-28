@@ -25,6 +25,7 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
 
     assert sources["official.cwa.rainfall"]["data_gov_dataset_id"] == "9177"
     assert sources["official.wra.water_level"]["data_gov_dataset_id"] == "25768"
+    assert sources["official.wra_iow.flood_depth"]["data_gov_dataset_id"] == "142980"
     assert sources["official.flood_potential.geojson"]["data_gov_dataset_id"] == "25766"
     assert sources["official.wra.flood_warning"]["status"] == "phase4_candidate"
     assert sources["geocoder.moi.village_boundary"]["data_gov_url"].startswith(
@@ -45,6 +46,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
     for adapter_key in (
         "official.cwa.rainfall",
         "official.wra.water_level",
+        "official.wra_iow.flood_depth",
         "official.flood_potential.geojson",
     ):
         metadata = ADAPTER_REGISTRY[adapter_key]

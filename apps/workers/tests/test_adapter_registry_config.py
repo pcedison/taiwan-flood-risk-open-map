@@ -342,6 +342,176 @@ def test_explicit_adapter_allowlist_does_not_bypass_sample_data_gate() -> None:
             "SOURCE_CIVIL_IOT_PUMP_ENABLED",
             {"SOURCE_CIVIL_IOT_PUMP_API_ENABLED": "true"},
         ),
+        (
+            "official.civil_iot.gate_water_level",
+            "SOURCE_CIVIL_IOT_GATE_ENABLED",
+            {"SOURCE_CIVIL_IOT_GATE_API_ENABLED": "true"},
+        ),
+        (
+            "official.wra_iow.flood_depth",
+            "SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED",
+            {"SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED": "true"},
+        ),
+        (
+            "local.new_taipei.water_level",
+            "SOURCE_NEW_TAIPEI_WATER_LEVEL_ENABLED",
+            {"SOURCE_NEW_TAIPEI_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.new_taipei.flood_sensor",
+            "SOURCE_NEW_TAIPEI_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_NEW_TAIPEI_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.new_taipei.rainfall",
+            "SOURCE_NEW_TAIPEI_RAINFALL_ENABLED",
+            {"SOURCE_NEW_TAIPEI_RAINFALL_API_ENABLED": "true"},
+        ),
+        (
+            "local.new_taipei.drainage_water_level",
+            "SOURCE_NEW_TAIPEI_DRAINAGE_WATER_LEVEL_ENABLED",
+            {"SOURCE_NEW_TAIPEI_DRAINAGE_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.taipei.sewer_water_level",
+            "SOURCE_TAIPEI_SEWER_WATER_LEVEL_ENABLED",
+            {"SOURCE_TAIPEI_SEWER_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.taipei.river_water_level",
+            "SOURCE_TAIPEI_RIVER_WATER_LEVEL_ENABLED",
+            {"SOURCE_TAIPEI_RIVER_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.taipei.pump_station",
+            "SOURCE_TAIPEI_PUMP_STATION_ENABLED",
+            {"SOURCE_TAIPEI_PUMP_STATION_API_ENABLED": "true"},
+        ),
+        (
+            "local.taoyuan.flood_sensor",
+            "SOURCE_TAOYUAN_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_TAOYUAN_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.taoyuan.water_level",
+            "SOURCE_TAOYUAN_WATER_LEVEL_ENABLED",
+            {"SOURCE_TAOYUAN_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.taoyuan.rainfall",
+            "SOURCE_TAOYUAN_RAINFALL_ENABLED",
+            {"SOURCE_TAOYUAN_RAINFALL_API_ENABLED": "true"},
+        ),
+        (
+            "local.chiayi_city.water_level",
+            "SOURCE_CHIAYI_CITY_WATER_LEVEL_ENABLED",
+            {"SOURCE_CHIAYI_CITY_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.chiayi_city.rainfall",
+            "SOURCE_CHIAYI_CITY_RAINFALL_ENABLED",
+            {"SOURCE_CHIAYI_CITY_RAINFALL_API_ENABLED": "true"},
+        ),
+        (
+            "local.taichung.water_level",
+            "SOURCE_TAICHUNG_WATER_LEVEL_ENABLED",
+            {"SOURCE_TAICHUNG_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.hsinchu_city.sewer_water_level",
+            "SOURCE_HSINCHU_CITY_SEWER_WATER_LEVEL_ENABLED",
+            {"SOURCE_HSINCHU_CITY_SEWER_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.hsinchu_city.flood_sensor",
+            "SOURCE_HSINCHU_CITY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_HSINCHU_CITY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.nantou.sewer_water_level",
+            "SOURCE_NANTOU_SEWER_WATER_LEVEL_ENABLED",
+            {"SOURCE_NANTOU_SEWER_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.chiayi_county.flood_sensor",
+            "SOURCE_CHIAYI_COUNTY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_CHIAYI_COUNTY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.kaohsiung.sewer_water_level",
+            "SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_ENABLED",
+            {"SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.kaohsiung.flood_sensor",
+            "SOURCE_KAOHSIUNG_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_KAOHSIUNG_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.keelung.water_level",
+            "SOURCE_KEELUNG_WATER_LEVEL_ENABLED",
+            {"SOURCE_KEELUNG_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.keelung.flood_sensor",
+            "SOURCE_KEELUNG_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_KEELUNG_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.keelung.rainfall",
+            "SOURCE_KEELUNG_RAINFALL_ENABLED",
+            {"SOURCE_KEELUNG_RAINFALL_API_ENABLED": "true"},
+        ),
+        (
+            "local.yunlin.water_level",
+            "SOURCE_YUNLIN_WATER_LEVEL_ENABLED",
+            {"SOURCE_YUNLIN_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.yilan.flood_sensor",
+            "SOURCE_YILAN_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_YILAN_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.yilan.water_level",
+            "SOURCE_YILAN_WATER_LEVEL_ENABLED",
+            {"SOURCE_YILAN_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.penghu.water_level",
+            "SOURCE_PENGHU_WATER_LEVEL_ENABLED",
+            {"SOURCE_PENGHU_WATER_LEVEL_API_ENABLED": "true"},
+        ),
+        (
+            "local.hsinchu_county.flood_sensor",
+            "SOURCE_HSINCHU_COUNTY_FHY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_HSINCHU_COUNTY_FHY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.miaoli.flood_sensor",
+            "SOURCE_MIAOLI_FHY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_MIAOLI_FHY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.changhua.flood_sensor",
+            "SOURCE_CHANGHUA_FHY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_CHANGHUA_FHY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.pingtung.flood_sensor",
+            "SOURCE_PINGTUNG_FHY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_PINGTUNG_FHY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.hualien.flood_sensor",
+            "SOURCE_HUALIEN_FHY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_HUALIEN_FHY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
+        (
+            "local.taitung.flood_sensor",
+            "SOURCE_TAITUNG_FHY_FLOOD_SENSOR_ENABLED",
+            {"SOURCE_TAITUNG_FHY_FLOOD_SENSOR_API_ENABLED": "true"},
+        ),
     ),
 )
 def test_explicit_adapter_allowlist_requires_new_source_gates(

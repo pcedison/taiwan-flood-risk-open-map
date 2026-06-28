@@ -66,6 +66,99 @@ def test_realtime_freshness_thresholds_progress_from_degraded_to_stale_to_failed
     assert failed.is_alert()
 
 
+def test_wra_iow_flood_depth_uses_realtime_freshness_cadence() -> None:
+    check = check_summary_freshness(
+        _summary(
+            adapter_key="official.wra_iow.flood_depth",
+            source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=6 * 60 * 60,
+    )
+
+    assert check.cadence == "realtime"
+    assert check.status == "stale"
+    assert check.reason == "source data is older than stale freshness threshold"
+
+
+def test_civil_iot_water_level_sources_use_realtime_freshness_cadence() -> None:
+    for adapter_key in (
+        "official.civil_iot.river_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+    ):
+        check = check_summary_freshness(
+            _summary(
+                adapter_key=adapter_key,
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+            ),
+            checked_at=CHECKED_AT,
+            max_age_seconds=6 * 60 * 60,
+        )
+
+        assert check.cadence == "realtime"
+        assert check.status == "stale"
+
+
+def test_local_taipei_sources_use_realtime_freshness_cadence() -> None:
+    for adapter_key in (
+        "local.taipei.sewer_water_level",
+        "local.taipei.river_water_level",
+        "local.taipei.pump_station",
+    ):
+        check = check_summary_freshness(
+            _summary(
+                adapter_key=adapter_key,
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+            ),
+            checked_at=CHECKED_AT,
+            max_age_seconds=6 * 60 * 60,
+        )
+
+        assert check.cadence == "realtime"
+        assert check.status == "stale"
+
+
+def test_local_taoyuan_sources_use_realtime_freshness_cadence() -> None:
+    for adapter_key in (
+        "local.taoyuan.flood_sensor",
+        "local.taoyuan.water_level",
+        "local.taoyuan.rainfall",
+    ):
+        check = check_summary_freshness(
+            _summary(
+                adapter_key=adapter_key,
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+            ),
+            checked_at=CHECKED_AT,
+            max_age_seconds=6 * 60 * 60,
+        )
+
+        assert check.cadence == "realtime"
+        assert check.status == "stale"
+
+
+def test_local_chiayi_taichung_sources_use_realtime_freshness_cadence() -> None:
+    for adapter_key in (
+        "local.chiayi_city.water_level",
+        "local.chiayi_city.rainfall",
+        "local.taichung.water_level",
+    ):
+        check = check_summary_freshness(
+            _summary(
+                adapter_key=adapter_key,
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+            ),
+            checked_at=CHECKED_AT,
+            max_age_seconds=6 * 60 * 60,
+        )
+
+        assert check.cadence == "realtime"
+        assert check.status == "stale"
+
+
 def test_legacy_freshness_check_marks_old_source_timestamp_stale() -> None:
     check = check_summary_freshness(
         _summary(

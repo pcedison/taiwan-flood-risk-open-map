@@ -1,7 +1,8 @@
 param(
   [switch]$SkipE2E,
   [switch]$SkipEventSmoke,
-  [switch]$SkipDockerConfig
+  [switch]$SkipDockerConfig,
+  [switch]$SkipRealtimeSourceGate
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,6 +58,13 @@ $Steps = @(
     Command = "docker"
     Arguments = @("compose", "config", "--quiet")
     Skip = $SkipDockerConfig
+  },
+  @{
+    Name = "Realtime source gate"
+    WorkingDirectory = $RepoRoot
+    Command = "python"
+    Arguments = @("scripts\realtime-source-gate.py", "--env-file", ".env")
+    Skip = $SkipRealtimeSourceGate
   },
   @{
     Name = "API tests"

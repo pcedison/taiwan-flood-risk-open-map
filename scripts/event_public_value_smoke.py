@@ -261,8 +261,8 @@ def configure_event_mode(mode: str) -> None:
     get_settings.cache_clear()
     public_routes._cached_nominatim_candidates = ORIGINAL_CACHED_NOMINATIM_CANDIDATES
     public_routes._cached_wikimedia_candidates = ORIGINAL_CACHED_WIKIMEDIA_CANDIDATES
-    public_routes._cached_nominatim_candidates.cache_clear()
-    public_routes._cached_wikimedia_candidates.cache_clear()
+    _clear_cache_if_supported(public_routes._cached_nominatim_candidates)
+    _clear_cache_if_supported(public_routes._cached_wikimedia_candidates)
     public_routes._cached_nominatim_candidates = lambda *_args: ()
     public_routes._cached_wikimedia_candidates = lambda *_args: ()
     public_routes.fetch_official_realtime_bundle = ORIGINAL_FETCH_OFFICIAL_REALTIME_BUNDLE
@@ -270,6 +270,12 @@ def configure_event_mode(mode: str) -> None:
     public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
     if mode == "simulated-heavy-rain":
         public_routes.fetch_official_realtime_bundle = simulated_heavy_rain_bundle
+
+
+def _clear_cache_if_supported(function: Any) -> None:
+    cache_clear = getattr(function, "cache_clear", None)
+    if callable(cache_clear):
+        cache_clear()
 
 
 def load_candidate_locations() -> list[CandidateLocation]:

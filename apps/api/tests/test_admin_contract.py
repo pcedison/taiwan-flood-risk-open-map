@@ -237,6 +237,11 @@ def test_admin_sources_include_realtime_diagnostics_and_disabled_sources_are_not
                 "latest_ingested_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
                 "row_count": 7,
                 "upstream_status": "succeeded",
+                "covered_counties": ["新北市", "臺北市"],
+                "covered_county_count": 2,
+                "fresh_county_count": 1,
+                "stale_county_count": 1,
+                "station_count_by_county": {"新北市": 3, "臺北市": 4},
             },
             {
                 "id": "ncdr-cap",
@@ -257,6 +262,11 @@ def test_admin_sources_include_realtime_diagnostics_and_disabled_sources_are_not
                 "latest_ingested_at": None,
                 "row_count": 0,
                 "upstream_status": "failed",
+                "covered_counties": [],
+                "covered_county_count": 0,
+                "fresh_county_count": 0,
+                "stale_county_count": 0,
+                "station_count_by_county": {},
             },
         ]
     )
@@ -281,6 +291,12 @@ def test_admin_sources_include_realtime_diagnostics_and_disabled_sources_are_not
     assert cwa["latest_ingested_at"] == "2026-04-28T12:56:00Z"
     assert cwa["lag_seconds"] == 600
     assert cwa["row_count"] == 7
+    assert cwa["covered_counties"] == ["新北市", "臺北市"]
+    assert cwa["covered_county_count"] == 2
+    assert cwa["fresh_county_count"] == 1
+    assert cwa["stale_county_count"] == 1
+    assert cwa["station_count_by_county"] == {"新北市": 3, "臺北市": 4}
+    assert "連江縣" in cwa["missing_counties"]
     assert cwa["freshness_state"] == "fresh"
     assert cwa["upstream_status"] == "succeeded"
     assert cwa["is_enabled"] is True
@@ -309,6 +325,174 @@ def test_admin_enabled_gates_include_flood_sensor_live_gate(
         "SOURCE_FLOOD_SENSOR_ENABLED",
         "SOURCE_FLOOD_SENSOR_API_ENABLED",
         "SOURCE_FLOOD_SENSOR_USE_LIVE",
+    ]
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    [
+        "official.wra_iow.flood_depth",
+        "local.taipei.sewer_water_level",
+        "local.taipei.river_water_level",
+        "local.taipei.pump_station",
+        "local.taoyuan.flood_sensor",
+        "local.taoyuan.water_level",
+        "local.taoyuan.rainfall",
+        "local.chiayi_city.water_level",
+        "local.chiayi_city.rainfall",
+        "local.taichung.water_level",
+        "local.keelung.water_level",
+        "local.keelung.flood_sensor",
+        "local.keelung.rainfall",
+        "local.yunlin.water_level",
+        "official.civil_iot.gate_water_level",
+    ],
+)
+def test_admin_freshness_uses_realtime_cadence_for_new_backbone_sources(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter_key: str,
+) -> None:
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-04-28T13:00:00+00:00"),
+    )
+
+    assert (
+        admin_route._freshness_state(
+            adapter_key=adapter_key,
+            health_status="healthy",
+            is_enabled=True,
+            source_timestamp_min=None,
+            source_timestamp_max=datetime.fromisoformat("2026-04-28T12:15:00+00:00"),
+            latest_observed_at=datetime.fromisoformat("2026-04-28T12:15:00+00:00"),
+            upstream_status="succeeded",
+        )
+        == "stale"
+    )
+
+
+@pytest.mark.parametrize(
+    ("adapter_key", "gate_names"),
+    [
+        (
+            "official.wra_iow.flood_depth",
+            (
+                "SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED",
+                "SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED",
+            ),
+        ),
+        (
+            "local.taipei.sewer_water_level",
+            (
+                "SOURCE_TAIPEI_SEWER_WATER_LEVEL_ENABLED",
+                "SOURCE_TAIPEI_SEWER_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.taipei.river_water_level",
+            (
+                "SOURCE_TAIPEI_RIVER_WATER_LEVEL_ENABLED",
+                "SOURCE_TAIPEI_RIVER_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.taipei.pump_station",
+            (
+                "SOURCE_TAIPEI_PUMP_STATION_ENABLED",
+                "SOURCE_TAIPEI_PUMP_STATION_API_ENABLED",
+            ),
+        ),
+        (
+            "local.taoyuan.flood_sensor",
+            (
+                "SOURCE_TAOYUAN_FLOOD_SENSOR_ENABLED",
+                "SOURCE_TAOYUAN_FLOOD_SENSOR_API_ENABLED",
+            ),
+        ),
+        (
+            "local.taoyuan.water_level",
+            (
+                "SOURCE_TAOYUAN_WATER_LEVEL_ENABLED",
+                "SOURCE_TAOYUAN_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.taoyuan.rainfall",
+            (
+                "SOURCE_TAOYUAN_RAINFALL_ENABLED",
+                "SOURCE_TAOYUAN_RAINFALL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.chiayi_city.water_level",
+            (
+                "SOURCE_CHIAYI_CITY_WATER_LEVEL_ENABLED",
+                "SOURCE_CHIAYI_CITY_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.chiayi_city.rainfall",
+            (
+                "SOURCE_CHIAYI_CITY_RAINFALL_ENABLED",
+                "SOURCE_CHIAYI_CITY_RAINFALL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.taichung.water_level",
+            (
+                "SOURCE_TAICHUNG_WATER_LEVEL_ENABLED",
+                "SOURCE_TAICHUNG_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.keelung.water_level",
+            (
+                "SOURCE_KEELUNG_WATER_LEVEL_ENABLED",
+                "SOURCE_KEELUNG_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.keelung.flood_sensor",
+            (
+                "SOURCE_KEELUNG_FLOOD_SENSOR_ENABLED",
+                "SOURCE_KEELUNG_FLOOD_SENSOR_API_ENABLED",
+            ),
+        ),
+        (
+            "local.keelung.rainfall",
+            (
+                "SOURCE_KEELUNG_RAINFALL_ENABLED",
+                "SOURCE_KEELUNG_RAINFALL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.yunlin.water_level",
+            (
+                "SOURCE_YUNLIN_WATER_LEVEL_ENABLED",
+                "SOURCE_YUNLIN_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "official.civil_iot.gate_water_level",
+            (
+                "SOURCE_CIVIL_IOT_GATE_ENABLED",
+                "SOURCE_CIVIL_IOT_GATE_API_ENABLED",
+            ),
+        ),
+    ],
+)
+def test_admin_enabled_gates_include_new_backbone_source_gates(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter_key: str,
+    gate_names: tuple[str, str],
+) -> None:
+    for gate_name in gate_names:
+        monkeypatch.setenv(gate_name, "true")
+
+    assert admin_route._enabled_gates(adapter_key, is_enabled=True) == [
+        "data_sources.is_enabled",
+        *gate_names,
     ]
 
 
@@ -702,6 +886,263 @@ def test_admin_sources_fall_back_to_sample_data_when_database_is_unavailable(
     assert cwa["upstream_status"] == "succeeded"
     assert cwa["freshness_state"] in {"fresh", "degraded"}
     assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
+def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/local-source-coverage",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["summary"]
+    assert summary["total_counties"] == 22
+    assert summary["local_direct_complete_count"] == 20
+    assert summary["local_direct_incomplete_count"] == 2
+    assert summary["central_backbone_minimum_complete_count"] == 21
+    assert summary["central_backbone_minimum_incomplete_count"] == 1
+    assert summary["counties_missing_hydrologic_backbone"] == ["連江縣"]
+    assert summary["request_official_authorization_count"] == 2
+    assert summary["verify_live_smoke_count"] == 3
+    assert summary["verify_public_api_contract_count"] == 2
+    assert summary["counties_requiring_official_authorization"] == ["花蓮縣", "金門縣"]
+    assert summary["counties_requiring_live_smoke"] == ["臺北市", "雲林縣", "屏東縣"]
+    assert summary["counties_requiring_public_api_contract"] == [
+        "苗栗縣",
+        "臺東縣",
+    ]
+    assert summary["counties_requiring_metadata_release_monitoring"] == [
+        "連江縣",
+    ]
+    assert summary["counties_requiring_official_discovery"] == [
+        "連江縣",
+    ]
+    assert "連江縣" in summary["local_direct_incomplete_counties"]
+    assert summary["central_backbone_required_families"] == [
+        "CWA",
+        "WRA",
+        "NCDR",
+        "Civil IoT",
+    ]
+    assert summary["central_backbone_missing_families"] == []
+    assert summary["central_backbone_family_complete"] is True
+    assert summary["central_backbone_required_adapter_keys"] == [
+        "official.cwa.rainfall",
+        "official.wra.water_level",
+        "official.ncdr.cap",
+        "official.wra_iow.flood_depth",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+    ]
+    assert summary["central_backbone_missing_adapter_keys"] == []
+    counties = {county["county"]: county for county in payload["counties"]}
+    assert len(counties) == 22
+    assert counties["臺北市"]["local_direct_statuses"] == [
+        "ready_implemented",
+        "needs_review",
+    ]
+    assert counties["臺北市"]["local_direct_complete"] is True
+    assert counties["臺北市"]["next_action_code"] == "verify_live_smoke"
+    assert counties["臺北市"]["candidate_source_urls"] == [
+        "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+    ]
+    assert "smoke" in counties["臺北市"]["blocking_reason"]
+    assert counties["臺南市"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["臺南市"]["local_direct_complete"] is True
+    assert counties["臺南市"]["central_backbone_available"] is True
+    assert counties["臺南市"]["production_adapter_keys"] == ["local.tainan.flood_sensor"]
+    assert counties["臺南市"]["production_source_urls"] == [
+        "https://soa.tainan.gov.tw/Api/Service/Get/21b31a27-3e61-48b8-8259-83c2001bec8c",
+    ]
+    assert counties["臺南市"]["next_action_code"] == "operate_adapter"
+    assert counties["臺南市"]["upgrade_priority"] == 5
+    assert counties["高雄市"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["高雄市"]["production_adapter_keys"] == [
+        "local.kaohsiung.sewer_water_level",
+        "local.kaohsiung.flood_sensor",
+    ]
+    assert counties["高雄市"]["next_action_code"] == "operate_adapter"
+    assert counties["新北市"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["新北市"]["local_direct_complete"] is True
+    assert counties["新北市"]["central_backbone_available"] is True
+    assert counties["新北市"]["central_backbone_signal_types"] == [
+        "rainfall",
+        "river_water_level",
+        "cap_alert",
+        "flood_depth",
+        "sewer_water_level",
+    ]
+    assert counties["新北市"]["central_backbone_required_signal_types"] == [
+        "rainfall",
+        "cap_alert",
+        "hydrologic_observation",
+    ]
+    assert counties["新北市"]["central_backbone_minimum_complete"] is True
+    assert counties["新北市"]["central_backbone_missing_signal_types"] == []
+    assert counties["新北市"]["central_backbone_coverage_level"] == "minimum_met"
+    assert "https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296" in counties[
+        "新北市"
+    ]["metadata_source_urls"]
+    assert counties["新北市"]["production_adapter_keys"] == [
+        "local.new_taipei.water_level",
+        "local.new_taipei.flood_sensor",
+        "local.new_taipei.rainfall",
+        "local.new_taipei.drainage_water_level",
+    ]
+    assert counties["新北市"]["next_action_code"] == "operate_adapter"
+    assert counties["新北市"]["blocking_reason"] is None
+    assert "official.civil_iot.flood_sensor" in counties["新北市"][
+        "central_backbone_adapter_keys"
+    ]
+    assert counties["基隆市"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["基隆市"]["local_direct_complete"] is True
+    assert counties["基隆市"]["production_adapter_keys"] == [
+        "local.keelung.water_level",
+        "local.keelung.flood_sensor",
+        "local.keelung.rainfall",
+    ]
+    assert counties["基隆市"]["next_action_code"] == "operate_adapter"
+    assert "sewer_water_level" in counties["基隆市"]["central_backbone_signal_types"]
+    assert counties["基隆市"]["upgrade_priority"] == 5
+    assert counties["新竹市"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["新竹市"]["local_direct_complete"] is True
+    assert counties["新竹市"]["production_adapter_keys"] == [
+        "local.hsinchu_city.sewer_water_level",
+        "local.hsinchu_city.flood_sensor",
+    ]
+    assert counties["新竹市"]["next_action_code"] == "operate_adapter"
+    assert counties["新竹縣"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["新竹縣"]["production_adapter_keys"] == [
+        "local.hsinchu_county.flood_sensor",
+    ]
+    assert counties["新竹縣"]["next_action_code"] == "operate_adapter"
+    assert "sewer_water_level" in counties["新竹縣"]["central_backbone_signal_types"]
+    assert "sewer_water_level" in counties["苗栗縣"]["central_backbone_signal_types"]
+    assert counties["苗栗縣"]["local_direct_complete"] is True
+    assert counties["苗栗縣"]["production_adapter_keys"] == [
+        "local.miaoli.flood_sensor",
+    ]
+    assert counties["南投縣"]["central_backbone_signal_types"] == [
+        "rainfall",
+        "river_water_level",
+        "cap_alert",
+        "flood_depth",
+        "sewer_water_level",
+    ]
+    assert counties["南投縣"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["南投縣"]["production_adapter_keys"] == [
+        "local.nantou.sewer_water_level",
+    ]
+    assert "sewer_water_level" in counties["彰化縣"]["central_backbone_signal_types"]
+    assert "gate_water_level" in counties["彰化縣"]["central_backbone_signal_types"]
+    assert counties["彰化縣"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["彰化縣"]["production_adapter_keys"] == [
+        "local.changhua.flood_sensor",
+    ]
+    assert counties["雲林縣"]["local_direct_statuses"] == [
+        "ready_implemented",
+        "needs_review",
+    ]
+    assert counties["雲林縣"]["local_direct_complete"] is True
+    assert counties["雲林縣"]["production_adapter_keys"] == [
+        "local.yunlin.water_level",
+    ]
+    assert counties["雲林縣"]["next_action_code"] == "verify_live_smoke"
+    assert "不以 alarmState 假造淹水深度" in " ".join(counties["雲林縣"]["notes"])
+    assert "sewer_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
+    assert "gate_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
+    assert counties["嘉義縣"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["嘉義縣"]["production_adapter_keys"] == [
+        "local.chiayi_county.flood_sensor",
+    ]
+    assert counties["嘉義縣"]["next_action_code"] == "operate_adapter"
+    assert "needs_review" in counties["屏東縣"]["local_direct_statuses"]
+    assert counties["屏東縣"]["local_direct_complete"] is True
+    assert counties["屏東縣"]["production_adapter_keys"] == [
+        "local.pingtung.flood_sensor",
+    ]
+    assert counties["屏東縣"]["next_action_code"] == "verify_live_smoke"
+    assert any(
+        "pteoc.pthg.gov.tw/RainStation" in url
+        for url in counties["屏東縣"]["candidate_source_urls"]
+    )
+    assert counties["宜蘭縣"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["宜蘭縣"]["production_adapter_keys"] == [
+        "local.yilan.flood_sensor",
+        "local.yilan.water_level",
+    ]
+    assert counties["宜蘭縣"]["next_action_code"] == "operate_adapter"
+    assert counties["澎湖縣"]["local_direct_statuses"] == ["ready_implemented"]
+    assert counties["澎湖縣"]["production_adapter_keys"] == [
+        "local.penghu.water_level",
+    ]
+    assert counties["澎湖縣"]["next_action_code"] == "operate_adapter"
+    assert "ph3dgis.penghu.gov.tw" in counties["澎湖縣"]["production_source_urls"][0]
+    assert counties["花蓮縣"]["local_direct_statuses"] == [
+        "ready_implemented",
+        "needs_application",
+    ]
+    assert counties["花蓮縣"]["local_direct_complete"] is True
+    assert counties["花蓮縣"]["production_adapter_keys"] == [
+        "local.hualien.flood_sensor",
+    ]
+    assert counties["花蓮縣"]["next_action_code"] == "request_official_authorization"
+    assert counties["花蓮縣"]["requires_application"] is True
+    assert counties["臺東縣"]["local_direct_complete"] is True
+    assert counties["臺東縣"]["production_adapter_keys"] == [
+        "local.taitung.flood_sensor",
+    ]
+    assert counties["金門縣"]["local_direct_statuses"] == ["needs_application"]
+    assert counties["金門縣"]["next_action_code"] == "request_official_authorization"
+    assert counties["金門縣"]["upgrade_priority"] == 1
+    assert counties["金門縣"]["requires_application"] is True
+    assert "KWIS" in (counties["金門縣"]["application_note"] or "")
+    assert any("KWIS" in url for url in counties["金門縣"]["application_urls"])
+    assert counties["連江縣"]["local_direct_statuses"] == ["metadata_only", "not_found"]
+    assert counties["連江縣"]["production_adapter_keys"] == []
+    assert counties["連江縣"]["central_backbone_minimum_complete"] is False
+    assert counties["連江縣"]["central_backbone_missing_signal_types"] == [
+        "hydrologic_observation",
+    ]
+    assert counties["連江縣"]["central_backbone_coverage_level"] == "needs_hydrologic_backbone"
+    assert_openapi_schema(payload, "AdminLocalSourceCoverageResponse")
+
+
+def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    get_settings.cache_clear()
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/local-source-action-plan",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["generated_at"] == "2026-06-28T00:00:00Z"
+    plan = payload["plan"]
+    assert plan["local_direct_complete_count"] == 20
+    assert plan["local_direct_remaining_count"] == 2
+    assert plan["central_backbone_minimum_complete_count"] == 21
+    assert plan["central_backbone_remaining_count"] == 1
+    assert [item["county"] for item in plan["authorization_requests"]] == ["金門縣"]
+    assert [item["county"] for item in plan["metadata_release_monitors"]] == ["連江縣"]
+    kinmen = plan["authorization_requests"][0]
+    assert "KWIS" in kinmen["reason"]
+    assert "observed_at" in kinmen["required_read_api_fields"]
+    lienchiang = plan["metadata_release_monitors"][0]
+    assert lienchiang["central_backbone_missing_signal_types"] == [
+        "hydrologic_observation",
+    ]
+    assert_openapi_schema(payload, "AdminLocalSourceActionPlanResponse")
 
 
 def test_admin_sources_can_use_sample_data_with_explicit_demo_flag_in_hosted_env(

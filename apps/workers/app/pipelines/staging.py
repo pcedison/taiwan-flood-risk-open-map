@@ -174,7 +174,12 @@ def _to_staging_upsert(
 # can derive an intensity-aware risk factor (a dry rainfall station then scores
 # low instead of inflating realtime risk by mere presence).
 _REALTIME_METRIC_KEYS: tuple[str, ...] = (
+    "rainfall_mm",
+    "rainfall_mm_10m",
     "rainfall_mm_1h",
+    "rainfall_mm_3h",
+    "rainfall_mm_6h",
+    "rainfall_mm_12h",
     "rainfall_mm_24h",
     "flood_depth_cm",
     "water_level_m",
@@ -183,6 +188,12 @@ _REALTIME_METRIC_KEYS: tuple[str, ...] = (
 
 _STAGING_PAYLOAD_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "station_id",
+    "station_name",
+    "authority",
+    "county",
+    "town",
+    "county_code",
+    "area_code",
     "areaDesc",
     "identifier",
     "effective",

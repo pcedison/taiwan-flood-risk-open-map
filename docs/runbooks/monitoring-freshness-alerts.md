@@ -11,6 +11,8 @@ from a scheduled monitor without changing application code.
 Covered:
 
 - Source freshness checks through `GET /admin/v1/sources`.
+- Local-direct 22-county coverage status through
+  `GET /admin/v1/local-source-coverage`.
 - Prometheus rule coverage for freshness, API readiness, and runtime heartbeats.
 - Grafana dashboard coverage for readiness, freshness, heartbeat, and worker
   last-run status plus runtime queue final-failed row visibility.
@@ -32,6 +34,13 @@ Completed for local validation:
 
 - `scripts/ops-source-freshness-check.ps1` can call `GET /admin/v1/sources`
   or run in dry-run/fixture mode.
+- Admin API exposes `GET /admin/v1/local-source-coverage` for the conservative
+  22-county local-direct source catalog, including ready adapters, candidate
+  systems, metadata-only sources, not-found counties, and application-required
+  sources. The response also includes `next_action_code`, `upgrade_priority`,
+  and `blocking_reason` so operators can separate "run the adapter" from
+  "request authorization", "verify an official API contract", and "continue
+  discovery".
 - The script can write Prometheus textfile metrics with `-MetricsPath`.
 - Prometheus alert rules and the Grafana dashboard can read freshness,
   API-readiness, worker heartbeat, scheduler heartbeat, and last-run status
@@ -226,6 +235,49 @@ From the repository root:
   -AdminToken "<token>" `
   -MaxAgeMinutes 60
 ```
+
+盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
+
+```powershell
+Invoke-RestMethod `
+  -Uri "https://<api-domain>/admin/v1/local-source-coverage" `
+  -Headers @{ Authorization = "Bearer <admin-token>" }
+```
+
+`summary` 可用於維運 dashboard 與工作排序。它會回報已有地方直連
+production adapter 的縣市數、仍缺中央最低基線的縣市數、缺水文觀測的縣市，
+以及等待授權、live smoke 或公開 API contract 驗證的縣市數。`summary` 內的
+縣市清單刻意支援多重歸類：同時是 `metadata_only` 與 `not_found` 的縣市，
+例如連江縣，會同時出現在 metadata release monitoring 與 official discovery
+queue。
+
+請分開判讀 `local_direct_complete` 與 `central_backbone_available`。前者代表
+官方地方政府 live adapter 已實作；後者代表 Civil IoT/WRA/CWA/NCDR 中央主幹
+仍能為該縣市提供基礎即時脈絡。
+`central_backbone_signal_types` 可查看目前存在的基線訊號，例如 `rainfall`、
+`river_water_level`、`flood_depth`、`sewer_water_level`、`pump_water_level`、
+`gate_water_level` 或 `cap_alert`。
+`central_backbone_minimum_complete`、`central_backbone_missing_signal_types`
+與 `central_backbone_coverage_level` 是縣市級健康門檻。最低基線需要官方雨量、
+官方 CAP 警戒脈絡，以及至少一種水位、淹水深度、下水道、抽水站、閘門或
+埤塘水位等水文觀測訊號。`needs_hydrologic_backbone` 表示該縣市仍缺中央
+水文觀測訊號。
+頂層 `central_backbone_required_families`、`central_backbone_missing_families`、
+`central_backbone_family_complete`、`central_backbone_required_adapter_keys` 與
+`central_backbone_missing_adapter_keys` 用於檢查全台中央主幹是否包含必要的
+CWA、WRA、NCDR、Civil IoT family 與 production adapter key。這些欄位不代表
+每個縣市的地方政府直連 API 都已完成。
+
+分派後續工作前，先依 `upgrade_priority` 排序縣市：
+
+| Action code | Meaning | Operator next step |
+|---|---|---|
+| `request_official_authorization` | A county source requires application or cooperation. | Use `application_urls` to ask the data owner for read API authorization and confirm the API is for observation reads, not only device uploads. |
+| `verify_public_api_contract` | An official candidate system exists, but no public API contract is verified. | Use `candidate_source_urls` to find an official API landing page, open-data catalog entry, or written endpoint/schema before implementation. |
+| `verify_live_smoke` | An official API contract is known, but live smoke, freshness, geometry, or field semantics still need verification. | Use `candidate_source_urls` to run a live smoke check before opening adapter TDD work. |
+| `monitor_open_data_release` | Only static metadata exists. | Use `metadata_source_urls` to monitor source catalogs for live fields and use metadata only for station joins after a live source appears. |
+| `continue_official_discovery` | No conforming local source has been found. | Continue official-source discovery; keep central backbone as the realtime baseline. |
+| `operate_adapter` | A production local adapter exists. | Use `production_source_urls` while keeping source gates, freshness, county coverage, and duplicate handling healthy. |
 
 To export Prometheus textfile metrics while keeping the check non-blocking:
 

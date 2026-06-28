@@ -48,6 +48,22 @@ HealthStatus = Literal["healthy", "degraded", "failed", "disabled", "unknown"]
 FreshnessState = Literal["fresh", "degraded", "stale", "failed"]
 SourceType = Literal["official", "news", "forum", "social", "user_report", "derived"]
 LegalBasis = Literal["L1", "L2", "L3", "L4", "L5"]
+LocalDirectSourceStatus = Literal[
+    "ready_implemented",
+    "candidate",
+    "needs_review",
+    "metadata_only",
+    "not_found",
+    "needs_application",
+]
+LocalSourceNextAction = Literal[
+    "operate_adapter",
+    "verify_public_api_contract",
+    "verify_live_smoke",
+    "request_official_authorization",
+    "monitor_open_data_release",
+    "continue_official_discovery",
+]
 
 
 class IngestionJob(ContractModel):
@@ -88,6 +104,12 @@ class DataSource(ContractModel):
     latest_ingested_at: datetime | None = None
     lag_seconds: int | None = Field(default=None, ge=0)
     row_count: int = Field(default=0, ge=0)
+    covered_counties: list[str] = Field(default_factory=list)
+    covered_county_count: int = Field(default=0, ge=0)
+    fresh_county_count: int = Field(default=0, ge=0)
+    stale_county_count: int = Field(default=0, ge=0)
+    station_count_by_county: dict[str, int] = Field(default_factory=dict)
+    missing_counties: list[str] = Field(default_factory=list)
     upstream_status: str = "unknown"
     enabled_gates: list[str] = Field(default_factory=list)
     freshness_state: FreshnessState = "stale"
@@ -95,6 +117,118 @@ class DataSource(ContractModel):
 
 class AdminSourcesResponse(ContractModel):
     sources: list[DataSource]
+
+
+class LocalSourceCoverage(ContractModel):
+    county: str
+    local_direct_statuses: list[LocalDirectSourceStatus]
+    local_direct_complete: bool = False
+    central_backbone_available: bool = False
+    production_adapter_keys: list[str] = Field(default_factory=list)
+    production_source_urls: list[str] = Field(default_factory=list)
+    central_backbone_adapter_keys: list[str] = Field(default_factory=list)
+    central_backbone_signal_types: list[str] = Field(default_factory=list)
+    central_backbone_required_signal_types: list[str] = Field(default_factory=list)
+    central_backbone_minimum_complete: bool = False
+    central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    central_backbone_coverage_level: str = "incomplete"
+    candidate_source_names: list[str] = Field(default_factory=list)
+    candidate_source_urls: list[str] = Field(default_factory=list)
+    metadata_source_names: list[str] = Field(default_factory=list)
+    metadata_source_urls: list[str] = Field(default_factory=list)
+    application_urls: list[str] = Field(default_factory=list)
+    requires_application: bool = False
+    application_note: str | None = None
+    next_action_code: LocalSourceNextAction
+    upgrade_priority: int = Field(ge=1, le=5)
+    blocking_reason: str | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class LocalSourceCoverageSummary(ContractModel):
+    total_counties: int = Field(ge=0)
+    local_direct_complete_count: int = Field(ge=0)
+    local_direct_incomplete_count: int = Field(ge=0)
+    local_direct_incomplete_counties: list[str] = Field(default_factory=list)
+    central_backbone_minimum_complete_count: int = Field(ge=0)
+    central_backbone_minimum_incomplete_count: int = Field(ge=0)
+    counties_missing_hydrologic_backbone: list[str] = Field(default_factory=list)
+    central_backbone_required_families: list[str] = Field(default_factory=list)
+    central_backbone_missing_families: list[str] = Field(default_factory=list)
+    central_backbone_family_complete: bool = False
+    central_backbone_required_adapter_keys: list[str] = Field(default_factory=list)
+    central_backbone_missing_adapter_keys: list[str] = Field(default_factory=list)
+    request_official_authorization_count: int = Field(ge=0)
+    verify_live_smoke_count: int = Field(ge=0)
+    verify_public_api_contract_count: int = Field(ge=0)
+    counties_requiring_official_authorization: list[str] = Field(default_factory=list)
+    counties_requiring_live_smoke: list[str] = Field(default_factory=list)
+    counties_requiring_public_api_contract: list[str] = Field(default_factory=list)
+    counties_requiring_metadata_release_monitoring: list[str] = Field(default_factory=list)
+    counties_requiring_official_discovery: list[str] = Field(default_factory=list)
+
+
+class AdminLocalSourceCoverageResponse(ContractModel):
+    generated_at: datetime
+    summary: LocalSourceCoverageSummary
+    counties: list[LocalSourceCoverage]
+
+
+class LocalSourceAuthorizationRequest(ContractModel):
+    county: str
+    reason: str | None = None
+    application_urls: list[str] = Field(default_factory=list)
+    application_note: str | None = None
+    required_read_api_fields: list[str] = Field(default_factory=list)
+    request_focus: str
+
+
+class LocalSourceMetadataReleaseMonitor(ContractModel):
+    county: str
+    reason: str | None = None
+    metadata_source_names: list[str] = Field(default_factory=list)
+    metadata_source_urls: list[str] = Field(default_factory=list)
+    central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    request_focus: str
+
+
+class LocalSourcePublicApiContractReview(ContractModel):
+    county: str
+    reason: str | None = None
+    candidate_source_names: list[str] = Field(default_factory=list)
+    candidate_source_urls: list[str] = Field(default_factory=list)
+    required_read_api_fields: list[str] = Field(default_factory=list)
+
+
+class LocalSourceLiveSmokeReview(ContractModel):
+    county: str
+    reason: str | None = None
+    candidate_source_names: list[str] = Field(default_factory=list)
+    candidate_source_urls: list[str] = Field(default_factory=list)
+    production_adapter_keys: list[str] = Field(default_factory=list)
+
+
+class LocalSourceActionPlan(ContractModel):
+    total_counties: int = Field(ge=0)
+    local_direct_complete_count: int = Field(ge=0)
+    local_direct_remaining_count: int = Field(ge=0)
+    central_backbone_minimum_complete_count: int = Field(ge=0)
+    central_backbone_remaining_count: int = Field(ge=0)
+    authorization_requests: list[LocalSourceAuthorizationRequest] = Field(
+        default_factory=list
+    )
+    metadata_release_monitors: list[LocalSourceMetadataReleaseMonitor] = Field(
+        default_factory=list
+    )
+    public_api_contract_reviews: list[LocalSourcePublicApiContractReview] = Field(
+        default_factory=list
+    )
+    live_smoke_reviews: list[LocalSourceLiveSmokeReview] = Field(default_factory=list)
+
+
+class AdminLocalSourceActionPlanResponse(ContractModel):
+    generated_at: datetime
+    plan: LocalSourceActionPlan
 
 
 class LatLng(ContractModel):

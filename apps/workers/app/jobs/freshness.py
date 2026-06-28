@@ -18,11 +18,22 @@ REALTIME_ADAPTER_KEYS = frozenset(
     {
         "official.cwa.rainfall",
         "official.wra.water_level",
+        "official.wra_iow.flood_depth",
         "official.civil_iot.flood_sensor",
         "official.civil_iot.river_water_level",
         "official.civil_iot.pond_water_level",
         "official.civil_iot.sewer_water_level",
         "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "local.taipei.sewer_water_level",
+        "local.taipei.river_water_level",
+        "local.taipei.pump_station",
+        "local.taoyuan.flood_sensor",
+        "local.taoyuan.water_level",
+        "local.taoyuan.rainfall",
+        "local.chiayi_city.water_level",
+        "local.chiayi_city.rainfall",
+        "local.taichung.water_level",
         "local.tainan.flood_sensor",
     }
 )

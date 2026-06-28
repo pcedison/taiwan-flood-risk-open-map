@@ -17,6 +17,7 @@ from app.adapters.civil_iot.river_water_level import (
 )
 from app.adapters.civil_iot.sta_client import (
     DEFAULT_STA_TIMEOUT_SECONDS,
+    STA_RAIN_SEWER_BASE,
     STA_WATER_RESOURCE_BASE,
     CivilIotStaError,
     CivilIotStaFetchError,
@@ -26,6 +27,7 @@ from app.adapters.civil_iot.sta_client import (
     parse_sta_things_payload,
 )
 from app.adapters.civil_iot.sta_water_level import (
+    GATE_WATER_LEVEL,
     POND_WATER_LEVEL,
     PUMP_WATER_LEVEL,
     SEWER_WATER_LEVEL,
@@ -36,6 +38,7 @@ from app.adapters.civil_iot.sta_water_level import (
 
 __all__ = [
     "DEFAULT_STA_TIMEOUT_SECONDS",
+    "STA_RAIN_SEWER_BASE",
     "STA_WATER_RESOURCE_BASE",
     "CivilIotStaError",
     "CivilIotStaFetchError",
@@ -54,6 +57,7 @@ __all__ = [
     "CivilIotRiverAdapter",
     "CivilIotRiverAdapterError",
     "CivilIotRiverApiAdapter",
+    "GATE_WATER_LEVEL",
     "POND_WATER_LEVEL",
     "PUMP_WATER_LEVEL",
     "SEWER_WATER_LEVEL",

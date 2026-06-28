@@ -17,7 +17,9 @@ Repo-local evidence is green:
 - `scripts/public-beta-local-gate.ps1` passes and covers the no-secret local
   candidate gate: Docker Compose config, API tests/mypy,
   worker/repository tests, validators, web audit/unit/lint/typecheck/build/E2E,
-  unknown-address smoke, and event smokes.
+  unknown-address smoke, event smokes, and the realtime source gate for official
+  backbone health plus unresolved 金門/連江 discovery monitoring. Use
+  `-SkipRealtimeSourceGate` only for explicitly offline local runs.
 - `docs/reviews/roadmap-execution-audit-2026-06-10.md` records the latest
   repo-local acceptance boundary and remaining private evidence blockers.
 - `python infra/scripts/validate_production_readiness_evidence.py` passes for

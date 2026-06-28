@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from app.adapters.civil_iot import (
+    GATE_WATER_LEVEL,
     POND_WATER_LEVEL,
     PUMP_WATER_LEVEL,
     RIVER_WATER_LEVEL_METADATA,
@@ -25,6 +26,11 @@ from app.pipelines.staging import build_staging_batch
 
 
 FETCHED_AT = datetime(2026, 6, 15, 3, 10, tzinfo=UTC)
+
+
+def test_sewer_water_level_uses_rain_sewer_service_not_water_resource() -> None:
+    assert "STA_RainSewer" in SEWER_WATER_LEVEL.sta_url
+    assert "STA_WaterResource" not in SEWER_WATER_LEVEL.sta_url
 
 
 def _water_level_payload(datastream_name: str, value: float) -> dict:
@@ -82,6 +88,61 @@ def _pump_payload() -> dict:
     }
 
 
+def _pump_generic_payload() -> dict:
+    return {
+        "value": [
+            {
+                "@iot.id": 4002,
+                "name": "埤子頭抽水站",
+                "properties": {"stationID": "PUMP-2", "authority": "嘉義縣政府水利處", "stationName": "埤子頭抽水站(004)"},
+                "Locations": [
+                    {"location": {"type": "Point", "coordinates": [120.45, 23.45]}}
+                ],
+                "Datastreams": [
+                    {
+                        "name": "水位",
+                        "unitOfMeasurement": {"symbol": "m"},
+                        "Observations": [
+                            {"phenomenonTime": "2026-06-15T03:02:00.000Z", "result": 6.39}
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _gate_payload() -> dict:
+    return {
+        "value": [
+            {
+                "@iot.id": 5001,
+                "name": "濁水溪33號閘門監測站",
+                "properties": {"stationID": "GATE-1", "authority": "第四河川分署", "stationName": "濁水溪33號閘門監測站"},
+                "Locations": [
+                    {"location": {"type": "Point", "coordinates": [120.35, 23.8]}}
+                ],
+                "Datastreams": [
+                    {
+                        "name": "閘門內水位",
+                        "unitOfMeasurement": {"symbol": "m"},
+                        "Observations": [
+                            {"phenomenonTime": "2026-06-15T03:03:00.000Z", "result": 6.36}
+                        ],
+                    },
+                    {
+                        "name": "閘門外水位",
+                        "unitOfMeasurement": {"symbol": "m"},
+                        "Observations": [
+                            {"phenomenonTime": "2026-06-15T03:04:00.000Z", "result": 6.35}
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+
+
 def _candidate_from_staging_payload(payload: dict, *, adapter_key: str) -> PromotionCandidate:
     return PromotionCandidate(
         staging_evidence_id="staging-id",
@@ -121,6 +182,30 @@ def test_pond_and_sewer_adapters_normalize_water_level() -> None:
         assert evidence.source_family is SourceFamily.OFFICIAL
         assert "3.14 公尺" in evidence.summary
         assert result.fetched[0].payload["water_level_m"] == 3.14
+
+
+def test_water_level_api_adapter_fetches_paginated_sta_pages() -> None:
+    calls: list[str] = []
+
+    def fetch_json(url: str, timeout: int) -> dict:
+        calls.append(url)
+        if len(calls) == 1:
+            payload = _water_level_payload("下水道水位", 1.5)
+            payload["@iot.nextLink"] = "https://example.test/next-page"
+            return payload
+        return _water_level_payload("下水道水位", 1.7)
+
+    adapter = StaWaterLevelApiAdapter(
+        SEWER_WATER_LEVEL,
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+    )
+
+    result = adapter.run()
+
+    assert calls == [SEWER_WATER_LEVEL.sta_url, "https://example.test/next-page"]
+    assert len(result.normalized) == 2
+    assert [item.payload["water_level_m"] for item in result.fetched] == [1.5, 1.7]
 
 
 def test_river_water_level_adapter_exposes_water_level_metric_in_raw_payload() -> None:
@@ -166,14 +251,19 @@ def test_water_level_staging_and_promotion_latest_keep_metrics_for_risk_factor()
 
     writer.write_evidence(promotion_payload)
 
-    latest_sql, latest_params = connection.cursor_instance.executions[1]
+    latest_sql, latest_params = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "INSERT INTO official_realtime_latest" in execution[0]
+    )
     assert "INSERT INTO official_realtime_latest" in latest_sql
     assert latest_params[11] == 3.2
     assert latest_params[13] == 4.0
-    assert latest_params[16] == 0.8
+    assert latest_params[16] is None
+    assert latest_params[17] == 0.8
 
 
-def test_pump_adapter_reads_external_water_level_datastream() -> None:
+def test_pump_adapter_prefers_external_water_level_and_falls_back_to_generic_water_level() -> None:
     adapter = StaWaterLevelApiAdapter(
         PUMP_WATER_LEVEL,
         fetched_at=FETCHED_AT,
@@ -186,6 +276,34 @@ def test_pump_adapter_reads_external_water_level_datastream() -> None:
     # The external (外水位 = 2.7 m) datastream is selected, not internal (1.1 m).
     assert "2.70 公尺" in result.normalized[0].summary
     assert result.fetched[0].payload["water_level_m"] == 2.7
+
+    fallback_adapter = StaWaterLevelApiAdapter(
+        PUMP_WATER_LEVEL,
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: _pump_generic_payload(),
+    )
+
+    fallback_result = fallback_adapter.run()
+
+    assert len(fallback_result.normalized) == 1
+    assert "6.39 公尺" in fallback_result.normalized[0].summary
+    assert fallback_result.fetched[0].payload["county"] == "嘉義縣"
+
+
+def test_gate_adapter_reads_external_gate_water_level_datastream() -> None:
+    adapter = StaWaterLevelApiAdapter(
+        GATE_WATER_LEVEL,
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: _gate_payload(),
+    )
+
+    result = adapter.run()
+
+    assert len(result.normalized) == 1
+    assert result.normalized[0].adapter_key == "official.civil_iot.gate_water_level"
+    assert result.normalized[0].event_type is EventType.WATER_LEVEL
+    assert "6.35 公尺" in result.normalized[0].summary
+    assert result.fetched[0].payload["datastream_name"] == "閘門外水位"
 
 
 def test_water_level_fixture_adapter_drops_invalid_sentinel() -> None:
@@ -207,6 +325,7 @@ def test_new_water_level_sources_registered_and_disabled_by_default() -> None:
         "official.civil_iot.pond_water_level",
         "official.civil_iot.sewer_water_level",
         "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
     ):
         assert key in ADAPTER_REGISTRY
         assert ADAPTER_REGISTRY[key].enabled_by_default is False
@@ -222,6 +341,8 @@ def test_new_water_level_flags_enable_and_wire_runtime() -> None:
             "SOURCE_CIVIL_IOT_SEWER_API_ENABLED": "true",
             "SOURCE_CIVIL_IOT_PUMP_ENABLED": "true",
             "SOURCE_CIVIL_IOT_PUMP_API_ENABLED": "true",
+            "SOURCE_CIVIL_IOT_GATE_ENABLED": "true",
+            "SOURCE_CIVIL_IOT_GATE_API_ENABLED": "true",
         }
     )
 
@@ -229,6 +350,7 @@ def test_new_water_level_flags_enable_and_wire_runtime() -> None:
     assert "official.civil_iot.pond_water_level" in keys
     assert "official.civil_iot.sewer_water_level" in keys
     assert "official.civil_iot.pump_water_level" in keys
+    assert "official.civil_iot.gate_water_level" in keys
 
     adapters = build_runtime_adapters(
         settings,
@@ -236,12 +358,15 @@ def test_new_water_level_flags_enable_and_wire_runtime() -> None:
         civil_iot_pond_fetch_json=lambda url, timeout: _water_level_payload("埤塘水位", 2.0),
         civil_iot_sewer_fetch_json=lambda url, timeout: _water_level_payload("下水道水位", 1.5),
         civil_iot_pump_fetch_json=lambda url, timeout: _pump_payload(),
+        civil_iot_gate_fetch_json=lambda url, timeout: _gate_payload(),
     )
 
     assert "official.civil_iot.pond_water_level" in adapters
     assert "official.civil_iot.sewer_water_level" in adapters
     assert "official.civil_iot.pump_water_level" in adapters
+    assert "official.civil_iot.gate_water_level" in adapters
     assert len(adapters["official.civil_iot.pump_water_level"].run().normalized) == 1
+    assert len(adapters["official.civil_iot.gate_water_level"].run().normalized) == 1
 
 
 class _FakePromotionConnection:
@@ -277,4 +402,6 @@ class _FakePromotionCursor:
         self.executions.append((sql, params))
 
     def fetchone(self) -> tuple[str]:
+        if self.executions and "FROM admin_area_profiles" in self.executions[-1][0]:
+            return None
         return (self._evidence_id,)

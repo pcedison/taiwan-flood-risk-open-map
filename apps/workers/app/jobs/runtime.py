@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from app.adapters.civil_iot import (
+    GATE_WATER_LEVEL,
     POND_WATER_LEVEL,
     PUMP_WATER_LEVEL,
     SEWER_WATER_LEVEL,
@@ -18,13 +19,78 @@ from app.adapters.contracts import DataSourceAdapter
 from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
+from app.adapters.local_chiayi_city import ChiayiCityRainfallApiAdapter, ChiayiCityWaterLevelApiAdapter
+from app.adapters.local_chiayi_city import FetchText as ChiayiCityFetchText
+from app.adapters.local_chiayi_county import ChiayiCountyFloodSensorApiAdapter
+from app.adapters.local_chiayi_county import FetchJson as ChiayiCountyFetchJson
+from app.adapters.local_fhy import FetchJson as FhyFloodSensorFetchJson
+from app.adapters.local_fhy import (
+    CHANGHUA_FHY_FLOOD_SENSOR,
+    FHY_LOCAL_FLOOD_SENSOR_SOURCES,
+    HSINCHU_COUNTY_FHY_FLOOD_SENSOR,
+    HUALIEN_FHY_FLOOD_SENSOR,
+    MIAOLI_FHY_FLOOD_SENSOR,
+    PINGTUNG_FHY_FLOOD_SENSOR,
+    TAITUNG_FHY_FLOOD_SENSOR,
+    FhyFloodSensorApiAdapter,
+)
+from app.adapters.local_hsinchu_city import FetchJson as HsinchuCityFetchJson
+from app.adapters.local_hsinchu_city import (
+    HsinchuCityFloodSensorApiAdapter,
+    HsinchuCitySewerWaterLevelApiAdapter,
+)
+from app.adapters.local_kaohsiung import FetchJson as KaohsiungFetchJson
+from app.adapters.local_kaohsiung import (
+    KaohsiungFloodSensorApiAdapter,
+    KaohsiungSewerWaterLevelApiAdapter,
+)
+from app.adapters.local_keelung import FetchJson as KeelungFetchJson
+from app.adapters.local_keelung import (
+    KeelungFloodSensorApiAdapter,
+    KeelungRainfallApiAdapter,
+    KeelungWaterLevelApiAdapter,
+)
+from app.adapters.local_nantou import FetchText as NantouFetchText
+from app.adapters.local_nantou import NantouSewerWaterLevelKmlAdapter
+from app.adapters.local_new_taipei import FetchJson as NewTaipeiFetchJson
+from app.adapters.local_new_taipei import (
+    NewTaipeiDrainageWaterLevelApiAdapter,
+    NewTaipeiFloodSensorApiAdapter,
+    NewTaipeiRainfallApiAdapter,
+    NewTaipeiWaterLevelApiAdapter,
+)
+from app.adapters.local_penghu import FetchJson as PenghuFetchJson
+from app.adapters.local_penghu import PenghuWaterLevelArcgisAdapter
+from app.adapters.local_taichung import FetchJson as TaichungFetchJson
+from app.adapters.local_taichung import TaichungWaterLevelApiAdapter
+from app.adapters.local_taipei import (
+    TAIPEI_RIVER_WATER_LEVEL,
+    TAIPEI_SEWER_WATER_LEVEL,
+    FetchJson as TaipeiFetchJson,
+)
+from app.adapters.local_taipei import (
+    FetchText as TaipeiFetchText,
+)
+from app.adapters.local_taipei import TaipeiPumpStationApiAdapter, TaipeiWaterLevelApiAdapter
 from app.adapters.local_tainan import FetchJson as TainanFetchJson
 from app.adapters.local_tainan import TainanFloodSensorApiAdapter
+from app.adapters.local_taoyuan import FetchText as TaoyuanFetchText
+from app.adapters.local_taoyuan import (
+    TaoyuanFloodSensorApiAdapter,
+    TaoyuanRainfallApiAdapter,
+    TaoyuanWaterLevelApiAdapter,
+)
+from app.adapters.local_yilan import FetchJson as YilanFetchJson
+from app.adapters.local_yilan import YilanFloodSensorArcgisAdapter, YilanWaterLevelArcgisAdapter
+from app.adapters.local_yunlin import FetchJson as YunlinFetchJson
+from app.adapters.local_yunlin import YunlinWaterLevelApiAdapter
 from app.adapters.ncdr import FetchText as NcdrFetchText
 from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.registry import enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import WraWaterLevelApiAdapter
+from app.adapters.wra_iow import FetchJson as WraIowFetchJson
+from app.adapters.wra_iow import WraIowFloodDepthApiAdapter
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.forum_candidate import build_forum_candidate_fixture_adapters
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
@@ -103,10 +169,41 @@ def build_runtime_adapters(
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
     tainan_flood_sensor_fetch_json: TainanFetchJson | None = None,
+    new_taipei_water_level_fetch_json: NewTaipeiFetchJson | None = None,
+    new_taipei_flood_sensor_fetch_json: NewTaipeiFetchJson | None = None,
+    new_taipei_rainfall_fetch_json: NewTaipeiFetchJson | None = None,
+    new_taipei_drainage_water_level_fetch_json: NewTaipeiFetchJson | None = None,
+    taipei_sewer_fetch_json: TaipeiFetchJson | None = None,
+    taipei_sewer_fetch_text: TaipeiFetchText | None = None,
+    taipei_river_fetch_json: TaipeiFetchJson | None = None,
+    taipei_river_fetch_text: TaipeiFetchText | None = None,
+    taipei_pump_fetch_json: TaipeiFetchJson | None = None,
+    taoyuan_flood_sensor_fetch_text: TaoyuanFetchText | None = None,
+    taoyuan_water_level_fetch_text: TaoyuanFetchText | None = None,
+    taoyuan_rainfall_fetch_text: TaoyuanFetchText | None = None,
+    chiayi_city_water_level_fetch_text: ChiayiCityFetchText | None = None,
+    chiayi_city_rainfall_fetch_text: ChiayiCityFetchText | None = None,
+    taichung_water_level_fetch_json: TaichungFetchJson | None = None,
+    hsinchu_city_sewer_fetch_json: HsinchuCityFetchJson | None = None,
+    hsinchu_city_flood_sensor_fetch_json: HsinchuCityFetchJson | None = None,
+    nantou_sewer_water_level_fetch_text: NantouFetchText | None = None,
+    chiayi_county_flood_sensor_fetch_json: ChiayiCountyFetchJson | None = None,
+    kaohsiung_sewer_fetch_json: KaohsiungFetchJson | None = None,
+    kaohsiung_flood_sensor_fetch_json: KaohsiungFetchJson | None = None,
+    keelung_water_level_fetch_json: KeelungFetchJson | None = None,
+    keelung_flood_sensor_fetch_json: KeelungFetchJson | None = None,
+    keelung_rainfall_fetch_json: KeelungFetchJson | None = None,
+    yunlin_water_level_fetch_json: YunlinFetchJson | None = None,
+    yilan_flood_sensor_fetch_json: YilanFetchJson | None = None,
+    yilan_water_level_fetch_json: YilanFetchJson | None = None,
+    penghu_water_level_fetch_json: PenghuFetchJson | None = None,
+    fhy_flood_sensor_fetch_json: FhyFloodSensorFetchJson | None = None,
+    wra_iow_flood_depth_fetch_json: WraIowFetchJson | None = None,
     civil_iot_river_fetch_json: StaFetchJson | None = None,
     civil_iot_pond_fetch_json: StaFetchJson | None = None,
     civil_iot_sewer_fetch_json: StaFetchJson | None = None,
     civil_iot_pump_fetch_json: StaFetchJson | None = None,
+    civil_iot_gate_fetch_json: StaFetchJson | None = None,
 ) -> Mapping[str, DataSourceAdapter]:
     if settings.runtime_fixtures_enabled:
         resolved_fetched_at = fetched_at or datetime.now(UTC)
@@ -155,6 +252,19 @@ def build_runtime_adapters(
             fetch_json=wra_fetch_json,
         )
         live_adapters[wra_adapter.metadata.key] = wra_adapter
+
+    if (
+        settings.source_wra_iow_flood_depth_api_enabled
+        and "official.wra_iow.flood_depth" in enabled_keys
+    ):
+        wra_iow_adapter = WraIowFloodDepthApiAdapter(
+            api_url=settings.wra_iow_flood_depth_api_url,
+            metadata_api_url=settings.wra_iow_flood_sensor_metadata_api_url,
+            timeout_seconds=settings.wra_iow_flood_depth_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=wra_iow_flood_depth_fetch_json,
+        )
+        live_adapters[wra_iow_adapter.metadata.key] = wra_iow_adapter
 
     if settings.source_ncdr_cap_api_enabled and "official.ncdr.cap" in enabled_keys:
         ncdr_cap_adapter = NcdrCapAlertAdapter(
@@ -217,6 +327,352 @@ def build_runtime_adapters(
         live_adapters[tainan_flood_sensor_adapter.metadata.key] = tainan_flood_sensor_adapter
 
     if (
+        settings.source_new_taipei_water_level_api_enabled
+        and "local.new_taipei.water_level" in enabled_keys
+    ):
+        new_taipei_water_adapter = NewTaipeiWaterLevelApiAdapter(
+            api_url=settings.new_taipei_water_level_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=new_taipei_water_level_fetch_json,
+        )
+        live_adapters[new_taipei_water_adapter.metadata.key] = new_taipei_water_adapter
+
+    if (
+        settings.source_new_taipei_flood_sensor_api_enabled
+        and "local.new_taipei.flood_sensor" in enabled_keys
+    ):
+        new_taipei_flood_adapter = NewTaipeiFloodSensorApiAdapter(
+            api_url=settings.new_taipei_flood_sensor_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=new_taipei_flood_sensor_fetch_json,
+        )
+        live_adapters[new_taipei_flood_adapter.metadata.key] = new_taipei_flood_adapter
+
+    if (
+        settings.source_new_taipei_rainfall_api_enabled
+        and "local.new_taipei.rainfall" in enabled_keys
+    ):
+        new_taipei_rainfall_adapter = NewTaipeiRainfallApiAdapter(
+            api_url=settings.new_taipei_rainfall_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=new_taipei_rainfall_fetch_json,
+        )
+        live_adapters[new_taipei_rainfall_adapter.metadata.key] = new_taipei_rainfall_adapter
+
+    if (
+        settings.source_new_taipei_drainage_water_level_api_enabled
+        and "local.new_taipei.drainage_water_level" in enabled_keys
+    ):
+        new_taipei_drainage_adapter = NewTaipeiDrainageWaterLevelApiAdapter(
+            api_url=settings.new_taipei_drainage_water_level_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=new_taipei_drainage_water_level_fetch_json,
+        )
+        live_adapters[new_taipei_drainage_adapter.metadata.key] = new_taipei_drainage_adapter
+
+    for source, api_enabled, api_url, metadata_csv_url, fetch_json, fetch_text in (
+        (
+            TAIPEI_SEWER_WATER_LEVEL,
+            settings.source_taipei_sewer_water_level_api_enabled,
+            settings.taipei_sewer_water_level_api_url,
+            settings.taipei_sewer_water_level_metadata_csv_url,
+            taipei_sewer_fetch_json,
+            taipei_sewer_fetch_text,
+        ),
+        (
+            TAIPEI_RIVER_WATER_LEVEL,
+            settings.source_taipei_river_water_level_api_enabled,
+            settings.taipei_river_water_level_api_url,
+            settings.taipei_river_water_level_metadata_csv_url,
+            taipei_river_fetch_json,
+            taipei_river_fetch_text,
+        ),
+    ):
+        if api_enabled and source.metadata.key in enabled_keys:
+            taipei_water_adapter = TaipeiWaterLevelApiAdapter(
+                source,
+                api_url=api_url,
+                metadata_csv_url=metadata_csv_url,
+                timeout_seconds=settings.taipei_water_timeout_seconds,
+                fetched_at=fetched_at,
+                fetch_json=fetch_json,
+                fetch_text=fetch_text,
+            )
+            live_adapters[taipei_water_adapter.metadata.key] = taipei_water_adapter
+
+    if (
+        settings.source_taipei_pump_station_api_enabled
+        and "local.taipei.pump_station" in enabled_keys
+    ):
+        taipei_pump_adapter = TaipeiPumpStationApiAdapter(
+            api_url=settings.taipei_pump_station_api_url,
+            timeout_seconds=settings.taipei_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=taipei_pump_fetch_json,
+        )
+        live_adapters[taipei_pump_adapter.metadata.key] = taipei_pump_adapter
+
+    if (
+        settings.source_taoyuan_flood_sensor_api_enabled
+        and "local.taoyuan.flood_sensor" in enabled_keys
+    ):
+        taoyuan_flood_adapter = TaoyuanFloodSensorApiAdapter(
+            api_url=settings.taoyuan_flood_sensor_api_url,
+            timeout_seconds=settings.taoyuan_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=taoyuan_flood_sensor_fetch_text,
+        )
+        live_adapters[taoyuan_flood_adapter.metadata.key] = taoyuan_flood_adapter
+
+    if (
+        settings.source_taoyuan_water_level_api_enabled
+        and "local.taoyuan.water_level" in enabled_keys
+    ):
+        taoyuan_water_adapter = TaoyuanWaterLevelApiAdapter(
+            api_url=settings.taoyuan_water_level_api_url,
+            timeout_seconds=settings.taoyuan_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=taoyuan_water_level_fetch_text,
+        )
+        live_adapters[taoyuan_water_adapter.metadata.key] = taoyuan_water_adapter
+
+    if (
+        settings.source_taoyuan_rainfall_api_enabled
+        and "local.taoyuan.rainfall" in enabled_keys
+    ):
+        taoyuan_rainfall_adapter = TaoyuanRainfallApiAdapter(
+            api_url=settings.taoyuan_rainfall_api_url,
+            timeout_seconds=settings.taoyuan_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=taoyuan_rainfall_fetch_text,
+        )
+        live_adapters[taoyuan_rainfall_adapter.metadata.key] = taoyuan_rainfall_adapter
+
+    if (
+        settings.source_chiayi_city_water_level_api_enabled
+        and "local.chiayi_city.water_level" in enabled_keys
+    ):
+        chiayi_adapter = ChiayiCityWaterLevelApiAdapter(
+            api_url=settings.chiayi_city_water_level_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=chiayi_city_water_level_fetch_text,
+        )
+        live_adapters[chiayi_adapter.metadata.key] = chiayi_adapter
+
+    if (
+        settings.source_chiayi_city_rainfall_api_enabled
+        and "local.chiayi_city.rainfall" in enabled_keys
+    ):
+        chiayi_rainfall_adapter = ChiayiCityRainfallApiAdapter(
+            api_url=settings.chiayi_city_rainfall_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=chiayi_city_rainfall_fetch_text,
+        )
+        live_adapters[chiayi_rainfall_adapter.metadata.key] = chiayi_rainfall_adapter
+
+    if (
+        settings.source_taichung_water_level_api_enabled
+        and "local.taichung.water_level" in enabled_keys
+    ):
+        taichung_adapter = TaichungWaterLevelApiAdapter(
+            api_url=settings.taichung_water_level_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=taichung_water_level_fetch_json,
+        )
+        live_adapters[taichung_adapter.metadata.key] = taichung_adapter
+
+    if (
+        settings.source_hsinchu_city_sewer_water_level_api_enabled
+        and "local.hsinchu_city.sewer_water_level" in enabled_keys
+    ):
+        hsinchu_sewer_adapter = HsinchuCitySewerWaterLevelApiAdapter(
+            base_api_url=settings.hsinchu_city_sewer_base_api_url,
+            realtime_api_url=settings.hsinchu_city_sewer_realtime_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=hsinchu_city_sewer_fetch_json,
+        )
+        live_adapters[hsinchu_sewer_adapter.metadata.key] = hsinchu_sewer_adapter
+
+    if (
+        settings.source_hsinchu_city_flood_sensor_api_enabled
+        and "local.hsinchu_city.flood_sensor" in enabled_keys
+    ):
+        hsinchu_flood_adapter = HsinchuCityFloodSensorApiAdapter(
+            station_api_url=settings.hsinchu_city_flood_sensor_station_api_url,
+            realtime_api_url=settings.hsinchu_city_flood_sensor_realtime_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=hsinchu_city_flood_sensor_fetch_json,
+        )
+        live_adapters[hsinchu_flood_adapter.metadata.key] = hsinchu_flood_adapter
+
+    if (
+        settings.source_nantou_sewer_water_level_api_enabled
+        and "local.nantou.sewer_water_level" in enabled_keys
+    ):
+        nantou_adapter = NantouSewerWaterLevelKmlAdapter(
+            kml_url=settings.nantou_sewer_water_level_kml_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=nantou_sewer_water_level_fetch_text,
+        )
+        live_adapters[nantou_adapter.metadata.key] = nantou_adapter
+
+    if (
+        settings.source_chiayi_county_flood_sensor_api_enabled
+        and "local.chiayi_county.flood_sensor" in enabled_keys
+    ):
+        chiayi_county_adapter = ChiayiCountyFloodSensorApiAdapter(
+            api_url=settings.chiayi_county_flood_sensor_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=chiayi_county_flood_sensor_fetch_json,
+        )
+        live_adapters[chiayi_county_adapter.metadata.key] = chiayi_county_adapter
+
+    if (
+        settings.source_kaohsiung_sewer_water_level_api_enabled
+        and "local.kaohsiung.sewer_water_level" in enabled_keys
+    ):
+        kaohsiung_sewer_adapter = KaohsiungSewerWaterLevelApiAdapter(
+            api_url=settings.kaohsiung_sewer_water_level_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=kaohsiung_sewer_fetch_json,
+        )
+        live_adapters[kaohsiung_sewer_adapter.metadata.key] = kaohsiung_sewer_adapter
+
+    if (
+        settings.source_kaohsiung_flood_sensor_api_enabled
+        and "local.kaohsiung.flood_sensor" in enabled_keys
+    ):
+        kaohsiung_flood_adapter = KaohsiungFloodSensorApiAdapter(
+            api_url=settings.kaohsiung_flood_sensor_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=kaohsiung_flood_sensor_fetch_json,
+        )
+        live_adapters[kaohsiung_flood_adapter.metadata.key] = kaohsiung_flood_adapter
+
+    if (
+        settings.source_keelung_water_level_api_enabled
+        and "local.keelung.water_level" in enabled_keys
+    ):
+        keelung_water_adapter = KeelungWaterLevelApiAdapter(
+            api_url=settings.keelung_water_level_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=keelung_water_level_fetch_json,
+        )
+        live_adapters[keelung_water_adapter.metadata.key] = keelung_water_adapter
+
+    if (
+        settings.source_keelung_flood_sensor_api_enabled
+        and "local.keelung.flood_sensor" in enabled_keys
+    ):
+        keelung_flood_adapter = KeelungFloodSensorApiAdapter(
+            api_url=settings.keelung_flood_sensor_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=keelung_flood_sensor_fetch_json,
+        )
+        live_adapters[keelung_flood_adapter.metadata.key] = keelung_flood_adapter
+
+    if (
+        settings.source_keelung_rainfall_api_enabled
+        and "local.keelung.rainfall" in enabled_keys
+    ):
+        keelung_rainfall_adapter = KeelungRainfallApiAdapter(
+            api_url=settings.keelung_rainfall_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=keelung_rainfall_fetch_json,
+        )
+        live_adapters[keelung_rainfall_adapter.metadata.key] = keelung_rainfall_adapter
+
+    if (
+        settings.source_yunlin_water_level_api_enabled
+        and "local.yunlin.water_level" in enabled_keys
+    ):
+        yunlin_water_adapter = YunlinWaterLevelApiAdapter(
+            api_url=settings.yunlin_stations_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=yunlin_water_level_fetch_json,
+        )
+        live_adapters[yunlin_water_adapter.metadata.key] = yunlin_water_adapter
+
+    if (
+        settings.source_yilan_flood_sensor_api_enabled
+        and "local.yilan.flood_sensor" in enabled_keys
+    ):
+        yilan_flood_adapter = YilanFloodSensorArcgisAdapter(
+            api_url=settings.yilan_flood_sensor_layer_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=yilan_flood_sensor_fetch_json,
+        )
+        live_adapters[yilan_flood_adapter.metadata.key] = yilan_flood_adapter
+
+    if (
+        settings.source_yilan_water_level_api_enabled
+        and "local.yilan.water_level" in enabled_keys
+    ):
+        yilan_water_level_adapter = YilanWaterLevelArcgisAdapter(
+            api_url=settings.yilan_water_level_layer_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=yilan_water_level_fetch_json,
+        )
+        live_adapters[yilan_water_level_adapter.metadata.key] = yilan_water_level_adapter
+
+    if (
+        settings.source_penghu_water_level_api_enabled
+        and "local.penghu.water_level" in enabled_keys
+    ):
+        penghu_water_level_adapter = PenghuWaterLevelArcgisAdapter(
+            api_url=settings.penghu_water_level_layer_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=penghu_water_level_fetch_json,
+        )
+        live_adapters[penghu_water_level_adapter.metadata.key] = penghu_water_level_adapter
+
+    fhy_api_gates = {
+        HSINCHU_COUNTY_FHY_FLOOD_SENSOR.metadata.key: (
+            settings.source_hsinchu_county_fhy_flood_sensor_api_enabled
+        ),
+        MIAOLI_FHY_FLOOD_SENSOR.metadata.key: settings.source_miaoli_fhy_flood_sensor_api_enabled,
+        CHANGHUA_FHY_FLOOD_SENSOR.metadata.key: (
+            settings.source_changhua_fhy_flood_sensor_api_enabled
+        ),
+        PINGTUNG_FHY_FLOOD_SENSOR.metadata.key: (
+            settings.source_pingtung_fhy_flood_sensor_api_enabled
+        ),
+        HUALIEN_FHY_FLOOD_SENSOR.metadata.key: settings.source_hualien_fhy_flood_sensor_api_enabled,
+        TAITUNG_FHY_FLOOD_SENSOR.metadata.key: settings.source_taitung_fhy_flood_sensor_api_enabled,
+    }
+    for fhy_source in FHY_LOCAL_FLOOD_SENSOR_SOURCES:
+        if fhy_api_gates[fhy_source.metadata.key] and fhy_source.metadata.key in enabled_keys:
+            fhy_adapter = FhyFloodSensorApiAdapter(
+                fhy_source,
+                station_api_url=settings.fhy_flood_sensor_station_api_url,
+                realtime_api_url=settings.fhy_flood_sensor_realtime_api_url,
+                timeout_seconds=settings.local_water_timeout_seconds,
+                fetched_at=fetched_at,
+                fetch_json=fhy_flood_sensor_fetch_json,
+            )
+            live_adapters[fhy_adapter.metadata.key] = fhy_adapter
+
+    if (
         settings.source_civil_iot_river_api_enabled
         and "official.civil_iot.river_water_level" in enabled_keys
     ):
@@ -228,7 +684,7 @@ def build_runtime_adapters(
         )
         live_adapters[civil_iot_river_adapter.metadata.key] = civil_iot_river_adapter
 
-    for source, api_enabled, sta_url, fetch_json in (
+    for sta_source, api_enabled, sta_url, fetch_json in (
         (
             POND_WATER_LEVEL,
             settings.source_civil_iot_pond_api_enabled,
@@ -247,10 +703,16 @@ def build_runtime_adapters(
             settings.civil_iot_pump_url,
             civil_iot_pump_fetch_json,
         ),
+        (
+            GATE_WATER_LEVEL,
+            settings.source_civil_iot_gate_api_enabled,
+            settings.civil_iot_gate_url,
+            civil_iot_gate_fetch_json,
+        ),
     ):
-        if api_enabled and source.metadata.key in enabled_keys:
+        if api_enabled and sta_source.metadata.key in enabled_keys:
             water_level_adapter = StaWaterLevelApiAdapter(
-                source,
+                sta_source,
                 sta_url=sta_url,
                 timeout_seconds=settings.civil_iot_api_timeout_seconds,
                 fetched_at=fetched_at,
@@ -271,6 +733,7 @@ def build_runtime_adapters(
             flood_sensor_use_live=settings.source_flood_sensor_use_live,
             tainan_flood_sensor_api_enabled=settings.source_tainan_flood_sensor_api_enabled,
             civil_iot_river_api_enabled=settings.source_civil_iot_river_api_enabled,
+            civil_iot_gate_api_enabled=settings.source_civil_iot_gate_api_enabled,
         )
         return {}
 

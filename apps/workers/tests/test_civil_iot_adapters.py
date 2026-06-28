@@ -21,6 +21,89 @@ from app.jobs.runtime import build_runtime_adapters
 FETCHED_AT = datetime(2026, 6, 15, 3, 10, tzinfo=UTC)
 
 
+def test_civil_iot_sta_defaults_use_colife_endpoint() -> None:
+    from app.adapters.civil_iot import sta_client
+
+    assert (
+        sta_client.STA_WATER_RESOURCE_BASE
+        == "https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/"
+    )
+    assert (
+        getattr(sta_client, "STA_RAIN_SEWER_BASE", None)
+        == "https://sta.colife.org.tw/STA_RainSewer/v1.0/"
+    )
+
+
+def test_fetch_sta_json_encodes_odata_url_before_request(monkeypatch) -> None:
+    from app.adapters.civil_iot import sta_client
+
+    requested_urls: list[str] = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"value": []}'
+
+    def _fake_urlopen(request, timeout):
+        requested_urls.append(request.full_url)
+        return _Response()
+
+    monkeypatch.setattr(sta_client, "urlopen", _fake_urlopen)
+
+    sta_client.fetch_sta_json(
+        "https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/Things"
+        "?$expand=Datastreams($expand=Observations($orderby=phenomenonTime desc;$top=1))"
+        "&$filter=substringof('淹水',Datastreams/name)",
+        timeout_seconds=8,
+    )
+
+    assert requested_urls == [
+        "https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/Things"
+        "?$expand=Datastreams($expand=Observations($orderby=phenomenonTime%20desc;$top=1))"
+        "&$filter=substringof('%E6%B7%B9%E6%B0%B4',Datastreams/name)"
+    ]
+
+
+def test_fetch_sta_json_preserves_encoded_next_link_plus_spacing(monkeypatch) -> None:
+    from app.adapters.civil_iot import sta_client
+
+    requested_urls: list[str] = []
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"value": []}'
+
+    def _fake_urlopen(request, timeout):
+        requested_urls.append(request.full_url)
+        return _Response()
+
+    monkeypatch.setattr(sta_client, "urlopen", _fake_urlopen)
+    next_link = (
+        "https://sta.colife.org.tw/STA_RainSewer/v1.0/Things"
+        "?$top=2000&$skip=2000"
+        "&$expand=Locations,Datastreams%28%24expand%3DObservations%28"
+        "%24top%3D1%3B%24skip%3D0%3B%24orderby%3DphenomenonTime+desc"
+        "%2C%40iot.id+asc%29%3B%24orderby%3D%40iot.id+asc%29"
+        "&$orderby=%40iot.id+asc"
+        "&$skipFilter=%28%40iot.id+gt+2000%29"
+    )
+
+    sta_client.fetch_sta_json(next_link, timeout_seconds=8)
+
+    assert requested_urls == [next_link]
+
+
 def _flood_sensor_payload() -> dict:
     return {
         "value": [
@@ -32,6 +115,8 @@ def _flood_sensor_payload() -> dict:
                     "authority": "水利署",
                     "city": "臺南市",
                     "town": "中西區",
+                    "countyCode": "67000",
+                    "areaCode": "67000370",
                 },
                 "Locations": [
                     {"location": {"type": "Point", "coordinates": [120.2, 23.0]}}
@@ -155,7 +240,25 @@ def test_parse_sta_things_payload_flattens_latest_observation() -> None:
     assert first["longitude"] == 120.2
     assert first["geometry"] == {"type": "Point", "coordinates": [120.2, 23.0]}
     assert first["location_text"] == "臺南市 中西區"
+    assert first["county"] == "臺南市"
+    assert first["town"] == "中西區"
+    assert first["county_code"] == "67000"
+    assert first["area_code"] == "67000370"
     assert first["authority"] == "水利署"
+
+
+def test_parse_sta_things_payload_infers_county_from_local_authority() -> None:
+    payload = _flood_sensor_payload()
+    payload["value"][0]["properties"].pop("city")
+    payload["value"][0]["properties"].pop("town")
+    payload["value"][0]["properties"]["authority"] = "高雄市政府水利局"
+
+    records = parse_sta_things_payload(
+        payload, source_url="https://example.test/water_12"
+    )
+
+    assert records[0]["county"] == "高雄市"
+    assert "town" not in records[0]
 
 
 def test_flood_sensor_api_adapter_keeps_zero_and_low_depth_readings_distinct() -> None:

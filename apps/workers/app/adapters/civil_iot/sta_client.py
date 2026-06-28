@@ -1,10 +1,10 @@
 """Shared OGC SensorThings API (STA) client for Civil IoT Taiwan.
 
-Civil IoT Taiwan (``ci.taiwan.gov.tw``) publishes WRA flood sensors, river water
-levels, agricultural pond levels, sewer levels, pump stations, and CWA rainfall
-through one OGC SensorThings API. This module fetches and flattens the standard
-STA ``Things``/``Locations``/``Datastreams``/``Observations`` shape into per
-station latest-observation records that adapters can normalize.
+Civil IoT Taiwan publishes WRA flood sensors, river water levels, agricultural
+pond levels, sewer levels, pump stations, and CWA rainfall through OGC
+SensorThings APIs. This module fetches and flattens the standard STA
+``Things``/``Locations``/``Datastreams``/``Observations`` shape into per station
+latest-observation records that adapters can normalize.
 
 The higher level adapters (flood sensor, river water level) build on this client
 so the STA parsing primitives are written once, mirroring the worker-internal
@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping
 from typing import Any, Callable
+from urllib.parse import quote
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -23,8 +24,9 @@ from app.adapters._helpers import optional_float, optional_str, parse_observed_a
 
 StaFetchJson = Callable[[str, int], Any]
 
-# Civil IoT Taiwan water-resource SensorThings service base.
-STA_WATER_RESOURCE_BASE = "https://sta.ci.taiwan.gov.tw/STA_WaterResource_v2/v1.0/"
+# Civil IoT Taiwan SensorThings service bases.
+STA_WATER_RESOURCE_BASE = "https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/"
+STA_RAIN_SEWER_BASE = "https://sta.colife.org.tw/STA_RainSewer/v1.0/"
 CIVIL_IOT_HOMEPAGE = "https://ci.taiwan.gov.tw/dsp/"
 CIVIL_IOT_USER_AGENT = "FloodRiskTaiwan/0.1 worker-civil-iot-sta"
 DEFAULT_STA_TIMEOUT_SECONDS = 8
@@ -33,6 +35,35 @@ DEFAULT_STA_TIMEOUT_SECONDS = 8
 DEFAULT_THINGS_EXPAND = (
     "Locations,"
     "Datastreams($expand=Observations($orderby=phenomenonTime desc;$top=1))"
+)
+
+TAIWAN_COUNTY_ALIASES: tuple[tuple[str, str], ...] = (
+    ("臺北市", "臺北市"),
+    ("台北市", "臺北市"),
+    ("新北市", "新北市"),
+    ("桃園市", "桃園市"),
+    ("臺中市", "臺中市"),
+    ("台中市", "臺中市"),
+    ("臺南市", "臺南市"),
+    ("台南市", "臺南市"),
+    ("高雄市", "高雄市"),
+    ("基隆市", "基隆市"),
+    ("新竹市", "新竹市"),
+    ("嘉義市", "嘉義市"),
+    ("新竹縣", "新竹縣"),
+    ("苗栗縣", "苗栗縣"),
+    ("彰化縣", "彰化縣"),
+    ("南投縣", "南投縣"),
+    ("雲林縣", "雲林縣"),
+    ("嘉義縣", "嘉義縣"),
+    ("屏東縣", "屏東縣"),
+    ("宜蘭縣", "宜蘭縣"),
+    ("花蓮縣", "花蓮縣"),
+    ("臺東縣", "臺東縣"),
+    ("台東縣", "臺東縣"),
+    ("澎湖縣", "澎湖縣"),
+    ("金門縣", "金門縣"),
+    ("連江縣", "連江縣"),
 )
 
 
@@ -52,7 +83,7 @@ def parse_sta_things_payload(
     payload: object,
     *,
     source_url: str,
-    datastream_name_contains: str | None = None,
+    datastream_name_contains: str | tuple[str, ...] | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     """Flatten an STA ``Things`` collection into latest-observation records.
 
@@ -88,14 +119,14 @@ def fetch_paginated_sta_things_records(
     timeout_seconds: int,
     fetch_json: StaFetchJson,
     source_url: str,
-    datastream_name_contains: str | None = None,
+    datastream_name_contains: str | tuple[str, ...] | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     """Fetch a paginated STA Things collection and flatten all pages."""
 
-    next_url = start_url
+    next_url: str | None = start_url
     seen_urls: set[str] = set()
     records: list[Mapping[str, Any]] = []
-    while next_url:
+    while next_url is not None:
         if next_url in seen_urls:
             raise CivilIotStaPayloadError(
                 f"Civil IoT SensorThings payload repeated @iot.nextLink: {next_url}"
@@ -137,7 +168,7 @@ def _parse_thing(
     thing: Mapping[str, Any],
     *,
     source_url: str,
-    datastream_name_contains: str | None = None,
+    datastream_name_contains: str | tuple[str, ...] | None = None,
 ) -> Mapping[str, Any] | None:
     properties = thing.get("properties")
     properties = properties if isinstance(properties, Mapping) else {}
@@ -192,6 +223,70 @@ def _parse_thing(
     if location_text is not None:
         record["location_text"] = location_text
 
+    county = _first_text(
+        properties,
+        "county",
+        "County",
+        "city",
+        "City",
+        "countyName",
+        "CountyName",
+        "COUNTYNAME",
+        "cityName",
+        "CityName",
+        "CITYNAME",
+    ) or _infer_county(properties, station_name)
+    if county is not None:
+        record["county"] = county
+
+    _add_first_text(
+        record,
+        "town",
+        properties,
+        "town",
+        "Town",
+        "district",
+        "District",
+        "townName",
+        "TownName",
+        "TOWNNAME",
+        "districtName",
+        "DistrictName",
+        "DISTRICTNAME",
+        "areaName",
+        "AreaName",
+        "AREANAME",
+    )
+    _add_first_text(
+        record,
+        "county_code",
+        properties,
+        "countyCode",
+        "CountyCode",
+        "COUNTYCODE",
+        "county_code",
+        "COUNTY_CODE",
+        "cityCode",
+        "CityCode",
+        "CITYCODE",
+    )
+    _add_first_text(
+        record,
+        "area_code",
+        properties,
+        "areaCode",
+        "AreaCode",
+        "AREACODE",
+        "area_code",
+        "AREA_CODE",
+        "townCode",
+        "TownCode",
+        "TOWNCODE",
+        "districtCode",
+        "DistrictCode",
+        "DISTRICTCODE",
+    )
+
     coordinate = _thing_coordinate(thing)
     if coordinate is not None:
         lat, lng = coordinate
@@ -211,19 +306,29 @@ def _datastreams(thing: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
 
 def _select_datastream(
     thing: Mapping[str, Any],
-    name_contains: str | None,
+    name_contains: str | tuple[str, ...] | None,
 ) -> Mapping[str, Any] | None:
     datastreams = _datastreams(thing)
-    if name_contains:
-        for datastream in datastreams:
-            name = optional_str(datastream.get("name")) or ""
-            if name_contains in name and _latest_observation(datastream) is not None:
-                return datastream
+    name_tokens = _datastream_name_tokens(name_contains)
+    if name_tokens:
+        for token in name_tokens:
+            for datastream in datastreams:
+                name = optional_str(datastream.get("name")) or ""
+                if token in name and _latest_observation(datastream) is not None:
+                    return datastream
         return None
     for datastream in datastreams:
         if _latest_observation(datastream) is not None:
             return datastream
     return None
+
+
+def _datastream_name_tokens(name_contains: str | tuple[str, ...] | None) -> tuple[str, ...]:
+    if name_contains is None:
+        return ()
+    if isinstance(name_contains, str):
+        return (name_contains,)
+    return tuple(token for token in name_contains if token)
 
 
 def _latest_observation(datastream: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -251,6 +356,32 @@ def _location_text(properties: Mapping[str, Any]) -> str | None:
     ]
     joined = " ".join(part for part in parts if part)
     return joined or None
+
+
+def _add_first_text(
+    target: dict[str, Any],
+    target_key: str,
+    item: Mapping[str, Any],
+    *source_keys: str,
+) -> None:
+    value = _first_text(item, *source_keys)
+    if value is not None:
+        target[target_key] = value
+
+
+def _infer_county(properties: Mapping[str, Any], station_name: str) -> str | None:
+    texts = (
+        _first_text(properties, "authority", "Authority", "owner"),
+        _first_text(properties, "stationName", "StationName", "STATIONNAME"),
+        station_name,
+    )
+    for text in texts:
+        if text is None:
+            continue
+        for alias, canonical in TAIWAN_COUNTY_ALIASES:
+            if alias in text:
+                return canonical
+    return None
 
 
 def _thing_coordinate(thing: Mapping[str, Any]) -> tuple[float, float] | None:
@@ -299,7 +430,7 @@ def _first_value(item: Mapping[str, Any], *keys: str) -> object:
 
 def fetch_sta_json(url: str, timeout_seconds: int) -> Any:
     request = Request(
-        url,
+        _request_url(url),
         headers={
             "Accept": "application/json",
             "User-Agent": CIVIL_IOT_USER_AGENT,
@@ -323,3 +454,7 @@ def fetch_sta_json(url: str, timeout_seconds: int) -> Any:
             "Civil IoT SensorThings API returned a non-object/list JSON payload"
         )
     return payload
+
+
+def _request_url(url: str) -> str:
+    return quote(url, safe=":/?&=$,();'@%+")

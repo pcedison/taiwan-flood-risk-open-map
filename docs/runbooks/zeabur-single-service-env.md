@@ -14,14 +14,23 @@ Use this checklist when filling Zeabur environment variables for the current sin
 
 Do not use `/ready` as the first health check. `/ready` checks PostgreSQL and Redis, so it can fail before those services exist.
 
-This checklist is for the deployable single-service public beta. By default it
-starts API and Web only. It can also start a beta ingestion scheduler in the
-same container when `HOSTED_INGESTION_SCHEDULER_ENABLED=true`; that scheduler
-uses the existing worker managed-ingestion path, persists official snapshots to
-Postgres, promotes them to evidence, and guards repeated runs with the
-Postgres scheduler lease. A separate worker/scheduler topology is still the
-preferred production operating model once alerting, scaling, and incident
-ownership are accepted.
+This checklist is for the deployable single-service public beta. The container
+always starts API and Web. When `DATABASE_URL` or `WORKER_DATABASE_URL` is
+attached, `HOSTED_INGESTION_SCHEDULER_ENABLED=auto` starts the beta ingestion
+scheduler in the same container by default. That scheduler uses the existing
+worker managed-ingestion path, persists official snapshots to Postgres,
+promotes them to evidence, and guards repeated runs with the Postgres scheduler
+lease. The production beta start script forces the realtime backbone on when a
+database URL is present, so legacy `HOSTED_INGESTION_SCHEDULER_ENABLED=false`
+does not keep the backbone disabled. Set
+`REALTIME_BACKBONE_INGESTION_DISABLED=true` as the explicit kill switch. A
+separate worker/scheduler topology is still the preferred production operating
+model once alerting, scaling, and incident ownership are accepted.
+
+When a database URL is attached, the start script also applies any unrecorded
+`infra/migrations/*.sql` files before launching API/Web. Migrations are tracked
+in `schema_migrations` and can be disabled only with
+`RUN_DATABASE_MIGRATIONS_ON_START=false`.
 
 ## Required Variables
 
@@ -58,29 +67,46 @@ public basemap.
 | `API_VERSION` | Release label, for example `preview-2026-04-29` | You want `/health` to show a recognizable version. |
 | `CORS_ORIGINS` | The Zeabur origin, for example `https://your-service.zeabur.app` | A separate site will call the API directly. Usually unnecessary for same-origin preview. |
 
-## Optional Single-Service Official Ingestion
+## Single-Service Official Ingestion
 
-Use this only after PostgreSQL migrations have been applied and the source
-credentials are intentionally enabled. The scheduler runs inside the same
-Zeabur service as API/Web so the public beta can receive official CWA/WRA
-snapshots before a dedicated worker service exists.
+Use this after PostgreSQL migrations have been applied. The scheduler runs
+inside the same Zeabur service as API/Web so the public beta can receive
+official CWA/WRA, WRA IoW, NCDR CAP, and Civil IoT backbone snapshots before a
+dedicated worker service exists. Source gates default to `true` in the
+single-service scheduler, but each gate can still be set to `false` in Zeabur to
+disable that source.
 
 | Variable | Zeabur value |
 |---|---|
-| `HOSTED_INGESTION_SCHEDULER_ENABLED` | `true` |
+| `HOSTED_INGESTION_SCHEDULER_ENABLED` | Leave unset or set `auto`; legacy `false` is overridden by `REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true` |
 | `DATABASE_URL` | Zeabur Postgres connection URL |
 | `WORKER_DATABASE_URL` | Leave blank to reuse `DATABASE_URL`, or set the same Postgres URL |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level` |
+| `REALTIME_BACKBONE_FORCE_INGESTION_ON_START` | Leave unset or `true`; forces the realtime backbone on when DB is attached |
+| `REALTIME_BACKBONE_INGESTION_DISABLED` | Leave unset or `false`; set `true` only as the explicit kill switch |
+| `REALTIME_BACKBONE_ADAPTER_KEYS` | Leave unset for the full backbone, or set the same full list below to override an old `WORKER_ENABLED_ADAPTER_KEYS` |
+| `RUN_DATABASE_MIGRATIONS_ON_START` | Leave unset or `true`; use `false` only for an operator-managed migration window |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level` |
+| `SOURCE_CWA_ENABLED` | Leave unset or `true`; `false` disables CWA ingestion |
 | `SOURCE_CWA_API_ENABLED` | `true` |
 | `CWA_API_AUTHORIZATION` | Your CWA API authorization token |
+| `SOURCE_WRA_ENABLED` | Leave unset or `true`; `false` disables WRA ingestion |
 | `SOURCE_WRA_API_ENABLED` | `true` |
+| `SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED` | `true` |
+| `SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED` | `true` |
+| `SOURCE_NCDR_CAP_ENABLED` | `true` |
+| `SOURCE_NCDR_CAP_API_ENABLED` | `true` |
+| `SOURCE_FLOOD_SENSOR_ENABLED` | `true` |
+| `SOURCE_FLOOD_SENSOR_API_ENABLED` | `true` |
+| `SOURCE_FLOOD_SENSOR_USE_LIVE` | `true` |
+| `SOURCE_CIVIL_IOT_SEWER_ENABLED` | `true` |
+| `SOURCE_CIVIL_IOT_SEWER_API_ENABLED` | `true` |
+| `SOURCE_CIVIL_IOT_PUMP_ENABLED` | `true` |
+| `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `true` |
+| `SOURCE_CIVIL_IOT_GATE_ENABLED` | `true` |
+| `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` |
 | `WRA_STATION_API_URL` | Leave blank unless overriding the WRA station metadata endpoint |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` for a 5-minute beta cadence |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` |
-
-Leave `SOURCE_CWA_ENABLED` and `SOURCE_WRA_ENABLED` unset unless you need an
-explicit override. Setting either to `false` disables that source even when it
-is listed in `WORKER_ENABLED_ADAPTER_KEYS`.
 
 ## Leave Blank For First Preview
 

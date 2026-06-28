@@ -214,8 +214,10 @@ def test_write_evidence_upserts_official_realtime_latest_for_flood_depth() -> No
 
     assert evidence_id == "evidence-id"
     assert connection.committed is True
-    assert len(connection.cursor_instance.executions) == 2
-    latest_sql, latest_params = connection.cursor_instance.executions[1]
+    assert len(connection.cursor_instance.executions) == 3
+    admin_sql, _admin_params = connection.cursor_instance.executions[0]
+    latest_sql, latest_params = connection.cursor_instance.executions[2]
+    assert "FROM admin_area_profiles" in admin_sql
     assert "INSERT INTO official_realtime_latest" in latest_sql
     assert "WHERE EXCLUDED.observed_at >= official_realtime_latest.observed_at" in latest_sql
     assert latest_params[0] == "FS-001:2026-06-15T03:00:00+00:00"
@@ -227,8 +229,114 @@ def test_write_evidence_upserts_official_realtime_latest_for_flood_depth() -> No
     assert latest_params[6] == OBSERVED_AT
     assert json.loads(str(latest_params[7])) == {"type": "Point", "coordinates": [120.2, 23.0]}
     assert latest_params[12] == 18.0
-    assert latest_params[16] == 0.5
-    assert latest_params[17] == "evidence-id"
+    assert latest_params[16] is None
+    assert latest_params[17] == 0.5
+    assert latest_params[18] == "evidence-id"
+
+
+def test_write_evidence_enriches_missing_admin_area_from_point_geometry() -> None:
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        admin_area_row=("臺北市", "中正區", "黎明里"),
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.civil_iot.gate_water_level",
+        source_id="GATE-001:2026-06-15T03:00:00+00:00",
+        source_type="official",
+        event_type="water_level",
+        title="Gate water level",
+        summary="Observed external gate water level",
+        url="https://example.test/civil-iot/gate/GATE-001",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.9,
+        raw_ref="raw/civil-iot/gate/gate-001.json",
+        properties={
+            "adapter_key": "official.civil_iot.gate_water_level",
+            "station_id": "GATE-001",
+            "station_name": "水門監測站",
+            "authority": "第四河川分署",
+            "water_level_m": 1.38,
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [121.52, 25.04]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    admin_sql, admin_params = connection.cursor_instance.executions[0]
+    insert_sql, insert_params = connection.cursor_instance.executions[1]
+    assert "FROM admin_area_profiles" in admin_sql
+    assert "ST_Covers" in admin_sql
+    assert json.loads(str(admin_params[0])) == {"type": "Point", "coordinates": [121.52, 25.04]}
+    assert "INSERT INTO evidence" in insert_sql
+    properties = json.loads(str(insert_params[14]))
+    assert properties["county"] == "臺北市"
+    assert properties["town"] == "中正區"
+    assert properties["village"] == "黎明里"
+    latest_params = connection.cursor_instance.executions[2][1]
+    assert latest_params[1] == "official.civil_iot.gate_water_level"
+
+
+def test_write_evidence_marks_local_latest_as_duplicate_candidate_near_central_backbone() -> None:
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        central_duplicate_row=("official.civil_iot.flood_sensor", "CIVIL-FS-001"),
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="local.tainan.flood_sensor",
+        source_id="TN-FS-001:2026-06-15T03:00:00+00:00",
+        source_type="official",
+        event_type="flood_report",
+        title="Tainan flood sensor report",
+        summary="Observed local flood depth 17 cm",
+        url="https://example.test/tainan/flood-sensor/TN-FS-001",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.9,
+        raw_ref="raw/tainan/flood-sensor/tn-fs-001.json",
+        properties={
+            "adapter_key": "local.tainan.flood_sensor",
+            "station_id": "TN-FS-001",
+            "station_name": "臺南淹水感測器",
+            "authority": "Tainan City Government",
+            "flood_depth_cm": 17.0,
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [120.2, 23.0]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    duplicate_sql, duplicate_params = connection.cursor_instance.executions[1]
+    insert_sql, insert_params = connection.cursor_instance.executions[2]
+    latest_sql, latest_params = connection.cursor_instance.executions[3]
+    assert "FROM official_realtime_latest" in duplicate_sql
+    assert "adapter_key NOT LIKE 'local.%'" in duplicate_sql
+    assert duplicate_params[0] == "flood_report"
+    assert json.loads(str(duplicate_params[3])) == {"type": "Point", "coordinates": [120.2, 23.0]}
+    properties = json.loads(str(insert_params[14]))
+    assert properties["quality_flags"]["duplicate_candidate"] is True
+    assert properties["quality_flags"]["duplicate_of_adapter_key"] == "official.civil_iot.flood_sensor"
+    assert properties["quality_flags"]["duplicate_of_station_id"] == "CIVIL-FS-001"
+    assert properties["source_weight"] == 0.45
+    assert "source_weight" in latest_sql
+    assert latest_params[16] == 0.45
+    assert json.loads(str(latest_params[21])) == {
+        "duplicate_candidate": True,
+        "duplicate_of_adapter_key": "official.civil_iot.flood_sensor",
+        "duplicate_of_station_id": "CIVIL-FS-001",
+    }
 
 
 def test_write_evidence_skips_latest_when_station_id_missing() -> None:
@@ -367,7 +475,7 @@ def test_write_evidence_does_not_overwrite_newer_latest_with_older_observation()
 
     writer.write_evidence(payload)
 
-    latest_sql, latest_params = connection.cursor_instance.executions[1]
+    latest_sql, latest_params = connection.cursor_instance.executions[2]
     assert "WHERE EXCLUDED.observed_at >= official_realtime_latest.observed_at" in latest_sql
     assert latest_params[6] == datetime(2026, 4, 28, 9, 50, tzinfo=timezone.utc)
     assert connection.cursor_instance.latest_attempted is True
@@ -517,11 +625,15 @@ class _FakeConnection:
         rows: list[tuple[object, ...]],
         evidence_id: str,
         existing_latest_observed_at: datetime | None = None,
+        admin_area_row: tuple[str, str | None, str | None] | None = None,
+        central_duplicate_row: tuple[str, str] | None = None,
     ) -> None:
         self.cursor_instance = _FakeCursor(
             rows=rows,
             evidence_id=evidence_id,
             existing_latest_observed_at=existing_latest_observed_at,
+            admin_area_row=admin_area_row,
+            central_duplicate_row=central_duplicate_row,
         )
         self.committed = False
 
@@ -545,9 +657,13 @@ class _FakeCursor:
         rows: list[tuple[object, ...]],
         evidence_id: str,
         existing_latest_observed_at: datetime | None,
+        admin_area_row: tuple[str, str | None, str | None] | None,
+        central_duplicate_row: tuple[str, str] | None,
     ) -> None:
         self._rows = tuple(rows)
         self._evidence_id = evidence_id
+        self._admin_area_row = admin_area_row
+        self._central_duplicate_row = central_duplicate_row
         self.executions: list[tuple[str, tuple[object, ...]]] = []
         self._existing_latest_observed_at = existing_latest_observed_at
         self.latest_attempted = False
@@ -585,4 +701,8 @@ class _FakeCursor:
         return self._rows
 
     def fetchone(self) -> tuple[str]:
+        if self.executions and "FROM admin_area_profiles" in self.executions[-1][0]:
+            return self._admin_area_row
+        if self.executions and "FROM official_realtime_latest" in self.executions[-1][0]:
+            return self._central_duplicate_row
         return (self._evidence_id,)

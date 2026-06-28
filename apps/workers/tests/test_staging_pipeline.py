@@ -90,6 +90,10 @@ def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:
                 "value": 12.0,
                 "source_url": "https://example.test/official/civil-iot/flood-sensor",
                 "authority": "水利署",
+                "county": "臺南市",
+                "town": "仁德區",
+                "county_code": "67000",
+                "area_code": "67000270",
                 "datastream_name": "淹水深度",
             },
         ),
@@ -102,6 +106,13 @@ def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:
     assert batch.accepted[0].occurred_at == source_ts
     assert batch.raw_snapshot.fetched_at == fetched_at
     assert batch.accepted[0].payload["flood_depth_cm"] == 12.0
+    assert batch.accepted[0].payload["station_id"] == "FS-001"
+    assert batch.accepted[0].payload["station_name"] == "淹水感測器"
+    assert batch.accepted[0].payload["authority"] == "水利署"
+    assert batch.accepted[0].payload["county"] == "臺南市"
+    assert batch.accepted[0].payload["town"] == "仁德區"
+    assert batch.accepted[0].payload["county_code"] == "67000"
+    assert batch.accepted[0].payload["area_code"] == "67000270"
 
 
 def test_build_staging_batch_preserves_cap_fields_needed_for_promotion() -> None:
