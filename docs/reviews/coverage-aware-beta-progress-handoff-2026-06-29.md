@@ -159,15 +159,20 @@ contract request、authorization request，或 metadata release monitoring。
 
 ### 1. 不能宣稱鄉鎮鄰里級完整即時覆蓋
 
-目前 coverage catalog 是縣市級與訊號族級，不是「查詢點半徑內感測器密度」級。
+原本 coverage catalog 是縣市級與訊號族級，不是「查詢點半徑內感測器密度」級。
+2026-06-29 的 query-point nearby coverage 初版已把 public risk response、API contract、
+Web panel、diagnostics 與 runtime smoke assertion 接上 `nearby_realtime_coverage`，
+可以回報最近感測器距離、500m / 1km / 3km / 5km 站數、缺哪些水文訊號，
+並明確區分「縣市有資料」和「查詢點附近真的有 fresh 即時資料」。
 
 尚未完成：
 
-- 查詢點附近最近感測器距離分級。
 - 鄉鎮 / 村里 / 鄰里級 coverage heatmap。
-- 依事件類型計算有效半徑，例如水位站、雨量站、淹水感測器不可共用同一半徑。
-- 對「最近感測器太遠」的 public API / UI 明確提示。
-- 查詢結果中將「有縣市資料」和「附近有即時資料」分開說明。
+- 依事件類型與地形情境校準有效半徑；目前初版採固定 500m / 1km / 3km / 5km
+  bucket 與 signal-level coverage level，尚未建立水位站、雨量站、淹水感測器的
+  差異化 production 門檻。
+- full Docker runtime smoke 尚未在本機通過；目前已加入 assertion，但 Docker daemon
+  未啟動時仍無法證明 live Compose API 實際跑過該檢查。
 
 ### 2. 金門地方直連 read API 尚未完成
 
@@ -263,15 +268,18 @@ contract request、authorization request，或 metadata release monitoring。
 
 ### 1. 查詢點半徑內 coverage 評估
 
-接手者應優先建立「查詢點附近」評估，而不是只看 county coverage。
+初版已建立「查詢點附近」評估，而不是只看 county coverage。
 
-建議輸出：
+目前 public response 欄位為 `nearby_realtime_coverage`，已輸出：
 
 - nearest sensor distance by signal type。
 - sensor count within 500m / 1km / 3km / 5km。
 - coverage confidence：high / medium / low / no-local-sensor。
 - missing nearby signal types。
 - stale nearby station count。
+
+下一步應把這套評估擴展到 admin / ops dashboard、township / village heatmap，
+並用實際事件回放校準各 signal type 的有效半徑。
 
 ### 2. UI / Public API 文案分級
 
@@ -361,7 +369,8 @@ Civil IoT、WRA IoW、FHY、地方平台可能有同源或重疊感測器。
 1. 先 sync branch `codex/local-source-candidate-smoke`。
 2. 跑本文件下方的驗證指令。
 3. 檢查 `GET /admin/v1/local-source-coverage` 與 `GET /admin/v1/local-source-action-plan`。
-4. 優先做查詢點半徑內 coverage 評估，解決「縣市有資料但查詢點附近沒有資料」問題。
+4. 複驗並擴充 `nearby_realtime_coverage`，確認「縣市有資料但查詢點附近沒有資料」
+   的 public API / UI 邊界在 Docker runtime 與正式環境都成立。
 5. 再推臺北疏散門 fallback、雲林 status-only UI、苗栗/屏東/臺東 request packet 流程。
 6. 最後處理花蓮、金門、連江這類需要人工授權或政策合作的項目。
 
@@ -383,3 +392,56 @@ PYTHONPATH=apps/api /Users/marcus/.cache/codex-runtimes/codex-primary-runtime/de
 
 注意：系統預設 `/usr/bin/python3` 是 Python 3.9，不能跑本專案 API 測試；專案使用
 Python 3.12 語法，例如 PEP 695 generic function syntax。
+
+## Query-point nearby coverage implementation status
+
+2026-06-29 query-point nearby coverage 初版已落地在 public API、Web UI、runtime
+smoke assertion 與 handoff 文件中。Public risk response 欄位為
+`nearby_realtime_coverage`。
+
+已驗證：
+
+```powershell
+$py='C:\Users\y_mea\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+$env:PYTHONPATH='apps/api'
+& $py -m pytest apps/api/tests/test_nearby_realtime_coverage.py apps/api/tests/test_evidence_repository.py apps/api/tests/test_public_risk_service.py apps/api/tests/test_public_contract.py -q -p no:cacheprovider --basetemp '.codex-tmp\pytest\basetemp'
+# 103 passed, 2 existing warnings
+
+$env:PYTHONPATH='apps/api'
+& $py infra/scripts/validate_openapi.py
+# OpenAPI 3.1 spec valid. paths=16 schemas=61
+
+npm test --prefix apps/web
+# 49 passed
+
+npm run lint --prefix apps/web
+# passed
+
+npm run typecheck --prefix apps/web
+# passed
+```
+
+Full Docker runtime smoke status on this machine:
+
+- `.\\scripts\\runtime-smoke.ps1 -StopOnExit` was blocked by local PowerShell
+  execution policy before running.
+- Retried with `powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\runtime-smoke.ps1 -StopOnExit`.
+- The script reached Docker daemon verification but failed before API/Web runtime
+  assertions because Docker daemon was unavailable:
+
+```text
+failed to connect to the docker API at npipe:////./pipe/docker_engine; check if the path is correct and if the daemon is running: open //./pipe/docker_engine: The system cannot find the file specified.
+Runtime smoke failed: Checking Docker daemon exited with code 1
+```
+
+Additional local Docker warning:
+
+```text
+WARNING: Error loading config file: open C:\Users\y_mea\.docker\config.json: Access is denied.
+```
+
+Boundary statement: county coverage is not nearby coverage. A county can have
+local or central realtime sources while the queried point still has no fresh
+sensor within the relevant radius. Public API and UI must continue to describe
+the nearby result as `high` / `medium` / `low` / `no_local_sensor` /
+`unavailable` instead of saying the county is complete or empty.
