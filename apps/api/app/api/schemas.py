@@ -232,6 +232,26 @@ class LocalSourceLiveSmokeReview(ContractModel):
     required_read_api_fields: list[str] = Field(default_factory=list)
 
 
+class LocalSourceIntegrationPriorityItem(ContractModel):
+    rank: int = Field(ge=1)
+    priority_tier: str
+    county: str
+    workstream: str
+    next_action_code: str
+    tracking_status: str
+    requested_counterparty: str
+    blocking_reason: str | None = None
+    why_now: str
+    completion_gate: str
+    missing_signal_types: list[str] = Field(default_factory=list)
+    central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    production_adapter_keys: list[str] = Field(default_factory=list)
+    candidate_source_names: list[str] = Field(default_factory=list)
+    candidate_source_urls: list[str] = Field(default_factory=list)
+    application_urls: list[str] = Field(default_factory=list)
+    required_read_api_fields: list[str] = Field(default_factory=list)
+
+
 class LocalSourceActionPlan(ContractModel):
     total_counties: int = Field(ge=0)
     local_direct_complete_count: int = Field(ge=0)
@@ -248,6 +268,12 @@ class LocalSourceActionPlan(ContractModel):
         default_factory=list
     )
     live_smoke_reviews: list[LocalSourceLiveSmokeReview] = Field(default_factory=list)
+    sensor_signal_gap_reviews: list[LocalSourceIntegrationPriorityItem] = Field(
+        default_factory=list
+    )
+    integration_priority_queue: list[LocalSourceIntegrationPriorityItem] = Field(
+        default_factory=list
+    )
 
 
 class AdminLocalSourceActionPlanResponse(ContractModel):

@@ -1187,6 +1187,21 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "臺北市",
         "雲林縣",
     ]
+    assert [item["county"] for item in plan["integration_priority_queue"][:3]] == [
+        "連江縣",
+        "金門縣",
+        "花蓮縣",
+    ]
+    top_priority = plan["integration_priority_queue"][0]
+    assert top_priority["priority_tier"] == "P0"
+    assert top_priority["workstream"] == "restore_hydrologic_backbone"
+    assert top_priority["completion_gate"]
+    assert "hydrologic_observation" in top_priority["central_backbone_missing_signal_types"]
+    signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
+    assert "嘉義市" in signal_gaps
+    assert signal_gaps["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
+    assert "flood_depth" in signal_gaps["嘉義市"]["missing_signal_types"]
+    assert "高雄市" not in signal_gaps
     hualien = plan["authorization_requests"][0]
     assert hualien["requested_counterparty"] == "花蓮縣政府 / Senslink 行動水情維運窗口"
     kinmen = plan["authorization_requests"][1]

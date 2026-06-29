@@ -899,6 +899,56 @@ paths:
                           request_focus: "請官方釋出即時水文觀測 read API。"
                       public_api_contract_reviews: []
                       live_smoke_reviews: []
+                      sensor_signal_gap_reviews:
+                        - rank: 1
+                          priority_tier: P2
+                          county: 嘉義市
+                          workstream: fill_sensor_signal_gap
+                          next_action_code: operate_adapter
+                          tracking_status: needs_signal_gap_review
+                          requested_counterparty: 嘉義市政府公開資料或水利防災維運窗口
+                          blocking_reason: null
+                          why_now: existing adapters do not cover every required water signal family
+                          completion_gate: "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+                          missing_signal_types:
+                            - flood_depth
+                            - sewer_water_level
+                            - pump_or_gate_status
+                          central_backbone_missing_signal_types: []
+                          production_adapter_keys:
+                            - local.chiayi_city.water_level
+                            - local.chiayi_city.rainfall
+                          candidate_source_names: []
+                          candidate_source_urls: []
+                          application_urls: []
+                          required_read_api_fields:
+                            - observed_at
+                            - station_or_device_id
+                            - measurement_value
+                      integration_priority_queue:
+                        - rank: 1
+                          priority_tier: P0
+                          county: 連江縣
+                          workstream: restore_hydrologic_backbone
+                          next_action_code: continue_official_discovery
+                          tracking_status: monitoring_open_data_release
+                          requested_counterparty: 連江縣政府公開資料或防災水利窗口
+                          blocking_reason: "目前只有靜態清冊、站點、抽水站、水門或易淹區 metadata，尚無即時觀測欄位。"
+                          why_now: central_backbone is missing hydrologic observation coverage for this county；local_direct_source is not complete
+                          completion_gate: "取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門即時 read API，並提供 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+                          missing_signal_types:
+                            - water_level
+                            - flood_depth
+                          central_backbone_missing_signal_types:
+                            - hydrologic_observation
+                          production_adapter_keys: []
+                          candidate_source_names: []
+                          candidate_source_urls: []
+                          application_urls: []
+                          required_read_api_fields:
+                            - observed_at
+                            - station_or_device_id
+                            - measurement_value
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2376,6 +2426,8 @@ components:
         - metadata_release_monitors
         - public_api_contract_reviews
         - live_smoke_reviews
+        - sensor_signal_gap_reviews
+        - integration_priority_queue
       properties:
         total_counties:
           type: integer
@@ -2408,6 +2460,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LocalSourceLiveSmokeReview"
+        sensor_signal_gap_reviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceIntegrationPriorityItem"
+        integration_priority_queue:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceIntegrationPriorityItem"
       additionalProperties: false
 
     LocalSourceAuthorizationRequest:
@@ -2588,6 +2648,83 @@ components:
             - string
             - "null"
           format: date-time
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    LocalSourceIntegrationPriorityItem:
+      type: object
+      required:
+        - rank
+        - priority_tier
+        - county
+        - workstream
+        - next_action_code
+        - tracking_status
+        - requested_counterparty
+        - blocking_reason
+        - why_now
+        - completion_gate
+        - missing_signal_types
+        - central_backbone_missing_signal_types
+        - production_adapter_keys
+        - candidate_source_names
+        - candidate_source_urls
+        - application_urls
+        - required_read_api_fields
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        priority_tier:
+          type: string
+          description: Operator priority bucket such as P0, P1, P2, or P3.
+        county:
+          type: string
+        workstream:
+          type: string
+        next_action_code:
+          type: string
+        tracking_status:
+          type: string
+        requested_counterparty:
+          type: string
+        blocking_reason:
+          type:
+            - string
+            - "null"
+        why_now:
+          type: string
+        completion_gate:
+          type: string
+        missing_signal_types:
+          type: array
+          items:
+            type: string
+        central_backbone_missing_signal_types:
+          type: array
+          items:
+            type: string
+        production_adapter_keys:
+          type: array
+          items:
+            type: string
+        candidate_source_names:
+          type: array
+          items:
+            type: string
+        candidate_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        application_urls:
+          type: array
+          items:
+            type: string
+            format: uri
         required_read_api_fields:
           type: array
           items:

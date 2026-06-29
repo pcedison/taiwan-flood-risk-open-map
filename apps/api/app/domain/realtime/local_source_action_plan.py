@@ -20,6 +20,7 @@ def build_local_source_action_plan(
 ) -> dict[str, Any]:
     local_complete = [record for record in records if record.local_direct_complete]
     central_complete = [record for record in records if record.central_backbone_minimum_complete]
+    sensor_signal_gap_reviews = _sensor_signal_gap_reviews(records)
     return {
         "total_counties": len(records),
         "local_direct_complete_count": len(local_complete),
@@ -46,6 +47,11 @@ def build_local_source_action_plan(
             for record in records
             if record.next_action_code == "verify_live_smoke"
         ],
+        "sensor_signal_gap_reviews": sensor_signal_gap_reviews,
+        "integration_priority_queue": _integration_priority_queue(
+            records,
+            sensor_signal_gap_reviews=sensor_signal_gap_reviews,
+        ),
     }
 
 
@@ -111,6 +117,197 @@ def _live_smoke_review(record: LocalSourceCoverageRecord) -> dict[str, Any]:
         "last_followed_up_at": None,
         "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
     }
+
+
+def _sensor_signal_gap_reviews(
+    records: tuple[LocalSourceCoverageRecord, ...],
+) -> list[dict[str, Any]]:
+    gap_records = sorted(
+        (
+            record
+            for record in records
+            if record.local_direct_complete
+            and record.next_action_code == "operate_adapter"
+            and record.missing_signal_types
+        ),
+        key=lambda record: (-len(record.missing_signal_types), record.county),
+    )
+    return [
+        _integration_priority_item(rank=index + 1, record=record)
+        for index, record in enumerate(gap_records)
+    ]
+
+
+def _integration_priority_queue(
+    records: tuple[LocalSourceCoverageRecord, ...],
+    *,
+    sensor_signal_gap_reviews: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    signal_gap_counties = {item["county"] for item in sensor_signal_gap_reviews}
+    candidates = [
+        record
+        for record in records
+        if _needs_integration_work(record, signal_gap_counties=signal_gap_counties)
+    ]
+    ordered = sorted(candidates, key=_integration_sort_key)
+    return [
+        _integration_priority_item(rank=index + 1, record=record)
+        for index, record in enumerate(ordered)
+    ]
+
+
+def _needs_integration_work(
+    record: LocalSourceCoverageRecord,
+    *,
+    signal_gap_counties: set[str],
+) -> bool:
+    return (
+        not record.central_backbone_minimum_complete
+        or not record.local_direct_complete
+        or record.next_action_code != "operate_adapter"
+        or record.county in signal_gap_counties
+    )
+
+
+def _integration_sort_key(record: LocalSourceCoverageRecord) -> tuple[int, int, int, int, str]:
+    return (
+        0 if not record.central_backbone_minimum_complete else 1,
+        0 if not record.local_direct_complete else 1,
+        _workstream_priority(record),
+        -len(record.missing_signal_types),
+        record.county,
+    )
+
+
+def _integration_priority_item(
+    *,
+    rank: int,
+    record: LocalSourceCoverageRecord,
+) -> dict[str, Any]:
+    return {
+        "rank": rank,
+        "priority_tier": _priority_tier(record),
+        "county": record.county,
+        "workstream": _workstream(record),
+        "next_action_code": record.next_action_code,
+        "tracking_status": _tracking_status(record),
+        "requested_counterparty": _requested_counterparty(record),
+        "blocking_reason": record.blocking_reason,
+        "why_now": _why_now(record),
+        "completion_gate": _completion_gate(record),
+        "missing_signal_types": list(record.missing_signal_types),
+        "central_backbone_missing_signal_types": list(
+            record.central_backbone_missing_signal_types
+        ),
+        "production_adapter_keys": list(record.production_adapter_keys),
+        "candidate_source_names": list(record.candidate_source_names),
+        "candidate_source_urls": list(record.candidate_source_urls),
+        "application_urls": list(record.application_urls),
+        "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
+    }
+
+
+def _workstream_priority(record: LocalSourceCoverageRecord) -> int:
+    if not record.central_backbone_minimum_complete:
+        return 0
+    if not record.local_direct_complete:
+        return 1
+    return {
+        "request_official_authorization": 2,
+        "verify_live_smoke": 3,
+        "verify_public_api_contract": 4,
+        "monitor_open_data_release": 5,
+        "continue_official_discovery": 6,
+        "operate_adapter": 7,
+    }[record.next_action_code]
+
+
+def _priority_tier(record: LocalSourceCoverageRecord) -> str:
+    if not record.central_backbone_minimum_complete or not record.local_direct_complete:
+        return "P0"
+    if record.next_action_code in {"request_official_authorization", "verify_live_smoke"}:
+        return "P1"
+    if record.next_action_code == "verify_public_api_contract" or record.missing_signal_types:
+        return "P2"
+    return "P3"
+
+
+def _workstream(record: LocalSourceCoverageRecord) -> str:
+    if not record.central_backbone_minimum_complete:
+        return "restore_hydrologic_backbone"
+    if record.next_action_code == "request_official_authorization":
+        return "request_official_authorization"
+    if record.next_action_code == "verify_live_smoke":
+        return "verify_live_smoke"
+    if record.next_action_code == "verify_public_api_contract":
+        return "verify_public_read_api_contract"
+    if record.next_action_code == "monitor_open_data_release":
+        return "monitor_open_data_release"
+    if record.next_action_code == "continue_official_discovery":
+        return "continue_official_discovery"
+    if record.missing_signal_types:
+        return "fill_sensor_signal_gap"
+    return "operate_adapter"
+
+
+def _tracking_status(record: LocalSourceCoverageRecord) -> str:
+    if record.missing_signal_types and record.next_action_code == "operate_adapter":
+        return "needs_signal_gap_review"
+    return {
+        "request_official_authorization": "needs_authorization_request",
+        "verify_live_smoke": "needs_live_smoke_retry",
+        "verify_public_api_contract": "needs_public_read_api_contract",
+        "monitor_open_data_release": "monitoring_open_data_release",
+        "continue_official_discovery": "continue_official_discovery",
+        "operate_adapter": "operating_adapter",
+    }[record.next_action_code]
+
+
+def _why_now(record: LocalSourceCoverageRecord) -> str:
+    reasons: list[str] = []
+    if not record.central_backbone_minimum_complete:
+        reasons.append(
+            "central_backbone is missing hydrologic observation coverage for this county"
+        )
+    if not record.local_direct_complete:
+        reasons.append("local_direct_source is not complete")
+    if record.requires_application:
+        reasons.append("official authorization is required before a production read API can run")
+    if "needs_review" in record.local_direct_statuses:
+        reasons.append("candidate or status-only source needs live smoke and field semantics review")
+    if "candidate" in record.local_direct_statuses:
+        reasons.append("candidate source needs a public read API contract review")
+    if record.missing_signal_types and record.next_action_code == "operate_adapter":
+        reasons.append(
+            "existing adapters do not cover every required water signal family"
+        )
+    return "；".join(reasons) or "adapter is operating; keep freshness and monitoring active"
+
+
+def _completion_gate(record: LocalSourceCoverageRecord) -> str:
+    if not record.central_backbone_minimum_complete:
+        return (
+            "取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門"
+            "即時 read API，並提供 observed_at、station_or_device_id、measurement_value、"
+            "measurement_unit_or_type 與座標。"
+        )
+    if not record.local_direct_complete:
+        return (
+            "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方"
+            "授權/釋出請求並可追蹤 follow-up 狀態。"
+        )
+    if record.next_action_code == "request_official_authorization":
+        return "取得官方授權或公開 read API contract，確認用途不是設備上傳 API。"
+    if record.next_action_code == "verify_live_smoke":
+        return "live smoke 連續成功，並確認 observed_at、station id、measurement_value、單位、座標與欄位語意。"
+    if record.next_action_code == "verify_public_api_contract":
+        return "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。"
+    if record.missing_signal_types:
+        return (
+            "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 "
+            "observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+        )
+    return "持續以 worker scheduler 寫入 raw snapshot、staging、adapter run 與 promoted evidence。"
 
 
 def _requested_counterparty(record: LocalSourceCoverageRecord) -> str:

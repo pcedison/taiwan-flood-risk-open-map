@@ -77,6 +77,27 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert set(live_smoke_by_county) == {"臺北市", "雲林縣"}
     assert live_smoke_by_county["臺北市"]["tracking_status"] == "needs_live_smoke_retry"
 
+    priority = plan["integration_priority_queue"]
+    assert [item["county"] for item in priority[:3]] == ["連江縣", "金門縣", "花蓮縣"]
+    assert priority[0]["rank"] == 1
+    assert priority[0]["priority_tier"] == "P0"
+    assert priority[0]["workstream"] == "restore_hydrologic_backbone"
+    assert "hydrologic_observation" in priority[0]["central_backbone_missing_signal_types"]
+    assert priority[0]["tracking_status"] == "monitoring_open_data_release"
+    assert priority[1]["workstream"] == "request_official_authorization"
+    assert "local_direct_source" in priority[1]["why_now"]
+    assert "observed_at" in priority[1]["required_read_api_fields"]
+
+    signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
+    assert "嘉義市" in signal_gaps
+    assert {
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    }.issubset(set(signal_gaps["嘉義市"]["missing_signal_types"]))
+    assert signal_gaps["嘉義市"]["workstream"] == "fill_sensor_signal_gap"
+    assert "高雄市" not in signal_gaps
+
 
 def test_local_source_action_plan_keeps_ready_counties_out_of_blocker_queues() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
@@ -95,3 +116,18 @@ def test_local_source_action_plan_keeps_ready_counties_out_of_blocker_queues() -
     assert "臺南市" not in queued_counties
     assert "高雄市" not in queued_counties
     assert "新竹縣" not in queued_counties
+
+
+def test_local_source_action_plan_prioritizes_signal_gap_reviews_after_blockers() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+
+    priority_by_county = {
+        item["county"]: item for item in plan["integration_priority_queue"]
+    }
+
+    assert priority_by_county["連江縣"]["rank"] < priority_by_county["嘉義市"]["rank"]
+    assert priority_by_county["金門縣"]["rank"] < priority_by_county["嘉義市"]["rank"]
+    assert priority_by_county["臺北市"]["rank"] < priority_by_county["嘉義市"]["rank"]
+    assert priority_by_county["嘉義市"]["priority_tier"] == "P2"
+    assert priority_by_county["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
+    assert "measurement_value" in priority_by_county["嘉義市"]["completion_gate"]
