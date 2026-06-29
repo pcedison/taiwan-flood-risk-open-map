@@ -916,10 +916,10 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert summary["central_backbone_minimum_incomplete_count"] == 1
     assert summary["counties_missing_hydrologic_backbone"] == ["連江縣"]
     assert summary["request_official_authorization_count"] == 2
-    assert summary["verify_live_smoke_count"] == 2
+    assert summary["verify_live_smoke_count"] == 1
     assert summary["verify_public_api_contract_count"] == 3
     assert summary["counties_requiring_official_authorization"] == ["花蓮縣", "金門縣"]
-    assert summary["counties_requiring_live_smoke"] == ["臺北市", "雲林縣"]
+    assert summary["counties_requiring_live_smoke"] == ["臺北市"]
     assert summary["counties_requiring_public_api_contract"] == [
         "苗栗縣",
         "屏東縣",
@@ -1065,16 +1065,15 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert counties["彰化縣"]["production_adapter_keys"] == [
         "local.changhua.flood_sensor",
     ]
-    assert counties["雲林縣"]["local_direct_statuses"] == [
-        "ready_implemented",
-        "needs_review",
-    ]
+    assert counties["雲林縣"]["local_direct_statuses"] == ["ready_implemented"]
     assert counties["雲林縣"]["local_direct_complete"] is True
     assert counties["雲林縣"]["production_adapter_keys"] == [
         "local.yunlin.water_level",
     ]
-    assert counties["雲林縣"]["next_action_code"] == "verify_live_smoke"
-    assert "不以 alarmState 假造淹水深度" in " ".join(counties["雲林縣"]["notes"])
+    assert counties["雲林縣"]["next_action_code"] == "operate_adapter"
+    yunlin_notes = " ".join(counties["雲林縣"]["notes"])
+    assert "alarmState" in yunlin_notes
+    assert "不以其假造淹水深度" in yunlin_notes
     assert counties["雲林縣"]["status_only_available"] is True
     assert counties["雲林縣"]["status_only_source_names"] == [
         "雲林 iflood 淹水感測狀態",
