@@ -115,7 +115,7 @@ Production 即時來源至少需要：
 | 縣市 | 來源 | 現況 | 人工介入 |
 | --- | --- | --- | --- |
 | 花蓮縣 | Senslink / 行動水情 | 更完整儀表板需登入或授權；FHY 淹水感測已接 | 需縣府或平台授權 read API |
-| 金門縣 | KWIS | 公開文件偏第三方設備上傳 API，需帳密/key/token | 需確認是否有最新水情 read API，並申請正式授權 |
+| 金門縣 | KWIS | ASMX/WSDL 已列出 token-gated read methods，但空 Token smoke 回 `ErrMsg (7)`、`Data: []`；介接文件仍包含第三方設備上傳 API | 需申請正式 Token、可讀範圍、rate limit 與 response schema，未授權前不實作 production adapter |
 | 連江縣 | 地方即時水文觀測 | 目前未找到 live API，也未在中央主幹有足夠水文觀測 | 需資料釋出或加入 Civil IoT / WRA |
 
 成功門檻：
@@ -214,7 +214,7 @@ Production 即時來源至少需要：
 
 ### 第三優先：需授權或政策合作
 
-1. 金門 KWIS read API 授權確認。
+1. 金門 KWIS token-gated read API methods 已確認；下一步為正式 Token 與 response schema 授權。
 2. 花蓮 Senslink read API 授權確認。
 3. 連江即時水文觀測釋出或納入中央主幹。
 

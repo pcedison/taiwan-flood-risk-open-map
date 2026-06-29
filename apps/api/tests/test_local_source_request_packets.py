@@ -33,12 +33,14 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert hualien["packet_type"] == "authorization_request"
     assert hualien["subject"] == "花蓮縣 Senslink/行動水情 即時水情 read API 授權請求"
     assert hualien["requested_counterparty"] == "花蓮縣政府 / Senslink 行動水情維運窗口"
+    assert "是否可提供最新觀測 read API" in hualien["request_body"]
+    assert "既有 read API methods" not in hualien["request_body"]
 
     kinmen = next(packet for packet in packets if packet["county"] == "金門縣")
     assert kinmen["packet_type"] == "authorization_request"
     assert kinmen["requires_human_intervention"] is True
     assert "金門縣 KWIS 即時水情 read API 授權請求" == kinmen["subject"]
-    assert "不是設備上傳 API" in kinmen["request_body"]
+    assert "不要將設備上傳 API 當作查詢 API" in kinmen["request_body"]
     assert "observed_at" in kinmen["required_read_api_fields"]
     assert any("kwis.kinmen.gov.tw" in url for url in kinmen["source_urls"])
 
@@ -117,6 +119,10 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "- [ ] 確認是否可提供最新觀測 read API" in markdown
     assert "`observed_at`" in markdown
     assert "hydrologic_observation" in markdown
+    assert "KWIS_Get_Pump_Basic_Unit_Data" in markdown
+    assert "KWIS_IOT_Data_Service.asmx?WSDL" in markdown
+    assert "(7)" in markdown
+    assert "Data: []" in markdown
     assert "- 已排除官方線索：連江自來水廠水庫水位月報、連江縣資訊公開查詢系統即時監測值" in markdown
     assert "放流水環保 CEMS" in markdown
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
@@ -156,12 +162,36 @@ def test_kinmen_packet_marks_upload_api_as_insufficient_for_read_adapter() -> No
     assert kinmen["workstream"] == "request_official_authorization"
     assert (
         kinmen["api_contract_risk"]
-        == "known_public_docs_are_upload_or_application_focused"
+        == "token_gated_read_methods_require_authorization"
     )
     assert kinmen["insufficient_api_purposes"] == [
+        "credentialed_read_api_without_authorized_token",
         "device_upload_api",
         "third_party_upload_integration",
     ]
     assert kinmen["required_api_purpose"] == "latest_observation_read_api"
     assert "upload-only" in kinmen["request_clarification"]
     assert "read API" in kinmen["request_clarification"]
+    assert kinmen["credential_requirements"] == [
+        "KWIS_key",
+        "account",
+        "password",
+        "Token",
+    ]
+    assert kinmen["known_read_method_names"] == [
+        "KWIS_Get_Rain_Gauge_Basic_Unit_Data",
+        "KWIS_Get_Water_Level_Gauge_Basic_Unit_Data",
+        "KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data",
+        "KWIS_Get_Pump_Basic_Unit_Data",
+        "KWIS_Get_Monitoring_Station_Sensor_Device_List",
+    ]
+    assert any(
+        "KWIS_IOT_Data_Service.asmx?WSDL" in url
+        for url in kinmen["known_read_endpoint_urls"]
+    )
+    assert any(
+        "KWIS_Get_Pump_Basic_Unit_Data" in url
+        for url in kinmen["known_read_endpoint_urls"]
+    )
+    assert "(7)" in kinmen["unauthorized_smoke_result"]
+    assert "Data: []" in kinmen["unauthorized_smoke_result"]

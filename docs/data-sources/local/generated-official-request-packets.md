@@ -39,18 +39,36 @@
 - 追蹤對象：金門縣政府 / KWIS 維運窗口
 - 追蹤狀態：needs_authorization_request
 - 整合優先序：#2 / P0 / request_official_authorization
-- API contract 風險：known_public_docs_are_upload_or_application_focused
-- 不足用途：device_upload_api、third_party_upload_integration
+- API contract 風險：token_gated_read_methods_require_authorization
+- 不足用途：credentialed_read_api_without_authorized_token、device_upload_api、third_party_upload_integration
 - 必要 API 用途：latest_observation_read_api
-- 需釐清事項：公開文件看起來偏第三方設備 upload-only 介接；production adapter 需要可查詢最新觀測值的 read API contract。
+- 需釐清事項：公開文件仍包含第三方設備 upload-only 介接流程，公開服務另已列出 token-gated read API methods，但空 Token smoke 只回 Data: []；production adapter 仍需縣府核發正式 Token、可讀範圍、rate limit 與 response schema。
+- Credential requirements: KWIS_key, account, password, Token
+- Known token-gated read methods: KWIS_Get_Rain_Gauge_Basic_Unit_Data, KWIS_Get_Water_Level_Gauge_Basic_Unit_Data, KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data, KWIS_Get_Pump_Basic_Unit_Data, KWIS_Get_Monitoring_Station_Sensor_Device_List
+- Known read endpoint references:
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Rain_Gauge_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Water_Level_Gauge_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Pump_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Monitoring_Station_Sensor_Device_List
+- Unauthorized smoke result: Blank-token GET smoke against KWIS_Get_Pump_Basic_Unit_Data, KWIS_Get_Water_Level_Gauge_Basic_Unit_Data, and KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data returned ErrMsg (7) invalid Token with Data: [].
 - 來源：
   - https://kwis.kinmen.gov.tw/
+  - https://docs.google.com/forms/d/e/1FAIpQLSdjBEvTNQyORMrkNdsJfs4KV5RUulRZF4hp2V3QhF5rGLUJYA/viewform
   - https://kwis.kinmen.gov.tw/KWIS/Doc/%E9%87%91%E9%96%80%E7%B8%A3%E6%94%BF%E5%BA%9C%E7%AC%AC%E4%B8%89%E6%96%B9%E5%96%AE%E4%BD%8D%E8%B3%87%E6%96%99%E4%B8%8A%E5%82%B3%5B%E9%87%91%E9%96%80%E6%B0%B4%E6%83%85%E7%B3%BB%E7%B5%B1%5D%E4%B9%8BAPI%E4%BB%8B%E6%8E%A5%E7%94%B3%E8%AB%8B%E5%8F%8A%E4%BD%BF%E7%94%A8%E8%AA%AA%E6%98%8E.pdf
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Rain_Gauge_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Water_Level_Gauge_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Pump_Basic_Unit_Data
+  - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Monitoring_Station_Sensor_Device_List
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - 排入此順位原因：local_direct_source is not complete；official authorization is required before a production read API can run
 - 完成門檻：完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。
 
-目前金門縣地方直連即時水情來源仍需要官方授權。請確認 KWIS 是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。
+目前金門縣地方直連即時水情來源仍需要官方授權。請確認 KWIS 既有 read API methods 的正式 Token、可讀範圍與 production 使用條款；不要將設備上傳 API 當作查詢 API。請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。
 
 待辦：
 - [ ] 確認是否可提供最新觀測 read API

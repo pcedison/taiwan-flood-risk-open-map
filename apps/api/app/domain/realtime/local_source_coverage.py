@@ -728,13 +728,33 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         requires_application=True,
         application_urls=(
             "https://kwis.kinmen.gov.tw/",
+            "https://docs.google.com/forms/d/e/1FAIpQLSdjBEvTNQyORMrkNdsJfs4KV5RUulRZF4hp2V3QhF5rGLUJYA/viewform",
             "https://kwis.kinmen.gov.tw/KWIS/Doc/%E9%87%91%E9%96%80%E7%B8%A3%E6%94%BF%E5%BA%9C%E7%AC%AC%E4%B8%89%E6%96%B9%E5%96%AE%E4%BD%8D%E8%B3%87%E6%96%99%E4%B8%8A%E5%82%B3%5B%E9%87%91%E9%96%80%E6%B0%B4%E6%83%85%E7%B3%BB%E7%B5%B1%5D%E4%B9%8BAPI%E4%BB%8B%E6%8E%A5%E7%94%B3%E8%AB%8B%E5%8F%8A%E4%BD%BF%E7%94%A8%E8%AA%AA%E6%98%8E.pdf",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Rain_Gauge_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Water_Level_Gauge_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Pump_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Monitoring_Station_Sensor_Device_List",
         ),
-        application_note="KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。",
+        application_note=(
+            "KWIS SOAP/ASMX publishes token-gated read methods for rain gauges, "
+            "water-level gauges, flood-sensing devices, pumps, and station sensor "
+            "lists; blank-token smoke returns ErrMsg (7) invalid Token with empty "
+            "Data, so production read access still requires county authorization."
+        ),
         notes=(
             "2026-06-28 Civil IoT live smoke：金門縣中央主幹已有淹水感測 7 站、"
             "RainSewer 29 站；這些是中央聚合 read API，可補即時水文觀測，"
             "但不等於金門縣府地方直出 read API。",
+            "2026-06-30 KWIS ASMX/WSDL smoke：service listing exposes "
+            "KWIS_Get_Rain_Gauge_Basic_Unit_Data, "
+            "KWIS_Get_Water_Level_Gauge_Basic_Unit_Data, "
+            "KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data, "
+            "KWIS_Get_Pump_Basic_Unit_Data, and "
+            "KWIS_Get_Monitoring_Station_Sensor_Device_List. Each read method "
+            "requires Token; blank-token calls return ErrMsg (7) and Data: [].",
         ),
     ),
     LocalSourceCoverageRecord(

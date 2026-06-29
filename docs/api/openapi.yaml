@@ -871,10 +871,13 @@ paths:
                       central_backbone_remaining_count: 1
                       authorization_requests:
                         - county: 金門縣
-                          reason: "KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。"
+                          reason: "KWIS SOAP/ASMX exposes token-gated read methods, but production read access still requires county authorization."
                           application_urls:
                             - https://kwis.kinmen.gov.tw/
-                          application_note: "KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。"
+                            - https://docs.google.com/forms/d/e/1FAIpQLSdjBEvTNQyORMrkNdsJfs4KV5RUulRZF4hp2V3QhF5rGLUJYA/viewform
+                            - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx
+                            - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL
+                          application_note: "KWIS ASMX/WSDL lists token-gated read methods; blank-token smoke returns ErrMsg (7) with Data: []."
                           requested_counterparty: "金門縣政府 / KWIS 維運窗口"
                           tracking_status: needs_authorization_request
                           last_followed_up_at: null

@@ -83,12 +83,7 @@ def _authorization_packet(
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
         "required_read_api_fields": required_fields,
-        "request_body": (
-            f"目前{county}地方直連即時水情來源仍需要官方授權。請確認 {system_name} "
-            "是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 "
-            "API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata "
-            "與範例 response。"
-        ),
+        "request_body": _authorization_request_body(county, system_name),
         "checklist": [
             "確認是否可提供最新觀測 read API",
             "確認 API contract、授權條款與 rate limit",
@@ -96,6 +91,22 @@ def _authorization_packet(
             "確認資料欄位可滿足 production adapter 必備欄位",
         ],
     } | _authorization_contract_fields(system_name) | _priority_packet_fields(priority_item)
+
+
+def _authorization_request_body(county: str, system_name: str) -> str:
+    if system_name == "KWIS":
+        return (
+            f"目前{county}地方直連即時水情來源仍需要官方授權。請確認 {system_name} "
+            "既有 read API methods 的正式 Token、可讀範圍與 production 使用條款；"
+            "不要將設備上傳 API 當作查詢 API。請協助提供正式 API contract、"
+            "申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。"
+        )
+    return (
+        f"目前{county}地方直連即時水情來源仍需要官方授權。請確認 {system_name} "
+        "是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 "
+        "API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata "
+        "與範例 response。"
+    )
 
 
 def _metadata_release_packet(
@@ -289,16 +300,43 @@ def _packet_sort_key(packet: Mapping[str, Any]) -> tuple[int, str]:
 def _authorization_contract_fields(system_name: str) -> dict[str, Any]:
     if system_name != "KWIS":
         return {}
+    service_root = "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx"
+    known_read_methods = [
+        "KWIS_Get_Rain_Gauge_Basic_Unit_Data",
+        "KWIS_Get_Water_Level_Gauge_Basic_Unit_Data",
+        "KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data",
+        "KWIS_Get_Pump_Basic_Unit_Data",
+        "KWIS_Get_Monitoring_Station_Sensor_Device_List",
+    ]
     return {
-        "api_contract_risk": "known_public_docs_are_upload_or_application_focused",
+        "api_contract_risk": "token_gated_read_methods_require_authorization",
         "insufficient_api_purposes": [
+            "credentialed_read_api_without_authorized_token",
             "device_upload_api",
             "third_party_upload_integration",
         ],
         "required_api_purpose": "latest_observation_read_api",
+        "credential_requirements": [
+            "KWIS_key",
+            "account",
+            "password",
+            "Token",
+        ],
+        "known_read_method_names": known_read_methods,
+        "known_read_endpoint_urls": [
+            f"{service_root}?WSDL",
+            *(f"{service_root}?op={method}" for method in known_read_methods),
+        ],
+        "unauthorized_smoke_result": (
+            "Blank-token GET smoke against KWIS_Get_Pump_Basic_Unit_Data, "
+            "KWIS_Get_Water_Level_Gauge_Basic_Unit_Data, and "
+            "KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data returned "
+            "ErrMsg (7) invalid Token with Data: []."
+        ),
         "request_clarification": (
-            "公開文件看起來偏第三方設備 upload-only 介接；production adapter "
-            "需要可查詢最新觀測值的 read API contract。"
+            "公開文件仍包含第三方設備 upload-only 介接流程，公開服務另已列出 "
+            "token-gated read API methods，但空 Token smoke 只回 Data: []；production "
+            "adapter 仍需縣府核發正式 Token、可讀範圍、rate limit 與 response schema。"
         ),
     }
 
@@ -347,6 +385,21 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
         lines.append(f"- 必要 API 用途：{packet['required_api_purpose']}")
     if packet.get("request_clarification"):
         lines.append(f"- 需釐清事項：{packet['request_clarification']}")
+    if packet.get("credential_requirements"):
+        lines.append(
+            "- Credential requirements: "
+            + ", ".join(str(item) for item in packet["credential_requirements"])
+        )
+    if packet.get("known_read_method_names"):
+        lines.append(
+            "- Known token-gated read methods: "
+            + ", ".join(str(item) for item in packet["known_read_method_names"])
+        )
+    if packet.get("known_read_endpoint_urls"):
+        lines.append("- Known read endpoint references:")
+        lines.extend(f"  - {url}" for url in packet["known_read_endpoint_urls"])
+    if packet.get("unauthorized_smoke_result"):
+        lines.append(f"- Unauthorized smoke result: {packet['unauthorized_smoke_result']}")
     if packet.get("last_followed_up_at"):
         lines.append(f"- 最後追蹤時間：{packet['last_followed_up_at']}")
     if packet.get("source_urls"):

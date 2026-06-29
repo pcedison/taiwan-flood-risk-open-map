@@ -187,10 +187,12 @@ Expected: both commands pass.
 
 **Interfaces:**
 - Consumes: `integration_priority_queue` item for `金門縣`.
-- Produces: a packet that distinguishes KWIS upload API documents from the needed read API contract.
+- Produces: a packet that distinguishes KWIS upload API documents from the needed read API contract and lists the token-gated read methods discovered in the ASMX/WSDL.
 
 - [x] Write a failing test requiring the Kinmen packet to state that upload-only APIs are insufficient.
 - [x] Add required read API fields and counterparty `金門縣政府 / KWIS 維運窗口`.
+- [x] Confirm KWIS ASMX/WSDL exposes token-gated read methods for rain gauges, water-level gauges, flood-sensing devices, pumps, and station sensor lists.
+- [x] Record blank-token smoke result: KWIS read methods return `ErrMsg (7)` with `Data: []`, so production adapter remains blocked on official Token authorization.
 - [x] Run request packet tests.
 
 ## Task 4: Taipei Evacuation Gate Live Smoke
