@@ -816,6 +816,9 @@ paths:
                         candidate_source_urls: []
                         metadata_source_names: []
                         metadata_source_urls: []
+                        non_qualifying_source_names: []
+                        non_qualifying_source_urls: []
+                        non_qualifying_source_reasons: []
                         status_only_source_names: []
                         status_only_source_urls: []
                         status_only_signal_types: []
@@ -887,6 +890,15 @@ paths:
                             - 連江縣大潮、豪雨易淹水地區 ODS
                           metadata_source_urls:
                             - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
+                          non_qualifying_source_names:
+                            - 連江自來水廠水庫水位月報
+                            - 連江縣資訊公開查詢系統即時監測值
+                          non_qualifying_source_urls:
+                            - https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page
+                            - http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx
+                          non_qualifying_source_reasons:
+                            - Public reservoir water level is monthly PDF only, without observed_at/station_id/measurement_value realtime API fields.
+                            - Public realtime page is environmental discharge CEMS, not flood, water-level, sewer, pump, or gate observation.
                           central_backbone_missing_signal_types:
                             - hydrologic_observation
                           requested_counterparty: "連江縣政府公開資料或防災水利窗口"
@@ -920,6 +932,9 @@ paths:
                             - local.chiayi_city.rainfall
                           candidate_source_names: []
                           candidate_source_urls: []
+                          non_qualifying_source_names: []
+                          non_qualifying_source_urls: []
+                          non_qualifying_source_reasons: []
                           status_only_source_names: []
                           status_only_source_urls: []
                           status_only_signal_types: []
@@ -947,6 +962,15 @@ paths:
                           production_adapter_keys: []
                           candidate_source_names: []
                           candidate_source_urls: []
+                          non_qualifying_source_names:
+                            - 連江自來水廠水庫水位月報
+                            - 連江縣資訊公開查詢系統即時監測值
+                          non_qualifying_source_urls:
+                            - https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page
+                            - http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx
+                          non_qualifying_source_reasons:
+                            - Public reservoir water level is monthly PDF only, without observed_at/station_id/measurement_value realtime API fields.
+                            - Public realtime page is environmental discharge CEMS, not flood, water-level, sewer, pump, or gate observation.
                           status_only_source_names: []
                           status_only_source_urls: []
                           status_only_signal_types: []
