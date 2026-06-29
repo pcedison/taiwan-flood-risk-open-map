@@ -406,10 +406,10 @@ def _station_locations(payload: Mapping[str, Any]) -> list[Any]:
     cwa_open_data = payload.get("cwaopendata")
     if not isinstance(cwa_open_data, Mapping):
         raise CwaTideLevelPayloadError("CWA tide station metadata is missing cwaopendata")
-    resource = (
-        _mapping(cwa_open_data.get("Resources"))
-        and _mapping(cwa_open_data["Resources"]).get("Resource")
-    )
+    resources = _mapping(cwa_open_data.get("Resources"))
+    if resources is None:
+        raise CwaTideLevelPayloadError("CWA tide station metadata is missing Resources")
+    resource = resources.get("Resource")
     if not isinstance(resource, Mapping):
         raise CwaTideLevelPayloadError("CWA tide station metadata is missing Resource")
     data = resource.get("Data")
