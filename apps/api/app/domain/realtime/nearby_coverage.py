@@ -2,18 +2,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
-from app.api.schemas import NearbyCoverageSignal, NearbyRealtimeCoverage
+from app.api.schemas import (
+    NearbyCoverageLevel,
+    NearbyCoverageSignal,
+    NearbyCoverageSignalType,
+    NearbyRealtimeCoverage,
+)
 from app.domain.evidence.repository import NearbyCoverageRow
 
 RADIUS_BUCKETS_M = (500, 1000, 3000, 5000)
-REQUIRED_SIGNAL_TYPES = (
+REQUIRED_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = (
     "rainfall",
     "water_level",
     "flood_depth",
     "sewer_water_level",
 )
-SIGNAL_LABELS = {
+SIGNAL_LABELS: dict[NearbyCoverageSignalType, str] = {
     "rainfall": "雨量",
     "water_level": "水位",
     "flood_depth": "淹水深度",
@@ -23,7 +29,7 @@ SIGNAL_LABELS = {
     "status_only": "狀態資訊",
 }
 
-_ALL_SIGNAL_TYPES = REQUIRED_SIGNAL_TYPES + (
+_ALL_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = REQUIRED_SIGNAL_TYPES + (
     "pump_or_gate_status",
     "flood_warning",
     "status_only",
@@ -32,9 +38,16 @@ _COUNTY_LEVEL_NOTE = (
     "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；"
     "附近涵蓋會依查詢點重新計算。"
 )
-_RANK_BY_LEVEL = {"no_local_sensor": 0, "low": 1, "medium": 2, "high": 3}
-_LEVEL_BY_RANK = {rank: level for level, rank in _RANK_BY_LEVEL.items()}
-_THRESHOLDS_BY_SIGNAL = {
+_RANK_BY_LEVEL: dict[NearbyCoverageLevel, int] = {
+    "no_local_sensor": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+}
+_LEVEL_BY_RANK: dict[int, NearbyCoverageLevel] = {
+    rank: level for level, rank in _RANK_BY_LEVEL.items()
+}
+_THRESHOLDS_BY_SIGNAL: dict[NearbyCoverageSignalType, tuple[int, int, int]] = {
     "rainfall": (1000, 3000, 5000),
     "water_level": (500, 1000, 3000),
     "flood_depth": (500, 1000, 3000),
@@ -43,7 +56,7 @@ _THRESHOLDS_BY_SIGNAL = {
     "flood_warning": (500, 1000, 3000),
     "status_only": (500, 1000, 3000),
 }
-_ADAPTER_SIGNAL_TYPES = {
+_ADAPTER_SIGNAL_TYPES: dict[str, NearbyCoverageSignalType] = {
     "official.cwa.rainfall": "rainfall",
     "official.wra.water_level": "water_level",
     "official.wra_iow.flood_depth": "flood_depth",
@@ -89,7 +102,7 @@ _ADAPTER_SIGNAL_TYPES = {
     "local.taitung.flood_sensor": "flood_depth",
     "local.penghu.water_level": "water_level",
 }
-_EVENT_TYPE_ALIASES = {
+_EVENT_TYPE_ALIASES: dict[str, NearbyCoverageSignalType] = {
     "river_water_level": "water_level",
     "pond_water_level": "water_level",
     "pump_water_level": "pump_or_gate_status",
@@ -103,18 +116,23 @@ _EVENT_TYPE_ALIASES = {
 
 @dataclass(frozen=True)
 class _SignalEvaluation:
-    signal_type: str
+    signal_type: NearbyCoverageSignalType
     model: NearbyCoverageSignal
     has_rows: bool
 
 
-def coverage_signal_type(event_type: str, adapter_key: str) -> str:
+def coverage_signal_type(event_type: str, adapter_key: str) -> NearbyCoverageSignalType:
     if event_type == "status_only":
         return "status_only"
-    signal_type = _ADAPTER_SIGNAL_TYPES.get(adapter_key)
-    if signal_type is None:
-        signal_type = _EVENT_TYPE_ALIASES.get(event_type, event_type)
-    return signal_type if signal_type in _ALL_SIGNAL_TYPES else "status_only"
+    adapter_signal_type = _ADAPTER_SIGNAL_TYPES.get(adapter_key)
+    if adapter_signal_type is not None:
+        return adapter_signal_type
+    alias_signal_type = _EVENT_TYPE_ALIASES.get(event_type)
+    if alias_signal_type is not None:
+        return alias_signal_type
+    if event_type in _ALL_SIGNAL_TYPES:
+        return cast(NearbyCoverageSignalType, event_type)
+    return "status_only"
 
 
 def build_nearby_realtime_coverage(
@@ -170,8 +188,12 @@ def build_nearby_realtime_coverage(
     )
 
 
-def _group_rows(rows: tuple[NearbyCoverageRow, ...]) -> dict[str, tuple[NearbyCoverageRow, ...]]:
-    grouped: dict[str, list[NearbyCoverageRow]] = {signal_type: [] for signal_type in _ALL_SIGNAL_TYPES}
+def _group_rows(
+    rows: tuple[NearbyCoverageRow, ...],
+) -> dict[NearbyCoverageSignalType, tuple[NearbyCoverageRow, ...]]:
+    grouped: dict[NearbyCoverageSignalType, list[NearbyCoverageRow]] = {
+        signal_type: [] for signal_type in _ALL_SIGNAL_TYPES
+    }
     for row in rows:
         if row.distance_to_query_m > RADIUS_BUCKETS_M[-1]:
             continue
@@ -181,7 +203,7 @@ def _group_rows(rows: tuple[NearbyCoverageRow, ...]) -> dict[str, tuple[NearbyCo
 
 def _evaluate_signal(
     *,
-    signal_type: str,
+    signal_type: NearbyCoverageSignalType,
     rows: tuple[NearbyCoverageRow, ...],
 ) -> _SignalEvaluation:
     in_range_rows = tuple(row for row in rows if row.distance_to_query_m <= RADIUS_BUCKETS_M[-1])
@@ -221,7 +243,10 @@ def _evaluate_signal(
     )
 
 
-def _coverage_level(signal_type: str, nearest_fresh_row: NearbyCoverageRow | None) -> str:
+def _coverage_level(
+    signal_type: NearbyCoverageSignalType,
+    nearest_fresh_row: NearbyCoverageRow | None,
+) -> NearbyCoverageLevel:
     if nearest_fresh_row is None:
         return "no_local_sensor"
     thresholds = _THRESHOLDS_BY_SIGNAL[signal_type]
@@ -235,7 +260,7 @@ def _coverage_level(signal_type: str, nearest_fresh_row: NearbyCoverageRow | Non
     return "no_local_sensor"
 
 
-def _overall_level(evaluations: list[_SignalEvaluation]) -> str:
+def _overall_level(evaluations: list[_SignalEvaluation]) -> NearbyCoverageLevel:
     hydrologic_rank = 0
     for evaluation in evaluations:
         if evaluation.signal_type in {"water_level", "flood_depth", "sewer_water_level"}:
@@ -266,7 +291,9 @@ def _has_fresh_coverage(evaluation: _SignalEvaluation) -> bool:
     return evaluation.model.coverage_level != "no_local_sensor"
 
 
-def _build_summary(*, evaluations: list[_SignalEvaluation], overall_level: str) -> str:
+def _build_summary(
+    *, evaluations: list[_SignalEvaluation], overall_level: NearbyCoverageLevel
+) -> str:
     if overall_level == "unavailable":
         return "資料庫目前無法查詢附近即時涵蓋。"
     if overall_level == "low" and _has_only_rainfall_or_warning(evaluations):
