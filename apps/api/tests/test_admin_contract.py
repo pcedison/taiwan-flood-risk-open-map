@@ -1231,6 +1231,11 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "sewer_water_level",
         "pump_or_gate_status",
     ]
+    kinmen_priority = plan["integration_priority_queue"][1]
+    assert kinmen_priority["authorization_gated_adapter_keys"] == [
+        "local.kinmen.kwis_pump_station"
+    ]
+    assert kinmen_priority["production_adapter_keys"] == []
     signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
     assert "臺北市" in signal_gaps
     assert signal_gaps["臺北市"]["tracking_status"] == "needs_signal_gap_review"
@@ -1256,6 +1261,10 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert kinmen["requested_counterparty"] == "金門縣政府 / KWIS 維運窗口"
     assert kinmen["tracking_status"] == "needs_authorization_request"
     assert kinmen["last_followed_up_at"] is None
+    assert kinmen["authorization_gated_adapter_keys"] == [
+        "local.kinmen.kwis_pump_station"
+    ]
+    assert kinmen["production_adapter_keys"] == []
     lienchiang = plan["metadata_release_monitors"][0]
     assert lienchiang["central_backbone_missing_signal_types"] == []
     assert lienchiang["requested_counterparty"] == "連江縣政府公開資料或防災水利窗口"

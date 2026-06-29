@@ -888,6 +888,9 @@ paths:
                             - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx
                             - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL
                           application_note: "KWIS ASMX/WSDL lists token-gated read methods; blank-token smoke returns ErrMsg (7) with Data: []."
+                          production_adapter_keys: []
+                          authorization_gated_adapter_keys:
+                            - local.kinmen.kwis_pump_station
                           requested_counterparty: "金門縣政府 / KWIS 維運窗口"
                           tracking_status: needs_authorization_request
                           last_followed_up_at: null
@@ -946,6 +949,7 @@ paths:
                           production_adapter_keys:
                             - local.chiayi_city.water_level
                             - local.chiayi_city.rainfall
+                          authorization_gated_adapter_keys: []
                           metadata_source_names: []
                           metadata_source_urls: []
                           candidate_source_names: []
@@ -981,6 +985,7 @@ paths:
                             - pump_or_gate_status
                           central_backbone_missing_signal_types: []
                           production_adapter_keys: []
+                          authorization_gated_adapter_keys: []
                           metadata_source_names:
                             - 連江縣大潮、豪雨易淹水地區 ODS
                           metadata_source_urls:
@@ -2536,6 +2541,8 @@ components:
         - reason
         - application_urls
         - application_note
+        - production_adapter_keys
+        - authorization_gated_adapter_keys
         - requested_counterparty
         - tracking_status
         - last_followed_up_at
@@ -2557,6 +2564,14 @@ components:
           type:
             - string
             - "null"
+        production_adapter_keys:
+          type: array
+          items:
+            type: string
+        authorization_gated_adapter_keys:
+          type: array
+          items:
+            type: string
         requested_counterparty:
           type: string
         tracking_status:
@@ -2765,6 +2780,7 @@ components:
         - missing_signal_types
         - central_backbone_missing_signal_types
         - production_adapter_keys
+        - authorization_gated_adapter_keys
         - metadata_source_names
         - metadata_source_urls
         - candidate_source_names
@@ -2814,6 +2830,10 @@ components:
           items:
             type: string
         production_adapter_keys:
+          type: array
+          items:
+            type: string
+        authorization_gated_adapter_keys:
           type: array
           items:
             type: string

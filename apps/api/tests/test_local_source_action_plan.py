@@ -25,6 +25,10 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
         == "花蓮縣政府 / Senslink 行動水情維運窗口"
     )
     assert "KWIS" in authorization_by_county["金門縣"]["reason"]
+    assert authorization_by_county["金門縣"]["authorization_gated_adapter_keys"] == [
+        "local.kinmen.kwis_pump_station"
+    ]
+    assert authorization_by_county["金門縣"]["production_adapter_keys"] == []
     assert authorization_by_county["金門縣"]["required_read_api_fields"] == list(
         REQUIRED_REALTIME_READ_API_FIELDS
     )
@@ -171,6 +175,10 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert priority[1]["workstream"] == "request_official_authorization"
     assert "local_direct_source" in priority[1]["why_now"]
     assert "observed_at" in priority[1]["required_read_api_fields"]
+    assert priority[1]["authorization_gated_adapter_keys"] == [
+        "local.kinmen.kwis_pump_station"
+    ]
+    assert priority[1]["production_adapter_keys"] == []
     priority_by_county = {item["county"]: item for item in priority}
     assert priority_by_county["\u82d7\u6817\u7e23"][
         "candidate_contract_missing_fields"

@@ -106,6 +106,7 @@ class LocalSourceCoverageRecord:
     county: str
     local_direct_statuses: tuple[LocalDirectSourceStatus, ...]
     production_adapter_keys: tuple[str, ...] = ()
+    authorization_gated_adapter_keys: tuple[str, ...] = ()
     production_source_urls: tuple[str, ...] = ()
     central_backbone_adapter_keys: tuple[str, ...] = NATIONAL_BASELINE_BACKBONE_KEYS
     candidate_source_names: tuple[str, ...] = ()
@@ -819,6 +820,7 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
     LocalSourceCoverageRecord(
         county="金門縣",
         local_direct_statuses=("needs_application",),
+        authorization_gated_adapter_keys=("local.kinmen.kwis_pump_station",),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.civil_iot.flood_sensor",

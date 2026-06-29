@@ -61,6 +61,10 @@ def _authorization_request(record: LocalSourceCoverageRecord) -> dict[str, Any]:
         "reason": record.blocking_reason,
         "application_urls": list(record.application_urls),
         "application_note": record.application_note,
+        "production_adapter_keys": list(record.production_adapter_keys),
+        "authorization_gated_adapter_keys": list(
+            record.authorization_gated_adapter_keys
+        ),
         "requested_counterparty": _requested_counterparty(record),
         "tracking_status": "needs_authorization_request",
         "last_followed_up_at": None,
@@ -211,6 +215,9 @@ def _integration_priority_item(
             record.central_backbone_missing_signal_types
         ),
         "production_adapter_keys": list(record.production_adapter_keys),
+        "authorization_gated_adapter_keys": list(
+            record.authorization_gated_adapter_keys
+        ),
         "metadata_source_names": list(record.metadata_source_names),
         "metadata_source_urls": list(record.metadata_source_urls),
         "candidate_source_names": list(record.candidate_source_names),

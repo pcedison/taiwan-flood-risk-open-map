@@ -691,6 +691,38 @@ response schema confirmation, license/rate-limit review, raw snapshot retention,
 hosted scheduler cadence, hosted egress review, alert routing, and a
 worker-persisted evidence smoke with real authorized rows.
 
+## Task 22: Authorization-Gated Adapter Readiness In Action Plan
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+
+**Interfaces:**
+- Consumes: local coverage records with adapters that are implemented or
+  implementable but blocked on formal read-side authorization.
+- Produces: `authorization_gated_adapter_keys` on authorization requests and
+  integration-priority items, without counting those adapters as production
+  coverage.
+
+- [x] Write failing tests proving Kinmen exposes
+  `local.kinmen.kwis_pump_station` as authorization-gated readiness.
+- [x] Keep `production_adapter_keys` empty for Kinmen so completion counts and
+  signal coverage are not inflated.
+- [x] Add schema and OpenAPI fields so the admin contract can distinguish
+  production adapters from adapters waiting on official credentials.
+- [x] Verify action-plan/admin contract, OpenAPI validation, API lint, and the
+  Kinmen worker adapter regression test.
+
+Completed 2026-06-30: `/admin/v1/local-source-action-plan` now separates
+production adapters from authorization-gated adapter readiness. Kinmen remains
+`needs_authorization_request`, but operators and UI can show that a KWIS pump
+status adapter is ready to activate after official Token approval and hosted
+worker-persisted evidence smoke.
+
 ## Completion Gates
 
 The full objective is complete only when:
