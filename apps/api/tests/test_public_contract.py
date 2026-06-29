@@ -9,7 +9,13 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from app.api.schemas import DependencyReadiness, LatLng, NearbyCoverageSignal, PlaceCandidate
+from app.api.schemas import (
+    DependencyReadiness,
+    LatLng,
+    NearbyCoverageSignal,
+    NearbyRealtimeCoverage,
+    PlaceCandidate,
+)
 from app.api.routes import health as health_routes
 from app.api.routes import public as public_routes
 from app.core.config import get_settings
@@ -179,6 +185,34 @@ def test_nearby_coverage_signal_requires_diagnostic_counts() -> None:
     assert required_diagnostics <= pydantic_required
     assert required_diagnostics <= runtime_required
     assert required_diagnostics <= documented_required
+
+
+def test_nearby_realtime_coverage_requires_top_level_contract_fields() -> None:
+    expected_required = {
+        "overall_level",
+        "evaluated_at",
+        "query_radius_m",
+        "radius_buckets_m",
+        "summary",
+        "signal_breakdown",
+        "missing_signal_types",
+        "limitations",
+        "county_level_note",
+    }
+
+    pydantic_required = set(NearbyRealtimeCoverage.model_json_schema()["required"])
+    runtime_required = set(
+        client.get("/openapi.json").json()["components"]["schemas"]["NearbyRealtimeCoverage"][
+            "required"
+        ]
+    )
+    documented_required = set(
+        OPENAPI_SPEC["components"]["schemas"]["NearbyRealtimeCoverage"]["required"]
+    )
+
+    assert pydantic_required == expected_required
+    assert runtime_required == expected_required
+    assert documented_required == expected_required
 
 
 def test_geocode_contract_and_limit() -> None:

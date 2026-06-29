@@ -1936,11 +1936,6 @@ components:
           type: array
           items:
             type: integer
-          default:
-            - 500
-            - 1000
-            - 3000
-            - 5000
         summary:
           type: string
         signal_breakdown:
@@ -1965,7 +1960,6 @@ components:
             type: string
         county_level_note:
           type: string
-          description: 縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。
           description: 縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。
       additionalProperties: false
 

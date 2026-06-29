@@ -464,11 +464,11 @@ class NearbyRealtimeCoverage(ContractModel):
     overall_level: NearbyCoverageLevel
     evaluated_at: datetime
     query_radius_m: int = Field(ge=50, le=2000)
-    radius_buckets_m: list[int] = Field(default_factory=lambda: [500, 1000, 3000, 5000])
+    radius_buckets_m: list[int]
     summary: str
     signal_breakdown: list[NearbyCoverageSignal]
-    missing_signal_types: list[NearbyCoverageSignalType] = Field(default_factory=list)
-    limitations: list[str] = Field(default_factory=list)
+    missing_signal_types: list[NearbyCoverageSignalType]
+    limitations: list[str]
     county_level_note: str = Field(
         description='縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
     )
