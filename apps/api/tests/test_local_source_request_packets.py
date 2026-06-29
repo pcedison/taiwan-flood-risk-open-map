@@ -20,9 +20,9 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         "連江縣",
         "金門縣",
         "花蓮縣",
-        "臺北市",
         "臺東縣",
         "苗栗縣",
+        "屏東縣",
     ]
     assert {packet["county"] for packet in packets} >= {
         "苗栗縣",
@@ -58,9 +58,13 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "observed_at" in pingtung["required_read_api_fields"]
 
     taipei = next(packet for packet in packets if packet["county"] == "臺北市")
-    assert taipei["packet_type"] == "live_smoke_review_request"
-    assert taipei["tracking_status"] == "needs_live_smoke_retry"
-    assert "狀態或開關資料不得替代水位、雨量或淹水深度" in taipei["request_body"]
+    assert taipei["packet_type"] == "signal_gap_request"
+    assert taipei["tracking_status"] == "needs_signal_gap_review"
+    assert taipei["target_signal_types"] == ["flood_depth"]
+    assert taipei["status_only_signal_types"] == ["gate_status"]
+    assert taipei["status_only_source_names"] == ["臺北市水門啟閉狀態"]
+    assert "status-only" in taipei["request_body"]
+    assert "不得替代水位、雨量、淹水深度或下水道水位量測" in taipei["request_body"]
 
     yunlin = next(packet for packet in packets if packet["county"] == "雲林縣")
     assert yunlin["packet_type"] == "signal_gap_request"
@@ -94,6 +98,7 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "## 金門縣：金門縣 KWIS 即時水情 read API 授權請求" in markdown
     assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
+    assert "## 臺北市：臺北市缺漏水資訊訊號補齊請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
     assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" in markdown
     assert "- 需要人工介入：是" in markdown
@@ -103,6 +108,7 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "`observed_at`" in markdown
     assert "hydrologic_observation" in markdown
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
+    assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
 
 

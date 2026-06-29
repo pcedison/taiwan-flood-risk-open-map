@@ -916,10 +916,10 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert summary["central_backbone_minimum_incomplete_count"] == 1
     assert summary["counties_missing_hydrologic_backbone"] == ["連江縣"]
     assert summary["request_official_authorization_count"] == 2
-    assert summary["verify_live_smoke_count"] == 1
+    assert summary["verify_live_smoke_count"] == 0
     assert summary["verify_public_api_contract_count"] == 3
     assert summary["counties_requiring_official_authorization"] == ["花蓮縣", "金門縣"]
-    assert summary["counties_requiring_live_smoke"] == ["臺北市"]
+    assert summary["counties_requiring_live_smoke"] == []
     assert summary["counties_requiring_public_api_contract"] == [
         "苗栗縣",
         "屏東縣",
@@ -955,14 +955,19 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert len(counties) == 22
     assert counties["臺北市"]["local_direct_statuses"] == [
         "ready_implemented",
-        "needs_review",
     ]
     assert counties["臺北市"]["local_direct_complete"] is True
-    assert counties["臺北市"]["next_action_code"] == "verify_live_smoke"
-    assert counties["臺北市"]["candidate_source_urls"] == [
-        "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+    assert counties["臺北市"]["next_action_code"] == "operate_adapter"
+    assert counties["臺北市"]["candidate_source_urls"] == []
+    assert counties["臺北市"]["status_only_available"] is True
+    assert counties["臺北市"]["status_only_source_names"] == ["臺北市水門啟閉狀態"]
+    assert counties["臺北市"]["status_only_source_urls"] == [
+        "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
     ]
-    assert "smoke" in counties["臺北市"]["blocking_reason"]
+    assert counties["臺北市"]["status_only_signal_types"] == ["gate_status"]
+    assert counties["臺北市"]["flood_depth_available"] is False
+    assert "flood_depth" in counties["臺北市"]["missing_signal_types"]
+    assert counties["臺北市"]["blocking_reason"] is None
     assert counties["臺南市"]["local_direct_statuses"] == ["ready_implemented"]
     assert counties["臺南市"]["local_direct_complete"] is True
     assert counties["臺南市"]["central_backbone_available"] is True
@@ -1183,9 +1188,7 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "屏東縣",
         "臺東縣",
     ]
-    assert [item["county"] for item in plan["live_smoke_reviews"]] == [
-        "臺北市",
-    ]
+    assert [item["county"] for item in plan["live_smoke_reviews"]] == []
     assert [item["county"] for item in plan["integration_priority_queue"][:3]] == [
         "連江縣",
         "金門縣",
@@ -1197,6 +1200,10 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert top_priority["completion_gate"]
     assert "hydrologic_observation" in top_priority["central_backbone_missing_signal_types"]
     signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
+    assert "臺北市" in signal_gaps
+    assert signal_gaps["臺北市"]["tracking_status"] == "needs_signal_gap_review"
+    assert signal_gaps["臺北市"]["missing_signal_types"] == ["flood_depth"]
+    assert signal_gaps["臺北市"]["status_only_signal_types"] == ["gate_status"]
     assert "嘉義市" in signal_gaps
     assert signal_gaps["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
     assert "flood_depth" in signal_gaps["嘉義市"]["missing_signal_types"]

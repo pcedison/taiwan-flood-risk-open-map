@@ -636,10 +636,6 @@ def _has_measurement_value(
                 }
             )
         )
-    if any(signal in definition.expected_signal_types for signal in ("gate_status", "pump_status", "flood_warning")):
-        return bool(
-            keys.intersection({"status", "alarmstate", "pumb_status", "pumpingstatus"})
-        ) or _has_gate_status_value(keys)
     return False
 
 

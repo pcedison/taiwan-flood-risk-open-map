@@ -28,7 +28,7 @@
 | P0 | Restore minimum nationwide hydrologic backbone | 連江縣 | `central_backbone_minimum_complete` is true or an explicit official request packet exists with tracked follow-up status. |
 | P0 | Complete local direct source absence | 金門縣、連江縣 | Each county has either a production adapter or a documented authorization/open-data request with required read API fields. |
 | P1 | Resolve authorization-gated richer sources | 花蓮縣、金門縣 | Request packet records official counterparty, API purpose, required fields, raw snapshot and license requirements. |
-| P1 | Resolve technical live-smoke blockers | 臺北市、雲林縣 | Candidate endpoints are smoked with observed time, id, value semantics, coordinates, and status-only separation. |
+| P1 | Resolve technical live-smoke blockers | Current queue empty after 臺北市、雲林縣 status-only reviews | Candidate endpoints are smoked with observed time, id, value semantics, coordinates, and status-only separation. |
 | P2 | Resolve public read API contract blockers | 苗栗縣、屏東縣、臺東縣 | Each candidate either becomes a production adapter or remains blocked with a precise missing field/contract reason. |
 | P2 | Fill missing sensor signal families | Ready counties missing rainfall, water level, flood depth, sewer water level, or pump/gate status | `sensor_signal_gap_reviews` shows fewer missing required signal families per county, with no silent risk-score changes. |
 | P3 | Hosted persistence and scheduler proof | All enabled central/local adapters | Worker scheduler writes raw snapshots, staging, adapter runs, and promoted evidence under Zeabur-compatible env gates. |
@@ -276,7 +276,7 @@ rather than the API realtime bridge.
 - [x] Regenerate Markdown/JSON request packet artifacts.
 
 Completed 2026-06-30: generated request packets now include 18 priority-ordered
-items. The output starts with 連江縣、金門縣、花蓮縣、臺北市 and
+items. The output starts with 連江縣、金門縣、花蓮縣、臺東縣 and
 continues through public API contract and signal-gap follow-up packets. Signal
 gap packets explicitly require official read APIs or documented unavailability
 for missing families such as `flood_depth`, `sewer_water_level`, and
@@ -330,6 +330,24 @@ rule that `alarmState` cannot satisfy flood-depth measurement coverage.
 - [x] Add failing tests proving fixture mode includes CWA, WRA, and Civil IoT official backbone adapters.
 - [x] Expand the managed runtime persist smoke to verify latest-row freshness and metric columns for CWA rainfall, WRA water level, Civil IoT flood depth, and Civil IoT water-level families.
 - [x] Document that this smoke validates fixture-backed worker persistence, not real upstream credentials, source egress, or every county's local direct integration.
+
+## Task 10: Taipei Evacuation Gate Status-Only Reclassification
+
+**Files:**
+- Modify: `apps/workers/app/ops/local_source_candidate_smoke.py`
+- Modify: `apps/workers/tests/test_local_source_candidate_smoke.py`
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: action-plan, request-packet, CLI, admin contract tests.
+- Modify: generated request packet artifacts and local source docs.
+
+**Interfaces:**
+- Consumes: Taipei evacuation/water-gate candidate fields `stationNo`, `recTime`, `lng`, `lat`, and `fo`/`fc`/`flt`.
+- Produces: status-only source metadata for `臺北市水門啟閉狀態`, while keeping `flood_depth` unresolved and tracked through signal-gap request packets.
+
+- [x] Write failing tests proving Taipei evacuation gates are not `promotion_ready` measurements.
+- [x] Reclassify gate open/close fields as `status_only_ready` and remove Taipei from `live_smoke_reviews`.
+- [x] Regenerate request packets so Taipei becomes a `signal_gap_request` with `gate_status` status-only metadata.
+- [x] Update matrix and verification log to explain that gate status cannot satisfy water level, rainfall, or flood-depth coverage.
 
 ## Completion Gates
 

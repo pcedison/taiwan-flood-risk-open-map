@@ -101,7 +101,9 @@ def test_taipei_evacuate_gate_retries_public_mirror_and_stays_gate_status(
     assert "water_level" not in definition.expected_signal_types
     assert "flood_depth" not in definition.expected_signal_types
     assert "status_only" in qualification.observed_capabilities
-    assert qualification.status == "promotion_ready"
+    assert qualification.status == "status_only_ready"
+    assert qualification.missing_required_fields == ("measurement_value",)
+    assert qualification.next_action == "present_as_status_only_and_find_depth_contract"
 
 
 def test_json_source_with_observed_time_coordinates_and_measurement_is_promotion_ready() -> None:

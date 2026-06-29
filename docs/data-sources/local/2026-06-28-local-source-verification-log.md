@@ -47,7 +47,7 @@
 
 | 縣市 | 候選來源 | 2026-06-29 live smoke | 判讀 | 下一步 |
 | --- | --- | --- | --- | --- |
-| 臺北市 | 疏散門即時監測 `wic.heo.taipei/OpenData/API/Evacuate/Get` | 20 秒 timeout；2026-06-30 已補 smoke fallback：`wic.heo.taipei` timeout 時會重試官方公開 mirror `wic.gov.taipei` 同路徑，並以單元測試確認 `fo/fc/flt` 只作疏散門/水門狀態，不升級成水位或淹水深度。 | `blocked_timeout` → fallback implemented, live availability still pending | 重新跑 live smoke；若 mirror 穩定且欄位含觀測時間、站點、座標與狀態語意，才進 adapter TDD。 |
+| 臺北市 | 疏散門即時監測 `wic.heo.taipei/OpenData/API/Evacuate/Get` / mirror `wic.gov.taipei/OpenData/API/Evacuate/Get` | 2026-06-30 已補 smoke fallback：`wic.heo.taipei` timeout 時會重試官方公開 mirror `wic.gov.taipei` 同路徑，並以單元測試確認 mirror payload 的 `stationNo`、`recTime`、`lng/lat` 與 `fo/fc/flt` 只作疏散門/水門啟閉狀態，不升級成水位或淹水深度。 | `status_only_verified` | 移出 live-smoke blocker；coverage catalog 改列 `臺北市水門啟閉狀態` / `gate_status` status-only。臺北市仍缺 `flood_depth`，由 signal-gap request 追蹤公開 read API 或官方不可得證明。 |
 | 苗栗縣 | 雨水下水道即時水情監測成果頁 | 200 HTML，未曝露觀測時間、站點 id、測值與座標 | `needs_observed_time` | 需要公開 read API contract 或可 join 的 station metadata。 |
 | 雲林縣 | iflood station API 的淹水感測類 | 200 JSON，具 `latestUpdateTime`、站點與座標，但未曝露淹水深度測值；2026-06-30 已改為 `status_only` 事件類型，source weight 低且沒有 realtime risk factor。 | `status_only_ready` + `needs_measurement_value` | 保留既有 `local.yunlin.water_level`；淹水感測可作附近狀態線索，但仍需找 depth/detail API 或官方欄位文件才可補 `flood_depth`。 |
 | 嘉義縣 | 智慧防汛管理型線索 | 查核頁在目前 runtime 觸發 `DH_KEY_TOO_SMALL` SSL 錯誤；公開 RFD API 已 production | `needs_observed_time` / 非阻塞 | 不依賴管理型 `/api/v1`；繼續操作已落地 `local.chiayi_county.flood_sensor`。 |

@@ -74,8 +74,7 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     live_smoke_by_county = {
         item["county"]: item for item in plan["live_smoke_reviews"]
     }
-    assert set(live_smoke_by_county) == {"臺北市"}
-    assert live_smoke_by_county["臺北市"]["tracking_status"] == "needs_live_smoke_retry"
+    assert live_smoke_by_county == {}
 
     priority = plan["integration_priority_queue"]
     assert [item["county"] for item in priority[:3]] == ["連江縣", "金門縣", "花蓮縣"]
@@ -89,8 +88,14 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert "observed_at" in priority[1]["required_read_api_fields"]
 
     signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
+    assert "臺北市" in signal_gaps
     assert "嘉義市" in signal_gaps
     assert "雲林縣" in signal_gaps
+    assert signal_gaps["臺北市"]["missing_signal_types"] == ["flood_depth"]
+    assert signal_gaps["臺北市"]["status_only_signal_types"] == ["gate_status"]
+    assert signal_gaps["臺北市"]["status_only_source_urls"] == [
+        "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+    ]
     assert {
         "flood_depth",
         "sewer_water_level",
@@ -135,7 +140,9 @@ def test_local_source_action_plan_prioritizes_signal_gap_reviews_after_blockers(
 
     assert priority_by_county["連江縣"]["rank"] < priority_by_county["嘉義市"]["rank"]
     assert priority_by_county["金門縣"]["rank"] < priority_by_county["嘉義市"]["rank"]
-    assert priority_by_county["臺北市"]["rank"] < priority_by_county["嘉義市"]["rank"]
+    assert priority_by_county["嘉義市"]["rank"] < priority_by_county["臺北市"]["rank"]
+    assert priority_by_county["臺北市"]["tracking_status"] == "needs_signal_gap_review"
+    assert priority_by_county["臺北市"]["missing_signal_types"] == ["flood_depth"]
     assert priority_by_county["嘉義市"]["priority_tier"] == "P2"
     assert priority_by_county["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
     assert "measurement_value" in priority_by_county["嘉義市"]["completion_gate"]

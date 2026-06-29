@@ -264,7 +264,7 @@ def _coverage_signal_type(signal_type: str) -> str | None:
 TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
     LocalSourceCoverageRecord(
         county="臺北市",
-        local_direct_statuses=("ready_implemented", "needs_review"),
+        local_direct_statuses=("ready_implemented",),
         production_adapter_keys=(
             "local.taipei.sewer_water_level",
             "local.taipei.river_water_level",
@@ -275,15 +275,19 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://wic.gov.taipei/OpenData/API/Water/Get?stationNo=&loginId=river&dataKey=9E2648AA",
             "https://heopublic.gov.taipei/taipei-heo-api/openapi/pumb/latest",
         ),
-        candidate_source_names=("臺北市疏散門即時監測",),
-        candidate_source_urls=(
-            "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+        status_only_source_names=("臺北市水門啟閉狀態",),
+        status_only_source_urls=(
+            "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
         ),
+        status_only_signal_types=("gate_status",),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.civil_iot.sewer_water_level",
             "official.civil_iot.pump_water_level",
             "official.civil_iot.gate_water_level",
+        ),
+        notes=(
+            "2026-06-30 smoke confirmed the public mirror returns station id, recTime, coordinates, and gate open/close fields only; keep the evacuation gate as status-only and continue to track flood_depth as missing.",
         ),
     ),
     LocalSourceCoverageRecord(
