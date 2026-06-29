@@ -589,6 +589,36 @@ local source can become hosted worker ingestion. This does not mean credentials
 or hosted egress approvals have been granted; it makes those gates visible and
 trackable in the source-contract workflow.
 
+## Task 19: Realtime Source Gate Production-Readiness Summary
+
+**Files:**
+- Modify: `apps/workers/app/ops/realtime_source_gate.py`
+- Modify: `apps/workers/tests/test_realtime_source_gate.py`
+- Modify: `scripts/realtime-source-gate.py`
+- Add: `tests/test_realtime_source_gate_cli.py`
+- Modify: `docs/runbooks/civil-iot-live-enablement.md`
+
+**Interfaces:**
+- Consumes: official live-smoke result, unresolved local-source discovery, and
+  optional production-gate evidence booleans.
+- Produces: `production_readiness` JSON with required, satisfied, and missing
+  gates for hosted/production source readiness.
+
+- [x] Write failing tests proving the source gate exposes production-readiness
+  state and can fail when required evidence is missing.
+- [x] Track credential review, source license review, raw snapshot retention
+  policy, hosted scheduler cadence, hosted egress review, alert routing
+  ownership, and worker-persisted evidence smoke.
+- [x] Add CLI evidence JSON input and fail-closed mode for hosted readiness
+  rehearsals.
+- [x] Document that green live smoke is not production completeness.
+
+Completed 2026-06-30: `realtime-source-gate` now reports production-readiness
+gaps separately from live upstream health. It can identify whether a hosted
+readiness run is still missing credential, license, retention, cadence, egress,
+alert, or worker-persisted-evidence proof. This still does not create those
+private approvals; it makes them machine-visible.
+
 ## Completion Gates
 
 The full objective is complete only when:

@@ -10,6 +10,16 @@ from app.ops.official_realtime_live_smoke import (
 )
 from app.ops.realtime_source_gate import evaluate_realtime_source_gate
 
+EXPECTED_PRODUCTION_GATES = [
+    "credential_review",
+    "source_license_review",
+    "raw_snapshot_retention_policy",
+    "hosted_scheduler_cadence",
+    "hosted_egress_review",
+    "alert_routing_ownership",
+    "worker_persisted_evidence_smoke",
+]
+
 
 def _coverage_summary() -> dict:
     return {
@@ -58,6 +68,12 @@ def test_realtime_source_gate_passes_with_healthy_backbone_and_no_live_candidate
     assert result.to_dict()["discovery"]["summary"][
         "metadata_only_count_by_county"
     ] == {"連江縣": 1}
+    assert result.to_dict()["production_readiness"] == {
+        "readiness_state": "not_production_complete",
+        "required_gates": EXPECTED_PRODUCTION_GATES,
+        "satisfied_gates": [],
+        "missing_gates": EXPECTED_PRODUCTION_GATES,
+    }
 
 
 def test_realtime_source_gate_fails_on_failed_central_backbone_source() -> None:
@@ -100,3 +116,50 @@ def test_realtime_source_gate_can_fail_when_new_live_candidates_are_found() -> N
 
     assert result.passed is False
     assert "candidate_live_read_api" in result.failures[0]
+
+
+def test_realtime_source_gate_can_fail_on_missing_production_readiness_gates() -> None:
+    result = evaluate_realtime_source_gate(
+        coverage_summary=_coverage_summary(),
+        smoke_result=OfficialRealtimeSmokeResult(
+            results=(SmokeSourceResult("official.wra.water_level", "healthy"),)
+        ),
+        discovery_result=DiscoveryResult(target_counties=("金門縣",), candidates=()),
+        production_gate_evidence={
+            "credential_review": True,
+            "source_license_review": True,
+        },
+        fail_on_missing_production_gates=True,
+    )
+
+    assert result.passed is False
+    assert "missing production readiness gates" in result.failures[0]
+    readiness = result.to_dict()["production_readiness"]
+    assert readiness["satisfied_gates"] == [
+        "credential_review",
+        "source_license_review",
+    ]
+    assert readiness["missing_gates"] == [
+        "raw_snapshot_retention_policy",
+        "hosted_scheduler_cadence",
+        "hosted_egress_review",
+        "alert_routing_ownership",
+        "worker_persisted_evidence_smoke",
+    ]
+
+
+def test_realtime_source_gate_accepts_all_production_readiness_gate_evidence() -> None:
+    result = evaluate_realtime_source_gate(
+        coverage_summary=_coverage_summary(),
+        smoke_result=OfficialRealtimeSmokeResult(
+            results=(SmokeSourceResult("official.wra.water_level", "healthy"),)
+        ),
+        discovery_result=DiscoveryResult(target_counties=("金門縣",), candidates=()),
+        production_gate_evidence={gate: True for gate in EXPECTED_PRODUCTION_GATES},
+        fail_on_missing_production_gates=True,
+    )
+
+    assert result.passed is True
+    assert result.to_dict()["production_readiness"]["readiness_state"] == (
+        "production_evidence_complete"
+    )

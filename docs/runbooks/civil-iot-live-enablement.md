@@ -106,6 +106,24 @@ must be loaded, and `--fail-on-live-candidate` when a newly published data.gov.t
 candidate should stop the pipeline until it is reviewed and either implemented
 or documented as unsuitable.
 
+The gate output also includes `production_readiness`. Treat
+`production_readiness.readiness_state: not_production_complete` as the expected
+state until all required gates have private evidence: credential review, source
+license review, raw snapshot retention policy, hosted scheduler cadence, hosted
+egress review, alert routing ownership, and worker-persisted evidence smoke.
+Green official live smoke proves current upstream reachability only; it does not
+prove the hosted production evidence set is complete.
+
+For hosted readiness rehearsals, pass a private evidence JSON and fail closed
+when any gate is missing:
+
+```bash
+PYTHONPATH=apps/workers python scripts/realtime-source-gate.py \
+  --env-file .env \
+  --production-gate-evidence-json private-production-gates.json \
+  --fail-on-missing-production-gates
+```
+
 1. **Ingestion ran**: worker logs show
    `scheduler.ingestion_cycle.completed` and the adapter's batch summary with
    `normalized > 0` (and `fetched > 0`). No repeated adapter errors.
