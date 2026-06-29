@@ -15,6 +15,7 @@ const {
   formatCoordinate,
   formatDateTime,
   formatDistance,
+  formatDistanceMeters,
   getEvidenceDisplayState,
   getProfileBasisText,
   getProfilePreviewState,
@@ -22,6 +23,8 @@ const {
   layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
   latestNewsLinksFreshnessSourceId,
+  nearbyCoverageLevelLabel,
+  nearbyCoverageSummary,
   riskOverlayPresentation,
   riskSummaryBasis,
   riskSummaryTitle,
@@ -459,6 +462,64 @@ test("layer display state exposes an empty state when no layer inputs exist", ()
     items: [],
     status: "empty",
   });
+});
+
+test("nearbyCoverageSummary labels nearby sensor availability", () => {
+  const state = nearbyCoverageSummary({
+    county_level_note:
+      "縣市資料源目錄顯示可能有資料，但附近覆蓋仍以查詢點半徑內感測器為準。",
+    evaluated_at: "2026-06-29T12:00:00Z",
+    limitations: [],
+    missing_signal_types: ["flood_depth"],
+    overall_level: "medium",
+    query_radius_m: 500,
+    radius_buckets_m: [500, 1000, 3000, 5000],
+    signal_breakdown: [],
+    summary: "查詢點 1 公里內有雨量或水位即時資料，但感測密度仍有限。",
+  });
+
+  assert.deepEqual(state, {
+    badge: "附近即時感測中等",
+    summary: "查詢點 1 公里內有雨量或水位即時資料，但感測密度仍有限。",
+    tone: "warn",
+  });
+});
+
+test("nearbyCoverageSummary distinguishes no local sensor from unavailable coverage", () => {
+  assert.deepEqual(
+    nearbyCoverageSummary({
+      county_level_note:
+        "縣市資料源目錄顯示可能有資料，但查詢點半徑附近沒有新鮮在地感測資料。",
+      evaluated_at: "2026-06-29T12:00:00Z",
+      limitations: ["半徑內沒有 fresh local sensor，不能代表縣市沒有感測器。"],
+      missing_signal_types: ["rainfall", "water_level"],
+      overall_level: "no_local_sensor",
+      query_radius_m: 500,
+      radius_buckets_m: [500, 1000, 3000, 5000],
+      signal_breakdown: [],
+      summary: "查詢點半徑內沒有新鮮在地感測資料；縣市或資料源仍可能有資料。",
+    }),
+    {
+      badge: "半徑內無新鮮在地感測",
+      summary: "查詢點半徑內沒有新鮮在地感測資料；縣市或資料源仍可能有資料。",
+      tone: "poor",
+    },
+  );
+
+  assert.deepEqual(nearbyCoverageSummary(null), {
+    badge: "即時覆蓋暫時無法評估",
+    summary: "即時感測覆蓋尚未回傳，無法判斷附近是否有感測器。",
+    tone: "muted",
+  });
+});
+
+test("nearby coverage labels and distance formatting are explicit", () => {
+  assert.equal(nearbyCoverageLevelLabel("high"), "附近即時感測充足");
+  assert.equal(nearbyCoverageLevelLabel("low"), "附近即時感測偏少");
+  assert.equal(nearbyCoverageLevelLabel("unavailable"), "即時覆蓋暫時無法評估");
+  assert.equal(formatDistanceMeters(230.4), "230 公尺");
+  assert.equal(formatDistanceMeters(1234.4), "1.2 公里");
+  assert.equal(formatDistanceMeters(null), "半徑內無新鮮感測");
 });
 
 test("risk and evidence formatting helpers produce display-ready strings", () => {

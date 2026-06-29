@@ -33,6 +33,46 @@ export type EvidenceListResponse = {
   next_cursor: string | null;
 };
 
+export type NearbyCoverageLevel =
+  | "high"
+  | "medium"
+  | "low"
+  | "no_local_sensor"
+  | "unavailable";
+
+export type NearbyCoverageSignalType =
+  | "rainfall"
+  | "water_level"
+  | "flood_depth"
+  | "sewer_water_level"
+  | "pump_or_gate_status"
+  | "flood_warning"
+  | "status_only";
+
+export type NearbyRealtimeCoverage = {
+  overall_level: NearbyCoverageLevel;
+  evaluated_at: string;
+  query_radius_m: number;
+  radius_buckets_m: number[];
+  summary: string;
+  signal_breakdown: Array<{
+    signal_type: NearbyCoverageSignalType;
+    label: string;
+    coverage_level: NearbyCoverageLevel;
+    nearest_distance_m: number | null;
+    nearest_source_id: string | null;
+    nearest_observed_at: string | null;
+    counts_by_radius_m: Record<string, number>;
+    fresh_count: number;
+    stale_count: number;
+    status_only_count: number;
+    missing_reason: string | null;
+  }>;
+  missing_signal_types: NearbyCoverageSignalType[];
+  limitations: string[];
+  county_level_note: string;
+};
+
 export type RiskAssessmentResponse = {
   assessment_id: string;
   realtime: {
@@ -62,6 +102,7 @@ export type RiskAssessmentResponse = {
     attention_level: string;
     updated_at: string;
   };
+  nearby_realtime_coverage: NearbyRealtimeCoverage;
   layers?: LayerContractItem[];
   map_layers?: LayerContractItem[];
 };

@@ -5,9 +5,14 @@ import type { buildLayerDisplayState, latestNewsEvidenceLinks } from "../lib/ris
 import {
   formatCoordinate,
   formatDateTime,
+  formatDistanceMeters,
   layerAvailabilityDisplayLabel,
+  nearbyCoverageLevelLabel,
 } from "../lib/risk-display";
 import { healthLabel, text } from "../lib/ui-text";
+
+type CoverageSignal =
+  RiskAssessmentResponse["nearby_realtime_coverage"]["signal_breakdown"][number];
 
 type DiagnosticsSectionProps = {
   assessment: RiskAssessmentResponse | null;
@@ -28,6 +33,8 @@ export function DiagnosticsSection({
   latestNewsLinks,
   latestNewsLinkSourceId,
 }: DiagnosticsSectionProps) {
+  const coverage = assessment?.nearby_realtime_coverage ?? null;
+
   return (
     <section className="panel-section diagnostics-panel" data-testid="diagnostics-panel">
       <details className="diagnostics-drawer" data-testid="diagnostics-drawer">
@@ -56,6 +63,73 @@ export function DiagnosticsSection({
                 <dd>{radius.toLocaleString("zh-TW")} 公尺</dd>
               </div>
             </dl>
+          </section>
+
+          <section className="diagnostics-section coverage-detail-panel" aria-label={text.diagnosticsCoverageTitle}>
+            <div className="section-heading">
+              <span className="section-kicker">{text.nearbyCoverageKicker}</span>
+              <strong>
+                {coverage
+                  ? nearbyCoverageLevelLabel(coverage.overall_level)
+                  : text.diagnosticsPending}
+              </strong>
+            </div>
+            <p>{coverage ? coverage.summary : text.nearbyCoveragePending}</p>
+            {coverage ? (
+              <>
+                <p className="coverage-boundary-note">
+                  {coverage.county_level_note || text.diagnosticsCoverageLocalBoundary}
+                </p>
+                {coverage.signal_breakdown.length ? (
+                  <ul className="coverage-detail-list">
+                    {coverage.signal_breakdown.map((signal) => (
+                      <li key={signal.signal_type}>
+                        <div className="coverage-detail-heading">
+                          <strong>{signal.label}</strong>
+                          <span>{nearbyCoverageLevelLabel(signal.coverage_level)}</span>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>{text.nearbyCoverageNearest}</dt>
+                            <dd>{formatDistanceMeters(signal.nearest_distance_m)}</dd>
+                          </div>
+                          <div>
+                            <dt>{text.diagnosticsCoverageBuckets}</dt>
+                            <dd>{formatCoverageBucketCounts(signal, coverage.radius_buckets_m)}</dd>
+                          </div>
+                          <div>
+                            <dt>{text.diagnosticsCoverageFreshness}</dt>
+                            <dd>
+                              {signal.fresh_count} / {signal.stale_count} /{" "}
+                              {signal.status_only_count}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{text.nearbyCoverageObservedAt}</dt>
+                            <dd>{formatDateTime(signal.nearest_observed_at)}</dd>
+                          </div>
+                        </dl>
+                        {signal.missing_reason ? (
+                          <p>
+                            <strong>{text.diagnosticsCoverageMissingReason}</strong>
+                            <span>{signal.missing_reason}</span>
+                          </p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>{text.diagnosticsCoverageNoSignals}</p>
+                )}
+                {coverage.limitations.length ? (
+                  <ul className="coverage-limitations">
+                    {coverage.limitations.map((limitation) => (
+                      <li key={limitation}>{limitation}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </>
+            ) : null}
           </section>
 
           <section className="diagnostics-section layer-panel" aria-label={text.layers}>
@@ -156,4 +230,13 @@ export function DiagnosticsSection({
       </details>
     </section>
   );
+}
+
+function formatCoverageBucketCounts(signal: CoverageSignal, buckets: number[]) {
+  return buckets
+    .map((bucket) => {
+      const label = bucket >= 1000 ? `${bucket / 1000}km` : `${bucket}m`;
+      return `${label}: ${signal.counts_by_radius_m[String(bucket)] ?? 0}`;
+    })
+    .join(" / ");
 }
