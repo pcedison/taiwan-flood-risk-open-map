@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from app.api.schemas import DependencyReadiness, LatLng, PlaceCandidate
+from app.api.schemas import DependencyReadiness, LatLng, NearbyCoverageSignal, PlaceCandidate
 from app.api.routes import health as health_routes
 from app.api.routes import public as public_routes
 from app.core.config import get_settings
@@ -156,6 +156,29 @@ def test_runtime_openapi_exposes_health_and_readiness_schemas() -> None:
     assert ready_responses["503"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ReadyResponse"
     }
+
+
+def test_nearby_coverage_signal_requires_diagnostic_counts() -> None:
+    required_diagnostics = {
+        "counts_by_radius_m",
+        "fresh_count",
+        "stale_count",
+        "status_only_count",
+    }
+
+    pydantic_required = set(NearbyCoverageSignal.model_json_schema()["required"])
+    runtime_required = set(
+        client.get("/openapi.json").json()["components"]["schemas"]["NearbyCoverageSignal"][
+            "required"
+        ]
+    )
+    documented_required = set(
+        OPENAPI_SPEC["components"]["schemas"]["NearbyCoverageSignal"]["required"]
+    )
+
+    assert required_diagnostics <= pydantic_required
+    assert required_diagnostics <= runtime_required
+    assert required_diagnostics <= documented_required
 
 
 def test_geocode_contract_and_limit() -> None:

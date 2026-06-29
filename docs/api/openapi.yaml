@@ -1845,6 +1845,7 @@ components:
         - signal_type
         - label
         - coverage_level
+        - counts_by_radius_m
         - fresh_count
         - stale_count
         - status_only_count
