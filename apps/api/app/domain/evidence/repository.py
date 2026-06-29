@@ -611,10 +611,10 @@ def query_nearby_realtime_coverage_rows(
     params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
     try:
         with _connect(database_url, connection_factory) as connection:
-            cursor = connection.cursor()
-            _apply_statement_timeout(cursor, statement_timeout_ms)
-            cursor.execute(sql, params)
-            return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
+            with connection.cursor() as cursor:
+                _apply_statement_timeout(cursor, statement_timeout_ms)
+                cursor.execute(sql, params)
+                return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
     except psycopg.errors.UndefinedTable as exc:
         if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
             return ()
