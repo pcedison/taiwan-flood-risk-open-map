@@ -2188,6 +2188,9 @@ components:
         - reason
         - application_urls
         - application_note
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
         - required_read_api_fields
         - request_focus
       properties:
@@ -2206,6 +2209,15 @@ components:
           type:
             - string
             - "null"
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         required_read_api_fields:
           type: array
           items:
@@ -2222,6 +2234,10 @@ components:
         - metadata_source_names
         - metadata_source_urls
         - central_backbone_missing_signal_types
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
+        - required_read_api_fields
         - request_focus
       properties:
         county:
@@ -2243,6 +2259,19 @@ components:
           type: array
           items:
             type: string
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
         request_focus:
           type: string
       additionalProperties: false
@@ -2254,6 +2283,9 @@ components:
         - reason
         - candidate_source_names
         - candidate_source_urls
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
         - required_read_api_fields
       properties:
         county:
@@ -2271,6 +2303,15 @@ components:
           items:
             type: string
             format: uri
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         required_read_api_fields:
           type: array
           items:
@@ -2285,6 +2326,10 @@ components:
         - candidate_source_names
         - candidate_source_urls
         - production_adapter_keys
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
+        - required_read_api_fields
       properties:
         county:
           type: string
@@ -2302,6 +2347,19 @@ components:
             type: string
             format: uri
         production_adapter_keys:
+          type: array
+          items:
+            type: string
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        required_read_api_fields:
           type: array
           items:
             type: string
@@ -2418,10 +2476,20 @@ components:
         - central_backbone_minimum_complete
         - central_backbone_missing_signal_types
         - central_backbone_coverage_level
+        - rainfall_available
+        - water_level_available
+        - flood_depth_available
+        - sewer_water_level_available
+        - pump_or_gate_status_available
+        - status_only_available
+        - missing_signal_types
         - candidate_source_names
         - candidate_source_urls
         - metadata_source_names
         - metadata_source_urls
+        - status_only_source_names
+        - status_only_source_urls
+        - status_only_signal_types
         - application_urls
         - requires_application
         - application_note
@@ -2480,6 +2548,29 @@ components:
         central_backbone_coverage_level:
           type: string
           description: minimum_met, needs_hydrologic_backbone, or incomplete.
+        rainfall_available:
+          type: boolean
+          description: True when rainfall realtime evidence is available from local or central official sources.
+        water_level_available:
+          type: boolean
+          description: True when river, pond, or other water-level realtime evidence is available.
+        flood_depth_available:
+          type: boolean
+          description: True when flood-depth realtime evidence is available from a high-confidence source.
+        sewer_water_level_available:
+          type: boolean
+          description: True when sewer or drainage water-level realtime evidence is available.
+        pump_or_gate_status_available:
+          type: boolean
+          description: True when pump or gate status/water-level realtime evidence is available.
+        status_only_available:
+          type: boolean
+          description: True when an official source has observed status but no water-depth or water-level measurement.
+        missing_signal_types:
+          type: array
+          items:
+            type: string
+          description: Realtime signal categories still missing after local and central official coverage are combined.
         candidate_source_names:
           type: array
           items:
@@ -2502,6 +2593,22 @@ components:
             type: string
             format: uri
           description: Official static metadata dataset URLs useful for station joins or release monitoring.
+        status_only_source_names:
+          type: array
+          items:
+            type: string
+          description: Official status-only sources that have freshness and station context but no measurement value.
+        status_only_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Source URLs for status-only official signals.
+        status_only_signal_types:
+          type: array
+          items:
+            type: string
+          description: Low-confidence status-only signal categories that must not be treated as depth, water level, or rainfall.
         application_urls:
           type: array
           items:

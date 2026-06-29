@@ -21,9 +21,17 @@ def test_local_source_request_packets_cli_emits_json() -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert [packet["county"] for packet in payload] == ["金門縣", "連江縣"]
+    assert [packet["county"] for packet in payload] == [
+        "花蓮縣",
+        "金門縣",
+        "連江縣",
+        "苗栗縣",
+        "屏東縣",
+        "臺東縣",
+    ]
     assert payload[0]["packet_type"] == "authorization_request"
-    assert payload[1]["target_signal_types"] == ["hydrologic_observation"]
+    assert payload[2]["target_signal_types"] == ["hydrologic_observation"]
+    assert payload[4]["packet_type"] == "public_api_contract_request"
 
 
 def test_local_source_request_packets_cli_writes_markdown_output(
@@ -50,5 +58,7 @@ def test_local_source_request_packets_cli_writes_markdown_output(
     assert result.stdout == ""
     assert str(output_path) in result.stderr
     markdown = output_path.read_text(encoding="utf-8")
+    assert "## 花蓮縣：花蓮縣 Senslink/行動水情 即時水情 read API 授權請求" in markdown
     assert "## 金門縣：金門縣 KWIS 即時水情 read API 授權請求" in markdown
     assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
+    assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown

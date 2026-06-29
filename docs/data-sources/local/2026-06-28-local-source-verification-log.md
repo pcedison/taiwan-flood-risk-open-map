@@ -29,7 +29,7 @@
 | 雲林縣 | `https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5` | 免 key JSON；2026-06-28 smoke：totalCount 2473。stationType 水位 161 站；live adapter 取 102 筆具 `levelHeight/latestUpdateTime` 與座標的水位資料，normalized 101、stale reject 1。淹水感測 173 站未曝露 depth。 | `ready_implemented` + `needs_review` | 已新增 `local.yunlin.water_level`。淹水感測不以 `alarmState` 偽造水深，需追前端細節 API 或官方欄位文件。 |
 | 雲林縣 | data.gov.tw `156080` 淹水感測器、`163147` 淹水感測器(白金)、`156083` 水位計、`161651` 水情監測設備座標 | JSON 可讀且含 WGS84 座標，但主要是站點/設備清冊 | `metadata_only` | 可作未來 station metadata join，不單獨作 realtime evidence。 |
 | 嘉義縣 | `https://api.floodsolution.aiot.ing/api/public/devices/RFD` | 免 key JSON；2026-06-28 回傳 253 站，`latest.time`、`latest.data.waterDepth`、`lon`、`lat`、鄉鎮村里可讀。`/api/v1` 管理端點仍需登入，不納入。 | `ready_implemented` | 已新增 `local.chiayi_county.flood_sensor`；靜態抽水站 CSV 保留 metadata 候選。 |
-| 高雄市 | `https://wrbswi.kcg.gov.tw/SFC/api/sewer/rt`、`https://wrbswi.kcg.gov.tw/SFC/api/khfloodinfo/sta_info/lastest/wrs_flooding_sensor` | 免 key JSON；sewer/rt 回傳 296 筆下水道水位，含 `time`、`stage`、警戒值、座標；wrs_flooding_sensor 回傳 171 筆淹水感測，含 `time`、`obs_value`、座標。sewer/rt live payload 混入 1 筆 2027 未來時間，adapter 保留 raw 但 normalized reject。雨量端點缺站名/座標，未納入 production。 | `ready_implemented` | 已新增 `local.kaohsiung.sewer_water_level` 與 `local.kaohsiung.flood_sensor`。 |
+| 高雄市 | `https://wrbswi.kcg.gov.tw/SFC/api/sewer/rt`、`https://wrbswi.kcg.gov.tw/SFC/api/khfloodinfo/sta_info/lastest/wrs_flooding_sensor`、`https://wrbswi.kcg.gov.tw/SFC/api/rain/rt`、`https://wrbswi.kcg.gov.tw/SFC/api/rain/base` | 免 key JSON；sewer/rt 回傳 296 筆下水道水位，含 `time`、`stage`、警戒值、座標；wrs_flooding_sensor 回傳 171 筆淹水感測，含 `time`、`obs_value`、座標。sewer/rt live payload 混入 1 筆 2027 未來時間，adapter 保留 raw 但 normalized reject。2026-06-29 補查：rain/rt live adapter 87 筆 normalized、rain/base 88 筆 metadata，`ST_NO` join 可取得 `DATE`、站名、地址與 WGS84 座標；站數會隨平台即時狀態浮動。 | `ready_implemented` | 已新增 `local.kaohsiung.sewer_water_level`、`local.kaohsiung.flood_sensor` 與 `local.kaohsiung.rainfall`；地方雨量只補強 CWA 空間密度，不取代 CWA。 |
 | 宜蘭縣 | `https://wragis.e-land.gov.tw/arcgis/rest/services/HDST/防汛儀表板/MapServer/{layer}/query?where=1=1&outFields=*&f=json` | 免 key ArcGIS REST JSON；layer 0 回傳 85 筆淹水感測、layer 2 回傳 154 筆水位計，含 `write_date` epoch milliseconds、`water_inner`、WGS84 座標。 | `ready_implemented` | 已新增 `local.yilan.flood_sensor` 與 `local.yilan.water_level`。 |
 | 屏東縣 | `https://pteoc.pthg.gov.tw/RainStation` | HTML 可讀，表格含站名與 10 分鐘/1/3/6/12/24 小時雨量值；細節頁缺明確觀測時間與座標 | `needs_review` 候選，不可 production | 不把 fetched_at 偽裝成 observed_at；需找到有 timestamp/coordinate 的 API 或官方 metadata join。 |
 | 屏東縣 | `https://pteoc.pthg.gov.tw/River`、`/Flood`、`/Crawler` | HTML 可讀；`/River` 只列未達警戒狀態，`/Flood` 是鄉鎮連結，`/Crawler` 主要是影像 | `candidate` | 不 scrape 成 production realtime evidence。 |
@@ -39,6 +39,21 @@
 | 澎湖縣 | `https://ph3dgis.penghu.gov.tw/server/rest/services/SewerNew/PHSewer_Basemap/MapServer/6/query?where=1%3D1&outFields=*&f=json&returnGeometry=true&outSR=4326` | 免 key ArcGIS REST JSON；2026-06-28 smoke：38 筆 normalized、0 筆 rejected，含 `measure_time`、`water_level`、`water_level_percent`、`battery`、`rssi` 與 WGS84 geometry。`measure_time` 為台灣本地 wall-clock epoch 編碼，adapter 會扣 8 小時後做 freshness check。 | `ready_implemented` | 已新增 `local.penghu.water_level`。`https://sewer.penghu.gov.tw/` 登入型儀表板不納入 production。 |
 | 金門縣 | KWIS 介接文件；Civil IoT `water_12` / `STA_RainSewer` | KWIS 已知需線上申請帳密/key/token，且文件用途偏第三方設備上傳，不是公開 read API。2026-06-28 Civil IoT live smoke：淹水感測 7 站、RainSewer 29 站。 | `needs_application` + `central_aggregated_ready` | 未申請或未取得官方公開 read API 前不實作地方 adapter；中央主幹可補足金門即時水文觀測。 |
 | 連江縣 | data.gov.tw / 連江縣開放資料 | 只找到易淹水 ODS 與防災靜態資料 | `metadata_only` + `not_found` | 中央主幹仍需補 hydrologic backbone；地方 live API 未找到。 |
+
+## 2026-06-29 候選來源 smoke 補充
+
+本補充使用 `scripts/local-source-candidate-smoke.py --timeout-seconds 20 --format json`
+重跑尚待判讀的地方候選，目標是把「尚未接上」拆成可執行原因，而不是統一視為未完成。
+
+| 縣市 | 候選來源 | 2026-06-29 live smoke | 判讀 | 下一步 |
+| --- | --- | --- | --- | --- |
+| 臺北市 | 疏散門即時監測 `wic.heo.taipei/OpenData/API/Evacuate/Get` | 20 秒 timeout | `blocked_timeout` | 先複核官方主機與 mirror host 可用性，再確認 `fo/fc/flt` 欄位語意後才可建 adapter。 |
+| 苗栗縣 | 雨水下水道即時水情監測成果頁 | 200 HTML，未曝露觀測時間、站點 id、測值與座標 | `needs_observed_time` | 需要公開 read API contract 或可 join 的 station metadata。 |
+| 雲林縣 | iflood station API 的淹水感測類 | 200 JSON，具 `latestUpdateTime`、站點與座標，但未曝露淹水深度測值 | `needs_measurement_value` | 保留既有 `local.yunlin.water_level`；淹水感測需找 depth/detail API 或官方欄位文件。 |
+| 嘉義縣 | 智慧防汛管理型線索 | 查核頁在目前 runtime 觸發 `DH_KEY_TOO_SMALL` SSL 錯誤；公開 RFD API 已 production | `needs_observed_time` / 非阻塞 | 不依賴管理型 `/api/v1`；繼續操作已落地 `local.chiayi_county.flood_sensor`。 |
+| 高雄市 | SFC `rain/rt` + `rain/base` | 200 JSON；live adapter fetched/normalized 87、rejected 0，metadata 88 筆 | `promotion_ready` → `ready_implemented` | 已新增 `local.kaohsiung.rainfall`；地方雨量只補強 CWA。 |
+| 屏東縣 | PTEOC `/RainStation` | 200 HTML；有雨量值，但缺明確觀測時間、站點 id 與座標；不需登入 | `needs_observed_time` | 不把 fetched_at 當 observed_at；需要公開 API 或官方 metadata join。 |
+| 臺東縣 | 洪水與淹水預警系統線索 | 20 秒 timeout | `blocked_timeout` | 保留既有 `local.taitung.flood_sensor`；其他系統需公開 read API contract。 |
 
 ## 可實作性門檻
 

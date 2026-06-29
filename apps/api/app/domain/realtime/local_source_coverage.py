@@ -54,6 +54,49 @@ BACKBONE_SIGNAL_TYPES_BY_ADAPTER_KEY = {
     "official.civil_iot.pump_water_level": "pump_water_level",
     "official.civil_iot.gate_water_level": "gate_water_level",
 }
+LOCAL_SIGNAL_TYPES_BY_ADAPTER_KEY = {
+    "local.taipei.sewer_water_level": "sewer_water_level",
+    "local.taipei.river_water_level": "water_level",
+    "local.taipei.pump_station": "pump_or_gate_status",
+    "local.new_taipei.water_level": "water_level",
+    "local.new_taipei.flood_sensor": "flood_depth",
+    "local.new_taipei.rainfall": "rainfall",
+    "local.new_taipei.drainage_water_level": "sewer_water_level",
+    "local.keelung.water_level": "water_level",
+    "local.keelung.flood_sensor": "flood_depth",
+    "local.keelung.rainfall": "rainfall",
+    "local.taoyuan.flood_sensor": "flood_depth",
+    "local.taoyuan.water_level": "water_level",
+    "local.taoyuan.rainfall": "rainfall",
+    "local.hsinchu_city.sewer_water_level": "sewer_water_level",
+    "local.hsinchu_city.flood_sensor": "flood_depth",
+    "local.hsinchu_county.flood_sensor": "flood_depth",
+    "local.miaoli.flood_sensor": "flood_depth",
+    "local.taichung.water_level": "water_level",
+    "local.changhua.flood_sensor": "flood_depth",
+    "local.nantou.sewer_water_level": "sewer_water_level",
+    "local.yunlin.water_level": "water_level",
+    "local.chiayi_city.water_level": "water_level",
+    "local.chiayi_city.rainfall": "rainfall",
+    "local.chiayi_county.flood_sensor": "flood_depth",
+    "local.tainan.flood_sensor": "flood_depth",
+    "local.kaohsiung.sewer_water_level": "sewer_water_level",
+    "local.kaohsiung.flood_sensor": "flood_depth",
+    "local.kaohsiung.rainfall": "rainfall",
+    "local.pingtung.flood_sensor": "flood_depth",
+    "local.yilan.flood_sensor": "flood_depth",
+    "local.yilan.water_level": "water_level",
+    "local.hualien.flood_sensor": "flood_depth",
+    "local.taitung.flood_sensor": "flood_depth",
+    "local.penghu.water_level": "water_level",
+}
+COVERAGE_SIGNAL_TYPES = (
+    "rainfall",
+    "water_level",
+    "flood_depth",
+    "sewer_water_level",
+    "pump_or_gate_status",
+)
 
 
 @dataclass(frozen=True)
@@ -67,6 +110,9 @@ class LocalSourceCoverageRecord:
     candidate_source_urls: tuple[str, ...] = ()
     metadata_source_names: tuple[str, ...] = ()
     metadata_source_urls: tuple[str, ...] = ()
+    status_only_source_names: tuple[str, ...] = ()
+    status_only_source_urls: tuple[str, ...] = ()
+    status_only_signal_types: tuple[str, ...] = ()
     application_urls: tuple[str, ...] = ()
     requires_application: bool = False
     application_note: str | None = None
@@ -88,6 +134,53 @@ class LocalSourceCoverageRecord:
             if signal_type is not None and signal_type not in signal_types:
                 signal_types.append(signal_type)
         return tuple(signal_types)
+
+    @property
+    def local_signal_types(self) -> tuple[str, ...]:
+        signal_types: list[str] = []
+        for adapter_key in self.production_adapter_keys:
+            signal_type = LOCAL_SIGNAL_TYPES_BY_ADAPTER_KEY.get(adapter_key)
+            if signal_type is not None and signal_type not in signal_types:
+                signal_types.append(signal_type)
+        return tuple(signal_types)
+
+    @property
+    def coverage_signal_types(self) -> tuple[str, ...]:
+        available = {
+            _coverage_signal_type(signal_type)
+            for signal_type in (*self.local_signal_types, *self.central_backbone_signal_types)
+            if _coverage_signal_type(signal_type) is not None
+        }
+        return tuple(signal_type for signal_type in COVERAGE_SIGNAL_TYPES if signal_type in available)
+
+    @property
+    def rainfall_available(self) -> bool:
+        return "rainfall" in self.coverage_signal_types
+
+    @property
+    def water_level_available(self) -> bool:
+        return "water_level" in self.coverage_signal_types
+
+    @property
+    def flood_depth_available(self) -> bool:
+        return "flood_depth" in self.coverage_signal_types
+
+    @property
+    def sewer_water_level_available(self) -> bool:
+        return "sewer_water_level" in self.coverage_signal_types
+
+    @property
+    def pump_or_gate_status_available(self) -> bool:
+        return "pump_or_gate_status" in self.coverage_signal_types
+
+    @property
+    def status_only_available(self) -> bool:
+        return bool(self.status_only_source_names or self.status_only_signal_types)
+
+    @property
+    def missing_signal_types(self) -> tuple[str, ...]:
+        available = set(self.coverage_signal_types)
+        return tuple(signal_type for signal_type in COVERAGE_SIGNAL_TYPES if signal_type not in available)
 
     @property
     def central_backbone_required_signal_types(self) -> tuple[str, ...]:
@@ -156,6 +249,16 @@ class LocalSourceCoverageRecord:
         if self.next_action_code == "monitor_open_data_release":
             return "目前只有靜態清冊、站點、抽水站、水門或易淹區 metadata，尚無即時觀測欄位。"
         return "尚未找到可追溯的地方政府公開即時水情來源。"
+
+
+def _coverage_signal_type(signal_type: str) -> str | None:
+    if signal_type in {"river_water_level", "pond_water_level"}:
+        return "water_level"
+    if signal_type in {"pump_water_level", "gate_water_level", "gate_status", "pump_status"}:
+        return "pump_or_gate_status"
+    if signal_type in COVERAGE_SIGNAL_TYPES:
+        return signal_type
+    return None
 
 
 TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
@@ -395,6 +498,11 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://opendata.yunlin.gov.tw/OpenDataContent.aspx?n=8350&s=1427",
             "https://yliflood.yunlin.gov.tw/ifloodboard",
         ),
+        status_only_source_names=("雲林 iflood 淹水感測狀態",),
+        status_only_source_urls=(
+            "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5",
+        ),
+        status_only_signal_types=("flood_sensor_status",),
         notes=(
             "2026-06-28 smoke：雲林 iflood station API 免 key，totalCount 2473；"
             "stationType 水位 161 站，其中 102 筆具 levelHeight/latestUpdateTime/座標，"
@@ -459,10 +567,13 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         production_adapter_keys=(
             "local.kaohsiung.sewer_water_level",
             "local.kaohsiung.flood_sensor",
+            "local.kaohsiung.rainfall",
         ),
         production_source_urls=(
             "https://wrbswi.kcg.gov.tw/SFC/api/sewer/rt",
             "https://wrbswi.kcg.gov.tw/SFC/api/khfloodinfo/sta_info/lastest/wrs_flooding_sensor",
+            "https://wrbswi.kcg.gov.tw/SFC/api/rain/rt",
+            "https://wrbswi.kcg.gov.tw/SFC/api/rain/base",
         ),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
@@ -474,12 +585,15 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         metadata_source_urls=("https://data.gov.tw/dataset/104708",),
         notes=(
             "2026-06-28 smoke：高雄 SFC sewer/rt 免 key 回傳 296 筆下水道水位，"
-            "wrs_flooding_sensor 免 key 回傳 171 筆淹水感測；雨量端點缺站名/座標，未納入 production。",
+            "wrs_flooding_sensor 免 key 回傳 171 筆淹水感測。2026-06-29 複核："
+            "rain/rt live adapter 87 筆 normalized，可用 ST_NO join rain/base 88 筆 "
+            "WGS84 metadata，站數會隨平台即時狀態浮動；已納入地方雨量補強，"
+            "只補足 CWA 空間密度，不取代 CWA。",
         ),
     ),
     LocalSourceCoverageRecord(
         county="屏東縣",
-        local_direct_statuses=("ready_implemented", "candidate", "needs_review"),
+        local_direct_statuses=("ready_implemented", "candidate"),
         production_adapter_keys=("local.pingtung.flood_sensor",),
         production_source_urls=(
             "https://www.dprcflood.org.tw/SGDS/WS/FHYBrokerWS.asmx/GetFHYFloodSensorInfoRt",
@@ -635,7 +749,7 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
 
 
 def local_source_coverage_generated_at() -> datetime:
-    return datetime(2026, 6, 28, tzinfo=UTC)
+    return datetime(2026, 6, 29, tzinfo=UTC)
 
 
 def list_local_source_coverage() -> tuple[LocalSourceCoverageRecord, ...]:

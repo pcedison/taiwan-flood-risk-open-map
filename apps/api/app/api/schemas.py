@@ -132,10 +132,20 @@ class LocalSourceCoverage(ContractModel):
     central_backbone_minimum_complete: bool = False
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
     central_backbone_coverage_level: str = "incomplete"
+    rainfall_available: bool = False
+    water_level_available: bool = False
+    flood_depth_available: bool = False
+    sewer_water_level_available: bool = False
+    pump_or_gate_status_available: bool = False
+    status_only_available: bool = False
+    missing_signal_types: list[str] = Field(default_factory=list)
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
+    status_only_source_names: list[str] = Field(default_factory=list)
+    status_only_source_urls: list[str] = Field(default_factory=list)
+    status_only_signal_types: list[str] = Field(default_factory=list)
     application_urls: list[str] = Field(default_factory=list)
     requires_application: bool = False
     application_note: str | None = None
@@ -179,6 +189,9 @@ class LocalSourceAuthorizationRequest(ContractModel):
     reason: str | None = None
     application_urls: list[str] = Field(default_factory=list)
     application_note: str | None = None
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
     required_read_api_fields: list[str] = Field(default_factory=list)
     request_focus: str
 
@@ -189,6 +202,10 @@ class LocalSourceMetadataReleaseMonitor(ContractModel):
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
+    required_read_api_fields: list[str] = Field(default_factory=list)
     request_focus: str
 
 
@@ -197,6 +214,9 @@ class LocalSourcePublicApiContractReview(ContractModel):
     reason: str | None = None
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
     required_read_api_fields: list[str] = Field(default_factory=list)
 
 
@@ -206,6 +226,10 @@ class LocalSourceLiveSmokeReview(ContractModel):
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
     production_adapter_keys: list[str] = Field(default_factory=list)
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
+    required_read_api_fields: list[str] = Field(default_factory=list)
 
 
 class LocalSourceActionPlan(ContractModel):

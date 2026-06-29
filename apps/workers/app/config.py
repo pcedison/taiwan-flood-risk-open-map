@@ -65,6 +65,8 @@ class WorkerSettings:
     source_kaohsiung_sewer_water_level_api_enabled: bool
     source_kaohsiung_flood_sensor_enabled: bool | None
     source_kaohsiung_flood_sensor_api_enabled: bool
+    source_kaohsiung_rainfall_enabled: bool | None
+    source_kaohsiung_rainfall_api_enabled: bool
     source_keelung_water_level_enabled: bool | None
     source_keelung_water_level_api_enabled: bool
     source_keelung_flood_sensor_enabled: bool | None
@@ -162,6 +164,8 @@ class WorkerSettings:
     chiayi_county_flood_sensor_api_url: str | None
     kaohsiung_sewer_water_level_api_url: str | None
     kaohsiung_flood_sensor_api_url: str | None
+    kaohsiung_rainfall_rt_api_url: str | None
+    kaohsiung_rainfall_base_api_url: str | None
     keelung_water_level_api_url: str | None
     keelung_flood_sensor_api_url: str | None
     keelung_rainfall_api_url: str | None
@@ -368,6 +372,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_kaohsiung_flood_sensor_api_enabled=env_flag(
             values,
             "SOURCE_KAOHSIUNG_FLOOD_SENSOR_API_ENABLED",
+        ),
+        source_kaohsiung_rainfall_enabled=env_bool(
+            values,
+            "SOURCE_KAOHSIUNG_RAINFALL_ENABLED",
+        ),
+        source_kaohsiung_rainfall_api_enabled=env_flag(
+            values,
+            "SOURCE_KAOHSIUNG_RAINFALL_API_ENABLED",
         ),
         source_keelung_water_level_enabled=env_bool(
             values,
@@ -636,6 +648,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         kaohsiung_flood_sensor_api_url=env_str(
             values,
             "KAOHSIUNG_FLOOD_SENSOR_API_URL",
+        ),
+        kaohsiung_rainfall_rt_api_url=env_str(
+            values,
+            "KAOHSIUNG_RAINFALL_RT_API_URL",
+        ),
+        kaohsiung_rainfall_base_api_url=env_str(
+            values,
+            "KAOHSIUNG_RAINFALL_BASE_API_URL",
         ),
         keelung_water_level_api_url=env_str(
             values,

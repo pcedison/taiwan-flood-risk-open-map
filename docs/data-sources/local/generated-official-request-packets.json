@@ -1,5 +1,33 @@
 [
   {
+    "county": "花蓮縣",
+    "packet_type": "authorization_request",
+    "requires_human_intervention": true,
+    "subject": "花蓮縣 Senslink/行動水情 即時水情 read API 授權請求",
+    "source_urls": [
+      "https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index",
+      "https://www.hl.gov.tw/News_Content.aspx?n=32725&s=116294"
+    ],
+    "requested_counterparty": "花蓮縣政府 / Senslink 行動水情維運窗口",
+    "tracking_status": "needs_authorization_request",
+    "last_followed_up_at": null,
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "request_body": "目前花蓮縣地方直連即時水情來源仍需要官方授權。請確認 Senslink/行動水情 是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。",
+    "checklist": [
+      "確認是否可提供最新觀測 read API",
+      "確認 API contract、授權條款與 rate limit",
+      "取得測站清冊、座標 metadata 與範例 response",
+      "確認資料欄位可滿足 production adapter 必備欄位"
+    ]
+  },
+  {
     "county": "金門縣",
     "packet_type": "authorization_request",
     "requires_human_intervention": true,
@@ -8,6 +36,9 @@
       "https://kwis.kinmen.gov.tw/",
       "https://kwis.kinmen.gov.tw/KWIS/Doc/%E9%87%91%E9%96%80%E7%B8%A3%E6%94%BF%E5%BA%9C%E7%AC%AC%E4%B8%89%E6%96%B9%E5%96%AE%E4%BD%8D%E8%B3%87%E6%96%99%E4%B8%8A%E5%82%B3%5B%E9%87%91%E9%96%80%E6%B0%B4%E6%83%85%E7%B3%BB%E7%B5%B1%5D%E4%B9%8BAPI%E4%BB%8B%E6%8E%A5%E7%94%B3%E8%AB%8B%E5%8F%8A%E4%BD%BF%E7%94%A8%E8%AA%AA%E6%98%8E.pdf"
     ],
+    "requested_counterparty": "金門縣政府 / KWIS 維運窗口",
+    "tracking_status": "needs_authorization_request",
+    "last_followed_up_at": null,
     "required_read_api_fields": [
       "observed_at",
       "station_or_device_id",
@@ -33,8 +64,19 @@
       "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5",
       "https://www.matsu.gov.tw/upload/f-20230922134042.ods"
     ],
+    "requested_counterparty": "連江縣政府公開資料或防災水利窗口",
+    "tracking_status": "monitoring_open_data_release",
+    "last_followed_up_at": null,
     "target_signal_types": [
       "hydrologic_observation"
+    ],
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
     ],
     "request_body": "目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。",
     "checklist": [
@@ -42,6 +84,91 @@
       "確認是否可加入 Civil IoT 或 WRA 公開主幹",
       "取得站點 ID、觀測時間、測值、單位與座標",
       "確認短期無感測器時的建置計畫或資料釋出時程"
+    ]
+  },
+  {
+    "county": "苗栗縣",
+    "packet_type": "public_api_contract_request",
+    "requires_human_intervention": true,
+    "subject": "苗栗縣地方即時水情 read API contract 請求",
+    "source_urls": [
+      "https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560"
+    ],
+    "requested_counterparty": "苗栗縣政府公開資料或水利防災維運窗口",
+    "tracking_status": "needs_public_read_api_contract",
+    "last_followed_up_at": null,
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "request_body": "目前苗栗縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。",
+    "checklist": [
+      "確認公開 read API URL 與 response 格式",
+      "確認觀測時間、站點 ID、測值、單位與座標欄位",
+      "確認授權條款、rate limit 與維運窗口",
+      "取得可重跑 live smoke 的範例 response"
+    ]
+  },
+  {
+    "county": "屏東縣",
+    "packet_type": "public_api_contract_request",
+    "requires_human_intervention": true,
+    "subject": "屏東縣地方即時水情 read API contract 請求",
+    "source_urls": [
+      "https://pteoc.pthg.gov.tw/",
+      "https://pteoc.pthg.gov.tw/RainStation",
+      "https://pteoc.pthg.gov.tw/River",
+      "https://pteoc.pthg.gov.tw/Flood",
+      "https://pteoc.pthg.gov.tw/Crawler"
+    ],
+    "requested_counterparty": "屏東縣政府公開資料或水利防災維運窗口",
+    "tracking_status": "needs_public_read_api_contract",
+    "last_followed_up_at": null,
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "request_body": "目前屏東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。",
+    "checklist": [
+      "確認公開 read API URL 與 response 格式",
+      "確認觀測時間、站點 ID、測值、單位與座標欄位",
+      "確認授權條款、rate limit 與維運窗口",
+      "取得可重跑 live smoke 的範例 response"
+    ]
+  },
+  {
+    "county": "臺東縣",
+    "packet_type": "public_api_contract_request",
+    "requires_human_intervention": true,
+    "subject": "臺東縣地方即時水情 read API contract 請求",
+    "source_urls": [
+      "https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652"
+    ],
+    "requested_counterparty": "臺東縣政府公開資料或水利防災維運窗口",
+    "tracking_status": "needs_public_read_api_contract",
+    "last_followed_up_at": null,
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "request_body": "目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。",
+    "checklist": [
+      "確認公開 read API URL 與 response 格式",
+      "確認觀測時間、站點 ID、測值、單位與座標欄位",
+      "確認授權條款、rate limit 與維運窗口",
+      "取得可重跑 live smoke 的範例 response"
     ]
   }
 ]

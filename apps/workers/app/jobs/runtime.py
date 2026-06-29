@@ -42,6 +42,7 @@ from app.adapters.local_hsinchu_city import (
 from app.adapters.local_kaohsiung import FetchJson as KaohsiungFetchJson
 from app.adapters.local_kaohsiung import (
     KaohsiungFloodSensorApiAdapter,
+    KaohsiungRainfallApiAdapter,
     KaohsiungSewerWaterLevelApiAdapter,
 )
 from app.adapters.local_keelung import FetchJson as KeelungFetchJson
@@ -190,6 +191,7 @@ def build_runtime_adapters(
     chiayi_county_flood_sensor_fetch_json: ChiayiCountyFetchJson | None = None,
     kaohsiung_sewer_fetch_json: KaohsiungFetchJson | None = None,
     kaohsiung_flood_sensor_fetch_json: KaohsiungFetchJson | None = None,
+    kaohsiung_rainfall_fetch_json: KaohsiungFetchJson | None = None,
     keelung_water_level_fetch_json: KeelungFetchJson | None = None,
     keelung_flood_sensor_fetch_json: KeelungFetchJson | None = None,
     keelung_rainfall_fetch_json: KeelungFetchJson | None = None,
@@ -561,6 +563,19 @@ def build_runtime_adapters(
             fetch_json=kaohsiung_flood_sensor_fetch_json,
         )
         live_adapters[kaohsiung_flood_adapter.metadata.key] = kaohsiung_flood_adapter
+
+    if (
+        settings.source_kaohsiung_rainfall_api_enabled
+        and "local.kaohsiung.rainfall" in enabled_keys
+    ):
+        kaohsiung_rainfall_adapter = KaohsiungRainfallApiAdapter(
+            realtime_api_url=settings.kaohsiung_rainfall_rt_api_url,
+            base_api_url=settings.kaohsiung_rainfall_base_api_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=kaohsiung_rainfall_fetch_json,
+        )
+        live_adapters[kaohsiung_rainfall_adapter.metadata.key] = kaohsiung_rainfall_adapter
 
     if (
         settings.source_keelung_water_level_api_enabled

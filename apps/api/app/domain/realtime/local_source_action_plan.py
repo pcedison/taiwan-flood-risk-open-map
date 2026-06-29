@@ -30,22 +30,21 @@ def build_local_source_action_plan(
             _authorization_request(record)
             for record in records
             if record.next_action_code == "request_official_authorization"
-            and not record.local_direct_complete
         ],
         "metadata_release_monitors": [
             _metadata_release_monitor(record)
             for record in records
-            if not record.local_direct_complete and "metadata_only" in record.local_direct_statuses
+            if "metadata_only" in record.local_direct_statuses
         ],
         "public_api_contract_reviews": [
             _public_api_contract_review(record)
             for record in records
-            if not record.local_direct_complete and "candidate" in record.local_direct_statuses
+            if record.next_action_code == "verify_public_api_contract"
         ],
         "live_smoke_reviews": [
             _live_smoke_review(record)
             for record in records
-            if not record.local_direct_complete and "needs_review" in record.local_direct_statuses
+            if record.next_action_code == "verify_live_smoke"
         ],
     }
 
@@ -56,6 +55,9 @@ def _authorization_request(record: LocalSourceCoverageRecord) -> dict[str, Any]:
         "reason": record.blocking_reason,
         "application_urls": list(record.application_urls),
         "application_note": record.application_note,
+        "requested_counterparty": _requested_counterparty(record),
+        "tracking_status": "needs_authorization_request",
+        "last_followed_up_at": None,
         "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
         "request_focus": (
             "請官方提供可查詢最新觀測值的 read API contract，而不是設備上傳 API；"
@@ -73,6 +75,10 @@ def _metadata_release_monitor(record: LocalSourceCoverageRecord) -> dict[str, An
         "central_backbone_missing_signal_types": list(
             record.central_backbone_missing_signal_types
         ),
+        "requested_counterparty": _requested_counterparty(record),
+        "tracking_status": "monitoring_open_data_release",
+        "last_followed_up_at": None,
+        "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
         "request_focus": (
             "請官方釋出即時水文觀測 read API，至少包含水位、淹水深度、雨水下水道、"
             "抽水站或水門任一類觀測資料，並提供觀測時間、站點 ID、測值與座標。"
@@ -86,6 +92,9 @@ def _public_api_contract_review(record: LocalSourceCoverageRecord) -> dict[str, 
         "reason": record.blocking_reason,
         "candidate_source_names": list(record.candidate_source_names),
         "candidate_source_urls": list(record.candidate_source_urls),
+        "requested_counterparty": _requested_counterparty(record),
+        "tracking_status": "needs_public_read_api_contract",
+        "last_followed_up_at": None,
         "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
     }
 
@@ -97,4 +106,18 @@ def _live_smoke_review(record: LocalSourceCoverageRecord) -> dict[str, Any]:
         "candidate_source_names": list(record.candidate_source_names),
         "candidate_source_urls": list(record.candidate_source_urls),
         "production_adapter_keys": list(record.production_adapter_keys),
+        "requested_counterparty": _requested_counterparty(record),
+        "tracking_status": "needs_live_smoke_retry",
+        "last_followed_up_at": None,
+        "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
     }
+
+
+def _requested_counterparty(record: LocalSourceCoverageRecord) -> str:
+    if record.county == "金門縣":
+        return "金門縣政府 / KWIS 維運窗口"
+    if record.county == "連江縣":
+        return "連江縣政府公開資料或防災水利窗口"
+    if record.county == "花蓮縣":
+        return "花蓮縣政府 / Senslink 行動水情維運窗口"
+    return f"{record.county}政府公開資料或水利防災維運窗口"
