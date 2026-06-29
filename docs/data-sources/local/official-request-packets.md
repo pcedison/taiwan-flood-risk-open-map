@@ -89,6 +89,13 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 目前狀態：`metadata_only` + `not_found`，地方直連尚未完成；中央主幹也缺
 `hydrologic_observation`。
 
+整合優先序：`#1 / P0 / restore_hydrologic_backbone`。此請求包直接對應
+`integration_priority_queue[0]`，完成門檻是取得至少一個可公開追溯的水位、
+淹水深度、雨水下水道、抽水站或水門即時 read API，且欄位需包含
+`observed_at`、`station_or_device_id`、`measurement_value`、
+`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
+與官方來源/授權資訊。
+
 已查核來源：
 
 - 連江縣開放資料查詢：`https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5`

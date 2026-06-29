@@ -25,7 +25,12 @@
       "確認 API contract、授權條款與 rate limit",
       "取得測站清冊、座標 metadata 與範例 response",
       "確認資料欄位可滿足 production adapter 必備欄位"
-    ]
+    ],
+    "priority_rank": 3,
+    "priority_tier": "P1",
+    "workstream": "request_official_authorization",
+    "priority_why_now": "official authorization is required before a production read API can run",
+    "completion_gate": "取得官方授權或公開 read API contract，確認用途不是設備上傳 API。"
   },
   {
     "county": "金門縣",
@@ -53,7 +58,12 @@
       "確認 API contract、授權條款與 rate limit",
       "取得測站清冊、座標 metadata 與範例 response",
       "確認資料欄位可滿足 production adapter 必備欄位"
-    ]
+    ],
+    "priority_rank": 2,
+    "priority_tier": "P0",
+    "workstream": "request_official_authorization",
+    "priority_why_now": "local_direct_source is not complete；official authorization is required before a production read API can run",
+    "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。"
   },
   {
     "county": "連江縣",
@@ -84,7 +94,12 @@
       "確認是否可加入 Civil IoT 或 WRA 公開主幹",
       "取得站點 ID、觀測時間、測值、單位與座標",
       "確認短期無感測器時的建置計畫或資料釋出時程"
-    ]
+    ],
+    "priority_rank": 1,
+    "priority_tier": "P0",
+    "workstream": "restore_hydrologic_backbone",
+    "priority_why_now": "central_backbone is missing hydrologic observation coverage for this county；local_direct_source is not complete",
+    "completion_gate": "取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門即時 read API，並提供 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
   },
   {
     "county": "苗栗縣",
@@ -111,7 +126,12 @@
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認授權條款、rate limit 與維運窗口",
       "取得可重跑 live smoke 的範例 response"
-    ]
+    ],
+    "priority_rank": 7,
+    "priority_tier": "P2",
+    "workstream": "verify_public_read_api_contract",
+    "priority_why_now": "candidate source needs a public read API contract review",
+    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。"
   },
   {
     "county": "屏東縣",
@@ -142,7 +162,12 @@
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認授權條款、rate limit 與維運窗口",
       "取得可重跑 live smoke 的範例 response"
-    ]
+    ],
+    "priority_rank": 8,
+    "priority_tier": "P2",
+    "workstream": "verify_public_read_api_contract",
+    "priority_why_now": "candidate source needs a public read API contract review",
+    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。"
   },
   {
     "county": "臺東縣",
@@ -169,6 +194,11 @@
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認授權條款、rate limit 與維運窗口",
       "取得可重跑 live smoke 的範例 response"
-    ]
+    ],
+    "priority_rank": 6,
+    "priority_tier": "P2",
+    "workstream": "verify_public_read_api_contract",
+    "priority_why_now": "candidate source needs a public read API contract review",
+    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。"
   }
 ]

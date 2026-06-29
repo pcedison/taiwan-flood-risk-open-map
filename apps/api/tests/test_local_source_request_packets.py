@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from app.domain.realtime.local_source_action_plan import build_local_source_action_plan
+from app.domain.realtime.local_source_action_plan import (
+    REQUIRED_REALTIME_READ_API_FIELDS,
+    build_local_source_action_plan,
+)
 from app.domain.realtime.local_source_coverage import list_local_source_coverage
 from app.domain.realtime.local_source_request_packets import (
     build_official_request_packets,
@@ -66,3 +69,21 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "- [ ] 確認是否可提供最新觀測 read API" in markdown
     assert "`observed_at`" in markdown
     assert "hydrologic_observation" in markdown
+
+
+def test_lienchiang_packet_tracks_p0_hydrologic_backbone_priority() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+    top_priority = plan["integration_priority_queue"][0]
+
+    packets = build_official_request_packets(plan)
+    lienchiang = next(packet for packet in packets if packet["county"] == "連江縣")
+
+    assert top_priority["county"] == "連江縣"
+    assert lienchiang["priority_rank"] == top_priority["rank"] == 1
+    assert lienchiang["priority_tier"] == "P0"
+    assert lienchiang["workstream"] == "restore_hydrologic_backbone"
+    assert lienchiang["completion_gate"] == top_priority["completion_gate"]
+    assert lienchiang["target_signal_types"] == ["hydrologic_observation"]
+    assert lienchiang["required_read_api_fields"] == list(
+        REQUIRED_REALTIME_READ_API_FIELDS
+    )

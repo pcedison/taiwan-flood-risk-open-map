@@ -173,9 +173,9 @@ Expected: both commands pass.
 - Consumes: `integration_priority_queue[0]` for `連江縣`.
 - Produces: a request packet asking for live hydrologic read API fields and a tracking status for official follow-up.
 
-- [ ] Write a failing request-packet test that requires `連江縣` to include `hydrologic_observation`, `observed_at`, `station_or_device_id`, `measurement_value`, `measurement_unit_or_type`, and `longitude_latitude_or_joinable_station_metadata`.
-- [ ] Generate or update the packet content from existing `build_local_source_action_plan()` data.
-- [ ] Run `python -m pytest apps/api/tests/test_local_source_request_packets.py tests/test_local_source_request_packets_cli.py -q`.
+- [x] Write a failing request-packet test that requires `連江縣` to include `hydrologic_observation`, `observed_at`, `station_or_device_id`, `measurement_value`, `measurement_unit_or_type`, and `longitude_latitude_or_joinable_station_metadata`.
+- [x] Generate or update the packet content from existing `build_local_source_action_plan()` data.
+- [x] Run `python -m pytest apps/api/tests/test_local_source_request_packets.py tests/test_local_source_request_packets_cli.py -q`.
 
 ## Task 3: Kinmen KWIS Authorization Packet
 

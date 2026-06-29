@@ -7,16 +7,29 @@ def build_official_request_packets(
     action_plan: Mapping[str, Any],
 ) -> tuple[dict[str, Any], ...]:
     packets: list[dict[str, Any]] = []
+    priority_by_county = {
+        str(item["county"]): item
+        for item in action_plan.get("integration_priority_queue", [])
+    }
     packets.extend(
-        _authorization_packet(item)
+        _authorization_packet(
+            item,
+            priority_item=priority_by_county.get(str(item["county"])),
+        )
         for item in action_plan.get("authorization_requests", [])
     )
     packets.extend(
-        _metadata_release_packet(item)
+        _metadata_release_packet(
+            item,
+            priority_item=priority_by_county.get(str(item["county"])),
+        )
         for item in action_plan.get("metadata_release_monitors", [])
     )
     packets.extend(
-        _public_api_contract_packet(item)
+        _public_api_contract_packet(
+            item,
+            priority_item=priority_by_county.get(str(item["county"])),
+        )
         for item in action_plan.get("public_api_contract_reviews", [])
     )
     return tuple(packets)
@@ -36,7 +49,11 @@ def render_official_request_packets_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _authorization_packet(item: Mapping[str, Any]) -> dict[str, Any]:
+def _authorization_packet(
+    item: Mapping[str, Any],
+    *,
+    priority_item: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     county = str(item["county"])
     required_fields = list(item.get("required_read_api_fields", []))
     source_urls = list(item.get("application_urls", []))
@@ -64,10 +81,14 @@ def _authorization_packet(item: Mapping[str, Any]) -> dict[str, Any]:
             "取得測站清冊、座標 metadata 與範例 response",
             "確認資料欄位可滿足 production adapter 必備欄位",
         ],
-    }
+    } | _priority_packet_fields(priority_item)
 
 
-def _metadata_release_packet(item: Mapping[str, Any]) -> dict[str, Any]:
+def _metadata_release_packet(
+    item: Mapping[str, Any],
+    *,
+    priority_item: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     county = str(item["county"])
     source_urls = list(item.get("metadata_source_urls", []))
     target_signal_types = list(item.get("central_backbone_missing_signal_types", []))
@@ -95,10 +116,14 @@ def _metadata_release_packet(item: Mapping[str, Any]) -> dict[str, Any]:
             "取得站點 ID、觀測時間、測值、單位與座標",
             "確認短期無感測器時的建置計畫或資料釋出時程",
         ],
-    }
+    } | _priority_packet_fields(priority_item)
 
 
-def _public_api_contract_packet(item: Mapping[str, Any]) -> dict[str, Any]:
+def _public_api_contract_packet(
+    item: Mapping[str, Any],
+    *,
+    priority_item: Mapping[str, Any] | None,
+) -> dict[str, Any]:
     county = str(item["county"])
     source_urls = list(item.get("candidate_source_urls", []))
     required_fields = list(item.get("required_read_api_fields", []))
@@ -124,6 +149,18 @@ def _public_api_contract_packet(item: Mapping[str, Any]) -> dict[str, Any]:
             "確認授權條款、rate limit 與維運窗口",
             "取得可重跑 live smoke 的範例 response",
         ],
+    } | _priority_packet_fields(priority_item)
+
+
+def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str, Any]:
+    if priority_item is None:
+        return {}
+    return {
+        "priority_rank": priority_item.get("rank"),
+        "priority_tier": priority_item.get("priority_tier"),
+        "workstream": priority_item.get("workstream"),
+        "priority_why_now": priority_item.get("why_now"),
+        "completion_gate": priority_item.get("completion_gate"),
     }
 
 
@@ -155,6 +192,11 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
         lines.append(f"- 追蹤對象：{packet['requested_counterparty']}")
     if packet.get("tracking_status"):
         lines.append(f"- 追蹤狀態：{packet['tracking_status']}")
+    if packet.get("priority_rank"):
+        lines.append(
+            f"- 整合優先序：#{packet['priority_rank']} / "
+            f"{packet.get('priority_tier')} / {packet.get('workstream')}"
+        )
     if packet.get("last_followed_up_at"):
         lines.append(f"- 最後追蹤時間：{packet['last_followed_up_at']}")
     if packet.get("source_urls"):
@@ -168,6 +210,10 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
             "- 待補中央主幹訊號："
             + "、".join(str(signal) for signal in packet["target_signal_types"])
         )
+    if packet.get("priority_why_now"):
+        lines.append(f"- 排入此順位原因：{packet['priority_why_now']}")
+    if packet.get("completion_gate"):
+        lines.append(f"- 完成門檻：{packet['completion_gate']}")
     lines.extend(["", packet["request_body"], "", "待辦："])
     lines.extend(f"- [ ] {item}" for item in packet.get("checklist", []))
     lines.append("")
