@@ -59,6 +59,14 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 
 目前狀態：`needs_application`，地方直連尚未完成。
 
+整合優先序：`#2 / P0 / request_official_authorization`。目前公開文件的
+API contract 風險標記為 `known_public_docs_are_upload_or_application_focused`：
+`device_upload_api` 與 `third_party_upload_integration` 不足以支撐 production
+read adapter；仍需確認是否有 `latest_observation_read_api` 可查詢最新觀測值。
+正式回覆需包含 `observed_at`、`station_or_device_id`、`measurement_value`、
+`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
+與官方來源/授權資訊。
+
 已查核來源：
 
 - 金門水情系統入口：`https://kwis.kinmen.gov.tw/`

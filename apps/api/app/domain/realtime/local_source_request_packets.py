@@ -81,7 +81,7 @@ def _authorization_packet(
             "取得測站清冊、座標 metadata 與範例 response",
             "確認資料欄位可滿足 production adapter 必備欄位",
         ],
-    } | _priority_packet_fields(priority_item)
+    } | _authorization_contract_fields(system_name) | _priority_packet_fields(priority_item)
 
 
 def _metadata_release_packet(
@@ -164,6 +164,23 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
     }
 
 
+def _authorization_contract_fields(system_name: str) -> dict[str, Any]:
+    if system_name != "KWIS":
+        return {}
+    return {
+        "api_contract_risk": "known_public_docs_are_upload_or_application_focused",
+        "insufficient_api_purposes": [
+            "device_upload_api",
+            "third_party_upload_integration",
+        ],
+        "required_api_purpose": "latest_observation_read_api",
+        "request_clarification": (
+            "公開文件看起來偏第三方設備 upload-only 介接；production adapter "
+            "需要可查詢最新觀測值的 read API contract。"
+        ),
+    }
+
+
 def _authorization_system_name(item: Mapping[str, Any], reason: str) -> str:
     text = " ".join(
         str(part)
@@ -197,6 +214,17 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
             f"- 整合優先序：#{packet['priority_rank']} / "
             f"{packet.get('priority_tier')} / {packet.get('workstream')}"
         )
+    if packet.get("api_contract_risk"):
+        lines.append(f"- API contract 風險：{packet['api_contract_risk']}")
+    if packet.get("insufficient_api_purposes"):
+        lines.append(
+            "- 不足用途："
+            + "、".join(str(purpose) for purpose in packet["insufficient_api_purposes"])
+        )
+    if packet.get("required_api_purpose"):
+        lines.append(f"- 必要 API 用途：{packet['required_api_purpose']}")
+    if packet.get("request_clarification"):
+        lines.append(f"- 需釐清事項：{packet['request_clarification']}")
     if packet.get("last_followed_up_at"):
         lines.append(f"- 最後追蹤時間：{packet['last_followed_up_at']}")
     if packet.get("source_urls"):

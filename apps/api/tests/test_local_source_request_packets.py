@@ -87,3 +87,25 @@ def test_lienchiang_packet_tracks_p0_hydrologic_backbone_priority() -> None:
     assert lienchiang["required_read_api_fields"] == list(
         REQUIRED_REALTIME_READ_API_FIELDS
     )
+
+
+def test_kinmen_packet_marks_upload_api_as_insufficient_for_read_adapter() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+
+    packets = build_official_request_packets(plan)
+    kinmen = next(packet for packet in packets if packet["county"] == "金門縣")
+
+    assert kinmen["priority_rank"] == 2
+    assert kinmen["priority_tier"] == "P0"
+    assert kinmen["workstream"] == "request_official_authorization"
+    assert (
+        kinmen["api_contract_risk"]
+        == "known_public_docs_are_upload_or_application_focused"
+    )
+    assert kinmen["insufficient_api_purposes"] == [
+        "device_upload_api",
+        "third_party_upload_integration",
+    ]
+    assert kinmen["required_api_purpose"] == "latest_observation_read_api"
+    assert "upload-only" in kinmen["request_clarification"]
+    assert "read API" in kinmen["request_clarification"]

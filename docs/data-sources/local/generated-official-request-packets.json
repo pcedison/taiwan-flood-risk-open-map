@@ -59,6 +59,13 @@
       "取得測站清冊、座標 metadata 與範例 response",
       "確認資料欄位可滿足 production adapter 必備欄位"
     ],
+    "api_contract_risk": "known_public_docs_are_upload_or_application_focused",
+    "insufficient_api_purposes": [
+      "device_upload_api",
+      "third_party_upload_integration"
+    ],
+    "required_api_purpose": "latest_observation_read_api",
+    "request_clarification": "公開文件看起來偏第三方設備 upload-only 介接；production adapter 需要可查詢最新觀測值的 read API contract。",
     "priority_rank": 2,
     "priority_tier": "P0",
     "workstream": "request_official_authorization",

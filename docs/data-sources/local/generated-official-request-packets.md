@@ -31,6 +31,10 @@
 - 追蹤對象：金門縣政府 / KWIS 維運窗口
 - 追蹤狀態：needs_authorization_request
 - 整合優先序：#2 / P0 / request_official_authorization
+- API contract 風險：known_public_docs_are_upload_or_application_focused
+- 不足用途：device_upload_api、third_party_upload_integration
+- 必要 API 用途：latest_observation_read_api
+- 需釐清事項：公開文件看起來偏第三方設備 upload-only 介接；production adapter 需要可查詢最新觀測值的 read API contract。
 - 來源：
   - https://kwis.kinmen.gov.tw/
   - https://kwis.kinmen.gov.tw/KWIS/Doc/%E9%87%91%E9%96%80%E7%B8%A3%E6%94%BF%E5%BA%9C%E7%AC%AC%E4%B8%89%E6%96%B9%E5%96%AE%E4%BD%8D%E8%B3%87%E6%96%99%E4%B8%8A%E5%82%B3%5B%E9%87%91%E9%96%80%E6%B0%B4%E6%83%85%E7%B3%BB%E7%B5%B1%5D%E4%B9%8BAPI%E4%BB%8B%E6%8E%A5%E7%94%B3%E8%AB%8B%E5%8F%8A%E4%BD%BF%E7%94%A8%E8%AA%AA%E6%98%8E.pdf

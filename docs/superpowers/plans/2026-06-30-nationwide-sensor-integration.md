@@ -189,9 +189,9 @@ Expected: both commands pass.
 - Consumes: `integration_priority_queue` item for `金門縣`.
 - Produces: a packet that distinguishes KWIS upload API documents from the needed read API contract.
 
-- [ ] Write a failing test requiring the Kinmen packet to state that upload-only APIs are insufficient.
-- [ ] Add required read API fields and counterparty `金門縣政府 / KWIS 維運窗口`.
-- [ ] Run request packet tests.
+- [x] Write a failing test requiring the Kinmen packet to state that upload-only APIs are insufficient.
+- [x] Add required read API fields and counterparty `金門縣政府 / KWIS 維運窗口`.
+- [x] Run request packet tests.
 
 ## Task 4: Taipei Evacuation Gate Live Smoke
 
