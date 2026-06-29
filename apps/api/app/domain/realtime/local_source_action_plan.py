@@ -202,6 +202,9 @@ def _integration_priority_item(
         "production_adapter_keys": list(record.production_adapter_keys),
         "candidate_source_names": list(record.candidate_source_names),
         "candidate_source_urls": list(record.candidate_source_urls),
+        "status_only_source_names": list(record.status_only_source_names),
+        "status_only_source_urls": list(record.status_only_source_urls),
+        "status_only_signal_types": list(record.status_only_signal_types),
         "application_urls": list(record.application_urls),
         "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
     }

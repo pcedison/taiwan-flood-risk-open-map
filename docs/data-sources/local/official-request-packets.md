@@ -37,10 +37,11 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 - 連江縣：即時水文觀測資料釋出或納入 Civil IoT / WRA 主幹。
 - 金門縣：KWIS read API 授權。
 - 花蓮縣：Senslink / 行動水情 read API 授權。
-- 臺北市、雲林縣：live smoke / status-only 欄位語意複核。
+- 臺北市：疏散門 live smoke / 欄位語意複核。
 - 臺東縣、苗栗縣、屏東縣：public read API contract 與站點 metadata。
 - 嘉義市、桃園市、澎湖縣、臺中市、臺南市、南投縣、基隆市、宜蘭縣、
-  新北市、新竹縣：既有 production adapter 之外的水資訊訊號缺口補齊。
+  新北市、新竹縣、雲林縣：既有 production adapter 之外的水資訊訊號缺口補齊；
+  雲林 iflood `alarmState` 已保留為 status-only 診斷線索，不作淹水深度。
 
 各類請求包都會列出 production read API 必備欄位；signal-gap 請求包會明確
 要求不要把 `status-only` 資料當成水位、雨量、淹水深度或下水道水位量測。
@@ -55,8 +56,8 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 - 臺東縣：洪水與淹水預警系統 read API contract。
 
 舊版未將臺北疏散門、雲林 iflood 淹水感測狀態或已上線縣市的 signal-gap
-reviews 輸出成請求包；新版已納入，但仍維持欄位語意隔離，避免把可技術解項目、
-授權/契約請求與 `status-only` 診斷線索混為正式量測值。
+reviews 輸出成請求包；新版已納入，且雲林已從 live-smoke retry 轉入
+signal-gap/status-only 追蹤，避免把 `status-only` 診斷線索混為正式量測值。
 
 ## Production read API 必備欄位
 

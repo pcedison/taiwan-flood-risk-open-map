@@ -218,6 +218,9 @@ def _signal_gap_packet(
         "subject": f"{county}缺漏水資訊訊號補齊請求",
         "source_urls": list(item.get("candidate_source_urls", [])),
         "production_adapter_keys": list(item.get("production_adapter_keys", [])),
+        "status_only_source_names": list(item.get("status_only_source_names", [])),
+        "status_only_source_urls": list(item.get("status_only_source_urls", [])),
+        "status_only_signal_types": list(item.get("status_only_signal_types", [])),
         "requested_counterparty": item.get("requested_counterparty"),
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
@@ -329,6 +332,19 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
             "- 既有 production adapters："
             + "、".join(str(key) for key in packet["production_adapter_keys"])
         )
+    if packet.get("status_only_source_names"):
+        lines.append(
+            "- 既有 status-only 來源："
+            + "、".join(str(name) for name in packet["status_only_source_names"])
+        )
+    if packet.get("status_only_signal_types"):
+        lines.append(
+            "- 既有 status-only 訊號："
+            + "、".join(str(signal) for signal in packet["status_only_signal_types"])
+        )
+    if packet.get("status_only_source_urls"):
+        lines.append("- status-only 來源 URL：")
+        lines.extend(f"  - {url}" for url in packet["status_only_source_urls"])
     if packet.get("required_read_api_fields"):
         fields = "、".join(f"`{field}`" for field in packet["required_read_api_fields"])
         lines.append(f"- Production read API 必備欄位：{fields}")

@@ -74,7 +74,7 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     live_smoke_by_county = {
         item["county"]: item for item in plan["live_smoke_reviews"]
     }
-    assert set(live_smoke_by_county) == {"臺北市", "雲林縣"}
+    assert set(live_smoke_by_county) == {"臺北市"}
     assert live_smoke_by_county["臺北市"]["tracking_status"] == "needs_live_smoke_retry"
 
     priority = plan["integration_priority_queue"]
@@ -90,11 +90,19 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
 
     signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
     assert "嘉義市" in signal_gaps
+    assert "雲林縣" in signal_gaps
     assert {
         "flood_depth",
         "sewer_water_level",
         "pump_or_gate_status",
     }.issubset(set(signal_gaps["嘉義市"]["missing_signal_types"]))
+    assert signal_gaps["雲林縣"]["missing_signal_types"] == ["flood_depth"]
+    assert signal_gaps["雲林縣"]["status_only_source_names"] == [
+        "雲林 iflood 淹水感測狀態"
+    ]
+    assert signal_gaps["雲林縣"]["status_only_signal_types"] == [
+        "flood_sensor_status"
+    ]
     assert signal_gaps["嘉義市"]["workstream"] == "fill_sensor_signal_gap"
     assert "高雄市" not in signal_gaps
 

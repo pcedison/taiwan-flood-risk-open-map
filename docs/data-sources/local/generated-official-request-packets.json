@@ -149,40 +149,6 @@
     "completion_gate": "live smoke 連續成功，並確認 observed_at、station id、measurement_value、單位、座標與欄位語意。"
   },
   {
-    "county": "雲林縣",
-    "packet_type": "live_smoke_review_request",
-    "requires_human_intervention": true,
-    "subject": "雲林縣地方即時水情 live smoke 複核請求",
-    "source_urls": [],
-    "source_names": [],
-    "production_adapter_keys": [
-      "local.yunlin.water_level"
-    ],
-    "requested_counterparty": "雲林縣政府公開資料或水利防災維運窗口",
-    "tracking_status": "needs_live_smoke_retry",
-    "last_followed_up_at": null,
-    "required_read_api_fields": [
-      "observed_at",
-      "station_or_device_id",
-      "measurement_value",
-      "measurement_unit_or_type",
-      "longitude_latitude_or_joinable_station_metadata",
-      "official_source_url_and_license"
-    ],
-    "request_body": "目前雲林縣已有候選或部分 production adapter，但仍需要 live smoke 複核觀測時間、站點 ID、測值、單位、座標與欄位語意。狀態或開關資料不得替代水位、雨量或淹水深度；若只能提供狀態，需標示為 status-only 診斷線索。",
-    "checklist": [
-      "重跑 live smoke 並保存 response 範例",
-      "確認 observed_at、station_or_device_id、measurement_value、單位與座標",
-      "確認狀態或開關欄位不被誤標為水位、雨量或淹水深度",
-      "更新 adapter gate、verification log 與 freshness policy"
-    ],
-    "priority_rank": 5,
-    "priority_tier": "P1",
-    "workstream": "verify_live_smoke",
-    "priority_why_now": "candidate or status-only source needs live smoke and field semantics review",
-    "completion_gate": "live smoke 連續成功，並確認 observed_at、station id、measurement_value、單位、座標與欄位語意。"
-  },
-  {
     "county": "臺東縣",
     "packet_type": "public_api_contract_request",
     "requires_human_intervention": true,
@@ -208,7 +174,7 @@
       "確認授權條款、rate limit 與維運窗口",
       "取得可重跑 live smoke 的範例 response"
     ],
-    "priority_rank": 6,
+    "priority_rank": 5,
     "priority_tier": "P2",
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
@@ -240,7 +206,7 @@
       "確認授權條款、rate limit 與維運窗口",
       "取得可重跑 live smoke 的範例 response"
     ],
-    "priority_rank": 7,
+    "priority_rank": 6,
     "priority_tier": "P2",
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
@@ -276,7 +242,7 @@
       "確認授權條款、rate limit 與維運窗口",
       "取得可重跑 live smoke 的範例 response"
     ],
-    "priority_rank": 8,
+    "priority_rank": 7,
     "priority_tier": "P2",
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
@@ -292,6 +258,9 @@
       "local.chiayi_city.water_level",
       "local.chiayi_city.rainfall"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "嘉義市政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -315,7 +284,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 9,
+    "priority_rank": 8,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -332,6 +301,9 @@
       "local.taoyuan.water_level",
       "local.taoyuan.rainfall"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "桃園市政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -354,7 +326,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 10,
+    "priority_rank": 9,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -369,6 +341,9 @@
     "production_adapter_keys": [
       "local.penghu.water_level"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "澎湖縣政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -391,7 +366,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 11,
+    "priority_rank": 10,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -406,6 +381,9 @@
     "production_adapter_keys": [
       "local.taichung.water_level"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "臺中市政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -428,7 +406,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 12,
+    "priority_rank": 11,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -443,6 +421,9 @@
     "production_adapter_keys": [
       "local.tainan.flood_sensor"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "臺南市政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -465,7 +446,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 13,
+    "priority_rank": 12,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -480,6 +461,9 @@
     "production_adapter_keys": [
       "local.nantou.sewer_water_level"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "南投縣政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -501,7 +485,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 14,
+    "priority_rank": 13,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -518,6 +502,9 @@
       "local.keelung.flood_sensor",
       "local.keelung.rainfall"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "基隆市政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -539,7 +526,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 15,
+    "priority_rank": 14,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -555,6 +542,9 @@
       "local.yilan.flood_sensor",
       "local.yilan.water_level"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "宜蘭縣政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -576,7 +566,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 16,
+    "priority_rank": 15,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -594,6 +584,9 @@
       "local.new_taipei.rainfall",
       "local.new_taipei.drainage_water_level"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "新北市政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -615,7 +608,7 @@
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
       "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
     ],
-    "priority_rank": 17,
+    "priority_rank": 16,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -630,6 +623,9 @@
     "production_adapter_keys": [
       "local.hsinchu_county.flood_sensor"
     ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
     "requested_counterparty": "新竹縣政府公開資料或水利防災維運窗口",
     "tracking_status": "needs_signal_gap_review",
     "last_followed_up_at": null,
@@ -645,6 +641,51 @@
       "official_source_url_and_license"
     ],
     "request_body": "目前新竹縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "checklist": [
+      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
+      "確認觀測時間、站點 ID、測值、單位與座標欄位",
+      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+    ],
+    "priority_rank": 17,
+    "priority_tier": "P2",
+    "workstream": "fill_sensor_signal_gap",
+    "priority_why_now": "existing adapters do not cover every required water signal family",
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+  },
+  {
+    "county": "雲林縣",
+    "packet_type": "signal_gap_request",
+    "requires_human_intervention": true,
+    "subject": "雲林縣缺漏水資訊訊號補齊請求",
+    "source_urls": [],
+    "production_adapter_keys": [
+      "local.yunlin.water_level"
+    ],
+    "status_only_source_names": [
+      "雲林 iflood 淹水感測狀態"
+    ],
+    "status_only_source_urls": [
+      "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
+    ],
+    "status_only_signal_types": [
+      "flood_sensor_status"
+    ],
+    "requested_counterparty": "雲林縣政府公開資料或水利防災維運窗口",
+    "tracking_status": "needs_signal_gap_review",
+    "last_followed_up_at": null,
+    "target_signal_types": [
+      "flood_depth"
+    ],
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "request_body": "目前雲林縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",

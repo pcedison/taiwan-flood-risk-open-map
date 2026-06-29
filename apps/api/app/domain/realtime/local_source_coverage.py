@@ -480,7 +480,7 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
     ),
     LocalSourceCoverageRecord(
         county="雲林縣",
-        local_direct_statuses=("ready_implemented", "needs_review"),
+        local_direct_statuses=("ready_implemented",),
         production_adapter_keys=("local.yunlin.water_level",),
         production_source_urls=(
             "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5",
@@ -505,7 +505,8 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "2026-06-28 smoke：雲林 iflood station API 免 key，totalCount 2473；"
             "stationType 水位 161 站，其中 102 筆具 levelHeight/latestUpdateTime/座標，"
             "本輪 live adapter normalized 101、1 筆 stale 拒收。淹水感測 173 站目前公開"
-            "清單未曝露 depth 欄位，不以 alarmState 假造淹水深度。",
+            "清單未曝露 depth 欄位；alarmState 已標示為 status-only 診斷線索，"
+            "不以其假造淹水深度。",
         ),
     ),
     LocalSourceCoverageRecord(

@@ -1186,7 +1186,6 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     ]
     assert [item["county"] for item in plan["live_smoke_reviews"]] == [
         "臺北市",
-        "雲林縣",
     ]
     assert [item["county"] for item in plan["integration_priority_queue"][:3]] == [
         "連江縣",
@@ -1202,6 +1201,14 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert "嘉義市" in signal_gaps
     assert signal_gaps["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
     assert "flood_depth" in signal_gaps["嘉義市"]["missing_signal_types"]
+    assert "雲林縣" in signal_gaps
+    assert signal_gaps["雲林縣"]["missing_signal_types"] == ["flood_depth"]
+    assert signal_gaps["雲林縣"]["status_only_source_urls"] == [
+        "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
+    ]
+    assert signal_gaps["雲林縣"]["status_only_signal_types"] == [
+        "flood_sensor_status"
+    ]
     assert "高雄市" not in signal_gaps
     hualien = plan["authorization_requests"][0]
     assert hualien["requested_counterparty"] == "花蓮縣政府 / Senslink 行動水情維運窗口"

@@ -248,6 +248,9 @@ class LocalSourceIntegrationPriorityItem(ContractModel):
     production_adapter_keys: list[str] = Field(default_factory=list)
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    status_only_source_names: list[str] = Field(default_factory=list)
+    status_only_source_urls: list[str] = Field(default_factory=list)
+    status_only_signal_types: list[str] = Field(default_factory=list)
     application_urls: list[str] = Field(default_factory=list)
     required_read_api_fields: list[str] = Field(default_factory=list)
 

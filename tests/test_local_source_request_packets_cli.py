@@ -26,8 +26,8 @@ def test_local_source_request_packets_cli_emits_json() -> None:
         "金門縣",
         "花蓮縣",
         "臺北市",
-        "雲林縣",
         "臺東縣",
+        "苗栗縣",
     ]
     assert {packet["county"] for packet in payload} >= {
         "苗栗縣",
@@ -43,6 +43,10 @@ def test_local_source_request_packets_cli_emits_json() -> None:
         "sewer_water_level",
         "pump_or_gate_status",
     ]
+    yunlin = next(packet for packet in payload if packet["county"] == "雲林縣")
+    assert yunlin["packet_type"] == "signal_gap_request"
+    assert yunlin["status_only_source_names"] == ["雲林 iflood 淹水感測狀態"]
+    assert yunlin["target_signal_types"] == ["flood_depth"]
 
 
 def test_local_source_request_packets_cli_writes_markdown_output(
@@ -74,4 +78,6 @@ def test_local_source_request_packets_cli_writes_markdown_output(
     assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
+    assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" in markdown
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
+    assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown

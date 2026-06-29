@@ -2673,6 +2673,9 @@ components:
         - production_adapter_keys
         - candidate_source_names
         - candidate_source_urls
+        - status_only_source_names
+        - status_only_source_urls
+        - status_only_signal_types
         - application_urls
         - required_read_api_fields
       properties:
@@ -2721,6 +2724,19 @@ components:
           items:
             type: string
             format: uri
+        status_only_source_names:
+          type: array
+          items:
+            type: string
+        status_only_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        status_only_signal_types:
+          type: array
+          items:
+            type: string
         application_urls:
           type: array
           items:

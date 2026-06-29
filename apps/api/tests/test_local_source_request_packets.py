@@ -21,8 +21,8 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         "金門縣",
         "花蓮縣",
         "臺北市",
-        "雲林縣",
         "臺東縣",
+        "苗栗縣",
     ]
     assert {packet["county"] for packet in packets} >= {
         "苗栗縣",
@@ -62,6 +62,14 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert taipei["tracking_status"] == "needs_live_smoke_retry"
     assert "狀態或開關資料不得替代水位、雨量或淹水深度" in taipei["request_body"]
 
+    yunlin = next(packet for packet in packets if packet["county"] == "雲林縣")
+    assert yunlin["packet_type"] == "signal_gap_request"
+    assert yunlin["tracking_status"] == "needs_signal_gap_review"
+    assert yunlin["target_signal_types"] == ["flood_depth"]
+    assert yunlin["status_only_source_names"] == ["雲林 iflood 淹水感測狀態"]
+    assert yunlin["status_only_signal_types"] == ["flood_sensor_status"]
+    assert "status-only" in yunlin["request_body"]
+
     chiayi_city = next(packet for packet in packets if packet["county"] == "嘉義市")
     assert chiayi_city["packet_type"] == "signal_gap_request"
     assert chiayi_city["tracking_status"] == "needs_signal_gap_review"
@@ -87,6 +95,7 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
+    assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" in markdown
     assert "- 需要人工介入：是" in markdown
     assert "- 追蹤狀態：needs_public_read_api_contract" in markdown
     assert "- 追蹤狀態：needs_signal_gap_review" in markdown
@@ -94,6 +103,7 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "`observed_at`" in markdown
     assert "hydrologic_observation" in markdown
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
+    assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
 
 
 def test_lienchiang_packet_tracks_p0_hydrologic_backbone_priority() -> None:

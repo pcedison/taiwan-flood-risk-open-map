@@ -276,12 +276,43 @@ rather than the API realtime bridge.
 - [x] Regenerate Markdown/JSON request packet artifacts.
 
 Completed 2026-06-30: generated request packets now include 18 priority-ordered
-items. The new output starts with 連江縣、金門縣、花蓮縣、臺北市、雲林縣 and
+items. The output starts with 連江縣、金門縣、花蓮縣、臺北市 and
 continues through public API contract and signal-gap follow-up packets. Signal
 gap packets explicitly require official read APIs or documented unavailability
 for missing families such as `flood_depth`, `sewer_water_level`, and
 `pump_or_gate_status`, while warning that `status-only` data must not be
 misrepresented as a measurement.
+
+## Task 8: Yunlin Status-Only Queue Reclassification
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: generated request packet artifacts.
+- Test: action-plan, admin-contract, and request-packet tests.
+
+**Interfaces:**
+- Consumes: Yunlin local source coverage status-only metadata and
+  `sensor_signal_gap_reviews`.
+- Produces: action-plan and request-packet output that treats Yunlin
+  `alarmState` as an accepted status-only diagnostic clue, while keeping
+  `flood_depth` as an unresolved signal gap.
+
+- [x] Write failing tests proving Yunlin leaves `live_smoke_reviews`.
+- [x] Add status-only source metadata to integration priority and signal-gap
+  items.
+- [x] Regenerate request packets so Yunlin becomes a `signal_gap_request` with
+  status-only source names, URLs, and signal type.
+- [x] Update OpenAPI/admin contract to expose the new status-only metadata on
+  priority items.
+
+Completed 2026-06-30: 雲林縣 now leaves the P1 live-smoke queue and appears as
+a P2 `signal_gap_request` for missing `flood_depth`. The packet keeps
+`雲林 iflood 淹水感測狀態` as a status-only source and explicitly preserves the
+rule that `alarmState` cannot satisfy flood-depth measurement coverage.
 
 ## Completion Gates
 
