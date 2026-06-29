@@ -44,6 +44,11 @@ def test_official_demo_builder_covers_default_official_adapter_keys() -> None:
         "official.cwa.rainfall",
         "official.wra.water_level",
         "official.flood_potential.geojson",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
     }
 
 
@@ -1411,6 +1416,11 @@ def test_runtime_adapters_fixture_mode_supplies_official_adapters() -> None:
 
     assert set(build_runtime_adapters(settings)) == {
         "official.cwa.rainfall",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.sewer_water_level",
         "official.wra.water_level",
         "official.flood_potential.geojson",
     }
@@ -1447,6 +1457,11 @@ def test_runtime_adapters_fixture_mode_requires_explicit_public_web_sample() -> 
     assert "news.public_web.sample" not in adapters
     assert set(adapters) == {
         "official.cwa.rainfall",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.sewer_water_level",
         "official.wra.water_level",
         "official.flood_potential.geojson",
     }
@@ -1612,6 +1627,11 @@ def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeyp
         "official.cwa.rainfall",
         "official.wra.water_level",
         "official.flood_potential.geojson",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
     )
 
 

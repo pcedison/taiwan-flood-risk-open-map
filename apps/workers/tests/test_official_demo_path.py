@@ -101,6 +101,55 @@ def test_official_demo_flood_potential_keeps_geometry_in_promotion_payload() -> 
     assert payload.raw_ref == "raw/official-demo/flood-potential.geojson"
 
 
+def test_official_demo_civil_iot_backbone_adapters_stage_required_metrics() -> None:
+    adapters = build_official_demo_adapters(fetched_at=FETCHED_AT)
+    expected = {
+        "official.civil_iot.flood_sensor": (
+            "raw/official-demo/civil-iot-flood-sensor.json",
+            "flood_report",
+            "flood_depth_cm",
+            "CIVIL-IOT-FLOOD-DEMO-001",
+        ),
+        "official.civil_iot.sewer_water_level": (
+            "raw/official-demo/civil-iot-sewer-water-level.json",
+            "water_level",
+            "water_level_m",
+            "CIVIL-IOT-SEWER-DEMO-001",
+        ),
+        "official.civil_iot.pump_water_level": (
+            "raw/official-demo/civil-iot-pump-water-level.json",
+            "water_level",
+            "water_level_m",
+            "CIVIL-IOT-PUMP-DEMO-001",
+        ),
+        "official.civil_iot.gate_water_level": (
+            "raw/official-demo/civil-iot-gate-water-level.json",
+            "water_level",
+            "water_level_m",
+            "CIVIL-IOT-GATE-DEMO-001",
+        ),
+        "official.civil_iot.pond_water_level": (
+            "raw/official-demo/civil-iot-pond-water-level.json",
+            "water_level",
+            "water_level_m",
+            "CIVIL-IOT-POND-DEMO-001",
+        ),
+    }
+
+    for adapter_key, (raw_ref, event_type, metric_key, station_id) in expected.items():
+        batch = build_staging_batch(adapters[adapter_key].run())
+        staged = batch.accepted[0]
+
+        assert batch.adapter_key == adapter_key
+        assert batch.raw_snapshot.raw_ref == raw_ref
+        assert batch.raw_snapshot.metadata["items_fetched"] == 1
+        assert len(batch.accepted) == 1
+        assert staged.source_type == "official"
+        assert staged.event_type == event_type
+        assert staged.payload["station_id"] == station_id
+        assert staged.payload[metric_key] > 0
+
+
 class _MemoryPromotionWriter:
     def __init__(self, candidates: list[PromotionCandidate]) -> None:
         self._candidates = tuple(candidates)

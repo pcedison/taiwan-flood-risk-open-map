@@ -36,10 +36,16 @@ def test_runtime_smoke_verifies_worker_persisted_latest_rows_by_adapter() -> Non
     assert "Checking worker-persisted official realtime latest rows" in script
     assert "official_realtime_latest" in script
     assert "official.wra.water_level" in script
+    assert "official.civil_iot.flood_sensor" in script
+    assert "official.civil_iot.sewer_water_level" in script
+    assert "official.civil_iot.pump_water_level" in script
+    assert "official.civil_iot.gate_water_level" in script
+    assert "official.civil_iot.pond_water_level" in script
     assert "latest_row_count" in script
     assert "fresh_ingested_count" in script
     assert "ingested_at >= smoke_started_at" in script
     assert "water_level_m IS NOT NULL" in script
+    assert "flood_depth_cm IS NOT NULL" in script
 
 
 def test_runtime_smoke_cleans_worker_persisted_latest_rows() -> None:
@@ -47,7 +53,9 @@ def test_runtime_smoke_cleans_worker_persisted_latest_rows() -> None:
 
     assert "deleted_latest AS (" in script
     assert "DELETE FROM official_realtime_latest" in script
-    assert "adapter_key IN (" in script
+    assert "(adapter_key, station_id) IN" in script
+    assert "CIVIL-IOT-FLOOD-DEMO-001" in script
+    assert "CIVIL-IOT-SEWER-DEMO-001" in script
 
 
 def test_runbooks_require_hosted_worker_persisted_evidence_before_claiming_ready() -> None:
@@ -56,6 +64,12 @@ def test_runbooks_require_hosted_worker_persisted_evidence_before_claiming_ready
 
     assert "REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false" in runtime_runbook
     assert "official_realtime_latest" in runtime_runbook
+    assert "official.cwa.rainfall" in runtime_runbook
+    assert "official.civil_iot.flood_sensor" in runtime_runbook
+    assert "official.civil_iot.sewer_water_level" in runtime_runbook
+    assert "official.civil_iot.pump_water_level" in runtime_runbook
+    assert "official.civil_iot.gate_water_level" in runtime_runbook
+    assert "official.civil_iot.pond_water_level" in runtime_runbook
     assert "worker-persisted latest rows" in runtime_runbook
     assert "worker-persisted evidence" in scheduler_runbook
     assert "do not use the API realtime bridge" in scheduler_runbook

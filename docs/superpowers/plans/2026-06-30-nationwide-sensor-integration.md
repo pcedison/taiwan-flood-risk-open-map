@@ -314,6 +314,23 @@ a P2 `signal_gap_request` for missing `flood_depth`. The packet keeps
 `雲林 iflood 淹水感測狀態` as a status-only source and explicitly preserves the
 rule that `alarmState` cannot satisfy flood-depth measurement coverage.
 
+## Task 9: Official Backbone Fixture Persistence Expansion
+
+**Files:**
+- Modify: `apps/workers/app/jobs/official_demo.py`
+- Modify: `apps/workers/tests/test_worker_entrypoints.py`
+- Modify: `scripts/runtime-smoke.ps1`
+- Modify: `docs/runbooks/runtime-smoke.md`
+- Modify: `docs/runbooks/worker-scheduler-deployment.md`
+
+**Interfaces:**
+- Consumes: fixture-backed CWA, WRA, Civil IoT, and L2 public-web sample adapter rows.
+- Produces: hosted-like smoke evidence that official central backbone adapters write raw snapshots, staging rows, adapter runs, promoted evidence, and `official_realtime_latest` rows by adapter.
+
+- [x] Add failing tests proving fixture mode includes CWA, WRA, and Civil IoT official backbone adapters.
+- [x] Expand the managed runtime persist smoke to verify latest-row freshness and metric columns for CWA rainfall, WRA water level, Civil IoT flood depth, and Civil IoT water-level families.
+- [x] Document that this smoke validates fixture-backed worker persistence, not real upstream credentials, source egress, or every county's local direct integration.
+
 ## Completion Gates
 
 The full objective is complete only when:

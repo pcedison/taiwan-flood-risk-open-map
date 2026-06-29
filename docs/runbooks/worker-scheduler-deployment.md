@@ -127,16 +127,19 @@ Managed ingestion smoke:
 
 ```sh
 WORKER_RUNTIME_FIXTURES_ENABLED=true \
-WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level \
+WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.wra.water_level,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,official.civil_iot.pond_water_level \
 python -m app.main --run-enabled-adapters --persist
 ```
 
 Before claiming hosted or production readiness, capture evidence that the
 worker/scheduler path wrote `raw_snapshots`, `staging_evidence`,
 `adapter_runs`, promoted `evidence`, and fresh `official_realtime_latest` rows
-for each enabled official adapter. The `official_realtime_latest` rows are the
-public hot path for nearby realtime coverage; do not use the API realtime
-bridge as a substitute for this evidence.
+for each enabled official adapter. The local managed ingestion smoke now covers
+fixture-backed CWA rainfall, WRA water level, and Civil IoT flood, sewer, pump,
+gate, and pond water-level adapters, but production readiness still requires
+hosted evidence from the real enabled upstreams. The `official_realtime_latest`
+rows are the public hot path for nearby realtime coverage; do not use the API
+realtime bridge as a substitute for this evidence.
 
 ## Failure Detection
 
