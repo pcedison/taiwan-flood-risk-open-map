@@ -132,10 +132,20 @@ class LocalSourceCoverage(ContractModel):
     central_backbone_minimum_complete: bool = False
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
     central_backbone_coverage_level: str = "incomplete"
+    rainfall_available: bool = False
+    water_level_available: bool = False
+    flood_depth_available: bool = False
+    sewer_water_level_available: bool = False
+    pump_or_gate_status_available: bool = False
+    status_only_available: bool = False
+    missing_signal_types: list[str] = Field(default_factory=list)
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
+    status_only_source_names: list[str] = Field(default_factory=list)
+    status_only_source_urls: list[str] = Field(default_factory=list)
+    status_only_signal_types: list[str] = Field(default_factory=list)
     application_urls: list[str] = Field(default_factory=list)
     requires_application: bool = False
     application_note: str | None = None
@@ -179,6 +189,9 @@ class LocalSourceAuthorizationRequest(ContractModel):
     reason: str | None = None
     application_urls: list[str] = Field(default_factory=list)
     application_note: str | None = None
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
     required_read_api_fields: list[str] = Field(default_factory=list)
     request_focus: str
 
@@ -189,6 +202,10 @@ class LocalSourceMetadataReleaseMonitor(ContractModel):
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
+    required_read_api_fields: list[str] = Field(default_factory=list)
     request_focus: str
 
 
@@ -197,6 +214,9 @@ class LocalSourcePublicApiContractReview(ContractModel):
     reason: str | None = None
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
     required_read_api_fields: list[str] = Field(default_factory=list)
 
 
@@ -206,6 +226,10 @@ class LocalSourceLiveSmokeReview(ContractModel):
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
     production_adapter_keys: list[str] = Field(default_factory=list)
+    requested_counterparty: str
+    tracking_status: str
+    last_followed_up_at: datetime | None = None
+    required_read_api_fields: list[str] = Field(default_factory=list)
 
 
 class LocalSourceActionPlan(ContractModel):
@@ -410,7 +434,48 @@ class QueryHeat(ContractModel):
     updated_at: datetime
 
 
+NearbyCoverageLevel = Literal["high", "medium", "low", "no_local_sensor", "unavailable"]
+NearbyCoverageSignalType = Literal[
+    "rainfall",
+    "water_level",
+    "flood_depth",
+    "sewer_water_level",
+    "pump_or_gate_status",
+    "flood_warning",
+    "status_only",
+]
+
+
+class NearbyCoverageSignal(ContractModel):
+    signal_type: NearbyCoverageSignalType
+    label: str
+    coverage_level: NearbyCoverageLevel
+    nearest_distance_m: float | None = Field(default=None, ge=0)
+    nearest_source_id: str | None = None
+    nearest_observed_at: datetime | None = None
+    counts_by_radius_m: dict[str, int]
+    fresh_count: int = Field(ge=0)
+    stale_count: int = Field(ge=0)
+    status_only_count: int = Field(ge=0)
+    missing_reason: str | None = None
+
+
+class NearbyRealtimeCoverage(ContractModel):
+    overall_level: NearbyCoverageLevel
+    evaluated_at: datetime
+    query_radius_m: int = Field(ge=50, le=2000)
+    radius_buckets_m: list[int]
+    summary: str
+    signal_breakdown: list[NearbyCoverageSignal]
+    missing_signal_types: list[NearbyCoverageSignalType]
+    limitations: list[str]
+    county_level_note: str = Field(
+        description='縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
+    )
+
+
 class RiskAssessmentResponse(ContractModel):
+
     assessment_id: str
     location: LatLng
     radius_m: int
@@ -424,6 +489,7 @@ class RiskAssessmentResponse(ContractModel):
     evidence: list[EvidencePreview]
     data_freshness: list[DataFreshness]
     query_heat: QueryHeat
+    nearby_realtime_coverage: NearbyRealtimeCoverage
 
 
 class GeoJsonGeometry(ContractModel):

@@ -9,7 +9,13 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 import pytest
 import yaml  # type: ignore[import-untyped]
 
-from app.api.schemas import DependencyReadiness, LatLng, PlaceCandidate
+from app.api.schemas import (
+    DependencyReadiness,
+    LatLng,
+    NearbyCoverageSignal,
+    NearbyRealtimeCoverage,
+    PlaceCandidate,
+)
 from app.api.routes import health as health_routes
 from app.api.routes import public as public_routes
 from app.core.config import get_settings
@@ -19,6 +25,7 @@ from app.domain.evidence import (
     EvidenceUpsert,
     QueryHeatSnapshot,
 )
+from app.domain.evidence.repository import NearbyCoverageRow
 from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
 from app.domain.profiles import RiskProfileRecord
@@ -56,6 +63,7 @@ def fallback_to_local_historical_records(monkeypatch: pytest.MonkeyPatch) -> Non
         )
 
     monkeypatch.setattr(public_routes, "query_nearby_evidence", unavailable)
+    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", unavailable)
     monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
     monkeypatch.setattr(public_routes, "persist_risk_assessment", unavailable)
     monkeypatch.setattr(public_routes, "fetch_map_layers", layers_unavailable)
@@ -154,6 +162,57 @@ def test_runtime_openapi_exposes_health_and_readiness_schemas() -> None:
     assert ready_responses["503"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ReadyResponse"
     }
+
+
+def test_nearby_coverage_signal_requires_diagnostic_counts() -> None:
+    required_diagnostics = {
+        "counts_by_radius_m",
+        "fresh_count",
+        "stale_count",
+        "status_only_count",
+    }
+
+    pydantic_required = set(NearbyCoverageSignal.model_json_schema()["required"])
+    runtime_required = set(
+        client.get("/openapi.json").json()["components"]["schemas"]["NearbyCoverageSignal"][
+            "required"
+        ]
+    )
+    documented_required = set(
+        OPENAPI_SPEC["components"]["schemas"]["NearbyCoverageSignal"]["required"]
+    )
+
+    assert required_diagnostics <= pydantic_required
+    assert required_diagnostics <= runtime_required
+    assert required_diagnostics <= documented_required
+
+
+def test_nearby_realtime_coverage_requires_top_level_contract_fields() -> None:
+    expected_required = {
+        "overall_level",
+        "evaluated_at",
+        "query_radius_m",
+        "radius_buckets_m",
+        "summary",
+        "signal_breakdown",
+        "missing_signal_types",
+        "limitations",
+        "county_level_note",
+    }
+
+    pydantic_required = set(NearbyRealtimeCoverage.model_json_schema()["required"])
+    runtime_required = set(
+        client.get("/openapi.json").json()["components"]["schemas"]["NearbyRealtimeCoverage"][
+            "required"
+        ]
+    )
+    documented_required = set(
+        OPENAPI_SPEC["components"]["schemas"]["NearbyRealtimeCoverage"]["required"]
+    )
+
+    assert pydantic_required == expected_required
+    assert runtime_required == expected_required
+    assert documented_required == expected_required
 
 
 def test_geocode_contract_and_limit() -> None:
@@ -494,6 +553,7 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "evidence",
         "data_freshness",
         "query_heat",
+        "nearby_realtime_coverage",
     }
     assert UUID(payload["assessment_id"])
     assert payload["location"] == {"lat": 25.033, "lng": 121.5654}
@@ -528,6 +588,20 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert payload["data_freshness"][0]["source_id"] == "cwa-rainfall"
     assert payload["query_heat"]["period"] == "P7D"
     assert payload["query_heat"]["attention_level"] in RISK_LEVELS
+    coverage = payload["nearby_realtime_coverage"]
+    assert coverage["query_radius_m"] == 500
+    assert coverage["radius_buckets_m"] == [500, 1000, 3000, 5000]
+    assert coverage["overall_level"] in {
+        "high",
+        "medium",
+        "low",
+        "no_local_sensor",
+        "unavailable",
+    }
+    assert coverage["county_level_note"] == (
+        '縣市層級涵蓋只作背景參考，不代表查詢點附'
+        '近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
+    )
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
@@ -1477,6 +1551,13 @@ def test_risk_assess_skips_db_when_evidence_repository_is_disabled(monkeypatch) 
     )
     monkeypatch.setattr(
         public_routes,
+        "query_nearby_realtime_coverage_rows",
+        lambda **_kwargs: pytest.fail(
+            "query_nearby_realtime_coverage_rows should not be called"
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
         "persist_risk_assessment",
         lambda **_kwargs: pytest.fail("persist_risk_assessment should not be called"),
     )
@@ -1504,6 +1585,13 @@ def test_risk_assess_skips_db_when_evidence_repository_is_disabled(monkeypatch) 
     assert payload["historical"]["level"] == "中"
     assert payload["query_heat"]["query_count_bucket"] == "limited-db-disabled"
     assert payload["query_heat"]["unique_approx_count_bucket"] == "limited-db-disabled"
+    assert payload["nearby_realtime_coverage"]["overall_level"] == "unavailable"
+    assert set(payload["nearby_realtime_coverage"]["missing_signal_types"]) == {
+        "rainfall",
+        "water_level",
+        "flood_depth",
+        "sewer_water_level",
+    }
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
@@ -1701,6 +1789,22 @@ def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypa
     monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
     monkeypatch.setattr(
         public_routes,
+        "query_nearby_realtime_coverage_rows",
+        lambda **_kwargs: (
+            NearbyCoverageRow(
+                adapter_key="official.cwa.rainfall",
+                source_id="cwa-rainfall:profile-fast-path",
+                event_type="rainfall",
+                station_id="profile-fast-path",
+                observed_at=computed_at,
+                ingested_at=computed_at,
+                distance_to_query_m=230.0,
+                freshness_state="fresh",
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
         "fetch_best_profile_for_point",
         lambda **_kwargs: RiskProfileRecord(
             profile_kind="risk_grid",
@@ -1808,6 +1912,12 @@ def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypa
     assert "profile 未納入即時雨量來源；這會限制即時風險，不代表歷史參考沒有依據。" in payload["explanation"]["missing_sources"]
     assert enqueued[0]["profile_kind"] == "risk_grid"
     assert enqueued[0]["profile_key"] == "h3:842ab57ffffffff"
+    coverage = payload["nearby_realtime_coverage"]
+    assert coverage["overall_level"] == "low"
+    rainfall = next(
+        item for item in coverage["signal_breakdown"] if item["signal_type"] == "rainfall"
+    )
+    assert rainfall["nearest_source_id"] == "cwa-rainfall:profile-fast-path"
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 

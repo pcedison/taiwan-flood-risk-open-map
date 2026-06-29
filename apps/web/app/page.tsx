@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { DiagnosticsSection } from "./components/diagnostics-section";
 import { EvidenceSection } from "./components/evidence-section";
+import { NearbyCoverageSection } from "./components/nearby-coverage-section";
 import { RiskSummarySection } from "./components/risk-summary-section";
 import { SearchForm } from "./components/search-form";
 import { UserReportSection } from "./components/user-report-section";
@@ -351,6 +352,8 @@ export default function HomePage() {
           profileBasisText={profileBasisText}
           profilePreviewState={profilePreviewState}
         />
+
+        <NearbyCoverageSection coverage={assessment?.nearby_realtime_coverage ?? null} />
 
         <EvidenceSection
           assessment={assessment}

@@ -448,6 +448,11 @@ def test_explicit_adapter_allowlist_does_not_bypass_sample_data_gate() -> None:
             {"SOURCE_KAOHSIUNG_FLOOD_SENSOR_API_ENABLED": "true"},
         ),
         (
+            "local.kaohsiung.rainfall",
+            "SOURCE_KAOHSIUNG_RAINFALL_ENABLED",
+            {"SOURCE_KAOHSIUNG_RAINFALL_API_ENABLED": "true"},
+        ),
+        (
             "local.keelung.water_level",
             "SOURCE_KEELUNG_WATER_LEVEL_ENABLED",
             {"SOURCE_KEELUNG_WATER_LEVEL_API_ENABLED": "true"},

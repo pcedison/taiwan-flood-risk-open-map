@@ -42,15 +42,17 @@ The script performs these checks:
 7. Posts a sample request to `/v1/risk/assess`
 8. Verifies `query_heat` is present and not in the `limited-db-unavailable`
    fallback state
-9. Verifies `/v1/reports` is default-disabled over live HTTP with
+9. Verifies `nearby_realtime_coverage` is present with `radius_buckets_m` and
+   a `summary`
+10. Verifies `/v1/reports` is default-disabled over live HTTP with
    `feature_disabled`
-10. Verifies seeded MVT endpoints:
+11. Verifies seeded MVT endpoints:
     - `/v1/tiles/query-heat/8/215/107.mvt`
     - `/v1/tiles/flood-potential/8/215/107.mvt`
-11. Runs `python -m app.main --run-official-demo` in a one-off `worker`
+12. Runs `python -m app.main --run-official-demo` in a one-off `worker`
     container to prove the safe official adapter fixture parse/dry-run path
     without external API credentials or persistence.
-12. Runs `python -m app.main --run-enabled-adapters --persist` in a one-off
+13. Runs `python -m app.main --run-enabled-adapters --persist` in a one-off
     `worker` container with `WORKER_RUNTIME_FIXTURES_ENABLED=true`,
     `SOURCE_SAMPLE_DATA_ENABLED=true`, and only
     `official.wra.water_level,news.public_web.sample` selected:
@@ -65,7 +67,7 @@ The script performs these checks:
     - accepts Phase 2 L2 public evidence fixture/persistence only; it does not
       prove CWA/WRA/flood-potential production source readiness or production
       news ingestion
-13. Runs a queue ops CLI surface smoke in a one-off `worker` container:
+14. Runs a queue ops CLI surface smoke in a one-off `worker` container:
     - executes `python -m app.main --help`
     - verifies the enqueue, consume, queue metrics export, queue summary/list,
       requeue, live-run, and adapter-list flags are present
@@ -73,7 +75,7 @@ The script performs these checks:
       `official.flood_potential.geojson` even when the GeoJSON live gate is on
     - verifies the flood-potential GeoJSON gate and URL settings are present
     - does not connect to the database and does not require CWA/WRA credentials
-14. Runs a safe live-gate no-network boundary smoke in a one-off `worker`
+15. Runs a safe live-gate no-network boundary smoke in a one-off `worker`
     container:
     - calls `--run-enabled-adapters` with CWA/WRA/flood-potential selected
       but live API gates disabled
@@ -81,7 +83,7 @@ The script performs these checks:
       the no-op path tries to connect externally
     - does not require external credentials and does not prove production
       official ingestion readiness
-15. Runs a queue live smoke in a one-off `worker` container:
+16. Runs a queue live smoke in a one-off `worker` container:
     - enables fixture runtime adapters with
       `WORKER_RUNTIME_FIXTURES_ENABLED=true`
     - verifies active-job producer dedupe for the same adapter
@@ -93,18 +95,18 @@ The script performs these checks:
     - requeues that row through the audited `--requeue-runtime-job` CLI against
       the live DB table and verifies it can be dequeued again
     - deletes the smoke queue rows
-16. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
+17. Runs a bounded maintenance scheduler tick for the Query Heat/tile cadence
     path with `--maintenance --scheduler --max-ticks 1`.
-17. Runs a reports enabled-path smoke in a one-off `api` container with
+18. Runs a reports enabled-path smoke in a one-off `api` container with
     `USER_REPORTS_ENABLED=true`; this inserts a minimized pending row in
     `user_reports`, verifies moderation/audit rows, then deletes the smoke rows
-18. Runs a query heat and tile cache job smoke:
+19. Runs a query heat and tile cache job smoke:
     - materializes `P1D` and `P7D` query heat buckets
     - refreshes `flood-potential` map features from accepted evidence
     - writes one smoke tile cache row
     - verifies the API serves the same cached tile payload bytes
     - deletes synthetic tile/evidence/cache rows
-19. Polls the web runtime until it responds at `http://localhost:3000`
+20. Polls the web runtime until it responds at `http://localhost:3000`
 
 By default, services are left running for debugging or follow-up manual testing. To stop the runtime containers after the smoke finishes, without removing volumes:
 
@@ -149,6 +151,7 @@ API health: status=ok, service=flood-risk-api, version=...
 API ready: database=healthy, redis=healthy
 Risk smoke: assessment_id=..., realtime=..., historical=..., confidence=...
 Query heat smoke: period=P7D, query_count_bucket=..., unique_approx_count_bucket=...
+Nearby realtime coverage smoke: overall=..., missing=...
 Reports default-disabled smoke: HTTP 404 feature_disabled
 MVT smoke: layer=query-heat, HTTP 200, content-type=application/vnd.mapbox-vector-tile
 MVT smoke: layer=flood-potential, HTTP 200, content-type=application/vnd.mapbox-vector-tile

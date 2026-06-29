@@ -30,6 +30,8 @@ KAOHSIUNG_SEWER_WATER_LEVEL_API_URL = "https://wrbswi.kcg.gov.tw/SFC/api/sewer/r
 KAOHSIUNG_FLOOD_SENSOR_API_URL = (
     "https://wrbswi.kcg.gov.tw/SFC/api/khfloodinfo/sta_info/lastest/wrs_flooding_sensor"
 )
+KAOHSIUNG_RAINFALL_RT_API_URL = "https://wrbswi.kcg.gov.tw/SFC/api/rain/rt"
+KAOHSIUNG_RAINFALL_BASE_API_URL = "https://wrbswi.kcg.gov.tw/SFC/api/rain/base"
 KAOHSIUNG_DATA_URL = "https://wrb.kcg.gov.tw/WRInfo/"
 
 KAOHSIUNG_SEWER_WATER_LEVEL_METADATA = AdapterMetadata(
@@ -60,6 +62,22 @@ KAOHSIUNG_FLOOD_SENSOR_METADATA = AdapterMetadata(
     limitations=(
         "Supplemental local flood-depth source exposed through Kaohsiung SFC.",
         "Rows without station id, observation time, depth, or WGS84 point are rejected.",
+    ),
+)
+
+KAOHSIUNG_RAINFALL_METADATA = AdapterMetadata(
+    key="local.kaohsiung.rainfall",
+    family=SourceFamily.OFFICIAL,
+    enabled_by_default=False,
+    display_name="Kaohsiung rainfall adapter",
+    data_gov_url=KAOHSIUNG_DATA_URL,
+    resource_url=KAOHSIUNG_RAINFALL_RT_API_URL,
+    update_frequency="Kaohsiung rain API carries per-station DATE timestamps",
+    license="Government Open Data License, version 1.0",
+    limitations=(
+        "Supplemental local-government rainfall source for Kaohsiung.",
+        "Rainfall values augment CWA rainfall density and must not replace the CWA "
+        "official national rainfall source.",
     ),
 )
 
@@ -157,6 +175,53 @@ class KaohsiungFloodSensorApiAdapter:
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         return _normalize_flood_sensor_record(self.metadata, raw_item)
+
+    def run(self) -> AdapterRunResult:
+        return _run(self)
+
+
+class KaohsiungRainfallApiAdapter:
+    metadata = KAOHSIUNG_RAINFALL_METADATA
+
+    def __init__(
+        self,
+        *,
+        realtime_api_url: str | None = None,
+        base_api_url: str | None = None,
+        timeout_seconds: int = DEFAULT_KAOHSIUNG_WATER_TIMEOUT_SECONDS,
+        fetched_at: datetime | None = None,
+        fetch_json: FetchJson | None = None,
+        raw_snapshot_key: str | None = None,
+    ) -> None:
+        self._realtime_api_url = (realtime_api_url or KAOHSIUNG_RAINFALL_RT_API_URL).strip()
+        self._base_api_url = (base_api_url or KAOHSIUNG_RAINFALL_BASE_API_URL).strip()
+        self._timeout_seconds = max(1, timeout_seconds)
+        self._fetched_at = fetched_at
+        self._fetch_json = fetch_json or fetch_kaohsiung_json
+        self._raw_snapshot_key = raw_snapshot_key
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        try:
+            base_payload = self._fetch_json(self._base_api_url, self._timeout_seconds)
+            realtime_payload = self._fetch_json(self._realtime_api_url, self._timeout_seconds)
+        except KaohsiungWaterAdapterError:
+            raise
+        except Exception as exc:
+            raise KaohsiungWaterFetchError(
+                f"{self.metadata.display_name} fetcher failed: {exc}"
+            ) from exc
+        fetched_at = self._fetched_at or datetime.now(UTC)
+        records = parse_kaohsiung_rainfall_payload(
+            realtime_payload,
+            base_payload=base_payload,
+            source_url=KAOHSIUNG_DATA_URL,
+            resource_url=self._realtime_api_url,
+            fetched_at=fetched_at,
+        )
+        return _raw_items(records, fetched_at=fetched_at, raw_snapshot_key=self._raw_snapshot_key)
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        return _normalize_rainfall_record(self.metadata, raw_item)
 
     def run(self) -> AdapterRunResult:
         return _run(self)
@@ -276,6 +341,67 @@ def parse_kaohsiung_flood_sensor_payload(
     return tuple(records)
 
 
+def parse_kaohsiung_rainfall_payload(
+    payload: object,
+    *,
+    base_payload: object,
+    source_url: str,
+    resource_url: str | None = None,
+    fetched_at: datetime | None = None,
+) -> tuple[Mapping[str, Any], ...]:
+    base_by_station = _rainfall_base_by_station(base_payload)
+    records: list[Mapping[str, Any]] = []
+    for item in _payload_items(payload):
+        if not isinstance(item, Mapping):
+            continue
+        station_id = _first_text(item, "ST_NO", "st_no", "station_id")
+        if station_id is None:
+            continue
+        base = base_by_station.get(station_id)
+        if base is None:
+            continue
+        station_name = _first_text(base, "NAME_C", "stn_name", "station_name")
+        observed_at = _parse_local_time(_first_value(item, "DATE", "time"))
+        rainfall_mm = optional_float(_first_value(item, "H1", "rainfall_mm", "rain"))
+        coordinate = _coordinate(_first_value(base, "Long", "lon"), _first_value(base, "Lat", "lat"))
+        if (
+            station_name is None
+            or observed_at is None
+            or rainfall_mm is None
+            or coordinate is None
+        ):
+            continue
+        longitude, latitude = coordinate
+        record: dict[str, Any] = {
+            "station_id": station_id,
+            "station_name": station_name,
+            "observed_at": observed_at.isoformat(),
+            "rainfall_mm": rainfall_mm,
+            "source_url": source_url,
+            "resource_url": resource_url,
+            "location_text": " ".join(
+                part for part in (_first_text(base, "ADDR_C"), station_name) if part
+            ),
+            "address": _first_text(base, "ADDR_C"),
+            "status": _first_text(item, "Status", "status"),
+            "authority": _first_text(base, "Source") or "高雄市政府水利局",
+            "longitude": longitude,
+            "latitude": latitude,
+            "geometry": {"type": "Point", "coordinates": [longitude, latitude]},
+            "attribution": KAOHSIUNG_ATTRIBUTION,
+            "confidence": 0.8,
+            "quality_flags": _quality_flags(observed_at, fetched_at=fetched_at),
+        }
+        _assign_float(record, "rainfall_mm_10m", _first_value(item, "M10"))
+        _assign_float(record, "rainfall_mm_20m", _first_value(item, "M20"))
+        _assign_float(record, "rainfall_mm_3h", _first_value(item, "H3"))
+        _assign_float(record, "rainfall_mm_6h", _first_value(item, "H6"))
+        _assign_float(record, "rainfall_mm_12h", _first_value(item, "H12"))
+        _assign_float(record, "rainfall_mm_24h", _first_value(item, "H24"))
+        records.append(record)
+    return tuple(records)
+
+
 def _normalize_water_level_record(
     metadata: AdapterMetadata,
     raw_item: RawSourceItem,
@@ -336,6 +462,33 @@ def _normalize_flood_sensor_record(
         observed_at=observed_at,
         summary=summary,
         tags=("official", "local_kaohsiung", "flood_sensor", *depth_tags),
+    )
+
+
+def _normalize_rainfall_record(
+    metadata: AdapterMetadata,
+    raw_item: RawSourceItem,
+) -> NormalizedEvidence | None:
+    payload = raw_item.payload
+    station_name = optional_str(payload.get("station_name"))
+    observed_at = parse_datetime(payload.get("observed_at"))
+    rainfall_mm = optional_float(payload.get("rainfall_mm"))
+    if station_name is None or observed_at is None or rainfall_mm is None:
+        return None
+    if _has_quality_flag(payload, "future_observation"):
+        return None
+    summary = f"高雄地方雨量觀測：{rainfall_mm:.1f} mm（{station_name}）"
+    rainfall_24h = optional_float(payload.get("rainfall_mm_24h"))
+    if rainfall_24h is not None:
+        summary = f"{summary}；24 小時 {rainfall_24h:.1f} mm"
+    return _evidence(
+        metadata,
+        raw_item,
+        event_type=EventType.RAINFALL,
+        station_name=station_name,
+        observed_at=observed_at,
+        summary=summary,
+        tags=("official", "local_kaohsiung", "rainfall"),
     )
 
 
@@ -415,6 +568,17 @@ def _payload_items(payload: object) -> tuple[object, ...]:
                 items.extend(value)
         return tuple(items)
     return ()
+
+
+def _rainfall_base_by_station(payload: object) -> dict[str, Mapping[str, Any]]:
+    records: dict[str, Mapping[str, Any]] = {}
+    for item in _payload_items(payload):
+        if not isinstance(item, Mapping):
+            continue
+        station_id = _first_text(item, "ST_NO", "st_no", "station_id")
+        if station_id is not None:
+            records[station_id] = item
+    return records
 
 
 def _parse_local_time(value: object) -> datetime | None:

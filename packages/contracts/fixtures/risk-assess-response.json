@@ -44,5 +44,102 @@
     "query_count_bucket": "1-9",
     "unique_approx_count_bucket": "1-9",
     "updated_at": "2026-04-28T13:00:00Z"
+  },
+  "nearby_realtime_coverage": {
+    "overall_level": "no_local_sensor",
+    "evaluated_at": "2026-04-28T13:00:00Z",
+    "query_radius_m": 500,
+    "radius_buckets_m": [
+      500,
+      1000,
+      3000,
+      5000
+    ],
+    "summary": "目前沒有可用的近距離即時感測資料。",
+    "signal_breakdown": [
+      {
+        "signal_type": "rainfall",
+        "label": "雨量",
+        "coverage_level": "no_local_sensor",
+        "nearest_distance_m": null,
+        "nearest_source_id": null,
+        "nearest_observed_at": null,
+        "counts_by_radius_m": {
+          "500": 0,
+          "1000": 0,
+          "3000": 0,
+          "5000": 0
+        },
+        "fresh_count": 0,
+        "stale_count": 0,
+        "status_only_count": 0,
+        "missing_reason": "查詢點 5 公里內沒有雨量資料。"
+      },
+      {
+        "signal_type": "water_level",
+        "label": "水位",
+        "coverage_level": "no_local_sensor",
+        "nearest_distance_m": null,
+        "nearest_source_id": null,
+        "nearest_observed_at": null,
+        "counts_by_radius_m": {
+          "500": 0,
+          "1000": 0,
+          "3000": 0,
+          "5000": 0
+        },
+        "fresh_count": 0,
+        "stale_count": 0,
+        "status_only_count": 0,
+        "missing_reason": "查詢點 5 公里內沒有水位資料。"
+      },
+      {
+        "signal_type": "flood_depth",
+        "label": "淹水深度",
+        "coverage_level": "no_local_sensor",
+        "nearest_distance_m": null,
+        "nearest_source_id": null,
+        "nearest_observed_at": null,
+        "counts_by_radius_m": {
+          "500": 0,
+          "1000": 0,
+          "3000": 0,
+          "5000": 0
+        },
+        "fresh_count": 0,
+        "stale_count": 0,
+        "status_only_count": 0,
+        "missing_reason": "查詢點 5 公里內沒有淹水深度資料。"
+      },
+      {
+        "signal_type": "sewer_water_level",
+        "label": "下水道水位",
+        "coverage_level": "no_local_sensor",
+        "nearest_distance_m": null,
+        "nearest_source_id": null,
+        "nearest_observed_at": null,
+        "counts_by_radius_m": {
+          "500": 0,
+          "1000": 0,
+          "3000": 0,
+          "5000": 0
+        },
+        "fresh_count": 0,
+        "stale_count": 0,
+        "status_only_count": 0,
+        "missing_reason": "查詢點 5 公里內沒有下水道水位資料。"
+      }
+    ],
+    "missing_signal_types": [
+      "rainfall",
+      "water_level",
+      "flood_depth",
+      "sewer_water_level"
+    ],
+    "limitations": [
+      "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。",
+      "附近沒有可用的即時感測資料。"
+    ],
+    "county_level_note": "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。"
   }
 }

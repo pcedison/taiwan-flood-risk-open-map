@@ -50,6 +50,18 @@ class EvidenceRecord:
 
 
 @dataclass(frozen=True)
+class NearbyCoverageRow:
+    adapter_key: str
+    source_id: str
+    event_type: str
+    station_id: str | None
+    observed_at: datetime | None
+    ingested_at: datetime
+    distance_to_query_m: float
+    freshness_state: str
+
+
+@dataclass(frozen=True)
 class EvidenceUpsert:
     id: str
     adapter_key: str
@@ -554,6 +566,63 @@ def query_nearby_latest_official(
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
 
+def query_nearby_realtime_coverage_rows(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    radius_buckets_m: tuple[int, ...] = (500, 1000, 3000, 5000),
+    observed_since: datetime | None = None,
+    statement_timeout_ms: int = 1500,
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[NearbyCoverageRow, ...]:
+    max_radius_m = max(radius_buckets_m)
+    observed_filter = "AND latest.observed_at >= %s::timestamptz" if observed_since else ""
+    observed_params: tuple[datetime, ...] = (observed_since,) if observed_since else ()
+    sql = f"""
+        WITH query_point AS (
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                (%s::double precision / 90000.0) AS degree_radius
+        )
+        SELECT
+            latest.adapter_key,
+            latest.source_id,
+            latest.event_type,
+            latest.station_id,
+            latest.observed_at,
+            latest.ingested_at,
+            ST_Distance(latest.geom::geography, qp.geog) AS distance_to_query_m,
+            CASE
+                WHEN latest.observed_at IS NULL THEN 'stale'
+                WHEN latest.observed_at >= now() - interval '10 minutes' THEN 'fresh'
+                WHEN latest.observed_at >= now() - interval '60 minutes' THEN 'stale'
+                ELSE 'stale'
+            END AS freshness_state
+        FROM official_realtime_latest latest
+        CROSS JOIN query_point qp
+        WHERE latest.geom IS NOT NULL
+            {observed_filter}
+            AND latest.geom && ST_Expand(qp.geom, qp.degree_radius)
+            AND ST_DWithin(latest.geom::geography, qp.geog, %s)
+        ORDER BY distance_to_query_m ASC, latest.observed_at DESC NULLS LAST
+    """
+    params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
+    try:
+        with _connect(database_url, connection_factory) as connection:
+            with connection.cursor() as cursor:
+                _apply_statement_timeout(cursor, statement_timeout_ms)
+                cursor.execute(sql, params)
+                return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
+    except psycopg.errors.UndefinedTable as exc:
+        if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
+            return ()
+        raise EvidenceRepositoryUnavailable(str(exc)) from exc
+    except (OSError, psycopg.Error) as exc:
+        raise EvidenceRepositoryUnavailable(str(exc)) from exc
+
+
 def upsert_public_evidence(
     *,
     database_url: str,
@@ -902,6 +971,19 @@ def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
         warning_level_m=_optional_float(row.get("warning_level_m")),
         flood_depth_cm=_optional_float(row.get("flood_depth_cm")),
         realtime_risk_factor=_optional_float(row.get("realtime_risk_factor")),
+    )
+
+
+def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:
+    return NearbyCoverageRow(
+        adapter_key=str(row["adapter_key"]),
+        source_id=str(row["source_id"]),
+        event_type=str(row["event_type"]),
+        station_id=str(row["station_id"]) if row.get("station_id") is not None else None,
+        observed_at=row.get("observed_at"),
+        ingested_at=row["ingested_at"],
+        distance_to_query_m=float(row["distance_to_query_m"]),
+        freshness_state=str(row["freshness_state"]),
     )
 
 

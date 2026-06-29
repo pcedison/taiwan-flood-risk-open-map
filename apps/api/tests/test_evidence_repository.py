@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import psycopg
 import pytest
@@ -15,6 +15,7 @@ from app.domain.evidence.repository import (
     persist_risk_assessment,
     query_nearby_evidence,
     query_nearby_latest_official,
+    query_nearby_realtime_coverage_rows,
     upsert_public_evidence,
 )
 
@@ -208,7 +209,60 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
     )
 
 
+def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
+    connection = _FakeConnection(
+        rows=[
+            {
+                "adapter_key": "local.kaohsiung.rainfall",
+                "source_id": "local.kaohsiung.rainfall:ST-001",
+                "event_type": "rainfall",
+                "station_id": "ST-001",
+                "observed_at": datetime(2026, 6, 29, 11, 55, tzinfo=UTC),
+                "ingested_at": datetime(2026, 6, 29, 11, 56, tzinfo=UTC),
+                "distance_to_query_m": 230.4,
+                "freshness_state": "fresh",
+            }
+        ]
+    )
+
+    rows = query_nearby_realtime_coverage_rows(
+        database_url="postgresql://example",
+        lat=22.6273,
+        lng=120.3014,
+        observed_since=datetime(2026, 6, 29, 9, 0, tzinfo=UTC),
+        connection_factory=lambda: connection,
+    )
+
+    assert rows[0].adapter_key == "local.kaohsiung.rainfall"
+    assert rows[0].distance_to_query_m == 230.4
+    query_call = next(
+        (item for item in connection.cursor_instance.executions if "official_realtime_latest" in item[0]),
+        None,
+    )
+    assert query_call is not None
+    sql, params = query_call
+    assert "official_realtime_latest" in sql
+    assert "ST_DWithin" in sql
+    assert 5000 in params
+
+
+def test_query_nearby_realtime_coverage_rows_falls_back_when_table_missing() -> None:
+    connection = _FakeConnection(
+        rows=[],
+        execute_side_effects=[_undefined_table_error(table_name="official_realtime_latest")],
+    )
+
+    rows = query_nearby_realtime_coverage_rows(
+        database_url="postgresql://example.test/flood",
+        lat=22.6273,
+        lng=120.3014,
+        connection_factory=lambda: connection,
+    )
+
+    assert rows == ()
+
 def test_query_nearby_latest_official_uses_flood_depth_radius() -> None:
+
     connection = _FakeConnection(rows=[])
 
     records = query_nearby_latest_official(

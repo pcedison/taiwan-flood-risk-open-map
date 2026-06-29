@@ -14,6 +14,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:RuntimeSmokeCleanupSql = @()
+$script:MvtLayerStatusCleanupSql = @'
+UPDATE map_layers
+SET
+    status = COALESCE(metadata ->> 'runtime_smoke_previous_status', status),
+    metadata = COALESCE(metadata, '{}'::jsonb) - 'runtime_smoke_previous_status',
+    updated_at = now()
+WHERE layer_id IN ('query-heat', 'flood-potential')
+    AND (COALESCE(metadata, '{}'::jsonb) ? 'runtime_smoke_previous_status');
+'@
 
 function Show-SmokeHelp {
     Write-Host @"
@@ -50,7 +59,8 @@ Extended checks are enabled by default:
     clean up the smoke rows while restoring data source health state.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
-  - MVT smoke: GET seeded query-heat and flood-potential .mvt endpoints.
+  - MVT smoke: temporarily enable seeded query-heat and flood-potential
+    layers, GET their .mvt endpoints, and restore the previous layer status.
   - Maintenance scheduler bounded tick smoke: run the Query Heat/tile cadence
     path once with --maintenance --scheduler --max-ticks 1.
   - Query heat / tile cache job readiness: run the worker query heat
@@ -490,6 +500,7 @@ function Invoke-ReportsDisabledSmoke {
 function Invoke-ReportsEnabledSmoke {
     $reportsEnabledPython = @'
 import asyncio
+import inspect
 
 from app.api.routes.reports import create_user_report
 from app.api.schemas import LatLng, UserReportCreateRequest
@@ -500,13 +511,14 @@ get_settings.cache_clear()
 
 async def main() -> None:
     report_id = None
-    response = await create_user_report(
+    maybe_response = create_user_report(
         UserReportCreateRequest(
             point=LatLng(lat=25.033, lng=121.5654),
             summary="Runtime smoke enabled report path.",
         ),
         Request({"type": "http", "headers": [], "client": ("runtime-smoke", 0)}),
     )
+    response = await maybe_response if inspect.isawaitable(maybe_response) else maybe_response
     if response.status != "pending" or not response.report_id:
         raise SystemExit("expected a pending report_id from enabled reports path")
     report_id = response.report_id
@@ -1445,6 +1457,52 @@ function Invoke-PostgresSqlSmoke {
     }
 }
 
+function Enable-SeededMvtLayersForRuntimeSmoke {
+    if ($script:RuntimeSmokeCleanupSql -notcontains $script:MvtLayerStatusCleanupSql) {
+        $script:RuntimeSmokeCleanupSql += $script:MvtLayerStatusCleanupSql
+    }
+
+    $mvtLayerStatusSetupSql = @'
+UPDATE map_layers
+SET
+    status = COALESCE(metadata ->> 'runtime_smoke_previous_status', status),
+    metadata = COALESCE(metadata, '{}'::jsonb) - 'runtime_smoke_previous_status',
+    updated_at = now()
+WHERE layer_id IN ('query-heat', 'flood-potential')
+    AND (COALESCE(metadata, '{}'::jsonb) ? 'runtime_smoke_previous_status');
+
+UPDATE map_layers
+SET
+    status = 'degraded',
+    metadata = jsonb_set(
+        COALESCE(metadata, '{}'::jsonb),
+        '{runtime_smoke_previous_status}',
+        to_jsonb(status),
+        true
+    ),
+    updated_at = now()
+WHERE layer_id IN ('query-heat', 'flood-potential')
+    AND status NOT IN ('available', 'degraded');
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM map_layers
+        WHERE layer_id IN ('query-heat', 'flood-potential')
+            AND status NOT IN ('available', 'degraded')
+    ) THEN
+        RAISE EXCEPTION 'seeded MVT layers are not enabled for runtime smoke';
+    END IF;
+END
+$$;
+'@
+
+    Invoke-PostgresSqlSmoke `
+        -Description "Temporarily enabling seeded MVT layers for runtime smoke" `
+        -Sql $mvtLayerStatusSetupSql
+}
+
 function Invoke-QueryHeatAndTileCacheJobSmoke {
     $tileSmokeCleanupSql = "DELETE FROM tile_cache_entries WHERE metadata ->> 'source' = 'runtime-smoke'; DELETE FROM map_layer_features WHERE feature_key IN ('runtime-smoke-flood-potential', 'runtime-smoke-expired-feature'); DELETE FROM evidence WHERE raw_ref = 'runtime-smoke:tile-cache'; DELETE FROM query_heat_buckets WHERE h3_index = 'runtime-smoke-retention';"
     $script:RuntimeSmokeCleanupSql += $tileSmokeCleanupSql
@@ -1663,8 +1721,20 @@ try {
     }
     Write-Host "Query heat smoke: period=$($risk.query_heat.period), query_count_bucket=$($risk.query_heat.query_count_bucket), unique_approx_count_bucket=$($risk.query_heat.unique_approx_count_bucket)"
 
+    if (-not $risk.nearby_realtime_coverage) {
+        Fail-Smoke "Risk assessment response did not include nearby_realtime_coverage." "api"
+    }
+    if (-not $risk.nearby_realtime_coverage.radius_buckets_m) {
+        Fail-Smoke "Nearby realtime coverage did not include radius_buckets_m." "api"
+    }
+    if (-not $risk.nearby_realtime_coverage.summary) {
+        Fail-Smoke "Nearby realtime coverage did not include a summary." "api"
+    }
+    Write-Host "Nearby realtime coverage smoke: overall=$($risk.nearby_realtime_coverage.overall_level), missing=$($risk.nearby_realtime_coverage.missing_signal_types -join ',')"
+
     if (-not $SkipExtendedSmoke) {
         Invoke-ReportsDisabledSmoke -ApiBaseUrl $ApiBaseUrl
+        Enable-SeededMvtLayersForRuntimeSmoke
         Invoke-MvtSmoke -ApiBaseUrl $ApiBaseUrl
 
         if ($SkipAdapterFixtureSmoke) {
@@ -1710,6 +1780,8 @@ try {
     Write-Host "Runtime smoke passed."
 }
 finally {
+    Invoke-RegisteredSmokeCleanup
+
     if ($StopOnExit) {
         Write-Step "Stopping runtime services without deleting volumes"
         docker compose stop web api postgres redis minio

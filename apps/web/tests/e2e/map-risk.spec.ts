@@ -3,6 +3,71 @@ import { expect, test } from "@playwright/test";
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.E2E_API_PORT ?? "8000"}`;
 
+type MockCoverageOverrides = Partial<{
+  county_level_note: string;
+  limitations: string[];
+  missing_signal_types: string[];
+  overall_level: string;
+  signal_breakdown: Array<Record<string, unknown>>;
+  summary: string;
+}>;
+
+function nearbyRealtimeCoverage(overrides: MockCoverageOverrides = {}) {
+  return {
+    county_level_note:
+      "縣市資料源目錄顯示可能有資料，但附近覆蓋仍以查詢點半徑內感測器為準。",
+    evaluated_at: "2026-04-29T03:00:00Z",
+    limitations: ["縣市有資料不代表查詢點附近有 fresh local sensor。"],
+    missing_signal_types: ["flood_depth"],
+    overall_level: "medium",
+    query_radius_m: 500,
+    radius_buckets_m: [500, 1000, 3000, 5000],
+    signal_breakdown: [
+      {
+        counts_by_radius_m: { "500": 1, "1000": 2, "3000": 4, "5000": 5 },
+        coverage_level: "medium",
+        fresh_count: 2,
+        label: "雨量",
+        missing_reason: null,
+        nearest_distance_m: 230.4,
+        nearest_observed_at: "2026-04-29T02:55:00Z",
+        nearest_source_id: "local.test.rainfall:ST-001",
+        signal_type: "rainfall",
+        stale_count: 0,
+        status_only_count: 0,
+      },
+      {
+        counts_by_radius_m: { "500": 0, "1000": 1, "3000": 1, "5000": 1 },
+        coverage_level: "low",
+        fresh_count: 1,
+        label: "水位",
+        missing_reason: null,
+        nearest_distance_m: 1320,
+        nearest_observed_at: "2026-04-29T02:48:00Z",
+        nearest_source_id: "local.test.water:WL-001",
+        signal_type: "water_level",
+        stale_count: 1,
+        status_only_count: 0,
+      },
+      {
+        counts_by_radius_m: { "500": 0, "1000": 0, "3000": 0, "5000": 0 },
+        coverage_level: "no_local_sensor",
+        fresh_count: 0,
+        label: "淹水深度",
+        missing_reason: "查詢點半徑附近沒有 fresh local sensor。",
+        nearest_distance_m: null,
+        nearest_observed_at: null,
+        nearest_source_id: null,
+        signal_type: "flood_depth",
+        stale_count: 0,
+        status_only_count: 0,
+      },
+    ],
+    summary: "查詢點 1 公里內有雨量或水位即時資料，但感測密度仍有限。",
+    ...overrides,
+  };
+}
+
 test("searching a Taiwan landmark moves the map and renders a risk assessment", async ({
   page,
 }) => {
@@ -115,6 +180,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             tile_url: null,
           },
         ],
+        nearby_realtime_coverage: nearbyRealtimeCoverage(),
         radius_m: 500,
         realtime: { level: "低" },
         score_version: "risk-v0.1.0",
@@ -222,12 +288,17 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByTestId("risk-summary").locator(".risk-confidence-card")).toBeVisible();
   await expect(page.getByTestId("risk-summary").locator(".risk-explanation")).toBeVisible();
   await expect(page.getByTestId("risk-summary").locator(".layer-list")).toHaveCount(0);
+  await expect(page.getByTestId("nearby-coverage")).toBeVisible();
+  await expect(page.getByTestId("nearby-coverage")).toContainText("附近即時感測中等");
+  await expect(page.getByTestId("nearby-coverage")).toContainText("雨量");
+  await expect(page.getByTestId("nearby-coverage")).toContainText("230 公尺");
   await expect(page.getByTestId("evidence-panel").locator(".evidence-card")).toHaveCount(3);
   await expect(page.getByTestId("evidence-panel").locator(".freshness-strip")).toHaveCount(0);
   await expect(page.getByTestId("user-report-panel")).toBeVisible();
   await expect(page.getByTestId("diagnostics-panel")).toBeVisible();
   const primarySectionOrder = await page.evaluate(() => {
     const riskSummary = document.querySelector('[data-testid="risk-summary"]');
+    const nearbyCoverage = document.querySelector('[data-testid="nearby-coverage"]');
     const evidencePanel = document.querySelector('[data-testid="evidence-panel"]');
     const userReportPanel = document.querySelector('[data-testid="user-report-panel"]');
     const diagnosticsPanel = document.querySelector('[data-testid="diagnostics-panel"]');
@@ -240,16 +311,18 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
           left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING,
       );
     return {
+      coverageBeforeEvidence: comesBefore(nearbyCoverage, evidencePanel),
       evidenceBeforeLimitations: comesBefore(evidenceList, limitations),
       evidenceBeforeUserReport: comesBefore(evidencePanel, userReportPanel),
-      riskBeforeEvidence: comesBefore(riskSummary, evidencePanel),
+      riskBeforeCoverage: comesBefore(riskSummary, nearbyCoverage),
       userReportBeforeDiagnostics: comesBefore(userReportPanel, diagnosticsPanel),
     };
   });
   expect(primarySectionOrder).toEqual({
+    coverageBeforeEvidence: true,
     evidenceBeforeLimitations: true,
     evidenceBeforeUserReport: true,
-    riskBeforeEvidence: true,
+    riskBeforeCoverage: true,
     userReportBeforeDiagnostics: true,
   });
   await expect(page.getByText("來源與圖層狀態")).toBeVisible();
@@ -441,6 +514,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
         },
         historical: { level: "高" },
         location: { lat: 23.038818, lng: 120.213493 },
+        nearby_realtime_coverage: nearbyRealtimeCoverage(),
         query_heat: {
           attention_level: "低",
           period: "P7D",
@@ -555,6 +629,19 @@ test("an admin-area geocode warns and still assesses with data limits", async ({
         },
         historical: { level: isAdminFallback ? "未知" : "高" },
         location: body.point ?? { lat: 23.038818, lng: 120.213493 },
+        nearby_realtime_coverage: nearbyRealtimeCoverage(
+          isAdminFallback
+            ? {
+                county_level_note:
+                  "縣市資料源目錄顯示可能有資料，但查詢點半徑附近沒有新鮮在地感測資料。",
+                limitations: ["半徑內沒有 fresh local sensor，不能代表縣市沒有感測器。"],
+                missing_signal_types: ["rainfall", "water_level", "flood_depth"],
+                overall_level: "no_local_sensor",
+                signal_breakdown: [],
+                summary: "查詢點半徑內沒有新鮮在地感測資料；縣市或資料源仍可能有資料。",
+              }
+            : {},
+        ),
         query_heat: {
           attention_level: "低",
           period: "P7D",

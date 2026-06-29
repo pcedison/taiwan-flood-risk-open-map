@@ -6,8 +6,11 @@ from typing import Any
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.local_kaohsiung import (
     KAOHSIUNG_FLOOD_SENSOR_API_URL,
+    KAOHSIUNG_RAINFALL_BASE_API_URL,
+    KAOHSIUNG_RAINFALL_RT_API_URL,
     KAOHSIUNG_SEWER_WATER_LEVEL_API_URL,
     KaohsiungFloodSensorApiAdapter,
+    KaohsiungRainfallApiAdapter,
     KaohsiungSewerWaterLevelApiAdapter,
 )
 from app.adapters.local_yilan import (
@@ -67,6 +70,58 @@ def _kaohsiung_flood_payload() -> list[dict[str, Any]]:
             "town": "美濃區",
             "uuid": {"depth": "aad74e1c-7789-496d-b1e3-ef45d8b6e218"},
         }
+    ]
+
+
+def _kaohsiung_rainfall_rt_payload() -> list[dict[str, Any]]:
+    return [
+        {
+            "DATE": "2026-06-28T16:40:00",
+            "H1": 2.5,
+            "H12": 18.0,
+            "H24": 28.0,
+            "H3": 7.0,
+            "H6": 11.0,
+            "M10": 0.5,
+            "M20": 1.0,
+            "ST_NO": "KHRF001",
+            "Status": "正常",
+        },
+        {
+            "DATE": "2027-06-28T16:40:00",
+            "H1": 1.0,
+            "M10": 0.0,
+            "ST_NO": "KHRF002",
+            "Status": "正常",
+        },
+        {
+            "DATE": "2026-06-28T16:40:00",
+            "H1": 4.0,
+            "M10": 1.0,
+            "ST_NO": "KHRF_NO_BASE",
+            "Status": "正常",
+        },
+    ]
+
+
+def _kaohsiung_rainfall_base_payload() -> list[dict[str, Any]]:
+    return [
+        {
+            "ADDR_C": "高雄市三民區測試路",
+            "Lat": 22.643,
+            "Long": 120.321,
+            "NAME_C": "民族雨量站",
+            "ST_NO": "KHRF001",
+            "Source": "高雄市政府水利局",
+        },
+        {
+            "ADDR_C": "高雄市測試區未來路",
+            "Lat": 22.65,
+            "Long": 120.33,
+            "NAME_C": "未來雨量站",
+            "ST_NO": "KHRF002",
+            "Source": "高雄市政府水利局",
+        },
     ]
 
 
@@ -172,6 +227,41 @@ def test_kaohsiung_flood_json_outputs_flood_depth() -> None:
     assert "local_kaohsiung" in evidence.tags
 
 
+def test_kaohsiung_rainfall_json_joins_base_metadata_and_rejects_invalid_rows() -> None:
+    adapter = KaohsiungRainfallApiAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: (
+            _kaohsiung_rainfall_base_payload()
+            if url == KAOHSIUNG_RAINFALL_BASE_API_URL
+            else _kaohsiung_rainfall_rt_payload()
+        ),
+    )
+
+    result = adapter.run()
+
+    assert result.adapter_key == "local.kaohsiung.rainfall"
+    assert len(result.fetched) == 2
+    assert len(result.normalized) == 1
+    assert result.rejected == ("KHRF002:2027-06-28T08:40:00+00:00",)
+    raw_payload = result.fetched[0].payload
+    assert raw_payload["station_id"] == "KHRF001"
+    assert raw_payload["station_name"] == "民族雨量站"
+    assert raw_payload["observed_at"] == "2026-06-28T08:40:00+00:00"
+    assert raw_payload["rainfall_mm"] == 2.5
+    assert raw_payload["rainfall_mm_10m"] == 0.5
+    assert raw_payload["rainfall_mm_24h"] == 28.0
+    assert raw_payload["geometry"] == {
+        "type": "Point",
+        "coordinates": [120.321, 22.643],
+    }
+    evidence = result.normalized[0]
+    assert evidence.event_type is EventType.RAINFALL
+    assert "2.5 mm" in evidence.summary
+    assert "24 小時 28.0 mm" in evidence.summary
+    assert "local_kaohsiung" in evidence.tags
+    assert "rainfall" in evidence.tags
+
+
 def test_yilan_arcgis_flood_layer_outputs_flood_depth() -> None:
     adapter = YilanFloodSensorArcgisAdapter(
         fetched_at=FETCHED_AT,
@@ -231,12 +321,15 @@ def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are
         {
             "WORKER_ENABLED_ADAPTER_KEYS": (
                 "local.kaohsiung.sewer_water_level,local.kaohsiung.flood_sensor,"
+                "local.kaohsiung.rainfall,"
                 "local.yilan.flood_sensor,local.yilan.water_level"
             ),
             "SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_ENABLED": "true",
             "SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_API_ENABLED": "true",
             "SOURCE_KAOHSIUNG_FLOOD_SENSOR_ENABLED": "true",
             "SOURCE_KAOHSIUNG_FLOOD_SENSOR_API_ENABLED": "true",
+            "SOURCE_KAOHSIUNG_RAINFALL_ENABLED": "true",
+            "SOURCE_KAOHSIUNG_RAINFALL_API_ENABLED": "true",
             "SOURCE_YILAN_FLOOD_SENSOR_ENABLED": "true",
             "SOURCE_YILAN_FLOOD_SENSOR_API_ENABLED": "true",
             "SOURCE_YILAN_WATER_LEVEL_ENABLED": "true",
@@ -250,6 +343,11 @@ def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are
         fetched_at=FETCHED_AT,
         kaohsiung_sewer_fetch_json=lambda url, timeout: _kaohsiung_sewer_payload(),
         kaohsiung_flood_sensor_fetch_json=lambda url, timeout: _kaohsiung_flood_payload(),
+        kaohsiung_rainfall_fetch_json=lambda url, timeout: (
+            _kaohsiung_rainfall_base_payload()
+            if url == KAOHSIUNG_RAINFALL_BASE_API_URL
+            else _kaohsiung_rainfall_rt_payload()
+        ),
         yilan_flood_sensor_fetch_json=lambda url, timeout: _yilan_flood_layer_payload(),
         yilan_water_level_fetch_json=lambda url, timeout: _yilan_water_level_layer_payload(),
     )
@@ -257,14 +355,18 @@ def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are
     assert tuple(adapters) == (
         "local.kaohsiung.sewer_water_level",
         "local.kaohsiung.flood_sensor",
+        "local.kaohsiung.rainfall",
         "local.yilan.flood_sensor",
         "local.yilan.water_level",
     )
     assert len(adapters["local.kaohsiung.sewer_water_level"].run().normalized) == 1
     assert len(adapters["local.kaohsiung.flood_sensor"].run().normalized) == 1
+    assert len(adapters["local.kaohsiung.rainfall"].run().normalized) == 1
     assert len(adapters["local.yilan.flood_sensor"].run().normalized) == 1
     assert len(adapters["local.yilan.water_level"].run().normalized) == 1
     assert KAOHSIUNG_SEWER_WATER_LEVEL_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
     assert KAOHSIUNG_FLOOD_SENSOR_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
+    assert KAOHSIUNG_RAINFALL_RT_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
+    assert KAOHSIUNG_RAINFALL_BASE_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
     assert YILAN_FLOOD_SENSOR_LAYER_URL.startswith("https://wragis.e-land.gov.tw/")
     assert YILAN_WATER_LEVEL_LAYER_URL.startswith("https://wragis.e-land.gov.tw/")

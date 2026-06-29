@@ -25,6 +25,7 @@ from app.adapters.local_hsinchu_city import (
 )
 from app.adapters.local_kaohsiung import (
     KAOHSIUNG_FLOOD_SENSOR_METADATA,
+    KAOHSIUNG_RAINFALL_METADATA,
     KAOHSIUNG_SEWER_WATER_LEVEL_METADATA,
 )
 from app.adapters.local_fhy import FHY_LOCAL_FLOOD_SENSOR_SOURCES
@@ -107,6 +108,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         HSINCHU_CITY_FLOOD_SENSOR_METADATA.key: HSINCHU_CITY_FLOOD_SENSOR_METADATA,
         KAOHSIUNG_SEWER_WATER_LEVEL_METADATA.key: KAOHSIUNG_SEWER_WATER_LEVEL_METADATA,
         KAOHSIUNG_FLOOD_SENSOR_METADATA.key: KAOHSIUNG_FLOOD_SENSOR_METADATA,
+        KAOHSIUNG_RAINFALL_METADATA.key: KAOHSIUNG_RAINFALL_METADATA,
         KEELUNG_WATER_LEVEL_METADATA.key: KEELUNG_WATER_LEVEL_METADATA,
         KEELUNG_FLOOD_SENSOR_METADATA.key: KEELUNG_FLOOD_SENSOR_METADATA,
         KEELUNG_RAINFALL_METADATA.key: KEELUNG_RAINFALL_METADATA,
@@ -270,6 +272,11 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return _with_optional_override(
             metadata.enabled_by_default,
             settings.source_kaohsiung_flood_sensor_enabled,
+        )
+    if metadata.key == "local.kaohsiung.rainfall":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_kaohsiung_rainfall_enabled,
         )
     if metadata.key == "local.keelung.water_level":
         return _with_optional_override(
@@ -439,6 +446,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_kaohsiung_sewer_water_level_enabled is True
     if metadata.key == "local.kaohsiung.flood_sensor":
         return settings.source_kaohsiung_flood_sensor_enabled is True
+    if metadata.key == "local.kaohsiung.rainfall":
+        return settings.source_kaohsiung_rainfall_enabled is True
     if metadata.key == "local.keelung.water_level":
         return settings.source_keelung_water_level_enabled is True
     if metadata.key == "local.keelung.flood_sensor":

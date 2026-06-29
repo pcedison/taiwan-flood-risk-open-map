@@ -1,10 +1,11 @@
 # 地方即時水情官方請求包
 
-日期：2026-06-28
+日期：2026-06-29
 
-用途：追蹤目前 22 縣市地方即時水情尚未完成 production local adapter 的
-官方授權或資料釋出請求。此文件只處理地方政府直出或授權 read API；中央
-全台主幹 Civil IoT、WRA、CWA、NCDR 仍由既有 official adapters 維持。
+用途：追蹤目前 22 縣市地方即時水情尚未完成 production local adapter，或雖已有
+局部 local adapter 但仍缺更完整 read API contract / 授權的官方請求。此文件只處理
+地方政府直出或授權 read API；中央全台主幹 Civil IoT、WRA、CWA、NCDR 仍由既有
+official adapters 維持。
 
 資料釋出監看可重跑：
 
@@ -29,6 +30,18 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 
 - `docs/data-sources/local/generated-official-request-packets.md`
 - `docs/data-sources/local/generated-official-request-packets.json`
+
+2026-06-29 action plan 產生的正式請求包涵蓋：
+
+- 花蓮縣：Senslink / 行動水情 read API 授權。
+- 金門縣：KWIS read API 授權。
+- 連江縣：即時水文觀測資料釋出或納入 Civil IoT / WRA 主幹。
+- 苗栗縣：雨水下水道即時水情 read API contract。
+- 屏東縣：PTEOC RainStation / River / Flood / Crawler read API contract 與站點 metadata。
+- 臺東縣：洪水與淹水預警系統 read API contract。
+
+臺北疏散門與雲林 iflood 淹水感測狀態屬技術 smoke / status-only 追蹤；目前不列入
+官方請求包，避免把可技術解項目和授權/契約請求混在一起。
 
 ## Production read API 必備欄位
 

@@ -234,6 +234,86 @@ paths:
                       query_count_bucket: "1-9"
                       unique_approx_count_bucket: "1-9"
                       updated_at: "2026-04-28T13:00:00Z"
+                    nearby_realtime_coverage:
+                      overall_level: no_local_sensor
+                      evaluated_at: "2026-04-28T13:00:00Z"
+                      query_radius_m: 500
+                      radius_buckets_m:
+                        - 500
+                        - 1000
+                        - 3000
+                        - 5000
+                      summary: "目前沒有可用的近距離即時感測資料。"
+                      signal_breakdown:
+                        - signal_type: rainfall
+                          label: "雨量"
+                          coverage_level: no_local_sensor
+                          nearest_distance_m: null
+                          nearest_source_id: null
+                          nearest_observed_at: null
+                          counts_by_radius_m:
+                            "500": 0
+                            "1000": 0
+                            "3000": 0
+                            "5000": 0
+                          fresh_count: 0
+                          stale_count: 0
+                          status_only_count: 0
+                          missing_reason: "查詢點 5 公里內沒有雨量資料。"
+                        - signal_type: water_level
+                          label: "水位"
+                          coverage_level: no_local_sensor
+                          nearest_distance_m: null
+                          nearest_source_id: null
+                          nearest_observed_at: null
+                          counts_by_radius_m:
+                            "500": 0
+                            "1000": 0
+                            "3000": 0
+                            "5000": 0
+                          fresh_count: 0
+                          stale_count: 0
+                          status_only_count: 0
+                          missing_reason: "查詢點 5 公里內沒有水位資料。"
+                        - signal_type: flood_depth
+                          label: "淹水深度"
+                          coverage_level: no_local_sensor
+                          nearest_distance_m: null
+                          nearest_source_id: null
+                          nearest_observed_at: null
+                          counts_by_radius_m:
+                            "500": 0
+                            "1000": 0
+                            "3000": 0
+                            "5000": 0
+                          fresh_count: 0
+                          stale_count: 0
+                          status_only_count: 0
+                          missing_reason: "查詢點 5 公里內沒有淹水深度資料。"
+                        - signal_type: sewer_water_level
+                          label: "下水道水位"
+                          coverage_level: no_local_sensor
+                          nearest_distance_m: null
+                          nearest_source_id: null
+                          nearest_observed_at: null
+                          counts_by_radius_m:
+                            "500": 0
+                            "1000": 0
+                            "3000": 0
+                            "5000": 0
+                          fresh_count: 0
+                          stale_count: 0
+                          status_only_count: 0
+                          missing_reason: "查詢點 5 公里內沒有下水道水位資料。"
+                      missing_signal_types:
+                        - rainfall
+                        - water_level
+                        - flood_depth
+                        - sewer_water_level
+                      limitations:
+                        - "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。"
+                        - "附近沒有可用的即時感測資料。"
+                      county_level_note: "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。"
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -723,10 +803,22 @@ paths:
                         central_backbone_minimum_complete: true
                         central_backbone_missing_signal_types: []
                         central_backbone_coverage_level: minimum_met
+                        rainfall_available: true
+                        water_level_available: true
+                        flood_depth_available: true
+                        sewer_water_level_available: false
+                        pump_or_gate_status_available: false
+                        status_only_available: false
+                        missing_signal_types:
+                          - sewer_water_level
+                          - pump_or_gate_status
                         candidate_source_names: []
                         candidate_source_urls: []
                         metadata_source_names: []
                         metadata_source_urls: []
+                        status_only_source_names: []
+                        status_only_source_urls: []
+                        status_only_signal_types: []
                         application_urls: []
                         requires_application: false
                         application_note: null
@@ -780,6 +872,9 @@ paths:
                           application_urls:
                             - https://kwis.kinmen.gov.tw/
                           application_note: "KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。"
+                          requested_counterparty: "金門縣政府 / KWIS 維運窗口"
+                          tracking_status: needs_authorization_request
+                          last_followed_up_at: null
                           required_read_api_fields:
                             - observed_at
                             - station_or_device_id
@@ -794,6 +889,13 @@ paths:
                             - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
                           central_backbone_missing_signal_types:
                             - hydrologic_observation
+                          requested_counterparty: "連江縣政府公開資料或防災水利窗口"
+                          tracking_status: monitoring_open_data_release
+                          last_followed_up_at: null
+                          required_read_api_fields:
+                            - observed_at
+                            - station_or_device_id
+                            - measurement_value
                           request_focus: "請官方釋出即時水文觀測 read API。"
                       public_api_contract_reviews: []
                       live_smoke_reviews: []
@@ -1490,6 +1592,7 @@ components:
         - evidence
         - data_freshness
         - query_heat
+        - nearby_realtime_coverage
       properties:
         assessment_id:
           type: string
@@ -1526,6 +1629,8 @@ components:
             $ref: "#/components/schemas/DataFreshness"
         query_heat:
           $ref: "#/components/schemas/QueryHeat"
+        nearby_realtime_coverage:
+          $ref: "#/components/schemas/NearbyRealtimeCoverage"
       additionalProperties: false
 
     RiskLevelBlock:
@@ -1834,6 +1939,130 @@ components:
         updated_at:
           type: string
           format: date-time
+      additionalProperties: false
+
+    NearbyCoverageSignal:
+      type: object
+      required:
+        - signal_type
+        - label
+        - coverage_level
+        - counts_by_radius_m
+        - fresh_count
+        - stale_count
+        - status_only_count
+      properties:
+        signal_type:
+          type: string
+          enum:
+            - rainfall
+            - water_level
+            - flood_depth
+            - sewer_water_level
+            - pump_or_gate_status
+            - flood_warning
+            - status_only
+        label:
+          type: string
+        coverage_level:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+            - no_local_sensor
+            - unavailable
+        nearest_distance_m:
+          type:
+            - number
+            - "null"
+          minimum: 0
+        nearest_source_id:
+          type:
+            - string
+            - "null"
+        nearest_observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        counts_by_radius_m:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        fresh_count:
+          type: integer
+          minimum: 0
+        stale_count:
+          type: integer
+          minimum: 0
+        status_only_count:
+          type: integer
+          minimum: 0
+        missing_reason:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    NearbyRealtimeCoverage:
+      type: object
+      required:
+        - overall_level
+        - evaluated_at
+        - query_radius_m
+        - radius_buckets_m
+        - summary
+        - signal_breakdown
+        - missing_signal_types
+        - limitations
+        - county_level_note
+      properties:
+        overall_level:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+            - no_local_sensor
+            - unavailable
+        evaluated_at:
+          type: string
+          format: date-time
+        query_radius_m:
+          type: integer
+          minimum: 50
+          maximum: 2000
+        radius_buckets_m:
+          type: array
+          items:
+            type: integer
+        summary:
+          type: string
+        signal_breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/NearbyCoverageSignal"
+        missing_signal_types:
+          type: array
+          items:
+            type: string
+            enum:
+              - rainfall
+              - water_level
+              - flood_depth
+              - sewer_water_level
+              - pump_or_gate_status
+              - flood_warning
+              - status_only
+        limitations:
+          type: array
+          items:
+            type: string
+        county_level_note:
+          type: string
+          description: 縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。
       additionalProperties: false
 
     LayersResponse:
@@ -2188,6 +2417,9 @@ components:
         - reason
         - application_urls
         - application_note
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
         - required_read_api_fields
         - request_focus
       properties:
@@ -2206,6 +2438,15 @@ components:
           type:
             - string
             - "null"
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         required_read_api_fields:
           type: array
           items:
@@ -2222,6 +2463,10 @@ components:
         - metadata_source_names
         - metadata_source_urls
         - central_backbone_missing_signal_types
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
+        - required_read_api_fields
         - request_focus
       properties:
         county:
@@ -2243,6 +2488,19 @@ components:
           type: array
           items:
             type: string
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
         request_focus:
           type: string
       additionalProperties: false
@@ -2254,6 +2512,9 @@ components:
         - reason
         - candidate_source_names
         - candidate_source_urls
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
         - required_read_api_fields
       properties:
         county:
@@ -2271,6 +2532,15 @@ components:
           items:
             type: string
             format: uri
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
         required_read_api_fields:
           type: array
           items:
@@ -2285,6 +2555,10 @@ components:
         - candidate_source_names
         - candidate_source_urls
         - production_adapter_keys
+        - requested_counterparty
+        - tracking_status
+        - last_followed_up_at
+        - required_read_api_fields
       properties:
         county:
           type: string
@@ -2302,6 +2576,19 @@ components:
             type: string
             format: uri
         production_adapter_keys:
+          type: array
+          items:
+            type: string
+        requested_counterparty:
+          type: string
+        tracking_status:
+          type: string
+        last_followed_up_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        required_read_api_fields:
           type: array
           items:
             type: string
@@ -2418,10 +2705,20 @@ components:
         - central_backbone_minimum_complete
         - central_backbone_missing_signal_types
         - central_backbone_coverage_level
+        - rainfall_available
+        - water_level_available
+        - flood_depth_available
+        - sewer_water_level_available
+        - pump_or_gate_status_available
+        - status_only_available
+        - missing_signal_types
         - candidate_source_names
         - candidate_source_urls
         - metadata_source_names
         - metadata_source_urls
+        - status_only_source_names
+        - status_only_source_urls
+        - status_only_signal_types
         - application_urls
         - requires_application
         - application_note
@@ -2480,6 +2777,29 @@ components:
         central_backbone_coverage_level:
           type: string
           description: minimum_met, needs_hydrologic_backbone, or incomplete.
+        rainfall_available:
+          type: boolean
+          description: True when rainfall realtime evidence is available from local or central official sources.
+        water_level_available:
+          type: boolean
+          description: True when river, pond, or other water-level realtime evidence is available.
+        flood_depth_available:
+          type: boolean
+          description: True when flood-depth realtime evidence is available from a high-confidence source.
+        sewer_water_level_available:
+          type: boolean
+          description: True when sewer or drainage water-level realtime evidence is available.
+        pump_or_gate_status_available:
+          type: boolean
+          description: True when pump or gate status/water-level realtime evidence is available.
+        status_only_available:
+          type: boolean
+          description: True when an official source has observed status but no water-depth or water-level measurement.
+        missing_signal_types:
+          type: array
+          items:
+            type: string
+          description: Realtime signal categories still missing after local and central official coverage are combined.
         candidate_source_names:
           type: array
           items:
@@ -2502,6 +2822,22 @@ components:
             type: string
             format: uri
           description: Official static metadata dataset URLs useful for station joins or release monitoring.
+        status_only_source_names:
+          type: array
+          items:
+            type: string
+          description: Official status-only sources that have freshness and station context but no measurement value.
+        status_only_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Source URLs for status-only official signals.
+        status_only_signal_types:
+          type: array
+          items:
+            type: string
+          description: Low-confidence status-only signal categories that must not be treated as depth, water level, or rainfall.
         application_urls:
           type: array
           items:

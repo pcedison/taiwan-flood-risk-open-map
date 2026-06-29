@@ -25,6 +25,7 @@ playwright-report/
 test-results/
 .runtime-smoke/
 .wrangler/
+.worktrees/
 
 # Python
 __pycache__/

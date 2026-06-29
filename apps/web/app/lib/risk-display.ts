@@ -1,3 +1,5 @@
+import type { NearbyCoverageLevel, NearbyRealtimeCoverage } from "./page-types";
+
 export type Coordinate = {
   lat: number;
   lng: number;
@@ -257,6 +259,77 @@ export function formatConfidence(value: number) {
 
 export function formatDistance(value: number | null) {
   return value === null ? "未提供" : `${Math.round(value).toLocaleString("zh-TW")} 公尺`;
+}
+
+export type NearbyCoverageSummaryState = {
+  badge: string;
+  tone: "good" | "warn" | "poor" | "muted";
+  summary: string;
+};
+
+const nearbyCoverageLabels: Record<NearbyCoverageLevel, string> = {
+  high: "附近即時感測充足",
+  low: "附近即時感測偏少",
+  medium: "附近即時感測中等",
+  no_local_sensor: "半徑內無新鮮在地感測",
+  unavailable: "即時覆蓋暫時無法評估",
+};
+
+const nearbyCoverageFallbackSummaries: Record<NearbyCoverageLevel, string> = {
+  high: "查詢點附近有新鮮即時感測資料，感測密度充足。",
+  low: "查詢點附近有新鮮即時感測資料，但感測密度偏少。",
+  medium: "查詢點附近有新鮮即時感測資料，感測密度中等。",
+  no_local_sensor:
+    "查詢點半徑內沒有新鮮在地感測資料；縣市或資料源仍可能有資料。",
+  unavailable: "即時感測覆蓋暫時無法評估，不能判斷附近是否有感測器。",
+};
+
+export function nearbyCoverageLevelLabel(level: NearbyCoverageLevel): string {
+  return nearbyCoverageLabels[level];
+}
+
+export function formatDistanceMeters(value: number | null): string {
+  if (value === null) {
+    return "半徑內無新鮮感測";
+  }
+
+  const normalized = Math.max(0, value);
+  if (normalized < 1000) {
+    return `${Math.round(normalized).toLocaleString("zh-TW")} 公尺`;
+  }
+
+  return `${new Intl.NumberFormat("zh-TW", {
+    maximumFractionDigits: 1,
+  }).format(normalized / 1000)} 公里`;
+}
+
+export function nearbyCoverageSummary(
+  coverage: NearbyRealtimeCoverage | null,
+): NearbyCoverageSummaryState {
+  if (!coverage) {
+    return {
+      badge: nearbyCoverageLabels.unavailable,
+      summary: "即時感測覆蓋尚未回傳，無法判斷附近是否有感測器。",
+      tone: "muted",
+    };
+  }
+
+  const tone: NearbyCoverageSummaryState["tone"] =
+    coverage.overall_level === "high"
+      ? "good"
+      : coverage.overall_level === "no_local_sensor"
+        ? "poor"
+        : coverage.overall_level === "unavailable"
+          ? "muted"
+          : "warn";
+
+  return {
+    badge: nearbyCoverageLabels[coverage.overall_level],
+    summary:
+      coverage.summary.trim() ||
+      nearbyCoverageFallbackSummaries[coverage.overall_level],
+    tone,
+  };
 }
 
 export function formatDateTime(value: string | null, options?: { timeZone?: string }) {

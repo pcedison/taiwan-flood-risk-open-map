@@ -20,6 +20,7 @@ from app.api.schemas import (
     LatLng,  # noqa: F401  (re-exported for tests building Evidence payloads)
     LayersResponse,
     MapLayer,
+    NearbyRealtimeCoverage,
     PlaceCandidate,
     QueryHeat,
     RiskAssessRequest,
@@ -47,7 +48,10 @@ from app.domain.evidence import (
     RiskAssessmentPersistence,
     upsert_public_evidence,
 )
-from app.domain.evidence.repository import query_nearby_latest_official
+from app.domain.evidence.repository import (
+    query_nearby_latest_official,
+    query_nearby_realtime_coverage_rows,
+)
 from app.domain.geocoding import build_open_data_geocoder
 from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
 from app.domain.history import (
@@ -71,6 +75,7 @@ from app.domain.realtime import (
     OfficialRealtimeSourceStatus,  # noqa: F401  (re-exported for tests)
     fetch_official_realtime_bundle,
 )
+from app.domain.realtime.nearby_coverage import build_nearby_realtime_coverage
 from app.domain.reports.abuse import (
     RateLimitBackend,
     RateLimitExceeded,
@@ -225,6 +230,43 @@ REALTIME_FLOOD_WARNING_RELEVANCE_M = 10000
 REALTIME_OFFICIAL_LOOKBACK = timedelta(hours=3)
 EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS = 6000
 ASSESSMENT_PERSIST_STATEMENT_TIMEOUT_MS = 1500
+
+
+def _nearby_realtime_coverage(
+    request: RiskAssessRequest,
+    *,
+    now: datetime,
+) -> NearbyRealtimeCoverage:
+    settings = get_settings()
+    if not settings.evidence_repository_enabled:
+        return _unavailable_nearby_realtime_coverage(request, now=now)
+    try:
+        rows = query_nearby_realtime_coverage_rows(
+            database_url=settings.database_url,
+            lat=request.point.lat,
+            lng=request.point.lng,
+            observed_since=now - REALTIME_OFFICIAL_LOOKBACK,
+        )
+    except EvidenceRepositoryUnavailable:
+        return _unavailable_nearby_realtime_coverage(request, now=now)
+    return build_nearby_realtime_coverage(
+        rows=rows,
+        query_radius_m=request.radius_m,
+        evaluated_at=now,
+    )
+
+
+def _unavailable_nearby_realtime_coverage(
+    request: RiskAssessRequest,
+    *,
+    now: datetime,
+) -> NearbyRealtimeCoverage:
+    return build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=request.radius_m,
+        evaluated_at=now,
+        repository_unavailable=True,
+    )
 
 
 def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | None:
@@ -546,6 +588,7 @@ def _risk_assessment_dependencies() -> public_risk.RiskAssessmentDependencies:
         risk_assessment_response_cache_key=_risk_assessment_response_cache_key,
         cached_risk_assessment_response=_cached_risk_assessment_response,
         fetch_official_realtime_bundle=_official_realtime_bundle_for_risk,
+        nearby_realtime_coverage=_nearby_realtime_coverage,
         nearby_db_evidence=_nearby_db_evidence,
         official_flood_disaster_lookup=_official_flood_disaster_lookup,
         can_use_profile_fast_path=_can_use_profile_fast_path,
@@ -671,6 +714,7 @@ def _profile_backed_response(
     assessment_id: str,
     profile: RiskProfileRecord,
     realtime_bundle: OfficialRealtimeBundle,
+    nearby_realtime_coverage: NearbyRealtimeCoverage,
     created_at: datetime,
 ) -> RiskAssessmentResponse:
     return public_profiles.profile_backed_response(
@@ -678,6 +722,7 @@ def _profile_backed_response(
         assessment_id=assessment_id,
         profile=profile,
         realtime_bundle=realtime_bundle,
+        nearby_realtime_coverage=nearby_realtime_coverage,
         created_at=created_at,
         top_evidence_items=_profile_top_evidence_items(profile),
         query_heat=_query_heat(request, now=created_at),
@@ -780,7 +825,7 @@ def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: An
             "time_context": request.time_context,
             "location_text": (request.location_text or "").strip(),
             "app_env": settings.app_env,
-            "cache_version": "realtime-evidence-v2",
+            "cache_version": "realtime-evidence-v3-nearby-coverage",
             "realtime_official_enabled": settings.realtime_official_enabled,
             "realtime_official_diagnostic_fallback_enabled": (
                 settings.realtime_official_diagnostic_fallback_enabled
@@ -853,6 +898,7 @@ def _persist_assessment(
     explanation: Explanation,
     data_freshness: list[DataFreshness],
     evidence_items: list[Evidence],
+    nearby_realtime_coverage: NearbyRealtimeCoverage,
     created_at: datetime,
     expires_at: datetime,
 ) -> None:
@@ -883,6 +929,7 @@ def _persist_assessment(
                     explanation=explanation,
                     data_freshness=data_freshness,
                     evidence_items=evidence_items,
+                    nearby_realtime_coverage=nearby_realtime_coverage,
                     created_at=created_at,
                     expires_at=expires_at,
                 ),
