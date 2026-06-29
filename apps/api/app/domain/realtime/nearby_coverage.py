@@ -133,7 +133,7 @@ def build_nearby_realtime_coverage(
             radius_buckets_m=list(RADIUS_BUCKETS_M),
             summary=summary,
             signal_breakdown=[],
-            missing_signal_types=list(_ALL_SIGNAL_TYPES),
+            missing_signal_types=list(REQUIRED_SIGNAL_TYPES),
             limitations=[summary, _COUNTY_LEVEL_NOTE],
             county_level_note=_COUNTY_LEVEL_NOTE,
         )
@@ -148,7 +148,8 @@ def build_nearby_realtime_coverage(
     missing_signal_types = [
         evaluation.signal_type
         for evaluation in evaluations
-        if evaluation.model.coverage_level == "no_local_sensor"
+        if evaluation.signal_type in REQUIRED_SIGNAL_TYPES
+        and evaluation.model.coverage_level == "no_local_sensor"
     ]
     limitations = [_COUNTY_LEVEL_NOTE]
     if overall_level == "low" and _has_only_rainfall_or_warning(evaluations):
@@ -241,10 +242,10 @@ def _overall_level(evaluations: list[_SignalEvaluation]) -> str:
             hydrologic_rank = max(hydrologic_rank, _RANK_BY_LEVEL[evaluation.model.coverage_level])
     if hydrologic_rank:
         return _LEVEL_BY_RANK[hydrologic_rank]
-    if any(evaluation.signal_type == "rainfall" and evaluation.has_rows for evaluation in evaluations):
-        return "low"
     if any(
-        evaluation.signal_type == "flood_warning" and evaluation.has_rows for evaluation in evaluations
+        evaluation.signal_type == "rainfall"
+        and evaluation.model.coverage_level != "no_local_sensor"
+        for evaluation in evaluations
     ):
         return "low"
     return "no_local_sensor"

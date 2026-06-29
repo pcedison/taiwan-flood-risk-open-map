@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from app.domain.evidence.repository import NearbyCoverageRow
 from app.domain.realtime.nearby_coverage import (
     RADIUS_BUCKETS_M,
+    REQUIRED_SIGNAL_TYPES,
     build_nearby_realtime_coverage,
     coverage_signal_type,
 )
@@ -150,6 +151,101 @@ def test_nearby_coverage_status_only_does_not_count_as_flood_depth() -> None:
     assert "flood_depth" in coverage.missing_signal_types
     assert "rainfall" in coverage.missing_signal_types
     assert "water_level" in coverage.missing_signal_types
+    assert "pump_or_gate_status" not in coverage.missing_signal_types
+    assert "flood_warning" not in coverage.missing_signal_types
+    assert "status_only" not in coverage.missing_signal_types
+
+
+def test_nearby_coverage_stale_only_rainfall_and_warning_do_not_satisfy_fallback() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.cwa.rainfall",
+                source_id="cwa-rainfall:stale",
+                event_type="rainfall",
+                distance_to_query_m=120.0,
+                freshness_state="stale",
+                observed_delta_minutes=90,
+            ),
+            _row(
+                adapter_key="official.ncdr.cap",
+                source_id="ncdr-cap:stale",
+                event_type="flood_warning",
+                distance_to_query_m=150.0,
+                freshness_state="stale",
+                observed_delta_minutes=90,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
+    warning = next(item for item in coverage.signal_breakdown if item.signal_type == "flood_warning")
+    assert coverage.overall_level == "no_local_sensor"
+    assert rainfall.coverage_level == "no_local_sensor"
+    assert rainfall.fresh_count == 0
+    assert rainfall.stale_count == 1
+    assert warning.coverage_level == "no_local_sensor"
+    assert warning.fresh_count == 0
+    assert warning.stale_count == 1
+    assert set(coverage.missing_signal_types) == set(REQUIRED_SIGNAL_TYPES)
+
+
+def test_nearby_coverage_warning_only_does_not_satisfy_rainfall_fallback() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.ncdr.cap",
+                source_id="ncdr-cap:fresh",
+                event_type="flood_warning",
+                distance_to_query_m=150.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+    no_rows_coverage = build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    warning = next(item for item in coverage.signal_breakdown if item.signal_type == "flood_warning")
+    assert coverage.overall_level == "no_local_sensor"
+    assert coverage.summary == no_rows_coverage.summary
+    assert warning.fresh_count == 1
+    assert set(coverage.missing_signal_types) == set(REQUIRED_SIGNAL_TYPES)
+
+
+def test_nearby_coverage_missing_signals_ignore_context_and_status_rows() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.civil_iot.pump_water_level",
+                source_id="civil-iot-pump:1",
+                event_type="pump_water_level",
+                distance_to_query_m=150.0,
+            ),
+            _row(
+                adapter_key="official.ncdr.cap",
+                source_id="ncdr-cap:1",
+                event_type="flood_warning",
+                distance_to_query_m=180.0,
+            ),
+            _row(
+                adapter_key="local.taipei.pump_station",
+                source_id="taipei-pump:1",
+                event_type="status_only",
+                distance_to_query_m=220.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    assert coverage.overall_level == "no_local_sensor"
+    assert set(coverage.missing_signal_types) == set(REQUIRED_SIGNAL_TYPES)
 
 
 def test_nearby_coverage_unavailable_when_repository_unavailable() -> None:
@@ -165,3 +261,4 @@ def test_nearby_coverage_unavailable_when_repository_unavailable() -> None:
     assert coverage.limitations
     assert "無法" in coverage.summary or "unavailable" in coverage.summary
     assert coverage.county_level_note
+    assert set(coverage.missing_signal_types) == set(REQUIRED_SIGNAL_TYPES)
