@@ -58,6 +58,7 @@ _THRESHOLDS_BY_SIGNAL: dict[NearbyCoverageSignalType, tuple[int, int, int]] = {
 }
 _ADAPTER_SIGNAL_TYPES: dict[str, NearbyCoverageSignalType] = {
     "official.cwa.rainfall": "rainfall",
+    "official.cwa.tide_level": "water_level",
     "official.wra.water_level": "water_level",
     "official.wra_iow.flood_depth": "flood_depth",
     "official.civil_iot.flood_sensor": "flood_depth",

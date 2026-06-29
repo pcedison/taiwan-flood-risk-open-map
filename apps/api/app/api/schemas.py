@@ -208,6 +208,7 @@ class LocalSourceMetadataReleaseMonitor(ContractModel):
     non_qualifying_source_urls: list[str] = Field(default_factory=list)
     non_qualifying_source_reasons: list[str] = Field(default_factory=list)
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    missing_signal_types: list[str] = Field(default_factory=list)
     requested_counterparty: str
     tracking_status: str
     last_followed_up_at: datetime | None = None

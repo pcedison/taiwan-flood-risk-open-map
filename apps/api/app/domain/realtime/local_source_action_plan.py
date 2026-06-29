@@ -84,6 +84,7 @@ def _metadata_release_monitor(record: LocalSourceCoverageRecord) -> dict[str, An
         "central_backbone_missing_signal_types": list(
             record.central_backbone_missing_signal_types
         ),
+        "missing_signal_types": list(record.missing_signal_types),
         "requested_counterparty": _requested_counterparty(record),
         "tracking_status": "monitoring_open_data_release",
         "last_followed_up_at": None,

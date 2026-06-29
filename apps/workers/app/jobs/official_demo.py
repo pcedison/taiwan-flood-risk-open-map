@@ -13,7 +13,11 @@ from app.adapters.civil_iot import (
     StaWaterLevelAdapter,
 )
 from app.adapters.contracts import DataSourceAdapter
-from app.adapters.cwa import CwaRainfallAdapter
+from app.adapters.cwa import (
+    CWA_TIDE_LEVEL_DATASET_URL,
+    CwaRainfallAdapter,
+    CwaTideLevelAdapter,
+)
 from app.adapters.flood_potential import FloodPotentialGeoJsonAdapter
 from app.adapters.wra import WraWaterLevelAdapter
 
@@ -42,6 +46,32 @@ def build_official_demo_adapters(
             ),
             fetched_at=resolved_fetched_at,
             raw_snapshot_key="raw/official-demo/cwa-rainfall.json",
+        ),
+        CwaTideLevelAdapter(
+            (
+                {
+                    "station_id": "CWA-DEMO-MATSU-TIDE-001",
+                    "station_name": "Matsu Demo Tide Station",
+                    "county": "Lienchiang County",
+                    "town": "Nangan Township",
+                    "observed_at": observed_at,
+                    "water_level_m": 2.16,
+                    "source_url": CWA_TIDE_LEVEL_DATASET_URL,
+                    "confidence": 0.9,
+                    "source_weight": 0.65,
+                    "station_type": "tide_level",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [119.9428, 26.1617],
+                    },
+                    "attribution": "Central Weather Administration demo fixture",
+                    "quality_flags": {
+                        "coastal_context_only": True,
+                    },
+                },
+            ),
+            fetched_at=resolved_fetched_at,
+            raw_snapshot_key="raw/official-demo/cwa-tide-level.json",
         ),
         WraWaterLevelAdapter(
             (

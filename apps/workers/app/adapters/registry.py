@@ -11,7 +11,7 @@ from app.adapters.civil_iot import (
     RIVER_WATER_LEVEL_METADATA,
     SEWER_WATER_LEVEL,
 )
-from app.adapters.cwa import CWA_RAINFALL_METADATA
+from app.adapters.cwa import CWA_RAINFALL_METADATA, CWA_TIDE_LEVEL_METADATA
 from app.adapters.dcard import METADATA as DCARD_METADATA
 from app.adapters.flood_potential import FLOOD_POTENTIAL_GEOJSON_METADATA
 from app.adapters.local_chiayi_city import (
@@ -79,6 +79,7 @@ ADAPTER_REGISTRY = MappingProxyType(
             terms_review_required=True,
         ),
         CWA_RAINFALL_METADATA.key: CWA_RAINFALL_METADATA,
+        CWA_TIDE_LEVEL_METADATA.key: CWA_TIDE_LEVEL_METADATA,
         WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
         WRA_IOW_FLOOD_DEPTH_METADATA.key: WRA_IOW_FLOOD_DEPTH_METADATA,
         NCDR_CAP_METADATA.key: NCDR_CAP_METADATA,
@@ -153,6 +154,8 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return False
 
     if metadata.key == "official.cwa.rainfall":
+        return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
+    if metadata.key == "official.cwa.tide_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
     if metadata.key == "official.wra.water_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_wra_enabled)
@@ -395,6 +398,8 @@ def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettin
 
 def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
     if metadata.key == "official.cwa.rainfall":
+        return settings.source_cwa_enabled is not False
+    if metadata.key == "official.cwa.tide_level":
         return settings.source_cwa_enabled is not False
     if metadata.key == "official.wra.water_level":
         return settings.source_wra_enabled is not False

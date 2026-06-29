@@ -746,10 +746,9 @@ paths:
                       local_direct_incomplete_counties:
                         - 金門縣
                         - 連江縣
-                      central_backbone_minimum_complete_count: 21
-                      central_backbone_minimum_incomplete_count: 1
-                      counties_missing_hydrologic_backbone:
-                        - 連江縣
+                      central_backbone_minimum_complete_count: 22
+                      central_backbone_minimum_incomplete_count: 0
+                      counties_missing_hydrologic_backbone: []
                       central_backbone_required_families:
                         - CWA
                         - WRA
@@ -759,22 +758,30 @@ paths:
                       central_backbone_family_complete: true
                       central_backbone_required_adapter_keys:
                         - official.cwa.rainfall
+                        - official.cwa.tide_level
                         - official.wra.water_level
                         - official.ncdr.cap
                         - official.wra_iow.flood_depth
                         - official.civil_iot.flood_sensor
                         - official.civil_iot.sewer_water_level
+                        - official.civil_iot.pump_water_level
+                        - official.civil_iot.gate_water_level
                       central_backbone_missing_adapter_keys: []
-                      request_official_authorization_count: 1
+                      request_official_authorization_count: 2
                       verify_live_smoke_count: 0
-                      verify_public_api_contract_count: 0
+                      verify_public_api_contract_count: 3
                       counties_requiring_official_authorization:
+                        - 花蓮縣
                         - 金門縣
                       counties_requiring_live_smoke: []
-                      counties_requiring_public_api_contract: []
+                      counties_requiring_public_api_contract:
+                        - 苗栗縣
+                        - 屏東縣
+                        - 臺東縣
                       counties_requiring_metadata_release_monitoring:
                         - 連江縣
-                      counties_requiring_official_discovery: []
+                      counties_requiring_official_discovery:
+                        - 連江縣
                     counties:
                       - county: 臺南市
                         local_direct_statuses:
@@ -867,8 +874,8 @@ paths:
                       total_counties: 22
                       local_direct_complete_count: 20
                       local_direct_remaining_count: 2
-                      central_backbone_minimum_complete_count: 21
-                      central_backbone_remaining_count: 1
+                      central_backbone_minimum_complete_count: 22
+                      central_backbone_remaining_count: 0
                       authorization_requests:
                         - county: 金門縣
                           reason: "KWIS SOAP/ASMX exposes token-gated read methods, but production read access still requires county authorization."
@@ -902,8 +909,11 @@ paths:
                           non_qualifying_source_reasons:
                             - Public reservoir water level is monthly PDF only, without observed_at/station_id/measurement_value realtime API fields.
                             - Public realtime page is environmental discharge CEMS, not flood, water-level, sewer, pump, or gate observation.
-                          central_backbone_missing_signal_types:
-                            - hydrologic_observation
+                          central_backbone_missing_signal_types: []
+                          missing_signal_types:
+                            - flood_depth
+                            - sewer_water_level
+                            - pump_or_gate_status
                           requested_counterparty: "連江縣政府公開資料或防災水利窗口"
                           tracking_status: monitoring_open_data_release
                           last_followed_up_at: null
@@ -911,7 +921,7 @@ paths:
                             - observed_at
                             - station_or_device_id
                             - measurement_value
-                          request_focus: "請官方釋出即時水文觀測 read API。"
+                          request_focus: "請官方釋出即時水文觀測 read API，至少包含水位、淹水深度、雨水下水道、抽水站或水門任一類觀測資料。"
                       public_api_contract_reviews: []
                       live_smoke_reviews: []
                       sensor_signal_gap_reviews:
@@ -950,18 +960,18 @@ paths:
                         - rank: 1
                           priority_tier: P0
                           county: 連江縣
-                          workstream: restore_hydrologic_backbone
-                          next_action_code: continue_official_discovery
+                          workstream: monitor_open_data_release
+                          next_action_code: monitor_open_data_release
                           tracking_status: monitoring_open_data_release
                           requested_counterparty: 連江縣政府公開資料或防災水利窗口
                           blocking_reason: "目前只有靜態清冊、站點、抽水站、水門或易淹區 metadata，尚無即時觀測欄位。"
-                          why_now: central_backbone is missing hydrologic observation coverage for this county；local_direct_source is not complete
-                          completion_gate: "取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門即時 read API，並提供 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+                          why_now: local_direct_source is not complete
+                          completion_gate: "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。"
                           missing_signal_types:
-                            - water_level
                             - flood_depth
-                          central_backbone_missing_signal_types:
-                            - hydrologic_observation
+                            - sewer_water_level
+                            - pump_or_gate_status
+                          central_backbone_missing_signal_types: []
                           production_adapter_keys: []
                           candidate_source_names: []
                           candidate_source_urls: []
@@ -2560,6 +2570,7 @@ components:
         - non_qualifying_source_urls
         - non_qualifying_source_reasons
         - central_backbone_missing_signal_types
+        - missing_signal_types
         - requested_counterparty
         - tracking_status
         - last_followed_up_at
@@ -2595,6 +2606,10 @@ components:
           items:
             type: string
         central_backbone_missing_signal_types:
+          type: array
+          items:
+            type: string
+        missing_signal_types:
           type: array
           items:
             type: string

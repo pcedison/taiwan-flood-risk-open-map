@@ -11,10 +11,10 @@ from app.ops.official_realtime_live_smoke import OfficialRealtimeSmokeResult
 DEFAULT_EXPECTED_COVERAGE_SUMMARY = {
     "local_direct_complete_count": 20,
     "local_direct_incomplete_count": 2,
-    "central_backbone_minimum_complete_count": 21,
-    "central_backbone_minimum_incomplete_count": 1,
+    "central_backbone_minimum_complete_count": 22,
+    "central_backbone_minimum_incomplete_count": 0,
     "local_direct_incomplete_counties": ["金門縣", "連江縣"],
-    "counties_missing_hydrologic_backbone": ["連江縣"],
+    "counties_missing_hydrologic_backbone": [],
 }
 
 

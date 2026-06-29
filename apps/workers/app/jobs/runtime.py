@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from app.adapters.civil_iot import (
     GATE_WATER_LEVEL,
@@ -16,7 +16,7 @@ from app.adapters.civil_iot import (
     StaWaterLevelApiAdapter,
 )
 from app.adapters.contracts import DataSourceAdapter
-from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
+from app.adapters.cwa import CwaRainfallApiAdapter, CwaTideLevelApiAdapter, FetchJson, TideFetchJson
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
 from app.adapters.local_chiayi_city import ChiayiCityRainfallApiAdapter, ChiayiCityWaterLevelApiAdapter
@@ -160,11 +160,34 @@ class RuntimeQueueProducerResult:
         return len(self.deduped_job_ids)
 
 
+def _combined_cwa_tide_fetcher(
+    *,
+    tide_fetch_json: TideFetchJson | None,
+    station_fetch_json: TideFetchJson | None,
+) -> TideFetchJson | None:
+    if tide_fetch_json is None and station_fetch_json is None:
+        return None
+
+    def fetch_json(url: str, timeout_seconds: int) -> Mapping[str, Any]:
+        station_endpoint = "O-B0076" in url or "/opendataapi/" in url or "stations" in url
+        fetcher = (
+            (station_fetch_json or tide_fetch_json)
+            if station_endpoint
+            else (tide_fetch_json or station_fetch_json)
+        )
+        assert fetcher is not None
+        return fetcher(url, timeout_seconds)
+
+    return fetch_json
+
+
 def build_runtime_adapters(
     settings: WorkerSettings,
     *,
     fetched_at: datetime | None = None,
     cwa_fetch_json: FetchJson | None = None,
+    cwa_tide_fetch_json: TideFetchJson | None = None,
+    cwa_tide_station_fetch_json: TideFetchJson | None = None,
     wra_fetch_json: WraFetchJson | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
@@ -243,6 +266,18 @@ def build_runtime_adapters(
             fetch_json=cwa_fetch_json,
         )
         live_adapters[cwa_adapter.metadata.key] = cwa_adapter
+
+    if settings.source_cwa_api_enabled and "official.cwa.tide_level" in enabled_keys:
+        cwa_tide_adapter = CwaTideLevelApiAdapter(
+            authorization=settings.cwa_api_authorization,
+            timeout_seconds=settings.cwa_api_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=_combined_cwa_tide_fetcher(
+                tide_fetch_json=cwa_tide_fetch_json,
+                station_fetch_json=cwa_tide_station_fetch_json,
+            ),
+        )
+        live_adapters[cwa_tide_adapter.metadata.key] = cwa_tide_adapter
 
     if settings.source_wra_api_enabled and "official.wra.water_level" in enabled_keys:
         wra_adapter = WraWaterLevelApiAdapter(

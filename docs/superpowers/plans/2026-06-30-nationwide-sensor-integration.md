@@ -25,7 +25,7 @@
 
 | Priority | Workstream | Counties / scope | Exit gate |
 | --- | --- | --- | --- |
-| P0 | Restore minimum nationwide hydrologic backbone | 連江縣 | `central_backbone_minimum_complete` is true or an explicit official request packet exists with tracked follow-up status and non-qualifying official leads are explicitly excluded. |
+| P0 | Restore minimum nationwide hydrologic backbone | 連江縣 | Completed 2026-06-30 by `official.cwa.tide_level`; keep local-direct follow-up separate because CWA tide is coastal context, not a local flood/sewer/pump/gate feed. |
 | P0 | Complete local direct source absence | 金門縣、連江縣 | Each county has either a production adapter or a documented authorization/open-data request with required read API fields. |
 | P1 | Resolve authorization-gated richer sources | 花蓮縣、金門縣 | Request packet records official counterparty, API purpose, required fields, raw snapshot and license requirements. |
 | P1 | Resolve technical live-smoke blockers | Current queue empty after 臺北市、雲林縣 status-only reviews | Candidate endpoints are smoked with observed time, id, value semantics, coordinates, and status-only separation. |
@@ -67,8 +67,13 @@ Add assertions that:
 priority = plan["integration_priority_queue"]
 assert [item["county"] for item in priority[:3]] == ["連江縣", "金門縣", "花蓮縣"]
 assert priority[0]["priority_tier"] == "P0"
-assert priority[0]["workstream"] == "restore_hydrologic_backbone"
-assert "hydrologic_observation" in priority[0]["central_backbone_missing_signal_types"]
+assert priority[0]["workstream"] == "monitor_open_data_release"
+assert priority[0]["central_backbone_missing_signal_types"] == []
+assert priority[0]["missing_signal_types"] == [
+    "flood_depth",
+    "sewer_water_level",
+    "pump_or_gate_status",
+]
 assert priority[1]["workstream"] == "request_official_authorization"
 assert "local_direct_source" in priority[1]["why_now"]
 
@@ -173,7 +178,7 @@ Expected: both commands pass.
 - Consumes: `integration_priority_queue[0]` for `連江縣`.
 - Produces: a request packet asking for live hydrologic read API fields and a tracking status for official follow-up.
 
-- [x] Write a failing request-packet test that requires `連江縣` to include `hydrologic_observation`, `observed_at`, `station_or_device_id`, `measurement_value`, `measurement_unit_or_type`, and `longitude_latitude_or_joinable_station_metadata`.
+- [x] Historical blocker packet created before CWA tide-level integration. Superseded 2026-06-30 by Task 12: `official.cwa.tide_level` closes the central `hydrologic_observation` gap, so the current packet targets local-direct `flood_depth`, `sewer_water_level`, and `pump_or_gate_status`.
 - [x] Generate or update the packet content from existing `build_local_source_action_plan()` data.
 - [x] Run `python -m pytest apps/api/tests/test_local_source_request_packets.py tests/test_local_source_request_packets_cli.py -q`.
 
@@ -367,7 +372,7 @@ rule that `alarmState` cannot satisfy flood-depth measurement coverage.
 - Consumes: 連江自來水廠水庫水位月報 and `erbwater` public realtime monitoring page.
 - Produces: `non_qualifying_source_*` metadata in local source coverage,
   action-plan, admin, and request-packet outputs, without reducing the
-  `hydrologic_observation` gap.
+  local-direct signal gaps.
 
 - [x] Write failing tests proving Lienchiang excluded official leads are exposed.
 - [x] Record water-reservoir monthly PDFs and environmental CEMS as
@@ -375,7 +380,35 @@ rule that `alarmState` cannot satisfy flood-depth measurement coverage.
 - [x] Regenerate official request packets so the P0 request includes exclusion
   reasons.
 - [x] Update matrix and verification log to preserve that Lienchiang still needs
-  a realtime hydrologic observation read API.
+  local-direct realtime water feeds; CWA tide-level integration now satisfies
+  the minimum central `hydrologic_observation` gate separately.
+
+## Task 12: CWA Tide-Level Backbone for Lienchiang
+
+**Files:**
+- Add: `apps/workers/app/adapters/cwa/tide.py`
+- Add: `apps/workers/tests/test_cwa_tide_level_adapter.py`
+- Add: `infra/migrations/0031_cwa_tide_level_source.sql`
+- Modify: worker registry/runtime/demo/staging/freshness tests and API coverage/action-plan contracts.
+- Modify: official/local data-source docs, OpenAPI examples, Zeabur and scheduler runbooks.
+
+**Interfaces:**
+- Consumes: CWA `O-B0075-001` tide-level observations and CWA `O-B0076-001`
+  sea-surface station metadata.
+- Produces: `official.cwa.tide_level` water-level evidence with station
+  metadata, source URLs, coastal-context limitations, and CWA source gates.
+
+- [x] Write failing adapter tests for joining tide observations with station metadata.
+- [x] Implement CWA tide-level live adapter, runtime builder, registry metadata, official demo fixture, staging passthrough, and source migration.
+- [x] Classify `official.cwa.tide_level` as `tide_level` / `water_level` for central and nearby coverage while preserving coastal-only limitations.
+- [x] Update local coverage/action-plan contracts so 22/22 counties meet the minimum central backbone, while 連江縣 remains P0 for local-direct `flood_depth`, `sewer_water_level`, and `pump_or_gate_status`.
+- [x] Regenerate request packet artifacts and update OpenAPI/docs/runbooks.
+
+Completed 2026-06-30: 連江縣 no longer appears in
+`counties_missing_hydrologic_backbone`; `central_backbone_minimum_complete_count`
+is 22. This is not full nationwide completion: 金門縣 and 連江縣 still lack
+complete local-direct production sources, and multiple ready counties still
+have documented signal-family gaps.
 
 ## Completion Gates
 

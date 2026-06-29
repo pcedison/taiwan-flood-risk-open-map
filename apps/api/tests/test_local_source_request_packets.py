@@ -47,8 +47,12 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     lienchiang = packets[0]
     assert lienchiang["packet_type"] == "metadata_release_request"
     assert lienchiang["requires_human_intervention"] is True
-    assert "連江縣即時水文觀測資料釋出請求" == lienchiang["subject"]
-    assert lienchiang["target_signal_types"] == ["hydrologic_observation"]
+    assert "連江縣地方即時水情資料釋出請求" == lienchiang["subject"]
+    assert lienchiang["target_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
     assert "南竿、北竿、莒光、東引" in lienchiang["request_body"]
     assert any("matsu.gov.tw" in url for url in lienchiang["source_urls"])
     assert lienchiang["non_qualifying_source_names"] == [
@@ -60,7 +64,10 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx",
     ]
     assert "放流水環保 CEMS" in " ".join(lienchiang["non_qualifying_source_reasons"])
-    assert "仍未補足 hydrologic_observation" in lienchiang["request_body"]
+    assert "中央最低水文骨幹已補足" in lienchiang["request_body"]
+    assert "地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status" in lienchiang[
+        "request_body"
+    ]
 
     pingtung = next(packet for packet in packets if packet["county"] == "屏東縣")
     assert pingtung["packet_type"] == "public_api_contract_request"
@@ -108,7 +115,7 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert markdown.startswith("# 地方即時水情官方請求包")
     assert "## 花蓮縣：花蓮縣 Senslink/行動水情 即時水情 read API 授權請求" in markdown
     assert "## 金門縣：金門縣 KWIS 即時水情 read API 授權請求" in markdown
-    assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
+    assert "## 連江縣：連江縣地方即時水情資料釋出請求" in markdown
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
     assert "## 臺北市：臺北市缺漏水資訊訊號補齊請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
@@ -118,7 +125,8 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "- 追蹤狀態：needs_signal_gap_review" in markdown
     assert "- [ ] 確認是否可提供最新觀測 read API" in markdown
     assert "`observed_at`" in markdown
-    assert "hydrologic_observation" in markdown
+    assert "中央最低水文骨幹已補足" in markdown
+    assert "- 待補地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
     assert "KWIS_Get_Pump_Basic_Unit_Data" in markdown
     assert "KWIS_IOT_Data_Service.asmx?WSDL" in markdown
     assert "(7)" in markdown
@@ -130,7 +138,7 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
 
 
-def test_lienchiang_packet_tracks_p0_hydrologic_backbone_priority() -> None:
+def test_lienchiang_packet_tracks_p0_local_direct_release_priority() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
     top_priority = plan["integration_priority_queue"][0]
 
@@ -140,9 +148,13 @@ def test_lienchiang_packet_tracks_p0_hydrologic_backbone_priority() -> None:
     assert top_priority["county"] == "連江縣"
     assert lienchiang["priority_rank"] == top_priority["rank"] == 1
     assert lienchiang["priority_tier"] == "P0"
-    assert lienchiang["workstream"] == "restore_hydrologic_backbone"
+    assert lienchiang["workstream"] == "monitor_open_data_release"
     assert lienchiang["completion_gate"] == top_priority["completion_gate"]
-    assert lienchiang["target_signal_types"] == ["hydrologic_observation"]
+    assert lienchiang["target_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
     assert lienchiang["non_qualifying_source_names"] == top_priority[
         "non_qualifying_source_names"
     ]

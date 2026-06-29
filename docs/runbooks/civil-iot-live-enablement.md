@@ -45,6 +45,7 @@ adapter key must be in `WORKER_ENABLED_ADAPTER_KEYS` (or that var unset).
 | Source | Adapter key | Gate flag | Live flag | Extra |
 |---|---|---|---|---|
 | CWA rainfall (full network) | `official.cwa.rainfall` | `SOURCE_CWA_ENABLED=true` | `SOURCE_CWA_API_ENABLED=true` | `CWA_API_AUTHORIZATION=CWA-...` |
+| CWA coastal tide level | `official.cwa.tide_level` | `SOURCE_CWA_ENABLED=true` | `SOURCE_CWA_API_ENABLED=true` | `CWA_API_AUTHORIZATION=CWA-...`; coastal context only |
 | WRA water level (opendata) | `official.wra.water_level` | `SOURCE_WRA_ENABLED=true` | `SOURCE_WRA_API_ENABLED=true` | — |
 | Flood sensors | `official.civil_iot.flood_sensor` | `SOURCE_FLOOD_SENSOR_ENABLED=true` | `SOURCE_FLOOD_SENSOR_API_ENABLED=true` | optional `CIVIL_IOT_FLOOD_SENSOR_URL` |
 | River level (STA) | `official.civil_iot.river_water_level` | `SOURCE_CIVIL_IOT_RIVER_ENABLED=true` | `SOURCE_CIVIL_IOT_RIVER_API_ENABLED=true` | overlaps WRA water level — pick one |
@@ -60,7 +61,7 @@ Optional URL overrides:
   The old `sta.ci.taiwan.gov.tw` host is not the default.
 
 Recommended enablement order (highest realtime-water value first, lightest load
-first): CWA rainfall → flood sensors → river level → sewer → pond → pump.
+first): CWA rainfall/tide-level → flood sensors → river level → sewer → pond → pump.
 
 ## Procedure (repeat per source)
 

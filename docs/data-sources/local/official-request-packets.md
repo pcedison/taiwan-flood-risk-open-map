@@ -34,7 +34,7 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 2026-06-30 action plan 產生的正式請求包已改用 `integration_priority_queue`
 排序，涵蓋四類缺口：
 
-- 連江縣：即時水文觀測資料釋出或納入 Civil IoT / WRA 主幹。
+- 連江縣：地方即時水情資料釋出；中央最低水文骨幹已由 CWA 潮位補足。
 - 金門縣：KWIS read API 授權。
 - 花蓮縣：Senslink / 行動水情 read API 授權。
 - 臺北市：疏散門 live smoke / 欄位語意複核。
@@ -50,7 +50,7 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 
 - 花蓮縣：Senslink / 行動水情 read API 授權。
 - 金門縣：KWIS read API 授權。
-- 連江縣：即時水文觀測資料釋出或納入 Civil IoT / WRA 主幹。
+- 連江縣：地方即時水情資料釋出；中央最低水文骨幹已由 CWA 潮位補足。
 - 苗栗縣：雨水下水道即時水情 read API contract。
 - 屏東縣：PTEOC RainStation / River / Flood / Crawler read API contract 與站點 metadata。
 - 臺東縣：洪水與淹水預警系統 read API contract。
@@ -111,23 +111,23 @@ KWIS ASMX/WSDL 已列出 token-gated read methods，但空 Token smoke 只回
 - Civil IoT `official.civil_iot.flood_sensor`：2026-06-28 live smoke 金門 7 站。
 - Civil IoT `official.civil_iot.sewer_water_level`：2026-06-28 live smoke 金門 29 站。
 
-## 連江縣：即時水文觀測資料釋出請求
+## 連江縣：地方即時水情資料釋出請求
 
-目前狀態：`metadata_only` + `not_found`，地方直連尚未完成；中央主幹也缺
-`hydrologic_observation`。
+目前狀態：`metadata_only` + `not_found`，地方直連尚未完成；中央最低水文
+骨幹已由 CWA `official.cwa.tide_level` 補足。
 
-整合優先序：`#1 / P0 / restore_hydrologic_backbone`。此請求包直接對應
-`integration_priority_queue[0]`，完成門檻是取得至少一個可公開追溯的水位、
-淹水深度、雨水下水道、抽水站或水門即時 read API，且欄位需包含
-`observed_at`、`station_or_device_id`、`measurement_value`、
-`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
-與官方來源/授權資訊。
+整合優先序：`#1 / P0 / monitor_open_data_release`。此請求包直接對應
+`integration_priority_queue[0]`，完成門檻是完成地方直出 production adapter，
+或留下含 required read API fields 的官方釋出請求並可追蹤 follow-up 狀態。
+目前地方直連仍缺 `flood_depth`、`sewer_water_level`、`pump_or_gate_status`。
 
 已查核來源：
 
 - 連江縣開放資料查詢：`https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5`
 - 連江縣大潮、豪雨易淹水地區 ODS：`https://www.matsu.gov.tw/upload/f-20230922134042.ods`
 - data.gov.tw dataset `165820`
+- CWA 潮位觀測 `O-B0075-001` 與測站 metadata `O-B0076-001`，其中馬祖潮位站可提供
+  沿海水位脈絡。
 - Civil IoT `STA_RainSewer`、`STA_WaterResource_v2`
 - WRA IoW、WRA 即時水位、NCDR CAP、CWA 雨量
 
@@ -136,13 +136,14 @@ KWIS ASMX/WSDL 已列出 token-gated read methods，但空 Token smoke 只回
 - 地方公開資料只找到靜態易淹區 metadata，沒有即時觀測時間、站點 ID、測值或座標。
 - 2026-06-28 查核：Civil IoT 雨水下水道、水資源、WRA IoW、WRA 即時水位均無連江
   水文觀測站點。
-- CWA 雨量與 NCDR CAP 可提供雨量或事件脈絡，但不能替代水位、淹水深度、雨水下水道、
-  抽水站或水門觀測。
+- CWA 潮位可提供沿海水位脈絡並補足中央最低 backbone，但不能替代地方道路淹水、
+  雨水下水道、抽水站或水門量測。
+- 連江自來水廠水庫水位月報與 `erbwater` 放流水 CEMS 已列為 `non_qualifying`，
+  不列 production adapter。
 
 請求重點：
 
-- 請連江縣政府釋出可機器讀取的即時水文觀測 read API，或確認是否可加入 Civil IoT /
-  WRA 公開 SensorThings 主幹。
+- 請連江縣政府釋出可機器讀取的地方即時水情 read API。
 - 需要的資料類型優先序：南竿、北竿、莒光、東引等地區的雨水下水道水位、道路淹水
   感測器、抽水站或水門水位、易淹區鄰近水位站。
 - 若短期無感測器，請提供官方站點建置計畫或資料釋出時程，讓 coverage catalog 從

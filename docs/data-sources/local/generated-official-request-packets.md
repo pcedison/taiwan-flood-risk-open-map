@@ -2,13 +2,13 @@
 
 此文件由 local-source action plan 產生，用於追蹤尚需人工授權或官方資料釋出的地方即時水情缺口。
 
-## 連江縣：連江縣即時水文觀測資料釋出請求
+## 連江縣：連江縣地方即時水情資料釋出請求
 
 - 類型：metadata_release_request
 - 需要人工介入：是
 - 追蹤對象：連江縣政府公開資料或防災水利窗口
 - 追蹤狀態：monitoring_open_data_release
-- 整合優先序：#1 / P0 / restore_hydrologic_backbone
+- 整合優先序：#1 / P0 / monitor_open_data_release
 - 來源：
   - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
   - https://www.matsu.gov.tw/upload/f-20230922134042.ods
@@ -20,15 +20,14 @@
   - 公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API。
   - 公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- 待補中央主幹訊號：hydrologic_observation
-- 排入此順位原因：central_backbone is missing hydrologic observation coverage for this county；local_direct_source is not complete
-- 完成門檻：取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門即時 read API，並提供 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+- 待補地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status
+- 排入此順位原因：local_direct_source is not complete
+- 完成門檻：完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。
 
-目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。 已查核但排除的官方線索：公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API；公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。因此仍未補足 hydrologic_observation。
+目前連江縣已由中央主幹補足最低水文脈絡，但地方公開資料仍只有靜態或 metadata 類資料。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等地方直連 read API。 已查核但排除的官方線索：公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API；公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。目前中央最低水文骨幹已補足；仍需補足地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status。
 
 待辦：
-- [ ] 確認是否可提供最新觀測 read API
-- [ ] 確認是否可加入 Civil IoT 或 WRA 公開主幹
+- [ ] 確認是否可提供地方最新觀測 read API
 - [ ] 取得站點 ID、觀測時間、測值、單位與座標
 - [ ] 確認短期無感測器時的建置計畫或資料釋出時程
 

@@ -129,6 +129,29 @@ def test_nearby_coverage_reports_missing_flood_depth_and_sewer() -> None:
     assert "water_level" not in coverage.missing_signal_types
 
 
+def test_nearby_coverage_treats_cwa_tide_level_as_water_level_context() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.cwa.tide_level",
+                source_id="cwa-tide-level:C4W01",
+                event_type="water_level",
+                distance_to_query_m=480.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    water_level = next(
+        item for item in coverage.signal_breakdown if item.signal_type == "water_level"
+    )
+    assert coverage_signal_type("water_level", "official.cwa.tide_level") == "water_level"
+    assert water_level.coverage_level == "high"
+    assert water_level.fresh_count == 1
+    assert "water_level" not in coverage.missing_signal_types
+
+
 def test_nearby_coverage_status_only_does_not_count_as_flood_depth() -> None:
     coverage = build_nearby_realtime_coverage(
         rows=(

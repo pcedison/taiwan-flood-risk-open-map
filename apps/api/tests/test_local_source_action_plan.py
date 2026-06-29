@@ -12,8 +12,8 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
 
     assert plan["local_direct_complete_count"] == 20
     assert plan["local_direct_remaining_count"] == 2
-    assert plan["central_backbone_minimum_complete_count"] == 21
-    assert plan["central_backbone_remaining_count"] == 1
+    assert plan["central_backbone_minimum_complete_count"] == 22
+    assert plan["central_backbone_remaining_count"] == 0
 
     authorization_by_county = {
         item["county"]: item for item in plan["authorization_requests"]
@@ -42,8 +42,11 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
         item["county"]: item for item in plan["metadata_release_monitors"]
     }
     assert set(metadata_release_by_county) == {"連江縣"}
-    assert metadata_release_by_county["連江縣"]["central_backbone_missing_signal_types"] == [
-        "hydrologic_observation"
+    assert metadata_release_by_county["連江縣"]["central_backbone_missing_signal_types"] == []
+    assert metadata_release_by_county["連江縣"]["missing_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
     ]
     assert "觀測" in metadata_release_by_county["連江縣"]["request_focus"]
     assert metadata_release_by_county["連江縣"]["required_read_api_fields"] == list(
@@ -88,8 +91,13 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert [item["county"] for item in priority[:3]] == ["連江縣", "金門縣", "花蓮縣"]
     assert priority[0]["rank"] == 1
     assert priority[0]["priority_tier"] == "P0"
-    assert priority[0]["workstream"] == "restore_hydrologic_backbone"
-    assert "hydrologic_observation" in priority[0]["central_backbone_missing_signal_types"]
+    assert priority[0]["workstream"] == "monitor_open_data_release"
+    assert priority[0]["central_backbone_missing_signal_types"] == []
+    assert priority[0]["missing_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
     assert priority[0]["tracking_status"] == "monitoring_open_data_release"
     assert priority[0]["non_qualifying_source_names"] == [
         "連江自來水廠水庫水位月報",

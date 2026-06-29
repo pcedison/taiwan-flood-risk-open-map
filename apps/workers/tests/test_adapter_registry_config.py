@@ -23,6 +23,7 @@ def test_default_enabled_adapters_are_official_only() -> None:
 
     assert enabled_adapter_keys(settings) == (
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.flood_potential.geojson",
     )
@@ -33,6 +34,8 @@ def test_official_registry_metadata_uses_data_gov_primary_catalog() -> None:
         "https://data.gov.tw/dataset/9177"
     )
     assert ADAPTER_REGISTRY["official.cwa.rainfall"].resource_url is not None
+    assert ADAPTER_REGISTRY["official.cwa.tide_level"].data_gov_dataset_id == "O-B0075-001"
+    assert "coastal" in " ".join(ADAPTER_REGISTRY["official.cwa.tide_level"].limitations)
     assert ADAPTER_REGISTRY["official.wra.water_level"].data_gov_dataset_id == "25768"
     assert "quality checked" in " ".join(
         ADAPTER_REGISTRY["official.wra.water_level"].limitations

@@ -116,15 +116,53 @@ def _metadata_release_packet(
 ) -> dict[str, Any]:
     county = str(item["county"])
     source_urls = list(item.get("metadata_source_urls", []))
-    target_signal_types = list(item.get("central_backbone_missing_signal_types", []))
+    central_missing_signal_types = list(
+        item.get("central_backbone_missing_signal_types", [])
+    )
+    target_signal_types = _metadata_target_signal_types(
+        item,
+        priority_item=priority_item,
+    )
     non_qualifying_reasons = list(item.get("non_qualifying_source_reasons", []))
     area_hint = "南竿、北竿、莒光、東引" if county == "連江縣" else county
     excluded_summary = _non_qualifying_request_summary(non_qualifying_reasons)
+    if central_missing_signal_types:
+        status_sentence = "因此仍未補足 hydrologic_observation。"
+        request_body = (
+            f"目前{county}僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的"
+            f"即時水文觀測 read API。請協助釋出{area_hint}的雨水下水道水位、道路"
+            "淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 "
+            "Civil IoT / WRA 等中央公開 SensorThings 主幹。"
+            f"{excluded_summary}{status_sentence}"
+        )
+        checklist = [
+            "確認是否可提供最新觀測 read API",
+            "確認是否可加入 Civil IoT 或 WRA 公開主幹",
+            "取得站點 ID、觀測時間、測值、單位與座標",
+            "確認短期無感測器時的建置計畫或資料釋出時程",
+        ]
+    else:
+        signal_summary = "、".join(str(signal) for signal in target_signal_types)
+        status_sentence = (
+            "目前中央最低水文骨幹已補足；仍需補足地方直連訊號："
+            f"{signal_summary}。"
+        )
+        request_body = (
+            f"目前{county}已由中央主幹補足最低水文脈絡，但地方公開資料仍只有靜態"
+            f"或 metadata 類資料。請協助釋出{area_hint}的雨水下水道水位、道路"
+            "淹水感測器、抽水站或水門水位、易淹區鄰近水位站等地方直連 read API。"
+            f"{excluded_summary}{status_sentence}"
+        )
+        checklist = [
+            "確認是否可提供地方最新觀測 read API",
+            "取得站點 ID、觀測時間、測值、單位與座標",
+            "確認短期無感測器時的建置計畫或資料釋出時程",
+        ]
     return {
         "county": county,
         "packet_type": "metadata_release_request",
         "requires_human_intervention": True,
-        "subject": f"{county}即時水文觀測資料釋出請求",
+        "subject": f"{county}地方即時水情資料釋出請求",
         "source_urls": source_urls,
         "non_qualifying_source_names": list(item.get("non_qualifying_source_names", [])),
         "non_qualifying_source_urls": list(item.get("non_qualifying_source_urls", [])),
@@ -134,20 +172,28 @@ def _metadata_release_packet(
         "last_followed_up_at": item.get("last_followed_up_at"),
         "target_signal_types": target_signal_types,
         "required_read_api_fields": list(item.get("required_read_api_fields", [])),
-        "request_body": (
-            f"目前{county}僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的"
-            f"即時水文觀測 read API。請協助釋出{area_hint}的雨水下水道水位、道路"
-            "淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 "
-            "Civil IoT / WRA 等中央公開 SensorThings 主幹。"
-            f"{excluded_summary}因此仍未補足 hydrologic_observation。"
-        ),
-        "checklist": [
-            "確認是否可提供最新觀測 read API",
-            "確認是否可加入 Civil IoT 或 WRA 公開主幹",
-            "取得站點 ID、觀測時間、測值、單位與座標",
-            "確認短期無感測器時的建置計畫或資料釋出時程",
-        ],
+        "request_body": request_body,
+        "checklist": checklist,
     } | _priority_packet_fields(priority_item)
+
+
+def _metadata_target_signal_types(
+    item: Mapping[str, Any],
+    *,
+    priority_item: Mapping[str, Any] | None,
+) -> list[Any]:
+    central_missing = list(item.get("central_backbone_missing_signal_types", []))
+    if central_missing:
+        return central_missing
+    missing = list(item.get("missing_signal_types", []))
+    if missing:
+        return missing
+    if priority_item is not None:
+        priority_missing = list(priority_item.get("missing_signal_types", []))
+        if priority_missing:
+            return priority_missing
+        return list(priority_item.get("central_backbone_missing_signal_types", []))
+    return []
 
 
 def _public_api_contract_packet(
@@ -442,7 +488,9 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
     if packet.get("target_signal_types"):
         signal_label = "待補水資訊訊號"
         if packet.get("packet_type") == "metadata_release_request":
-            signal_label = "待補中央主幹訊號"
+            signal_label = "待補地方直連訊號"
+            if packet.get("workstream") == "restore_hydrologic_backbone":
+                signal_label = "待補中央主幹訊號"
         lines.append(
             f"- {signal_label}："
             + "、".join(str(signal) for signal in packet["target_signal_types"])

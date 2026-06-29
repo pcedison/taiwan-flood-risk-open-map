@@ -17,6 +17,7 @@ REALTIME_STALE_SECONDS = 60 * 60
 REALTIME_ADAPTER_KEYS = frozenset(
     {
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.wra_iow.flood_depth",
         "official.civil_iot.flood_sensor",

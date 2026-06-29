@@ -331,6 +331,7 @@ def test_admin_enabled_gates_include_flood_sensor_live_gate(
 @pytest.mark.parametrize(
     "adapter_key",
     [
+        "official.cwa.tide_level",
         "official.wra_iow.flood_depth",
         "local.taipei.sewer_water_level",
         "local.taipei.river_water_level",
@@ -376,6 +377,13 @@ def test_admin_freshness_uses_realtime_cadence_for_new_backbone_sources(
 @pytest.mark.parametrize(
     ("adapter_key", "gate_names"),
     [
+        (
+            "official.cwa.tide_level",
+            (
+                "SOURCE_CWA_ENABLED",
+                "SOURCE_CWA_API_ENABLED",
+            ),
+        ),
         (
             "official.wra_iow.flood_depth",
             (
@@ -912,9 +920,9 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert summary["total_counties"] == 22
     assert summary["local_direct_complete_count"] == 20
     assert summary["local_direct_incomplete_count"] == 2
-    assert summary["central_backbone_minimum_complete_count"] == 21
-    assert summary["central_backbone_minimum_incomplete_count"] == 1
-    assert summary["counties_missing_hydrologic_backbone"] == ["連江縣"]
+    assert summary["central_backbone_minimum_complete_count"] == 22
+    assert summary["central_backbone_minimum_incomplete_count"] == 0
+    assert summary["counties_missing_hydrologic_backbone"] == []
     assert summary["request_official_authorization_count"] == 2
     assert summary["verify_live_smoke_count"] == 0
     assert summary["verify_public_api_contract_count"] == 3
@@ -942,6 +950,7 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert summary["central_backbone_family_complete"] is True
     assert summary["central_backbone_required_adapter_keys"] == [
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.ncdr.cap",
         "official.wra_iow.flood_depth",
@@ -1140,13 +1149,21 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert any("KWIS" in url for url in counties["金門縣"]["application_urls"])
     assert counties["連江縣"]["local_direct_statuses"] == ["metadata_only", "not_found"]
     assert counties["連江縣"]["production_adapter_keys"] == []
-    assert counties["連江縣"]["central_backbone_minimum_complete"] is False
-    assert counties["連江縣"]["central_backbone_missing_signal_types"] == [
-        "hydrologic_observation",
+    assert counties["連江縣"]["central_backbone_adapter_keys"] == [
+        "official.cwa.rainfall",
+        "official.cwa.tide_level",
+        "official.ncdr.cap",
     ]
-    assert counties["連江縣"]["central_backbone_coverage_level"] == "needs_hydrologic_backbone"
+    assert counties["連江縣"]["central_backbone_signal_types"] == [
+        "rainfall",
+        "tide_level",
+        "cap_alert",
+    ]
+    assert counties["連江縣"]["central_backbone_minimum_complete"] is True
+    assert counties["連江縣"]["central_backbone_missing_signal_types"] == []
+    assert counties["連江縣"]["central_backbone_coverage_level"] == "minimum_met"
     assert counties["連江縣"]["rainfall_available"] is True
-    assert counties["連江縣"]["water_level_available"] is False
+    assert counties["連江縣"]["water_level_available"] is True
     assert counties["連江縣"]["flood_depth_available"] is False
     assert counties["連江縣"]["sewer_water_level_available"] is False
     assert counties["連江縣"]["pump_or_gate_status_available"] is False
@@ -1163,7 +1180,6 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
         counties["連江縣"]["non_qualifying_source_reasons"]
     )
     assert counties["連江縣"]["missing_signal_types"] == [
-        "water_level",
         "flood_depth",
         "sewer_water_level",
         "pump_or_gate_status",
@@ -1187,8 +1203,8 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     plan = payload["plan"]
     assert plan["local_direct_complete_count"] == 20
     assert plan["local_direct_remaining_count"] == 2
-    assert plan["central_backbone_minimum_complete_count"] == 21
-    assert plan["central_backbone_remaining_count"] == 1
+    assert plan["central_backbone_minimum_complete_count"] == 22
+    assert plan["central_backbone_remaining_count"] == 0
     assert [item["county"] for item in plan["authorization_requests"]] == [
         "花蓮縣",
         "金門縣",
@@ -1207,9 +1223,14 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     ]
     top_priority = plan["integration_priority_queue"][0]
     assert top_priority["priority_tier"] == "P0"
-    assert top_priority["workstream"] == "restore_hydrologic_backbone"
+    assert top_priority["workstream"] == "monitor_open_data_release"
     assert top_priority["completion_gate"]
-    assert "hydrologic_observation" in top_priority["central_backbone_missing_signal_types"]
+    assert top_priority["central_backbone_missing_signal_types"] == []
+    assert top_priority["missing_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
     signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
     assert "臺北市" in signal_gaps
     assert signal_gaps["臺北市"]["tracking_status"] == "needs_signal_gap_review"
@@ -1236,9 +1257,7 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert kinmen["tracking_status"] == "needs_authorization_request"
     assert kinmen["last_followed_up_at"] is None
     lienchiang = plan["metadata_release_monitors"][0]
-    assert lienchiang["central_backbone_missing_signal_types"] == [
-        "hydrologic_observation",
-    ]
+    assert lienchiang["central_backbone_missing_signal_types"] == []
     assert lienchiang["requested_counterparty"] == "連江縣政府公開資料或防災水利窗口"
     assert lienchiang["tracking_status"] == "monitoring_open_data_release"
     assert lienchiang["last_followed_up_at"] is None

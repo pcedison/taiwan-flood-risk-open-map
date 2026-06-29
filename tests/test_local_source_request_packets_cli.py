@@ -36,7 +36,11 @@ def test_local_source_request_packets_cli_emits_json() -> None:
         "嘉義市",
     }
     assert payload[0]["packet_type"] == "metadata_release_request"
-    assert payload[0]["target_signal_types"] == ["hydrologic_observation"]
+    assert payload[0]["target_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
     assert payload[0]["non_qualifying_source_names"] == [
         "連江自來水廠水庫水位月報",
         "連江縣資訊公開查詢系統即時監測值",
@@ -81,12 +85,13 @@ def test_local_source_request_packets_cli_writes_markdown_output(
     markdown = output_path.read_text(encoding="utf-8")
     assert "## 花蓮縣：花蓮縣 Senslink/行動水情 即時水情 read API 授權請求" in markdown
     assert "## 金門縣：金門縣 KWIS 即時水情 read API 授權請求" in markdown
-    assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
+    assert "## 連江縣：連江縣地方即時水情資料釋出請求" in markdown
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
     assert "## 臺北市：臺北市缺漏水資訊訊號補齊請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
     assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" in markdown
     assert "- 已排除官方線索：連江自來水廠水庫水位月報、連江縣資訊公開查詢系統即時監測值" in markdown
+    assert "- 待補地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
     assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown

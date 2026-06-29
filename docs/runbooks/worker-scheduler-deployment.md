@@ -1,4 +1,4 @@
-# Worker And Scheduler Deployment
+﻿# Worker And Scheduler Deployment
 
 Reviewed: 2026-06-09
 
@@ -127,7 +127,7 @@ Managed ingestion smoke:
 
 ```sh
 WORKER_RUNTIME_FIXTURES_ENABLED=true \
-WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.wra.water_level,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,official.civil_iot.pond_water_level \
+WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,official.civil_iot.pond_water_level \
 python -m app.main --run-enabled-adapters --persist
 ```
 

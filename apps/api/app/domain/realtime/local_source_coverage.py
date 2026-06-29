@@ -35,6 +35,7 @@ CENTRAL_BACKBONE_REQUIRED_SIGNAL_TYPES = (
 HYDROLOGIC_BACKBONE_SIGNAL_TYPES = frozenset(
     {
         "river_water_level",
+        "tide_level",
         "flood_depth",
         "sewer_water_level",
         "pump_water_level",
@@ -44,6 +45,7 @@ HYDROLOGIC_BACKBONE_SIGNAL_TYPES = frozenset(
 )
 BACKBONE_SIGNAL_TYPES_BY_ADAPTER_KEY = {
     "official.cwa.rainfall": "rainfall",
+    "official.cwa.tide_level": "tide_level",
     "official.wra.water_level": "river_water_level",
     "official.ncdr.cap": "cap_alert",
     "official.wra_iow.flood_depth": "flood_depth",
@@ -255,7 +257,7 @@ class LocalSourceCoverageRecord:
 
 
 def _coverage_signal_type(signal_type: str) -> str | None:
-    if signal_type in {"river_water_level", "pond_water_level"}:
+    if signal_type in {"river_water_level", "pond_water_level", "tide_level"}:
         return "water_level"
     if signal_type in {"pump_water_level", "gate_water_level", "gate_status", "pump_status"}:
         return "pump_or_gate_status"
@@ -762,6 +764,7 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         local_direct_statuses=("metadata_only", "not_found"),
         central_backbone_adapter_keys=(
             "official.cwa.rainfall",
+            "official.cwa.tide_level",
             "official.ncdr.cap",
         ),
         metadata_source_names=("連江縣大潮、豪雨易淹水地區 ODS",),
