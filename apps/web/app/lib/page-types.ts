@@ -1,4 +1,8 @@
-import type { EvidenceItem, EvidencePreview, LayerContractItem } from "./risk-display";
+import type {
+  EvidenceItem,
+  EvidencePreview,
+  LayerContractItem,
+} from "./risk-display";
 
 export type CoordinateSource = "default" | "map" | "search";
 export type QueryMode = "map" | "search";
@@ -96,6 +100,7 @@ export type RiskAssessmentResponse = {
     health_status: string;
     observed_at: string | null;
     ingested_at: string | null;
+    feature_count?: number | null;
     message: string | null;
   }>;
   query_heat: {

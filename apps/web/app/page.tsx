@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { DiagnosticsSection } from "./components/diagnostics-section";
 import { EvidenceSection } from "./components/evidence-section";
-import { NearbyCoverageSection } from "./components/nearby-coverage-section";
+import { NearbySensingSection } from "./components/nearby-sensing-section";
 import { RiskSummarySection } from "./components/risk-summary-section";
 import { SearchForm } from "./components/search-form";
 import { UserReportSection } from "./components/user-report-section";
@@ -27,8 +27,9 @@ import {
   getProfileBasisText,
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
-  latestNewsEvidenceLinks,
-  latestNewsLinksFreshnessSourceId,
+  hiddenHistoricalNewsCount,
+  publicDataFreshnessItems,
+  publicEvidenceDisplayItems,
   riskOverlayPresentation,
   riskSummaryBasis,
   riskSummaryTitle,
@@ -66,20 +67,20 @@ export default function HomePage() {
   const [reportSummary, setReportSummary] = useState("");
   const [reportStatus, setReportStatus] = useState<UserReportSubmissionStatus>("idle");
 
-  const displayedEvidence = useMemo(
+  const selectedEvidence = useMemo(
     () =>
       assessment
         ? selectEvidenceItems(assessment.evidence, evidenceItems, evidenceStatus)
         : [],
     [assessment, evidenceItems, evidenceStatus],
   );
-  const latestNewsLinks = useMemo(
-    () => latestNewsEvidenceLinks(displayedEvidence, 3),
-    [displayedEvidence],
+  const displayedEvidence = useMemo(
+    () => publicEvidenceDisplayItems(selectedEvidence),
+    [selectedEvidence],
   );
-  const latestNewsLinkSourceId = useMemo(
-    () => latestNewsLinksFreshnessSourceId(assessment?.data_freshness ?? [], displayedEvidence),
-    [assessment?.data_freshness, displayedEvidence],
+  const hiddenNewsCount = useMemo(
+    () => hiddenHistoricalNewsCount(selectedEvidence),
+    [selectedEvidence],
   );
   const evidenceDisplayState = getEvidenceDisplayState(
     evidenceStatus,
@@ -87,8 +88,8 @@ export default function HomePage() {
   );
   const layerDisplayState = assessment
     ? buildLayerDisplayState({
-        dataFreshness: assessment.data_freshness,
-        evidenceItems,
+        dataFreshness: publicDataFreshnessItems(assessment.data_freshness),
+        evidenceItems: displayedEvidence,
         layers: assessment.map_layers ?? assessment.layers,
       })
     : { hasTileContract: false, items: [], status: "pending" as const };
@@ -353,12 +354,13 @@ export default function HomePage() {
           profilePreviewState={profilePreviewState}
         />
 
-        <NearbyCoverageSection coverage={assessment?.nearby_realtime_coverage ?? null} />
+        <NearbySensingSection assessment={assessment} evidenceItems={displayedEvidence} />
 
         <EvidenceSection
           assessment={assessment}
           displayedEvidence={displayedEvidence}
           evidenceDisplayState={evidenceDisplayState}
+          hiddenHistoricalNewsCount={hiddenNewsCount}
           profileBasisText={profileBasisText}
           profilePreviewState={profilePreviewState}
         />
@@ -384,8 +386,6 @@ export default function HomePage() {
           radius={radius}
           currentSummary={currentSummary}
           layerDisplayState={layerDisplayState}
-          latestNewsLinks={latestNewsLinks}
-          latestNewsLinkSourceId={latestNewsLinkSourceId}
         />
       </aside>
     </main>

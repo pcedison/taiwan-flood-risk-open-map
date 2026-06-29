@@ -26,10 +26,13 @@ export function SearchForm({
 }: SearchFormProps) {
   return (
     <form className="panel-section query-panel" onSubmit={onSubmit}>
-      <div className="beta-limit-notice" role="note">
-        <strong>{text.betaLimitTitle}</strong>
+      <details className="beta-limit-notice" role="note">
+        <summary>
+          <strong>{text.betaLimitTitle}</strong>
+          <span>{text.betaLimitAction}</span>
+        </summary>
         <p>{text.betaLimitMessage}</p>
-      </div>
+      </details>
 
       <label className="field">
         <span>{text.searchPlace}</span>

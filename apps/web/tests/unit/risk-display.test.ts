@@ -9,6 +9,7 @@ const {
   buildLayerDisplayState,
   buildUserReportPayload,
   combinedRiskLevel,
+  evidenceDisplayText,
   evidencePublishedAt,
   evidenceSourceUrl,
   formatConfidence,
@@ -20,16 +21,24 @@ const {
   getProfileBasisText,
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
+  hiddenHistoricalNewsCount,
   layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
   latestNewsLinksFreshnessSourceId,
   nearbyCoverageLevelLabel,
   nearbyCoverageSummary,
+  nearbySensingState,
+  normalizeRiskLevel,
+  publicDataFreshnessItems,
+  publicEvidenceDisplayItems,
+  riskDecisionSummary,
   riskOverlayPresentation,
+  riskSummaryDecisionText,
   riskSummaryBasis,
   riskSummaryTitle,
   selectEvidenceItems,
   shouldFetchEvidenceList,
+  sourceHealthSummaryState,
 } = (await import(riskDisplayModulePath)) as typeof import("../../app/lib/risk-display");
 
 const previewEvidence: EvidencePreview = {
@@ -269,14 +278,182 @@ test("combined risk display separates summary from source basis", () => {
   assert.equal(combinedRiskLevel("未知", "高"), "高");
   assert.equal(riskSummaryTitle("未知", "高"), "綜合風險：高");
   assert.equal(riskSummaryBasis("未知", "高"), "即時：未知；歷史參考：高");
+  assert.equal(normalizeRiskLevel("low"), "低");
+  assert.equal(normalizeRiskLevel("medium"), "中");
+  assert.equal(normalizeRiskLevel("very_high"), "極高");
+  assert.equal(combinedRiskLevel("low", "medium"), "中");
+  assert.equal(riskSummaryTitle("low", "medium"), "綜合風險：中");
+  assert.equal(riskSummaryBasis("low", "medium"), "即時：低；歷史參考：中");
+  assert.match(
+    riskSummaryDecisionText({
+      confidenceLevel: "中",
+      historicalLevel: "高",
+      realtimeLevel: "未知",
+    }),
+    /由歷史事件或淹水潛勢參考主導/,
+  );
+  assert.deepEqual(
+    riskDecisionSummary({
+      confidenceLevel: "中",
+      historicalLevel: "高",
+      realtimeLevel: "未知",
+    }),
+    {
+      confidence: "信心：中",
+      driver: "主導：歷史參考",
+      method: "取即時/歷史較高",
+      narrative: "本次採歷史參考，因歷史參考（高）高於即時（未知）。",
+    },
+  );
 
   const highOverlay = riskOverlayPresentation("高", true);
   assert.equal(highOverlay.colorName, "紅色");
   assert.equal(highOverlay.fillOpacity, 0.85);
 
+  const englishHighOverlay = riskOverlayPresentation("high", true);
+  assert.equal(englishHighOverlay.level, "高");
+  assert.equal(englishHighOverlay.colorName, "紅色");
+
   const idleOverlay = riskOverlayPresentation(null, false);
   assert.equal(idleOverlay.level, "未知");
   assert.equal(idleOverlay.fillOpacity, 0.18);
+});
+
+test("public evidence display hides historical news and keeps official signals first", () => {
+  const newsEvidence: EvidenceItem = {
+    ...fullEvidence,
+    id: "news-hidden",
+    source_id: "news:stored",
+    source_type: "news",
+    title: "歷史新聞",
+  };
+  const rainfallEvidence: EvidenceItem = {
+    ...fullEvidence,
+    event_type: "rainfall",
+    id: "rainfall",
+    source_id: "cwa-rainfall",
+    source_type: "official",
+    title: "CWA 雨量站",
+  };
+
+  assert.deepEqual(publicEvidenceDisplayItems([newsEvidence, fullEvidence, rainfallEvidence]), [
+    rainfallEvidence,
+    fullEvidence,
+  ]);
+  assert.equal(hiddenHistoricalNewsCount([newsEvidence, rainfallEvidence]), 1);
+  assert.deepEqual(
+    publicDataFreshnessItems([
+      {
+        health_status: "healthy",
+        ingested_at: "2026-05-13T03:50:00Z",
+        message: "已從公開新聞/百科索引補查並整理 2 筆候選淹水事件。",
+        name: "公開新聞即時補查",
+        observed_at: "2026-04-23T02:28:00Z",
+        source_id: "on-demand-public-news",
+      },
+      {
+        health_status: "healthy",
+        ingested_at: "2026-05-13T04:20:00Z",
+        message: "來源可用。",
+        name: "中央氣象署即時雨量",
+        observed_at: "2026-05-13T04:20:00Z",
+        source_id: "cwa-rainfall",
+      },
+    ]).map((item) => item.source_id),
+    ["cwa-rainfall"],
+  );
+});
+
+test("evidence display text normalizes official realtime raw titles", () => {
+  const rainfallEvidence: EvidenceItem = {
+    ...fullEvidence,
+    event_type: "rainfall",
+    source_id: "cwa-rainfall",
+    source_type: "official",
+    summary: "Raw CWA rainfall summary from backend.",
+    title: "Raw CWA rainfall station title",
+  };
+  const forumEvidence: EvidenceItem = {
+    ...fullEvidence,
+    event_type: "discussion",
+    source_id: "community-report",
+    source_type: "forum",
+    summary: "Community report summary",
+    title: "公開討論淹水線索",
+  };
+
+  assert.deepEqual(evidenceDisplayText(rainfallEvidence), {
+    purpose: "用途：即時雨量",
+    summary: "附近即時雨量觀測可輔助判讀當下降雨壓力。",
+    title: "雨量觀測",
+  });
+  assert.doesNotMatch(evidenceDisplayText(rainfallEvidence).title, /Raw|CWA|backend/i);
+  assert.doesNotMatch(evidenceDisplayText(rainfallEvidence).summary, /Raw|backend/i);
+  assert.deepEqual(evidenceDisplayText(forumEvidence), {
+    purpose: "用途：補充線索",
+    summary: "Community report summary",
+    title: "公開討論淹水線索",
+  });
+});
+
+test("nearby sensing state prefers backend coverage and falls back to realtime evidence", () => {
+  const fromCoverage = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: {
+        county_level_note: "縣市級 coverage catalog 只作背景。",
+        evaluated_at: "2026-06-29T12:00:00Z",
+        limitations: ["Backend technical coverage limitation."],
+        missing_signal_types: ["flood_depth"],
+        overall_level: "medium",
+        query_radius_m: 500,
+        radius_buckets_m: [500, 1000, 3000, 5000],
+        signal_breakdown: [
+          {
+            counts_by_radius_m: { "500": 0, "1000": 1 },
+            coverage_level: "medium",
+            fresh_count: 1,
+            label: "Rainfall sensor",
+            missing_reason: null,
+            nearest_distance_m: 820,
+            nearest_observed_at: "2026-06-29T11:55:00Z",
+            nearest_source_id: "cwa-rainfall:001",
+            signal_type: "rainfall",
+            stale_count: 0,
+            status_only_count: 0,
+          },
+        ],
+        summary: "Backend raw English summary.",
+      },
+    },
+    evidenceItems: [],
+  });
+  assert.equal(fromCoverage.badge, "附近觀測：中");
+  assert.deepEqual(fromCoverage.gaps, ["淹水深度"]);
+  assert.equal(fromCoverage.items[0].label, "雨量");
+  assert.equal(fromCoverage.summary, "附近有 雨量 1 類觀測，最近 820 公尺；仍缺 淹水深度。");
+  assert.equal(
+    fromCoverage.note,
+    "缺口代表本次查詢範圍內沒有取得該類近距觀測，不等於現地安全。",
+  );
+  assert.doesNotMatch(fromCoverage.summary, /Backend|English/);
+  assert.doesNotMatch(fromCoverage.note, /Backend|technical/);
+
+  const fromEvidence = nearbySensingState({
+    assessment: {},
+    evidenceItems: [
+      {
+        ...fullEvidence,
+        distance_to_query_m: 260,
+        event_type: "rainfall",
+        source_id: "cwa-rainfall",
+        source_type: "official",
+        title: "CWA 雨量站",
+      },
+    ],
+  });
+  assert.equal(fromEvidence.badge, "附近觀測：中");
+  assert.deepEqual(fromEvidence.gaps, ["水位"]);
+  assert.match(fromEvidence.summary, /可用即時觀測/);
 });
 
 test("layer display state prefers explicit tile contract fields", () => {
@@ -308,6 +485,52 @@ test("layer display state prefers explicit tile contract fields", () => {
     status: "healthy",
     tileUrl: "/v1/tiles/rainfall/{z}/{x}/{y}.png",
   });
+});
+
+test("source health summary condenses layer availability counts", () => {
+  const state = buildLayerDisplayState({
+    layers: [
+      {
+        availability: "available",
+        health_status: "healthy",
+        layer_id: "ready-layer",
+        name: "Ready layer",
+      },
+      {
+        availability: "limited",
+        health_status: "degraded",
+        layer_id: "limited-layer",
+        name: "Limited layer",
+      },
+      {
+        availability: "empty",
+        health_status: "healthy",
+        layer_id: "empty-layer",
+        name: "Empty layer",
+      },
+      {
+        availability: "unavailable",
+        health_status: "failed",
+        layer_id: "failed-layer",
+        name: "Failed layer",
+      },
+    ],
+  });
+
+  const summary = sourceHealthSummaryState(state);
+
+  assert.equal(summary.tone, "limited");
+  assert.match(summary.title, /部分受限/);
+  assert.match(summary.note, /地圖圖層契約/);
+  assert.deepEqual(
+    summary.items.map((item) => [item.key, item.count]),
+    [
+      ["available", 1],
+      ["limited", 1],
+      ["empty", 1],
+      ["unavailable", 1],
+    ],
+  );
 });
 
 test("layer display state derives a limited fallback from freshness and evidence", () => {

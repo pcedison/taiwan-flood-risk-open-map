@@ -1,4 +1,5 @@
 import type { Coordinate, CoordinateSource, GeocodeCandidate, RiskAssessmentResponse } from "./page-types";
+import { normalizeRiskLevel } from "./risk-display";
 
 export const text = {
   appLabel: "台灣淹水風險地圖",
@@ -13,6 +14,7 @@ export const text = {
   searchPlace: "搜尋地點",
   searchPlaceholder: "輸入地標、地址或行政區",
   betaLimitTitle: "Public beta 使用限制",
+  betaLimitAction: "查看限制",
   betaLimitMessage:
     "本服務為公開資料與歷史/潛勢圖資整合的淹水風險查詢 beta。結果不可視為即時災害通報或購屋安全保證；地址定位可能因開放資料覆蓋不足而退回道路或行政區精度。",
   radius: "分析半徑",
@@ -25,11 +27,20 @@ export const text = {
   riskPlaceholder: "搜尋地點或點選地圖後，按下查詢即可整理半徑內公開淹水相關資料。",
   insufficientData: "資料不足",
   riskMeter: "風險等級",
+  riskDecisionSummary: "風險判讀摘要",
+  riskQuestion: "回答：目前要看哪個風險？為什麼採這個等級？",
+  riskMethodSummary: "查看分級依據",
   realtime: "即時",
   historical: "歷史參考",
   confidence: "資料信心",
+  nearbySensingKicker: "附近即時感測",
+  nearbySensingQuestion: "回答：附近感測器有沒有足夠覆蓋？",
+  nearbySensingGaps: "缺口",
   evidenceKicker: "資料證據",
-  evidenceTitle: "附近資料線索",
+  evidenceTitle: "重點資料線索",
+  evidenceQuestion: "回答：哪些資料支撐這次判讀？",
+  evidenceScopeNote: "優先列出官方、即時與可驗證資料；歷史新聞暫停顯示。",
+  hiddenNewsEvidence: "已隱藏歷史新聞來源",
   evidenceSource: "來源",
   evidenceConfidence: "信心",
   evidenceDistance: "距離",
@@ -99,6 +110,7 @@ export const text = {
   reportValidation: "請先輸入簡短觀察內容。",
   reportSubmit: "送出通報",
   reportDisabledTitle: "民眾通報目前停用",
+  reportDisabledAction: "查看原因",
   reportDisabledMessage: "此功能會等法律、隱私、審核與治理流程完成後再開放。",
   provided: "已提供",
   tileLabel: "圖磚",
@@ -159,19 +171,20 @@ const sourceTypeLabels: Record<string, string> = {
 export const sourceTypeLabel = (value: string) => sourceTypeLabels[value] ?? "其他資料";
 
 export const riskMeterPosition = (level?: string) => {
-  if (level === "低") return "16%";
-  if (level === "中") return "50%";
-  if (level === "高") return "75%";
-  if (level === "極高") return "92%";
+  const displayLevel = normalizeRiskLevel(level);
+  if (displayLevel === "低") return "16%";
+  if (displayLevel === "中") return "50%";
+  if (displayLevel === "高") return "75%";
+  if (displayLevel === "極高") return "92%";
   return "8%";
 };
 
 export const hasInsufficientRiskData = (assessment: RiskAssessmentResponse | null) =>
   Boolean(
     assessment &&
-      assessment.realtime.level === "未知" &&
-      assessment.historical.level === "未知" &&
-      assessment.confidence.level === "未知" &&
+      normalizeRiskLevel(assessment.realtime.level) === "未知" &&
+      normalizeRiskLevel(assessment.historical.level) === "未知" &&
+      normalizeRiskLevel(assessment.confidence.level) === "未知" &&
       assessment.evidence.length === 0,
   );
 

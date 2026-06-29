@@ -1,13 +1,15 @@
 "use client";
 
 import type { Coordinate, RiskAssessmentResponse } from "../lib/page-types";
-import type { buildLayerDisplayState, latestNewsEvidenceLinks } from "../lib/risk-display";
+import type { buildLayerDisplayState } from "../lib/risk-display";
 import {
   formatCoordinate,
   formatDateTime,
   formatDistanceMeters,
   layerAvailabilityDisplayLabel,
   nearbyCoverageLevelLabel,
+  publicDataFreshnessItems,
+  sourceHealthSummaryState,
 } from "../lib/risk-display";
 import { healthLabel, text } from "../lib/ui-text";
 
@@ -20,8 +22,6 @@ type DiagnosticsSectionProps = {
   radius: number;
   currentSummary: string;
   layerDisplayState: ReturnType<typeof buildLayerDisplayState>;
-  latestNewsLinks: ReturnType<typeof latestNewsEvidenceLinks>;
-  latestNewsLinkSourceId: string | null;
 };
 
 export function DiagnosticsSection({
@@ -30,10 +30,12 @@ export function DiagnosticsSection({
   radius,
   currentSummary,
   layerDisplayState,
-  latestNewsLinks,
-  latestNewsLinkSourceId,
 }: DiagnosticsSectionProps) {
   const coverage = assessment?.nearby_realtime_coverage ?? null;
+  const visibleFreshness = assessment
+    ? publicDataFreshnessItems(assessment.data_freshness)
+    : [];
+  const sourceSummary = sourceHealthSummaryState(layerDisplayState);
 
   return (
     <section className="panel-section diagnostics-panel" data-testid="diagnostics-panel">
@@ -44,6 +46,25 @@ export function DiagnosticsSection({
           <span>{assessment ? text.diagnosticsReady : text.diagnosticsPending}</span>
         </summary>
         <div className="diagnostics-body">
+          <section
+            className={`diagnostics-section source-health-summary source-health-${sourceSummary.tone}`}
+            aria-label="來源摘要"
+          >
+            <div>
+              <span className="section-kicker">來源摘要</span>
+              <strong>{sourceSummary.title}</strong>
+              <p>{sourceSummary.note}</p>
+            </div>
+            <dl>
+              {sourceSummary.items.map((item) => (
+                <div key={item.key} className={`source-health-chip source-health-chip-${item.key}`}>
+                  <dt>{item.label}</dt>
+                  <dd>{item.count.toLocaleString("zh-TW")}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
           <section className="diagnostics-section coordinate-panel" aria-label={text.currentCoordinate}>
             <div>
               <span className="section-kicker">{text.currentCoordinate}</span>
@@ -188,35 +209,17 @@ export function DiagnosticsSection({
               <span className="section-kicker">{text.freshness}</span>
               <strong>{assessment ? text.online : text.offline}</strong>
             </div>
-            {assessment ? (
+            {assessment && visibleFreshness.length ? (
               <ul className="freshness-list">
-                {assessment.data_freshness.map((item) => {
-                  const showLatestNewsLinks =
-                    latestNewsLinks.length > 0 && item.source_id === latestNewsLinkSourceId;
-
-                  return (
-                    <li key={item.source_id}>
-                      <strong>{`${item.name}：${healthLabel(item.health_status)}`}</strong>
-                      {item.message ? <span>{item.message}</span> : null}
-                      {showLatestNewsLinks ? (
-                        <div className="freshness-source-links">
-                          <span>{text.latestNewsSources}</span>
-                          <ol>
-                            {latestNewsLinks.map((link) => (
-                              <li key={link.id}>
-                                <a href={link.url} target="_blank" rel="noreferrer">
-                                  {link.title}
-                                </a>
-                                <small>{formatDateTime(link.time)}</small>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
+                {visibleFreshness.map((item) => (
+                  <li key={item.source_id}>
+                    <strong>{`${item.name}：${healthLabel(item.health_status)}`}</strong>
+                    {item.message ? <span>{item.message}</span> : null}
+                  </li>
+                ))}
               </ul>
+            ) : assessment ? (
+              <p>歷史新聞已暫時隱藏；本次沒有其他可公開顯示的來源狀態。</p>
             ) : (
               <p>{text.lastSync}</p>
             )}
