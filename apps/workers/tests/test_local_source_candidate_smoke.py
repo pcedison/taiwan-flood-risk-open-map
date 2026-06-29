@@ -1,13 +1,37 @@
 from __future__ import annotations
 
+from urllib.request import Request
+
 from app.ops.local_source_candidate_smoke import (
     CANDIDATE_SOURCE_KEYS,
+    CANDIDATE_SOURCE_DEFINITIONS,
     CandidateSourceDefinition,
     CandidateSourceFetchResult,
     CandidateSourceQualification,
+    fetch_candidate_source,
     qualify_candidate_source_fetch,
     qualify_static_candidate_sources,
 )
+
+
+class FakeResponse:
+    def __init__(self, *, url: str, body: str, content_type: str = "application/json") -> None:
+        self._url = url
+        self._body = body.encode("utf-8")
+        self.headers = {"content-type": content_type}
+        self.status = 200
+
+    def __enter__(self) -> "FakeResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+    def geturl(self) -> str:
+        return self._url
 
 
 def test_static_candidate_source_catalog_tracks_priority_counties() -> None:
@@ -35,6 +59,49 @@ def test_static_candidate_source_catalog_tracks_priority_counties() -> None:
     )
     assert by_key["taipei_evacuate_gate"].status == "blocked_timeout"
     assert by_key["taipei_evacuate_gate"].next_action == "retry_live_smoke"
+
+
+def test_taipei_evacuate_gate_retries_public_mirror_and_stays_gate_status(
+    monkeypatch,
+) -> None:
+    definition = next(
+        item for item in CANDIDATE_SOURCE_DEFINITIONS if item.key == "taipei_evacuate_gate"
+    )
+    attempted_urls: list[str] = []
+
+    def fake_urlopen(request: Request, *, timeout: int):
+        url = request.full_url
+        attempted_urls.append(url)
+        if "wic.heo.taipei" in url:
+            raise TimeoutError("timed out")
+        return FakeResponse(
+            url=url,
+            body=(
+                '[{"stationNo":"A001","recTime":"202606291030",'
+                '"name":"測試疏散門","fo":"0","fc":"1","flt":"0",'
+                '"lng":121.5,"lat":25.0}]'
+            ),
+        )
+
+    monkeypatch.setattr(
+        "app.ops.local_source_candidate_smoke.urlopen",
+        fake_urlopen,
+    )
+
+    fetch = fetch_candidate_source(definition, timeout_seconds=3)
+    qualification = qualify_candidate_source_fetch(definition, fetch)
+
+    assert attempted_urls == [
+        "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+        "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+    ]
+    assert fetch.url.startswith("https://wic.gov.taipei/")
+    assert fetch.attempted_urls == tuple(attempted_urls)
+    assert definition.expected_signal_types == ("gate_status",)
+    assert "water_level" not in definition.expected_signal_types
+    assert "flood_depth" not in definition.expected_signal_types
+    assert "status_only" in qualification.observed_capabilities
+    assert qualification.status == "promotion_ready"
 
 
 def test_json_source_with_observed_time_coordinates_and_measurement_is_promotion_ready() -> None:

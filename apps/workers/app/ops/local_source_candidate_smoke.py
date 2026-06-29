@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
@@ -40,6 +40,7 @@ class CandidateSourceDefinition:
     expected_signal_types: tuple[str, ...]
     existing_adapter_key: str | None = None
     metadata_url: str | None = None
+    fallback_urls: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -51,6 +52,7 @@ class CandidateSourceDefinition:
             "expected_signal_types": list(self.expected_signal_types),
             "existing_adapter_key": self.existing_adapter_key,
             "metadata_url": self.metadata_url,
+            "fallback_urls": list(self.fallback_urls),
             "notes": list(self.notes),
         }
 
@@ -64,6 +66,7 @@ class CandidateSourceFetchResult:
     payload: object | None = None
     error: str | None = None
     timeout_seconds: int | None = None
+    attempted_urls: tuple[str, ...] = ()
 
     @classmethod
     def json_payload(cls, url: str, payload: object, *, status_code: int = 200) -> "CandidateSourceFetchResult":
@@ -107,6 +110,7 @@ class CandidateSourceFetchResult:
             "content_type": self.content_type,
             "error": self.error,
             "timeout_seconds": self.timeout_seconds,
+            "attempted_urls": list(self.attempted_urls),
         }
 
 
@@ -163,6 +167,9 @@ CANDIDATE_SOURCE_DEFINITIONS: tuple[CandidateSourceDefinition, ...] = (
         name="臺北市疏散門即時監測",
         url="https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
         expected_signal_types=("gate_status",),
+        fallback_urls=(
+            "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+        ),
     ),
     CandidateSourceDefinition(
         key="miaoli_sewer_monitoring",
@@ -235,8 +242,28 @@ def fetch_candidate_source(
     *,
     timeout_seconds: int = 20,
 ) -> CandidateSourceFetchResult:
+    attempted_urls: list[str] = []
+    last_fetch: CandidateSourceFetchResult | None = None
+    for url in (definition.url, *definition.fallback_urls):
+        attempted_urls.append(url)
+        fetch = _fetch_candidate_url(url, timeout_seconds=timeout_seconds)
+        last_fetch = fetch
+        if not _should_try_fallback(fetch):
+            return replace(fetch, attempted_urls=tuple(attempted_urls))
+    if last_fetch is None:
+        return CandidateSourceFetchResult.timeout(
+            definition.url, timeout_seconds=max(1, timeout_seconds)
+        )
+    return replace(last_fetch, attempted_urls=tuple(attempted_urls))
+
+
+def _fetch_candidate_url(
+    url: str,
+    *,
+    timeout_seconds: int,
+) -> CandidateSourceFetchResult:
     request = Request(
-        definition.url,
+        url,
         headers={"Accept": "*/*", "User-Agent": "FloodRiskTaiwan/0.1 local-source-candidate-smoke"},
     )
     try:
@@ -254,12 +281,12 @@ def fetch_candidate_source(
             )
     except TimeoutError:
         return CandidateSourceFetchResult.timeout(
-            definition.url, timeout_seconds=max(1, timeout_seconds)
+            url, timeout_seconds=max(1, timeout_seconds)
         )
     except HTTPError as exc:
         body = exc.read().decode("utf-8-sig", errors="replace") if exc.fp else None
         return CandidateSourceFetchResult.http_error(
-            definition.url,
+            url,
             status_code=exc.code,
             content_type=exc.headers.get("content-type"),
             body=body,
@@ -268,14 +295,20 @@ def fetch_candidate_source(
         reason = str(exc.reason)
         if "timed out" in reason.lower():
             return CandidateSourceFetchResult.timeout(
-                definition.url, timeout_seconds=max(1, timeout_seconds)
+                url, timeout_seconds=max(1, timeout_seconds)
             )
         return CandidateSourceFetchResult(
-            url=definition.url,
+            url=url,
             status_code=None,
             content_type=None,
             error=reason,
         )
+
+
+def _should_try_fallback(fetch: CandidateSourceFetchResult) -> bool:
+    if fetch.error and "timeout" in fetch.error.lower():
+        return True
+    return fetch.status_code is None and fetch.error is not None
 
 
 def qualify_candidate_source_fetch(
@@ -433,7 +466,10 @@ def _observed_capabilities(
         capabilities.add("longitude_latitude_or_joinable_station_metadata")
     if _has_measurement_value(definition, keys, text_values, body):
         capabilities.add("measurement_value")
-    if _has_status_only_value(keys) and {
+    if (
+        _has_status_only_value(keys)
+        or ("gate_status" in definition.expected_signal_types and _has_gate_status_value(keys))
+    ) and {
         "observed_at",
         "station_or_device_id",
         "longitude_latitude_or_joinable_station_metadata",
@@ -601,7 +637,9 @@ def _has_measurement_value(
             )
         )
     if any(signal in definition.expected_signal_types for signal in ("gate_status", "pump_status", "flood_warning")):
-        return bool(keys.intersection({"status", "alarmstate", "pumb_status", "pumpingstatus"}))
+        return bool(
+            keys.intersection({"status", "alarmstate", "pumb_status", "pumpingstatus"})
+        ) or _has_gate_status_value(keys)
     return False
 
 
@@ -618,3 +656,7 @@ def _has_status_only_value(keys: set[str]) -> bool:
             }
         )
     )
+
+
+def _has_gate_status_value(keys: set[str]) -> bool:
+    return bool(keys.intersection({"fo", "fc", "flt", "gate_status"}))

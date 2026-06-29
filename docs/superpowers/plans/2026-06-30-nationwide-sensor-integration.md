@@ -202,11 +202,11 @@ Expected: both commands pass.
 
 **Interfaces:**
 - Consumes: candidate URL `臺北市疏散門即時監測`.
-- Produces: smoke status `candidate_ready_for_adapter_design` only when observed time, station id, status semantics, and coordinates are validated.
+- Produces: existing smoke status `promotion_ready` / `start_adapter_tdd` only when observed time, station id, status semantics, and coordinates are validated.
 
-- [ ] Write a failing smoke test for mirror host fallback from `wic.heo.taipei` to `wic.gov.taipei`.
-- [ ] Implement fallback without bypassing auth or private endpoints.
-- [ ] Keep evacuation gate status out of flood depth and water level event types.
+- [x] Write a failing smoke test for mirror host fallback from `wic.heo.taipei` to `wic.gov.taipei`.
+- [x] Implement fallback without bypassing auth or private endpoints.
+- [x] Keep evacuation gate status out of flood depth and water level event types.
 
 ## Task 5: Yunlin Status-Only Evidence Type
 
