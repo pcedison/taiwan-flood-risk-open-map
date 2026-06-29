@@ -566,6 +566,33 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         production_source_urls=(
             "https://soa.tainan.gov.tw/Api/Service/Get/21b31a27-3e61-48b8-8259-83c2001bec8c",
         ),
+        metadata_source_names=(
+            "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e",
+            "114\u5e74\u5ea6\u62bd\u6c34\u7ad9\u57fa\u672c\u8cc7\u6599",
+            "114\u5e74\u5ea6\u6c34\u9580\u57fa\u672c\u8cc7\u6599",
+        ),
+        metadata_source_urls=(
+            "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9",
+            "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
+            "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291",
+        ),
+        non_qualifying_source_names=(
+            "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf",
+            "\u6c34\u5229\u7f72\u8207\u53f0\u5357\u5e02\u5408\u5efa\u6df9\u6c34\u611f\u6e2c\u5668\u611f\u6e2c\u8cc7\u6599",
+        ),
+        non_qualifying_source_urls=(
+            "https://soa.tainan.gov.tw/Api/Service/Get/427a8287-0bc1-4b45-92ac-53eb858b5b9c",
+            "https://soa.tainan.gov.tw/Api/Service/Get/537b469d-e8c5-42ca-835e-bdde93bc61be",
+        ),
+        non_qualifying_source_reasons=(
+            "2026-06-30 live smoke: regional-drainage CCTV returns GroupStationID, "
+            "CameraID, Point, and ImageUrl only; image-only CCTV has no observed_at, "
+            "measurement_value, or measurement_unit_or_type and cannot satisfy "
+            "sewer_water_level or pump_or_gate_status.",
+            "2026-06-30 live smoke: WRA/Tainan joint flood-sensor endpoint returned "
+            "data:null, so no station/device observation rows are available for "
+            "production ingestion.",
+        ),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.wra_iow.flood_depth",

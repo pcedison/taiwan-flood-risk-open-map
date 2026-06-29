@@ -47,6 +47,13 @@
     "workstream": "monitor_open_data_release",
     "priority_why_now": "local_direct_source is not complete",
     "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。",
+    "metadata_source_names": [
+      "連江縣大潮、豪雨易淹水地區 ODS"
+    ],
+    "metadata_source_urls": [
+      "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5",
+      "https://www.matsu.gov.tw/upload/f-20230922134042.ods"
+    ],
     "candidate_contract_findings": [],
     "candidate_contract_missing_fields": [],
     "candidate_contract_non_measurement_notes": []
@@ -121,6 +128,8 @@
     "workstream": "request_official_authorization",
     "priority_why_now": "local_direct_source is not complete；official authorization is required before a production read API can run",
     "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -160,6 +169,8 @@
     "workstream": "request_official_authorization",
     "priority_why_now": "official authorization is required before a production read API can run",
     "completion_gate": "取得官方授權或公開 read API contract，確認用途不是設備上傳 API。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -201,6 +212,8 @@
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
     "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": []
@@ -239,6 +252,8 @@
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
     "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": []
@@ -290,6 +305,8 @@
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
     "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": []
@@ -335,6 +352,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -383,6 +402,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -429,6 +450,12 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [
+      "澎湖縣區域排水疏濬工程"
+    ],
+    "metadata_source_urls": [
+      "https://data.gov.tw/dataset/156926"
+    ],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -475,6 +502,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -521,9 +550,28 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
-    "non_qualifying_source_names": [],
-    "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": [],
+    "metadata_source_names": [
+      "臺南市管區域排水之水位站名稱及位置",
+      "114年度抽水站基本資料",
+      "114年度水門基本資料"
+    ],
+    "metadata_source_urls": [
+      "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9",
+      "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
+      "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291"
+    ],
+    "non_qualifying_source_names": [
+      "臺南市管區域排水即時影像",
+      "水利署與台南市合建淹水感測器感測資料"
+    ],
+    "non_qualifying_source_urls": [
+      "https://soa.tainan.gov.tw/Api/Service/Get/427a8287-0bc1-4b45-92ac-53eb858b5b9c",
+      "https://soa.tainan.gov.tw/Api/Service/Get/537b469d-e8c5-42ca-835e-bdde93bc61be"
+    ],
+    "non_qualifying_source_reasons": [
+      "2026-06-30 live smoke: regional-drainage CCTV returns GroupStationID, CameraID, Point, and ImageUrl only; image-only CCTV has no observed_at, measurement_value, or measurement_unit_or_type and cannot satisfy sewer_water_level or pump_or_gate_status.",
+      "2026-06-30 live smoke: WRA/Tainan joint flood-sensor endpoint returned data:null, so no station/device observation rows are available for production ingestion."
+    ],
     "candidate_contract_findings": [],
     "candidate_contract_missing_fields": [],
     "candidate_contract_non_measurement_notes": []
@@ -566,6 +614,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -613,6 +663,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -659,6 +711,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -707,6 +761,14 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [
+      "新北市各抽水站資訊",
+      "新北市水門資料"
+    ],
+    "metadata_source_urls": [
+      "https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296",
+      "https://data.ntpc.gov.tw/datasets/bf784279-31aa-44bc-a210-33151d03e7ab"
+    ],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -752,6 +814,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -805,6 +869,8 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
@@ -856,6 +922,15 @@
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [
+      "雲林縣淹水感測器座標",
+      "雲林縣抽水站資料",
+      "雲林縣水門點位"
+    ],
+    "metadata_source_urls": [
+      "https://opendata.yunlin.gov.tw/OpenDataContent.aspx?n=8350&s=1427",
+      "https://yliflood.yunlin.gov.tw/ifloodboard"
+    ],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],

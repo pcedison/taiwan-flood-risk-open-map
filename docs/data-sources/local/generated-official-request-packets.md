@@ -12,6 +12,10 @@
 - 來源：
   - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
   - https://www.matsu.gov.tw/upload/f-20230922134042.ods
+- 靜態 metadata 線索：連江縣大潮、豪雨易淹水地區 ODS
+- 靜態 metadata URL：
+  - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
+  - https://www.matsu.gov.tw/upload/f-20230922134042.ods
 - 已排除官方線索：連江自來水廠水庫水位月報、連江縣資訊公開查詢系統即時監測值
 - 已排除官方線索 URL：
   - https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page
@@ -220,6 +224,9 @@
 - 追蹤對象：澎湖縣政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
 - 整合優先序：#9 / P2 / fill_sensor_signal_gap
+- 靜態 metadata 線索：澎湖縣區域排水疏濬工程
+- 靜態 metadata URL：
+  - https://data.gov.tw/dataset/156926
 - 既有 production adapters：local.penghu.water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - 待補水資訊訊號：flood_depth、pump_or_gate_status
@@ -262,6 +269,18 @@
 - 追蹤對象：臺南市政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
 - 整合優先序：#11 / P2 / fill_sensor_signal_gap
+- 靜態 metadata 線索：臺南市管區域排水之水位站名稱及位置、114年度抽水站基本資料、114年度水門基本資料
+- 靜態 metadata URL：
+  - https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9
+  - https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3
+  - https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291
+- 已排除官方線索：臺南市管區域排水即時影像、水利署與台南市合建淹水感測器感測資料
+- 已排除官方線索 URL：
+  - https://soa.tainan.gov.tw/Api/Service/Get/427a8287-0bc1-4b45-92ac-53eb858b5b9c
+  - https://soa.tainan.gov.tw/Api/Service/Get/537b469d-e8c5-42ca-835e-bdde93bc61be
+- 排除原因：
+  - 2026-06-30 live smoke: regional-drainage CCTV returns GroupStationID, CameraID, Point, and ImageUrl only; image-only CCTV has no observed_at, measurement_value, or measurement_unit_or_type and cannot satisfy sewer_water_level or pump_or_gate_status.
+  - 2026-06-30 live smoke: WRA/Tainan joint flood-sensor endpoint returned data:null, so no station/device observation rows are available for production ingestion.
 - 既有 production adapters：local.tainan.flood_sensor
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - 待補水資訊訊號：sewer_water_level、pump_or_gate_status
@@ -346,6 +365,10 @@
 - 追蹤對象：新北市政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
 - 整合優先序：#15 / P2 / fill_sensor_signal_gap
+- 靜態 metadata 線索：新北市各抽水站資訊、新北市水門資料
+- 靜態 metadata URL：
+  - https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296
+  - https://data.ntpc.gov.tw/datasets/bf784279-31aa-44bc-a210-33151d03e7ab
 - 既有 production adapters：local.new_taipei.water_level、local.new_taipei.flood_sensor、local.new_taipei.rainfall、local.new_taipei.drainage_water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - 待補水資訊訊號：pump_or_gate_status
@@ -413,6 +436,10 @@
 - 追蹤對象：雲林縣政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
 - 整合優先序：#18 / P2 / fill_sensor_signal_gap
+- 靜態 metadata 線索：雲林縣淹水感測器座標、雲林縣抽水站資料、雲林縣水門點位
+- 靜態 metadata URL：
+  - https://opendata.yunlin.gov.tw/OpenDataContent.aspx?n=8350&s=1427
+  - https://yliflood.yunlin.gov.tw/ifloodboard
 - 既有 production adapters：local.yunlin.water_level
 - 既有 status-only 來源：雲林 iflood 淹水感測狀態
 - 既有 status-only 訊號：flood_sensor_status

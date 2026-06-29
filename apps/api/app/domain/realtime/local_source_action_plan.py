@@ -211,6 +211,8 @@ def _integration_priority_item(
             record.central_backbone_missing_signal_types
         ),
         "production_adapter_keys": list(record.production_adapter_keys),
+        "metadata_source_names": list(record.metadata_source_names),
+        "metadata_source_urls": list(record.metadata_source_urls),
         "candidate_source_names": list(record.candidate_source_names),
         "candidate_source_urls": list(record.candidate_source_urls),
         "candidate_contract_findings": list(record.candidate_contract_findings),

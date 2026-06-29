@@ -441,6 +441,40 @@ government-supplier flood sensors. PTEOC remains a public API contract blocker;
 it must not be promoted by scraping HTML or by using `fetched_at` as
 `observed_at`.
 
+## Task 14: Tainan Static Water Metadata And Non-Measurement Leads
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Modify: generated request packet artifacts and local source docs.
+
+**Interfaces:**
+- Consumes: Tainan SOA datasets for regional-drainage water-station metadata,
+  114 pump-station basic data, 114 water-gate basic data, regional-drainage
+  CCTV image index, and the WRA/Tainan joint flood-sensor endpoint.
+- Produces: structured metadata and non-qualifying source evidence on the
+  Tainan signal-gap queue item, without reducing the unresolved
+  `sewer_water_level` or `pump_or_gate_status` gaps.
+
+- [x] Write failing tests proving Tainan signal-gap items expose static metadata
+  source names/URLs and non-measurement leads.
+- [x] Record water-station, pump-station, and water-gate datasets as static
+  metadata only.
+- [x] Mark regional-drainage realtime images as image-only CCTV, not
+  sewer-water-level or pump/gate-status measurements.
+- [x] Mark the WRA/Tainan joint flood-sensor endpoint as unavailable for
+  production ingestion after the live smoke returned `data:null`.
+- [x] Regenerate request packet artifacts and update OpenAPI/docs.
+
+Completed 2026-06-30: 臺南市 still has `local.tainan.flood_sensor`, but the
+remaining signal-gap request now carries official static metadata leads and
+explicit non-qualifying evidence. The Tainan gap remains `sewer_water_level`
+and `pump_or_gate_status`; CCTV image URLs and static facility metadata must
+not be treated as realtime measurements.
+
 ## Completion Gates
 
 The full objective is complete only when:

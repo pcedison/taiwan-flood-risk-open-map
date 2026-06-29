@@ -259,6 +259,8 @@ class LocalSourceIntegrationPriorityItem(ContractModel):
     missing_signal_types: list[str] = Field(default_factory=list)
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
     production_adapter_keys: list[str] = Field(default_factory=list)
+    metadata_source_names: list[str] = Field(default_factory=list)
+    metadata_source_urls: list[str] = Field(default_factory=list)
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
     candidate_contract_findings: list[str] = Field(default_factory=list)

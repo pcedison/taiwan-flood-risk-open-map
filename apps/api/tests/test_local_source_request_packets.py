@@ -227,3 +227,54 @@ def test_kinmen_packet_marks_upload_api_as_insufficient_for_read_adapter() -> No
     )
     assert "(7)" in kinmen["unauthorized_smoke_result"]
     assert "Data: []" in kinmen["unauthorized_smoke_result"]
+
+
+def test_tainan_signal_gap_packet_carries_static_metadata_and_exclusion_reasons() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+
+    packets = build_official_request_packets(plan)
+    tainan = next(
+        packet
+        for packet in packets
+        if packet["county"] == "\u81fa\u5357\u5e02"
+    )
+
+    assert tainan["packet_type"] == "signal_gap_request"
+    assert tainan["target_signal_types"] == [
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
+    assert tainan["metadata_source_names"] == [
+        "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e",
+        "114\u5e74\u5ea6\u62bd\u6c34\u7ad9\u57fa\u672c\u8cc7\u6599",
+        "114\u5e74\u5ea6\u6c34\u9580\u57fa\u672c\u8cc7\u6599",
+    ]
+    assert tainan["metadata_source_urls"] == [
+        "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9",
+        "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
+        "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291",
+    ]
+    assert any(
+        "427a8287-0bc1-4b45-92ac-53eb858b5b9c" in url
+        for url in tainan["non_qualifying_source_urls"]
+    )
+    assert any(
+        "ImageUrl" in reason and "measurement_value" in reason
+        for reason in tainan["non_qualifying_source_reasons"]
+    )
+    assert any(
+        "537b469d-e8c5-42ca-835e-bdde93bc61be" in url
+        for url in tainan["non_qualifying_source_urls"]
+    )
+
+
+def test_rendered_tainan_signal_gap_packet_lists_static_metadata_sources() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+    packets = build_official_request_packets(plan)
+
+    markdown = render_official_request_packets_markdown(packets)
+
+    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e" in markdown
+    assert "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9" in markdown
+    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf" in markdown
+    assert "image-only CCTV" in markdown

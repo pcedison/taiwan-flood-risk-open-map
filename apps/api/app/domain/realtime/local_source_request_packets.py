@@ -323,6 +323,14 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
         "workstream": priority_item.get("workstream"),
         "priority_why_now": priority_item.get("why_now"),
         "completion_gate": priority_item.get("completion_gate"),
+        "metadata_source_names": priority_item.get(
+            "metadata_source_names",
+            [],
+        ),
+        "metadata_source_urls": priority_item.get(
+            "metadata_source_urls",
+            [],
+        ),
         "non_qualifying_source_names": priority_item.get(
             "non_qualifying_source_names",
             [],
@@ -499,6 +507,14 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
     if packet.get("source_urls"):
         lines.append("- 來源：")
         lines.extend(f"  - {url}" for url in packet["source_urls"])
+    if packet.get("metadata_source_names"):
+        lines.append(
+            "- 靜態 metadata 線索："
+            + "、".join(str(name) for name in packet["metadata_source_names"])
+        )
+    if packet.get("metadata_source_urls"):
+        lines.append("- 靜態 metadata URL：")
+        lines.extend(f"  - {url}" for url in packet["metadata_source_urls"])
     if packet.get("non_qualifying_source_names"):
         lines.append(
             "- 已排除官方線索："

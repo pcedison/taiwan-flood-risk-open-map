@@ -946,6 +946,8 @@ paths:
                           production_adapter_keys:
                             - local.chiayi_city.water_level
                             - local.chiayi_city.rainfall
+                          metadata_source_names: []
+                          metadata_source_urls: []
                           candidate_source_names: []
                           candidate_source_urls: []
                           candidate_contract_findings: []
@@ -979,6 +981,10 @@ paths:
                             - pump_or_gate_status
                           central_backbone_missing_signal_types: []
                           production_adapter_keys: []
+                          metadata_source_names:
+                            - 連江縣大潮、豪雨易淹水地區 ODS
+                          metadata_source_urls:
+                            - https://www.matsu.gov.tw/upload/f-20230922134042.ods
                           candidate_source_names: []
                           candidate_source_urls: []
                           candidate_contract_findings: []
@@ -2759,6 +2765,8 @@ components:
         - missing_signal_types
         - central_backbone_missing_signal_types
         - production_adapter_keys
+        - metadata_source_names
+        - metadata_source_urls
         - candidate_source_names
         - candidate_source_urls
         - candidate_contract_findings
@@ -2809,6 +2817,15 @@ components:
           type: array
           items:
             type: string
+        metadata_source_names:
+          type: array
+          items:
+            type: string
+        metadata_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
         candidate_source_names:
           type: array
           items:

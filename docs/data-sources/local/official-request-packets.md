@@ -44,7 +44,9 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
   淹水深度或水位量測。
 - 嘉義市、桃園市、澎湖縣、臺中市、臺南市、南投縣、基隆市、宜蘭縣、
   新北市、新竹縣、雲林縣：既有 production adapter 之外的水資訊訊號缺口補齊；
-  雲林 iflood `alarmState` 已保留為 status-only 診斷線索，不作淹水深度。
+  雲林 iflood `alarmState` 已保留為 status-only 診斷線索，不作淹水深度。臺南市
+  signal-gap request 也已列出區域排水水位站、抽水站、水門靜態 metadata，以及
+  即時影像 `ImageUrl` / 合建淹水端點 `data:null` 的 non-qualifying 理由。
 
 各類請求包都會列出 production read API 必備欄位；signal-gap 請求包會明確
 要求不要把 `status-only` 資料當成水位、雨量、淹水深度或下水道水位量測。
