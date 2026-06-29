@@ -164,6 +164,8 @@ contract request、authorization request，或 metadata release monitoring。
 Web panel、diagnostics 與 runtime smoke assertion 接上 `nearby_realtime_coverage`，
 可以回報最近感測器距離、500m / 1km / 3km / 5km 站數、缺哪些水文訊號，
 並明確區分「縣市有資料」和「查詢點附近真的有 fresh 即時資料」。
+本機 Docker Desktop 啟動後，full Docker runtime smoke 已在 2026-06-29 通過，
+證明 live Compose API 實際執行了 nearby coverage assertion。
 
 尚未完成：
 
@@ -171,8 +173,6 @@ Web panel、diagnostics 與 runtime smoke assertion 接上 `nearby_realtime_cove
 - 依事件類型與地形情境校準有效半徑；目前初版採固定 500m / 1km / 3km / 5km
   bucket 與 signal-level coverage level，尚未建立水位站、雨量站、淹水感測器的
   差異化 production 門檻。
-- full Docker runtime smoke 尚未在本機通過；目前已加入 assertion，但 Docker daemon
-  未啟動時仍無法證明 live Compose API 實際跑過該檢查。
 
 ### 2. 金門地方直連 read API 尚未完成
 
@@ -426,19 +426,29 @@ Full Docker runtime smoke status on this machine:
 - `.\\scripts\\runtime-smoke.ps1 -StopOnExit` was blocked by local PowerShell
   execution policy before running.
 - Retried with `powershell.exe -ExecutionPolicy Bypass -File .\\scripts\\runtime-smoke.ps1 -StopOnExit`.
-- The script reached Docker daemon verification but failed before API/Web runtime
-  assertions because Docker daemon was unavailable:
+- After Docker Desktop was started, full Docker runtime smoke passed on this
+  machine. The smoke executed the live Compose API/Web stack and included the
+  new nearby coverage assertion:
 
 ```text
-failed to connect to the docker API at npipe:////./pipe/docker_engine; check if the path is correct and if the daemon is running: open //./pipe/docker_engine: The system cannot find the file specified.
-Runtime smoke failed: Checking Docker daemon exited with code 1
+Nearby realtime coverage smoke: overall=no_local_sensor, missing=rainfall,water_level,flood_depth,sewer_water_level
+MVT smoke: layer=query-heat, HTTP 200, content-type=application/vnd.mapbox-vector-tile
+MVT smoke: layer=flood-potential, HTTP 200, content-type=application/vnd.mapbox-vector-tile
+reports_enabled_smoke=ok report_id=<runtime-smoke-report-id> status=pending
+tile_lifecycle_smoke=ok pruned_cache=1 pruned_features=1 invalidated_features=2 deleted_cache=1
+Web smoke: HTTP 200 from http://localhost:3000
+Runtime smoke passed.
 ```
 
-Additional local Docker warning:
+Runtime smoke follow-up fix applied:
 
-```text
-WARNING: Error loading config file: open C:\Users\y_mea\.docker\config.json: Access is denied.
-```
+- The smoke now temporarily enables the seeded `query-heat` and
+  `flood-potential` MVT layers only for runtime validation, then restores their
+  previous `map_layers.status`.
+- The reports enabled-path smoke now handles both sync and async
+  `create_user_report` implementations.
+- Post-smoke DB verification confirmed `query-heat` and `flood-potential`
+  returned to `disabled` with no `runtime_smoke_previous_status` marker.
 
 Boundary statement: county coverage is not nearby coverage. A county can have
 local or central realtime sources while the queried point still has no fresh
