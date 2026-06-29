@@ -37,7 +37,7 @@
 | 屏東縣 | `https://pteoc.pthg.gov.tw/River`、`/Flood`、`/Crawler` | HTML 可讀；2026-06-30 重查 `Flood/Details/900` 是雨量警戒狀態與 1H/3H/6H 門檻，不是淹水深度；`Crawler/Details/1` 是河川監測 CCTV 影像，不是水位量測。 | `candidate_contract_blocker` | 不 scrape 成 production realtime evidence；請求官方 JSON/CSV/XML/ArcGIS/SensorThings read API contract 與 station metadata。 |
 | 屏東縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt` | 免 key SOAP/ASMX JSON；CityCode `10013`，Supplier=`屏東縣政府` 20 站；2026-06-28 smoke：fetched/normalized 20。 | `ready_implemented` | 已新增 `local.pingtung.flood_sensor`；PTEOC HTML 仍不可 production。 |
 | 花蓮縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；`https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index` | FHY 免 key SOAP/ASMX JSON；CityCode `10015`，Supplier=`花蓮縣政府` 13 站；2026-06-28 smoke：fetched/normalized 13。Senslink 首頁 200，但水情/路淹/抽水站/看板頁 302 到登入。 | `ready_implemented` + `needs_application` | 已新增 `local.hualien.flood_sensor`；Senslink 更完整 read API 仍需帳密或官方授權。 |
-| 臺東縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；臺東洪水與淹水預警系統線索 | FHY 免 key SOAP/ASMX JSON；CityCode `10014`，Supplier=`臺東縣政府` 2 站；2026-06-28 smoke：fetched/normalized 2。預警系統仍未找到公開 API endpoint。 | `ready_implemented` + `candidate` | 已新增 `local.taitung.flood_sensor`；臺東預警系統仍等待公開 read API contract。 |
+| 臺東縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；臺東縣府防汛新聞、審計部臺東水情預警系統說明 | FHY 免 key SOAP/ASMX JSON；CityCode `10014`，Supplier=`臺東縣政府` 2 站；2026-06-28 smoke：fetched/normalized 2。2026-06-30 curl/web review：縣府新聞頁是防洪/河道清疏新聞，提及水情監測系統使用淹水感測、水位站、雨量站、即時影像監視器；審計部頁證實洪水與淹水預警系統並已介接 CWA 49 雨量站、WRA 9 水位站。兩者都未曝露 latest-observation read API/schema。 | `ready_implemented` + `candidate_contract_blocker` | 已新增 `local.taitung.flood_sensor`；臺東預警系統仍等待公開 read API contract，且不得把新聞/稽核摘要或即時影像視為量測資料。 |
 | 澎湖縣 | `https://ph3dgis.penghu.gov.tw/server/rest/services/SewerNew/PHSewer_Basemap/MapServer/6/query?where=1%3D1&outFields=*&f=json&returnGeometry=true&outSR=4326` | 免 key ArcGIS REST JSON；2026-06-28 smoke：38 筆 normalized、0 筆 rejected，含 `measure_time`、`water_level`、`water_level_percent`、`battery`、`rssi` 與 WGS84 geometry。`measure_time` 為台灣本地 wall-clock epoch 編碼，adapter 會扣 8 小時後做 freshness check。 | `ready_implemented` | 已新增 `local.penghu.water_level`。`https://sewer.penghu.gov.tw/` 登入型儀表板不納入 production。 |
 | 金門縣 | KWIS 介接文件、ASMX/WSDL；Civil IoT `water_12` / `STA_RainSewer` | 2026-06-30 KWIS WSDL 查核：service listing 有雨量、水位、淹水感測、抽水機與 station sensor list 的 token-gated read methods；空 Token smoke 回 `ErrMsg (7)`、`Data: []`。2026-06-28 Civil IoT live smoke：淹水感測 7 站、RainSewer 29 站。 | `needs_application` + `central_aggregated_ready` | 已確認 read method 名稱，但未申請或未取得官方 Token/可讀範圍/response schema 前不實作地方 adapter；中央主幹可補足金門即時水文觀測。 |
 | 連江縣 | data.gov.tw / 連江縣開放資料；CWA `O-B0075-001` + `O-B0076-001` | 只找到易淹水 ODS 與防災靜態資料；2026-06-30 追加查核 CWA 馬祖潮位站可提供沿海水位觀測與站點 metadata。 | `metadata_only` + `not_found` + `central_aggregated_ready` | 中央最低 hydrologic backbone 已由 CWA 潮位補足；地方 live API 仍未找到，仍缺 `flood_depth`、`sewer_water_level`、`pump_or_gate_status` 地方直連訊號。 |
@@ -56,7 +56,7 @@
 | 嘉義縣 | 智慧防汛管理型線索 | 查核頁在目前 runtime 觸發 `DH_KEY_TOO_SMALL` SSL 錯誤；公開 RFD API 已 production | `needs_observed_time` / 非阻塞 | 不依賴管理型 `/api/v1`；繼續操作已落地 `local.chiayi_county.flood_sensor`。 |
 | 高雄市 | SFC `rain/rt` + `rain/base` | 200 JSON；live adapter fetched/normalized 87、rejected 0，metadata 88 筆 | `promotion_ready` → `ready_implemented` | 已新增 `local.kaohsiung.rainfall`；地方雨量只補強 CWA。 |
 | 屏東縣 | PTEOC `/RainStation`、`/Flood`、`/Crawler` | 200 HTML；`/RainStation/Details/*` 有雨量窗格但缺明確觀測時間與座標；`/Flood/Details/*` 為雨量警戒門檻；`/Crawler/Details/*` 為 CCTV 影像。 | `needs_public_read_api_contract` | 不把 `fetched_at` 當 `observed_at`；需要公開 API 或官方 metadata join，並將非量測頁面保留為 contract blocker 證據。 |
-| 臺東縣 | 洪水與淹水預警系統線索 | 20 秒 timeout | `blocked_timeout` | 保留既有 `local.taitung.flood_sensor`；其他系統需公開 read API contract。 |
+| 臺東縣 | 洪水與淹水預警系統線索 | 2026-06-30 curl/web review：縣府新聞頁 200 HTML，證實水情監測系統含淹水感測、水位站、雨量站與即時影像；審計部頁證實已介接 CWA 49 雨量站與 WRA 9 水位站，但未提供觀測時間、站點 ID、測值、單位或可 join WGS84 metadata 的公開 read API。 | `needs_public_read_api_contract` | 保留既有 `local.taitung.flood_sensor`；其他系統需公開 latest-observation read API contract。 |
 
 ## 可實作性門檻
 
@@ -79,7 +79,8 @@
    `status_only` 狀態線索與覆蓋診斷。
 3. **苗栗縣、臺東縣**：FHY 地方政府 supplier 已可運作；苗栗成果頁已證實
    58 處雨水下水道水位監測站存在，但目前只公開 HTML/JPG 成果說明，仍需
-   API contract 後才可另增 adapter；臺東其他官方系統仍需找到公開 read API。
+   API contract 後才可另增 adapter；臺東縣府新聞與審計部頁可證明預警系統、
+   影像/感測線索與 CWA/WRA station integration，但仍缺公開 read API contract。
 4. **花蓮縣、金門縣**：目前屬授權/登入型；金門已確認 KWIS token-gated read methods，仍需要人工申請正式 Token、可讀範圍、rate limit 與 response schema。
 5. **彰化、連江**：目前主要是靜態 open data；連江水庫水位月報與
    `erbwater` 放流水 CEMS 已列為 `non_qualifying`，持續監看 metadata

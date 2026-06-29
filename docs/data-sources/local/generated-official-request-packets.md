@@ -110,11 +110,18 @@
 - 整合優先序：#4 / P2 / verify_public_read_api_contract
 - 來源：
   - https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652
+  - https://www.audit.gov.tw/p/406-1000-9612%2Cr12.php?Lang=zh-tw
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 候選系統缺少欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
+- 候選系統查核事實：
+  - 2026-06-30 curl smoke: Taitung County Government news page is a public HTML flood-control article citing WRA Eighth River Management Office; it says flood hotspots use a water-monitoring system with flood sensors, water-level stations, rain gauges, and realtime cameras, but exposes no public read API, observation rows, or station metadata file.
+  - 2026-06-30 official audit review: Audit Office page says Taitung County Government built a flood and inundation warning system and later integrated 49 CWA rainfall stations plus 9 WRA water-level stations; this confirms system context but not a local-government latest-observation read API contract.
+- 候選系統不可當量測來源：
+  - 2026-06-30 review: the Taitung evidence is a news article/audit summary, not a latest-observation read API; realtime camera references are image-only context, and central CWA/WRA station integration does not satisfy local pump_or_gate_status production ingestion.
 - 排入此順位原因：candidate source needs a public read API contract review
 - 完成門檻：公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。
 
-目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。
+目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 curl smoke: Taitung County Government news page is a public HTML flood-control article citing WRA Eighth River Management Office; it says flood hotspots use a water-monitoring system with flood sensors, water-level stations, rain gauges, and realtime cameras, but exposes no public read API, observation rows, or station metadata file.；2026-06-30 official audit review: Audit Office page says Taitung County Government built a flood and inundation warning system and later integrated 49 CWA rainfall stations plus 9 WRA water-level stations; this confirms system context but not a local-government latest-observation read API contract. 目前缺少 production 必備欄位：observed_at、station_or_device_id、measurement_value、measurement_unit_or_type、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 review: the Taitung evidence is a news article/audit summary, not a latest-observation read API; realtime camera references are image-only context, and central CWA/WRA station integration does not satisfy local pump_or_gate_status production ingestion.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。
 
 待辦：
 - [ ] 確認公開 read API URL 與 response 格式

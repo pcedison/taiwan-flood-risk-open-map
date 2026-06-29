@@ -757,14 +757,43 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "official.civil_iot.flood_sensor",
             "official.civil_iot.sewer_water_level",
         ),
-        candidate_source_names=("臺東洪水與淹水預警系統",),
+        candidate_source_names=(
+            "臺東洪水與淹水預警系統",
+            "臺東縣政府水情預警系統建置情形",
+        ),
         candidate_source_urls=(
             "https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652",
+            "https://www.audit.gov.tw/p/406-1000-9612%2Cr12.php?Lang=zh-tw",
+        ),
+        candidate_contract_findings=(
+            "2026-06-30 curl smoke: Taitung County Government news page is a public "
+            "HTML flood-control article citing WRA Eighth River Management Office; "
+            "it says flood hotspots use a water-monitoring system with flood sensors, "
+            "water-level stations, rain gauges, and realtime cameras, but exposes no "
+            "public read API, observation rows, or station metadata file.",
+            "2026-06-30 official audit review: Audit Office page says Taitung County "
+            "Government built a flood and inundation warning system and later integrated "
+            "49 CWA rainfall stations plus 9 WRA water-level stations; this confirms "
+            "system context but not a local-government latest-observation read API "
+            "contract.",
+        ),
+        candidate_contract_missing_fields=(
+            "observed_at",
+            "station_or_device_id",
+            "measurement_value",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata",
+        ),
+        candidate_contract_non_measurement_notes=(
+            "2026-06-30 review: the Taitung evidence is a news article/audit summary, "
+            "not a latest-observation read API; realtime camera references are "
+            "image-only context, and central CWA/WRA station integration does not "
+            "satisfy local pump_or_gate_status production ingestion.",
         ),
         notes=(
             "2026-06-28 smoke：FHY Broker station/realtime API 免 key，CityCode 10014；"
             "Supplier=臺東縣政府 2 站，本輪 local adapter fetched/normalized 2。"
-            "臺東洪水與淹水預警系統仍未公開地方 read API contract。",
+            "臺東洪水與淹水預警系統/審計部系統說明仍未公開地方 read API contract。",
         ),
     ),
     LocalSourceCoverageRecord(

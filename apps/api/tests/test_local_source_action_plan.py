@@ -97,6 +97,31 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
         and "not a sewer_water_level read API" in note
         for note in miaoli_contract["candidate_contract_non_measurement_notes"]
     )
+    taitung_contract = public_contract_by_county["\u81fa\u6771\u7e23"]
+    assert "audit.gov.tw" in " ".join(taitung_contract["candidate_source_urls"])
+    assert taitung_contract["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert any(
+        "flood sensors, water-level stations, rain gauges, and realtime cameras"
+        in finding
+        and "no public read API" in finding
+        for finding in taitung_contract["candidate_contract_findings"]
+    )
+    assert any(
+        "49 CWA rainfall stations" in finding
+        and "9 WRA water-level stations" in finding
+        for finding in taitung_contract["candidate_contract_findings"]
+    )
+    assert any(
+        "news article/audit summary" in note
+        and "not a latest-observation read API" in note
+        for note in taitung_contract["candidate_contract_non_measurement_notes"]
+    )
     assert (
         public_contract_by_county["屏東縣"]["tracking_status"]
         == "needs_public_read_api_contract"
@@ -158,6 +183,15 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     ]
     assert priority_by_county["屏東縣"]["candidate_contract_missing_fields"] == [
         "observed_at",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert priority_by_county["\u81fa\u6771\u7e23"][
+        "candidate_contract_missing_fields"
+    ] == [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
         "longitude_latitude_or_joinable_station_metadata",
     ]
 

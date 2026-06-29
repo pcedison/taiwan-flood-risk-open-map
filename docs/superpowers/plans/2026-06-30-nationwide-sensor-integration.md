@@ -500,6 +500,39 @@ facts, but it remains a public API contract blocker until Miaoli publishes a
 machine-readable read API with observed time, station/device id, value, unit,
 and joinable WGS84 station metadata.
 
+## Task 16: Taitung Warning-System Contract-Blocker Evidence
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/tests/test_local_source_action_plan.py`
+- Modify: `apps/api/tests/test_local_source_request_packets.py`
+- Modify: generated request packet artifacts and local source docs.
+
+**Interfaces:**
+- Consumes: Taitung County Government flood-control news page and Audit Office
+  page for Taitung County Government water-warning system setup.
+- Produces: structured `candidate_contract_*` fields for the Taitung public
+  API contract review and request packets, without promoting news/audit summary
+  evidence into production ingestion.
+
+- [x] Write failing tests proving Taitung contract blockers expose missing read
+  API fields.
+- [x] Record that the county news page confirms water-monitoring system context:
+  flood sensors, water-level stations, rain gauges, and realtime cameras.
+- [x] Record that the Audit Office page confirms integration of 49 CWA rainfall
+  stations and 9 WRA water-level stations.
+- [x] Mark the news/audit summary and realtime camera references as
+  non-measurement evidence that cannot satisfy a local-government
+  latest-observation read API.
+- [x] Regenerate request packet artifacts and update local source docs.
+
+Completed 2026-06-30: 臺東縣 still has `local.taitung.flood_sensor` for FHY
+government-supplier flood sensors. The Taitung warning-system evidence proves
+system context and central CWA/WRA station integration, but it remains a public
+API contract blocker until Taitung publishes a machine-readable local-government
+read API with observed time, station/device id, value, unit, and joinable WGS84
+station metadata.
+
 ## Completion Gates
 
 The full objective is complete only when:

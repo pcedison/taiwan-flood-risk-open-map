@@ -95,6 +95,28 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "58 water-level monitoring stations" in miaoli["request_body"]
     assert "HTML article/JPGs" in miaoli["request_body"]
 
+    taitung = next(packet for packet in packets if packet["county"] == "\u81fa\u6771\u7e23")
+    assert taitung["packet_type"] == "public_api_contract_request"
+    assert taitung["tracking_status"] == "needs_public_read_api_contract"
+    assert any("audit.gov.tw" in url for url in taitung["source_urls"])
+    assert taitung["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert any(
+        "49 CWA rainfall stations" in finding
+        and "9 WRA water-level stations" in finding
+        for finding in taitung["candidate_contract_findings"]
+    )
+    assert any(
+        "not a latest-observation read API" in note
+        for note in taitung["candidate_contract_non_measurement_notes"]
+    )
+    assert "49 CWA rainfall stations" in taitung["request_body"]
+
     pingtung = next(packet for packet in packets if packet["county"] == "屏東縣")
     assert pingtung["packet_type"] == "public_api_contract_request"
     assert pingtung["requires_human_intervention"] is True
@@ -176,6 +198,9 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "Data: []" in markdown
     assert "- 已排除官方線索：連江自來水廠水庫水位月報、連江縣資訊公開查詢系統即時監測值" in markdown
     assert "放流水環保 CEMS" in markdown
+    assert "49 CWA rainfall stations" in markdown
+    assert "9 WRA water-level stations" in markdown
+    assert "not a latest-observation read API" in markdown
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
     assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
