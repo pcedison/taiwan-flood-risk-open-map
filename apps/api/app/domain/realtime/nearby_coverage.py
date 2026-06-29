@@ -255,11 +255,15 @@ def _has_only_rainfall_or_warning(evaluations: list[_SignalEvaluation]) -> bool:
     relevant_types = {
         evaluation.signal_type
         for evaluation in evaluations
-        if evaluation.has_rows
+        if _has_fresh_coverage(evaluation)
         and evaluation.signal_type
         in {"rainfall", "flood_warning", "water_level", "flood_depth", "sewer_water_level"}
     }
     return bool(relevant_types) and relevant_types <= {"rainfall", "flood_warning"}
+
+
+def _has_fresh_coverage(evaluation: _SignalEvaluation) -> bool:
+    return evaluation.model.coverage_level != "no_local_sensor"
 
 
 def _build_summary(*, evaluations: list[_SignalEvaluation], overall_level: str) -> str:
@@ -269,7 +273,7 @@ def _build_summary(*, evaluations: list[_SignalEvaluation], overall_level: str) 
         return "目前只有雨量或淹水警戒可作背景參考。"
     if overall_level == "no_local_sensor":
         return "目前沒有可用的近距離即時感測資料。"
-    available = [evaluation.signal_type for evaluation in evaluations if evaluation.has_rows]
+    available = [evaluation.signal_type for evaluation in evaluations if _has_fresh_coverage(evaluation)]
     return f"附近即時涵蓋最佳等級為 {overall_level}，可用訊號：{', '.join(available)}。"
 
 

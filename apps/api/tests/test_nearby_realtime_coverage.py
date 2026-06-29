@@ -192,6 +192,52 @@ def test_nearby_coverage_stale_only_rainfall_and_warning_do_not_satisfy_fallback
     assert set(coverage.missing_signal_types) == set(REQUIRED_SIGNAL_TYPES)
 
 
+def test_nearby_coverage_stale_water_level_does_not_satisfy_summary_available() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.cwa.rainfall",
+                source_id="cwa-rainfall:fresh",
+                event_type="rainfall",
+                distance_to_query_m=120.0,
+            ),
+            _row(
+                adapter_key="official.wra.water_level",
+                source_id="wra-water-level:stale",
+                event_type="water_level",
+                distance_to_query_m=150.0,
+                freshness_state="stale",
+                observed_delta_minutes=90,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+    rainfall_only_coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.cwa.rainfall",
+                source_id="cwa-rainfall:fresh",
+                event_type="rainfall",
+                distance_to_query_m=120.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    water_level = next(
+        item for item in coverage.signal_breakdown if item.signal_type == "water_level"
+    )
+    assert coverage.overall_level == "low"
+    assert water_level.coverage_level == "no_local_sensor"
+    assert water_level.stale_count == 1
+    assert "water_level" in coverage.missing_signal_types
+    assert "water_level" not in coverage.summary
+    assert coverage.limitations[1:] == rainfall_only_coverage.limitations[1:]
+    assert coverage.limitations[1:]
+
+
 def test_nearby_coverage_warning_only_does_not_satisfy_rainfall_fallback() -> None:
     coverage = build_nearby_realtime_coverage(
         rows=(
