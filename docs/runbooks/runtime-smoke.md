@@ -6,8 +6,9 @@ query, query heat, worker queue ops CLI surface, queue metrics export surface,
 live-gate no-network boundaries, durable worker queue with DLQ-equivalent
 list/requeue visibility and replay audit IDs, official adapter fixture
 dry-run, managed runtime fixture persistence for WRA official plus the gated
-L2 public-web sample evidence adapter, user reports gates, MVT tiles, and the
-documented query-heat materialization plus tile feature/cache smoke path.
+L2 public-web sample evidence adapter, worker-persisted latest rows in
+`official_realtime_latest`, user reports gates, MVT tiles, and the documented
+query-heat materialization plus tile feature/cache smoke path.
 
 The smoke is intentionally local. A passing run means the Compose services,
 migrations, fixture-backed worker paths, managed persistence writers, queue
@@ -16,6 +17,11 @@ prove production source credentials, real upstream official worker ingestion,
 production news ingestion, source egress, hosted monitoring, scheduler
 cadence, DLQ/replay operations, tile hosting, or public report launch
 readiness.
+
+The normal runtime smoke keeps
+`REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false`. A hosted or
+production-readiness claim must use worker-persisted evidence; do not treat the
+API realtime bridge fallback as production evidence.
 
 ## Requirements
 
@@ -61,6 +67,9 @@ The script performs these checks:
     - verifies the managed runtime CLI path wrote raw snapshot, accepted
       staging evidence, ingestion job, adapter run, and promoted evidence rows
       for both the WRA official fixture and L2 public-web sample fixture
+    - verifies worker-persisted latest rows in `official_realtime_latest` for
+      `official.wra.water_level`, including fresh `ingested_at`,
+      non-null `observed_at`, and non-null `water_level_m`
     - deletes rows tied to `raw/official-demo/wra-water-level.json` and
       `raw/news-public-web/sample.json` after the verification, and restores
       the pre-smoke `data_sources` health/timestamp fields for both adapters

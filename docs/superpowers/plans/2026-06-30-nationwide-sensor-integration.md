@@ -239,9 +239,16 @@ coverage and has no realtime risk factor.
 - Consumes: enabled adapter list from Zeabur-compatible env vars.
 - Produces: smoke evidence that hosted-like mode uses worker-persisted rows and does not call the API realtime bridge.
 
-- [ ] Add runtime smoke assertions for `official_realtime_latest` row freshness by adapter.
-- [ ] Add a hosted-mode guard assertion that `REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED` is not used during normal smoke.
-- [ ] Document required evidence before claiming production readiness.
+- [x] Add runtime smoke assertions for `official_realtime_latest` row freshness by adapter.
+- [x] Add a hosted-mode guard assertion that `REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED` is not used during normal smoke.
+- [x] Document required evidence before claiming production readiness.
+
+Completed 2026-06-30: runtime smoke now rejects enabled diagnostic fallback
+during normal runs, explicitly sets
+`REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false`, verifies the managed WRA
+fixture wrote fresh worker-persisted rows into `official_realtime_latest`, and
+documents that hosted readiness requires worker/scheduler persistence evidence
+rather than the API realtime bridge.
 
 ## Completion Gates
 

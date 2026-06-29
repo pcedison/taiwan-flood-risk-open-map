@@ -14,6 +14,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:RuntimeSmokeCleanupSql = @()
+$script:PreviousRealtimeOfficialDiagnosticFallback = $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED
+$script:RealtimeOfficialDiagnosticFallbackTouched = $false
 $script:MvtLayerStatusCleanupSql = @'
 UPDATE map_layers
 SET
@@ -55,8 +57,9 @@ Extended checks are enabled by default:
     worker container without external API credentials.
   - Managed runtime persist smoke: run --run-enabled-adapters --persist with
     WRA official and gated news public-web sample fixture adapters against the
-    Compose database, verify raw/staging/run and promoted evidence rows, and
-    clean up the smoke rows while restoring data source health state.
+    Compose database, verify raw/staging/run, promoted evidence, and
+    official_realtime_latest rows, and clean up the smoke rows while restoring
+    data source health state.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
   - MVT smoke: temporarily enable seeded query-heat and flood-potential
@@ -147,6 +150,30 @@ function Fail-Smoke {
         docker compose logs --tail=80 $ServiceForLogs
     }
     exit 1
+}
+
+function Assert-HostedDiagnosticFallbackDisabled {
+    $configured = $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED
+    if ($configured -and $configured.Trim().ToLowerInvariant() -ne "false") {
+        Fail-Smoke "REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED must stay false during runtime smoke; hosted mode must use worker-persisted evidence instead of the API realtime bridge."
+    }
+
+    $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED = "false"
+    $script:RealtimeOfficialDiagnosticFallbackTouched = $true
+    Write-Host "Hosted diagnostic fallback guard: REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false"
+}
+
+function Restore-HostedDiagnosticFallbackEnv {
+    if (-not $script:RealtimeOfficialDiagnosticFallbackTouched) {
+        return
+    }
+
+    if ($null -eq $script:PreviousRealtimeOfficialDiagnosticFallback) {
+        Remove-Item Env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED -ErrorAction SilentlyContinue
+        return
+    }
+
+    $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED = $script:PreviousRealtimeOfficialDiagnosticFallback
 }
 
 function Invoke-CheckedCommand {
@@ -1051,6 +1078,13 @@ WITH smoke_jobs AS (
         )
         AND ingestion_job_id IS NOT NULL
 ),
+deleted_latest AS (
+    DELETE FROM official_realtime_latest
+    WHERE adapter_key IN ('official.wra.water_level')
+        AND event_type = 'water_level'
+        AND station_id = 'WRA-DEMO-001'
+    RETURNING 1
+),
 deleted_risk_links AS (
     DELETE FROM risk_assessment_evidence
     WHERE evidence_id IN (
@@ -1143,6 +1177,13 @@ WITH smoke_jobs AS (
         )
         AND ingestion_job_id IS NOT NULL
 ),
+deleted_latest AS (
+    DELETE FROM official_realtime_latest
+    WHERE adapter_key IN ('official.wra.water_level')
+        AND event_type = 'water_level'
+        AND station_id = 'WRA-DEMO-001'
+    RETURNING 1
+),
 deleted_risk_links AS (
     DELETE FROM risk_assessment_evidence
     WHERE evidence_id IN (
@@ -1214,6 +1255,7 @@ restored_data_sources AS (
     RETURNING 1
 )
 SELECT
+    (SELECT count(*) FROM deleted_latest) AS deleted_latest,
     (SELECT count(*) FROM deleted_risk_links) AS deleted_risk_links,
     (SELECT count(*) FROM deleted_evidence) AS deleted_evidence,
     (SELECT count(*) FROM deleted_staging) AS deleted_staging,
@@ -1322,6 +1364,39 @@ BEGIN
 END $$;
 '@
 
+    $managedRuntimePersistLatestVerificationSql = @'
+DO $$
+DECLARE
+    smoke_started_at timestamptz := now() - interval '15 minutes';
+    latest_row_count integer;
+    fresh_ingested_count integer;
+BEGIN
+    SELECT
+        count(*),
+        count(*) FILTER (
+            WHERE ingested_at >= smoke_started_at
+                AND observed_at IS NOT NULL
+                AND water_level_m IS NOT NULL
+        )
+    INTO latest_row_count, fresh_ingested_count
+    FROM official_realtime_latest
+    WHERE adapter_key = 'official.wra.water_level'
+        AND event_type = 'water_level'
+        AND station_id = 'WRA-DEMO-001';
+
+    IF latest_row_count < 1 THEN
+        RAISE EXCEPTION 'worker-persisted latest smoke found no official_realtime_latest row for official.wra.water_level';
+    END IF;
+    IF fresh_ingested_count < 1 THEN
+        RAISE EXCEPTION 'worker-persisted latest smoke found no fresh official_realtime_latest row for official.wra.water_level';
+    END IF;
+
+    RAISE NOTICE 'worker-persisted latest smoke: adapter=official.wra.water_level latest_row_count=% fresh_ingested_count=%',
+        latest_row_count,
+        fresh_ingested_count;
+END $$;
+'@
+
     Invoke-PostgresSqlSmoke `
         -Description "Cleaning pre-existing managed runtime persist smoke rows" `
         -Sql $managedRuntimePersistRowCleanupSql
@@ -1356,6 +1431,10 @@ END $$;
             -Sql $managedRuntimePersistVerificationSql
 
         Invoke-PostgresSqlSmoke `
+            -Description "Checking worker-persisted official realtime latest rows" `
+            -Sql $managedRuntimePersistLatestVerificationSql
+
+        Invoke-PostgresSqlSmoke `
             -Description "Cleaning managed runtime persist smoke rows and restoring data source state" `
             -Sql $managedRuntimePersistCleanupSql
         $managedRuntimePersistCleanupCompleted = $true
@@ -1367,7 +1446,7 @@ END $$;
         $script:RuntimeSmokeCleanupSql = @($script:RuntimeSmokeCleanupSql | Where-Object { $_ -ne $managedRuntimePersistCleanupSql })
     }
 
-    Write-Host "Managed runtime persist smoke: --run-enabled-adapters --persist wrote WRA official and news public-web sample raw/staging/run and promoted evidence rows, then cleanup and data source restore completed."
+    Write-Host "Managed runtime persist smoke: --run-enabled-adapters --persist wrote WRA official and news public-web sample raw/staging/run, promoted evidence, and worker-persisted latest rows, then cleanup and data source restore completed."
 }
 
 function Invoke-SchedulerBoundedTickSmoke {
@@ -1637,6 +1716,8 @@ print(
 }
 
 try {
+    Assert-HostedDiagnosticFallbackDisabled
+
     Invoke-CheckedCommand "Validating docker compose config" @("docker", "compose", "config", "--quiet")
 
     Invoke-CheckedCommand "Checking Docker daemon" @("docker", "info")
@@ -1781,6 +1862,7 @@ try {
 }
 finally {
     Invoke-RegisteredSmokeCleanup
+    Restore-HostedDiagnosticFallbackEnv
 
     if ($StopOnExit) {
         Write-Step "Stopping runtime services without deleting volumes"
