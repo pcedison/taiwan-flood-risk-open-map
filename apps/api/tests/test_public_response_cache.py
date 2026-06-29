@@ -4,6 +4,7 @@ import pytest
 import redis
 
 import app.api.services.public_response_cache as response_cache
+from app.api.services.public_risk import build_placeholder_nearby_realtime_coverage
 from app.api.services.redis_support import FailOpenRedisClients
 from app.api.schemas import (
     ConfidenceBlock,
@@ -58,7 +59,10 @@ def _response(assessment_id: str = "assessment-1") -> RiskAssessmentResponse:
         explanation=Explanation(summary="測試用評估摘要"),
         evidence=[],
         data_freshness=[],
-        query_heat=QueryHeat(period="weekly", attention_level="低", updated_at=NOW),
+        query_heat=QueryHeat(period="weekly", attention_level="未知", updated_at=NOW),
+        nearby_realtime_coverage=build_placeholder_nearby_realtime_coverage(
+            evaluated_at=NOW, query_radius_m=500
+        ),
     )
 
 

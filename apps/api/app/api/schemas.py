@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -469,24 +469,13 @@ class NearbyRealtimeCoverage(ContractModel):
     signal_breakdown: list[NearbyCoverageSignal]
     missing_signal_types: list[NearbyCoverageSignalType] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
-    county_level_note: str
-
-
-def _default_nearby_realtime_coverage() -> NearbyRealtimeCoverage:
-    return NearbyRealtimeCoverage(
-        overall_level="unavailable",
-        evaluated_at=datetime.now(UTC),
-        query_radius_m=500,
-        radius_buckets_m=[500, 1000, 3000, 5000],
-        summary="附近即時觀測資料尚未接入。",
-        signal_breakdown=[],
-        missing_signal_types=[],
-        limitations=[],
-        county_level_note="蝮??縣級 coverage note",
+    county_level_note: str = Field(
+        description='縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
     )
 
 
 class RiskAssessmentResponse(ContractModel):
+
     assessment_id: str
     location: LatLng
     radius_m: int
@@ -500,9 +489,7 @@ class RiskAssessmentResponse(ContractModel):
     evidence: list[EvidencePreview]
     data_freshness: list[DataFreshness]
     query_heat: QueryHeat
-    nearby_realtime_coverage: NearbyRealtimeCoverage = Field(
-        default_factory=_default_nearby_realtime_coverage
-    )
+    nearby_realtime_coverage: NearbyRealtimeCoverage
 
 
 class GeoJsonGeometry(ContractModel):

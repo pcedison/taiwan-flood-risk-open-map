@@ -539,7 +539,10 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "no_local_sensor",
         "unavailable",
     }
-    assert "蝮??" in coverage["county_level_note"]
+    assert coverage["county_level_note"] == (
+        '縣市層級涵蓋只作背景參考，不代表查詢點附'
+        '近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
+    )
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 

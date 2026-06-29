@@ -12,6 +12,7 @@ from app.api.schemas import (
     EvidencePreview,
     Explanation,
     QueryHeat,
+    NearbyRealtimeCoverage,
     RiskAssessRequest,
     RiskAssessmentResponse,
     RiskLevelBlock,
@@ -186,8 +187,35 @@ class QueryHeatLookup(Protocol):
     def __call__(self, request: RiskAssessRequest, /, *, now: datetime) -> QueryHeat: ...
 
 
+_NEARBY_REALTIME_COVERAGE_NOTE = ('縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。')
+
+
+def build_placeholder_nearby_realtime_coverage(
+    *, evaluated_at: datetime, query_radius_m: int
+) -> NearbyRealtimeCoverage:
+    return NearbyRealtimeCoverage(
+        overall_level="unavailable",
+        evaluated_at=evaluated_at,
+        query_radius_m=query_radius_m,
+        radius_buckets_m=[500, 1000, 3000, 5000],
+        summary='目前僅提供縣市層級背景涵蓋資訊；查詢點附近涵蓋會依查詢點重新計算。',
+        signal_breakdown=[],
+        missing_signal_types=[
+            "rainfall",
+            "water_level",
+            "flood_depth",
+            "sewer_water_level",
+            "pump_or_gate_status",
+            "flood_warning",
+        ],
+        limitations=[_NEARBY_REALTIME_COVERAGE_NOTE],
+        county_level_note=_NEARBY_REALTIME_COVERAGE_NOTE,
+    )
+
+
 @dataclass(frozen=True)
 class RiskAssessmentDependencies:
+
     risk_assessment_response_cache_key: Callable[[RiskAssessRequest, Settings], str]
     cached_risk_assessment_response: CachedRiskAssessmentResponse
     fetch_official_realtime_bundle: FetchOfficialRealtimeBundle
@@ -505,6 +533,9 @@ def assess_risk(
         evidence=[dependencies.evidence_preview(item) for item in display_evidence_items],
         data_freshness=data_freshness,
         query_heat=dependencies.query_heat(risk_request, now=created_at),
+        nearby_realtime_coverage=build_placeholder_nearby_realtime_coverage(
+            evaluated_at=created_at, query_radius_m=risk_request.radius_m
+        ),
     )
     if can_cache_response:
         dependencies.cache_risk_assessment_response(

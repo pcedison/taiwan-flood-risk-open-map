@@ -64,6 +64,9 @@ def _risk_response(
             unique_approx_count_bucket=None,
             updated_at=created_at,
         ),
+        nearby_realtime_coverage=public_risk.build_placeholder_nearby_realtime_coverage(
+            evaluated_at=created_at, query_radius_m=request.radius_m
+        ),
     )
 
 

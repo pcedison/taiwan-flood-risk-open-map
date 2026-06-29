@@ -23,6 +23,7 @@ from app.api.schemas import (
     RiskLevelBlock,
 )
 from app.api.services import public_evidence, public_freshness
+from app.api.services.public_risk import build_placeholder_nearby_realtime_coverage
 from app.domain.geocoding import stable_uuid
 from app.domain.profiles import RiskProfileRecord
 from app.domain.realtime import OfficialRealtimeBundle
@@ -141,6 +142,9 @@ def profile_backed_response(
         evidence=[public_evidence.evidence_preview(item) for item in profile_items],
         data_freshness=data_freshness,
         query_heat=query_heat,
+        nearby_realtime_coverage=build_placeholder_nearby_realtime_coverage(
+            evaluated_at=created_at, query_radius_m=request.radius_m
+        ),
     )
 
 
