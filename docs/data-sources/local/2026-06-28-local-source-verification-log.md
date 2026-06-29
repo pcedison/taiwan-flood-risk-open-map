@@ -23,7 +23,7 @@
 | 基隆市 | `https://smartflood.klcg.gov.tw/api/r/javaapinew/water_extra_api/flood/getFloodListData?...type=radar%2Cwater%2CWT_RR_W%2CWG_RR_W`、`...type=flood`、`https://smartflood.klcg.gov.tw/api/r/javaapinew/water_extra_api/rain/getRainFallBaseData?org_id=58&org_data=ALL` | 免 key JSON；2026-06-28 smoke：water 11 筆、flood 49 筆、rain 18 筆，均含 `datatime` 與 WGS84 座標。live adapter normalized water 11、flood 49、rain 16，雨量 2 站 stale reject。 | `ready_implemented` | 已新增 `local.keelung.water_level`、`local.keelung.flood_sensor`、`local.keelung.rainfall`；stale/future observation 保留 raw 但 normalized reject。 |
 | 新竹市 | `https://swc.hccg.gov.tw/api/map/sewer/base`、`/api/map/sewer/rt`；FHY Broker `GetFHYFloodSensorStationByCityCode`、`GetFHYFloodSensorInfoRt` | sewer base/rt API 免 key；base 50 站、rt 50 筆，含 `Time`、`WaterDepth`、WGS84 metadata。FHY Broker station/realtime 免 key，依 `CityCode=10018` 過濾新竹市。 | `ready_implemented` | 已新增 `local.hsinchu_city.sewer_water_level` 與 `local.hsinchu_city.flood_sensor`。 |
 | 新竹縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt` | 免 key SOAP/ASMX JSON；CityCode `10004`，Supplier=`新竹縣政府` 22 站；2026-06-28 smoke：fetched 22、normalized 20、stale reject 2，含 `.NET /Date(ms)/` `SourceTime` 與 WGS84 座標。 | `ready_implemented` | 已新增 `local.hsinchu_county.flood_sensor`；只保留地方政府 supplier，水利署分署 supplier 不納入 local adapter。 |
-| 苗栗縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；官方雨水下水道即時水情監測新聞/成果說明 | 免 key SOAP/ASMX JSON；CityCode `10005`，Supplier=`苗栗縣政府` 42 站；2026-06-28 smoke：fetched 42、normalized 40、stale reject 2。另有雨水下水道監測系統線索，但未找到 endpoint/schema。 | `ready_implemented` + `candidate` | 已新增 `local.miaoli.flood_sensor`；苗栗雨水下水道系統仍等待公開 read API contract。 |
+| 苗栗縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；官方雨水下水道即時水情監測新聞/成果說明 | 免 key SOAP/ASMX JSON；CityCode `10005`，Supplier=`苗栗縣政府` 42 站；2026-06-28 smoke：fetched 42、normalized 40、stale reject 2。2026-06-30 curl smoke：官方成果頁為 HTML 文章，說明 10 個鄉鎮市都市計畫區已設置 58 處水位監測站，且有每月維護與月報，但未曝露 latest-observation read API、站點 metadata 檔或機器可讀觀測 endpoint。 | `ready_implemented` + `candidate_contract_blocker` | 已新增 `local.miaoli.flood_sensor`；苗栗雨水下水道系統仍等待公開 read API contract。HTML/JPG 成果頁不可滿足 `sewer_water_level` 或 `pump_or_gate_status` production ingestion。 |
 | 彰化縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；data.gov.tw `41415`、`28916` | FHY 免 key SOAP/ASMX JSON；CityCode `10007`，Supplier=`彰化縣政府` 70 站；2026-06-28 smoke：fetched/normalized 70。data.gov.tw 資料仍為靜態清冊/年度統計。 | `ready_implemented` | 已新增 `local.changhua.flood_sensor`；彰化 ArcGIS 水位計圖資目前只作 metadata，不產生 realtime evidence。 |
 | 南投縣 | `https://dpinfo.nantou.gov.tw/Api/Proxy/GetKML` | 免 key KML；2026-06-28 回傳 69 個 Placemark，description 內嵌 JSON，含水位高度、時雨量、更新時間與 WGS84 coordinates。 | `ready_implemented` | 已新增 `local.nantou.sewer_water_level`。 |
 | 雲林縣 | `https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5` | 免 key JSON；2026-06-28 smoke：totalCount 2473。stationType 水位 161 站；live adapter 取 102 筆具 `levelHeight/latestUpdateTime` 與座標的水位資料，normalized 101、stale reject 1。淹水感測 173 站未曝露 depth。2026-06-30 補強：`alarmState` 會保留為低權重 `status_only` 狀態線索，但不抵扣 `flood_depth` 缺口。 | `ready_implemented` + `needs_review` | 已新增 `local.yunlin.water_level`。淹水感測不以 `alarmState` 偽造水深；附近觀測可顯示為狀態線索，仍需追前端細節 API 或官方欄位文件取得 depth。 |
@@ -51,7 +51,7 @@
 | 縣市 | 候選來源 | 2026-06-29 live smoke | 判讀 | 下一步 |
 | --- | --- | --- | --- | --- |
 | 臺北市 | 疏散門即時監測 `wic.heo.taipei/OpenData/API/Evacuate/Get` / mirror `wic.gov.taipei/OpenData/API/Evacuate/Get` | 2026-06-30 已補 smoke fallback：`wic.heo.taipei` timeout 時會重試官方公開 mirror `wic.gov.taipei` 同路徑，並以單元測試確認 mirror payload 的 `stationNo`、`recTime`、`lng/lat` 與 `fo/fc/flt` 只作疏散門/水門啟閉狀態，不升級成水位或淹水深度。 | `status_only_verified` | 移出 live-smoke blocker；coverage catalog 改列 `臺北市水門啟閉狀態` / `gate_status` status-only。臺北市仍缺 `flood_depth`，由 signal-gap request 追蹤公開 read API 或官方不可得證明。 |
-| 苗栗縣 | 雨水下水道即時水情監測成果頁 | 200 HTML，未曝露觀測時間、站點 id、測值與座標 | `needs_observed_time` | 需要公開 read API contract 或可 join 的 station metadata。 |
+| 苗栗縣 | 雨水下水道即時水情監測成果頁 | 2026-06-30 curl smoke：HTTP 200 HTML；頁面說明「114年度雨水下水道即時水情監測系統建置計畫」在 10 個鄉鎮市都市計畫區設置 58 處水位監測站，並有每月水位計維護與月報。公開頁只連到會議 JPG 圖片，未曝露 `observed_at`、`station_or_device_id`、`measurement_value`、單位或可 join WGS84 metadata。 | `needs_public_read_api_contract` | 需要公開 read API contract 或可 join 的 station metadata；HTML 文章/JPG 不可當成 `sewer_water_level` read API，也不能補 `pump_or_gate_status`。 |
 | 雲林縣 | iflood station API 的淹水感測類 | 200 JSON，具 `latestUpdateTime`、站點與座標，但未曝露淹水深度測值；2026-06-30 已改為 `status_only` 事件類型，source weight 低且沒有 realtime risk factor。 | `status_only_ready` + `needs_measurement_value` | 保留既有 `local.yunlin.water_level`；淹水感測可作附近狀態線索，但仍需找 depth/detail API 或官方欄位文件才可補 `flood_depth`。 |
 | 嘉義縣 | 智慧防汛管理型線索 | 查核頁在目前 runtime 觸發 `DH_KEY_TOO_SMALL` SSL 錯誤；公開 RFD API 已 production | `needs_observed_time` / 非阻塞 | 不依賴管理型 `/api/v1`；繼續操作已落地 `local.chiayi_county.flood_sensor`。 |
 | 高雄市 | SFC `rain/rt` + `rain/base` | 200 JSON；live adapter fetched/normalized 87、rejected 0，metadata 88 筆 | `promotion_ready` → `ready_implemented` | 已新增 `local.kaohsiung.rainfall`；地方雨量只補強 CWA。 |
@@ -77,8 +77,9 @@
 2. **雲林縣淹水感測**：追查是否有 station detail / measure API 曝露 depth；
    未確認前不得以 `alarmState` 當作淹水深度。`alarmState` 目前只作
    `status_only` 狀態線索與覆蓋診斷。
-3. **苗栗縣、臺東縣**：FHY 地方政府 supplier 已可運作；其他官方系統仍需找到
-   API contract 後才可另增 adapter。
+3. **苗栗縣、臺東縣**：FHY 地方政府 supplier 已可運作；苗栗成果頁已證實
+   58 處雨水下水道水位監測站存在，但目前只公開 HTML/JPG 成果說明，仍需
+   API contract 後才可另增 adapter；臺東其他官方系統仍需找到公開 read API。
 4. **花蓮縣、金門縣**：目前屬授權/登入型；金門已確認 KWIS token-gated read methods，仍需要人工申請正式 Token、可讀範圍、rate limit 與 response schema。
 5. **彰化、連江**：目前主要是靜態 open data；連江水庫水位月報與
    `erbwater` 放流水 CEMS 已列為 `non_qualifying`，持續監看 metadata

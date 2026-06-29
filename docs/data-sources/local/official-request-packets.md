@@ -38,7 +38,10 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 - 金門縣：KWIS read API 授權。
 - 花蓮縣：Senslink / 行動水情 read API 授權。
 - 臺北市：疏散門 live smoke / 欄位語意複核。
-- 臺東縣、苗栗縣、屏東縣：public read API contract 與站點 metadata；屏東 PTEOC
+- 臺東縣、苗栗縣、屏東縣：public read API contract 與站點 metadata；苗栗官方
+  成果頁已證實 10 個鄉鎮市都市計畫區設置 58 處雨水下水道水位監測站，且有
+  每月維護/月報，但公開頁只有 HTML 文章與 JPG 會議圖片，缺
+  `observed_at`、站點 ID、測值、單位與可 join WGS84 metadata；屏東 PTEOC
   已補上 2026-06-30 查核事實，`/RainStation` 缺 `observed_at` 與可 join
   座標 metadata，`/Flood` 為雨量警戒門檻，`/Crawler` 為 CCTV 影像，不可當
   淹水深度或水位量測。
@@ -59,7 +62,8 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 - 花蓮縣：Senslink / 行動水情 read API 授權。
 - 金門縣：KWIS read API 授權。
 - 連江縣：地方即時水情資料釋出；中央最低水文骨幹已由 CWA 潮位補足。
-- 苗栗縣：雨水下水道即時水情 read API contract。
+- 苗栗縣：雨水下水道即時水情 read API contract；現有成果頁只可證明監測站
+  與維護/月報制度存在，不能作 latest-observation read API。
 - 屏東縣：PTEOC RainStation / River / Flood / Crawler read API contract 與站點 metadata。
 - 臺東縣：洪水與淹水預警系統 read API contract。
 

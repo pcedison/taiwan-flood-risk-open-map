@@ -475,6 +475,31 @@ explicit non-qualifying evidence. The Tainan gap remains `sewer_water_level`
 and `pump_or_gate_status`; CCTV image URLs and static facility metadata must
 not be treated as realtime measurements.
 
+## Task 15: Miaoli Sewer Monitoring Contract-Blocker Evidence
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/tests/test_local_source_action_plan.py`
+- Modify: `apps/api/tests/test_local_source_request_packets.py`
+- Modify: generated request packet artifacts and local source docs.
+
+**Interfaces:**
+- Consumes: Miaoli official results-review page for the 114年度雨水下水道即時水情監測系統建置計畫.
+- Produces: structured `candidate_contract_*` fields for Miaoli public API contract review and request packets, without promoting HTML/JPG evidence into production ingestion.
+
+- [x] Write failing tests proving Miaoli contract blockers expose missing read API fields.
+- [x] Record that the official page confirms 58 water-level monitoring stations across 10 town/city urban-planning areas.
+- [x] Record monthly maintenance/monthly-report evidence while preserving that no latest-observation read API or station metadata file is exposed.
+- [x] Mark the public HTML article/JPGs as non-measurement evidence that cannot satisfy `sewer_water_level` or `pump_or_gate_status`.
+- [x] Regenerate request packet artifacts and update local source docs.
+
+Completed 2026-06-30: 苗栗縣 still has `local.miaoli.flood_sensor` for FHY
+government-supplier flood sensors. The official sewer-monitoring results page
+now strengthens the request packet with concrete station-count and maintenance
+facts, but it remains a public API contract blocker until Miaoli publishes a
+machine-readable read API with observed time, station/device id, value, unit,
+and joinable WGS84 station metadata.
+
 ## Completion Gates
 
 The full objective is complete only when:

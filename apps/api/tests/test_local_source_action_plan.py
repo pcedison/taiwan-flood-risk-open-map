@@ -74,6 +74,29 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
         item["county"]: item for item in plan["public_api_contract_reviews"]
     }
     assert set(public_contract_by_county) == {"苗栗縣", "屏東縣", "臺東縣"}
+    miaoli_contract = public_contract_by_county["\u82d7\u6817\u7e23"]
+    assert miaoli_contract["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert any(
+        "58 water-level monitoring stations" in finding
+        and "10 town/city urban-planning areas" in finding
+        for finding in miaoli_contract["candidate_contract_findings"]
+    )
+    assert any(
+        "\u96e8\u6c34\u4e0b\u6c34\u9053\u5373\u6642\u6c34\u60c5\u76e3\u6e2c\u7cfb\u7d71\u5efa\u7f6e\u8a08\u756b" in finding
+        and "monthly reports" in finding
+        for finding in miaoli_contract["candidate_contract_findings"]
+    )
+    assert any(
+        "HTML article/JPGs" in note
+        and "not a sewer_water_level read API" in note
+        for note in miaoli_contract["candidate_contract_non_measurement_notes"]
+    )
     assert (
         public_contract_by_county["屏東縣"]["tracking_status"]
         == "needs_public_read_api_contract"
@@ -124,6 +147,15 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert "local_direct_source" in priority[1]["why_now"]
     assert "observed_at" in priority[1]["required_read_api_fields"]
     priority_by_county = {item["county"]: item for item in priority}
+    assert priority_by_county["\u82d7\u6817\u7e23"][
+        "candidate_contract_missing_fields"
+    ] == [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
     assert priority_by_county["屏東縣"]["candidate_contract_missing_fields"] == [
         "observed_at",
         "longitude_latitude_or_joinable_station_metadata",

@@ -432,6 +432,28 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         candidate_source_urls=(
             "https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560",
         ),
+        candidate_contract_findings=(
+            "2026-06-30 curl smoke: official Miaoli page is a public HTML "
+            "results-review article for the 114年度雨水下水道即時水情監測系統建置計畫; "
+            "it states 58 water-level monitoring stations across 10 town/city "
+            "urban-planning areas.",
+            "2026-06-30 curl smoke: the 114年度雨水下水道即時水情監測系統建置計畫 "
+            "article says water gauges receive monthly maintenance and monthly "
+            "reports track uptime, abnormalities, and improvements, but it exposes "
+            "no latest-observation read API or station metadata file.",
+        ),
+        candidate_contract_missing_fields=(
+            "observed_at",
+            "station_or_device_id",
+            "measurement_value",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata",
+        ),
+        candidate_contract_non_measurement_notes=(
+            "2026-06-30 curl smoke: the public page exposes only an HTML article/JPGs; "
+            "it is not a sewer_water_level read API and cannot satisfy "
+            "pump_or_gate_status.",
+        ),
         notes=(
             "2026-06-28 smoke：FHY Broker station/realtime API 免 key，CityCode 10005；"
             "Supplier=苗栗縣政府 42 站，本輪 local adapter fetched 42、normalized 40、"

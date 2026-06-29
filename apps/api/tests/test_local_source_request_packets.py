@@ -69,6 +69,32 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         "request_body"
     ]
 
+    miaoli = next(packet for packet in packets if packet["county"] == "\u82d7\u6817\u7e23")
+    assert miaoli["packet_type"] == "public_api_contract_request"
+    assert miaoli["tracking_status"] == "needs_public_read_api_contract"
+    assert miaoli["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert any(
+        "58 water-level monitoring stations" in finding
+        and "10 town/city urban-planning areas" in finding
+        for finding in miaoli["candidate_contract_findings"]
+    )
+    assert any(
+        "monthly reports track uptime" in finding
+        for finding in miaoli["candidate_contract_findings"]
+    )
+    assert any(
+        "HTML article/JPGs" in note and "cannot satisfy pump_or_gate_status" in note
+        for note in miaoli["candidate_contract_non_measurement_notes"]
+    )
+    assert "58 water-level monitoring stations" in miaoli["request_body"]
+    assert "HTML article/JPGs" in miaoli["request_body"]
+
     pingtung = next(packet for packet in packets if packet["county"] == "屏東縣")
     assert pingtung["packet_type"] == "public_api_contract_request"
     assert pingtung["requires_human_intervention"] is True
@@ -154,6 +180,10 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
     assert "- 候選系統缺少欄位：`observed_at`、`longitude_latitude_or_joinable_station_metadata`" in markdown
+    assert "58 water-level monitoring stations" in markdown
+    assert "10 town/city urban-planning areas" in markdown
+    assert "HTML article/JPGs" in markdown
+    assert "not a sewer_water_level read API" in markdown
     assert "not_flood_depth_measurement" in markdown
     assert "image_only_cctv" in markdown
 
