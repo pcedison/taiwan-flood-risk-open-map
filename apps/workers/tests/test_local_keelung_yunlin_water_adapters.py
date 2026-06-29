@@ -243,9 +243,11 @@ def test_yunlin_station_api_outputs_water_level_without_fabricating_flood_depth(
     result = adapter.run()
 
     assert result.adapter_key == "local.yunlin.water_level"
-    assert len(result.fetched) == 1
-    assert len(result.normalized) == 1
-    raw_payload = result.fetched[0].payload
+    assert len(result.fetched) == 2
+    assert len(result.normalized) == 2
+    raw_payload = next(
+        item.payload for item in result.fetched if item.payload["station_type"] == "水位"
+    )
     assert raw_payload["station_id"] == "027f4035-d2c3-4784-bcd8-3f99486e5636"
     assert raw_payload["station_name"] == "馬公厝排水三"
     assert raw_payload["observed_at"] == "2026-06-28T09:00:30.135000+00:00"
@@ -255,11 +257,35 @@ def test_yunlin_station_api_outputs_water_level_without_fabricating_flood_depth(
     assert raw_payload["town"] == "東勢鄉"
     assert raw_payload["drainage"] == "馬公厝大排"
     assert raw_payload["observation_frequency"] == "十分鐘一筆"
-    evidence = result.normalized[0]
+    evidence = next(item for item in result.normalized if item.event_type is EventType.WATER_LEVEL)
     assert evidence.event_type is EventType.WATER_LEVEL
     assert "6.64 公尺" in evidence.summary
     assert "warning_threshold_reached" in evidence.tags
     assert "local_yunlin" in evidence.tags
+
+
+def test_yunlin_flood_sensor_alarm_state_outputs_status_only_without_depth() -> None:
+    adapter = YunlinWaterLevelApiAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: _yunlin_stations_payload(),
+    )
+
+    result = adapter.run()
+
+    raw_payload = next(
+        item.payload for item in result.fetched if item.payload["station_type"] == "淹水感測"
+    )
+    assert raw_payload["station_id"] == "01f29fe1-7a96-49ce-940a-flood-depth-not-exposed"
+    assert raw_payload["alarm_state"] == "正常"
+    assert raw_payload["status_only"] is True
+    assert raw_payload["source_weight"] == 0.05
+    assert "flood_depth_cm" not in raw_payload
+
+    evidence = next(item for item in result.normalized if item.event_type.value == "status_only")
+    assert evidence.summary == "雲林 iflood 淹水感測狀態：正常（港西村_中正路3-23號）"
+    assert evidence.confidence == 0.32
+    assert "status_only" in evidence.tags
+    assert "not_flood_depth" in evidence.tags
 
 
 def test_build_runtime_adapters_wires_keelung_and_yunlin_sources_when_gates_are_on() -> None:
@@ -299,7 +325,7 @@ def test_build_runtime_adapters_wires_keelung_and_yunlin_sources_when_gates_are_
     assert len(adapters["local.keelung.water_level"].run().normalized) == 1
     assert len(adapters["local.keelung.flood_sensor"].run().normalized) == 1
     assert len(adapters["local.keelung.rainfall"].run().normalized) == 1
-    assert len(adapters["local.yunlin.water_level"].run().normalized) == 1
+    assert len(adapters["local.yunlin.water_level"].run().normalized) == 2
     assert KEELUNG_WATER_LEVEL_API_URL.startswith("https://smartflood.klcg.gov.tw/")
     assert KEELUNG_FLOOD_SENSOR_API_URL.startswith("https://smartflood.klcg.gov.tw/")
     assert KEELUNG_RAINFALL_API_URL.startswith("https://smartflood.klcg.gov.tw/")

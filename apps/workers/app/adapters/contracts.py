@@ -27,6 +27,7 @@ class EventType(str, Enum):
     FLOOD_WARNING = "flood_warning"
     FLOOD_POTENTIAL = "flood_potential"
     FLOOD_REPORT = "flood_report"
+    STATUS_ONLY = "status_only"
     ROAD_CLOSURE = "road_closure"
     DISCUSSION = "discussion"
 

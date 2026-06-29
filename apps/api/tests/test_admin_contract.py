@@ -1079,8 +1079,9 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert counties["雲林縣"]["status_only_source_names"] == [
         "雲林 iflood 淹水感測狀態",
     ]
-    assert counties["雲林縣"]["flood_depth_available"] is True
-    assert "flood_depth" not in counties["雲林縣"]["missing_signal_types"]
+    assert counties["雲林縣"]["status_only_signal_types"] == ["flood_sensor_status"]
+    assert counties["雲林縣"]["flood_depth_available"] is False
+    assert "flood_depth" in counties["雲林縣"]["missing_signal_types"]
     assert "sewer_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
     assert "gate_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
     assert counties["嘉義縣"]["local_direct_statuses"] == ["ready_implemented"]

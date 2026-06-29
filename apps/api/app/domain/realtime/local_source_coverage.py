@@ -487,8 +487,6 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         ),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
-            "official.wra_iow.flood_depth",
-            "official.civil_iot.flood_sensor",
             "official.civil_iot.sewer_water_level",
             "official.civil_iot.pump_water_level",
             "official.civil_iot.gate_water_level",

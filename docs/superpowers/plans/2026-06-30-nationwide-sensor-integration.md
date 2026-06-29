@@ -219,9 +219,14 @@ Expected: both commands pass.
 - Consumes: Yunlin `alarmState` rows with station id, latest update time, and coordinates.
 - Produces: status-only evidence that can appear in coverage diagnostics but does not satisfy flood depth, water level, or rainfall measurements.
 
-- [ ] Write a failing test proving `alarmState` cannot reduce `missing_signal_types["flood_depth"]`.
-- [ ] Add a low-weight status-only event type with explicit UI/diagnostic wording.
-- [ ] Run API nearby coverage tests and Yunlin adapter tests.
+- [x] Write a failing test proving `alarmState` cannot reduce `missing_signal_types["flood_depth"]`.
+- [x] Add a low-weight status-only event type with explicit UI/diagnostic wording.
+- [x] Run API nearby coverage tests and Yunlin adapter tests.
+
+Completed 2026-06-30: `status_only` now remains a low-weight diagnostics-only
+event type. It can populate nearby coverage as a status clue, but it does not
+satisfy rainfall, water level, flood depth, or sewer water-level measurement
+coverage and has no realtime risk factor.
 
 ## Task 6: Hosted Worker Persistence Gate
 

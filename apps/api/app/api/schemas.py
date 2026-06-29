@@ -429,6 +429,7 @@ class EvidencePreview(ContractModel):
         "flood_warning",
         "flood_potential",
         "flood_report",
+        "status_only",
         "road_closure",
         "discussion",
     ]

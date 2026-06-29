@@ -145,9 +145,12 @@ def test_nearby_coverage_status_only_does_not_count_as_flood_depth() -> None:
 
     status_only = next(item for item in coverage.signal_breakdown if item.signal_type == "status_only")
     assert coverage_signal_type("status_only", "local.taipei.pump_station") == "status_only"
+    assert status_only.label == "狀態線索"
     assert status_only.status_only_count == 1
     assert status_only.fresh_count == 1
     assert coverage.overall_level == "no_local_sensor"
+    assert coverage.summary == "附近有狀態線索，但沒有可用的雨量、水位或淹水深度量測。"
+    assert "狀態線索只表示設備或警示狀態，不能代表雨量、水位或淹水深度。" in coverage.limitations
     assert "flood_depth" in coverage.missing_signal_types
     assert "rainfall" in coverage.missing_signal_types
     assert "water_level" in coverage.missing_signal_types
