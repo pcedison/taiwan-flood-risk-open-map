@@ -1663,6 +1663,17 @@ try {
     }
     Write-Host "Query heat smoke: period=$($risk.query_heat.period), query_count_bucket=$($risk.query_heat.query_count_bucket), unique_approx_count_bucket=$($risk.query_heat.unique_approx_count_bucket)"
 
+    if (-not $risk.nearby_realtime_coverage) {
+        Fail-Smoke "Risk assessment response did not include nearby_realtime_coverage." "api"
+    }
+    if (-not $risk.nearby_realtime_coverage.radius_buckets_m) {
+        Fail-Smoke "Nearby realtime coverage did not include radius_buckets_m." "api"
+    }
+    if (-not $risk.nearby_realtime_coverage.summary) {
+        Fail-Smoke "Nearby realtime coverage did not include a summary." "api"
+    }
+    Write-Host "Nearby realtime coverage smoke: overall=$($risk.nearby_realtime_coverage.overall_level), missing=$($risk.nearby_realtime_coverage.missing_signal_types -join ',')"
+
     if (-not $SkipExtendedSmoke) {
         Invoke-ReportsDisabledSmoke -ApiBaseUrl $ApiBaseUrl
         Invoke-MvtSmoke -ApiBaseUrl $ApiBaseUrl
