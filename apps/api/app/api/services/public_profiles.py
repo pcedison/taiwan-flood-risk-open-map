@@ -181,7 +181,7 @@ def profile_main_reasons(profile: RiskProfileRecord) -> list[str]:
             f"歷史參考來自 profile 彙整的 {profile_evidence_total(profile)} 筆公開資料："
             + profile_evidence_count_summary(profile)
         )
-        reasons.append("資料信心由來源類型、資料筆數、時間新鮮度與 coverage gap 綜合推估。")
+        reasons.append("資料可信度由來源類型、資料筆數、時間新鮮度與 coverage gap 綜合推估。")
     if profile.coverage_gaps:
         reasons.append("profile 仍有資料覆蓋限制：" + "、".join(profile.coverage_gaps))
     return reasons
