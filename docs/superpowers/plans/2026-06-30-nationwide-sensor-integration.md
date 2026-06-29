@@ -533,6 +533,32 @@ API contract blocker until Taitung publishes a machine-readable local-government
 read API with observed time, station/device id, value, unit, and joinable WGS84
 station metadata.
 
+## Task 17: P0 Local Open-Data Release Monitor Summary
+
+**Files:**
+- Modify: `apps/workers/app/ops/local_source_discovery_monitor.py`
+- Modify: `apps/workers/tests/test_local_source_discovery_monitor.py`
+- Modify: `apps/workers/tests/test_realtime_source_gate.py`
+- Modify: release-monitor docs and monitoring runbook.
+
+**Interfaces:**
+- Consumes: data.gov.tw dataset export candidates for unresolved local-source
+  counties such as 金門縣 and 連江縣.
+- Produces: machine-readable `summary.by_county` release-monitor state for each
+  target county: `live_candidate_found`, `metadata_only`, or `no_candidate`.
+
+- [x] Write failing tests proving the discovery monitor summarizes per-county
+  release-monitor state.
+- [x] Surface `candidate_live_read_api_count_by_county`,
+  `metadata_only_count_by_county`, and `target_counties_without_candidates`.
+- [x] Propagate the summary through the realtime source gate JSON.
+- [x] Document how operators should use the summary for `monitor_open_data_release`.
+
+Completed 2026-06-30: 連江縣 still has no verified local direct realtime API.
+This task makes the P0 open-data-release monitor machine-readable so scheduled
+checks or alerts can distinguish "new live candidate appeared" from "only
+metadata remains visible" and "no candidate in the export".
+
 ## Completion Gates
 
 The full objective is complete only when:

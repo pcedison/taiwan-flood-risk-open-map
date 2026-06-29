@@ -279,6 +279,21 @@ CWA、WRA、NCDR、Civil IoT family 與 production adapter key。這些欄位不
 | `continue_official_discovery` | No conforming local source has been found. | Continue official-source discovery; keep central backbone as the realtime baseline. |
 | `operate_adapter` | A production local adapter exists. | Use `production_source_urls` while keeping source gates, freshness, county coverage, and duplicate handling healthy. |
 
+For `monitor_open_data_release`, run the data.gov.tw release monitor and inspect
+`summary.by_county.<county>.readiness_state`. The state is:
+
+- `live_candidate_found`: a machine-readable dataset with live-water keywords
+  appeared and needs API contract/freshness/geometry verification.
+- `metadata_only`: only static metadata or flood-prone-area catalog entries are
+  visible; keep the official release request open.
+- `no_candidate`: the monitored county has no matching data.gov.tw candidate in
+  the current export.
+
+`candidate_live_read_api_count_by_county`, `metadata_only_count_by_county`, and
+`target_counties_without_candidates` are intended for scheduler output,
+freshness jobs, or alert routing so a P0 release-monitor county such as
+連江縣 does not silently remain unreviewed.
+
 To export Prometheus textfile metrics while keeping the check non-blocking:
 
 ```powershell

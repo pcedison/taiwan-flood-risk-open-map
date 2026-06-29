@@ -77,6 +77,7 @@ class DiscoveryResult:
             "target_counties": list(self.target_counties),
             "candidate_count": len(self.candidates),
             "candidates": [candidate.to_dict() for candidate in self.candidates],
+            "summary": _discovery_summary(self.target_counties, self.candidates),
         }
 
     def to_json(self) -> str:
@@ -111,6 +112,55 @@ def fetch_data_gov_dataset_export(
             return json.loads(response.read().decode("utf-8-sig"))
     except (HTTPError, URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Failed to fetch data.gov.tw dataset export: {exc}") from exc
+
+
+def _discovery_summary(
+    target_counties: tuple[str, ...],
+    candidates: tuple[LocalSourceCandidate, ...],
+) -> dict[str, Any]:
+    by_county: dict[str, dict[str, Any]] = {}
+    live_counts: dict[str, int] = {}
+    metadata_counts: dict[str, int] = {}
+    for county in target_counties:
+        county_candidates = tuple(candidate for candidate in candidates if candidate.county == county)
+        live_count = sum(
+            1
+            for candidate in county_candidates
+            if candidate.readiness == "candidate_live_read_api"
+        )
+        metadata_count = sum(
+            1 for candidate in county_candidates if candidate.readiness == "metadata_only"
+        )
+        if live_count:
+            readiness_state = "live_candidate_found"
+            live_counts[county] = live_count
+        elif metadata_count:
+            readiness_state = "metadata_only"
+            metadata_counts[county] = metadata_count
+        else:
+            readiness_state = "no_candidate"
+        signal_types = tuple(
+            dict.fromkeys(
+                signal_type
+                for candidate in county_candidates
+                for signal_type in candidate.signal_types
+            )
+        )
+        by_county[county] = {
+            "candidate_count": len(county_candidates),
+            "candidate_live_read_api_count": live_count,
+            "metadata_only_count": metadata_count,
+            "readiness_state": readiness_state,
+            "signal_types": list(signal_types),
+        }
+    return {
+        "by_county": by_county,
+        "candidate_live_read_api_count_by_county": live_counts,
+        "metadata_only_count_by_county": metadata_counts,
+        "target_counties_without_candidates": [
+            county for county, item in by_county.items() if item["candidate_count"] == 0
+        ],
+    }
 
 
 def _candidate_for_county(

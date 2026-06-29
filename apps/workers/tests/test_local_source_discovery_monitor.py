@@ -63,6 +63,39 @@ def test_discover_local_source_candidates_keeps_static_metadata_visible() -> Non
     assert candidate.resource_formats == ("ODS",)
 
 
+def test_discover_local_source_candidates_summarizes_release_monitor_state() -> None:
+    payload = [
+        {
+            "title": "連江縣大潮、豪雨易淹水地區",
+            "description": "易淹水地區靜態清冊",
+            "identifier": "165820",
+            "distribution": [{"format": "ODS"}],
+        },
+        {
+            "title": "金門縣水位即時監測資料",
+            "description": "金門水情系統即時水位 API",
+            "identifier": "kinmen-live",
+            "distribution": [{"format": "JSON"}],
+        },
+    ]
+
+    result = discover_local_source_candidates(
+        payload,
+        target_counties=("連江縣", "金門縣", "花蓮縣"),
+    )
+
+    summary = result.to_dict()["summary"]
+
+    assert summary["target_counties_without_candidates"] == ["花蓮縣"]
+    assert summary["candidate_live_read_api_count_by_county"] == {"金門縣": 1}
+    assert summary["metadata_only_count_by_county"] == {"連江縣": 1}
+    assert summary["by_county"]["金門縣"]["readiness_state"] == "live_candidate_found"
+    assert summary["by_county"]["連江縣"]["readiness_state"] == "metadata_only"
+    assert summary["by_county"]["花蓮縣"]["readiness_state"] == "no_candidate"
+    assert summary["by_county"]["金門縣"]["signal_types"] == ["water_level"]
+    assert summary["by_county"]["連江縣"]["signal_types"] == ["flood_prone_area"]
+
+
 def test_data_gov_dataset_parser_accepts_common_export_aliases() -> None:
     item = DataGovDataset.from_mapping(
         {

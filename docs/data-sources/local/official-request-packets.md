@@ -16,6 +16,10 @@ PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py
 此工具會掃 data.gov.tw 全站匯出，只針對金門縣與連江縣的水情關鍵字輸出
 `candidate_live_read_api` 或 `metadata_only`。它不會自動把候選來源升級為
 production adapter；候選仍需人工檢查 API contract、freshness、座標與授權。
+輸出的 `summary.by_county` 會將每個監看縣市標成 `live_candidate_found`、
+`metadata_only` 或 `no_candidate`，並提供
+`candidate_live_read_api_count_by_county`、`metadata_only_count_by_county` 與
+`target_counties_without_candidates`，可直接用於連江縣資料釋出監看與排程告警。
 
 官方請求包也可由 action plan 重建：
 

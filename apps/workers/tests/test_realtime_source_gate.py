@@ -52,6 +52,12 @@ def test_realtime_source_gate_passes_with_healthy_backbone_and_no_live_candidate
     assert result.passed is True
     assert result.to_dict()["coverage"]["local_direct_remaining_count"] == 2
     assert result.to_dict()["discovery"]["candidate_live_read_api_count"] == 0
+    assert result.to_dict()["discovery"]["summary"]["by_county"]["連江縣"][
+        "readiness_state"
+    ] == "metadata_only"
+    assert result.to_dict()["discovery"]["summary"][
+        "metadata_only_count_by_county"
+    ] == {"連江縣": 1}
 
 
 def test_realtime_source_gate_fails_on_failed_central_backbone_source() -> None:
