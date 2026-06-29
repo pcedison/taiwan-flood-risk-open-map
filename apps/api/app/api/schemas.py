@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -434,6 +434,58 @@ class QueryHeat(ContractModel):
     updated_at: datetime
 
 
+NearbyCoverageLevel = Literal["high", "medium", "low", "no_local_sensor", "unavailable"]
+NearbyCoverageSignalType = Literal[
+    "rainfall",
+    "water_level",
+    "flood_depth",
+    "sewer_water_level",
+    "pump_or_gate_status",
+    "flood_warning",
+    "status_only",
+]
+
+
+class NearbyCoverageSignal(ContractModel):
+    signal_type: NearbyCoverageSignalType
+    label: str
+    coverage_level: NearbyCoverageLevel
+    nearest_distance_m: float | None = Field(default=None, ge=0)
+    nearest_source_id: str | None = None
+    nearest_observed_at: datetime | None = None
+    counts_by_radius_m: dict[str, int] = Field(default_factory=dict)
+    fresh_count: int = Field(default=0, ge=0)
+    stale_count: int = Field(default=0, ge=0)
+    status_only_count: int = Field(default=0, ge=0)
+    missing_reason: str | None = None
+
+
+class NearbyRealtimeCoverage(ContractModel):
+    overall_level: NearbyCoverageLevel
+    evaluated_at: datetime
+    query_radius_m: int = Field(ge=50, le=2000)
+    radius_buckets_m: list[int] = Field(default_factory=lambda: [500, 1000, 3000, 5000])
+    summary: str
+    signal_breakdown: list[NearbyCoverageSignal]
+    missing_signal_types: list[NearbyCoverageSignalType] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    county_level_note: str
+
+
+def _default_nearby_realtime_coverage() -> NearbyRealtimeCoverage:
+    return NearbyRealtimeCoverage(
+        overall_level="unavailable",
+        evaluated_at=datetime.now(UTC),
+        query_radius_m=500,
+        radius_buckets_m=[500, 1000, 3000, 5000],
+        summary="附近即時觀測資料尚未接入。",
+        signal_breakdown=[],
+        missing_signal_types=[],
+        limitations=[],
+        county_level_note="蝮??縣級 coverage note",
+    )
+
+
 class RiskAssessmentResponse(ContractModel):
     assessment_id: str
     location: LatLng
@@ -448,6 +500,9 @@ class RiskAssessmentResponse(ContractModel):
     evidence: list[EvidencePreview]
     data_freshness: list[DataFreshness]
     query_heat: QueryHeat
+    nearby_realtime_coverage: NearbyRealtimeCoverage = Field(
+        default_factory=_default_nearby_realtime_coverage
+    )
 
 
 class GeoJsonGeometry(ContractModel):

@@ -494,6 +494,7 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "evidence",
         "data_freshness",
         "query_heat",
+        "nearby_realtime_coverage",
     }
     assert UUID(payload["assessment_id"])
     assert payload["location"] == {"lat": 25.033, "lng": 121.5654}
@@ -528,6 +529,17 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert payload["data_freshness"][0]["source_id"] == "cwa-rainfall"
     assert payload["query_heat"]["period"] == "P7D"
     assert payload["query_heat"]["attention_level"] in RISK_LEVELS
+    coverage = payload["nearby_realtime_coverage"]
+    assert coverage["query_radius_m"] == 500
+    assert coverage["radius_buckets_m"] == [500, 1000, 3000, 5000]
+    assert coverage["overall_level"] in {
+        "high",
+        "medium",
+        "low",
+        "no_local_sensor",
+        "unavailable",
+    }
+    assert "蝮??" in coverage["county_level_note"]
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 

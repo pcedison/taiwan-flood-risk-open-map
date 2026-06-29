@@ -1490,6 +1490,7 @@ components:
         - evidence
         - data_freshness
         - query_heat
+        - nearby_realtime_coverage
       properties:
         assessment_id:
           type: string
@@ -1526,6 +1527,8 @@ components:
             $ref: "#/components/schemas/DataFreshness"
         query_heat:
           $ref: "#/components/schemas/QueryHeat"
+        nearby_realtime_coverage:
+          $ref: "#/components/schemas/NearbyRealtimeCoverage"
       additionalProperties: false
 
     RiskLevelBlock:
@@ -1834,6 +1837,133 @@ components:
         updated_at:
           type: string
           format: date-time
+      additionalProperties: false
+
+    NearbyCoverageSignal:
+      type: object
+      required:
+        - signal_type
+        - label
+        - coverage_level
+        - fresh_count
+        - stale_count
+        - status_only_count
+      properties:
+        signal_type:
+          type: string
+          enum:
+            - rainfall
+            - water_level
+            - flood_depth
+            - sewer_water_level
+            - pump_or_gate_status
+            - flood_warning
+            - status_only
+        label:
+          type: string
+        coverage_level:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+            - no_local_sensor
+            - unavailable
+        nearest_distance_m:
+          type:
+            - number
+            - "null"
+          minimum: 0
+        nearest_source_id:
+          type:
+            - string
+            - "null"
+        nearest_observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        counts_by_radius_m:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        fresh_count:
+          type: integer
+          minimum: 0
+        stale_count:
+          type: integer
+          minimum: 0
+        status_only_count:
+          type: integer
+          minimum: 0
+        missing_reason:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    NearbyRealtimeCoverage:
+      type: object
+      required:
+        - overall_level
+        - evaluated_at
+        - query_radius_m
+        - radius_buckets_m
+        - summary
+        - signal_breakdown
+        - missing_signal_types
+        - limitations
+        - county_level_note
+      properties:
+        overall_level:
+          type: string
+          enum:
+            - high
+            - medium
+            - low
+            - no_local_sensor
+            - unavailable
+        evaluated_at:
+          type: string
+          format: date-time
+        query_radius_m:
+          type: integer
+          minimum: 50
+          maximum: 2000
+        radius_buckets_m:
+          type: array
+          items:
+            type: integer
+          default:
+            - 500
+            - 1000
+            - 3000
+            - 5000
+        summary:
+          type: string
+        signal_breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/NearbyCoverageSignal"
+        missing_signal_types:
+          type: array
+          items:
+            type: string
+            enum:
+              - rainfall
+              - water_level
+              - flood_depth
+              - sewer_water_level
+              - pump_or_gate_status
+              - flood_warning
+              - status_only
+        limitations:
+          type: array
+          items:
+            type: string
+        county_level_note:
+          type: string
       additionalProperties: false
 
     LayersResponse:
