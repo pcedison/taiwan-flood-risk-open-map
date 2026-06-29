@@ -3,6 +3,7 @@
 import type { RiskAssessmentResponse } from "../lib/page-types";
 import type { EvidenceItem, getEvidenceDisplayState, getProfileBasisText, getProfilePreviewState } from "../lib/risk-display";
 import {
+  evidenceDisplayText,
   evidenceSourceUrl,
   evidenceTimeSummary,
   formatConfidence,
@@ -14,6 +15,7 @@ type EvidenceSectionProps = {
   assessment: RiskAssessmentResponse | null;
   displayedEvidence: EvidenceItem[];
   evidenceDisplayState: ReturnType<typeof getEvidenceDisplayState>;
+  hiddenHistoricalNewsCount: number;
   profileBasisText: ReturnType<typeof getProfileBasisText>;
   profilePreviewState: ReturnType<typeof getProfilePreviewState>;
 };
@@ -22,6 +24,7 @@ export function EvidenceSection({
   assessment,
   displayedEvidence,
   evidenceDisplayState,
+  hiddenHistoricalNewsCount,
   profileBasisText,
   profilePreviewState,
 }: EvidenceSectionProps) {
@@ -39,6 +42,16 @@ export function EvidenceSection({
         </summary>
         {assessment ? (
           <div className="evidence-drawer-body">
+            <p className="section-question">{text.evidenceQuestion}</p>
+            <div className="evidence-scope-note" role="status">
+              <span>{text.evidenceScopeNote}</span>
+              {hiddenHistoricalNewsCount > 0 ? (
+                <strong>
+                  {text.hiddenNewsEvidence} {hiddenHistoricalNewsCount} 筆
+                </strong>
+              ) : null}
+            </div>
+
             {evidenceDisplayState.showLoading ? (
               <div className="evidence-state" role="status">
                 {text.evidenceLoading}
@@ -54,15 +67,29 @@ export function EvidenceSection({
             {evidenceDisplayState.showList ? (
               <ul className="evidence-list">
                 {displayedEvidence.map((item) => {
+                  const displayText = evidenceDisplayText(item);
                   const sourceUrl = evidenceSourceUrl(item);
 
                   return (
                     <li key={item.id} className="evidence-card">
                       <div className="evidence-card-header">
-                        <span>{sourceTypeLabel(item.source_type)}</span>
-                        <strong>{item.title}</strong>
+                        <div>
+                          <span>{sourceTypeLabel(item.source_type)}</span>
+                          <strong>{displayText.title}</strong>
+                        </div>
+                        {sourceUrl ? (
+                          <a
+                            className="evidence-card-link"
+                            href={sourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {text.evidenceOpenSource}
+                          </a>
+                        ) : null}
                       </div>
-                      <p>{item.summary}</p>
+                      <p>{displayText.summary}</p>
+                      <span className="evidence-card-purpose">{displayText.purpose}</span>
                       <dl className="evidence-meta">
                         <div>
                           <dt>{text.evidenceDistance}</dt>
@@ -76,18 +103,14 @@ export function EvidenceSection({
                           <dt>{text.evidenceConfidence}</dt>
                           <dd>{formatConfidence(item.confidence)}</dd>
                         </div>
-                        <div>
-                          <dt>{text.evidenceUrl}</dt>
-                          <dd>
-                            {sourceUrl ? (
-                              <a href={sourceUrl} target="_blank" rel="noreferrer">
-                                {text.evidenceOpenSource}
-                              </a>
-                            ) : (
+                        {!sourceUrl ? (
+                          <div>
+                            <dt>{text.evidenceUrl}</dt>
+                            <dd>
                               <span className="missing-source">{text.evidenceMissingUrl}</span>
-                            )}
-                          </dd>
-                        </div>
+                            </dd>
+                          </div>
+                        ) : null}
                       </dl>
                     </li>
                   );
@@ -100,17 +123,27 @@ export function EvidenceSection({
             ) : null}
 
             {assessment.explanation.missing_sources.length ? (
-              <div className="evidence-warning" data-testid="evidence-limitations" role="status">
-                <strong>{text.limitations}</strong>
-                {profileBasisText.limitationLead ? (
-                  <span className="evidence-warning-note">{profileBasisText.limitationLead}</span>
-                ) : null}
-                <ul>
-                  {assessment.explanation.missing_sources.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </div>
+              <details className="evidence-warning" data-testid="evidence-limitations">
+                <summary>
+                  <span>
+                    <strong>{text.limitations}</strong>
+                    <small>
+                      {assessment.explanation.missing_sources.length} 項需要留意
+                    </small>
+                  </span>
+                  <span>查看限制</span>
+                </summary>
+                <div className="evidence-warning-body" role="status">
+                  {profileBasisText.limitationLead ? (
+                    <span className="evidence-warning-note">{profileBasisText.limitationLead}</span>
+                  ) : null}
+                  <ul>
+                    {assessment.explanation.missing_sources.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
             ) : null}
           </div>
         ) : (

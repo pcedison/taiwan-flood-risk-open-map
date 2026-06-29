@@ -210,7 +210,8 @@ test("production-like open raster basemap renders without OSM or TGOS tiles", as
   await page.locator('form button[type="submit"]').first().click();
 
   await expect(page.getByText("Open basemap smoke risk summary")).toBeVisible();
-  await expect(page.getByText("Open basemap smoke full evidence", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("evidence-panel")).toContainText("淹水潛勢資料");
+  await expect(page.getByTestId("evidence-panel")).not.toContainText("Open basemap smoke full evidence");
   await expect(page.getByText("Open basemap smoke layer")).not.toBeVisible();
   await page.getByTestId("diagnostics-summary").click();
   await expect(page.getByText("Open basemap smoke layer")).toBeVisible();

@@ -31,11 +31,14 @@ export function UserReportSection({
   if (!enabled) {
     return (
       <section className="panel-section user-report-panel" data-testid="user-report-panel" aria-label={text.reportDisabledTitle}>
-        <div className="section-heading">
-          <span className="section-kicker">{text.publicReportKicker}</span>
-          <strong>{text.reportDisabledTitle}</strong>
-        </div>
-        <p>{text.reportDisabledMessage}</p>
+        <details className="report-disabled-drawer">
+          <summary>
+            <span className="section-kicker">{text.publicReportKicker}</span>
+            <strong>{text.reportDisabledTitle}</strong>
+            <small>{text.reportDisabledAction}</small>
+          </summary>
+          <p>{text.reportDisabledMessage}</p>
+        </details>
       </section>
     );
   }
