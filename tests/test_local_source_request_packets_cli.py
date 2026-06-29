@@ -21,17 +21,28 @@ def test_local_source_request_packets_cli_emits_json() -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
-    assert [packet["county"] for packet in payload] == [
-        "花蓮縣",
-        "金門縣",
+    assert [packet["county"] for packet in payload[:6]] == [
         "連江縣",
-        "苗栗縣",
-        "屏東縣",
+        "金門縣",
+        "花蓮縣",
+        "臺北市",
+        "雲林縣",
         "臺東縣",
     ]
-    assert payload[0]["packet_type"] == "authorization_request"
-    assert payload[2]["target_signal_types"] == ["hydrologic_observation"]
-    assert payload[4]["packet_type"] == "public_api_contract_request"
+    assert {packet["county"] for packet in payload} >= {
+        "苗栗縣",
+        "屏東縣",
+        "嘉義市",
+    }
+    assert payload[0]["packet_type"] == "metadata_release_request"
+    assert payload[0]["target_signal_types"] == ["hydrologic_observation"]
+    chiayi_city = next(packet for packet in payload if packet["county"] == "嘉義市")
+    assert chiayi_city["packet_type"] == "signal_gap_request"
+    assert chiayi_city["target_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
 
 
 def test_local_source_request_packets_cli_writes_markdown_output(
@@ -62,3 +73,5 @@ def test_local_source_request_packets_cli_writes_markdown_output(
     assert "## 金門縣：金門縣 KWIS 即時水情 read API 授權請求" in markdown
     assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
+    assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
+    assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown

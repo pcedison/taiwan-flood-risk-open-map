@@ -2,27 +2,28 @@
 
 此文件由 local-source action plan 產生，用於追蹤尚需人工授權或官方資料釋出的地方即時水情缺口。
 
-## 花蓮縣：花蓮縣 Senslink/行動水情 即時水情 read API 授權請求
+## 連江縣：連江縣即時水文觀測資料釋出請求
 
-- 類型：authorization_request
+- 類型：metadata_release_request
 - 需要人工介入：是
-- 追蹤對象：花蓮縣政府 / Senslink 行動水情維運窗口
-- 追蹤狀態：needs_authorization_request
-- 整合優先序：#3 / P1 / request_official_authorization
+- 追蹤對象：連江縣政府公開資料或防災水利窗口
+- 追蹤狀態：monitoring_open_data_release
+- 整合優先序：#1 / P0 / restore_hydrologic_backbone
 - 來源：
-  - https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index
-  - https://www.hl.gov.tw/News_Content.aspx?n=32725&s=116294
+  - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
+  - https://www.matsu.gov.tw/upload/f-20230922134042.ods
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- 排入此順位原因：official authorization is required before a production read API can run
-- 完成門檻：取得官方授權或公開 read API contract，確認用途不是設備上傳 API。
+- 待補中央主幹訊號：hydrologic_observation
+- 排入此順位原因：central_backbone is missing hydrologic observation coverage for this county；local_direct_source is not complete
+- 完成門檻：取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門即時 read API，並提供 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
 
-目前花蓮縣地方直連即時水情來源仍需要官方授權。請確認 Senslink/行動水情 是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。
+目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。
 
 待辦：
 - [ ] 確認是否可提供最新觀測 read API
-- [ ] 確認 API contract、授權條款與 rate limit
-- [ ] 取得測站清冊、座標 metadata 與範例 response
-- [ ] 確認資料欄位可滿足 production adapter 必備欄位
+- [ ] 確認是否可加入 Civil IoT 或 WRA 公開主幹
+- [ ] 取得站點 ID、觀測時間、測值、單位與座標
+- [ ] 確認短期無感測器時的建置計畫或資料釋出時程
 
 ## 金門縣：金門縣 KWIS 即時水情 read API 授權請求
 
@@ -50,28 +51,90 @@
 - [ ] 取得測站清冊、座標 metadata 與範例 response
 - [ ] 確認資料欄位可滿足 production adapter 必備欄位
 
-## 連江縣：連江縣即時水文觀測資料釋出請求
+## 花蓮縣：花蓮縣 Senslink/行動水情 即時水情 read API 授權請求
 
-- 類型：metadata_release_request
+- 類型：authorization_request
 - 需要人工介入：是
-- 追蹤對象：連江縣政府公開資料或防災水利窗口
-- 追蹤狀態：monitoring_open_data_release
-- 整合優先序：#1 / P0 / restore_hydrologic_backbone
+- 追蹤對象：花蓮縣政府 / Senslink 行動水情維運窗口
+- 追蹤狀態：needs_authorization_request
+- 整合優先序：#3 / P1 / request_official_authorization
 - 來源：
-  - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
-  - https://www.matsu.gov.tw/upload/f-20230922134042.ods
+  - https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index
+  - https://www.hl.gov.tw/News_Content.aspx?n=32725&s=116294
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- 待補中央主幹訊號：hydrologic_observation
-- 排入此順位原因：central_backbone is missing hydrologic observation coverage for this county；local_direct_source is not complete
-- 完成門檻：取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門即時 read API，並提供 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+- 排入此順位原因：official authorization is required before a production read API can run
+- 完成門檻：取得官方授權或公開 read API contract，確認用途不是設備上傳 API。
 
-目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。
+目前花蓮縣地方直連即時水情來源仍需要官方授權。請確認 Senslink/行動水情 是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。
 
 待辦：
 - [ ] 確認是否可提供最新觀測 read API
-- [ ] 確認是否可加入 Civil IoT 或 WRA 公開主幹
-- [ ] 取得站點 ID、觀測時間、測值、單位與座標
-- [ ] 確認短期無感測器時的建置計畫或資料釋出時程
+- [ ] 確認 API contract、授權條款與 rate limit
+- [ ] 取得測站清冊、座標 metadata 與範例 response
+- [ ] 確認資料欄位可滿足 production adapter 必備欄位
+
+## 臺北市：臺北市地方即時水情 live smoke 複核請求
+
+- 類型：live_smoke_review_request
+- 需要人工介入：是
+- 追蹤對象：臺北市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_live_smoke_retry
+- 整合優先序：#4 / P1 / verify_live_smoke
+- 來源：
+  - https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6
+- 既有 production adapters：local.taipei.sewer_water_level、local.taipei.river_water_level、local.taipei.pump_station
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 排入此順位原因：candidate or status-only source needs live smoke and field semantics review
+- 完成門檻：live smoke 連續成功，並確認 observed_at、station id、measurement_value、單位、座標與欄位語意。
+
+目前臺北市已有候選或部分 production adapter，但仍需要 live smoke 複核觀測時間、站點 ID、測值、單位、座標與欄位語意。狀態或開關資料不得替代水位、雨量或淹水深度；若只能提供狀態，需標示為 status-only 診斷線索。
+
+待辦：
+- [ ] 重跑 live smoke 並保存 response 範例
+- [ ] 確認 observed_at、station_or_device_id、measurement_value、單位與座標
+- [ ] 確認狀態或開關欄位不被誤標為水位、雨量或淹水深度
+- [ ] 更新 adapter gate、verification log 與 freshness policy
+
+## 雲林縣：雲林縣地方即時水情 live smoke 複核請求
+
+- 類型：live_smoke_review_request
+- 需要人工介入：是
+- 追蹤對象：雲林縣政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_live_smoke_retry
+- 整合優先序：#5 / P1 / verify_live_smoke
+- 既有 production adapters：local.yunlin.water_level
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 排入此順位原因：candidate or status-only source needs live smoke and field semantics review
+- 完成門檻：live smoke 連續成功，並確認 observed_at、station id、measurement_value、單位、座標與欄位語意。
+
+目前雲林縣已有候選或部分 production adapter，但仍需要 live smoke 複核觀測時間、站點 ID、測值、單位、座標與欄位語意。狀態或開關資料不得替代水位、雨量或淹水深度；若只能提供狀態，需標示為 status-only 診斷線索。
+
+待辦：
+- [ ] 重跑 live smoke 並保存 response 範例
+- [ ] 確認 observed_at、station_or_device_id、measurement_value、單位與座標
+- [ ] 確認狀態或開關欄位不被誤標為水位、雨量或淹水深度
+- [ ] 更新 adapter gate、verification log 與 freshness policy
+
+## 臺東縣：臺東縣地方即時水情 read API contract 請求
+
+- 類型：public_api_contract_request
+- 需要人工介入：是
+- 追蹤對象：臺東縣政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_public_read_api_contract
+- 整合優先序：#6 / P2 / verify_public_read_api_contract
+- 來源：
+  - https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 排入此順位原因：candidate source needs a public read API contract review
+- 完成門檻：公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。
+
+目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。
+
+待辦：
+- [ ] 確認公開 read API URL 與 response 格式
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認授權條款、rate limit 與維運窗口
+- [ ] 取得可重跑 live smoke 的範例 response
 
 ## 苗栗縣：苗栗縣地方即時水情 read API contract 請求
 
@@ -119,23 +182,212 @@
 - [ ] 確認授權條款、rate limit 與維運窗口
 - [ ] 取得可重跑 live smoke 的範例 response
 
-## 臺東縣：臺東縣地方即時水情 read API contract 請求
+## 嘉義市：嘉義市缺漏水資訊訊號補齊請求
 
-- 類型：public_api_contract_request
+- 類型：signal_gap_request
 - 需要人工介入：是
-- 追蹤對象：臺東縣政府公開資料或水利防災維運窗口
-- 追蹤狀態：needs_public_read_api_contract
-- 整合優先序：#6 / P2 / verify_public_read_api_contract
-- 來源：
-  - https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652
+- 追蹤對象：嘉義市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#9 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.chiayi_city.water_level、local.chiayi_city.rainfall
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- 排入此順位原因：candidate source needs a public read API contract review
-- 完成門檻：公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。
+- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
 
-目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。
+目前嘉義市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
 
 待辦：
-- [ ] 確認公開 read API URL 與 response 格式
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
 - [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
-- [ ] 確認授權條款、rate limit 與維運窗口
-- [ ] 取得可重跑 live smoke 的範例 response
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 桃園市：桃園市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：桃園市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#10 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.taoyuan.flood_sensor、local.taoyuan.water_level、local.taoyuan.rainfall
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：sewer_water_level、pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前桃園市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 澎湖縣：澎湖縣缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：澎湖縣政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#11 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.penghu.water_level
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：flood_depth、pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前澎湖縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 臺中市：臺中市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：臺中市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#12 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.taichung.water_level
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：sewer_water_level、pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前臺中市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 臺南市：臺南市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：臺南市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#13 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.tainan.flood_sensor
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：sewer_water_level、pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前臺南市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 南投縣：南投縣缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：南投縣政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#14 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.nantou.sewer_water_level
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前南投縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 基隆市：基隆市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：基隆市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#15 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.keelung.water_level、local.keelung.flood_sensor、local.keelung.rainfall
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前基隆市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 宜蘭縣：宜蘭縣缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：宜蘭縣政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#16 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.yilan.flood_sensor、local.yilan.water_level
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前宜蘭縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 新北市：新北市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：新北市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#17 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.new_taipei.water_level、local.new_taipei.flood_sensor、local.new_taipei.rainfall、local.new_taipei.drainage_water_level
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前新北市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+
+## 新竹縣：新竹縣缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：新竹縣政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#18 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.hsinchu_county.flood_sensor
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前新竹縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口

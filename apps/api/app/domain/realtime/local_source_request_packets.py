@@ -32,7 +32,21 @@ def build_official_request_packets(
         )
         for item in action_plan.get("public_api_contract_reviews", [])
     )
-    return tuple(packets)
+    packets.extend(
+        _live_smoke_review_packet(
+            item,
+            priority_item=priority_by_county.get(str(item["county"])),
+        )
+        for item in action_plan.get("live_smoke_reviews", [])
+    )
+    packets.extend(
+        _signal_gap_packet(
+            item,
+            priority_item=priority_by_county.get(str(item["county"])),
+        )
+        for item in action_plan.get("sensor_signal_gap_reviews", [])
+    )
+    return tuple(sorted(packets, key=_packet_sort_key))
 
 
 def render_official_request_packets_markdown(
@@ -152,6 +166,79 @@ def _public_api_contract_packet(
     } | _priority_packet_fields(priority_item)
 
 
+def _live_smoke_review_packet(
+    item: Mapping[str, Any],
+    *,
+    priority_item: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    county = str(item["county"])
+    source_urls = list(item.get("candidate_source_urls", []))
+    source_names = list(item.get("candidate_source_names", []))
+    required_fields = list(item.get("required_read_api_fields", []))
+    return {
+        "county": county,
+        "packet_type": "live_smoke_review_request",
+        "requires_human_intervention": True,
+        "subject": f"{county}地方即時水情 live smoke 複核請求",
+        "source_urls": source_urls,
+        "source_names": source_names,
+        "production_adapter_keys": list(item.get("production_adapter_keys", [])),
+        "requested_counterparty": item.get("requested_counterparty"),
+        "tracking_status": item.get("tracking_status"),
+        "last_followed_up_at": item.get("last_followed_up_at"),
+        "required_read_api_fields": required_fields,
+        "request_body": (
+            f"目前{county}已有候選或部分 production adapter，但仍需要 live smoke "
+            "複核觀測時間、站點 ID、測值、單位、座標與欄位語意。狀態或開關資料"
+            "不得替代水位、雨量或淹水深度；若只能提供狀態，需標示為 status-only "
+            "診斷線索。"
+        ),
+        "checklist": [
+            "重跑 live smoke 並保存 response 範例",
+            "確認 observed_at、station_or_device_id、measurement_value、單位與座標",
+            "確認狀態或開關欄位不被誤標為水位、雨量或淹水深度",
+            "更新 adapter gate、verification log 與 freshness policy",
+        ],
+    } | _priority_packet_fields(priority_item)
+
+
+def _signal_gap_packet(
+    item: Mapping[str, Any],
+    *,
+    priority_item: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    county = str(item["county"])
+    missing_signal_types = list(item.get("missing_signal_types", []))
+    required_fields = list(item.get("required_read_api_fields", []))
+    signal_summary = "、".join(str(signal) for signal in missing_signal_types)
+    return {
+        "county": county,
+        "packet_type": "signal_gap_request",
+        "requires_human_intervention": True,
+        "subject": f"{county}缺漏水資訊訊號補齊請求",
+        "source_urls": list(item.get("candidate_source_urls", [])),
+        "production_adapter_keys": list(item.get("production_adapter_keys", [])),
+        "requested_counterparty": item.get("requested_counterparty"),
+        "tracking_status": item.get("tracking_status"),
+        "last_followed_up_at": item.get("last_followed_up_at"),
+        "target_signal_types": missing_signal_types,
+        "required_read_api_fields": required_fields,
+        "request_body": (
+            f"目前{county}既有 production adapter 仍未覆蓋所有必要水資訊訊號："
+            f"{signal_summary}。請協助確認是否有官方公開 read API、開放資料或"
+            "可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運"
+            "狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或"
+            "下水道水位量測。"
+        ),
+        "checklist": [
+            "確認缺漏 signal families 是否存在官方 read API 或開放資料",
+            "確認觀測時間、站點 ID、測值、單位與座標欄位",
+            "確認 status-only 資料不會被當成水位、雨量或淹水深度",
+            "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+        ],
+    } | _priority_packet_fields(priority_item)
+
+
 def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str, Any]:
     if priority_item is None:
         return {}
@@ -162,6 +249,13 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
         "priority_why_now": priority_item.get("why_now"),
         "completion_gate": priority_item.get("completion_gate"),
     }
+
+
+def _packet_sort_key(packet: Mapping[str, Any]) -> tuple[int, str]:
+    rank = packet.get("priority_rank")
+    if not isinstance(rank, int):
+        rank = 9999
+    return (rank, str(packet.get("county", "")))
 
 
 def _authorization_contract_fields(system_name: str) -> dict[str, Any]:
@@ -230,12 +324,20 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
     if packet.get("source_urls"):
         lines.append("- 來源：")
         lines.extend(f"  - {url}" for url in packet["source_urls"])
+    if packet.get("production_adapter_keys"):
+        lines.append(
+            "- 既有 production adapters："
+            + "、".join(str(key) for key in packet["production_adapter_keys"])
+        )
     if packet.get("required_read_api_fields"):
         fields = "、".join(f"`{field}`" for field in packet["required_read_api_fields"])
         lines.append(f"- Production read API 必備欄位：{fields}")
     if packet.get("target_signal_types"):
+        signal_label = "待補水資訊訊號"
+        if packet.get("packet_type") == "metadata_release_request":
+            signal_label = "待補中央主幹訊號"
         lines.append(
-            "- 待補中央主幹訊號："
+            f"- {signal_label}："
             + "、".join(str(signal) for signal in packet["target_signal_types"])
         )
     if packet.get("priority_why_now"):

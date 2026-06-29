@@ -16,20 +16,25 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
 
     packets = build_official_request_packets(plan)
 
-    assert [packet["county"] for packet in packets] == [
-        "花蓮縣",
-        "金門縣",
+    assert [packet["county"] for packet in packets[:6]] == [
         "連江縣",
-        "苗栗縣",
-        "屏東縣",
+        "金門縣",
+        "花蓮縣",
+        "臺北市",
+        "雲林縣",
         "臺東縣",
     ]
-    hualien = packets[0]
+    assert {packet["county"] for packet in packets} >= {
+        "苗栗縣",
+        "屏東縣",
+        "嘉義市",
+    }
+    hualien = next(packet for packet in packets if packet["county"] == "花蓮縣")
     assert hualien["packet_type"] == "authorization_request"
     assert hualien["subject"] == "花蓮縣 Senslink/行動水情 即時水情 read API 授權請求"
     assert hualien["requested_counterparty"] == "花蓮縣政府 / Senslink 行動水情維運窗口"
 
-    kinmen = packets[1]
+    kinmen = next(packet for packet in packets if packet["county"] == "金門縣")
     assert kinmen["packet_type"] == "authorization_request"
     assert kinmen["requires_human_intervention"] is True
     assert "金門縣 KWIS 即時水情 read API 授權請求" == kinmen["subject"]
@@ -37,7 +42,7 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "observed_at" in kinmen["required_read_api_fields"]
     assert any("kwis.kinmen.gov.tw" in url for url in kinmen["source_urls"])
 
-    lienchiang = packets[2]
+    lienchiang = packets[0]
     assert lienchiang["packet_type"] == "metadata_release_request"
     assert lienchiang["requires_human_intervention"] is True
     assert "連江縣即時水文觀測資料釋出請求" == lienchiang["subject"]
@@ -45,12 +50,29 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "南竿、北竿、莒光、東引" in lienchiang["request_body"]
     assert any("matsu.gov.tw" in url for url in lienchiang["source_urls"])
 
-    pingtung = packets[4]
+    pingtung = next(packet for packet in packets if packet["county"] == "屏東縣")
     assert pingtung["packet_type"] == "public_api_contract_request"
     assert pingtung["requires_human_intervention"] is True
     assert pingtung["subject"] == "屏東縣地方即時水情 read API contract 請求"
     assert "pteoc.pthg.gov.tw/RainStation" in " ".join(pingtung["source_urls"])
     assert "observed_at" in pingtung["required_read_api_fields"]
+
+    taipei = next(packet for packet in packets if packet["county"] == "臺北市")
+    assert taipei["packet_type"] == "live_smoke_review_request"
+    assert taipei["tracking_status"] == "needs_live_smoke_retry"
+    assert "狀態或開關資料不得替代水位、雨量或淹水深度" in taipei["request_body"]
+
+    chiayi_city = next(packet for packet in packets if packet["county"] == "嘉義市")
+    assert chiayi_city["packet_type"] == "signal_gap_request"
+    assert chiayi_city["tracking_status"] == "needs_signal_gap_review"
+    assert chiayi_city["priority_tier"] == "P2"
+    assert chiayi_city["target_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
+    assert "既有 production adapter 仍未覆蓋所有必要水資訊訊號" in chiayi_city["request_body"]
+    assert "status-only" in chiayi_city["request_body"]
 
 
 def test_render_official_request_packets_markdown_is_ready_for_outreach() -> None:
@@ -64,11 +86,14 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "## 金門縣：金門縣 KWIS 即時水情 read API 授權請求" in markdown
     assert "## 連江縣：連江縣即時水文觀測資料釋出請求" in markdown
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
+    assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
     assert "- 需要人工介入：是" in markdown
     assert "- 追蹤狀態：needs_public_read_api_contract" in markdown
+    assert "- 追蹤狀態：needs_signal_gap_review" in markdown
     assert "- [ ] 確認是否可提供最新觀測 read API" in markdown
     assert "`observed_at`" in markdown
     assert "hydrologic_observation" in markdown
+    assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
 
 
 def test_lienchiang_packet_tracks_p0_hydrologic_backbone_priority() -> None:

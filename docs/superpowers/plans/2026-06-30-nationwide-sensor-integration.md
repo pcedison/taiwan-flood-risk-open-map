@@ -250,6 +250,39 @@ fixture wrote fresh worker-persisted rows into `official_realtime_latest`, and
 documents that hosted readiness requires worker/scheduler persistence evidence
 rather than the API realtime bridge.
 
+## Task 7: Signal Gap Request Packets
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `docs/data-sources/local/generated-official-request-packets.md`
+- Modify: `docs/data-sources/local/generated-official-request-packets.json`
+- Modify: `docs/data-sources/local/official-request-packets.md`
+- Test: `apps/api/tests/test_local_source_request_packets.py`
+- Test: `tests/test_local_source_request_packets_cli.py`
+
+**Interfaces:**
+- Consumes: `sensor_signal_gap_reviews`, `live_smoke_reviews`, and
+  `integration_priority_queue`.
+- Produces: priority-ordered official request packets for authorization,
+  metadata release, live-smoke/status-only review, public API contracts, and
+  missing signal-family follow-up.
+
+- [x] Add failing tests requiring generated request packets to follow
+  `integration_priority_queue` order.
+- [x] Add live-smoke review packets for臺北市與雲林縣 so status-only or gate
+  state cannot be treated as water measurements.
+- [x] Add signal-gap request packets for ready counties whose adapters do not
+  cover every required water signal family.
+- [x] Regenerate Markdown/JSON request packet artifacts.
+
+Completed 2026-06-30: generated request packets now include 18 priority-ordered
+items. The new output starts with 連江縣、金門縣、花蓮縣、臺北市、雲林縣 and
+continues through public API contract and signal-gap follow-up packets. Signal
+gap packets explicitly require official read APIs or documented unavailability
+for missing families such as `flood_depth`, `sewer_water_level`, and
+`pump_or_gate_status`, while warning that `status-only` data must not be
+misrepresented as a measurement.
+
 ## Completion Gates
 
 The full objective is complete only when:
