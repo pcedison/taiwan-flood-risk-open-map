@@ -10,6 +10,14 @@ from app.domain.realtime.local_source_request_packets import (
     render_official_request_packets_markdown,
 )
 
+EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS = [
+    "freshness_policy",
+    "raw_snapshot_retention_policy",
+    "monitored_scheduler_cadence",
+    "hosted_egress_review",
+    "worker_persisted_evidence_path",
+]
+
 
 def test_build_official_request_packets_turns_remaining_blockers_into_requests() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
@@ -43,6 +51,15 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "不要將設備上傳 API 當作查詢 API" in kinmen["request_body"]
     assert "observed_at" in kinmen["required_read_api_fields"]
     assert any("kwis.kinmen.gov.tw" in url for url in kinmen["source_urls"])
+    assert (
+        kinmen["production_operational_requirements"]
+        == EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS
+    )
+    assert "raw snapshot retention" in kinmen["request_body"]
+    assert "scheduler cadence" in kinmen["request_body"]
+    assert "hosted egress" in kinmen["request_body"]
+    assert "worker-persisted evidence" in kinmen["request_body"]
+    assert any("raw snapshot retention" in item for item in kinmen["checklist"])
 
     lienchiang = packets[0]
     assert lienchiang["packet_type"] == "metadata_release_request"
@@ -68,6 +85,10 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status" in lienchiang[
         "request_body"
     ]
+    assert (
+        lienchiang["production_operational_requirements"]
+        == EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS
+    )
 
     miaoli = next(packet for packet in packets if packet["county"] == "\u82d7\u6817\u7e23")
     assert miaoli["packet_type"] == "public_api_contract_request"
@@ -116,6 +137,10 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         for note in taitung["candidate_contract_non_measurement_notes"]
     )
     assert "49 CWA rainfall stations" in taitung["request_body"]
+    assert (
+        taitung["production_operational_requirements"]
+        == EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS
+    )
 
     pingtung = next(packet for packet in packets if packet["county"] == "屏東縣")
     assert pingtung["packet_type"] == "public_api_contract_request"
@@ -140,6 +165,10 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         for note in pingtung["candidate_contract_non_measurement_notes"]
     )
     assert "不得以 fetched_at 偽裝觀測時間" in pingtung["request_body"]
+    assert (
+        pingtung["production_operational_requirements"]
+        == EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS
+    )
 
     taipei = next(packet for packet in packets if packet["county"] == "臺北市")
     assert taipei["packet_type"] == "signal_gap_request"
@@ -169,6 +198,10 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     ]
     assert "既有 production adapter 仍未覆蓋所有必要水資訊訊號" in chiayi_city["request_body"]
     assert "status-only" in chiayi_city["request_body"]
+    assert (
+        chiayi_city["production_operational_requirements"]
+        == EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS
+    )
 
 
 def test_render_official_request_packets_markdown_is_ready_for_outreach() -> None:
@@ -211,6 +244,11 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "not a sewer_water_level read API" in markdown
     assert "not_flood_depth_measurement" in markdown
     assert "image_only_cctv" in markdown
+    assert "- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path" in markdown
+    assert "raw snapshot retention" in markdown
+    assert "scheduler cadence" in markdown
+    assert "hosted egress" in markdown
+    assert "worker-persisted evidence" in markdown
 
 
 def test_lienchiang_packet_tracks_p0_local_direct_release_priority() -> None:

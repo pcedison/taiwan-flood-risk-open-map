@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+PRODUCTION_OPERATIONAL_REQUIREMENTS = [
+    "freshness_policy",
+    "raw_snapshot_retention_policy",
+    "monitored_scheduler_cadence",
+    "hosted_egress_review",
+    "worker_persisted_evidence_path",
+]
+
 
 def build_official_request_packets(
     action_plan: Mapping[str, Any],
@@ -89,7 +97,8 @@ def _authorization_packet(
             "確認 API contract、授權條款與 rate limit",
             "取得測站清冊、座標 metadata 與範例 response",
             "確認資料欄位可滿足 production adapter 必備欄位",
-        ],
+        ]
+        + _production_operational_checklist(),
     } | _authorization_contract_fields(system_name) | _priority_packet_fields(priority_item)
 
 
@@ -100,12 +109,14 @@ def _authorization_request_body(county: str, system_name: str) -> str:
             "既有 read API methods 的正式 Token、可讀範圍與 production 使用條款；"
             "不要將設備上傳 API 當作查詢 API。請協助提供正式 API contract、"
             "申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。"
+            f"{_production_operational_request_suffix()}"
         )
     return (
         f"目前{county}地方直連即時水情來源仍需要官方授權。請確認 {system_name} "
         "是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 "
         "API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata "
         "與範例 response。"
+        f"{_production_operational_request_suffix()}"
     )
 
 
@@ -140,7 +151,7 @@ def _metadata_release_packet(
             "確認是否可加入 Civil IoT 或 WRA 公開主幹",
             "取得站點 ID、觀測時間、測值、單位與座標",
             "確認短期無感測器時的建置計畫或資料釋出時程",
-        ]
+        ] + _production_operational_checklist()
     else:
         signal_summary = "、".join(str(signal) for signal in target_signal_types)
         status_sentence = (
@@ -157,7 +168,8 @@ def _metadata_release_packet(
             "確認是否可提供地方最新觀測 read API",
             "取得站點 ID、觀測時間、測值、單位與座標",
             "確認短期無感測器時的建置計畫或資料釋出時程",
-        ]
+        ] + _production_operational_checklist()
+    request_body = request_body + _production_operational_request_suffix()
     return {
         "county": county,
         "packet_type": "metadata_release_request",
@@ -228,13 +240,15 @@ def _public_api_contract_packet(
             "ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、"
             "站點 metadata 與範例 response。"
             f"{_candidate_contract_request_summary(contract_findings, missing_fields, non_measurement_notes)}"
+            f"{_production_operational_request_suffix()}"
         ),
         "checklist": [
             "確認公開 read API URL 與 response 格式",
             "確認觀測時間、站點 ID、測值、單位與座標欄位",
             "確認授權條款、rate limit 與維運窗口",
             "取得可重跑 live smoke 的範例 response",
-        ],
+        ]
+        + _production_operational_checklist(),
     } | _priority_packet_fields(priority_item)
 
 
@@ -264,13 +278,15 @@ def _live_smoke_review_packet(
             "複核觀測時間、站點 ID、測值、單位、座標與欄位語意。狀態或開關資料"
             "不得替代水位、雨量或淹水深度；若只能提供狀態，需標示為 status-only "
             "診斷線索。"
+            f"{_production_operational_request_suffix()}"
         ),
         "checklist": [
             "重跑 live smoke 並保存 response 範例",
             "確認 observed_at、station_or_device_id、measurement_value、單位與座標",
             "確認狀態或開關欄位不被誤標為水位、雨量或淹水深度",
             "更新 adapter gate、verification log 與 freshness policy",
-        ],
+        ]
+        + _production_operational_checklist(),
     } | _priority_packet_fields(priority_item)
 
 
@@ -304,20 +320,23 @@ def _signal_gap_packet(
             "可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運"
             "狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或"
             "下水道水位量測。"
+            f"{_production_operational_request_suffix()}"
         ),
         "checklist": [
             "確認缺漏 signal families 是否存在官方 read API 或開放資料",
             "確認觀測時間、站點 ID、測值、單位與座標欄位",
             "確認 status-only 資料不會被當成水位、雨量或淹水深度",
             "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
-        ],
+        ]
+        + _production_operational_checklist(),
     } | _priority_packet_fields(priority_item)
 
 
 def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str, Any]:
+    fields = _production_operational_packet_fields()
     if priority_item is None:
-        return {}
-    return {
+        return fields
+    return fields | {
         "priority_rank": priority_item.get("rank"),
         "priority_tier": priority_item.get("priority_tier"),
         "workstream": priority_item.get("workstream"),
@@ -356,6 +375,30 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
             [],
         ),
     }
+
+
+def _production_operational_packet_fields() -> dict[str, Any]:
+    return {
+        "production_operational_requirements": list(
+            PRODUCTION_OPERATIONAL_REQUIREMENTS
+        ),
+    }
+
+
+def _production_operational_request_suffix() -> str:
+    return (
+        " Production 上線前也需確認 freshness policy、raw snapshot retention、"
+        "scheduler cadence、hosted egress review，並走 worker-persisted evidence path。"
+    )
+
+
+def _production_operational_checklist() -> list[str]:
+    return [
+        "確認 freshness policy 與 stale/degraded/failed 門檻",
+        "確認 raw snapshot retention policy 與可稽核保存位置",
+        "確認 scheduler cadence、重試策略與監控告警責任",
+        "確認 hosted egress review 與 worker-persisted evidence path",
+    ]
 
 
 def _non_qualifying_request_summary(reasons: list[Any]) -> str:
@@ -549,6 +592,12 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
     if packet.get("required_read_api_fields"):
         fields = "、".join(f"`{field}`" for field in packet["required_read_api_fields"])
         lines.append(f"- Production read API 必備欄位：{fields}")
+    if packet.get("production_operational_requirements"):
+        requirements = ", ".join(
+            str(requirement)
+            for requirement in packet["production_operational_requirements"]
+        )
+        lines.append(f"- Production ops gates: {requirements}")
     if packet.get("candidate_contract_missing_fields"):
         fields = "、".join(
             f"`{field}`" for field in packet["candidate_contract_missing_fields"]

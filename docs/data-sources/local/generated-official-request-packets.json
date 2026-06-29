@@ -36,11 +36,22 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前連江縣已由中央主幹補足最低水文脈絡，但地方公開資料仍只有靜態或 metadata 類資料。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等地方直連 read API。 已查核但排除的官方線索：公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API；公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。目前中央最低水文骨幹已補足；仍需補足地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status。",
+    "request_body": "目前連江縣已由中央主幹補足最低水文脈絡，但地方公開資料仍只有靜態或 metadata 類資料。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等地方直連 read API。 已查核但排除的官方線索：公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API；公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。目前中央最低水文骨幹已補足；仍需補足地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認是否可提供地方最新觀測 read API",
       "取得站點 ID、觀測時間、測值、單位與座標",
-      "確認短期無感測器時的建置計畫或資料釋出時程"
+      "確認短期無感測器時的建置計畫或資料釋出時程",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 1,
     "priority_tier": "P0",
@@ -86,12 +97,16 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前金門縣地方直連即時水情來源仍需要官方授權。請確認 KWIS 既有 read API methods 的正式 Token、可讀範圍與 production 使用條款；不要將設備上傳 API 當作查詢 API。請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。",
+    "request_body": "目前金門縣地方直連即時水情來源仍需要官方授權。請確認 KWIS 既有 read API methods 的正式 Token、可讀範圍與 production 使用條款；不要將設備上傳 API 當作查詢 API。請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認是否可提供最新觀測 read API",
       "確認 API contract、授權條款與 rate limit",
       "取得測站清冊、座標 metadata 與範例 response",
-      "確認資料欄位可滿足 production adapter 必備欄位"
+      "確認資料欄位可滿足 production adapter 必備欄位",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
     ],
     "api_contract_risk": "token_gated_read_methods_require_authorization",
     "insufficient_api_purposes": [
@@ -123,6 +138,13 @@
     ],
     "unauthorized_smoke_result": "Blank-token GET smoke against KWIS_Get_Pump_Basic_Unit_Data, KWIS_Get_Water_Level_Gauge_Basic_Unit_Data, and KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data returned ErrMsg (7) invalid Token with Data: [].",
     "request_clarification": "公開文件仍包含第三方設備 upload-only 介接流程，公開服務另已列出 token-gated read API methods，但空 Token smoke 只回 Data: []；production adapter 仍需縣府核發正式 Token、可讀範圍、rate limit 與 response schema。",
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
+    ],
     "priority_rank": 2,
     "priority_tier": "P0",
     "workstream": "request_official_authorization",
@@ -157,12 +179,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前花蓮縣地方直連即時水情來源仍需要官方授權。請確認 Senslink/行動水情 是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。",
+    "request_body": "目前花蓮縣地方直連即時水情來源仍需要官方授權。請確認 Senslink/行動水情 是否可提供最新觀測 read API，不是設備上傳 API。若可提供，請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認是否可提供最新觀測 read API",
       "確認 API contract、授權條款與 rate limit",
       "取得測站清冊、座標 metadata 與範例 response",
-      "確認資料欄位可滿足 production adapter 必備欄位"
+      "確認資料欄位可滿足 production adapter 必備欄位",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 3,
     "priority_tier": "P1",
@@ -212,12 +245,23 @@
     "candidate_contract_non_measurement_notes": [
       "2026-06-30 review: the Taitung evidence is a news article/audit summary, not a latest-observation read API; realtime camera references are image-only context, and central CWA/WRA station integration does not satisfy local pump_or_gate_status production ingestion."
     ],
-    "request_body": "目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 curl smoke: Taitung County Government news page is a public HTML flood-control article citing WRA Eighth River Management Office; it says flood hotspots use a water-monitoring system with flood sensors, water-level stations, rain gauges, and realtime cameras, but exposes no public read API, observation rows, or station metadata file.；2026-06-30 official audit review: Audit Office page says Taitung County Government built a flood and inundation warning system and later integrated 49 CWA rainfall stations plus 9 WRA water-level stations; this confirms system context but not a local-government latest-observation read API contract. 目前缺少 production 必備欄位：observed_at、station_or_device_id、measurement_value、measurement_unit_or_type、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 review: the Taitung evidence is a news article/audit summary, not a latest-observation read API; realtime camera references are image-only context, and central CWA/WRA station integration does not satisfy local pump_or_gate_status production ingestion.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。",
+    "request_body": "目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 curl smoke: Taitung County Government news page is a public HTML flood-control article citing WRA Eighth River Management Office; it says flood hotspots use a water-monitoring system with flood sensors, water-level stations, rain gauges, and realtime cameras, but exposes no public read API, observation rows, or station metadata file.；2026-06-30 official audit review: Audit Office page says Taitung County Government built a flood and inundation warning system and later integrated 49 CWA rainfall stations plus 9 WRA water-level stations; this confirms system context but not a local-government latest-observation read API contract. 目前缺少 production 必備欄位：observed_at、station_or_device_id、measurement_value、measurement_unit_or_type、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 review: the Taitung evidence is a news article/audit summary, not a latest-observation read API; realtime camera references are image-only context, and central CWA/WRA station integration does not satisfy local pump_or_gate_status production ingestion.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認公開 read API URL 與 response 格式",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認授權條款、rate limit 與維運窗口",
-      "取得可重跑 live smoke 的範例 response"
+      "取得可重跑 live smoke 的範例 response",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 4,
     "priority_tier": "P2",
@@ -263,12 +307,23 @@
     "candidate_contract_non_measurement_notes": [
       "2026-06-30 curl smoke: the public page exposes only an HTML article/JPGs; it is not a sewer_water_level read API and cannot satisfy pump_or_gate_status."
     ],
-    "request_body": "目前苗栗縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 curl smoke: official Miaoli page is a public HTML results-review article for the 114年度雨水下水道即時水情監測系統建置計畫; it states 58 water-level monitoring stations across 10 town/city urban-planning areas.；2026-06-30 curl smoke: the 114年度雨水下水道即時水情監測系統建置計畫 article says water gauges receive monthly maintenance and monthly reports track uptime, abnormalities, and improvements, but it exposes no latest-observation read API or station metadata file. 目前缺少 production 必備欄位：observed_at、station_or_device_id、measurement_value、measurement_unit_or_type、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 curl smoke: the public page exposes only an HTML article/JPGs; it is not a sewer_water_level read API and cannot satisfy pump_or_gate_status.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。",
+    "request_body": "目前苗栗縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 curl smoke: official Miaoli page is a public HTML results-review article for the 114年度雨水下水道即時水情監測系統建置計畫; it states 58 water-level monitoring stations across 10 town/city urban-planning areas.；2026-06-30 curl smoke: the 114年度雨水下水道即時水情監測系統建置計畫 article says water gauges receive monthly maintenance and monthly reports track uptime, abnormalities, and improvements, but it exposes no latest-observation read API or station metadata file. 目前缺少 production 必備欄位：observed_at、station_or_device_id、measurement_value、measurement_unit_or_type、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 curl smoke: the public page exposes only an HTML article/JPGs; it is not a sewer_water_level read API and cannot satisfy pump_or_gate_status.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認公開 read API URL 與 response 格式",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認授權條款、rate limit 與維運窗口",
-      "取得可重跑 live smoke 的範例 response"
+      "取得可重跑 live smoke 的範例 response",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 5,
     "priority_tier": "P2",
@@ -316,12 +371,23 @@
       "2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.",
       "2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; it exposes CCTV image URLs for river monitoring, not a water-level measurement value."
     ],
-    "request_body": "目前屏東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.；2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata. 目前缺少 production 必備欄位：observed_at、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.；2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; it exposes CCTV image URLs for river monitoring, not a water-level measurement value.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。",
+    "request_body": "目前屏東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.；2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata. 目前缺少 production 必備欄位：observed_at、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.；2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; it exposes CCTV image URLs for river monitoring, not a water-level measurement value.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認公開 read API URL 與 response 格式",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認授權條款、rate limit 與維運窗口",
-      "取得可重跑 live smoke 的範例 response"
+      "取得可重跑 live smoke 的範例 response",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 6,
     "priority_tier": "P2",
@@ -363,12 +429,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前嘉義市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前嘉義市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 7,
     "priority_tier": "P2",
@@ -413,12 +490,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前桃園市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前桃園市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 8,
     "priority_tier": "P2",
@@ -461,12 +549,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前澎湖縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前澎湖縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 9,
     "priority_tier": "P2",
@@ -513,12 +612,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前臺中市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前臺中市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 10,
     "priority_tier": "P2",
@@ -561,12 +671,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前臺南市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前臺南市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 11,
     "priority_tier": "P2",
@@ -625,12 +746,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前南投縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前南投縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 12,
     "priority_tier": "P2",
@@ -674,12 +806,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前基隆市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前基隆市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 13,
     "priority_tier": "P2",
@@ -722,12 +865,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前宜蘭縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前宜蘭縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 14,
     "priority_tier": "P2",
@@ -772,12 +926,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前新北市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前新北市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 15,
     "priority_tier": "P2",
@@ -825,12 +990,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前新竹縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前新竹縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 16,
     "priority_tier": "P2",
@@ -880,12 +1056,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前臺北市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前臺北市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 17,
     "priority_tier": "P2",
@@ -933,12 +1120,23 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前雲林縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。",
+    "request_body": "目前雲林縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
     "checklist": [
       "確認缺漏 signal families 是否存在官方 read API 或開放資料",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
       "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口"
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
     ],
     "priority_rank": 18,
     "priority_tier": "P2",

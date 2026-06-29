@@ -92,6 +92,16 @@ signal-gap/status-only 追蹤，避免把 `status-only` 診斷線索混為正式
    metadata join 出座標。
 6. `official_source_url_and_license`：官方來源 URL、使用授權、更新頻率或維運單位。
 
+## Production operational gates
+
+所有授權、公開 API contract、metadata release 與 signal-gap 請求都必須同時確認：
+
+- `freshness_policy`：fresh/degraded/stale/failed 門檻與觀測延遲可判讀。
+- `raw_snapshot_retention_policy`：worker 可保存 raw snapshot，且保留期限與可稽核位置明確。
+- `monitored_scheduler_cadence`：production scheduler cadence、重試策略與監控告警責任明確。
+- `hosted_egress_review`：正式 hosted runtime 對該 upstream 的 egress、TLS、授權與速率限制已審核。
+- `worker_persisted_evidence_path`：hosted/production 依 ADR-0010 走 worker-persisted evidence，不用 API realtime bridge 當正式資料路徑。
+
 ## 金門縣：KWIS read API 授權請求
 
 目前狀態：`needs_application`，地方直連尚未完成。
@@ -124,6 +134,9 @@ KWIS ASMX/WSDL 已列出 token-gated read methods，但空 Token smoke 只回
 
 - 請金門縣政府核發 read-side Token，並確認上述 KWIS read methods 的 production 使用範圍，不把設備上傳 API 當作查詢 API。
 - 請提供正式 API contract、申請方式、授權條款、rate limit、測站清冊與範例 response。
+- 請同步確認 freshness policy、raw snapshot retention、scheduler cadence、
+  hosted egress review 與 worker-persisted evidence path，避免取得 Token 後仍無法
+  進 production worker ingestion。
 - 需要的資料類型優先序：淹水感測器、雨水下水道水位、水位站、抽水站內外水位、
   水門或閘門外水位。
 

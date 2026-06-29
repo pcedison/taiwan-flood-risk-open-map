@@ -559,6 +559,36 @@ This task makes the P0 open-data-release monitor machine-readable so scheduled
 checks or alerts can distinguish "new live candidate appeared" from "only
 metadata remains visible" and "no candidate in the export".
 
+## Task 18: Production Ops Gates In Official Request Packets
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `apps/api/tests/test_local_source_request_packets.py`
+- Modify: `tests/test_local_source_request_packets_cli.py`
+- Modify: generated request packet artifacts and local source docs.
+
+**Interfaces:**
+- Consumes: local-source action plan request packets for authorization,
+  metadata release, public API contract, live-smoke review, and signal-gap
+  follow-up.
+- Produces: `production_operational_requirements` on every request packet:
+  `freshness_policy`, `raw_snapshot_retention_policy`,
+  `monitored_scheduler_cadence`, `hosted_egress_review`, and
+  `worker_persisted_evidence_path`.
+
+- [x] Write failing tests proving request packets expose production operational
+  gates in JSON and Markdown outputs.
+- [x] Add raw snapshot retention, scheduler cadence, hosted egress review, and
+  worker-persisted evidence path to request bodies/checklists.
+- [x] Regenerate official request packet artifacts.
+- [x] Document the operational gates in the manual request-packet guide.
+
+Completed 2026-06-30: Official requests now ask for more than API columns.
+They explicitly collect the production-readiness evidence needed before any
+local source can become hosted worker ingestion. This does not mean credentials
+or hosted egress approvals have been granted; it makes those gates visible and
+trackable in the source-contract workflow.
+
 ## Completion Gates
 
 The full objective is complete only when:

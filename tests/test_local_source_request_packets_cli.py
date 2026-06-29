@@ -8,6 +8,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "local-source-request-packets.py"
+EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS = [
+    "freshness_policy",
+    "raw_snapshot_retention_policy",
+    "monitored_scheduler_cadence",
+    "hosted_egress_review",
+    "worker_persisted_evidence_path",
+]
 
 
 def test_local_source_request_packets_cli_emits_json() -> None:
@@ -45,6 +52,10 @@ def test_local_source_request_packets_cli_emits_json() -> None:
         "連江自來水廠水庫水位月報",
         "連江縣資訊公開查詢系統即時監測值",
     ]
+    assert (
+        payload[0]["production_operational_requirements"]
+        == EXPECTED_PRODUCTION_OPERATIONAL_REQUIREMENTS
+    )
     chiayi_city = next(packet for packet in payload if packet["county"] == "嘉義市")
     assert chiayi_city["packet_type"] == "signal_gap_request"
     assert chiayi_city["target_signal_types"] == [
@@ -105,3 +116,5 @@ def test_local_source_request_packets_cli_writes_markdown_output(
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
     assert "- 候選系統缺少欄位：`observed_at`、`longitude_latitude_or_joinable_station_metadata`" in markdown
     assert "not_flood_depth_measurement" in markdown
+    assert "- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path" in markdown
+    assert "worker-persisted evidence" in markdown
