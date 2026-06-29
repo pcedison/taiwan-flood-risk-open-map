@@ -56,6 +56,14 @@ def test_local_source_request_packets_cli_emits_json() -> None:
     assert yunlin["packet_type"] == "signal_gap_request"
     assert yunlin["status_only_source_names"] == ["雲林 iflood 淹水感測狀態"]
     assert yunlin["target_signal_types"] == ["flood_depth"]
+    pingtung = next(packet for packet in payload if packet["county"] == "屏東縣")
+    assert pingtung["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert "not_flood_depth_measurement" in " ".join(
+        pingtung["candidate_contract_non_measurement_notes"]
+    )
 
 
 def test_local_source_request_packets_cli_writes_markdown_output(
@@ -95,3 +103,5 @@ def test_local_source_request_packets_cli_writes_markdown_output(
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
     assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
+    assert "- 候選系統缺少欄位：`observed_at`、`longitude_latitude_or_joinable_station_metadata`" in markdown
+    assert "not_flood_depth_measurement" in markdown

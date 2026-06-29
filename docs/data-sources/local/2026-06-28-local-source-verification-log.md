@@ -31,8 +31,8 @@
 | 嘉義縣 | `https://api.floodsolution.aiot.ing/api/public/devices/RFD` | 免 key JSON；2026-06-28 回傳 253 站，`latest.time`、`latest.data.waterDepth`、`lon`、`lat`、鄉鎮村里可讀。`/api/v1` 管理端點仍需登入，不納入。 | `ready_implemented` | 已新增 `local.chiayi_county.flood_sensor`；靜態抽水站 CSV 保留 metadata 候選。 |
 | 高雄市 | `https://wrbswi.kcg.gov.tw/SFC/api/sewer/rt`、`https://wrbswi.kcg.gov.tw/SFC/api/khfloodinfo/sta_info/lastest/wrs_flooding_sensor`、`https://wrbswi.kcg.gov.tw/SFC/api/rain/rt`、`https://wrbswi.kcg.gov.tw/SFC/api/rain/base` | 免 key JSON；sewer/rt 回傳 296 筆下水道水位，含 `time`、`stage`、警戒值、座標；wrs_flooding_sensor 回傳 171 筆淹水感測，含 `time`、`obs_value`、座標。sewer/rt live payload 混入 1 筆 2027 未來時間，adapter 保留 raw 但 normalized reject。2026-06-29 補查：rain/rt live adapter 87 筆 normalized、rain/base 88 筆 metadata，`ST_NO` join 可取得 `DATE`、站名、地址與 WGS84 座標；站數會隨平台即時狀態浮動。 | `ready_implemented` | 已新增 `local.kaohsiung.sewer_water_level`、`local.kaohsiung.flood_sensor` 與 `local.kaohsiung.rainfall`；地方雨量只補強 CWA 空間密度，不取代 CWA。 |
 | 宜蘭縣 | `https://wragis.e-land.gov.tw/arcgis/rest/services/HDST/防汛儀表板/MapServer/{layer}/query?where=1=1&outFields=*&f=json` | 免 key ArcGIS REST JSON；layer 0 回傳 85 筆淹水感測、layer 2 回傳 154 筆水位計，含 `write_date` epoch milliseconds、`water_inner`、WGS84 座標。 | `ready_implemented` | 已新增 `local.yilan.flood_sensor` 與 `local.yilan.water_level`。 |
-| 屏東縣 | `https://pteoc.pthg.gov.tw/RainStation` | HTML 可讀，表格含站名與 10 分鐘/1/3/6/12/24 小時雨量值；細節頁缺明確觀測時間與座標 | `needs_review` 候選，不可 production | 不把 fetched_at 偽裝成 observed_at；需找到有 timestamp/coordinate 的 API 或官方 metadata join。 |
-| 屏東縣 | `https://pteoc.pthg.gov.tw/River`、`/Flood`、`/Crawler` | HTML 可讀；`/River` 只列未達警戒狀態，`/Flood` 是鄉鎮連結，`/Crawler` 主要是影像 | `candidate` | 不 scrape 成 production realtime evidence。 |
+| 屏東縣 | `https://pteoc.pthg.gov.tw/RainStation` | HTML 可讀；2026-06-30 重查 `RainStation/Details/C0R190`、`RainStation/Details/01Q610`，表格含站名、雨量(mm)、10 分鐘、1/3/6/12/24 小時雨量值，但缺明確 `observed_at` 與可 join WGS84 站點 metadata。 | `needs_review` 候選，不可 production | 不把 `fetched_at` 偽裝成 `observed_at`；需找到有 timestamp/coordinate 的 read API 或官方 metadata join。 |
+| 屏東縣 | `https://pteoc.pthg.gov.tw/River`、`/Flood`、`/Crawler` | HTML 可讀；2026-06-30 重查 `Flood/Details/900` 是雨量警戒狀態與 1H/3H/6H 門檻，不是淹水深度；`Crawler/Details/1` 是河川監測 CCTV 影像，不是水位量測。 | `candidate_contract_blocker` | 不 scrape 成 production realtime evidence；請求官方 JSON/CSV/XML/ArcGIS/SensorThings read API contract 與 station metadata。 |
 | 屏東縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt` | 免 key SOAP/ASMX JSON；CityCode `10013`，Supplier=`屏東縣政府` 20 站；2026-06-28 smoke：fetched/normalized 20。 | `ready_implemented` | 已新增 `local.pingtung.flood_sensor`；PTEOC HTML 仍不可 production。 |
 | 花蓮縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；`https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index` | FHY 免 key SOAP/ASMX JSON；CityCode `10015`，Supplier=`花蓮縣政府` 13 站；2026-06-28 smoke：fetched/normalized 13。Senslink 首頁 200，但水情/路淹/抽水站/看板頁 302 到登入。 | `ready_implemented` + `needs_application` | 已新增 `local.hualien.flood_sensor`；Senslink 更完整 read API 仍需帳密或官方授權。 |
 | 臺東縣 | FHY Broker `GetFHYFloodSensorStationByCityCode` + `GetFHYFloodSensorInfoRt`；臺東洪水與淹水預警系統線索 | FHY 免 key SOAP/ASMX JSON；CityCode `10014`，Supplier=`臺東縣政府` 2 站；2026-06-28 smoke：fetched/normalized 2。預警系統仍未找到公開 API endpoint。 | `ready_implemented` + `candidate` | 已新增 `local.taitung.flood_sensor`；臺東預警系統仍等待公開 read API contract。 |
@@ -53,7 +53,7 @@
 | 雲林縣 | iflood station API 的淹水感測類 | 200 JSON，具 `latestUpdateTime`、站點與座標，但未曝露淹水深度測值；2026-06-30 已改為 `status_only` 事件類型，source weight 低且沒有 realtime risk factor。 | `status_only_ready` + `needs_measurement_value` | 保留既有 `local.yunlin.water_level`；淹水感測可作附近狀態線索，但仍需找 depth/detail API 或官方欄位文件才可補 `flood_depth`。 |
 | 嘉義縣 | 智慧防汛管理型線索 | 查核頁在目前 runtime 觸發 `DH_KEY_TOO_SMALL` SSL 錯誤；公開 RFD API 已 production | `needs_observed_time` / 非阻塞 | 不依賴管理型 `/api/v1`；繼續操作已落地 `local.chiayi_county.flood_sensor`。 |
 | 高雄市 | SFC `rain/rt` + `rain/base` | 200 JSON；live adapter fetched/normalized 87、rejected 0，metadata 88 筆 | `promotion_ready` → `ready_implemented` | 已新增 `local.kaohsiung.rainfall`；地方雨量只補強 CWA。 |
-| 屏東縣 | PTEOC `/RainStation` | 200 HTML；有雨量值，但缺明確觀測時間、站點 id 與座標；不需登入 | `needs_observed_time` | 不把 fetched_at 當 observed_at；需要公開 API 或官方 metadata join。 |
+| 屏東縣 | PTEOC `/RainStation`、`/Flood`、`/Crawler` | 200 HTML；`/RainStation/Details/*` 有雨量窗格但缺明確觀測時間與座標；`/Flood/Details/*` 為雨量警戒門檻；`/Crawler/Details/*` 為 CCTV 影像。 | `needs_public_read_api_contract` | 不把 `fetched_at` 當 `observed_at`；需要公開 API 或官方 metadata join，並將非量測頁面保留為 contract blocker 證據。 |
 | 臺東縣 | 洪水與淹水預警系統線索 | 20 秒 timeout | `blocked_timeout` | 保留既有 `local.taitung.flood_sensor`；其他系統需公開 read API contract。 |
 
 ## 可實作性門檻
@@ -69,7 +69,9 @@
 ## 後續工作排序
 
 1. **屏東縣**：優先找 `pteoc.pthg.gov.tw` 是否有非 HTML 的雨量/水位 JSON API，
-   或官方 station metadata 可 join。若只有 HTML 且無時間戳，維持 `needs_review`。
+   或官方 station metadata 可 join。已確認 `/Flood/Details/*` 與
+   `/Crawler/Details/*` 不可當量測；若只有 HTML 且無時間戳，
+   維持 `needs_public_read_api_contract`。
 2. **雲林縣淹水感測**：追查是否有 station detail / measure API 曝露 depth；
    未確認前不得以 `alarmState` 當作淹水深度。`alarmState` 目前只作
    `status_only` 狀態線索與覆蓋診斷。

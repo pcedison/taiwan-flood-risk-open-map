@@ -410,6 +410,37 @@ is 22. This is not full nationwide completion: 金門縣 and 連江縣 still lac
 complete local-direct production sources, and multiple ready counties still
 have documented signal-family gaps.
 
+## Task 13: Pingtung PTEOC Contract-Blocker Evidence
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `apps/api/app/api/routes/admin.py`
+- Modify: `docs/api/openapi.yaml`
+- Modify: generated request packet artifacts and local source docs.
+
+**Interfaces:**
+- Consumes: PTEOC `/RainStation/Details/*`, `/Flood/Details/*`, and
+  `/Crawler/Details/*` public HTML.
+- Produces: structured `candidate_contract_*` fields in coverage/action-plan/admin
+  outputs and official request packets, while keeping PTEOC out of production
+  ingestion until an official read API or station metadata join is available.
+
+- [x] Write failing tests proving PTEOC candidate pages expose missing fields and
+  non-measurement pages as structured contract blockers.
+- [x] Record RainStation missing `observed_at` and joinable WGS84 metadata.
+- [x] Mark Flood detail pages as warning-threshold/status pages, not flood-depth
+  measurements.
+- [x] Mark Crawler detail pages as CCTV image pages, not water-level measurements.
+- [x] Regenerate request packet artifacts and update OpenAPI/docs.
+
+Completed 2026-06-30: 屏東縣 still has `local.pingtung.flood_sensor` for FHY
+government-supplier flood sensors. PTEOC remains a public API contract blocker;
+it must not be promoted by scraping HTML or by using `fetched_at` as
+`observed_at`.
+
 ## Completion Gates
 
 The full objective is complete only when:

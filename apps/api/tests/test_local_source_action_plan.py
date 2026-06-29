@@ -81,6 +81,23 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert "pteoc.pthg.gov.tw/RainStation" in " ".join(
         public_contract_by_county["屏東縣"]["candidate_source_urls"]
     )
+    pingtung_contract = public_contract_by_county["屏東縣"]
+    assert pingtung_contract["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert any(
+        "RainStation/Details" in finding and "10分鐘雨量" in finding
+        for finding in pingtung_contract["candidate_contract_findings"]
+    )
+    assert any(
+        "Flood/Details" in note and "not_flood_depth_measurement" in note
+        for note in pingtung_contract["candidate_contract_non_measurement_notes"]
+    )
+    assert any(
+        "Crawler/Details" in note and "image_only_cctv" in note
+        for note in pingtung_contract["candidate_contract_non_measurement_notes"]
+    )
 
     live_smoke_by_county = {
         item["county"]: item for item in plan["live_smoke_reviews"]
@@ -106,6 +123,11 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert priority[1]["workstream"] == "request_official_authorization"
     assert "local_direct_source" in priority[1]["why_now"]
     assert "observed_at" in priority[1]["required_read_api_fields"]
+    priority_by_county = {item["county"]: item for item in priority}
+    assert priority_by_county["屏東縣"]["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
 
     signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
     assert "臺北市" in signal_gaps

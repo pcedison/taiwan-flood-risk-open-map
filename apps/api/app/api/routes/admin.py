@@ -347,6 +347,13 @@ def list_admin_local_source_coverage(
                 missing_signal_types=list(record.missing_signal_types),
                 candidate_source_names=list(record.candidate_source_names),
                 candidate_source_urls=list(record.candidate_source_urls),
+                candidate_contract_findings=list(record.candidate_contract_findings),
+                candidate_contract_missing_fields=list(
+                    record.candidate_contract_missing_fields
+                ),
+                candidate_contract_non_measurement_notes=list(
+                    record.candidate_contract_non_measurement_notes
+                ),
                 metadata_source_names=list(record.metadata_source_names),
                 metadata_source_urls=list(record.metadata_source_urls),
                 status_only_source_names=list(record.status_only_source_names),

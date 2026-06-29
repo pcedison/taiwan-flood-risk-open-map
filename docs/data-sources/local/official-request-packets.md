@@ -38,13 +38,19 @@ python scripts/local-source-request-packets.py --format json --output docs/data-
 - 金門縣：KWIS read API 授權。
 - 花蓮縣：Senslink / 行動水情 read API 授權。
 - 臺北市：疏散門 live smoke / 欄位語意複核。
-- 臺東縣、苗栗縣、屏東縣：public read API contract 與站點 metadata。
+- 臺東縣、苗栗縣、屏東縣：public read API contract 與站點 metadata；屏東 PTEOC
+  已補上 2026-06-30 查核事實，`/RainStation` 缺 `observed_at` 與可 join
+  座標 metadata，`/Flood` 為雨量警戒門檻，`/Crawler` 為 CCTV 影像，不可當
+  淹水深度或水位量測。
 - 嘉義市、桃園市、澎湖縣、臺中市、臺南市、南投縣、基隆市、宜蘭縣、
   新北市、新竹縣、雲林縣：既有 production adapter 之外的水資訊訊號缺口補齊；
   雲林 iflood `alarmState` 已保留為 status-only 診斷線索，不作淹水深度。
 
 各類請求包都會列出 production read API 必備欄位；signal-gap 請求包會明確
 要求不要把 `status-only` 資料當成水位、雨量、淹水深度或下水道水位量測。
+候選系統若只有 HTML、警戒狀態或影像，也會列出缺少欄位與不可當量測的理由；
+未取得官方 read API 或可 join station metadata 前，不得以 `fetched_at` 偽裝
+`observed_at`。
 
 2026-06-29 版 action plan 已產生的正式請求包涵蓋：
 

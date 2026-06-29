@@ -204,6 +204,11 @@ def _public_api_contract_packet(
     county = str(item["county"])
     source_urls = list(item.get("candidate_source_urls", []))
     required_fields = list(item.get("required_read_api_fields", []))
+    contract_findings = list(item.get("candidate_contract_findings", []))
+    missing_fields = list(item.get("candidate_contract_missing_fields", []))
+    non_measurement_notes = list(
+        item.get("candidate_contract_non_measurement_notes", [])
+    )
     return {
         "county": county,
         "packet_type": "public_api_contract_request",
@@ -214,11 +219,15 @@ def _public_api_contract_packet(
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
         "required_read_api_fields": required_fields,
+        "candidate_contract_findings": contract_findings,
+        "candidate_contract_missing_fields": missing_fields,
+        "candidate_contract_non_measurement_notes": non_measurement_notes,
         "request_body": (
             f"目前{county}已有官方系統或成果頁線索，但尚未找到可公開機器讀取的"
             "最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、"
             "ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、"
             "站點 metadata 與範例 response。"
+            f"{_candidate_contract_request_summary(contract_findings, missing_fields, non_measurement_notes)}"
         ),
         "checklist": [
             "確認公開 read API URL 與 response 格式",
@@ -326,6 +335,18 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
             "non_qualifying_source_reasons",
             [],
         ),
+        "candidate_contract_findings": priority_item.get(
+            "candidate_contract_findings",
+            [],
+        ),
+        "candidate_contract_missing_fields": priority_item.get(
+            "candidate_contract_missing_fields",
+            [],
+        ),
+        "candidate_contract_non_measurement_notes": priority_item.get(
+            "candidate_contract_non_measurement_notes",
+            [],
+        ),
     }
 
 
@@ -334,6 +355,33 @@ def _non_qualifying_request_summary(reasons: list[Any]) -> str:
         return ""
     reason_text = "；".join(str(reason).rstrip("。") for reason in reasons)
     return f" 已查核但排除的官方線索：{reason_text}。"
+
+
+def _candidate_contract_request_summary(
+    findings: list[Any],
+    missing_fields: list[Any],
+    non_measurement_notes: list[Any],
+) -> str:
+    details: list[str] = []
+    if findings:
+        details.append("已查核頁面事實：" + "；".join(str(item).rstrip("。") for item in findings))
+    if missing_fields:
+        details.append(
+            "目前缺少 production 必備欄位："
+            + "、".join(str(field) for field in missing_fields)
+        )
+    if non_measurement_notes:
+        details.append(
+            "不可當量測來源："
+            + "；".join(str(item).rstrip("。") for item in non_measurement_notes)
+        )
+    if not details:
+        return ""
+    return (
+        " "
+        + " ".join(details)
+        + "；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。"
+    )
 
 
 def _packet_sort_key(packet: Mapping[str, Any]) -> tuple[int, str]:
@@ -485,6 +533,20 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
     if packet.get("required_read_api_fields"):
         fields = "、".join(f"`{field}`" for field in packet["required_read_api_fields"])
         lines.append(f"- Production read API 必備欄位：{fields}")
+    if packet.get("candidate_contract_missing_fields"):
+        fields = "、".join(
+            f"`{field}`" for field in packet["candidate_contract_missing_fields"]
+        )
+        lines.append(f"- 候選系統缺少欄位：{fields}")
+    if packet.get("candidate_contract_findings"):
+        lines.append("- 候選系統查核事實：")
+        lines.extend(f"  - {finding}" for finding in packet["candidate_contract_findings"])
+    if packet.get("candidate_contract_non_measurement_notes"):
+        lines.append("- 候選系統不可當量測來源：")
+        lines.extend(
+            f"  - {note}"
+            for note in packet["candidate_contract_non_measurement_notes"]
+        )
     if packet.get("target_signal_types"):
         signal_label = "待補水資訊訊號"
         if packet.get("packet_type") == "metadata_release_request":

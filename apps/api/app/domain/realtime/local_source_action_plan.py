@@ -102,6 +102,13 @@ def _public_api_contract_review(record: LocalSourceCoverageRecord) -> dict[str, 
         "reason": record.blocking_reason,
         "candidate_source_names": list(record.candidate_source_names),
         "candidate_source_urls": list(record.candidate_source_urls),
+        "candidate_contract_findings": list(record.candidate_contract_findings),
+        "candidate_contract_missing_fields": list(
+            record.candidate_contract_missing_fields
+        ),
+        "candidate_contract_non_measurement_notes": list(
+            record.candidate_contract_non_measurement_notes
+        ),
         "requested_counterparty": _requested_counterparty(record),
         "tracking_status": "needs_public_read_api_contract",
         "last_followed_up_at": None,
@@ -206,6 +213,13 @@ def _integration_priority_item(
         "production_adapter_keys": list(record.production_adapter_keys),
         "candidate_source_names": list(record.candidate_source_names),
         "candidate_source_urls": list(record.candidate_source_urls),
+        "candidate_contract_findings": list(record.candidate_contract_findings),
+        "candidate_contract_missing_fields": list(
+            record.candidate_contract_missing_fields
+        ),
+        "candidate_contract_non_measurement_notes": list(
+            record.candidate_contract_non_measurement_notes
+        ),
         "status_only_source_names": list(record.status_only_source_names),
         "status_only_source_urls": list(record.status_only_source_urls),
         "status_only_signal_types": list(record.status_only_signal_types),

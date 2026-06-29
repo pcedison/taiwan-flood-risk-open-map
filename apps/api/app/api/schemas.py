@@ -141,6 +141,9 @@ class LocalSourceCoverage(ContractModel):
     missing_signal_types: list[str] = Field(default_factory=list)
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    candidate_contract_findings: list[str] = Field(default_factory=list)
+    candidate_contract_missing_fields: list[str] = Field(default_factory=list)
+    candidate_contract_non_measurement_notes: list[str] = Field(default_factory=list)
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
     status_only_source_names: list[str] = Field(default_factory=list)
@@ -221,6 +224,9 @@ class LocalSourcePublicApiContractReview(ContractModel):
     reason: str | None = None
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    candidate_contract_findings: list[str] = Field(default_factory=list)
+    candidate_contract_missing_fields: list[str] = Field(default_factory=list)
+    candidate_contract_non_measurement_notes: list[str] = Field(default_factory=list)
     requested_counterparty: str
     tracking_status: str
     last_followed_up_at: datetime | None = None
@@ -255,6 +261,9 @@ class LocalSourceIntegrationPriorityItem(ContractModel):
     production_adapter_keys: list[str] = Field(default_factory=list)
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    candidate_contract_findings: list[str] = Field(default_factory=list)
+    candidate_contract_missing_fields: list[str] = Field(default_factory=list)
+    candidate_contract_non_measurement_notes: list[str] = Field(default_factory=list)
     status_only_source_names: list[str] = Field(default_factory=list)
     status_only_source_urls: list[str] = Field(default_factory=list)
     status_only_signal_types: list[str] = Field(default_factory=list)

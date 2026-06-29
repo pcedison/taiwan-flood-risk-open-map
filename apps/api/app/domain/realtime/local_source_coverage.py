@@ -110,6 +110,9 @@ class LocalSourceCoverageRecord:
     central_backbone_adapter_keys: tuple[str, ...] = NATIONAL_BASELINE_BACKBONE_KEYS
     candidate_source_names: tuple[str, ...] = ()
     candidate_source_urls: tuple[str, ...] = ()
+    candidate_contract_findings: tuple[str, ...] = ()
+    candidate_contract_missing_fields: tuple[str, ...] = ()
+    candidate_contract_non_measurement_notes: tuple[str, ...] = ()
     metadata_source_names: tuple[str, ...] = ()
     metadata_source_urls: tuple[str, ...] = ()
     status_only_source_names: tuple[str, ...] = ()
@@ -620,6 +623,22 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://pteoc.pthg.gov.tw/River",
             "https://pteoc.pthg.gov.tw/Flood",
             "https://pteoc.pthg.gov.tw/Crawler",
+        ),
+        candidate_contract_findings=(
+            "2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; "
+            "the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.",
+            "2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, "
+            "but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata.",
+        ),
+        candidate_contract_missing_fields=(
+            "observed_at",
+            "longitude_latitude_or_joinable_station_metadata",
+        ),
+        candidate_contract_non_measurement_notes=(
+            "2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; "
+            "it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.",
+            "2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; "
+            "it exposes CCTV image URLs for river monitoring, not a water-level measurement value.",
         ),
         notes=(
             "2026-06-28 smoke：FHY Broker station/realtime API 免 key，CityCode 10013；"

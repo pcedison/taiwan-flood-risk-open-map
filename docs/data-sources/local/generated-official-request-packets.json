@@ -46,7 +46,10 @@
     "priority_tier": "P0",
     "workstream": "monitor_open_data_release",
     "priority_why_now": "local_direct_source is not complete",
-    "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。"
+    "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。",
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "金門縣",
@@ -120,7 +123,10 @@
     "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "花蓮縣",
@@ -156,7 +162,10 @@
     "completion_gate": "取得官方授權或公開 read API contract，確認用途不是設備上傳 API。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "臺東縣",
@@ -177,6 +186,9 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": [],
     "request_body": "目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。",
     "checklist": [
       "確認公開 read API URL 與 response 格式",
@@ -212,6 +224,9 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": [],
     "request_body": "目前苗栗縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。",
     "checklist": [
       "確認公開 read API URL 與 response 格式",
@@ -251,7 +266,19 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前屏東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。",
+    "candidate_contract_findings": [
+      "2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.",
+      "2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata."
+    ],
+    "candidate_contract_missing_fields": [
+      "observed_at",
+      "longitude_latitude_or_joinable_station_metadata"
+    ],
+    "candidate_contract_non_measurement_notes": [
+      "2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.",
+      "2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; it exposes CCTV image URLs for river monitoring, not a water-level measurement value."
+    ],
+    "request_body": "目前屏東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.；2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata. 目前缺少 production 必備欄位：observed_at、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.；2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; it exposes CCTV image URLs for river monitoring, not a water-level measurement value.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。",
     "checklist": [
       "確認公開 read API URL 與 response 格式",
       "確認觀測時間、站點 ID、測值、單位與座標欄位",
@@ -310,7 +337,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "桃園市",
@@ -355,7 +385,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "澎湖縣",
@@ -398,7 +431,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "臺中市",
@@ -441,7 +477,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "臺南市",
@@ -484,7 +523,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "南投縣",
@@ -526,7 +568,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "基隆市",
@@ -570,7 +615,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "宜蘭縣",
@@ -613,7 +661,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "新北市",
@@ -658,7 +709,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "新竹縣",
@@ -700,7 +754,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "臺北市",
@@ -750,7 +807,10 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   },
   {
     "county": "雲林縣",
@@ -798,6 +858,9 @@
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": []
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
   }
 ]

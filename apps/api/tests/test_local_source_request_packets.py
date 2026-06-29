@@ -75,6 +75,23 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert pingtung["subject"] == "屏東縣地方即時水情 read API contract 請求"
     assert "pteoc.pthg.gov.tw/RainStation" in " ".join(pingtung["source_urls"])
     assert "observed_at" in pingtung["required_read_api_fields"]
+    assert pingtung["candidate_contract_missing_fields"] == [
+        "observed_at",
+        "longitude_latitude_or_joinable_station_metadata",
+    ]
+    assert any(
+        "RainStation/Details" in finding and "10分鐘雨量" in finding
+        for finding in pingtung["candidate_contract_findings"]
+    )
+    assert any(
+        "Flood/Details" in note and "not_flood_depth_measurement" in note
+        for note in pingtung["candidate_contract_non_measurement_notes"]
+    )
+    assert any(
+        "Crawler/Details" in note and "image_only_cctv" in note
+        for note in pingtung["candidate_contract_non_measurement_notes"]
+    )
+    assert "不得以 fetched_at 偽裝觀測時間" in pingtung["request_body"]
 
     taipei = next(packet for packet in packets if packet["county"] == "臺北市")
     assert taipei["packet_type"] == "signal_gap_request"
@@ -136,6 +153,9 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
     assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
+    assert "- 候選系統缺少欄位：`observed_at`、`longitude_latitude_or_joinable_station_metadata`" in markdown
+    assert "not_flood_depth_measurement" in markdown
+    assert "image_only_cctv" in markdown
 
 
 def test_lienchiang_packet_tracks_p0_local_direct_release_priority() -> None:

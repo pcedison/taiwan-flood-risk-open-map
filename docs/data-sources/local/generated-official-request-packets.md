@@ -153,10 +153,17 @@
   - https://pteoc.pthg.gov.tw/Flood
   - https://pteoc.pthg.gov.tw/Crawler
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- 候選系統缺少欄位：`observed_at`、`longitude_latitude_or_joinable_station_metadata`
+- 候選系統查核事實：
+  - 2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.
+  - 2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata.
+- 候選系統不可當量測來源：
+  - 2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.
+  - 2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; it exposes CCTV image URLs for river monitoring, not a water-level measurement value.
 - 排入此順位原因：candidate source needs a public read API contract review
 - 完成門檻：公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。
 
-目前屏東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。
+目前屏東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.；2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata. 目前缺少 production 必備欄位：observed_at、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.；2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; it exposes CCTV image URLs for river monitoring, not a water-level measurement value.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。
 
 待辦：
 - [ ] 確認公開 read API URL 與 response 格式

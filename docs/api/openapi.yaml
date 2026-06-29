@@ -821,6 +821,9 @@ paths:
                           - pump_or_gate_status
                         candidate_source_names: []
                         candidate_source_urls: []
+                        candidate_contract_findings: []
+                        candidate_contract_missing_fields: []
+                        candidate_contract_non_measurement_notes: []
                         metadata_source_names: []
                         metadata_source_urls: []
                         non_qualifying_source_names: []
@@ -945,6 +948,9 @@ paths:
                             - local.chiayi_city.rainfall
                           candidate_source_names: []
                           candidate_source_urls: []
+                          candidate_contract_findings: []
+                          candidate_contract_missing_fields: []
+                          candidate_contract_non_measurement_notes: []
                           non_qualifying_source_names: []
                           non_qualifying_source_urls: []
                           non_qualifying_source_reasons: []
@@ -975,6 +981,9 @@ paths:
                           production_adapter_keys: []
                           candidate_source_names: []
                           candidate_source_urls: []
+                          candidate_contract_findings: []
+                          candidate_contract_missing_fields: []
+                          candidate_contract_non_measurement_notes: []
                           non_qualifying_source_names:
                             - 連江自來水廠水庫水位月報
                             - 連江縣資訊公開查詢系統即時監測值
@@ -2637,6 +2646,9 @@ components:
         - reason
         - candidate_source_names
         - candidate_source_urls
+        - candidate_contract_findings
+        - candidate_contract_missing_fields
+        - candidate_contract_non_measurement_notes
         - requested_counterparty
         - tracking_status
         - last_followed_up_at
@@ -2657,6 +2669,18 @@ components:
           items:
             type: string
             format: uri
+        candidate_contract_findings:
+          type: array
+          items:
+            type: string
+        candidate_contract_missing_fields:
+          type: array
+          items:
+            type: string
+        candidate_contract_non_measurement_notes:
+          type: array
+          items:
+            type: string
         requested_counterparty:
           type: string
         tracking_status:
@@ -2737,6 +2761,9 @@ components:
         - production_adapter_keys
         - candidate_source_names
         - candidate_source_urls
+        - candidate_contract_findings
+        - candidate_contract_missing_fields
+        - candidate_contract_non_measurement_notes
         - status_only_source_names
         - status_only_source_urls
         - status_only_signal_types
@@ -2791,6 +2818,18 @@ components:
           items:
             type: string
             format: uri
+        candidate_contract_findings:
+          type: array
+          items:
+            type: string
+        candidate_contract_missing_fields:
+          type: array
+          items:
+            type: string
+        candidate_contract_non_measurement_notes:
+          type: array
+          items:
+            type: string
         status_only_source_names:
           type: array
           items:
@@ -2948,6 +2987,9 @@ components:
         - missing_signal_types
         - candidate_source_names
         - candidate_source_urls
+        - candidate_contract_findings
+        - candidate_contract_missing_fields
+        - candidate_contract_non_measurement_notes
         - metadata_source_names
         - metadata_source_urls
         - status_only_source_names
@@ -3048,6 +3090,21 @@ components:
             type: string
             format: uri
           description: Official candidate pages, API contracts, or system URLs that need contract/live-smoke verification before adapter work.
+        candidate_contract_findings:
+          type: array
+          items:
+            type: string
+          description: Reviewed facts from official candidate pages that still do not prove a production read API.
+        candidate_contract_missing_fields:
+          type: array
+          items:
+            type: string
+          description: Production read API fields missing from the reviewed candidate source.
+        candidate_contract_non_measurement_notes:
+          type: array
+          items:
+            type: string
+          description: Candidate pages that expose status, warning thresholds, images, or other non-measurement evidence.
         metadata_source_names:
           type: array
           items:
