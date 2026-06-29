@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -24,6 +25,7 @@ from app.adapters.flood_potential import (
     parse_flood_potential_geojson_payload,
 )
 from app.adapters.wra import WraWaterLevelAdapter
+from app.adapters.wra import water_level as wra_water_level_module
 from app.adapters.wra import (
     WraWaterLevelApiAdapter,
     WraWaterLevelFetchError,
@@ -340,6 +342,43 @@ def test_wra_water_level_api_adapter_omits_optional_token_from_source_url() -> N
     assert result.fetched[0].payload["resource_url"] == (
         "https://example.test/wra/water-level?format=JSON"
     )
+
+
+def test_wra_water_level_fetch_uses_taiwan_gov_tls_context(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeResponse:
+        headers: dict[str, str] = {}
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"responseData":[]}'
+
+    def fake_urlopen(request, *, timeout: int, context: ssl.SSLContext):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["context"] = context
+        return FakeResponse()
+
+    monkeypatch.setattr(wra_water_level_module, "urlopen", fake_urlopen)
+
+    assert wra_water_level_module._fetch_json(
+        "https://opendata.wra.gov.tw/api/v2/example?format=JSON",
+        4,
+    ) == {"responseData": []}
+
+    context = cast(ssl.SSLContext, captured["context"])
+    strict = getattr(ssl, "VERIFY_X509_STRICT", 0)
+    assert captured["timeout"] == 4
+    assert context.verify_mode is ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    if strict:
+        assert not context.verify_flags & strict
 
 
 def test_wra_water_level_api_payload_shape_errors_are_explicit() -> None:

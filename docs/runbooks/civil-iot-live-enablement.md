@@ -94,6 +94,14 @@ and Civil IoT flood/sewer/pump/gate water-level sources. It marks CWA as
 or process environment; use `--fail-on-skipped` in CI or hosted readiness checks
 when all credentials must be loaded.
 
+WRA open-data and NCDR CAP endpoints have been observed to fail under Python /
+OpenSSL contexts that enable `VERIFY_X509_STRICT` because their certificate
+chain omits a Subject Key Identifier. The worker fetchers for those official
+endpoints use a Taiwan government open-data TLS compatibility context that
+removes only that strict-chain flag while keeping CA verification and hostname
+verification enabled. Treat any remaining certificate error as a hosted egress
+or upstream certificate incident, not as permission to disable TLS verification.
+
 For a broader gate that also scans unresolved local-source discovery for 金門縣
 and 連江縣, run:
 

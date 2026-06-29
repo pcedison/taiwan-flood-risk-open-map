@@ -619,6 +619,41 @@ readiness run is still missing credential, license, retention, cadence, egress,
 alert, or worker-persisted-evidence proof. This still does not create those
 private approvals; it makes them machine-visible.
 
+## Task 20: WRA/NCDR TLS Compatibility For Hosted Egress Smoke
+
+**Files:**
+- Add: `apps/workers/app/adapters/_taiwan_gov_tls.py`
+- Add: `apps/workers/tests/test_taiwan_gov_tls.py`
+- Modify: `apps/workers/app/adapters/wra/water_level.py`
+- Modify: `apps/workers/app/adapters/wra_iow/flood_depth.py`
+- Modify: `apps/workers/app/adapters/ncdr/cap_alerts.py`
+- Modify: related worker adapter tests.
+- Modify: `docs/runbooks/civil-iot-live-enablement.md`
+
+**Interfaces:**
+- Consumes: Python/OpenSSL verified HTTPS requests to WRA open-data and NCDR CAP
+  endpoints.
+- Produces: official-source live fetches that tolerate missing Subject Key
+  Identifier in the government certificate chain while retaining CA and hostname
+  verification.
+
+- [x] Reproduce the local live-smoke failure and confirm it is tied to
+  `VERIFY_X509_STRICT`, not disabled credentials.
+- [x] Write failing tests requiring WRA, WRA IoW, and NCDR fetchers to pass a
+  verified non-strict Taiwan government open-data TLS context.
+- [x] Implement the shared TLS context helper and wire only the affected
+  official fetchers.
+- [x] Document the hosted egress interpretation so operators do not disable TLS
+  verification.
+
+Completed 2026-06-30: WRA water-level, WRA IoW flood-depth, and NCDR CAP fetchers
+now use a shared TLS context that clears only `VERIFY_X509_STRICT`; certificate
+chain and hostname verification remain enabled. This removes a local/hosted
+egress false negative for government open-data endpoints whose certificate chain
+omits SKI. It does not satisfy source-license review, credential review, raw
+snapshot policy, scheduler cadence, alert routing, or worker-persisted evidence
+smoke by itself.
+
 ## Completion Gates
 
 The full objective is complete only when:
