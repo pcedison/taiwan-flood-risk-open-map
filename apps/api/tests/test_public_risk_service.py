@@ -11,6 +11,7 @@ from app.api.schemas import (
     DataFreshness,
     Explanation,
     LatLng,
+    NearbyRealtimeCoverage,
     QueryHeat,
     RiskAssessRequest,
     RiskAssessmentResponse,
@@ -18,8 +19,9 @@ from app.api.schemas import (
 )
 from app.api.routes import public as public_routes
 from app.api.services import public_risk
-from app.domain.evidence.repository import EvidenceRecord
+from app.domain.evidence.repository import EvidenceRecord, NearbyCoverageRow
 from app.domain.realtime import OfficialRealtimeBundle
+from app.domain.risk import score_risk
 
 
 def _risk_request() -> RiskAssessRequest:
@@ -70,6 +72,22 @@ def _risk_response(
     )
 
 
+def _nearby_coverage(
+    *, evaluated_at: datetime, query_radius_m: int = 500
+) -> NearbyRealtimeCoverage:
+    return NearbyRealtimeCoverage(
+        overall_level="medium",
+        evaluated_at=evaluated_at,
+        query_radius_m=query_radius_m,
+        radius_buckets_m=[500, 1000, 3000, 5000],
+        summary="nearby realtime coverage available",
+        signal_breakdown=[],
+        missing_signal_types=["flood_depth"],
+        limitations=["coverage is query-point specific"],
+        county_level_note="county source coverage is not nearby sensor coverage",
+    )
+
+
 def _settings() -> SimpleNamespace:
     return SimpleNamespace(
         app_env="test",
@@ -90,6 +108,7 @@ def _dependencies(**overrides: Any) -> public_risk.RiskAssessmentDependencies:
         "risk_assessment_response_cache_key": fail,
         "cached_risk_assessment_response": fail,
         "fetch_official_realtime_bundle": fail,
+        "nearby_realtime_coverage": fail,
         "nearby_db_evidence": fail,
         "official_flood_disaster_lookup": fail,
         "can_use_profile_fast_path": fail,
@@ -174,6 +193,223 @@ def test_assess_risk_returns_cached_response_before_source_work() -> None:
     )
 
     assert result is cached_response
+
+
+def test_assess_risk_includes_nearby_realtime_coverage() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    coverage = _nearby_coverage(evaluated_at=created_at)
+    persisted: dict[str, Any] = {}
+
+    response = public_risk.assess_risk(
+        request,
+        settings=_settings(),
+        created_at=created_at,
+        dependencies=_dependencies(
+            risk_assessment_response_cache_key=lambda *_args: "standard-cache-key",
+            cached_risk_assessment_response=lambda *_args, **_kwargs: None,
+            fetch_official_realtime_bundle=lambda **_kwargs: OfficialRealtimeBundle(
+                observations=(),
+                source_statuses=(),
+            ),
+            nearby_realtime_coverage=lambda _request, *, now: coverage,
+            nearby_db_evidence=lambda _request: (),
+            official_flood_disaster_lookup=lambda *_args, **_kwargs: SimpleNamespace(records=()),
+            can_use_profile_fast_path=lambda _items: False,
+            needs_historical_event_lookup=lambda **_kwargs: False,
+            persist_or_build_on_demand_evidence=lambda *_args, **_kwargs: (),
+            historical_data_freshness=lambda **_kwargs: DataFreshness(
+                source_id="historical-flood-records",
+                name="historical records",
+                health_status="unknown",
+                ingested_at=created_at,
+            ),
+            display_evidence_items=lambda items: items,
+            score_risk=score_risk,
+            cache_assessment_evidence=lambda *_args, **_kwargs: None,
+            persisted_official_realtime_data_freshness=lambda *_args, **_kwargs: [],
+            visible_source_limitations=lambda *_args, **_kwargs: [],
+            official_flood_disaster_data_freshness=lambda _lookup: [],
+            on_demand_data_freshness=lambda *_args, **_kwargs: [],
+            persist_assessment=lambda **kwargs: persisted.update(kwargs),
+            query_heat=lambda _request, *, now: QueryHeat(
+                period="P7D",
+                attention_level=public_routes.LOW_ATTENTION,
+                query_count_bucket=None,
+                unique_approx_count_bucket=None,
+                updated_at=now,
+            ),
+            cache_risk_assessment_response=lambda *_args, **_kwargs: None,
+        ),
+    )
+
+    assert response.nearby_realtime_coverage == coverage
+    assert persisted["nearby_realtime_coverage"] == coverage
+
+
+def test_assess_risk_profile_fast_path_receives_nearby_realtime_coverage() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    profile = object()
+    coverage = _nearby_coverage(evaluated_at=created_at)
+    expected_response = _risk_response(
+        request,
+        assessment_id="profile-assessment",
+        created_at=created_at,
+    )
+    calls: dict[str, Any] = {}
+
+    def profile_backed_response(**kwargs: Any) -> RiskAssessmentResponse:
+        calls["profile_kwargs"] = kwargs
+        return expected_response
+
+    result = public_risk.assess_risk(
+        request,
+        settings=_settings(),
+        created_at=created_at,
+        dependencies=_dependencies(
+            risk_assessment_response_cache_key=lambda *_args: "profile-cache-key",
+            cached_risk_assessment_response=lambda *_args, **_kwargs: None,
+            fetch_official_realtime_bundle=lambda **_kwargs: OfficialRealtimeBundle(
+                observations=(),
+                source_statuses=(),
+            ),
+            nearby_realtime_coverage=lambda _request, *, now: coverage,
+            nearby_db_evidence=lambda _request: (),
+            official_flood_disaster_lookup=lambda *_args, **_kwargs: SimpleNamespace(records=()),
+            can_use_profile_fast_path=lambda _items: True,
+            precomputed_risk_profile=lambda *_args, **_kwargs: profile,
+            profile_has_public_news=lambda _profile: True,
+            enqueue_profile_refresh=lambda *_args, **_kwargs: None,
+            profile_backed_response=profile_backed_response,
+            cache_risk_assessment_response=lambda *_args, **_kwargs: None,
+        ),
+    )
+
+    assert result is expected_response
+    assert calls["profile_kwargs"]["nearby_realtime_coverage"] == coverage
+
+
+def test_nearby_realtime_coverage_returns_unavailable_when_repository_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(evidence_repository_enabled=False),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_realtime_coverage_rows",
+        lambda **_kwargs: pytest.fail("coverage rows should not be queried when repo is disabled"),
+    )
+
+    coverage = public_routes._nearby_realtime_coverage(request, now=now)
+
+    assert coverage.overall_level == "unavailable"
+    assert set(coverage.missing_signal_types) == {
+        "rainfall",
+        "water_level",
+        "flood_depth",
+        "sewer_water_level",
+    }
+
+
+def test_nearby_realtime_coverage_queries_rows_with_official_lookback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    captured: dict[str, Any] = {}
+    row = NearbyCoverageRow(
+        adapter_key="official.cwa.rainfall",
+        source_id="cwa-rainfall:station-1",
+        event_type="rainfall",
+        station_id="station-1",
+        observed_at=now,
+        ingested_at=now,
+        distance_to_query_m=230.0,
+        freshness_state="fresh",
+    )
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_realtime_coverage_rows",
+        lambda **kwargs: captured.update(kwargs) or (row,),
+    )
+
+    coverage = public_routes._nearby_realtime_coverage(request, now=now)
+
+    assert captured["database_url"] == "postgresql://example.test/flood"
+    assert captured["lat"] == request.point.lat
+    assert captured["lng"] == request.point.lng
+    assert captured["observed_since"] == now - public_routes.REALTIME_OFFICIAL_LOOKBACK
+    assert coverage.query_radius_m == 500
+    assert coverage.overall_level == "low"
+
+
+def test_nearby_realtime_coverage_returns_unavailable_when_repository_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+        ),
+    )
+
+    def unavailable(**_kwargs: object) -> tuple[NearbyCoverageRow, ...]:
+        raise public_routes.EvidenceRepositoryUnavailable("coverage table timeout")
+
+    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", unavailable)
+
+    coverage = public_routes._nearby_realtime_coverage(request, now=now)
+
+    assert coverage.overall_level == "unavailable"
+    assert set(coverage.missing_signal_types) == {
+        "rainfall",
+        "water_level",
+        "flood_depth",
+        "sewer_water_level",
+    }
+
+
+def test_risk_assessment_response_cache_key_uses_nearby_coverage_version() -> None:
+    settings = SimpleNamespace(
+        app_env="test",
+        realtime_official_enabled=True,
+        realtime_official_diagnostic_fallback_enabled=False,
+        source_cwa_api_enabled=True,
+        source_wra_api_enabled=True,
+        source_news_enabled=True,
+        source_terms_review_ack=True,
+        historical_news_on_demand_enabled=False,
+        historical_news_on_demand_writeback_enabled=False,
+        historical_news_on_demand_max_records=5,
+        historical_news_on_demand_timeout_seconds=2.0,
+        official_flood_disaster_points_enabled=True,
+        evidence_repository_enabled=True,
+    )
+
+    cache_key = public_routes._risk_assessment_response_cache_key(_risk_request(), settings)
+
+    assert '"cache_version": "realtime-evidence-v3-nearby-coverage"' in cache_key
 
 
 def test_nearby_db_evidence_uses_latest_first_and_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -379,6 +615,7 @@ def test_assess_risk_profile_fast_path_refreshes_and_caches_response() -> None:
     request = _risk_request()
     created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
     profile = object()
+    coverage = _nearby_coverage(evaluated_at=created_at)
     expected_response = _risk_response(
         request,
         assessment_id="profile-assessment",
@@ -405,6 +642,7 @@ def test_assess_risk_profile_fast_path_refreshes_and_caches_response() -> None:
                 observations=(),
                 source_statuses=(),
             ),
+            nearby_realtime_coverage=lambda _request, *, now: coverage,
             nearby_db_evidence=lambda _request: (),
             official_flood_disaster_lookup=lambda *_args, **_kwargs: SimpleNamespace(records=()),
             can_use_profile_fast_path=lambda _items: True,
@@ -423,6 +661,7 @@ def test_assess_risk_profile_fast_path_refreshes_and_caches_response() -> None:
     assert calls["refresh_kwargs"] == {"request": request}
     assert calls["profile_kwargs"]["profile"] is profile
     assert calls["profile_kwargs"]["realtime_bundle"].observations == ()
+    assert calls["profile_kwargs"]["nearby_realtime_coverage"] == coverage
     assert calls["cache_args"] == ("profile-cache-key", expected_response)
     assert calls["cache_kwargs"] == {
         "now": created_at,

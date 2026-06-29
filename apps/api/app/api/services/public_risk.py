@@ -92,6 +92,7 @@ class ProfileBackedResponse(Protocol):
         assessment_id: str,
         profile: RiskProfileRecord,
         realtime_bundle: OfficialRealtimeBundle,
+        nearby_realtime_coverage: NearbyRealtimeCoverage,
         created_at: datetime,
     ) -> RiskAssessmentResponse: ...
 
@@ -178,6 +179,7 @@ class PersistAssessment(Protocol):
         explanation: Explanation,
         data_freshness: list[DataFreshness],
         evidence_items: list[Evidence],
+        nearby_realtime_coverage: NearbyRealtimeCoverage,
         created_at: datetime,
         expires_at: datetime,
     ) -> None: ...
@@ -185,6 +187,12 @@ class PersistAssessment(Protocol):
 
 class QueryHeatLookup(Protocol):
     def __call__(self, request: RiskAssessRequest, /, *, now: datetime) -> QueryHeat: ...
+
+
+class NearbyRealtimeCoverageLookup(Protocol):
+    def __call__(
+        self, request: RiskAssessRequest, /, *, now: datetime
+    ) -> NearbyRealtimeCoverage: ...
 
 
 _NEARBY_REALTIME_COVERAGE_NOTE = ('縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。')
@@ -205,8 +213,6 @@ def build_placeholder_nearby_realtime_coverage(
             "water_level",
             "flood_depth",
             "sewer_water_level",
-            "pump_or_gate_status",
-            "flood_warning",
         ],
         limitations=[_NEARBY_REALTIME_COVERAGE_NOTE],
         county_level_note=_NEARBY_REALTIME_COVERAGE_NOTE,
@@ -219,6 +225,7 @@ class RiskAssessmentDependencies:
     risk_assessment_response_cache_key: Callable[[RiskAssessRequest, Settings], str]
     cached_risk_assessment_response: CachedRiskAssessmentResponse
     fetch_official_realtime_bundle: FetchOfficialRealtimeBundle
+    nearby_realtime_coverage: NearbyRealtimeCoverageLookup
     nearby_db_evidence: Callable[[RiskAssessRequest], tuple[Evidence, ...] | None]
     official_flood_disaster_lookup: OfficialFloodDisasterLookupFn
     can_use_profile_fast_path: Callable[[tuple[Evidence, ...] | None], bool]
@@ -279,6 +286,7 @@ def assess_risk(
     )
     if cached_response is not None:
         return cached_response
+    nearby_coverage = dependencies.nearby_realtime_coverage(risk_request, now=created_at)
     assessment_id = stable_uuid(
         "assessment",
         risk_request.point.lat,
@@ -315,6 +323,7 @@ def assess_risk(
                 assessment_id=assessment_id,
                 profile=profile,
                 realtime_bundle=realtime_bundle,
+                nearby_realtime_coverage=nearby_coverage,
                 created_at=created_at,
             )
             dependencies.cache_risk_assessment_response(
@@ -516,6 +525,7 @@ def assess_risk(
         explanation=explanation,
         data_freshness=data_freshness,
         evidence_items=display_evidence_items,
+        nearby_realtime_coverage=nearby_coverage,
         created_at=created_at,
         expires_at=expires_at,
     )
@@ -533,9 +543,7 @@ def assess_risk(
         evidence=[dependencies.evidence_preview(item) for item in display_evidence_items],
         data_freshness=data_freshness,
         query_heat=dependencies.query_heat(risk_request, now=created_at),
-        nearby_realtime_coverage=build_placeholder_nearby_realtime_coverage(
-            evaluated_at=created_at, query_radius_m=risk_request.radius_m
-        ),
+        nearby_realtime_coverage=nearby_coverage,
     )
     if can_cache_response:
         dependencies.cache_risk_assessment_response(
@@ -570,6 +578,7 @@ def assessment_result_snapshot(
     explanation: Explanation,
     data_freshness: list[DataFreshness],
     evidence_items: list[Evidence],
+    nearby_realtime_coverage: NearbyRealtimeCoverage,
     created_at: datetime,
     expires_at: datetime,
 ) -> dict[str, Any]:
@@ -593,6 +602,7 @@ def assessment_result_snapshot(
         "evidence_ids": [item.id for item in evidence_items],
         "evidence_count": len(evidence_items),
         "data_freshness": [item.model_dump(mode="json") for item in data_freshness],
+        "nearby_realtime_coverage": nearby_realtime_coverage.model_dump(mode="json"),
         "created_at": created_at.isoformat(),
         "expires_at": expires_at.isoformat(),
     }
