@@ -63,6 +63,31 @@ Optional URL overrides:
 Recommended enablement order (highest realtime-water value first, lightest load
 first): CWA rainfall/tide-level → flood sensors → river level → sewer → pond → pump.
 
+### Kinmen KWIS Local Read Adapter
+
+Kinmen KWIS is not a public no-token source. The ASMX/WSDL exposes
+`KWIS_Get_Pump_Basic_Unit_Data`, but blank-token smoke returns HTTP 200 with
+`ErrMsg: (7) invalid Token` and `Data: []`. Treat it as authorization-gated until
+Kinmen County / the KWIS maintainer grants a read-side Token and confirms the
+response schema, license, rate limit, freshness policy, and production use.
+
+After authorization, enable it explicitly:
+
+```env
+WORKER_ENABLED_ADAPTER_KEYS=local.kinmen.kwis_pump_station
+SOURCE_KINMEN_KWIS_PUMP_STATION_ENABLED=true
+SOURCE_KINMEN_KWIS_PUMP_STATION_API_ENABLED=true
+KINMEN_KWIS_API_TOKEN=<private read-side token>
+```
+
+Leave `KINMEN_KWIS_PUMP_STATION_API_URL` empty unless the official ASMX method
+moves. The worker uses the Taiwan government TLS compatibility context that
+keeps CA and hostname verification and only clears `VERIFY_X509_STRICT`.
+
+Do not use KWIS upload-only credentials or blank-token smoke output as proof of
+production readiness. Kinmen remains incomplete until an authorized hosted
+worker-persisted evidence smoke normalizes real rows.
+
 ## Procedure (repeat per source)
 
 1. **Dry validation locally** before touching hosted:

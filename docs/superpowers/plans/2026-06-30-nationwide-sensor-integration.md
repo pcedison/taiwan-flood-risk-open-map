@@ -654,6 +654,43 @@ omits SKI. It does not satisfy source-license review, credential review, raw
 snapshot policy, scheduler cadence, alert routing, or worker-persisted evidence
 smoke by itself.
 
+## Task 21: Kinmen KWIS Token-Gated Pump Status Adapter
+
+**Files:**
+- Add: `apps/workers/app/adapters/local_kinmen/`
+- Add: `apps/workers/tests/test_local_kinmen_kwis_adapter.py`
+- Modify: `apps/workers/app/config.py`
+- Modify: `apps/workers/app/adapters/registry.py`
+- Modify: `apps/workers/app/jobs/runtime.py`
+- Modify: `.env.example`, `docker-compose.yml`
+- Modify: `docs/runbooks/civil-iot-live-enablement.md`
+
+**Interfaces:**
+- Consumes: Kinmen KWIS ASMX `KWIS_Get_Pump_Basic_Unit_Data`, which is a
+  token-gated read method. Official blank-token smoke on 2026-06-30 returned
+  HTTP 200 with `ErrMsg: (7) invalid Token` and `Data: []`.
+- Produces: a disabled-by-default runtime adapter key
+  `local.kinmen.kwis_pump_station` that only wires when
+  `SOURCE_KINMEN_KWIS_PUMP_STATION_ENABLED=true`,
+  `SOURCE_KINMEN_KWIS_PUMP_STATION_API_ENABLED=true`, the adapter key is
+  selected, and `KINMEN_KWIS_API_TOKEN` is configured.
+
+- [x] Write failing tests proving KWIS string envelopes parse into explicit
+  status-only pump records.
+- [x] Reject invalid/blank token responses as authorization errors.
+- [x] Keep runtime wiring fail-closed when the token is missing, without making
+  blank-token upstream calls.
+- [x] Reuse the Taiwan government TLS compatibility context while retaining CA
+  and hostname verification.
+- [x] Document that this is adapter readiness, not Kinmen production completion.
+
+Completed 2026-06-30: Kinmen now has a token-gated KWIS pump/status adapter
+ready for formal read-side authorization. This does not mark Kinmen local direct
+coverage complete. Production completion still requires the county-issued Token,
+response schema confirmation, license/rate-limit review, raw snapshot retention,
+hosted scheduler cadence, hosted egress review, alert routing, and a
+worker-persisted evidence smoke with real authorized rows.
+
 ## Completion Gates
 
 The full objective is complete only when:

@@ -28,6 +28,7 @@ from app.adapters.local_kaohsiung import (
     KAOHSIUNG_RAINFALL_METADATA,
     KAOHSIUNG_SEWER_WATER_LEVEL_METADATA,
 )
+from app.adapters.local_kinmen import KINMEN_KWIS_PUMP_STATION_METADATA
 from app.adapters.local_fhy import FHY_LOCAL_FLOOD_SENSOR_SOURCES
 from app.adapters.local_keelung import (
     KEELUNG_FLOOD_SENSOR_METADATA,
@@ -118,6 +119,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         YILAN_FLOOD_SENSOR_METADATA.key: YILAN_FLOOD_SENSOR_METADATA,
         YILAN_WATER_LEVEL_METADATA.key: YILAN_WATER_LEVEL_METADATA,
         PENGHU_WATER_LEVEL_METADATA.key: PENGHU_WATER_LEVEL_METADATA,
+        KINMEN_KWIS_PUMP_STATION_METADATA.key: KINMEN_KWIS_PUMP_STATION_METADATA,
         **{
             source.metadata.key: source.metadata
             for source in FHY_LOCAL_FLOOD_SENSOR_SOURCES
@@ -316,6 +318,11 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
             metadata.enabled_by_default,
             settings.source_penghu_water_level_enabled,
         )
+    if metadata.key == "local.kinmen.kwis_pump_station":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_kinmen_kwis_pump_station_enabled,
+        )
     if metadata.key == "local.hsinchu_county.flood_sensor":
         return _with_optional_override(
             metadata.enabled_by_default,
@@ -467,6 +474,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_yilan_water_level_enabled is True
     if metadata.key == "local.penghu.water_level":
         return settings.source_penghu_water_level_enabled is True
+    if metadata.key == "local.kinmen.kwis_pump_station":
+        return settings.source_kinmen_kwis_pump_station_enabled is True
     if metadata.key == "local.hsinchu_county.flood_sensor":
         return settings.source_hsinchu_county_fhy_flood_sensor_enabled is True
     if metadata.key == "local.miaoli.flood_sensor":

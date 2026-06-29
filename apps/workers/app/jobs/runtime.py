@@ -45,6 +45,8 @@ from app.adapters.local_kaohsiung import (
     KaohsiungRainfallApiAdapter,
     KaohsiungSewerWaterLevelApiAdapter,
 )
+from app.adapters.local_kinmen import FetchText as KinmenKwisFetchText
+from app.adapters.local_kinmen import KinmenKwisPumpStationApiAdapter
 from app.adapters.local_keelung import FetchJson as KeelungFetchJson
 from app.adapters.local_keelung import (
     KeelungFloodSensorApiAdapter,
@@ -222,6 +224,7 @@ def build_runtime_adapters(
     yilan_flood_sensor_fetch_json: YilanFetchJson | None = None,
     yilan_water_level_fetch_json: YilanFetchJson | None = None,
     penghu_water_level_fetch_json: PenghuFetchJson | None = None,
+    kinmen_kwis_pump_station_fetch_text: KinmenKwisFetchText | None = None,
     fhy_flood_sensor_fetch_json: FhyFloodSensorFetchJson | None = None,
     wra_iow_flood_depth_fetch_json: WraIowFetchJson | None = None,
     civil_iot_river_fetch_json: StaFetchJson | None = None,
@@ -696,6 +699,27 @@ def build_runtime_adapters(
         )
         live_adapters[penghu_water_level_adapter.metadata.key] = penghu_water_level_adapter
 
+    if (
+        settings.source_kinmen_kwis_pump_station_api_enabled
+        and "local.kinmen.kwis_pump_station" in enabled_keys
+    ):
+        if settings.kinmen_kwis_api_token:
+            kinmen_kwis_adapter = KinmenKwisPumpStationApiAdapter(
+                api_url=settings.kinmen_kwis_pump_station_api_url,
+                api_token=settings.kinmen_kwis_api_token,
+                timeout_seconds=settings.local_water_timeout_seconds,
+                fetched_at=fetched_at,
+                fetch_text=kinmen_kwis_pump_station_fetch_text,
+            )
+            live_adapters[kinmen_kwis_adapter.metadata.key] = kinmen_kwis_adapter
+        else:
+            log_event(
+                "runtime.adapters.gated",
+                adapter_key="local.kinmen.kwis_pump_station",
+                gate="KINMEN_KWIS_API_TOKEN",
+                source_intent="kinmen_kwis_token_gated_read_api",
+            )
+
     fhy_api_gates = {
         HSINCHU_COUNTY_FHY_FLOOD_SENSOR.metadata.key: (
             settings.source_hsinchu_county_fhy_flood_sensor_api_enabled
@@ -782,6 +806,9 @@ def build_runtime_adapters(
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,
             flood_sensor_use_live=settings.source_flood_sensor_use_live,
             tainan_flood_sensor_api_enabled=settings.source_tainan_flood_sensor_api_enabled,
+            kinmen_kwis_pump_station_api_enabled=(
+                settings.source_kinmen_kwis_pump_station_api_enabled
+            ),
             civil_iot_river_api_enabled=settings.source_civil_iot_river_api_enabled,
             civil_iot_gate_api_enabled=settings.source_civil_iot_gate_api_enabled,
         )
