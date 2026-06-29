@@ -146,6 +146,9 @@ class LocalSourceCoverage(ContractModel):
     status_only_source_names: list[str] = Field(default_factory=list)
     status_only_source_urls: list[str] = Field(default_factory=list)
     status_only_signal_types: list[str] = Field(default_factory=list)
+    non_qualifying_source_names: list[str] = Field(default_factory=list)
+    non_qualifying_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_reasons: list[str] = Field(default_factory=list)
     application_urls: list[str] = Field(default_factory=list)
     requires_application: bool = False
     application_note: str | None = None
@@ -201,6 +204,9 @@ class LocalSourceMetadataReleaseMonitor(ContractModel):
     reason: str | None = None
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_names: list[str] = Field(default_factory=list)
+    non_qualifying_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_reasons: list[str] = Field(default_factory=list)
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
     requested_counterparty: str
     tracking_status: str
@@ -251,6 +257,9 @@ class LocalSourceIntegrationPriorityItem(ContractModel):
     status_only_source_names: list[str] = Field(default_factory=list)
     status_only_source_urls: list[str] = Field(default_factory=list)
     status_only_signal_types: list[str] = Field(default_factory=list)
+    non_qualifying_source_names: list[str] = Field(default_factory=list)
+    non_qualifying_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_reasons: list[str] = Field(default_factory=list)
     application_urls: list[str] = Field(default_factory=list)
     required_read_api_fields: list[str] = Field(default_factory=list)
 

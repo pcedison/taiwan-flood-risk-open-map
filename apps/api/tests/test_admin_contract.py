@@ -1151,6 +1151,17 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert counties["連江縣"]["sewer_water_level_available"] is False
     assert counties["連江縣"]["pump_or_gate_status_available"] is False
     assert counties["連江縣"]["status_only_available"] is False
+    assert counties["連江縣"]["non_qualifying_source_names"] == [
+        "連江自來水廠水庫水位月報",
+        "連江縣資訊公開查詢系統即時監測值",
+    ]
+    assert counties["連江縣"]["non_qualifying_source_urls"] == [
+        "https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page",
+        "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx",
+    ]
+    assert "放流水環保 CEMS" in " ".join(
+        counties["連江縣"]["non_qualifying_source_reasons"]
+    )
     assert counties["連江縣"]["missing_signal_types"] == [
         "water_level",
         "flood_depth",
@@ -1231,6 +1242,11 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert lienchiang["requested_counterparty"] == "連江縣政府公開資料或防災水利窗口"
     assert lienchiang["tracking_status"] == "monitoring_open_data_release"
     assert lienchiang["last_followed_up_at"] is None
+    assert lienchiang["non_qualifying_source_names"] == [
+        "連江自來水廠水庫水位月報",
+        "連江縣資訊公開查詢系統即時監測值",
+    ]
+    assert "月報 PDF" in " ".join(lienchiang["non_qualifying_source_reasons"])
     assert "measurement_value" in lienchiang["required_read_api_fields"]
     assert_openapi_schema(payload, "AdminLocalSourceActionPlanResponse")
 

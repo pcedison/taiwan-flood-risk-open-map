@@ -348,6 +348,11 @@ def list_admin_local_source_coverage(
                 status_only_source_names=list(record.status_only_source_names),
                 status_only_source_urls=list(record.status_only_source_urls),
                 status_only_signal_types=list(record.status_only_signal_types),
+                non_qualifying_source_names=list(record.non_qualifying_source_names),
+                non_qualifying_source_urls=list(record.non_qualifying_source_urls),
+                non_qualifying_source_reasons=list(
+                    record.non_qualifying_source_reasons
+                ),
                 application_urls=list(record.application_urls),
                 requires_application=record.requires_application,
                 application_note=record.application_note,

@@ -113,6 +113,9 @@ class LocalSourceCoverageRecord:
     status_only_source_names: tuple[str, ...] = ()
     status_only_source_urls: tuple[str, ...] = ()
     status_only_signal_types: tuple[str, ...] = ()
+    non_qualifying_source_names: tuple[str, ...] = ()
+    non_qualifying_source_urls: tuple[str, ...] = ()
+    non_qualifying_source_reasons: tuple[str, ...] = ()
     application_urls: tuple[str, ...] = ()
     requires_application: bool = False
     application_note: str | None = None
@@ -746,7 +749,23 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5",
             "https://www.matsu.gov.tw/upload/f-20230922134042.ods",
         ),
-        notes=("尚未找到地方 live API。",),
+        non_qualifying_source_names=(
+            "連江自來水廠水庫水位月報",
+            "連江縣資訊公開查詢系統即時監測值",
+        ),
+        non_qualifying_source_urls=(
+            "https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page",
+            "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx",
+        ),
+        non_qualifying_source_reasons=(
+            "公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API。",
+            "公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。",
+        ),
+        notes=(
+            "尚未找到地方 live API。2026-06-30 查到連江自來水廠水庫水位月報與 "
+            "erbwater 公開即時監測值；前者是月報 PDF，後者是放流水環保 CEMS，"
+            "均不可補作 hydrologic_observation 風險量測。",
+        ),
     ),
 )
 

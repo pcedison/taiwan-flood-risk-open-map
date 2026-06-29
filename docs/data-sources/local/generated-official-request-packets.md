@@ -12,12 +12,19 @@
 - 來源：
   - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
   - https://www.matsu.gov.tw/upload/f-20230922134042.ods
+- 已排除官方線索：連江自來水廠水庫水位月報、連江縣資訊公開查詢系統即時監測值
+- 已排除官方線索 URL：
+  - https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page
+  - http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx
+- 排除原因：
+  - 公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API。
+  - 公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - 待補中央主幹訊號：hydrologic_observation
 - 排入此順位原因：central_backbone is missing hydrologic observation coverage for this county；local_direct_source is not complete
 - 完成門檻：取得至少一個可公開追溯的水位、淹水深度、雨水下水道、抽水站或水門即時 read API，並提供 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
 
-目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。
+目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。 已查核但排除的官方線索：公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API；公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。因此仍未補足 hydrologic_observation。
 
 待辦：
 - [ ] 確認是否可提供最新觀測 read API

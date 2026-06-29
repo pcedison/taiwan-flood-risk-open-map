@@ -2529,6 +2529,9 @@ components:
         - reason
         - metadata_source_names
         - metadata_source_urls
+        - non_qualifying_source_names
+        - non_qualifying_source_urls
+        - non_qualifying_source_reasons
         - central_backbone_missing_signal_types
         - requested_counterparty
         - tracking_status
@@ -2551,6 +2554,19 @@ components:
           items:
             type: string
             format: uri
+        non_qualifying_source_names:
+          type: array
+          items:
+            type: string
+        non_qualifying_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        non_qualifying_source_reasons:
+          type: array
+          items:
+            type: string
         central_backbone_missing_signal_types:
           type: array
           items:
@@ -2682,6 +2698,9 @@ components:
         - status_only_source_names
         - status_only_source_urls
         - status_only_signal_types
+        - non_qualifying_source_names
+        - non_qualifying_source_urls
+        - non_qualifying_source_reasons
         - application_urls
         - required_read_api_fields
       properties:
@@ -2740,6 +2759,19 @@ components:
             type: string
             format: uri
         status_only_signal_types:
+          type: array
+          items:
+            type: string
+        non_qualifying_source_names:
+          type: array
+          items:
+            type: string
+        non_qualifying_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        non_qualifying_source_reasons:
           type: array
           items:
             type: string
@@ -2879,6 +2911,9 @@ components:
         - status_only_source_names
         - status_only_source_urls
         - status_only_signal_types
+        - non_qualifying_source_names
+        - non_qualifying_source_urls
+        - non_qualifying_source_reasons
         - application_urls
         - requires_application
         - application_note
@@ -2998,6 +3033,22 @@ components:
           items:
             type: string
           description: Low-confidence status-only signal categories that must not be treated as depth, water level, or rainfall.
+        non_qualifying_source_names:
+          type: array
+          items:
+            type: string
+          description: Official sources that were reviewed but must not satisfy realtime water-signal coverage.
+        non_qualifying_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: URLs for reviewed official sources that do not qualify as realtime water-signal evidence.
+        non_qualifying_source_reasons:
+          type: array
+          items:
+            type: string
+          description: Why each reviewed official source is excluded from realtime risk evidence.
         application_urls:
           type: array
           items:

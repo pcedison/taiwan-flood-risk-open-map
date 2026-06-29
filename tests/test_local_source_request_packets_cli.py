@@ -15,6 +15,7 @@ def test_local_source_request_packets_cli_emits_json() -> None:
         [sys.executable, str(SCRIPT), "--format", "json"],
         cwd=REPO_ROOT,
         capture_output=True,
+        encoding="utf-8",
         text=True,
         check=False,
     )
@@ -36,6 +37,10 @@ def test_local_source_request_packets_cli_emits_json() -> None:
     }
     assert payload[0]["packet_type"] == "metadata_release_request"
     assert payload[0]["target_signal_types"] == ["hydrologic_observation"]
+    assert payload[0]["non_qualifying_source_names"] == [
+        "連江自來水廠水庫水位月報",
+        "連江縣資訊公開查詢系統即時監測值",
+    ]
     chiayi_city = next(packet for packet in payload if packet["county"] == "嘉義市")
     assert chiayi_city["packet_type"] == "signal_gap_request"
     assert chiayi_city["target_signal_types"] == [
@@ -65,6 +70,7 @@ def test_local_source_request_packets_cli_writes_markdown_output(
         ],
         cwd=REPO_ROOT,
         capture_output=True,
+        encoding="utf-8",
         text=True,
         check=False,
     )
@@ -80,6 +86,7 @@ def test_local_source_request_packets_cli_writes_markdown_output(
     assert "## 臺北市：臺北市缺漏水資訊訊號補齊請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
     assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" in markdown
+    assert "- 已排除官方線索：連江自來水廠水庫水位月報、連江縣資訊公開查詢系統即時監測值" in markdown
     assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
     assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
     assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown

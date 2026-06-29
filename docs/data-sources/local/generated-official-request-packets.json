@@ -8,6 +8,18 @@
       "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5",
       "https://www.matsu.gov.tw/upload/f-20230922134042.ods"
     ],
+    "non_qualifying_source_names": [
+      "連江自來水廠水庫水位月報",
+      "連江縣資訊公開查詢系統即時監測值"
+    ],
+    "non_qualifying_source_urls": [
+      "https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page",
+      "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx"
+    ],
+    "non_qualifying_source_reasons": [
+      "公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API。",
+      "公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。"
+    ],
     "requested_counterparty": "連江縣政府公開資料或防災水利窗口",
     "tracking_status": "monitoring_open_data_release",
     "last_followed_up_at": null,
@@ -22,7 +34,7 @@
       "longitude_latitude_or_joinable_station_metadata",
       "official_source_url_and_license"
     ],
-    "request_body": "目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。",
+    "request_body": "目前連江縣僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的即時水文觀測 read API。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。 已查核但排除的官方線索：公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API；公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。因此仍未補足 hydrologic_observation。",
     "checklist": [
       "確認是否可提供最新觀測 read API",
       "確認是否可加入 Civil IoT 或 WRA 公開主幹",
@@ -73,7 +85,10 @@
     "priority_tier": "P0",
     "workstream": "request_official_authorization",
     "priority_why_now": "local_direct_source is not complete；official authorization is required before a production read API can run",
-    "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。"
+    "completion_gate": "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "花蓮縣",
@@ -106,7 +121,10 @@
     "priority_tier": "P1",
     "workstream": "request_official_authorization",
     "priority_why_now": "official authorization is required before a production read API can run",
-    "completion_gate": "取得官方授權或公開 read API contract，確認用途不是設備上傳 API。"
+    "completion_gate": "取得官方授權或公開 read API contract，確認用途不是設備上傳 API。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "臺東縣",
@@ -138,7 +156,10 @@
     "priority_tier": "P2",
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
-    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。"
+    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "苗栗縣",
@@ -170,7 +191,10 @@
     "priority_tier": "P2",
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
-    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。"
+    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "屏東縣",
@@ -206,7 +230,10 @@
     "priority_tier": "P2",
     "workstream": "verify_public_read_api_contract",
     "priority_why_now": "candidate source needs a public read API contract review",
-    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。"
+    "completion_gate": "公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "嘉義市",
@@ -248,7 +275,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "桃園市",
@@ -290,7 +320,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "澎湖縣",
@@ -330,7 +363,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "臺中市",
@@ -370,7 +406,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "臺南市",
@@ -410,7 +449,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "南投縣",
@@ -449,7 +491,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "基隆市",
@@ -490,7 +535,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "宜蘭縣",
@@ -530,7 +578,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "新北市",
@@ -572,7 +623,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "新竹縣",
@@ -611,7 +665,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "臺北市",
@@ -658,7 +715,10 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   },
   {
     "county": "雲林縣",
@@ -703,6 +763,9 @@
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": []
   }
 ]

@@ -39,6 +39,7 @@
 | 澎湖縣 | `https://ph3dgis.penghu.gov.tw/server/rest/services/SewerNew/PHSewer_Basemap/MapServer/6/query?where=1%3D1&outFields=*&f=json&returnGeometry=true&outSR=4326` | 免 key ArcGIS REST JSON；2026-06-28 smoke：38 筆 normalized、0 筆 rejected，含 `measure_time`、`water_level`、`water_level_percent`、`battery`、`rssi` 與 WGS84 geometry。`measure_time` 為台灣本地 wall-clock epoch 編碼，adapter 會扣 8 小時後做 freshness check。 | `ready_implemented` | 已新增 `local.penghu.water_level`。`https://sewer.penghu.gov.tw/` 登入型儀表板不納入 production。 |
 | 金門縣 | KWIS 介接文件；Civil IoT `water_12` / `STA_RainSewer` | KWIS 已知需線上申請帳密/key/token，且文件用途偏第三方設備上傳，不是公開 read API。2026-06-28 Civil IoT live smoke：淹水感測 7 站、RainSewer 29 站。 | `needs_application` + `central_aggregated_ready` | 未申請或未取得官方公開 read API 前不實作地方 adapter；中央主幹可補足金門即時水文觀測。 |
 | 連江縣 | data.gov.tw / 連江縣開放資料 | 只找到易淹水 ODS 與防災靜態資料 | `metadata_only` + `not_found` | 中央主幹仍需補 hydrologic backbone；地方 live API 未找到。 |
+| 連江縣 | 連江自來水廠 `水庫水位`；`http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx` | 2026-06-30 追加查核：自來水廠水庫水位頁為月報 PDF；`erbwater` 公開即時監測值頁可進入，但欄位與選單顯示為放流水環保 CEMS，非淹水、水位、雨水下水道、抽水站或水門觀測。 | `non_qualifying` + `needs_hydrologic_backbone` | 兩者只作已排除官方線索，不列 production adapter，不降低 `hydrologic_observation` 缺口。 |
 
 ## 2026-06-29 候選來源 smoke 補充
 
@@ -75,5 +76,6 @@
 3. **苗栗縣、臺東縣**：FHY 地方政府 supplier 已可運作；其他官方系統仍需找到
    API contract 後才可另增 adapter。
 4. **花蓮縣、金門縣**：目前屬授權/登入型；需要人工申請或官方公開 read API。
-5. **彰化、連江**：目前主要是靜態 open data；持續監看
-   metadata release，不列 production adapter。
+5. **彰化、連江**：目前主要是靜態 open data；連江水庫水位月報與
+   `erbwater` 放流水 CEMS 已列為 `non_qualifying`，持續監看 metadata
+   release，不列 production adapter。

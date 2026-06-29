@@ -106,13 +106,18 @@ def _metadata_release_packet(
     county = str(item["county"])
     source_urls = list(item.get("metadata_source_urls", []))
     target_signal_types = list(item.get("central_backbone_missing_signal_types", []))
+    non_qualifying_reasons = list(item.get("non_qualifying_source_reasons", []))
     area_hint = "南竿、北竿、莒光、東引" if county == "連江縣" else county
+    excluded_summary = _non_qualifying_request_summary(non_qualifying_reasons)
     return {
         "county": county,
         "packet_type": "metadata_release_request",
         "requires_human_intervention": True,
         "subject": f"{county}即時水文觀測資料釋出請求",
         "source_urls": source_urls,
+        "non_qualifying_source_names": list(item.get("non_qualifying_source_names", [])),
+        "non_qualifying_source_urls": list(item.get("non_qualifying_source_urls", [])),
+        "non_qualifying_source_reasons": non_qualifying_reasons,
         "requested_counterparty": item.get("requested_counterparty"),
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
@@ -123,6 +128,7 @@ def _metadata_release_packet(
             f"即時水文觀測 read API。請協助釋出{area_hint}的雨水下水道水位、道路"
             "淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 "
             "Civil IoT / WRA 等中央公開 SensorThings 主幹。"
+            f"{excluded_summary}因此仍未補足 hydrologic_observation。"
         ),
         "checklist": [
             "確認是否可提供最新觀測 read API",
@@ -251,7 +257,26 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
         "workstream": priority_item.get("workstream"),
         "priority_why_now": priority_item.get("why_now"),
         "completion_gate": priority_item.get("completion_gate"),
+        "non_qualifying_source_names": priority_item.get(
+            "non_qualifying_source_names",
+            [],
+        ),
+        "non_qualifying_source_urls": priority_item.get(
+            "non_qualifying_source_urls",
+            [],
+        ),
+        "non_qualifying_source_reasons": priority_item.get(
+            "non_qualifying_source_reasons",
+            [],
+        ),
     }
+
+
+def _non_qualifying_request_summary(reasons: list[Any]) -> str:
+    if not reasons:
+        return ""
+    reason_text = "；".join(str(reason).rstrip("。") for reason in reasons)
+    return f" 已查核但排除的官方線索：{reason_text}。"
 
 
 def _packet_sort_key(packet: Mapping[str, Any]) -> tuple[int, str]:
@@ -327,6 +352,19 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
     if packet.get("source_urls"):
         lines.append("- 來源：")
         lines.extend(f"  - {url}" for url in packet["source_urls"])
+    if packet.get("non_qualifying_source_names"):
+        lines.append(
+            "- 已排除官方線索："
+            + "、".join(str(name) for name in packet["non_qualifying_source_names"])
+        )
+    if packet.get("non_qualifying_source_urls"):
+        lines.append("- 已排除官方線索 URL：")
+        lines.extend(f"  - {url}" for url in packet["non_qualifying_source_urls"])
+    if packet.get("non_qualifying_source_reasons"):
+        lines.append("- 排除原因：")
+        lines.extend(
+            f"  - {reason}" for reason in packet["non_qualifying_source_reasons"]
+        )
     if packet.get("production_adapter_keys"):
         lines.append(
             "- 既有 production adapters："

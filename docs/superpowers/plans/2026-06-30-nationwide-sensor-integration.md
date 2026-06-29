@@ -25,7 +25,7 @@
 
 | Priority | Workstream | Counties / scope | Exit gate |
 | --- | --- | --- | --- |
-| P0 | Restore minimum nationwide hydrologic backbone | 連江縣 | `central_backbone_minimum_complete` is true or an explicit official request packet exists with tracked follow-up status. |
+| P0 | Restore minimum nationwide hydrologic backbone | 連江縣 | `central_backbone_minimum_complete` is true or an explicit official request packet exists with tracked follow-up status and non-qualifying official leads are explicitly excluded. |
 | P0 | Complete local direct source absence | 金門縣、連江縣 | Each county has either a production adapter or a documented authorization/open-data request with required read API fields. |
 | P1 | Resolve authorization-gated richer sources | 花蓮縣、金門縣 | Request packet records official counterparty, API purpose, required fields, raw snapshot and license requirements. |
 | P1 | Resolve technical live-smoke blockers | Current queue empty after 臺北市、雲林縣 status-only reviews | Candidate endpoints are smoked with observed time, id, value semantics, coordinates, and status-only separation. |
@@ -348,6 +348,32 @@ rule that `alarmState` cannot satisfy flood-depth measurement coverage.
 - [x] Reclassify gate open/close fields as `status_only_ready` and remove Taipei from `live_smoke_reviews`.
 - [x] Regenerate request packets so Taipei becomes a `signal_gap_request` with `gate_status` status-only metadata.
 - [x] Update matrix and verification log to explain that gate status cannot satisfy water level, rainfall, or flood-depth coverage.
+
+## Task 11: Lienchiang Non-Qualifying Official Leads
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `apps/api/app/api/routes/admin.py`
+- Modify: `docs/api/openapi.yaml`
+- Modify: request-packet, action-plan, admin contract, and CLI tests.
+- Modify: generated request packet artifacts and local source docs.
+
+**Interfaces:**
+- Consumes: 連江自來水廠水庫水位月報 and `erbwater` public realtime monitoring page.
+- Produces: `non_qualifying_source_*` metadata in local source coverage,
+  action-plan, admin, and request-packet outputs, without reducing the
+  `hydrologic_observation` gap.
+
+- [x] Write failing tests proving Lienchiang excluded official leads are exposed.
+- [x] Record water-reservoir monthly PDFs and environmental CEMS as
+  non-qualifying sources.
+- [x] Regenerate official request packets so the P0 request includes exclusion
+  reasons.
+- [x] Update matrix and verification log to preserve that Lienchiang still needs
+  a realtime hydrologic observation read API.
 
 ## Completion Gates
 

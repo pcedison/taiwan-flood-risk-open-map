@@ -58,6 +58,14 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
         == "monitoring_open_data_release"
     )
     assert metadata_release_by_county["連江縣"]["last_followed_up_at"] is None
+    assert metadata_release_by_county["連江縣"]["non_qualifying_source_names"] == [
+        "連江自來水廠水庫水位月報",
+        "連江縣資訊公開查詢系統即時監測值",
+    ]
+    assert metadata_release_by_county["連江縣"]["non_qualifying_source_reasons"] == [
+        "公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API。",
+        "公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。",
+    ]
 
     public_contract_by_county = {
         item["county"]: item for item in plan["public_api_contract_reviews"]
@@ -83,6 +91,10 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     assert priority[0]["workstream"] == "restore_hydrologic_backbone"
     assert "hydrologic_observation" in priority[0]["central_backbone_missing_signal_types"]
     assert priority[0]["tracking_status"] == "monitoring_open_data_release"
+    assert priority[0]["non_qualifying_source_names"] == [
+        "連江自來水廠水庫水位月報",
+        "連江縣資訊公開查詢系統即時監測值",
+    ]
     assert priority[1]["workstream"] == "request_official_authorization"
     assert "local_direct_source" in priority[1]["why_now"]
     assert "observed_at" in priority[1]["required_read_api_fields"]
