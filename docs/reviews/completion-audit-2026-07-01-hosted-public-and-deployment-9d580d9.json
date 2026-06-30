@@ -1,0 +1,115 @@
+{
+  "evidence_overlay": {
+    "captured_at": "2026-07-01T01:45:00+08:00",
+    "follow_up_as_of": "2026-07-01T01:50:00+08:00",
+    "production_gate_evidence_count": 2,
+    "production_gate_requirement_evidence_count": 4,
+    "schema_version": "local-source-completion-evidence/v1",
+    "signal_family_gap_dispatch_count": 0,
+    "signal_family_gap_dispatch_follow_up_count": 0,
+    "signal_family_gap_dispatch_overdue_count": 0,
+    "signal_family_gap_evidence_count": 0,
+    "signal_family_gap_next_follow_up_due_at": null,
+    "source_contract_dispatch_count": 0,
+    "source_contract_dispatch_follow_up_count": 0,
+    "source_contract_dispatch_overdue_count": 0,
+    "source_contract_evidence_count": 0,
+    "source_contract_next_follow_up_due_at": null,
+    "validation_errors": []
+  },
+  "gates": [
+    {
+      "blocking_items": [],
+      "evidence": "Every county has local direct coverage or appears in the tracked integration priority/request workflow.",
+      "gate_key": "local_direct_or_tracked_request",
+      "next_workstream": null,
+      "status": "satisfied"
+    },
+    {
+      "blocking_items": [],
+      "evidence": "central_backbone_remaining_count=0",
+      "gate_key": "central_backbone_minimum_coverage",
+      "next_workstream": null,
+      "status": "satisfied"
+    },
+    {
+      "blocking_items": [
+        "pump_or_gate_status:13",
+        "flood_depth:3",
+        "sewer_water_level:1"
+      ],
+      "evidence": "3 signal families remain in signal_gap_priority_groups.",
+      "gate_key": "required_signal_families",
+      "next_workstream": "send_official_read_api_requests",
+      "status": "incomplete"
+    },
+    {
+      "blocking_items": [
+        "authorization_requests:2",
+        "metadata_release_monitors:1",
+        "public_api_contract_reviews:3"
+      ],
+      "evidence": "Formal credentials, official releases, and public read API contracts must clear before blocked local sources can become production adapters.",
+      "gate_key": "official_authorization_and_contracts",
+      "next_workstream": "resolve_authorization_gated_adapters",
+      "status": "incomplete"
+    },
+    {
+      "blocking_items": [
+        "freshness_policy",
+        "raw_snapshot_retention_policy",
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+        "worker_persisted_evidence_path"
+      ],
+      "evidence": "Hosted/production must prove worker-persisted evidence, raw snapshots, staging rows, adapter runs, promoted latest rows, and scheduler cadence per README and ADR-0010.",
+      "gate_key": "hosted_worker_persisted_evidence",
+      "next_workstream": "hosted_persistence_and_scheduler_proof",
+      "status": "incomplete"
+    },
+    {
+      "blocking_items": [],
+      "evidence": "Accepted completion evidence supplied for all production_deployment_evidence requirements.",
+      "gate_key": "production_deployment_evidence",
+      "next_workstream": null,
+      "status": "satisfied"
+    },
+    {
+      "blocking_items": [
+        "hosted_alert_routing",
+        "scheduled_freshness_checks",
+        "worker_scheduler_alert_ownership"
+      ],
+      "evidence": "Fresh/stale/failed source state needs hosted scrape jobs, alert routing ownership, and monitored scheduler evidence.",
+      "gate_key": "production_monitoring_and_alerting",
+      "next_workstream": "monitoring_and_alerting_proof",
+      "status": "incomplete"
+    },
+    {
+      "blocking_items": [],
+      "evidence": "Accepted completion evidence supplied for all public_risk_worker_evidence_path requirements.",
+      "gate_key": "public_risk_worker_evidence_path",
+      "next_workstream": null,
+      "status": "satisfied"
+    }
+  ],
+  "next_priority_workstreams": [
+    "send_official_read_api_requests",
+    "resolve_authorization_gated_adapters",
+    "hosted_persistence_and_scheduler_proof",
+    "monitoring_and_alerting_proof"
+  ],
+  "overall_status": "incomplete",
+  "summary": {
+    "authorization_request_count": 2,
+    "central_backbone_remaining_count": 0,
+    "live_smoke_review_count": 0,
+    "local_direct_remaining_count": 2,
+    "metadata_release_monitor_count": 1,
+    "public_api_contract_review_count": 3,
+    "signal_gap_county_item_count": 17,
+    "signal_gap_group_count": 3,
+    "total_counties": 22,
+    "unresolved_priority_item_count": 16
+  }
+}

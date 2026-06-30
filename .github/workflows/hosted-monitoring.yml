@@ -69,10 +69,28 @@ jobs:
         run: |
           echo "::notice title=Hosted source freshness skipped::ADMIN_BEARER_TOKEN is not configured, so /admin/v1/sources freshness evidence was not collected."
 
+      - name: Hosted completion audit
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          args=()
+          for file in artifacts/*-completion-evidence.json; do
+            if [ -f "$file" ]; then
+              args+=(--completion-evidence-json "$file")
+            fi
+          done
+          python scripts/local-source-completion-audit.py \
+            "${args[@]}" \
+            --as-of "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/hosted-completion-audit.json \
+            --markdown-output artifacts/hosted-completion-audit.md
+
       - name: Upload hosted monitoring artifacts
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: hosted-monitoring-${{ github.run_id }}
-          path: artifacts/*.json
+          path: |
+            artifacts/*.json
+            artifacts/*.md
           if-no-files-found: warn
