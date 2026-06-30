@@ -13,6 +13,7 @@ REQUIRED_REALTIME_READ_API_FIELDS = (
     "longitude_latitude_or_joinable_station_metadata",
     "official_source_url_and_license",
 )
+DATA_GOV_DATASET_EXPORT_URL = "https://data.gov.tw/api/front/dataset/export?format=json"
 
 
 def build_local_source_action_plan(
@@ -93,6 +94,7 @@ def _metadata_release_monitor(record: LocalSourceCoverageRecord) -> dict[str, An
         "tracking_status": "monitoring_open_data_release",
         "last_followed_up_at": None,
         "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
+        "open_data_release_monitor": _open_data_release_monitor(record),
         "request_focus": (
             "請官方釋出即時水文觀測 read API，至少包含水位、淹水深度、雨水下水道、"
             "抽水站或水門任一類觀測資料，並提供觀測時間、站點 ID、測值與座標。"
@@ -237,6 +239,33 @@ def _integration_priority_item(
         "non_qualifying_source_reasons": list(record.non_qualifying_source_reasons),
         "application_urls": list(record.application_urls),
         "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
+        "open_data_release_monitor": _open_data_release_monitor(record),
+    }
+
+
+def _open_data_release_monitor(
+    record: LocalSourceCoverageRecord,
+) -> dict[str, Any] | None:
+    if record.next_action_code not in {
+        "monitor_open_data_release",
+        "continue_official_discovery",
+    }:
+        return None
+    expected_state = (
+        "metadata_only" if "metadata_only" in record.local_direct_statuses else "no_candidate"
+    )
+    return {
+        "target_county": record.county,
+        "source_catalog": "data.gov.tw dataset export",
+        "source_catalog_url": DATA_GOV_DATASET_EXPORT_URL,
+        "expected_current_state": expected_state,
+        "escalate_on_state": "live_candidate_found",
+        "candidate_readiness_field": "candidate_live_read_api",
+        "command": (
+            "PYTHONPATH=apps/workers python "
+            "scripts/local-source-discovery-monitor.py "
+            f"--county {record.county} --fail-on-candidate"
+        ),
     }
 
 

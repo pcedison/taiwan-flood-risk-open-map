@@ -204,6 +204,16 @@ class LocalSourceAuthorizationRequest(ContractModel):
     request_focus: str
 
 
+class LocalSourceOpenDataReleaseMonitor(ContractModel):
+    target_county: str
+    source_catalog: str
+    source_catalog_url: str
+    expected_current_state: str
+    escalate_on_state: str
+    candidate_readiness_field: str
+    command: str
+
+
 class LocalSourceMetadataReleaseMonitor(ContractModel):
     county: str
     reason: str | None = None
@@ -218,6 +228,7 @@ class LocalSourceMetadataReleaseMonitor(ContractModel):
     tracking_status: str
     last_followed_up_at: datetime | None = None
     required_read_api_fields: list[str] = Field(default_factory=list)
+    open_data_release_monitor: LocalSourceOpenDataReleaseMonitor | None = None
     request_focus: str
 
 
@@ -277,6 +288,7 @@ class LocalSourceIntegrationPriorityItem(ContractModel):
     non_qualifying_source_reasons: list[str] = Field(default_factory=list)
     application_urls: list[str] = Field(default_factory=list)
     required_read_api_fields: list[str] = Field(default_factory=list)
+    open_data_release_monitor: LocalSourceOpenDataReleaseMonitor | None = None
 
 
 class LocalSourceActionPlan(ContractModel):

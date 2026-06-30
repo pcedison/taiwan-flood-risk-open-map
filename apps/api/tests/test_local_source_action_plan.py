@@ -65,6 +65,19 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
         == "monitoring_open_data_release"
     )
     assert metadata_release_by_county["連江縣"]["last_followed_up_at"] is None
+    assert metadata_release_by_county["連江縣"]["open_data_release_monitor"] == {
+        "target_county": "連江縣",
+        "source_catalog": "data.gov.tw dataset export",
+        "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json",
+        "expected_current_state": "metadata_only",
+        "escalate_on_state": "live_candidate_found",
+        "candidate_readiness_field": "candidate_live_read_api",
+        "command": (
+            "PYTHONPATH=apps/workers python "
+            "scripts/local-source-discovery-monitor.py "
+            "--county 連江縣 --fail-on-candidate"
+        ),
+    }
     assert metadata_release_by_county["連江縣"]["non_qualifying_source_names"] == [
         "連江自來水廠水庫水位月報",
         "連江縣資訊公開查詢系統即時監測值",
@@ -168,6 +181,12 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
         "pump_or_gate_status",
     ]
     assert priority[0]["tracking_status"] == "monitoring_open_data_release"
+    assert priority[0]["open_data_release_monitor"]["expected_current_state"] == (
+        "metadata_only"
+    )
+    assert priority[0]["open_data_release_monitor"]["escalate_on_state"] == (
+        "live_candidate_found"
+    )
     assert priority[0]["non_qualifying_source_names"] == [
         "連江自來水廠水庫水位月報",
         "連江縣資訊公開查詢系統即時監測值",

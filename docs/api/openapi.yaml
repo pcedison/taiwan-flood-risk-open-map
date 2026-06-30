@@ -927,6 +927,14 @@ paths:
                             - observed_at
                             - station_or_device_id
                             - measurement_value
+                          open_data_release_monitor:
+                            target_county: 連江縣
+                            source_catalog: data.gov.tw dataset export
+                            source_catalog_url: https://data.gov.tw/api/front/dataset/export?format=json
+                            expected_current_state: metadata_only
+                            escalate_on_state: live_candidate_found
+                            candidate_readiness_field: candidate_live_read_api
+                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --county 連江縣 --fail-on-candidate
                           request_focus: "請官方釋出即時水文觀測 read API，至少包含水位、淹水深度、雨水下水道、抽水站或水門任一類觀測資料。"
                       public_api_contract_reviews: []
                       live_smoke_reviews: []
@@ -968,6 +976,7 @@ paths:
                             - observed_at
                             - station_or_device_id
                             - measurement_value
+                          open_data_release_monitor: null
                       integration_priority_queue:
                         - rank: 1
                           priority_tier: P0
@@ -1012,6 +1021,14 @@ paths:
                             - observed_at
                             - station_or_device_id
                             - measurement_value
+                          open_data_release_monitor:
+                            target_county: 連江縣
+                            source_catalog: data.gov.tw dataset export
+                            source_catalog_url: https://data.gov.tw/api/front/dataset/export?format=json
+                            expected_current_state: metadata_only
+                            escalate_on_state: live_candidate_found
+                            candidate_readiness_field: candidate_live_read_api
+                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --county 連江縣 --fail-on-candidate
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -2589,6 +2606,41 @@ components:
           type: string
       additionalProperties: false
 
+    LocalSourceOpenDataReleaseMonitor:
+      type: object
+      required:
+        - target_county
+        - source_catalog
+        - source_catalog_url
+        - expected_current_state
+        - escalate_on_state
+        - candidate_readiness_field
+        - command
+      properties:
+        target_county:
+          type: string
+        source_catalog:
+          type: string
+        source_catalog_url:
+          type: string
+          format: uri
+        expected_current_state:
+          type: string
+          enum:
+            - metadata_only
+            - no_candidate
+        escalate_on_state:
+          type: string
+          enum:
+            - live_candidate_found
+        candidate_readiness_field:
+          type: string
+          enum:
+            - candidate_live_read_api
+        command:
+          type: string
+      additionalProperties: false
+
     LocalSourceMetadataReleaseMonitor:
       type: object
       required:
@@ -2605,6 +2657,7 @@ components:
         - tracking_status
         - last_followed_up_at
         - required_read_api_fields
+        - open_data_release_monitor
         - request_focus
       properties:
         county:
@@ -2656,6 +2709,10 @@ components:
           type: array
           items:
             type: string
+        open_data_release_monitor:
+          anyOf:
+            - $ref: "#/components/schemas/LocalSourceOpenDataReleaseMonitor"
+            - type: "null"
         request_focus:
           type: string
       additionalProperties: false
@@ -2796,6 +2853,7 @@ components:
         - non_qualifying_source_reasons
         - application_urls
         - required_read_api_fields
+        - open_data_release_monitor
       properties:
         rank:
           type: integer
@@ -2902,6 +2960,10 @@ components:
           type: array
           items:
             type: string
+        open_data_release_monitor:
+          anyOf:
+            - $ref: "#/components/schemas/LocalSourceOpenDataReleaseMonitor"
+            - type: "null"
       additionalProperties: false
 
     LocalSourceCoverageSummary:

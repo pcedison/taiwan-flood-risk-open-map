@@ -723,6 +723,36 @@ production adapters from authorization-gated adapter readiness. Kinmen remains
 status adapter is ready to activate after official Token approval and hosted
 worker-persisted evidence smoke.
 
+## Task 23: Lienchiang Open-Data Release Monitor Contract
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+
+**Interfaces:**
+- Consumes: the P0 `monitor_open_data_release` action-plan item for Lienchiang
+  and the existing worker-side `scripts/local-source-discovery-monitor.py`.
+- Produces: `open_data_release_monitor` on metadata-release and
+  integration-priority items so scheduled operators know which catalog to scan,
+  what current state is expected, and what state should trigger adapter TDD.
+
+- [x] Write failing tests requiring Lienchiang to expose a data.gov.tw release
+  monitor command and escalation rule.
+- [x] Keep Lienchiang incomplete: expected state is `metadata_only`, and the
+  escalation state is `live_candidate_found`.
+- [x] Update Pydantic and OpenAPI contracts so `/admin/v1/local-source-action-plan`
+  can drive release-monitor scheduling without scraping prose.
+- [x] Verify action-plan/admin contract tests, OpenAPI validation, and API lint.
+
+Completed 2026-06-30: the P0 Lienchiang item now includes a machine-readable
+release-monitor contract:
+`PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --county 連江縣 --fail-on-candidate`.
+Finding a `candidate_live_read_api` remains an escalation into source review
+and adapter TDD, not automatic production completion.
+
 ## Completion Gates
 
 The full objective is complete only when:

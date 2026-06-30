@@ -1231,6 +1231,19 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "sewer_water_level",
         "pump_or_gate_status",
     ]
+    assert top_priority["open_data_release_monitor"] == {
+        "target_county": "連江縣",
+        "source_catalog": "data.gov.tw dataset export",
+        "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json",
+        "expected_current_state": "metadata_only",
+        "escalate_on_state": "live_candidate_found",
+        "candidate_readiness_field": "candidate_live_read_api",
+        "command": (
+            "PYTHONPATH=apps/workers python "
+            "scripts/local-source-discovery-monitor.py "
+            "--county 連江縣 --fail-on-candidate"
+        ),
+    }
     kinmen_priority = plan["integration_priority_queue"][1]
     assert kinmen_priority["authorization_gated_adapter_keys"] == [
         "local.kinmen.kwis_pump_station"
@@ -1270,6 +1283,12 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert lienchiang["requested_counterparty"] == "連江縣政府公開資料或防災水利窗口"
     assert lienchiang["tracking_status"] == "monitoring_open_data_release"
     assert lienchiang["last_followed_up_at"] is None
+    assert lienchiang["open_data_release_monitor"]["expected_current_state"] == (
+        "metadata_only"
+    )
+    assert lienchiang["open_data_release_monitor"]["command"].endswith(
+        "--county 連江縣 --fail-on-candidate"
+    )
     assert lienchiang["non_qualifying_source_names"] == [
         "連江自來水廠水庫水位月報",
         "連江縣資訊公開查詢系統即時監測值",
