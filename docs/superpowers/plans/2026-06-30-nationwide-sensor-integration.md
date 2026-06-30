@@ -1398,6 +1398,33 @@ all five `hosted_worker_persisted_evidence` requirements. This does not itself
 prove hosted worker persistence; the audit is accepted only when real private
 worker, scheduler, storage, and egress evidence is provided.
 
+## Task 44: Source Contract Evidence Overlay
+
+**Files:**
+- Add: `scripts/source_contract_evidence.py`
+- Add: `tests/test_source_contract_evidence.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+
+**Interfaces:**
+- Consumes: a private source-contract manifest covering every current
+  `authorization_request`, `metadata_release_monitor`, and
+  `public_api_contract_review` item.
+- Produces: a fail-closed `local-source-completion-evidence/v1` overlay for
+  `official_authorization_and_contracts`.
+
+- [x] Write failing tests requiring valid source-contract evidence to produce
+  an accepted completion overlay.
+- [x] Reject incomplete manifests that lack an accepted status, evidence ref,
+  review timestamp, or any current required county/gate.
+- [x] Support PowerShell UTF-8 BOM JSON manifests.
+- [x] Document the private handoff command and required fields.
+
+Completed 2026-06-30: operators now have a strict private evidence path for
+the six current official authorization/contract blockers. This does not itself
+prove official authorization, metadata release, or public read API contracts;
+the audit is accepted only when real private official replies or contract
+reviews are supplied.
+
 ## Completion Gates
 
 The full objective is complete only when:
