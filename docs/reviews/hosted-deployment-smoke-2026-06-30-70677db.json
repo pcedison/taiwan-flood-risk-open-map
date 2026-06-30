@@ -1,0 +1,51 @@
+{
+  "schema_version": "hosted-deployment-smoke/v1",
+  "captured_at": "2026-06-30T19:25:00+08:00",
+  "base_url": "https://floodrisk.cc",
+  "status": "passed",
+  "expected_deployment_sha": "70677dba26d2b5b703088c59d3b3599b3c41beda",
+  "health": {
+    "status_code": 200,
+    "status": "ok",
+    "service": "flood-risk-api",
+    "version": "public-beta-mvp-2026-05-04",
+    "deployment_sha": "70677dba26d2b5b703088c59d3b3599b3c41beda",
+    "dependencies": {},
+    "error": null
+  },
+  "ready": {
+    "status_code": 200,
+    "status": "ok",
+    "service": "flood-risk-api",
+    "version": "public-beta-mvp-2026-05-04",
+    "deployment_sha": "70677dba26d2b5b703088c59d3b3599b3c41beda",
+    "dependencies": {
+      "database": "healthy",
+      "redis": "healthy"
+    },
+    "error": null
+  },
+  "completion_evidence_targets": [
+    {
+      "gate_key": "production_deployment_evidence",
+      "status": "accepted",
+      "satisfied_requirements": [
+        "main_branch_deployed_sha",
+        "ready_dependency_smoke"
+      ],
+      "requirement_evidence": [
+        {
+          "requirement": "main_branch_deployed_sha",
+          "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-06-30-70677db.json#/health/deployment_sha",
+          "observed_at": "2026-06-30T19:25:00+08:00"
+        },
+        {
+          "requirement": "ready_dependency_smoke",
+          "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-06-30-70677db.json#/ready/dependencies",
+          "observed_at": "2026-06-30T19:25:00+08:00"
+        }
+      ]
+    }
+  ],
+  "failures": []
+}

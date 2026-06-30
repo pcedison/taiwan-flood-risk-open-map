@@ -1,0 +1,29 @@
+{
+  "schema_version": "local-source-completion-evidence/v1",
+  "captured_at": "2026-06-30T19:26:00+08:00",
+  "signal_family_gap_evidence": [],
+  "source_contract_evidence": [],
+  "production_gate_evidence": [
+    {
+      "gate_key": "public_risk_worker_evidence_path",
+      "status": "accepted",
+      "evidence_ref": "docs\\reviews\\hosted-public-risk-evidence-smoke-2026-06-30-70677db.json",
+      "satisfied_requirements": [
+        "hosted_risk_response_worker_evidence_smoke",
+        "query_point_nearby_coverage_smoke"
+      ],
+      "requirement_evidence": [
+        {
+          "requirement": "hosted_risk_response_worker_evidence_smoke",
+          "evidence_ref": "docs\\reviews\\hosted-public-risk-evidence-smoke-2026-06-30-70677db.json#/risk_assessment/worker_evidence",
+          "observed_at": "2026-06-30T19:26:00+08:00"
+        },
+        {
+          "requirement": "query_point_nearby_coverage_smoke",
+          "evidence_ref": "docs\\reviews\\hosted-public-risk-evidence-smoke-2026-06-30-70677db.json#/risk_assessment/nearby_coverage",
+          "observed_at": "2026-06-30T19:26:00+08:00"
+        }
+      ]
+    }
+  ]
+}
