@@ -1566,6 +1566,40 @@ artifact instead of only static notes. This does not satisfy the
 need official read API contracts, accepted unavailability records, or promoted
 production adapters before the blockers can clear.
 
+## Task 50: Public Completion Audit Markdown Report
+
+**Files:**
+- Modify: `scripts/local-source-completion-audit.py`
+- Modify: `tests/test_local_source_completion_audit_cli.py`
+- Add: `docs/reviews/hosted-deployment-smoke-2026-06-30-5dc502f.json`
+- Add: `docs/reviews/hosted-deployment-completion-evidence-2026-06-30-5dc502f.json`
+- Add: `docs/reviews/hosted-public-risk-evidence-smoke-2026-06-30-5dc502f.json`
+- Add: `docs/reviews/hosted-public-risk-completion-evidence-2026-06-30-5dc502f.json`
+- Add: `docs/reviews/completion-audit-2026-06-30-5dc502f.json`
+- Add: `docs/reviews/completion-audit-2026-06-30-5dc502f.md`
+
+**Interfaces:**
+- Consumes: hosted deployment smoke and hosted public-risk evidence smoke for
+  main merge SHA `5dc502f360c5a8d813bc9b3787438f8d4a232cc0`.
+- Produces: a public-safe Markdown report for unresolved completion gates,
+  next workstreams, and committed evidence overlay counts.
+
+- [x] Write a failing CLI test requiring `--markdown-output` to emit a
+  human-readable completion audit report.
+- [x] Add Markdown rendering while keeping JSON stdout and `--output` behavior
+  unchanged.
+- [x] Re-run hosted deployment and hosted public-risk smokes against
+  `https://floodrisk.cc` for the deployed `5dc502f...` main SHA.
+- [x] Commit the latest completion-audit JSON and Markdown evidence artifacts.
+
+Completed 2026-06-30: the repository now records a public-safe completion audit
+report for deployed main SHA `5dc502f...`. The satisfied gates are
+`local_direct_or_tracked_request`, `central_backbone_minimum_coverage`,
+`production_deployment_evidence`, and `public_risk_worker_evidence_path`. The
+overall objective remains incomplete because signal-family blockers,
+official authorization/contracts, hosted worker persistence evidence, and
+production monitoring/alerting still require accepted evidence.
+
 ## Completion Gates
 
 The full objective is complete only when:
