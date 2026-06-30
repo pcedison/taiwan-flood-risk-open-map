@@ -108,3 +108,19 @@ Commands run against the current data.gov.tw dataset export through
 Conclusion: no adapter implementation should start from the current live
 discovery refresh. The unresolved signal families still require official read
 API follow-up, authorization/contract evidence, or a future release-monitor hit.
+
+Evidence artifacts captured 2026-06-30 with
+`scripts/local-source-discovery-monitor.py --captured-at 2026-06-30T14:00:00+08:00 --evidence-output ... --fail-on-candidate`:
+
+- `docs/reviews/signal-gap-discovery-refresh-2026-06-30-pump-or-gate.json`:
+  `pump_or_gate_status`, 9 metadata-only candidates, 0 live read API
+  candidates.
+- `docs/reviews/signal-gap-discovery-refresh-2026-06-30-flood-depth.json`:
+  `flood_depth`, 2 metadata-only candidates, 0 live read API candidates.
+- `docs/reviews/signal-gap-discovery-refresh-2026-06-30-sewer-water-level.json`:
+  `sewer_water_level`, 11 metadata-only candidates, 0 live read API candidates.
+
+Use those artifacts for release-monitor review and future PR evidence instead
+of PowerShell `Tee-Object`, because the CLI writes normalized UTF-8 JSON and
+records the source catalog URL, captured timestamp, target counties, required
+signal type, summary counts, and conclusion.
