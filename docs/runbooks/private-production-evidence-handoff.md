@@ -154,6 +154,7 @@ Nationwide local-source completion is audited by:
 
 ```powershell
 python scripts\local-source-completion-audit.py `
+  --completion-evidence-json docs\reviews\hosted-deployment-completion-evidence-YYYY-MM-DD-<sha>.json `
   --completion-evidence-json docs\reviews\hosted-public-risk-completion-evidence-YYYY-MM-DD-<sha>.json `
   --completion-evidence-json <private-source-contract-evidence.json> `
   --completion-evidence-json <private-hosted-worker-evidence.json> `

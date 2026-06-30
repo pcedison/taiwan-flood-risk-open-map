@@ -390,6 +390,13 @@ def test_local_source_action_plan_audits_completion_gates() -> None:
     assert hosted_gate["status"] == "incomplete"
     assert "worker-persisted evidence" in hosted_gate["evidence"]
 
+    deployment_gate = gates["production_deployment_evidence"]
+    assert deployment_gate["status"] == "incomplete"
+    assert deployment_gate["blocking_items"] == [
+        "main_branch_deployed_sha",
+        "ready_dependency_smoke",
+    ]
+
     assert audit["next_priority_workstreams"][:3] == [
         "send_official_read_api_requests",
         "resolve_authorization_gated_adapters",
@@ -415,14 +422,15 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
         "captured_at": "2026-06-30T12:00:00+08:00",
         "signal_family_gap_evidence_count": 24,
         "source_contract_evidence_count": 6,
-        "production_gate_evidence_count": 3,
-        "production_gate_requirement_evidence_count": 10,
+        "production_gate_evidence_count": 4,
+        "production_gate_requirement_evidence_count": 12,
         "validation_errors": [],
     }
     assert gates["required_signal_families"]["status"] == "satisfied"
     assert gates["required_signal_families"]["blocking_items"] == []
     assert gates["official_authorization_and_contracts"]["status"] == "satisfied"
     assert gates["official_authorization_and_contracts"]["blocking_items"] == []
+    assert gates["production_deployment_evidence"]["status"] == "satisfied"
     assert gates["hosted_worker_persisted_evidence"]["status"] == "satisfied"
     assert gates["production_monitoring_and_alerting"]["status"] == "satisfied"
     assert gates["public_risk_worker_evidence_path"]["status"] == "satisfied"
@@ -547,6 +555,16 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                 "satisfied_requirements": list(
                     PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
                         "hosted_worker_persisted_evidence"
+                    ]
+                ),
+            },
+            {
+                "gate_key": "production_deployment_evidence",
+                "status": "accepted",
+                "evidence_ref": "private-ops://zeabur/main-deployment",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "production_deployment_evidence"
                     ]
                 ),
             },
