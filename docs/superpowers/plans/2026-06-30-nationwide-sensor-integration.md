@@ -1789,6 +1789,37 @@ official replies, production adapter evidence, authorization-gated adapter
 evidence, or official-unavailable decisions before any completion gate is
 satisfied.
 
+## Task 57: Official Request Follow-Up Monitor
+
+**Files:**
+- Add: `scripts/local-source-request-followups.py`
+- Add: `tests/test_local_source_request_followups_cli.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: private `local-source-completion-evidence/v1` dispatch overlays
+  containing `signal_family_gap_evidence` and `source_contract_evidence`
+  entries with `status: request_dispatched`.
+- Produces: a public-safe follow-up report with pending/overdue counts,
+  `overdue_items`, and `next_follow_up_due_at`, without echoing
+  `evidence_ref`.
+
+- [x] Write failing CLI tests proving overdue dispatches make
+  `--fail-on-overdue` exit 1 and private evidence refs are not printed.
+- [x] Add the follow-up monitor CLI with repeatable
+  `--completion-evidence-json`, `--as-of`, `--output`, and
+  `--fail-on-overdue`.
+- [x] Document how operators can run the monitor against private dispatch
+  overlays after sending official signal-gap and source-contract requests.
+
+Completed 2026-06-30: dispatched official requests can now be monitored for
+pending or overdue follow-up without exposing private correspondence refs. This
+still does not satisfy `required_signal_families` or
+`official_authorization_and_contracts`; it keeps the official request workflow
+from becoming invisible while waiting for accepted replies or production
+adapter evidence.
+
 ## Completion Gates
 
 The full objective is complete only when:
