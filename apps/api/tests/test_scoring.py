@@ -123,6 +123,39 @@ def test_observed_flood_report_within_one_km_is_at_least_medium_history() -> Non
     assert result.historical_level == "中"
 
 
+def test_high_realtime_reason_names_the_signal_mix_without_implying_rain_only() -> None:
+    observed_at = datetime.fromisoformat("2026-06-29T00:00:00+00:00")
+    result = score_risk(
+        (
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="water_level",
+                confidence=1.0,
+                distance_to_query_m=80.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+                risk_factor=1.0,
+                observed_at=observed_at,
+            ),
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_warning",
+                confidence=1.0,
+                distance_to_query_m=80.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+                risk_factor=1.0,
+                observed_at=observed_at,
+            ),
+        ),
+        now=observed_at,
+    )
+
+    assert result.realtime_level == "極高"
+    assert any("水位" in reason and "官方警戒" in reason for reason in result.main_reasons)
+    assert all("雨量或水位" not in reason for reason in result.main_reasons)
+
+
 def test_flood_potential_context_does_not_escalate_single_observed_history_to_high() -> None:
     result = score_risk(
         (

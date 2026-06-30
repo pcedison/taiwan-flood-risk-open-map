@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import type { EvidenceItem, EvidencePreview } from "../../app/lib/risk-display";
@@ -40,6 +41,7 @@ const {
   shouldFetchEvidenceList,
   sourceHealthSummaryState,
 } = (await import(riskDisplayModulePath)) as typeof import("../../app/lib/risk-display");
+const uiTextSource = readFileSync(new URL("../../app/lib/ui-text.ts", import.meta.url), "utf8");
 
 const previewEvidence: EvidencePreview = {
   confidence: 0.812,
@@ -299,7 +301,7 @@ test("combined risk display separates summary from source basis", () => {
       realtimeLevel: "未知",
     }),
     {
-      confidence: "信心：中",
+      confidence: "資料可信度：中",
       driver: "主導：歷史參考",
       method: "取即時/歷史較高",
       narrative: "本次採歷史參考，因歷史參考（高）高於即時（未知）。",
@@ -317,6 +319,26 @@ test("combined risk display separates summary from source basis", () => {
   const idleOverlay = riskOverlayPresentation(null, false);
   assert.equal(idleOverlay.level, "未知");
   assert.equal(idleOverlay.fillOpacity, 0.18);
+});
+
+test("risk decision copy explains realtime is not only current rainfall", () => {
+  const decision = riskDecisionSummary({
+    confidenceLevel: "high",
+    historicalLevel: "low",
+    realtimeLevel: "very_high",
+  });
+
+  assert.equal(decision.driver, "主導：即時主導");
+  assert.equal(decision.confidence, "資料可信度：高");
+  assert.match(decision.narrative, /即時不是只代表正在下雨/);
+
+  const methodText = riskSummaryDecisionText({
+    confidenceLevel: "high",
+    historicalLevel: "low",
+    realtimeLevel: "very_high",
+  });
+  assert.match(methodText, /近期雨量、水位、官方警戒、通報或區域即時 profile/);
+  assert.match(methodText, /資料可信度（高）只描述證據可靠度，不代表淹水機率/);
 });
 
 test("public evidence display hides historical news and keeps official signals first", () => {
@@ -430,7 +452,11 @@ test("nearby sensing state prefers backend coverage and falls back to realtime e
   assert.equal(fromCoverage.badge, "附近觀測：中");
   assert.deepEqual(fromCoverage.gaps, ["淹水深度"]);
   assert.equal(fromCoverage.items[0].label, "雨量");
-  assert.equal(fromCoverage.summary, "附近有 雨量 1 類觀測，最近 820 公尺；仍缺 淹水深度。");
+  assert.equal(
+    fromCoverage.summary,
+    "附近有 雨量 1 類觀測；最近觀測距查詢點 820 公尺；仍缺 淹水深度。",
+  );
+  assert.equal(fromCoverage.items[0].detail, "距查詢點 820 公尺；覆蓋中");
   assert.equal(
     fromCoverage.note,
     "缺口代表本次查詢範圍內沒有取得該類近距觀測，不等於現地安全。",
@@ -454,6 +480,14 @@ test("nearby sensing state prefers backend coverage and falls back to realtime e
   assert.equal(fromEvidence.badge, "附近觀測：中");
   assert.deepEqual(fromEvidence.gaps, ["水位"]);
   assert.match(fromEvidence.summary, /可用即時觀測/);
+  assert.match(fromEvidence.items[0].detail, /^距查詢點 260 公尺；觀測 /);
+});
+
+test("right panel labels distinguish distance and source confidence", () => {
+  assert.match(uiTextSource, /evidenceDistance:\s*"距查詢點"/);
+  assert.match(uiTextSource, /evidenceConfidence:\s*"來源可信度"/);
+  assert.match(uiTextSource, /evidenceScopeNote:[\s\S]*不是淹水機率/);
+  assert.match(uiTextSource, /nearbySensingQuestion:.*距離是感測器到查詢點/);
 });
 
 test("layer display state prefers explicit tile contract fields", () => {

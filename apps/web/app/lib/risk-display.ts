@@ -304,12 +304,12 @@ export function riskSummaryDecisionText(input: {
     realtimeRank === 0 && historicalRank === 0
       ? "目前沒有足夠即時或歷史證據可判定。"
       : realtimeRank > historicalRank
-        ? "目前由即時雨量、水位或警戒訊號主導。"
+        ? "目前由即時訊號主導；即時可能包含近期雨量、水位、官方警戒、通報或區域即時 profile，不等於現在正在下雨。"
         : historicalRank > realtimeRank
           ? "目前由歷史事件或淹水潛勢參考主導。"
           : "即時與歷史參考落在相同等級。";
 
-  return `綜合風險取即時與歷史參考中的較高等級；資料信心（${confidenceLevel}）只描述證據可靠度，不會單獨拉高風險。${driver}`;
+  return `綜合風險取即時與歷史參考中的較高等級；資料可信度（${confidenceLevel}）只描述證據可靠度，不代表淹水機率，也不會單獨拉高風險。${driver}`;
 }
 
 export function riskDecisionSummary(input: {
@@ -334,13 +334,13 @@ export function riskDecisionSummary(input: {
     realtimeRank === 0 && historicalRank === 0
       ? "本次資料不足，暫不把即時或歷史參考推成結論。"
       : realtimeRank > historicalRank
-        ? `本次採即時風險，因即時（${realtimeLevel}）高於歷史參考（${historicalLevel}）。`
+        ? `本次採即時風險，因即時（${realtimeLevel}）高於歷史參考（${historicalLevel}）。即時不是只代表正在下雨，也可能來自水位、官方警戒、通報或區域即時 profile。`
         : historicalRank > realtimeRank
           ? `本次採歷史參考，因歷史參考（${historicalLevel}）高於即時（${realtimeLevel}）。`
           : `即時與歷史參考同為${realtimeLevel}，綜合維持${realtimeLevel}。`;
 
   return {
-    confidence: `信心：${confidenceLevel}`,
+    confidence: `資料可信度：${confidenceLevel}`,
     driver: `主導：${driver}`,
     method: "取即時/歷史較高",
     narrative,
@@ -763,11 +763,11 @@ function nearbySensingCoverageSummary(coverage: NearbyRealtimeCoverage) {
     .map((signal) => signal.nearest_distance_m)
     .filter((distance): distance is number => distance !== null);
   const nearestText = nearestDistances.length
-    ? `，最近 ${formatDistance(Math.min(...nearestDistances))}`
+    ? `；最近觀測距查詢點 ${formatDistance(Math.min(...nearestDistances))}`
     : "";
 
   if (coverage.overall_level === "unavailable") {
-    return "本次無法判讀附近即時感測覆蓋，請改看風險摘要與重點資料線索。";
+    return "本次無法判讀附近即時感測覆蓋，請改看風險摘要與判讀依據。";
   }
 
   if (!signals.length) {
@@ -806,7 +806,7 @@ export function nearbySensingState(input: {
         detail:
           signal.nearest_distance_m === null
             ? "未取得近距觀測"
-            : `${formatDistance(signal.nearest_distance_m)}；${nearbyCoverageBadge(signal.coverage_level).replace("附近觀測：", "覆蓋")}`,
+            : `距查詢點 ${formatDistance(signal.nearest_distance_m)}；${nearbyCoverageBadge(signal.coverage_level).replace("附近觀測：", "覆蓋")}`,
         id: signal.signal_type,
         label: nearbySignalLabel(signal.signal_type),
       })),
@@ -862,7 +862,7 @@ export function nearbySensingState(input: {
     badge: nearbyCoverageBadge(level),
     gaps,
     items: realtimeItems.slice(0, 4).map((item) => ({
-      detail: `${formatDistance(item.distance_to_query_m)}；${formatDateTime(item.observed_at)}`,
+      detail: `距查詢點 ${formatDistance(item.distance_to_query_m)}；觀測 ${formatDateTime(item.observed_at)}`,
       id: item.id,
       label: item.title || realtimeEventLabels[item.event_type] || "即時觀測",
     })),

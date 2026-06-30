@@ -30,6 +30,13 @@ EVENT_SCORE_CAPS = {
 FLOOD_POTENTIAL_CONTEXT_CAP_WITH_OBSERVED_HISTORY = 20.0
 OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM = 25.0
 REQUIRED_REALTIME_EVENTS = {"rainfall", "water_level"}
+REALTIME_REASON_LABELS = {
+    "rainfall": "雨量",
+    "water_level": "水位",
+    "flood_warning": "官方警戒",
+    "flood_report": "通報",
+    "road_closure": "道路封閉",
+}
 
 
 @dataclass(frozen=True)
@@ -248,7 +255,7 @@ def _main_reasons(
     flood_potential_count = sum(1 for signal in signals if signal.event_type == "flood_potential")
     reasons = []
     if realtime_level in {"高", "極高"}:
-        reasons.append("附近即時雨量或水位資料偏高。")
+        reasons.append(_realtime_main_reason(signals))
     if observed_history_count:
         reasons.append(
             f"查詢半徑內有 {observed_history_count} 筆官方災點、公開新聞或淹水事件紀錄。"
@@ -261,6 +268,18 @@ def _main_reasons(
     if not reasons:
         reasons.append("目前可用資料未形成強烈即時淹水訊號。")
     return tuple(reasons)
+
+
+def _realtime_main_reason(signals: tuple[RiskEvidenceSignal, ...]) -> str:
+    event_types = {signal.event_type for signal in signals if signal.event_type in REALTIME_WEIGHTS}
+    labels = [
+        label
+        for event_type, label in REALTIME_REASON_LABELS.items()
+        if event_type in event_types
+    ]
+    if not labels:
+        return "附近即時訊號偏高；即時不只代表現地降雨。"
+    return f"附近即時訊號偏高，主要來自{'、'.join(labels)}；即時不只代表現地降雨。"
 
 
 def _summary(
@@ -277,9 +296,9 @@ def _summary(
     if realtime_level == "未知" and historical_level != "未知":
         return (
             f"即時資料不足，無法判定即時風險；"
-            f"歷史與淹水潛勢參考為{historical_level}，資料信心為{confidence_level}。"
+            f"歷史與淹水潛勢參考為{historical_level}，資料可信度為{confidence_level}。"
         )
-    return f"即時風險為{realtime_level}，歷史與淹水潛勢參考為{historical_level}，資料信心為{confidence_level}。"
+    return f"即時風險為{realtime_level}，歷史與淹水潛勢參考為{historical_level}，資料可信度為{confidence_level}。"
 
 
 def _clamp(value: float) -> float:
