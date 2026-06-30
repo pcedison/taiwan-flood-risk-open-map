@@ -26,7 +26,7 @@ SIGNAL_LABELS: dict[NearbyCoverageSignalType, str] = {
     "sewer_water_level": "下水道水位",
     "pump_or_gate_status": "抽水站/水門狀態",
     "flood_warning": "淹水警戒",
-    "status_only": "狀態資訊",
+    "status_only": "狀態線索",
 }
 
 _ALL_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = REQUIRED_SIGNAL_TYPES + (
@@ -58,6 +58,7 @@ _THRESHOLDS_BY_SIGNAL: dict[NearbyCoverageSignalType, tuple[int, int, int]] = {
 }
 _ADAPTER_SIGNAL_TYPES: dict[str, NearbyCoverageSignalType] = {
     "official.cwa.rainfall": "rainfall",
+    "official.cwa.tide_level": "water_level",
     "official.wra.water_level": "water_level",
     "official.wra_iow.flood_depth": "flood_depth",
     "official.civil_iot.flood_sensor": "flood_depth",
@@ -170,10 +171,15 @@ def build_nearby_realtime_coverage(
         and evaluation.model.coverage_level == "no_local_sensor"
     ]
     limitations = [_COUNTY_LEVEL_NOTE]
+    if _has_status_only_rows(evaluations):
+        limitations.append("狀態線索只表示設備或警示狀態，不能代表雨量、水位或淹水深度。")
     if overall_level == "low" and _has_only_rainfall_or_warning(evaluations):
         limitations.append("目前只有雨量或淹水警戒可作背景參考，尚無近距離水文觀測。")
     elif overall_level == "no_local_sensor":
-        limitations.append("附近沒有可用的即時感測資料。")
+        if _has_status_only_rows(evaluations):
+            limitations.append("附近缺少可用的即時量測資料。")
+        else:
+            limitations.append("附近沒有可用的即時感測資料。")
 
     return NearbyRealtimeCoverage(
         overall_level=overall_level,
@@ -287,6 +293,13 @@ def _has_only_rainfall_or_warning(evaluations: list[_SignalEvaluation]) -> bool:
     return bool(relevant_types) and relevant_types <= {"rainfall", "flood_warning"}
 
 
+def _has_status_only_rows(evaluations: list[_SignalEvaluation]) -> bool:
+    return any(
+        evaluation.signal_type == "status_only" and evaluation.has_rows
+        for evaluation in evaluations
+    )
+
+
 def _has_fresh_coverage(evaluation: _SignalEvaluation) -> bool:
     return evaluation.model.coverage_level != "no_local_sensor"
 
@@ -299,6 +312,8 @@ def _build_summary(
     if overall_level == "low" and _has_only_rainfall_or_warning(evaluations):
         return "目前只有雨量或淹水警戒可作背景參考。"
     if overall_level == "no_local_sensor":
+        if _has_status_only_rows(evaluations):
+            return "附近有狀態線索，但沒有可用的雨量、水位或淹水深度量測。"
         return "目前沒有可用的近距離即時感測資料。"
     available = [evaluation.signal_type for evaluation in evaluations if _has_fresh_coverage(evaluation)]
     return f"附近即時涵蓋最佳等級為 {overall_level}，可用訊號：{', '.join(available)}。"

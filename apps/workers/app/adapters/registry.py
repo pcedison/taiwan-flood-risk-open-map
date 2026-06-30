@@ -11,7 +11,7 @@ from app.adapters.civil_iot import (
     RIVER_WATER_LEVEL_METADATA,
     SEWER_WATER_LEVEL,
 )
-from app.adapters.cwa import CWA_RAINFALL_METADATA
+from app.adapters.cwa import CWA_RAINFALL_METADATA, CWA_TIDE_LEVEL_METADATA
 from app.adapters.dcard import METADATA as DCARD_METADATA
 from app.adapters.flood_potential import FLOOD_POTENTIAL_GEOJSON_METADATA
 from app.adapters.local_chiayi_city import (
@@ -28,6 +28,7 @@ from app.adapters.local_kaohsiung import (
     KAOHSIUNG_RAINFALL_METADATA,
     KAOHSIUNG_SEWER_WATER_LEVEL_METADATA,
 )
+from app.adapters.local_kinmen import KINMEN_KWIS_PUMP_STATION_METADATA
 from app.adapters.local_fhy import FHY_LOCAL_FLOOD_SENSOR_SOURCES
 from app.adapters.local_keelung import (
     KEELUNG_FLOOD_SENSOR_METADATA,
@@ -79,6 +80,7 @@ ADAPTER_REGISTRY = MappingProxyType(
             terms_review_required=True,
         ),
         CWA_RAINFALL_METADATA.key: CWA_RAINFALL_METADATA,
+        CWA_TIDE_LEVEL_METADATA.key: CWA_TIDE_LEVEL_METADATA,
         WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
         WRA_IOW_FLOOD_DEPTH_METADATA.key: WRA_IOW_FLOOD_DEPTH_METADATA,
         NCDR_CAP_METADATA.key: NCDR_CAP_METADATA,
@@ -117,6 +119,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         YILAN_FLOOD_SENSOR_METADATA.key: YILAN_FLOOD_SENSOR_METADATA,
         YILAN_WATER_LEVEL_METADATA.key: YILAN_WATER_LEVEL_METADATA,
         PENGHU_WATER_LEVEL_METADATA.key: PENGHU_WATER_LEVEL_METADATA,
+        KINMEN_KWIS_PUMP_STATION_METADATA.key: KINMEN_KWIS_PUMP_STATION_METADATA,
         **{
             source.metadata.key: source.metadata
             for source in FHY_LOCAL_FLOOD_SENSOR_SOURCES
@@ -153,6 +156,8 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return False
 
     if metadata.key == "official.cwa.rainfall":
+        return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
+    if metadata.key == "official.cwa.tide_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
     if metadata.key == "official.wra.water_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_wra_enabled)
@@ -313,6 +318,11 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
             metadata.enabled_by_default,
             settings.source_penghu_water_level_enabled,
         )
+    if metadata.key == "local.kinmen.kwis_pump_station":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_kinmen_kwis_pump_station_enabled,
+        )
     if metadata.key == "local.hsinchu_county.flood_sensor":
         return _with_optional_override(
             metadata.enabled_by_default,
@@ -396,6 +406,8 @@ def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettin
 def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
     if metadata.key == "official.cwa.rainfall":
         return settings.source_cwa_enabled is not False
+    if metadata.key == "official.cwa.tide_level":
+        return settings.source_cwa_enabled is not False
     if metadata.key == "official.wra.water_level":
         return settings.source_wra_enabled is not False
     if metadata.key == "official.wra_iow.flood_depth":
@@ -462,6 +474,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_yilan_water_level_enabled is True
     if metadata.key == "local.penghu.water_level":
         return settings.source_penghu_water_level_enabled is True
+    if metadata.key == "local.kinmen.kwis_pump_station":
+        return settings.source_kinmen_kwis_pump_station_enabled is True
     if metadata.key == "local.hsinchu_county.flood_sensor":
         return settings.source_hsinchu_county_fhy_flood_sensor_enabled is True
     if metadata.key == "local.miaoli.flood_sensor":

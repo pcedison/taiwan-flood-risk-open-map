@@ -58,6 +58,18 @@ def main() -> int:
         help="Fail when discovery finds a new candidate_live_read_api dataset.",
     )
     parser.add_argument(
+        "--production-gate-evidence-json",
+        help=(
+            "Optional JSON file with production readiness gate booleans, e.g. "
+            "credential_review, hosted_egress_review, and worker_persisted_evidence_smoke."
+        ),
+    )
+    parser.add_argument(
+        "--fail-on-missing-production-gates",
+        action="store_true",
+        help="Fail when any production readiness gate is not backed by evidence.",
+    )
+    parser.add_argument(
         "--county",
         action="append",
         dest="counties",
@@ -83,6 +95,10 @@ def main() -> int:
         discovery_result=discovery,
         fail_on_live_candidate=args.fail_on_live_candidate,
         fail_on_skipped_smoke=args.fail_on_skipped_smoke,
+        production_gate_evidence=_production_gate_evidence(
+            args.production_gate_evidence_json
+        ),
+        fail_on_missing_production_gates=args.fail_on_missing_production_gates,
     )
     print(gate.to_json())
     return 0 if gate.passed else 1
@@ -92,6 +108,15 @@ def _coverage_summary(path: str | None) -> dict[str, Any]:
     if path is None:
         return dict(DEFAULT_EXPECTED_COVERAGE_SUMMARY)
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _production_gate_evidence(path: str | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("production gate evidence JSON must be an object")
+    return dict(payload)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,11 @@ import sys
 from pathlib import Path
 
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
 ROOT = Path(__file__).resolve().parents[1]
 API_APP = ROOT / "apps" / "api"
 sys.path.insert(0, str(API_APP))
@@ -18,6 +23,7 @@ from app.domain.realtime.local_source_coverage import (  # noqa: E402
     list_local_source_coverage,
 )
 from app.domain.realtime.local_source_request_packets import (  # noqa: E402
+    build_completion_evidence_template,
     build_official_request_packets,
     render_official_request_packets_markdown,
 )
@@ -29,7 +35,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--format",
-        choices=("markdown", "json"),
+        choices=("markdown", "json", "evidence-template"),
         default="markdown",
         help="Output format. Defaults to markdown.",
     )
@@ -40,16 +46,26 @@ def main() -> int:
         help="Only include the given county/city. Repeatable.",
     )
     parser.add_argument(
+        "--signal-type",
+        action="append",
+        dest="signal_types",
+        help=(
+            "Only include packets whose target signal types contain this value. "
+            "Repeatable."
+        ),
+    )
+    parser.add_argument(
         "--output",
         help="Optional output file. When omitted, content is written to stdout.",
     )
     args = parser.parse_args()
 
     plan = build_local_source_action_plan(list_local_source_coverage())
-    packets = build_official_request_packets(plan)
-    if args.counties:
-        wanted = set(args.counties)
-        packets = tuple(packet for packet in packets if packet["county"] in wanted)
+    packets = build_official_request_packets(
+        plan,
+        counties=set(args.counties) if args.counties else None,
+        signal_types=set(args.signal_types) if args.signal_types else None,
+    )
 
     content = _render_output(packets, output_format=args.format)
     if args.output:
@@ -70,6 +86,9 @@ def _render_output(
 ) -> str:
     if output_format == "json":
         return json.dumps(list(packets), ensure_ascii=False, indent=2) + "\n"
+    if output_format == "evidence-template":
+        template = build_completion_evidence_template(packets)
+        return json.dumps(template, ensure_ascii=False, indent=2) + "\n"
     return render_official_request_packets_markdown(packets)
 
 

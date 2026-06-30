@@ -1,4 +1,4 @@
-# Zeabur Deployment Runbook
+﻿# Zeabur Deployment Runbook
 
 ## Purpose
 
@@ -150,7 +150,7 @@ Official ingestion scheduler for the single-service beta:
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Set `true` only as the explicit kill switch. |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional override that replaces old `WORKER_ENABLED_ADAPTER_KEYS` values during forced backbone startup. |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level` | Selects the official realtime backbone adapters. |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level` | Selects the official realtime backbone adapters. |
 | `SOURCE_CWA_ENABLED` | `true` or leave unset | Enables the CWA adapter selection; `false` disables it. |
 | `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |
 | `SOURCE_WRA_ENABLED` | `true` or leave unset | Enables the WRA adapter selection; `false` disables it. |
@@ -186,7 +186,7 @@ Do not fill these for the first single-service preview:
 
 ### TGOS Optional Provider Notes
 
-Do not use TGOS registration as the launch blocker for this公益 preview. If TGOS
+Do not use TGOS registration as the launch blocker for this?祉? preview. If TGOS
 is revisited later, submit the exact domain users will open and keep any TGOS
 credential in secret storage only after the runtime supports it. Until then,
 leave `TGOS_API_KEY` unset and prove the open basemap path through
@@ -253,8 +253,8 @@ Adapter and source variables:
 
 | Variable | Service | Notes |
 |---|---|---|
-| `SOURCE_CWA_ENABLED` | worker, scheduler | Optional override for `official.cwa.rainfall`; unset defaults to enabled, `false` disables it |
-| `SOURCE_CWA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker CWA rainfall runtime adapter; keep `false` until credentials, cadence, and operator ownership are ready |
+| `SOURCE_CWA_ENABLED` | worker, scheduler | Optional override for CWA official adapters (`official.cwa.rainfall`, `official.cwa.tide_level`); unset defaults to enabled, `false` disables them |
+| `SOURCE_CWA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker CWA rainfall and tide-level runtime adapters; keep `false` until credentials, cadence, and operator ownership are ready |
 | `SOURCE_WRA_ENABLED` | worker, scheduler | Optional override for `official.wra.water_level`; unset defaults to enabled, `false` disables it |
 | `SOURCE_WRA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker WRA water-level runtime adapter; keep `false` until cadence, egress, and operator ownership are ready |
 | `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Optional override for `official.flood_potential.geojson`; unset defaults to enabled, `false` disables it |
@@ -266,9 +266,9 @@ Adapter and source variables:
 | `SOURCE_DCARD_CANDIDATE_APPROVAL_ACK` | worker, scheduler | Allows only the no-network synthetic Dcard candidate fixture contract; not real ingestion approval |
 | `SOURCE_TERMS_REVIEW_ACK` | worker, scheduler | Required to enable adapters marked `terms_review_required`, including GDELT backfill and future forum sources |
 | `SOURCE_SAMPLE_DATA_ENABLED` | worker, scheduler | Enables sample fixture adapters for demos/tests only; keep `false` outside local experiments |
-| `CWA_API_AUTHORIZATION` | api, worker | CWA open-data token used by the API realtime bridge and, when `SOURCE_CWA_API_ENABLED=true`, by the worker CWA rainfall live adapter |
+| `CWA_API_AUTHORIZATION` | api, worker | CWA open-data token used by the API realtime bridge and, when `SOURCE_CWA_API_ENABLED=true`, by the worker CWA rainfall and tide-level live adapters |
 | `CWA_API_URL` | worker | Optional override for the worker CWA rainfall endpoint; leave blank for the default CWA O-A0002-001 datastore |
-| `CWA_API_TIMEOUT_SECONDS` | worker | Worker CWA rainfall request timeout; default `8` seconds |
+| `CWA_API_TIMEOUT_SECONDS` | worker | Worker CWA rainfall and tide-level request timeout; default `8` seconds |
 | `WRA_API_URL` | worker | Optional override for the worker WRA water-level endpoint; leave blank for the default WRA open-data v2 datastore |
 | `WRA_STATION_API_URL` | worker | Optional override for the worker WRA station metadata endpoint; leave blank for the default WRA open-data v2 station catalog |
 | `WRA_API_TOKEN` | worker | Optional WRA token if an upstream environment requires one; omitted by default and never written into `source_url` |

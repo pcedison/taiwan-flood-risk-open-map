@@ -28,6 +28,15 @@ def main() -> int:
         help="Target county/city name. Repeatable. Defaults to 金門縣 and 連江縣.",
     )
     parser.add_argument(
+        "--signal-type",
+        action="append",
+        dest="signal_types",
+        help=(
+            "Required signal type to keep in discovery results. Repeatable, "
+            "for example pump_or_gate_status."
+        ),
+    )
+    parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=20,
@@ -42,7 +51,11 @@ def main() -> int:
 
     target_counties = tuple(args.counties or DEFAULT_TARGET_COUNTIES)
     payload = fetch_data_gov_dataset_export(timeout_seconds=max(1, args.timeout_seconds))
-    result = discover_local_source_candidates(payload, target_counties=target_counties)
+    result = discover_local_source_candidates(
+        payload,
+        target_counties=target_counties,
+        required_signal_types=tuple(args.signal_types or ()),
+    )
     print(result.to_json())
     if args.fail_on_candidate and any(
         candidate.readiness == "candidate_live_read_api" for candidate in result.candidates

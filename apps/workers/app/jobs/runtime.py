@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from app.adapters.civil_iot import (
     GATE_WATER_LEVEL,
@@ -16,7 +16,7 @@ from app.adapters.civil_iot import (
     StaWaterLevelApiAdapter,
 )
 from app.adapters.contracts import DataSourceAdapter
-from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
+from app.adapters.cwa import CwaRainfallApiAdapter, CwaTideLevelApiAdapter, FetchJson, TideFetchJson
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
 from app.adapters.local_chiayi_city import ChiayiCityRainfallApiAdapter, ChiayiCityWaterLevelApiAdapter
@@ -45,6 +45,8 @@ from app.adapters.local_kaohsiung import (
     KaohsiungRainfallApiAdapter,
     KaohsiungSewerWaterLevelApiAdapter,
 )
+from app.adapters.local_kinmen import FetchText as KinmenKwisFetchText
+from app.adapters.local_kinmen import KinmenKwisPumpStationApiAdapter
 from app.adapters.local_keelung import FetchJson as KeelungFetchJson
 from app.adapters.local_keelung import (
     KeelungFloodSensorApiAdapter,
@@ -160,11 +162,34 @@ class RuntimeQueueProducerResult:
         return len(self.deduped_job_ids)
 
 
+def _combined_cwa_tide_fetcher(
+    *,
+    tide_fetch_json: TideFetchJson | None,
+    station_fetch_json: TideFetchJson | None,
+) -> TideFetchJson | None:
+    if tide_fetch_json is None and station_fetch_json is None:
+        return None
+
+    def fetch_json(url: str, timeout_seconds: int) -> Mapping[str, Any]:
+        station_endpoint = "O-B0076" in url or "/opendataapi/" in url or "stations" in url
+        fetcher = (
+            (station_fetch_json or tide_fetch_json)
+            if station_endpoint
+            else (tide_fetch_json or station_fetch_json)
+        )
+        assert fetcher is not None
+        return fetcher(url, timeout_seconds)
+
+    return fetch_json
+
+
 def build_runtime_adapters(
     settings: WorkerSettings,
     *,
     fetched_at: datetime | None = None,
     cwa_fetch_json: FetchJson | None = None,
+    cwa_tide_fetch_json: TideFetchJson | None = None,
+    cwa_tide_station_fetch_json: TideFetchJson | None = None,
     wra_fetch_json: WraFetchJson | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
@@ -199,6 +224,7 @@ def build_runtime_adapters(
     yilan_flood_sensor_fetch_json: YilanFetchJson | None = None,
     yilan_water_level_fetch_json: YilanFetchJson | None = None,
     penghu_water_level_fetch_json: PenghuFetchJson | None = None,
+    kinmen_kwis_pump_station_fetch_text: KinmenKwisFetchText | None = None,
     fhy_flood_sensor_fetch_json: FhyFloodSensorFetchJson | None = None,
     wra_iow_flood_depth_fetch_json: WraIowFetchJson | None = None,
     civil_iot_river_fetch_json: StaFetchJson | None = None,
@@ -243,6 +269,18 @@ def build_runtime_adapters(
             fetch_json=cwa_fetch_json,
         )
         live_adapters[cwa_adapter.metadata.key] = cwa_adapter
+
+    if settings.source_cwa_api_enabled and "official.cwa.tide_level" in enabled_keys:
+        cwa_tide_adapter = CwaTideLevelApiAdapter(
+            authorization=settings.cwa_api_authorization,
+            timeout_seconds=settings.cwa_api_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=_combined_cwa_tide_fetcher(
+                tide_fetch_json=cwa_tide_fetch_json,
+                station_fetch_json=cwa_tide_station_fetch_json,
+            ),
+        )
+        live_adapters[cwa_tide_adapter.metadata.key] = cwa_tide_adapter
 
     if settings.source_wra_api_enabled and "official.wra.water_level" in enabled_keys:
         wra_adapter = WraWaterLevelApiAdapter(
@@ -661,6 +699,27 @@ def build_runtime_adapters(
         )
         live_adapters[penghu_water_level_adapter.metadata.key] = penghu_water_level_adapter
 
+    if (
+        settings.source_kinmen_kwis_pump_station_api_enabled
+        and "local.kinmen.kwis_pump_station" in enabled_keys
+    ):
+        if settings.kinmen_kwis_api_token:
+            kinmen_kwis_adapter = KinmenKwisPumpStationApiAdapter(
+                api_url=settings.kinmen_kwis_pump_station_api_url,
+                api_token=settings.kinmen_kwis_api_token,
+                timeout_seconds=settings.local_water_timeout_seconds,
+                fetched_at=fetched_at,
+                fetch_text=kinmen_kwis_pump_station_fetch_text,
+            )
+            live_adapters[kinmen_kwis_adapter.metadata.key] = kinmen_kwis_adapter
+        else:
+            log_event(
+                "runtime.adapters.gated",
+                adapter_key="local.kinmen.kwis_pump_station",
+                gate="KINMEN_KWIS_API_TOKEN",
+                source_intent="kinmen_kwis_token_gated_read_api",
+            )
+
     fhy_api_gates = {
         HSINCHU_COUNTY_FHY_FLOOD_SENSOR.metadata.key: (
             settings.source_hsinchu_county_fhy_flood_sensor_api_enabled
@@ -747,6 +806,9 @@ def build_runtime_adapters(
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,
             flood_sensor_use_live=settings.source_flood_sensor_use_live,
             tainan_flood_sensor_api_enabled=settings.source_tainan_flood_sensor_api_enabled,
+            kinmen_kwis_pump_station_api_enabled=(
+                settings.source_kinmen_kwis_pump_station_api_enabled
+            ),
             civil_iot_river_api_enabled=settings.source_civil_iot_river_api_enabled,
             civil_iot_gate_api_enabled=settings.source_civil_iot_gate_api_enabled,
         )

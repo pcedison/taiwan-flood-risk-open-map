@@ -24,6 +24,7 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
     sources = {source["key"]: source for source in catalog["sources"]}
 
     assert sources["official.cwa.rainfall"]["data_gov_dataset_id"] == "9177"
+    assert sources["official.cwa.tide_level"]["data_gov_dataset_id"] == "O-B0075-001"
     assert sources["official.wra.water_level"]["data_gov_dataset_id"] == "25768"
     assert sources["official.wra_iow.flood_depth"]["data_gov_dataset_id"] == "142980"
     assert sources["official.flood_potential.geojson"]["data_gov_dataset_id"] == "25766"
@@ -33,7 +34,9 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
     )
 
     for source in catalog["sources"]:
-        assert source["data_gov_url"].startswith("https://data.gov.tw/")
+        assert source["data_gov_url"].startswith(
+            ("https://data.gov.tw/", "https://opendata.cwa.gov.tw/")
+        )
         assert source["resource_url"].startswith("https://")
         assert source["license"]
         assert source["limitations"]
@@ -45,6 +48,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
 
     for adapter_key in (
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.wra_iow.flood_depth",
         "official.flood_potential.geojson",

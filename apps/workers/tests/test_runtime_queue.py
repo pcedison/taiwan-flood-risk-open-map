@@ -15,7 +15,7 @@ from app.adapters.contracts import (
     RawSourceItem,
     SourceFamily,
 )
-from app.adapters.cwa import CwaRainfallConfigurationError
+from app.adapters.cwa import CwaRainfallConfigurationError, CwaTideLevelConfigurationError
 from app.adapters.flood_potential import FloodPotentialGeoJsonConfigurationError
 from app.config import load_worker_settings
 from app.jobs.queue import (
@@ -693,6 +693,76 @@ def test_build_runtime_adapters_missing_cwa_auth_fails_without_fetch_call() -> N
 
     with pytest.raises(CwaRainfallConfigurationError, match="CWA_API_AUTHORIZATION"):
         adapters["official.cwa.rainfall"].run()
+    assert called is False
+
+
+def test_build_runtime_adapters_constructs_cwa_tide_level_api_adapter() -> None:
+    captured: dict[str, list[str] | int] = {"urls": []}
+
+    def tide_fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        assert isinstance(captured["urls"], list)
+        captured["urls"].append(url)
+        captured["timeout_seconds"] = timeout_seconds
+        return _cwa_tide_payload()
+
+    def station_fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        assert isinstance(captured["urls"], list)
+        captured["urls"].append(url)
+        captured["timeout_seconds"] = timeout_seconds
+        return _cwa_tide_station_payload()
+
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.tide_level",
+            "SOURCE_CWA_API_ENABLED": "true",
+            "CWA_API_AUTHORIZATION": "test-token",
+            "CWA_API_TIMEOUT_SECONDS": "4",
+        }
+    )
+
+    adapters = build_runtime_adapters(
+        settings,
+        fetched_at=datetime(2026, 6, 30, 4, 10, tzinfo=UTC),
+        cwa_tide_fetch_json=tide_fetch_json,
+        cwa_tide_station_fetch_json=station_fetch_json,
+    )
+    result = adapters["official.cwa.tide_level"].run()
+
+    assert tuple(adapters) == ("official.cwa.tide_level",)
+    assert captured["timeout_seconds"] == 4
+    assert isinstance(captured["urls"], list)
+    assert len(captured["urls"]) == 2
+    assert "O-B0075-001" in captured["urls"][0]
+    assert "O-B0076-001" in captured["urls"][1]
+    assert all("Authorization=test-token" in url for url in captured["urls"])
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+
+
+def test_build_runtime_adapters_missing_cwa_tide_auth_fails_without_fetch_call() -> None:
+    called = False
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        nonlocal called
+        del url, timeout_seconds
+        called = True
+        return _cwa_tide_payload()
+
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.tide_level",
+            "SOURCE_CWA_API_ENABLED": "true",
+        }
+    )
+
+    adapters = build_runtime_adapters(
+        settings,
+        cwa_tide_fetch_json=fetch_json,
+        cwa_tide_station_fetch_json=fetch_json,
+    )
+
+    with pytest.raises(CwaTideLevelConfigurationError, match="CWA_API_AUTHORIZATION"):
+        adapters["official.cwa.tide_level"].run()
     assert called is False
 
 
@@ -1379,6 +1449,56 @@ def _load_wra_api_payload() -> dict[str, Any]:
 
 def _load_flood_potential_geojson_payload() -> dict[str, Any]:
     return json.loads((FIXTURES / "flood_potential_sample.geojson").read_text(encoding="utf-8"))
+
+
+def _cwa_tide_payload() -> dict[str, Any]:
+    return {
+        "Records": {
+            "SeaSurfaceObs": {
+                "Location": [
+                    {
+                        "Station": {"StationID": "C4W01"},
+                        "StationObsTimes": {
+                            "StationObsTime": [
+                                {
+                                    "DateTime": "2026-06-29T23:00:00+08:00",
+                                    "WeatherElements": {"TideHeight": "2.16"},
+                                }
+                            ]
+                        },
+                    }
+                ]
+            }
+        }
+    }
+
+
+def _cwa_tide_station_payload() -> dict[str, Any]:
+    return {
+        "cwaopendata": {
+            "Resources": {
+                "Resource": {
+                    "Data": {
+                        "SeaSurfaceObs": {
+                            "Location": [
+                                {
+                                    "Station": {
+                                        "StationID": "C4W01",
+                                        "StationName": "Matsu tide station",
+                                        "StationLongitude": "119.9428",
+                                        "StationLatitude": "26.1617",
+                                        "County": {"CountyName": "Lienchiang County"},
+                                        "Town": {"TownName": "Nangan Township"},
+                                        "StationChargeIns": "Central Weather Administration",
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
 
 
 class _UnavailableQueue:

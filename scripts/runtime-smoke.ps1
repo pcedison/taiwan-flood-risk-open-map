@@ -14,6 +14,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $script:RuntimeSmokeCleanupSql = @()
+$script:PreviousRealtimeOfficialDiagnosticFallback = $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED
+$script:RealtimeOfficialDiagnosticFallbackTouched = $false
 $script:MvtLayerStatusCleanupSql = @'
 UPDATE map_layers
 SET
@@ -55,8 +57,9 @@ Extended checks are enabled by default:
     worker container without external API credentials.
   - Managed runtime persist smoke: run --run-enabled-adapters --persist with
     WRA official and gated news public-web sample fixture adapters against the
-    Compose database, verify raw/staging/run and promoted evidence rows, and
-    clean up the smoke rows while restoring data source health state.
+    Compose database, verify raw/staging/run, promoted evidence, and
+    official_realtime_latest rows, and clean up the smoke rows while restoring
+    data source health state.
   - Reports smoke: verify /v1/reports is default-disabled over live HTTP, then
     verify the enabled path in a one-off API container with USER_REPORTS_ENABLED=true.
   - MVT smoke: temporarily enable seeded query-heat and flood-potential
@@ -147,6 +150,30 @@ function Fail-Smoke {
         docker compose logs --tail=80 $ServiceForLogs
     }
     exit 1
+}
+
+function Assert-HostedDiagnosticFallbackDisabled {
+    $configured = $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED
+    if ($configured -and $configured.Trim().ToLowerInvariant() -ne "false") {
+        Fail-Smoke "REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED must stay false during runtime smoke; hosted mode must use worker-persisted evidence instead of the API realtime bridge."
+    }
+
+    $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED = "false"
+    $script:RealtimeOfficialDiagnosticFallbackTouched = $true
+    Write-Host "Hosted diagnostic fallback guard: REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false"
+}
+
+function Restore-HostedDiagnosticFallbackEnv {
+    if (-not $script:RealtimeOfficialDiagnosticFallbackTouched) {
+        return
+    }
+
+    if ($null -eq $script:PreviousRealtimeOfficialDiagnosticFallback) {
+        Remove-Item Env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED -ErrorAction SilentlyContinue
+        return
+    }
+
+    $env:REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED = $script:PreviousRealtimeOfficialDiagnosticFallback
 }
 
 function Invoke-CheckedCommand {
@@ -1046,10 +1073,29 @@ WITH smoke_jobs AS (
     SELECT DISTINCT ingestion_job_id
     FROM adapter_runs
     WHERE raw_ref IN (
+            'raw/official-demo/cwa-rainfall.json',
             'raw/official-demo/wra-water-level.json',
+            'raw/official-demo/civil-iot-flood-sensor.json',
+            'raw/official-demo/civil-iot-sewer-water-level.json',
+            'raw/official-demo/civil-iot-pump-water-level.json',
+            'raw/official-demo/civil-iot-gate-water-level.json',
+            'raw/official-demo/civil-iot-pond-water-level.json',
             'raw/news-public-web/sample.json'
         )
         AND ingestion_job_id IS NOT NULL
+),
+deleted_latest AS (
+    DELETE FROM official_realtime_latest
+    WHERE (adapter_key, station_id) IN (
+        ('official.cwa.rainfall', 'CWA-DEMO-TPE-001'),
+        ('official.wra.water_level', 'WRA-DEMO-001'),
+        ('official.civil_iot.flood_sensor', 'CIVIL-IOT-FLOOD-DEMO-001'),
+        ('official.civil_iot.sewer_water_level', 'CIVIL-IOT-SEWER-DEMO-001'),
+        ('official.civil_iot.pump_water_level', 'CIVIL-IOT-PUMP-DEMO-001'),
+        ('official.civil_iot.gate_water_level', 'CIVIL-IOT-GATE-DEMO-001'),
+        ('official.civil_iot.pond_water_level', 'CIVIL-IOT-POND-DEMO-001')
+    )
+    RETURNING 1
 ),
 deleted_risk_links AS (
     DELETE FROM risk_assessment_evidence
@@ -1057,7 +1103,13 @@ deleted_risk_links AS (
         SELECT id
         FROM evidence
         WHERE raw_ref IN (
+            'raw/official-demo/cwa-rainfall.json',
             'raw/official-demo/wra-water-level.json',
+            'raw/official-demo/civil-iot-flood-sensor.json',
+            'raw/official-demo/civil-iot-sewer-water-level.json',
+            'raw/official-demo/civil-iot-pump-water-level.json',
+            'raw/official-demo/civil-iot-gate-water-level.json',
+            'raw/official-demo/civil-iot-pond-water-level.json',
             'raw/news-public-web/sample.json'
         )
     )
@@ -1066,7 +1118,13 @@ deleted_risk_links AS (
 deleted_evidence AS (
     DELETE FROM evidence
     WHERE raw_ref IN (
+        'raw/official-demo/cwa-rainfall.json',
         'raw/official-demo/wra-water-level.json',
+        'raw/official-demo/civil-iot-flood-sensor.json',
+        'raw/official-demo/civil-iot-sewer-water-level.json',
+        'raw/official-demo/civil-iot-pump-water-level.json',
+        'raw/official-demo/civil-iot-gate-water-level.json',
+        'raw/official-demo/civil-iot-pond-water-level.json',
         'raw/news-public-web/sample.json'
     )
     RETURNING 1
@@ -1077,12 +1135,24 @@ deleted_staging AS (
             SELECT id
             FROM raw_snapshots
             WHERE raw_ref IN (
+                'raw/official-demo/cwa-rainfall.json',
                 'raw/official-demo/wra-water-level.json',
+                'raw/official-demo/civil-iot-flood-sensor.json',
+                'raw/official-demo/civil-iot-sewer-water-level.json',
+                'raw/official-demo/civil-iot-pump-water-level.json',
+                'raw/official-demo/civil-iot-gate-water-level.json',
+                'raw/official-demo/civil-iot-pond-water-level.json',
                 'raw/news-public-web/sample.json'
             )
         )
         OR payload ->> 'raw_ref' IN (
+            'raw/official-demo/cwa-rainfall.json',
             'raw/official-demo/wra-water-level.json',
+            'raw/official-demo/civil-iot-flood-sensor.json',
+            'raw/official-demo/civil-iot-sewer-water-level.json',
+            'raw/official-demo/civil-iot-pump-water-level.json',
+            'raw/official-demo/civil-iot-gate-water-level.json',
+            'raw/official-demo/civil-iot-pond-water-level.json',
             'raw/news-public-web/sample.json'
         )
     RETURNING 1
@@ -1090,7 +1160,13 @@ deleted_staging AS (
 deleted_adapter_runs AS (
     DELETE FROM adapter_runs
     WHERE raw_ref IN (
+        'raw/official-demo/cwa-rainfall.json',
         'raw/official-demo/wra-water-level.json',
+        'raw/official-demo/civil-iot-flood-sensor.json',
+        'raw/official-demo/civil-iot-sewer-water-level.json',
+        'raw/official-demo/civil-iot-pump-water-level.json',
+        'raw/official-demo/civil-iot-gate-water-level.json',
+        'raw/official-demo/civil-iot-pond-water-level.json',
         'raw/news-public-web/sample.json'
     )
     RETURNING 1
@@ -1100,7 +1176,13 @@ WHERE id IN (SELECT ingestion_job_id FROM smoke_jobs);
 
 DELETE FROM raw_snapshots
 WHERE raw_ref IN (
+    'raw/official-demo/cwa-rainfall.json',
     'raw/official-demo/wra-water-level.json',
+    'raw/official-demo/civil-iot-flood-sensor.json',
+    'raw/official-demo/civil-iot-sewer-water-level.json',
+    'raw/official-demo/civil-iot-pump-water-level.json',
+    'raw/official-demo/civil-iot-gate-water-level.json',
+    'raw/official-demo/civil-iot-pond-water-level.json',
     'raw/news-public-web/sample.json'
 );
 '@
@@ -1118,7 +1200,13 @@ SELECT
     updated_at
 FROM data_sources
 WHERE adapter_key IN (
+    'official.cwa.rainfall',
     'official.wra.water_level',
+    'official.civil_iot.flood_sensor',
+    'official.civil_iot.sewer_water_level',
+    'official.civil_iot.pump_water_level',
+    'official.civil_iot.gate_water_level',
+    'official.civil_iot.pond_water_level',
     'news.public_web.sample'
 );
 '@
@@ -1138,10 +1226,29 @@ WITH smoke_jobs AS (
     SELECT DISTINCT ingestion_job_id
     FROM adapter_runs
     WHERE raw_ref IN (
+            'raw/official-demo/cwa-rainfall.json',
             'raw/official-demo/wra-water-level.json',
+            'raw/official-demo/civil-iot-flood-sensor.json',
+            'raw/official-demo/civil-iot-sewer-water-level.json',
+            'raw/official-demo/civil-iot-pump-water-level.json',
+            'raw/official-demo/civil-iot-gate-water-level.json',
+            'raw/official-demo/civil-iot-pond-water-level.json',
             'raw/news-public-web/sample.json'
         )
         AND ingestion_job_id IS NOT NULL
+),
+deleted_latest AS (
+    DELETE FROM official_realtime_latest
+    WHERE (adapter_key, station_id) IN (
+        ('official.cwa.rainfall', 'CWA-DEMO-TPE-001'),
+        ('official.wra.water_level', 'WRA-DEMO-001'),
+        ('official.civil_iot.flood_sensor', 'CIVIL-IOT-FLOOD-DEMO-001'),
+        ('official.civil_iot.sewer_water_level', 'CIVIL-IOT-SEWER-DEMO-001'),
+        ('official.civil_iot.pump_water_level', 'CIVIL-IOT-PUMP-DEMO-001'),
+        ('official.civil_iot.gate_water_level', 'CIVIL-IOT-GATE-DEMO-001'),
+        ('official.civil_iot.pond_water_level', 'CIVIL-IOT-POND-DEMO-001')
+    )
+    RETURNING 1
 ),
 deleted_risk_links AS (
     DELETE FROM risk_assessment_evidence
@@ -1149,7 +1256,13 @@ deleted_risk_links AS (
         SELECT id
         FROM evidence
         WHERE raw_ref IN (
+            'raw/official-demo/cwa-rainfall.json',
             'raw/official-demo/wra-water-level.json',
+            'raw/official-demo/civil-iot-flood-sensor.json',
+            'raw/official-demo/civil-iot-sewer-water-level.json',
+            'raw/official-demo/civil-iot-pump-water-level.json',
+            'raw/official-demo/civil-iot-gate-water-level.json',
+            'raw/official-demo/civil-iot-pond-water-level.json',
             'raw/news-public-web/sample.json'
         )
     )
@@ -1158,7 +1271,13 @@ deleted_risk_links AS (
 deleted_evidence AS (
     DELETE FROM evidence
     WHERE raw_ref IN (
+        'raw/official-demo/cwa-rainfall.json',
         'raw/official-demo/wra-water-level.json',
+        'raw/official-demo/civil-iot-flood-sensor.json',
+        'raw/official-demo/civil-iot-sewer-water-level.json',
+        'raw/official-demo/civil-iot-pump-water-level.json',
+        'raw/official-demo/civil-iot-gate-water-level.json',
+        'raw/official-demo/civil-iot-pond-water-level.json',
         'raw/news-public-web/sample.json'
     )
     RETURNING 1
@@ -1169,12 +1288,24 @@ deleted_staging AS (
             SELECT id
             FROM raw_snapshots
             WHERE raw_ref IN (
+                'raw/official-demo/cwa-rainfall.json',
                 'raw/official-demo/wra-water-level.json',
+                'raw/official-demo/civil-iot-flood-sensor.json',
+                'raw/official-demo/civil-iot-sewer-water-level.json',
+                'raw/official-demo/civil-iot-pump-water-level.json',
+                'raw/official-demo/civil-iot-gate-water-level.json',
+                'raw/official-demo/civil-iot-pond-water-level.json',
                 'raw/news-public-web/sample.json'
             )
         )
         OR payload ->> 'raw_ref' IN (
+            'raw/official-demo/cwa-rainfall.json',
             'raw/official-demo/wra-water-level.json',
+            'raw/official-demo/civil-iot-flood-sensor.json',
+            'raw/official-demo/civil-iot-sewer-water-level.json',
+            'raw/official-demo/civil-iot-pump-water-level.json',
+            'raw/official-demo/civil-iot-gate-water-level.json',
+            'raw/official-demo/civil-iot-pond-water-level.json',
             'raw/news-public-web/sample.json'
         )
     RETURNING 1
@@ -1182,7 +1313,13 @@ deleted_staging AS (
 deleted_adapter_runs AS (
     DELETE FROM adapter_runs
     WHERE raw_ref IN (
+        'raw/official-demo/cwa-rainfall.json',
         'raw/official-demo/wra-water-level.json',
+        'raw/official-demo/civil-iot-flood-sensor.json',
+        'raw/official-demo/civil-iot-sewer-water-level.json',
+        'raw/official-demo/civil-iot-pump-water-level.json',
+        'raw/official-demo/civil-iot-gate-water-level.json',
+        'raw/official-demo/civil-iot-pond-water-level.json',
         'raw/news-public-web/sample.json'
     )
     RETURNING 1
@@ -1195,7 +1332,13 @@ deleted_ingestion_jobs AS (
 deleted_raw_snapshots AS (
     DELETE FROM raw_snapshots
     WHERE raw_ref IN (
+        'raw/official-demo/cwa-rainfall.json',
         'raw/official-demo/wra-water-level.json',
+        'raw/official-demo/civil-iot-flood-sensor.json',
+        'raw/official-demo/civil-iot-sewer-water-level.json',
+        'raw/official-demo/civil-iot-pump-water-level.json',
+        'raw/official-demo/civil-iot-gate-water-level.json',
+        'raw/official-demo/civil-iot-pond-water-level.json',
         'raw/news-public-web/sample.json'
     )
     RETURNING 1
@@ -1214,6 +1357,7 @@ restored_data_sources AS (
     RETURNING 1
 )
 SELECT
+    (SELECT count(*) FROM deleted_latest) AS deleted_latest,
     (SELECT count(*) FROM deleted_risk_links) AS deleted_risk_links,
     (SELECT count(*) FROM deleted_evidence) AS deleted_evidence,
     (SELECT count(*) FROM deleted_staging) AS deleted_staging,
@@ -1241,8 +1385,44 @@ BEGIN
         FROM (
             VALUES
                 (
+                    'official.cwa.rainfall',
+                    'raw/official-demo/cwa-rainfall.json',
+                    'official',
+                    'rainfall'
+                ),
+                (
                     'official.wra.water_level',
                     'raw/official-demo/wra-water-level.json',
+                    'official',
+                    'water_level'
+                ),
+                (
+                    'official.civil_iot.flood_sensor',
+                    'raw/official-demo/civil-iot-flood-sensor.json',
+                    'official',
+                    'flood_report'
+                ),
+                (
+                    'official.civil_iot.sewer_water_level',
+                    'raw/official-demo/civil-iot-sewer-water-level.json',
+                    'official',
+                    'water_level'
+                ),
+                (
+                    'official.civil_iot.pump_water_level',
+                    'raw/official-demo/civil-iot-pump-water-level.json',
+                    'official',
+                    'water_level'
+                ),
+                (
+                    'official.civil_iot.gate_water_level',
+                    'raw/official-demo/civil-iot-gate-water-level.json',
+                    'official',
+                    'water_level'
+                ),
+                (
+                    'official.civil_iot.pond_water_level',
+                    'raw/official-demo/civil-iot-pond-water-level.json',
                     'official',
                     'water_level'
                 ),
@@ -1322,6 +1502,60 @@ BEGIN
 END $$;
 '@
 
+    $managedRuntimePersistLatestVerificationSql = @'
+DO $$
+DECLARE
+    adapter record;
+    smoke_started_at timestamptz := now() - interval '15 minutes';
+    latest_row_count integer;
+    fresh_ingested_count integer;
+BEGIN
+    FOR adapter IN
+        SELECT *
+        FROM (
+            VALUES
+                ('official.cwa.rainfall', 'rainfall', 'CWA-DEMO-TPE-001', 'rainfall_mm_1h'),
+                ('official.wra.water_level', 'water_level', 'WRA-DEMO-001', 'water_level_m'),
+                ('official.civil_iot.flood_sensor', 'flood_report', 'CIVIL-IOT-FLOOD-DEMO-001', 'flood_depth_cm'),
+                ('official.civil_iot.sewer_water_level', 'water_level', 'CIVIL-IOT-SEWER-DEMO-001', 'water_level_m'),
+                ('official.civil_iot.pump_water_level', 'water_level', 'CIVIL-IOT-PUMP-DEMO-001', 'water_level_m'),
+                ('official.civil_iot.gate_water_level', 'water_level', 'CIVIL-IOT-GATE-DEMO-001', 'water_level_m'),
+                ('official.civil_iot.pond_water_level', 'water_level', 'CIVIL-IOT-POND-DEMO-001', 'water_level_m')
+        ) AS adapters(adapter_key, event_type, station_id, metric_column)
+    LOOP
+        SELECT
+            count(*),
+            count(*) FILTER (
+                WHERE ingested_at >= smoke_started_at
+                    AND observed_at IS NOT NULL
+                    AND CASE adapter.metric_column
+                        WHEN 'rainfall_mm_1h' THEN rainfall_mm_1h IS NOT NULL
+                        WHEN 'water_level_m' THEN water_level_m IS NOT NULL
+                        WHEN 'flood_depth_cm' THEN flood_depth_cm IS NOT NULL
+                        ELSE false
+                    END
+            )
+        INTO latest_row_count, fresh_ingested_count
+        FROM official_realtime_latest
+        WHERE adapter_key = adapter.adapter_key
+            AND event_type = adapter.event_type
+            AND station_id = adapter.station_id;
+
+        IF latest_row_count < 1 THEN
+            RAISE EXCEPTION 'worker-persisted latest smoke found no official_realtime_latest row for %', adapter.adapter_key;
+        END IF;
+        IF fresh_ingested_count < 1 THEN
+            RAISE EXCEPTION 'worker-persisted latest smoke found no fresh official_realtime_latest row for %', adapter.adapter_key;
+        END IF;
+
+        RAISE NOTICE 'worker-persisted latest smoke: adapter=% latest_row_count=% fresh_ingested_count=%',
+            adapter.adapter_key,
+            latest_row_count,
+            fresh_ingested_count;
+    END LOOP;
+END $$;
+'@
+
     Invoke-PostgresSqlSmoke `
         -Description "Cleaning pre-existing managed runtime persist smoke rows" `
         -Sql $managedRuntimePersistRowCleanupSql
@@ -1339,21 +1573,30 @@ END $$;
             -Environment @(
                 "WORKER_RUNTIME_FIXTURES_ENABLED=true",
                 "SOURCE_SAMPLE_DATA_ENABLED=true",
-                "WORKER_ENABLED_ADAPTER_KEYS=official.wra.water_level,news.public_web.sample",
+                "WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.wra.water_level,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,official.civil_iot.pond_water_level,news.public_web.sample",
                 "FRESHNESS_MAX_AGE_SECONDS=604800",
                 "WORKER_INSTANCE=runtime-smoke-managed-persist",
                 "SOURCE_CWA_API_ENABLED=false",
                 "SOURCE_WRA_API_ENABLED=false",
                 "SOURCE_FLOOD_POTENTIAL_GEOJSON_ENABLED=false",
-                "SOURCE_CWA_ENABLED=false",
+                "SOURCE_CWA_ENABLED=true",
                 "SOURCE_WRA_ENABLED=true",
                 "SOURCE_FLOOD_POTENTIAL_ENABLED=false",
+                "SOURCE_FLOOD_SENSOR_ENABLED=true",
+                "SOURCE_CIVIL_IOT_SEWER_ENABLED=true",
+                "SOURCE_CIVIL_IOT_PUMP_ENABLED=true",
+                "SOURCE_CIVIL_IOT_GATE_ENABLED=true",
+                "SOURCE_CIVIL_IOT_POND_ENABLED=true",
                 "SOURCE_NEWS_ENABLED=true"
             )
 
         Invoke-PostgresSqlSmoke `
             -Description "Checking managed runtime persist smoke rows" `
             -Sql $managedRuntimePersistVerificationSql
+
+        Invoke-PostgresSqlSmoke `
+            -Description "Checking worker-persisted official realtime latest rows" `
+            -Sql $managedRuntimePersistLatestVerificationSql
 
         Invoke-PostgresSqlSmoke `
             -Description "Cleaning managed runtime persist smoke rows and restoring data source state" `
@@ -1367,7 +1610,7 @@ END $$;
         $script:RuntimeSmokeCleanupSql = @($script:RuntimeSmokeCleanupSql | Where-Object { $_ -ne $managedRuntimePersistCleanupSql })
     }
 
-    Write-Host "Managed runtime persist smoke: --run-enabled-adapters --persist wrote WRA official and news public-web sample raw/staging/run and promoted evidence rows, then cleanup and data source restore completed."
+    Write-Host "Managed runtime persist smoke: --run-enabled-adapters --persist wrote CWA, WRA, Civil IoT official, and news public-web sample raw/staging/run, promoted evidence, and worker-persisted latest rows, then cleanup and data source restore completed."
 }
 
 function Invoke-SchedulerBoundedTickSmoke {
@@ -1637,6 +1880,8 @@ print(
 }
 
 try {
+    Assert-HostedDiagnosticFallbackDisabled
+
     Invoke-CheckedCommand "Validating docker compose config" @("docker", "compose", "config", "--quiet")
 
     Invoke-CheckedCommand "Checking Docker daemon" @("docker", "info")
@@ -1781,6 +2026,7 @@ try {
 }
 finally {
     Invoke-RegisteredSmokeCleanup
+    Restore-HostedDiagnosticFallbackEnv
 
     if ($StopOnExit) {
         Write-Step "Stopping runtime services without deleting volumes"

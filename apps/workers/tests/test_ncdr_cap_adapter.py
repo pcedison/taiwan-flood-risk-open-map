@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import ssl
+from typing import Any, cast
 
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.ncdr import NCDR_CAP_METADATA, NcdrCapAlertAdapter
+from app.adapters.ncdr import cap_alerts as ncdr_cap_module
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
@@ -208,3 +211,39 @@ def test_ncdr_cap_registry_and_runtime_gates_are_off_by_default() -> None:
 
     assert tuple(adapters) == ("official.ncdr.cap",)
     assert adapters["official.ncdr.cap"].run().normalized[0].event_type is EventType.FLOOD_WARNING
+
+
+def test_ncdr_cap_fetch_text_uses_taiwan_gov_tls_context(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeResponse:
+        headers = {"Content-Type": "application/xml; charset=utf-8"}
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"<feed></feed>"
+
+    def fake_urlopen(request, *, timeout: int, context: ssl.SSLContext):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["context"] = context
+        return FakeResponse()
+
+    monkeypatch.setattr(ncdr_cap_module, "urlopen", fake_urlopen)
+
+    assert ncdr_cap_module._fetch_text("https://alerts.ncdr.nat.gov.tw/feed", 6) == (
+        "<feed></feed>"
+    )
+
+    context = cast(ssl.SSLContext, captured["context"])
+    strict = getattr(ssl, "VERIFY_X509_STRICT", 0)
+    assert captured["timeout"] == 6
+    assert context.verify_mode is ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    if strict:
+        assert not context.verify_flags & strict

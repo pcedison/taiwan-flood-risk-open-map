@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS web-builder
+﻿FROM node:22-bookworm-slim AS web-builder
 
 WORKDIR /app/apps/web
 
@@ -102,7 +102,7 @@ RUN printf '%s\n' \
   'ingestion_enabled="${HOSTED_INGESTION_SCHEDULER_ENABLED:-${SINGLE_SERVICE_INGESTION_SCHEDULER_ENABLED:-auto}}"' \
   'realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"' \
   'realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"' \
-  'realtime_backbone_adapter_keys="official.cwa.rainfall,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level"' \
+  'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level"' \
   'if [ "${ingestion_enabled}" = "auto" ]; then' \
   '  if [ -n "${worker_database_url}" ]; then' \
   '    ingestion_enabled="true"' \

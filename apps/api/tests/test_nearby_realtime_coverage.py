@@ -129,6 +129,29 @@ def test_nearby_coverage_reports_missing_flood_depth_and_sewer() -> None:
     assert "water_level" not in coverage.missing_signal_types
 
 
+def test_nearby_coverage_treats_cwa_tide_level_as_water_level_context() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.cwa.tide_level",
+                source_id="cwa-tide-level:C4W01",
+                event_type="water_level",
+                distance_to_query_m=480.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    water_level = next(
+        item for item in coverage.signal_breakdown if item.signal_type == "water_level"
+    )
+    assert coverage_signal_type("water_level", "official.cwa.tide_level") == "water_level"
+    assert water_level.coverage_level == "high"
+    assert water_level.fresh_count == 1
+    assert "water_level" not in coverage.missing_signal_types
+
+
 def test_nearby_coverage_status_only_does_not_count_as_flood_depth() -> None:
     coverage = build_nearby_realtime_coverage(
         rows=(
@@ -145,9 +168,12 @@ def test_nearby_coverage_status_only_does_not_count_as_flood_depth() -> None:
 
     status_only = next(item for item in coverage.signal_breakdown if item.signal_type == "status_only")
     assert coverage_signal_type("status_only", "local.taipei.pump_station") == "status_only"
+    assert status_only.label == "狀態線索"
     assert status_only.status_only_count == 1
     assert status_only.fresh_count == 1
     assert coverage.overall_level == "no_local_sensor"
+    assert coverage.summary == "附近有狀態線索，但沒有可用的雨量、水位或淹水深度量測。"
+    assert "狀態線索只表示設備或警示狀態，不能代表雨量、水位或淹水深度。" in coverage.limitations
     assert "flood_depth" in coverage.missing_signal_types
     assert "rainfall" in coverage.missing_signal_types
     assert "water_level" in coverage.missing_signal_types

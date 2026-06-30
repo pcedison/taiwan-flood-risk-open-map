@@ -35,6 +35,7 @@ CENTRAL_BACKBONE_REQUIRED_SIGNAL_TYPES = (
 HYDROLOGIC_BACKBONE_SIGNAL_TYPES = frozenset(
     {
         "river_water_level",
+        "tide_level",
         "flood_depth",
         "sewer_water_level",
         "pump_water_level",
@@ -44,6 +45,7 @@ HYDROLOGIC_BACKBONE_SIGNAL_TYPES = frozenset(
 )
 BACKBONE_SIGNAL_TYPES_BY_ADAPTER_KEY = {
     "official.cwa.rainfall": "rainfall",
+    "official.cwa.tide_level": "tide_level",
     "official.wra.water_level": "river_water_level",
     "official.ncdr.cap": "cap_alert",
     "official.wra_iow.flood_depth": "flood_depth",
@@ -104,15 +106,22 @@ class LocalSourceCoverageRecord:
     county: str
     local_direct_statuses: tuple[LocalDirectSourceStatus, ...]
     production_adapter_keys: tuple[str, ...] = ()
+    authorization_gated_adapter_keys: tuple[str, ...] = ()
     production_source_urls: tuple[str, ...] = ()
     central_backbone_adapter_keys: tuple[str, ...] = NATIONAL_BASELINE_BACKBONE_KEYS
     candidate_source_names: tuple[str, ...] = ()
     candidate_source_urls: tuple[str, ...] = ()
+    candidate_contract_findings: tuple[str, ...] = ()
+    candidate_contract_missing_fields: tuple[str, ...] = ()
+    candidate_contract_non_measurement_notes: tuple[str, ...] = ()
     metadata_source_names: tuple[str, ...] = ()
     metadata_source_urls: tuple[str, ...] = ()
     status_only_source_names: tuple[str, ...] = ()
     status_only_source_urls: tuple[str, ...] = ()
     status_only_signal_types: tuple[str, ...] = ()
+    non_qualifying_source_names: tuple[str, ...] = ()
+    non_qualifying_source_urls: tuple[str, ...] = ()
+    non_qualifying_source_reasons: tuple[str, ...] = ()
     application_urls: tuple[str, ...] = ()
     requires_application: bool = False
     application_note: str | None = None
@@ -252,7 +261,7 @@ class LocalSourceCoverageRecord:
 
 
 def _coverage_signal_type(signal_type: str) -> str | None:
-    if signal_type in {"river_water_level", "pond_water_level"}:
+    if signal_type in {"river_water_level", "pond_water_level", "tide_level"}:
         return "water_level"
     if signal_type in {"pump_water_level", "gate_water_level", "gate_status", "pump_status"}:
         return "pump_or_gate_status"
@@ -264,7 +273,7 @@ def _coverage_signal_type(signal_type: str) -> str | None:
 TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
     LocalSourceCoverageRecord(
         county="臺北市",
-        local_direct_statuses=("ready_implemented", "needs_review"),
+        local_direct_statuses=("ready_implemented",),
         production_adapter_keys=(
             "local.taipei.sewer_water_level",
             "local.taipei.river_water_level",
@@ -275,15 +284,19 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://wic.gov.taipei/OpenData/API/Water/Get?stationNo=&loginId=river&dataKey=9E2648AA",
             "https://heopublic.gov.taipei/taipei-heo-api/openapi/pumb/latest",
         ),
-        candidate_source_names=("臺北市疏散門即時監測",),
-        candidate_source_urls=(
-            "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+        status_only_source_names=("臺北市水門啟閉狀態",),
+        status_only_source_urls=(
+            "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
         ),
+        status_only_signal_types=("gate_status",),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.civil_iot.sewer_water_level",
             "official.civil_iot.pump_water_level",
             "official.civil_iot.gate_water_level",
+        ),
+        notes=(
+            "2026-06-30 smoke confirmed the public mirror returns station id, recTime, coordinates, and gate open/close fields only; keep the evacuation gate as status-only and continue to track flood_depth as missing.",
         ),
     ),
     LocalSourceCoverageRecord(
@@ -420,6 +433,28 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         candidate_source_urls=(
             "https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560",
         ),
+        candidate_contract_findings=(
+            "2026-06-30 curl smoke: official Miaoli page is a public HTML "
+            "results-review article for the 114年度雨水下水道即時水情監測系統建置計畫; "
+            "it states 58 water-level monitoring stations across 10 town/city "
+            "urban-planning areas.",
+            "2026-06-30 curl smoke: the 114年度雨水下水道即時水情監測系統建置計畫 "
+            "article says water gauges receive monthly maintenance and monthly "
+            "reports track uptime, abnormalities, and improvements, but it exposes "
+            "no latest-observation read API or station metadata file.",
+        ),
+        candidate_contract_missing_fields=(
+            "observed_at",
+            "station_or_device_id",
+            "measurement_value",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata",
+        ),
+        candidate_contract_non_measurement_notes=(
+            "2026-06-30 curl smoke: the public page exposes only an HTML article/JPGs; "
+            "it is not a sewer_water_level read API and cannot satisfy "
+            "pump_or_gate_status.",
+        ),
         notes=(
             "2026-06-28 smoke：FHY Broker station/realtime API 免 key，CityCode 10005；"
             "Supplier=苗栗縣政府 42 站，本輪 local adapter fetched 42、normalized 40、"
@@ -480,15 +515,13 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
     ),
     LocalSourceCoverageRecord(
         county="雲林縣",
-        local_direct_statuses=("ready_implemented", "needs_review"),
+        local_direct_statuses=("ready_implemented",),
         production_adapter_keys=("local.yunlin.water_level",),
         production_source_urls=(
             "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5",
         ),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
-            "official.wra_iow.flood_depth",
-            "official.civil_iot.flood_sensor",
             "official.civil_iot.sewer_water_level",
             "official.civil_iot.pump_water_level",
             "official.civil_iot.gate_water_level",
@@ -507,7 +540,8 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "2026-06-28 smoke：雲林 iflood station API 免 key，totalCount 2473；"
             "stationType 水位 161 站，其中 102 筆具 levelHeight/latestUpdateTime/座標，"
             "本輪 live adapter normalized 101、1 筆 stale 拒收。淹水感測 173 站目前公開"
-            "清單未曝露 depth 欄位，不以 alarmState 假造淹水深度。",
+            "清單未曝露 depth 欄位；alarmState 已標示為 status-only 診斷線索，"
+            "不以其假造淹水深度。",
         ),
     ),
     LocalSourceCoverageRecord(
@@ -554,6 +588,33 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         production_adapter_keys=("local.tainan.flood_sensor",),
         production_source_urls=(
             "https://soa.tainan.gov.tw/Api/Service/Get/21b31a27-3e61-48b8-8259-83c2001bec8c",
+        ),
+        metadata_source_names=(
+            "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e",
+            "114\u5e74\u5ea6\u62bd\u6c34\u7ad9\u57fa\u672c\u8cc7\u6599",
+            "114\u5e74\u5ea6\u6c34\u9580\u57fa\u672c\u8cc7\u6599",
+        ),
+        metadata_source_urls=(
+            "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9",
+            "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
+            "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291",
+        ),
+        non_qualifying_source_names=(
+            "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf",
+            "\u6c34\u5229\u7f72\u8207\u53f0\u5357\u5e02\u5408\u5efa\u6df9\u6c34\u611f\u6e2c\u5668\u611f\u6e2c\u8cc7\u6599",
+        ),
+        non_qualifying_source_urls=(
+            "https://soa.tainan.gov.tw/Api/Service/Get/427a8287-0bc1-4b45-92ac-53eb858b5b9c",
+            "https://soa.tainan.gov.tw/Api/Service/Get/537b469d-e8c5-42ca-835e-bdde93bc61be",
+        ),
+        non_qualifying_source_reasons=(
+            "2026-06-30 live smoke: regional-drainage CCTV returns GroupStationID, "
+            "CameraID, Point, and ImageUrl only; image-only CCTV has no observed_at, "
+            "measurement_value, or measurement_unit_or_type and cannot satisfy "
+            "sewer_water_level or pump_or_gate_status.",
+            "2026-06-30 live smoke: WRA/Tainan joint flood-sensor endpoint returned "
+            "data:null, so no station/device observation rows are available for "
+            "production ingestion.",
         ),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
@@ -612,6 +673,22 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://pteoc.pthg.gov.tw/River",
             "https://pteoc.pthg.gov.tw/Flood",
             "https://pteoc.pthg.gov.tw/Crawler",
+        ),
+        candidate_contract_findings=(
+            "2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; "
+            "the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.",
+            "2026-06-30 smoke: RainStation detail pages identify station names such as 赤山站 and 古夏站, "
+            "but the public HTML did not expose an observed_at timestamp or joinable WGS84 station metadata.",
+        ),
+        candidate_contract_missing_fields=(
+            "observed_at",
+            "longitude_latitude_or_joinable_station_metadata",
+        ),
+        candidate_contract_non_measurement_notes=(
+            "2026-06-30 smoke: Flood/Details/900 is not_flood_depth_measurement; "
+            "it reports rainfall warning status and 1H/3H/6H thresholds, not a current flood-depth observation.",
+            "2026-06-30 smoke: Crawler/Details/1 is image_only_cctv; "
+            "it exposes CCTV image URLs for river monitoring, not a water-level measurement value.",
         ),
         notes=(
             "2026-06-28 smoke：FHY Broker station/realtime API 免 key，CityCode 10013；"
@@ -681,14 +758,43 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "official.civil_iot.flood_sensor",
             "official.civil_iot.sewer_water_level",
         ),
-        candidate_source_names=("臺東洪水與淹水預警系統",),
+        candidate_source_names=(
+            "臺東洪水與淹水預警系統",
+            "臺東縣政府水情預警系統建置情形",
+        ),
         candidate_source_urls=(
             "https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652",
+            "https://www.audit.gov.tw/p/406-1000-9612%2Cr12.php?Lang=zh-tw",
+        ),
+        candidate_contract_findings=(
+            "2026-06-30 curl smoke: Taitung County Government news page is a public "
+            "HTML flood-control article citing WRA Eighth River Management Office; "
+            "it says flood hotspots use a water-monitoring system with flood sensors, "
+            "water-level stations, rain gauges, and realtime cameras, but exposes no "
+            "public read API, observation rows, or station metadata file.",
+            "2026-06-30 official audit review: Audit Office page says Taitung County "
+            "Government built a flood and inundation warning system and later integrated "
+            "49 CWA rainfall stations plus 9 WRA water-level stations; this confirms "
+            "system context but not a local-government latest-observation read API "
+            "contract.",
+        ),
+        candidate_contract_missing_fields=(
+            "observed_at",
+            "station_or_device_id",
+            "measurement_value",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata",
+        ),
+        candidate_contract_non_measurement_notes=(
+            "2026-06-30 review: the Taitung evidence is a news article/audit summary, "
+            "not a latest-observation read API; realtime camera references are "
+            "image-only context, and central CWA/WRA station integration does not "
+            "satisfy local pump_or_gate_status production ingestion.",
         ),
         notes=(
             "2026-06-28 smoke：FHY Broker station/realtime API 免 key，CityCode 10014；"
             "Supplier=臺東縣政府 2 站，本輪 local adapter fetched/normalized 2。"
-            "臺東洪水與淹水預警系統仍未公開地方 read API contract。",
+            "臺東洪水與淹水預警系統/審計部系統說明仍未公開地方 read API contract。",
         ),
     ),
     LocalSourceCoverageRecord(
@@ -714,6 +820,7 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
     LocalSourceCoverageRecord(
         county="金門縣",
         local_direct_statuses=("needs_application",),
+        authorization_gated_adapter_keys=("local.kinmen.kwis_pump_station",),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.civil_iot.flood_sensor",
@@ -722,13 +829,33 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         requires_application=True,
         application_urls=(
             "https://kwis.kinmen.gov.tw/",
+            "https://docs.google.com/forms/d/e/1FAIpQLSdjBEvTNQyORMrkNdsJfs4KV5RUulRZF4hp2V3QhF5rGLUJYA/viewform",
             "https://kwis.kinmen.gov.tw/KWIS/Doc/%E9%87%91%E9%96%80%E7%B8%A3%E6%94%BF%E5%BA%9C%E7%AC%AC%E4%B8%89%E6%96%B9%E5%96%AE%E4%BD%8D%E8%B3%87%E6%96%99%E4%B8%8A%E5%82%B3%5B%E9%87%91%E9%96%80%E6%B0%B4%E6%83%85%E7%B3%BB%E7%B5%B1%5D%E4%B9%8BAPI%E4%BB%8B%E6%8E%A5%E7%94%B3%E8%AB%8B%E5%8F%8A%E4%BD%BF%E7%94%A8%E8%AA%AA%E6%98%8E.pdf",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Rain_Gauge_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Water_Level_Gauge_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Pump_Basic_Unit_Data",
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Monitoring_Station_Sensor_Device_List",
         ),
-        application_note="KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。",
+        application_note=(
+            "KWIS SOAP/ASMX publishes token-gated read methods for rain gauges, "
+            "water-level gauges, flood-sensing devices, pumps, and station sensor "
+            "lists; blank-token smoke returns ErrMsg (7) invalid Token with empty "
+            "Data, so production read access still requires county authorization."
+        ),
         notes=(
             "2026-06-28 Civil IoT live smoke：金門縣中央主幹已有淹水感測 7 站、"
             "RainSewer 29 站；這些是中央聚合 read API，可補即時水文觀測，"
             "但不等於金門縣府地方直出 read API。",
+            "2026-06-30 KWIS ASMX/WSDL smoke：service listing exposes "
+            "KWIS_Get_Rain_Gauge_Basic_Unit_Data, "
+            "KWIS_Get_Water_Level_Gauge_Basic_Unit_Data, "
+            "KWIS_Get_Flood_Sensing_Device_Basic_Unit_Data, "
+            "KWIS_Get_Pump_Basic_Unit_Data, and "
+            "KWIS_Get_Monitoring_Station_Sensor_Device_List. Each read method "
+            "requires Token; blank-token calls return ErrMsg (7) and Data: [].",
         ),
     ),
     LocalSourceCoverageRecord(
@@ -736,6 +863,7 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         local_direct_statuses=("metadata_only", "not_found"),
         central_backbone_adapter_keys=(
             "official.cwa.rainfall",
+            "official.cwa.tide_level",
             "official.ncdr.cap",
         ),
         metadata_source_names=("連江縣大潮、豪雨易淹水地區 ODS",),
@@ -743,7 +871,23 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5",
             "https://www.matsu.gov.tw/upload/f-20230922134042.ods",
         ),
-        notes=("尚未找到地方 live API。",),
+        non_qualifying_source_names=(
+            "連江自來水廠水庫水位月報",
+            "連江縣資訊公開查詢系統即時監測值",
+        ),
+        non_qualifying_source_urls=(
+            "https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page",
+            "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx",
+        ),
+        non_qualifying_source_reasons=(
+            "公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API。",
+            "公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。",
+        ),
+        notes=(
+            "尚未找到地方 live API。2026-06-30 查到連江自來水廠水庫水位月報與 "
+            "erbwater 公開即時監測值；前者是月報 PDF，後者是放流水環保 CEMS，"
+            "均不可補作 hydrologic_observation 風險量測。",
+        ),
     ),
 )
 

@@ -234,6 +234,50 @@ def test_write_evidence_upserts_official_realtime_latest_for_flood_depth() -> No
     assert latest_params[18] == "evidence-id"
 
 
+def test_write_evidence_upserts_status_only_without_risk_factor() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="local.yunlin.water_level",
+        source_id="YL-FS-001:2026-06-28T09:00:02.651000+00:00",
+        source_type="official",
+        event_type="status_only",
+        title="Yunlin iflood status",
+        summary="Status-only flood-sensor alarm state; no depth value exposed.",
+        url="https://yliflood.yunlin.gov.tw/ifloodboard/",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.32,
+        raw_ref="raw/local-yunlin/status-only.json",
+        properties={
+            "station_id": "YL-FS-001",
+            "station_name": "港西村_中正路3-23號",
+            "authority": "雲林縣政府",
+            "alarm_state": "正常",
+            "source_weight": 0.05,
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [120.147835, 23.575771]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    latest_sql, latest_params = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "INSERT INTO official_realtime_latest" in execution[0]
+    )
+    assert "INSERT INTO official_realtime_latest" in latest_sql
+    assert latest_params[1] == "local.yunlin.water_level"
+    assert latest_params[2] == "status_only"
+    assert latest_params[3] == "YL-FS-001"
+    assert latest_params[16] == 0.05
+    assert latest_params[17] is None
+
+
 def test_write_evidence_enriches_missing_admin_area_from_point_geometry() -> None:
     connection = _FakeConnection(
         rows=[],

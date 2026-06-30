@@ -805,10 +805,14 @@ aggregation covers it.
   `candidate_source_urls`、`metadata_source_urls` 與 `application_urls`，
   讓後續實作、監控、人工申請都能直接回到官方來源頁、API endpoint、
   metadata catalog 或授權文件。
-- 臺北市疏散門來源已從模糊候選升級為 `needs_review`：臺北資料大平台公開
+- 臺北市疏散門來源在 2026-06-28 曾列入 live-smoke review：臺北資料大平台公開
   official OpenAPI URL、loginId 與 dataKey，但 2026-06-28 在此環境 live smoke
   30 秒逾時，因此在 availability 與 freshness 驗證前，仍不接入 production
   adapter。
+  2026-06-30 update: this was superseded by the nationwide sensor plan. The
+  `wic.gov.taipei` mirror is now tracked as `status_only_verified` gate status;
+  it cannot satisfy `flood_depth`, so Taipei remains in signal-gap follow-up
+  rather than live-smoke review.
 - 第三輪來源探索已整合：北區、中南區、東部離島 subagents 確認許多剩餘縣市
   有可用的中央官方 SensorThings 或 WRA/CWA read API，但沒有找到縣市政府直營、
   可公開讀取的地方直連 open API。2026-06-28 RainSewer live smoke 確認新北

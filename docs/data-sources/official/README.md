@@ -9,6 +9,7 @@ This bridge is not Phase 2 completion by itself. Phase 2 acceptance still requir
 | Adapter key | Source family | Event type | Status |
 |---|---|---|---|
 | `official.cwa.rainfall` | `official` | `rainfall` | Fixture parser + API bridge + gated worker live client implemented |
+| `official.cwa.tide_level` | `official` | `water_level` | Gated worker live client implemented; joins CWA tide observations with station metadata for coastal water-level context |
 | `official.wra.water_level` | `official` | `water_level` | Fixture parser + API bridge + gated worker live client implemented |
 | `official.wra_iow.flood_depth` | `official` | `flood_report` | Gated worker live client implemented; joins latest flood depth with station metadata |
 | `official.flood_potential.geojson` | `official` | `flood_potential` | Fixture parser implemented |
@@ -17,6 +18,8 @@ This bridge is not Phase 2 completion by itself. Phase 2 acceptance still requir
 Current official endpoints used by the MVP bridge:
 
 - CWA automatic rainfall observations: `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001`
+- CWA coastal tide-level observations: `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-B0075-001`
+- CWA marine station metadata: `https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/O-B0076-001`
 - WRA realtime water level observations: `https://opendata.wra.gov.tw/api/v2/73c4c3de-4045-4765-abeb-89f9f9cd5ff0`
 - WRA water-level station metadata: `https://opendata.wra.gov.tw/api/v2/c4acc691-7416-40ca-9464-292c0c00da92`
 - WRA IoW latest flood depth observations: `https://opendata.wra.gov.tw/api/v2/1b991bbb-ad85-4e7a-b931-06ce8749d3ed`
@@ -45,6 +48,10 @@ Source mapping notes:
 - data.gov.tw dataset 9177 maps to the CWA `O-A0002-001` automatic rainfall
   station endpoint. This is the canonical rainfall source for the current
   adapter and public MVP bridge because it exposes `RainfallElement` values.
+- CWA `O-B0075-001` maps to coastal tide-level observations, with
+  `O-B0076-001` station metadata used for county/town and coordinates. It
+  provides coastal water-level context for offshore counties such as 連江縣,
+  but it is not an inland drainage, sewer, pump, or flood-depth observation.
 - CWA `O-A0003-001` is a 10-minute automatic weather station observation
   endpoint. It is useful as a future supplemental weather source, but it should
   not replace `O-A0002-001` in the rainfall adapter because its current payload
@@ -81,13 +88,13 @@ Source mapping notes:
   station metadata rows downloaded for bridge context; it is not a water-level
   observation payload.
 
-Worker live clients are still explicit opt-in paths. CWA uses
-`SOURCE_CWA_API_ENABLED=true` plus `CWA_API_AUTHORIZATION`; WRA uses
-`SOURCE_WRA_API_ENABLED=true` with optional `WRA_API_TOKEN`. These gates prove a
-deployable worker path exists for local/preview acceptance, not production beta
-readiness. Flood-potential remains fixture/demo only; adding its worker gate
-would prove only a deployable path until the upstream and operations reviews
-below are accepted.
+Worker live clients are still explicit opt-in paths. CWA rainfall and CWA
+tide-level ingestion use `SOURCE_CWA_API_ENABLED=true` plus
+`CWA_API_AUTHORIZATION`; WRA uses `SOURCE_WRA_API_ENABLED=true` with optional
+`WRA_API_TOKEN`. These gates prove a deployable worker path exists for
+local/preview acceptance, not production beta readiness. Flood-potential remains
+fixture/demo only; adding its worker gate would prove only a deployable path
+until the upstream and operations reviews below are accepted.
 
 Production enablement requirements:
 

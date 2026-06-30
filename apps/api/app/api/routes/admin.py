@@ -59,6 +59,7 @@ REALTIME_STALE_SECONDS = 60 * 60
 CENTRAL_BACKBONE_REQUIRED_FAMILIES = ("CWA", "WRA", "NCDR", "Civil IoT")
 CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS = (
     "official.cwa.rainfall",
+    "official.cwa.tide_level",
     "official.wra.water_level",
     "official.ncdr.cap",
     "official.wra_iow.flood_depth",
@@ -69,6 +70,7 @@ CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS = (
 )
 CENTRAL_BACKBONE_FAMILY_BY_ADAPTER_KEY = {
     "official.cwa.rainfall": "CWA",
+    "official.cwa.tide_level": "CWA",
     "official.wra.water_level": "WRA",
     "official.wra_iow.flood_depth": "WRA",
     "official.ncdr.cap": "NCDR",
@@ -80,6 +82,7 @@ CENTRAL_BACKBONE_FAMILY_BY_ADAPTER_KEY = {
 REALTIME_ADAPTER_KEYS = frozenset(
     {
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.civil_iot.flood_sensor",
         "official.civil_iot.river_water_level",
@@ -116,6 +119,7 @@ REALTIME_ADAPTER_KEYS = frozenset(
 STATIC_SLOW_CADENCE_ADAPTER_KEYS = frozenset({"official.flood_potential.geojson"})
 SOURCE_GATE_NAMES = {
     "official.cwa.rainfall": ("SOURCE_CWA_ENABLED", "SOURCE_CWA_API_ENABLED"),
+    "official.cwa.tide_level": ("SOURCE_CWA_ENABLED", "SOURCE_CWA_API_ENABLED"),
     "official.wra.water_level": ("SOURCE_WRA_ENABLED", "SOURCE_WRA_API_ENABLED"),
     "official.ncdr.cap": ("SOURCE_NCDR_CAP_ENABLED", "SOURCE_NCDR_CAP_API_ENABLED"),
     "official.flood_potential.geojson": (
@@ -343,11 +347,23 @@ def list_admin_local_source_coverage(
                 missing_signal_types=list(record.missing_signal_types),
                 candidate_source_names=list(record.candidate_source_names),
                 candidate_source_urls=list(record.candidate_source_urls),
+                candidate_contract_findings=list(record.candidate_contract_findings),
+                candidate_contract_missing_fields=list(
+                    record.candidate_contract_missing_fields
+                ),
+                candidate_contract_non_measurement_notes=list(
+                    record.candidate_contract_non_measurement_notes
+                ),
                 metadata_source_names=list(record.metadata_source_names),
                 metadata_source_urls=list(record.metadata_source_urls),
                 status_only_source_names=list(record.status_only_source_names),
                 status_only_source_urls=list(record.status_only_source_urls),
                 status_only_signal_types=list(record.status_only_signal_types),
+                non_qualifying_source_names=list(record.non_qualifying_source_names),
+                non_qualifying_source_urls=list(record.non_qualifying_source_urls),
+                non_qualifying_source_reasons=list(
+                    record.non_qualifying_source_reasons
+                ),
                 application_urls=list(record.application_urls),
                 requires_application=record.requires_application,
                 application_note=record.application_note,

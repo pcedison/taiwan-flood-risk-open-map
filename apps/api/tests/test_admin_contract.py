@@ -331,6 +331,7 @@ def test_admin_enabled_gates_include_flood_sensor_live_gate(
 @pytest.mark.parametrize(
     "adapter_key",
     [
+        "official.cwa.tide_level",
         "official.wra_iow.flood_depth",
         "local.taipei.sewer_water_level",
         "local.taipei.river_water_level",
@@ -376,6 +377,13 @@ def test_admin_freshness_uses_realtime_cadence_for_new_backbone_sources(
 @pytest.mark.parametrize(
     ("adapter_key", "gate_names"),
     [
+        (
+            "official.cwa.tide_level",
+            (
+                "SOURCE_CWA_ENABLED",
+                "SOURCE_CWA_API_ENABLED",
+            ),
+        ),
         (
             "official.wra_iow.flood_depth",
             (
@@ -912,14 +920,14 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert summary["total_counties"] == 22
     assert summary["local_direct_complete_count"] == 20
     assert summary["local_direct_incomplete_count"] == 2
-    assert summary["central_backbone_minimum_complete_count"] == 21
-    assert summary["central_backbone_minimum_incomplete_count"] == 1
-    assert summary["counties_missing_hydrologic_backbone"] == ["連江縣"]
+    assert summary["central_backbone_minimum_complete_count"] == 22
+    assert summary["central_backbone_minimum_incomplete_count"] == 0
+    assert summary["counties_missing_hydrologic_backbone"] == []
     assert summary["request_official_authorization_count"] == 2
-    assert summary["verify_live_smoke_count"] == 2
+    assert summary["verify_live_smoke_count"] == 0
     assert summary["verify_public_api_contract_count"] == 3
     assert summary["counties_requiring_official_authorization"] == ["花蓮縣", "金門縣"]
-    assert summary["counties_requiring_live_smoke"] == ["臺北市", "雲林縣"]
+    assert summary["counties_requiring_live_smoke"] == []
     assert summary["counties_requiring_public_api_contract"] == [
         "苗栗縣",
         "屏東縣",
@@ -942,6 +950,7 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert summary["central_backbone_family_complete"] is True
     assert summary["central_backbone_required_adapter_keys"] == [
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.ncdr.cap",
         "official.wra_iow.flood_depth",
@@ -955,14 +964,19 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert len(counties) == 22
     assert counties["臺北市"]["local_direct_statuses"] == [
         "ready_implemented",
-        "needs_review",
     ]
     assert counties["臺北市"]["local_direct_complete"] is True
-    assert counties["臺北市"]["next_action_code"] == "verify_live_smoke"
-    assert counties["臺北市"]["candidate_source_urls"] == [
-        "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+    assert counties["臺北市"]["next_action_code"] == "operate_adapter"
+    assert counties["臺北市"]["candidate_source_urls"] == []
+    assert counties["臺北市"]["status_only_available"] is True
+    assert counties["臺北市"]["status_only_source_names"] == ["臺北市水門啟閉狀態"]
+    assert counties["臺北市"]["status_only_source_urls"] == [
+        "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
     ]
-    assert "smoke" in counties["臺北市"]["blocking_reason"]
+    assert counties["臺北市"]["status_only_signal_types"] == ["gate_status"]
+    assert counties["臺北市"]["flood_depth_available"] is False
+    assert "flood_depth" in counties["臺北市"]["missing_signal_types"]
+    assert counties["臺北市"]["blocking_reason"] is None
     assert counties["臺南市"]["local_direct_statuses"] == ["ready_implemented"]
     assert counties["臺南市"]["local_direct_complete"] is True
     assert counties["臺南市"]["central_backbone_available"] is True
@@ -1065,22 +1079,22 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert counties["彰化縣"]["production_adapter_keys"] == [
         "local.changhua.flood_sensor",
     ]
-    assert counties["雲林縣"]["local_direct_statuses"] == [
-        "ready_implemented",
-        "needs_review",
-    ]
+    assert counties["雲林縣"]["local_direct_statuses"] == ["ready_implemented"]
     assert counties["雲林縣"]["local_direct_complete"] is True
     assert counties["雲林縣"]["production_adapter_keys"] == [
         "local.yunlin.water_level",
     ]
-    assert counties["雲林縣"]["next_action_code"] == "verify_live_smoke"
-    assert "不以 alarmState 假造淹水深度" in " ".join(counties["雲林縣"]["notes"])
+    assert counties["雲林縣"]["next_action_code"] == "operate_adapter"
+    yunlin_notes = " ".join(counties["雲林縣"]["notes"])
+    assert "alarmState" in yunlin_notes
+    assert "不以其假造淹水深度" in yunlin_notes
     assert counties["雲林縣"]["status_only_available"] is True
     assert counties["雲林縣"]["status_only_source_names"] == [
         "雲林 iflood 淹水感測狀態",
     ]
-    assert counties["雲林縣"]["flood_depth_available"] is True
-    assert "flood_depth" not in counties["雲林縣"]["missing_signal_types"]
+    assert counties["雲林縣"]["status_only_signal_types"] == ["flood_sensor_status"]
+    assert counties["雲林縣"]["flood_depth_available"] is False
+    assert "flood_depth" in counties["雲林縣"]["missing_signal_types"]
     assert "sewer_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
     assert "gate_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
     assert counties["嘉義縣"]["local_direct_statuses"] == ["ready_implemented"]
@@ -1135,19 +1149,37 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert any("KWIS" in url for url in counties["金門縣"]["application_urls"])
     assert counties["連江縣"]["local_direct_statuses"] == ["metadata_only", "not_found"]
     assert counties["連江縣"]["production_adapter_keys"] == []
-    assert counties["連江縣"]["central_backbone_minimum_complete"] is False
-    assert counties["連江縣"]["central_backbone_missing_signal_types"] == [
-        "hydrologic_observation",
+    assert counties["連江縣"]["central_backbone_adapter_keys"] == [
+        "official.cwa.rainfall",
+        "official.cwa.tide_level",
+        "official.ncdr.cap",
     ]
-    assert counties["連江縣"]["central_backbone_coverage_level"] == "needs_hydrologic_backbone"
+    assert counties["連江縣"]["central_backbone_signal_types"] == [
+        "rainfall",
+        "tide_level",
+        "cap_alert",
+    ]
+    assert counties["連江縣"]["central_backbone_minimum_complete"] is True
+    assert counties["連江縣"]["central_backbone_missing_signal_types"] == []
+    assert counties["連江縣"]["central_backbone_coverage_level"] == "minimum_met"
     assert counties["連江縣"]["rainfall_available"] is True
-    assert counties["連江縣"]["water_level_available"] is False
+    assert counties["連江縣"]["water_level_available"] is True
     assert counties["連江縣"]["flood_depth_available"] is False
     assert counties["連江縣"]["sewer_water_level_available"] is False
     assert counties["連江縣"]["pump_or_gate_status_available"] is False
     assert counties["連江縣"]["status_only_available"] is False
+    assert counties["連江縣"]["non_qualifying_source_names"] == [
+        "連江自來水廠水庫水位月報",
+        "連江縣資訊公開查詢系統即時監測值",
+    ]
+    assert counties["連江縣"]["non_qualifying_source_urls"] == [
+        "https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page",
+        "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx",
+    ]
+    assert "放流水環保 CEMS" in " ".join(
+        counties["連江縣"]["non_qualifying_source_reasons"]
+    )
     assert counties["連江縣"]["missing_signal_types"] == [
-        "water_level",
         "flood_depth",
         "sewer_water_level",
         "pump_or_gate_status",
@@ -1171,8 +1203,53 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     plan = payload["plan"]
     assert plan["local_direct_complete_count"] == 20
     assert plan["local_direct_remaining_count"] == 2
-    assert plan["central_backbone_minimum_complete_count"] == 21
-    assert plan["central_backbone_remaining_count"] == 1
+    assert plan["central_backbone_minimum_complete_count"] == 22
+    assert plan["central_backbone_remaining_count"] == 0
+    assert plan["completion_audit"]["overall_status"] == "incomplete"
+    assert plan["completion_audit"]["summary"]["signal_gap_county_item_count"] == 24
+    assert plan["completion_audit"]["evidence_overlay"] == {
+        "schema_version": None,
+        "captured_at": None,
+        "signal_family_gap_evidence_count": 0,
+        "source_contract_evidence_count": 0,
+        "production_gate_evidence_count": 0,
+        "production_gate_requirement_evidence_count": 0,
+        "validation_errors": [],
+    }
+    audit_gates = {
+        gate["gate_key"]: gate for gate in plan["completion_audit"]["gates"]
+    }
+    assert audit_gates["central_backbone_minimum_coverage"]["status"] == "satisfied"
+    assert audit_gates["required_signal_families"]["status"] == "incomplete"
+    assert audit_gates["hosted_worker_persisted_evidence"]["status"] == "incomplete"
+    assert plan["signal_gap_priority_groups"][0]["signal_type"] == "pump_or_gate_status"
+    assert plan["signal_gap_priority_groups"][0]["county_count"] == 14
+    assert plan["signal_gap_priority_groups"][0]["highest_priority_tier"] == "P0"
+    assert plan["signal_gap_priority_groups"][0]["tracking_statuses"] == {
+        "monitoring_open_data_release": 1,
+        "needs_authorization_request": 1,
+        "needs_public_read_api_contract": 2,
+        "needs_signal_gap_review": 10,
+    }
+    assert "--signal-type pump_or_gate_status" in plan["signal_gap_priority_groups"][0][
+        "discovery_monitor"
+    ]["command"]
+    request_batch = plan["signal_gap_priority_groups"][0]["official_request_batch"]
+    assert request_batch["target_signal_type"] == "pump_or_gate_status"
+    assert request_batch["packet_type"] == "signal_gap_batch_request"
+    assert request_batch["county_count"] == 14
+    assert request_batch["next_step"] == "send_official_read_api_requests"
+    assert "worker_persisted_evidence_path" in request_batch[
+        "production_operational_requirements"
+    ]
+    assert (
+        "scripts/local-source-request-packets.py --format markdown"
+        in request_batch["packet_generator_command"]
+    )
+    assert "--signal-type pump_or_gate_status" in request_batch[
+        "packet_generator_command"
+    ]
+    assert "金門縣" in plan["signal_gap_priority_groups"][0]["counties"]
     assert [item["county"] for item in plan["authorization_requests"]] == [
         "花蓮縣",
         "金門縣",
@@ -1183,10 +1260,57 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "屏東縣",
         "臺東縣",
     ]
-    assert [item["county"] for item in plan["live_smoke_reviews"]] == [
-        "臺北市",
-        "雲林縣",
+    assert [item["county"] for item in plan["live_smoke_reviews"]] == []
+    assert [item["county"] for item in plan["integration_priority_queue"][:3]] == [
+        "連江縣",
+        "金門縣",
+        "花蓮縣",
     ]
+    top_priority = plan["integration_priority_queue"][0]
+    assert top_priority["priority_tier"] == "P0"
+    assert top_priority["workstream"] == "monitor_open_data_release"
+    assert top_priority["completion_gate"]
+    assert top_priority["central_backbone_missing_signal_types"] == []
+    assert top_priority["missing_signal_types"] == [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+    ]
+    assert top_priority["open_data_release_monitor"] == {
+        "target_county": "連江縣",
+        "source_catalog": "data.gov.tw dataset export",
+        "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json",
+        "expected_current_state": "metadata_only",
+        "escalate_on_state": "live_candidate_found",
+        "candidate_readiness_field": "candidate_live_read_api",
+        "command": (
+            "PYTHONPATH=apps/workers python "
+            "scripts/local-source-discovery-monitor.py "
+            "--county 連江縣 --fail-on-candidate"
+        ),
+    }
+    kinmen_priority = plan["integration_priority_queue"][1]
+    assert kinmen_priority["authorization_gated_adapter_keys"] == [
+        "local.kinmen.kwis_pump_station"
+    ]
+    assert kinmen_priority["production_adapter_keys"] == []
+    signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
+    assert "臺北市" in signal_gaps
+    assert signal_gaps["臺北市"]["tracking_status"] == "needs_signal_gap_review"
+    assert signal_gaps["臺北市"]["missing_signal_types"] == ["flood_depth"]
+    assert signal_gaps["臺北市"]["status_only_signal_types"] == ["gate_status"]
+    assert "嘉義市" in signal_gaps
+    assert signal_gaps["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
+    assert "flood_depth" in signal_gaps["嘉義市"]["missing_signal_types"]
+    assert "雲林縣" in signal_gaps
+    assert signal_gaps["雲林縣"]["missing_signal_types"] == ["flood_depth"]
+    assert signal_gaps["雲林縣"]["status_only_source_urls"] == [
+        "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
+    ]
+    assert signal_gaps["雲林縣"]["status_only_signal_types"] == [
+        "flood_sensor_status"
+    ]
+    assert "高雄市" not in signal_gaps
     hualien = plan["authorization_requests"][0]
     assert hualien["requested_counterparty"] == "花蓮縣政府 / Senslink 行動水情維運窗口"
     kinmen = plan["authorization_requests"][1]
@@ -1195,13 +1319,26 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert kinmen["requested_counterparty"] == "金門縣政府 / KWIS 維運窗口"
     assert kinmen["tracking_status"] == "needs_authorization_request"
     assert kinmen["last_followed_up_at"] is None
-    lienchiang = plan["metadata_release_monitors"][0]
-    assert lienchiang["central_backbone_missing_signal_types"] == [
-        "hydrologic_observation",
+    assert kinmen["authorization_gated_adapter_keys"] == [
+        "local.kinmen.kwis_pump_station"
     ]
+    assert kinmen["production_adapter_keys"] == []
+    lienchiang = plan["metadata_release_monitors"][0]
+    assert lienchiang["central_backbone_missing_signal_types"] == []
     assert lienchiang["requested_counterparty"] == "連江縣政府公開資料或防災水利窗口"
     assert lienchiang["tracking_status"] == "monitoring_open_data_release"
     assert lienchiang["last_followed_up_at"] is None
+    assert lienchiang["open_data_release_monitor"]["expected_current_state"] == (
+        "metadata_only"
+    )
+    assert lienchiang["open_data_release_monitor"]["command"].endswith(
+        "--county 連江縣 --fail-on-candidate"
+    )
+    assert lienchiang["non_qualifying_source_names"] == [
+        "連江自來水廠水庫水位月報",
+        "連江縣資訊公開查詢系統即時監測值",
+    ]
+    assert "月報 PDF" in " ".join(lienchiang["non_qualifying_source_reasons"])
     assert "measurement_value" in lienchiang["required_read_api_fields"]
     assert_openapi_schema(payload, "AdminLocalSourceActionPlanResponse")
 

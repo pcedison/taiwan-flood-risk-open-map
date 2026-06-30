@@ -16,6 +16,7 @@ from app.adapters._helpers import (
     stable_evidence_id,
     url_with_query,
 )
+from app.adapters._taiwan_gov_tls import taiwan_gov_open_data_ssl_context
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -518,7 +519,11 @@ def _fetch_json(url: str, timeout_seconds: int) -> Any:
         method="GET",
     )
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with urlopen(
+            request,
+            timeout=timeout_seconds,
+            context=taiwan_gov_open_data_ssl_context(),
+        ) as response:
             payload: Any = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         raise WraWaterLevelFetchError(f"WRA water level API returned HTTP {exc.code}") from exc
