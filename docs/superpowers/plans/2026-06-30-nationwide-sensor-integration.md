@@ -1425,6 +1425,33 @@ prove official authorization, metadata release, or public read API contracts;
 the audit is accepted only when real private official replies or contract
 reviews are supplied.
 
+## Task 45: Signal Family Evidence Overlay
+
+**Files:**
+- Add: `scripts/signal_family_evidence.py`
+- Add: `tests/test_signal_family_evidence.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+
+**Interfaces:**
+- Consumes: a private signal-family manifest covering every current
+  county/signal item in `signal_gap_priority_groups`.
+- Produces: a fail-closed `local-source-completion-evidence/v1` overlay for
+  `required_signal_families`.
+
+- [x] Write failing tests requiring valid signal-family evidence to produce an
+  accepted completion overlay.
+- [x] Reject incomplete manifests that contain `request_dispatched`, missing
+  evidence refs, missing review timestamps, or omit any current county/signal
+  requirement.
+- [x] Support PowerShell UTF-8 BOM JSON manifests.
+- [x] Document the private handoff command and required fields.
+
+Completed 2026-06-30: operators now have a strict private evidence path for
+the 24 current signal-family blockers. This does not itself prove pump/gate,
+flood-depth, or sewer-level coverage; the audit is accepted only when real
+private official replies, authorization-gated adapter evidence, production
+adapter evidence, or official-unavailable decisions are supplied.
+
 ## Completion Gates
 
 The full objective is complete only when:

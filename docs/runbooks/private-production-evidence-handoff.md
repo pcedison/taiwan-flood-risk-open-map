@@ -229,6 +229,27 @@ replaced with `accepted`, `authorization_gated_adapter`,
 filled dispatch overlay; keep it with the private official correspondence or
 ticketing record.
 
+After official replies, authorization-gated adapter evidence, production
+adapter evidence, or official-unavailable decisions are accepted, normalize the
+private signal-family manifest into a completion overlay:
+
+```powershell
+python scripts\signal_family_evidence.py `
+  --manifest-json <private-signal-family-manifest.json> `
+  --evidence-output <private-signal-family-evidence.json> `
+  --completion-evidence-output <private-signal-family-completion-evidence.json>
+```
+
+The manifest schema is `signal-family-evidence-input/v1`. Each
+`signal_family_gap_evidence` entry must include `county`, `signal_type`,
+accepted `status`, `evidence_ref`, and `reviewed_at`. Accepted completion
+statuses are `accepted`, `authorization_gated_adapter`, `production_adapter`,
+and `official_unavailable`. `request_dispatched` is intentionally rejected by
+this CLI because it is progress evidence, not completion evidence. The CLI
+compares the manifest against the current `signal_gap_priority_groups` and
+fails closed if any required county/signal entry is missing, pending,
+duplicated, or no longer required.
+
 For the `official_authorization_and_contracts` gate, fill a private source
 contract manifest with accepted evidence for every current
 `authorization_request`, `metadata_release_monitor`, and
