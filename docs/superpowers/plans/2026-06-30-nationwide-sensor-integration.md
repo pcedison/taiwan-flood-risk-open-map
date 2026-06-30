@@ -1631,6 +1631,39 @@ water-level coverage currently appears only in 嘉義縣、新竹市、臺南市
 so the 13 `pump_or_gate_status` blocker counties remain
 unresolved.
 
+## Task 52: Deployed Main 70677db Completion Evidence
+
+**Files:**
+- Add: `docs/reviews/hosted-deployment-smoke-2026-06-30-70677db.json`
+- Add: `docs/reviews/hosted-deployment-completion-evidence-2026-06-30-70677db.json`
+- Add: `docs/reviews/hosted-public-risk-evidence-smoke-2026-06-30-70677db.json`
+- Add: `docs/reviews/hosted-public-risk-completion-evidence-2026-06-30-70677db.json`
+- Add: `docs/reviews/completion-audit-2026-06-30-70677db.json`
+- Add: `docs/reviews/completion-audit-2026-06-30-70677db.md`
+
+**Interfaces:**
+- Consumes: hosted `/health`, `/ready`, and public risk query smoke output for
+  deployed main merge SHA `70677dba26d2b5b703088c59d3b3599b3c41beda`.
+- Produces: public-safe completion evidence proving the current production
+  deployment and public-risk worker-evidence path while preserving the remaining
+  sensor/source/ops blockers.
+
+- [x] Re-run hosted deployment smoke against `https://floodrisk.cc` for
+  `70677db...`.
+- [x] Re-run hosted public-risk evidence smoke against the Tainan query sample.
+- [x] Merge the public completion overlays into the completion audit JSON and
+  Markdown report.
+- [x] Confirm the overall objective remains incomplete, with signal-family,
+  official authorization/contracts, hosted worker persistence, and monitoring
+  gates still open.
+
+Completed 2026-06-30: production deployment evidence and public-risk evidence
+are now committed for deployed `main` SHA `70677db...`. The current public audit
+marks `production_deployment_evidence` and `public_risk_worker_evidence_path`
+satisfied from public-safe evidence, while `required_signal_families`,
+`official_authorization_and_contracts`, `hosted_worker_persisted_evidence`, and
+`production_monitoring_and_alerting` remain incomplete.
+
 ## Completion Gates
 
 The full objective is complete only when:
