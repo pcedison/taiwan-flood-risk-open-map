@@ -898,6 +898,7 @@ paths:
                           signal_family_gap_evidence_count: 0
                           signal_family_gap_dispatch_count: 0
                           source_contract_evidence_count: 0
+                          source_contract_dispatch_count: 0
                           production_gate_evidence_count: 0
                           production_gate_requirement_evidence_count: 0
                           validation_errors: []
@@ -2756,6 +2757,7 @@ components:
         - signal_family_gap_evidence_count
         - signal_family_gap_dispatch_count
         - source_contract_evidence_count
+        - source_contract_dispatch_count
         - production_gate_evidence_count
         - production_gate_requirement_evidence_count
         - validation_errors
@@ -2775,6 +2777,9 @@ components:
           type: integer
           minimum: 0
         source_contract_evidence_count:
+          type: integer
+          minimum: 0
+        source_contract_dispatch_count:
           type: integer
           minimum: 0
         production_gate_evidence_count:

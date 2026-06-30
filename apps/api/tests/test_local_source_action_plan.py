@@ -438,6 +438,7 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
         "signal_family_gap_evidence_count": 17,
         "signal_family_gap_dispatch_count": 0,
         "source_contract_evidence_count": 6,
+        "source_contract_dispatch_count": 0,
         "production_gate_evidence_count": 4,
         "production_gate_requirement_evidence_count": 12,
         "validation_errors": [],
@@ -450,6 +451,46 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
     assert gates["hosted_worker_persisted_evidence"]["status"] == "satisfied"
     assert gates["production_monitoring_and_alerting"]["status"] == "satisfied"
     assert gates["public_risk_worker_evidence_path"]["status"] == "satisfied"
+
+
+def test_local_source_action_plan_tracks_dispatched_source_contracts_without_accepting_them() -> None:
+    evidence = {
+        "schema_version": "local-source-completion-evidence/v1",
+        "captured_at": "2026-06-30T18:20:00+08:00",
+        "signal_family_gap_evidence": [],
+        "source_contract_evidence": [
+            {
+                "county": "\u91d1\u9580\u7e23",
+                "gate": "authorization_request",
+                "status": "request_dispatched",
+                "evidence_ref": (
+                    "private-ops://local-source/source-contract-dispatch/"
+                    "\u91d1\u9580\u7e23/authorization_request"
+                ),
+                "dispatched_at": "2026-06-30T18:10:00+08:00",
+            }
+        ],
+        "production_gate_evidence": [],
+    }
+
+    plan = build_local_source_action_plan(
+        list_local_source_coverage(),
+        completion_evidence=evidence,
+    )
+    audit = plan["completion_audit"]
+    gates = {gate["gate_key"]: gate for gate in audit["gates"]}
+
+    assert audit["evidence_overlay"]["source_contract_evidence_count"] == 0
+    assert audit["evidence_overlay"]["source_contract_dispatch_count"] == 1
+    assert gates["official_authorization_and_contracts"]["status"] == "incomplete"
+    assert gates["official_authorization_and_contracts"]["blocking_items"] == [
+        "authorization_requests:2",
+        "metadata_release_monitors:1",
+        "public_api_contract_reviews:3",
+    ]
+    assert "Dispatch evidence supplied for 1/6" in gates[
+        "official_authorization_and_contracts"
+    ]["evidence"]
 
 
 def test_local_source_action_plan_requires_production_gate_requirement_evidence() -> None:

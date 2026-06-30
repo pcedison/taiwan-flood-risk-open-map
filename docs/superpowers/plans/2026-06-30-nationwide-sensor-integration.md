@@ -1720,6 +1720,39 @@ evidence unless both `required_adapter_keys` and `checked_sources` include CWA
 rainfall/tide, WRA water level, NCDR CAP, WRA IoW flood depth, and Civil IoT
 flood/sewer/pump/gate adapters.
 
+## Task 55: Source Contract Dispatch Tracking
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Modify: `scripts/local-source-request-packets.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Modify: action-plan, admin-contract, request-packet, and runbook tests.
+
+**Interfaces:**
+- Consumes: current `authorization_requests`, `metadata_release_monitors`, and
+  `public_api_contract_reviews`.
+- Produces: a `source-contract-dispatch-evidence` overlay path and audit
+  counter for official request dispatch progress without satisfying
+  `official_authorization_and_contracts`.
+
+- [x] Write failing tests proving `request_dispatched` source-contract evidence
+  is counted separately from accepted source-contract evidence.
+- [x] Add a request-packet CLI format that generates private dispatch overlays
+  for the six current authorization/release/contract blockers.
+- [x] Expose `source_contract_dispatch_count` in the admin action-plan contract
+  and OpenAPI schema.
+- [x] Document that dispatch overlays are private progress evidence and must not
+  be committed or treated as completion evidence.
+
+Completed 2026-06-30: source-contract request dispatch can now be tracked in
+the completion audit as progress toward official authorization and public read
+API contracts. It does not reduce the current blocker counts; accepted official
+reply, authorization, contract verification, metadata release, or
+official-unavailable evidence is still required.
+
 ## Completion Gates
 
 The full objective is complete only when:

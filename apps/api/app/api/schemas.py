@@ -264,6 +264,7 @@ class LocalSourceCompletionEvidenceOverlay(ContractModel):
     signal_family_gap_evidence_count: int = Field(ge=0)
     signal_family_gap_dispatch_count: int = Field(ge=0)
     source_contract_evidence_count: int = Field(ge=0)
+    source_contract_dispatch_count: int = Field(ge=0)
     production_gate_evidence_count: int = Field(ge=0)
     production_gate_requirement_evidence_count: int = Field(ge=0)
     validation_errors: list[str] = Field(default_factory=list)
