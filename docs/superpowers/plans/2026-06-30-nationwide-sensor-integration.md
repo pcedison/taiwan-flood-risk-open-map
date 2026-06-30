@@ -1308,6 +1308,43 @@ prevents starting adapters from stale or false-live discovery output and keeps
 the next work focused on official read-API follow-up, authorization/contracts,
 or future release-monitor hits.
 
+## Task 41: Hosted Main Deployment Evidence Gate
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Add: `scripts/hosted_deployment_smoke.py`
+- Add: `tests/test_hosted_deployment_smoke.py`
+- Modify: `apps/api/tests/test_local_source_action_plan.py`
+- Modify: `tests/test_local_source_completion_audit_cli.py`
+- Modify: `docs/data-sources/local/local-source-completion-evidence.example.json`
+- Modify: `docs/runbooks/official-realtime-source-of-truth.md`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Add: `docs/reviews/hosted-deployment-smoke-2026-06-30-19eb3ce.json`
+- Add: `docs/reviews/hosted-deployment-completion-evidence-2026-06-30-19eb3ce.json`
+
+**Interfaces:**
+- Consumes: hosted public `/health` and `/ready`.
+- Produces: a no-secret deployment evidence artifact plus a partial
+  `local-source-completion-evidence/v1` overlay for the
+  `production_deployment_evidence` gate.
+
+- [x] Write failing tests requiring completion audit to expose
+  `production_deployment_evidence` with `main_branch_deployed_sha` and
+  `ready_dependency_smoke`.
+- [x] Add a no-secret hosted deployment smoke that verifies `/health` and
+  `/ready` both return the expected main merge SHA and healthy readiness
+  dependencies.
+- [x] Capture current production deployment evidence for `19eb3ce...`.
+- [x] Validate that the deployment evidence can be merged with existing
+  public-risk evidence while leaving the remaining signal, source-contract,
+  hosted-worker, and monitoring gates incomplete.
+
+Completed 2026-06-30: deployment of `main` is now a first-class completion
+gate rather than chat-only evidence. The `19eb3ce...` hosted deployment smoke
+satisfies only `production_deployment_evidence`; it does not reduce required
+signal-family gaps, official authorization/contracts, hosted worker raw
+snapshot/scheduler/egress requirements, or production monitoring/alerting.
+
 ## Completion Gates
 
 The full objective is complete only when:
@@ -1316,6 +1353,7 @@ The full objective is complete only when:
 - Central backbone minimum coverage has no missing county.
 - Required signal families are either present, status-only with explicit labeling, or documented as unavailable with official follow-up.
 - Worker scheduler writes raw snapshots, staging rows, adapter runs, and promoted evidence in hosted-like mode.
+- Hosted `/health` and `/ready` return the accepted `main` merge SHA, with readiness dependencies healthy.
 - `/admin/v1/sources`, `/admin/v1/local-source-coverage`, and `/admin/v1/local-source-action-plan` expose freshness, missing signal, and queue state.
 - Public risk responses use worker-persisted evidence and query-point nearby coverage.
 - CI, OpenAPI validation, focused API/worker tests, and runtime smoke pass.

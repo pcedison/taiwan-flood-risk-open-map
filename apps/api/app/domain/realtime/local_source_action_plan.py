@@ -25,11 +25,16 @@ PRODUCTION_OPERATIONAL_REQUIREMENTS = (
 )
 PRODUCTION_EVIDENCE_GATE_KEYS = (
     "hosted_worker_persisted_evidence",
+    "production_deployment_evidence",
     "production_monitoring_and_alerting",
     "public_risk_worker_evidence_path",
 )
 PRODUCTION_GATE_REQUIRED_REQUIREMENTS = {
     "hosted_worker_persisted_evidence": PRODUCTION_OPERATIONAL_REQUIREMENTS,
+    "production_deployment_evidence": (
+        "main_branch_deployed_sha",
+        "ready_dependency_smoke",
+    ),
     "production_monitoring_and_alerting": (
         "hosted_alert_routing",
         "scheduled_freshness_checks",
@@ -186,6 +191,10 @@ def _completion_audit(
         "hosted_worker_persisted_evidence",
         evidence_state=evidence_state,
     )
+    deployment_blocking_items = _production_gate_blocking_items(
+        "production_deployment_evidence",
+        evidence_state=evidence_state,
+    )
     monitoring_blocking_items = _production_gate_blocking_items(
         "production_monitoring_and_alerting",
         evidence_state=evidence_state,
@@ -195,6 +204,7 @@ def _completion_audit(
         evidence_state=evidence_state,
     )
     hosted_evidence_satisfied = not hosted_blocking_items
+    deployment_evidence_satisfied = not deployment_blocking_items
     monitoring_evidence_satisfied = not monitoring_blocking_items
     public_risk_evidence_satisfied = not public_risk_blocking_items
     gates = [
@@ -275,6 +285,26 @@ def _completion_audit(
                 None
                 if hosted_evidence_satisfied
                 else "hosted_persistence_and_scheduler_proof"
+            ),
+        ),
+        _audit_gate(
+            gate_key="production_deployment_evidence",
+            status="satisfied" if deployment_evidence_satisfied else "incomplete",
+            evidence=_production_gate_evidence(
+                "production_deployment_evidence",
+                default_evidence=(
+                    "Production deployment must prove the main branch merge SHA "
+                    "is returned by hosted /health and /ready, with ready "
+                    "dependencies healthy."
+                ),
+                evidence_state=evidence_state,
+                satisfied=deployment_evidence_satisfied,
+            ),
+            blocking_items=deployment_blocking_items,
+            next_workstream=(
+                None
+                if deployment_evidence_satisfied
+                else "verify_main_branch_deployment"
             ),
         ),
         _audit_gate(

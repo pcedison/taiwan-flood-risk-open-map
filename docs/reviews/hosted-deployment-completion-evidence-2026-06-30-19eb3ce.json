@@ -1,0 +1,17 @@
+{
+  "schema_version": "local-source-completion-evidence/v1",
+  "captured_at": "2026-06-30T14:40:00+08:00",
+  "signal_family_gap_evidence": [],
+  "source_contract_evidence": [],
+  "production_gate_evidence": [
+    {
+      "gate_key": "production_deployment_evidence",
+      "status": "accepted",
+      "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-06-30-19eb3ce.json",
+      "satisfied_requirements": [
+        "main_branch_deployed_sha",
+        "ready_dependency_smoke"
+      ]
+    }
+  ]
+}

@@ -44,6 +44,23 @@ in hosted runtime by default.
 
 ## Hosted Public-Risk Smoke
 
+After each merge to `main`, first run the hosted deployment smoke to prove the
+public service is serving the intended merge SHA from both `/health` and
+`/ready`:
+
+```powershell
+python scripts\hosted_deployment_smoke.py `
+  --base-url https://floodrisk.cc `
+  --expected-deployment-sha <main-merge-sha> `
+  --evidence-output docs\reviews\hosted-deployment-smoke-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-output docs\reviews\hosted-deployment-completion-evidence-YYYY-MM-DD-<sha>.json
+```
+
+An accepted artifact may satisfy only the `production_deployment_evidence`
+requirements: `main_branch_deployed_sha` and `ready_dependency_smoke`. It does
+not prove worker raw snapshots, scheduler cadence, source egress, or
+monitoring ownership.
+
 After each production deploy, run the hosted public-risk evidence smoke to prove
 that the public `/v1/risk/assess` response exposes both worker-style official
 evidence and query-point nearby coverage:

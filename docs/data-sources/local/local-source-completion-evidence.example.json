@@ -36,6 +36,15 @@
   ],
   "production_gate_evidence": [
     {
+      "gate_key": "production_deployment_evidence",
+      "status": "pending",
+      "evidence_ref": "docs/reviews/hosted-deployment-smoke-YYYY-MM-DD-<sha>.json",
+      "satisfied_requirements": [
+        "main_branch_deployed_sha",
+        "ready_dependency_smoke"
+      ]
+    },
+    {
       "gate_key": "hosted_worker_persisted_evidence",
       "status": "pending",
       "evidence_ref": "private-ops://zeabur/worker-persisted-evidence-smoke",

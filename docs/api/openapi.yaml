@@ -924,6 +924,13 @@ paths:
                               - hosted_egress_review
                               - worker_persisted_evidence_path
                             next_workstream: hosted_persistence_and_scheduler_proof
+                          - gate_key: production_deployment_evidence
+                            status: incomplete
+                            evidence: Hosted /health and /ready must return the accepted main merge SHA with healthy readiness dependencies.
+                            blocking_items:
+                              - main_branch_deployed_sha
+                              - ready_dependency_smoke
+                            next_workstream: verify_main_branch_deployment
                         next_priority_workstreams:
                           - send_official_read_api_requests
                           - resolve_authorization_gated_adapters

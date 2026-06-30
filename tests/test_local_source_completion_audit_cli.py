@@ -69,6 +69,7 @@ def test_local_source_completion_audit_cli_accepts_completion_evidence(
     assert payload["next_priority_workstreams"] == []
     assert gates["required_signal_families"]["status"] == "satisfied"
     assert gates["official_authorization_and_contracts"]["status"] == "satisfied"
+    assert gates["production_deployment_evidence"]["status"] == "satisfied"
     assert gates["hosted_worker_persisted_evidence"]["status"] == "satisfied"
 
 
@@ -192,6 +193,16 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                 "satisfied_requirements": list(
                     PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
                         "hosted_worker_persisted_evidence"
+                    ]
+                ),
+            },
+            {
+                "gate_key": "production_deployment_evidence",
+                "status": "accepted",
+                "evidence_ref": "private-ops://zeabur/main-deployment",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "production_deployment_evidence"
                     ]
                 ),
             },
