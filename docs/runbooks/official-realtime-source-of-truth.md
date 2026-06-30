@@ -41,3 +41,28 @@ in hosted runtime by default.
   current `observed_at` timestamps.
 - Confirm API responses include healthy `cwa-rainfall` or `wra-water-level`
   freshness before describing realtime official data as available.
+
+## Hosted Public-Risk Smoke
+
+After each production deploy, run the hosted public-risk evidence smoke to prove
+that the public `/v1/risk/assess` response exposes both worker-style official
+evidence and query-point nearby coverage:
+
+```powershell
+python scripts\hosted_public_risk_evidence_smoke.py `
+  --base-url https://floodrisk.cc `
+  --lat 23.01929 `
+  --lng 120.18726 `
+  --radius-m 500 `
+  --location-text "Tainan hosted public risk evidence smoke" `
+  --evidence-output docs\reviews\hosted-public-risk-evidence-smoke-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-output docs\reviews\hosted-public-risk-completion-evidence-YYYY-MM-DD-<sha>.json
+```
+
+This smoke checks the public contract only: `data_freshness` for CWA/WRA
+official realtime sources, `official` rainfall or water-level evidence with
+`observed_at` and `ingested_at`, and a populated
+`nearby_realtime_coverage` block. It can satisfy the
+`public_risk_worker_evidence_path` completion requirements when the artifact is
+accepted, but it does not prove raw snapshot retention, scheduler cadence,
+hosted egress approval, or alert routing.

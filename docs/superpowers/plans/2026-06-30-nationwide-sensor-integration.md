@@ -1173,6 +1173,40 @@ false failure. It still does not satisfy source-family completion,
 authorization/contract approvals, worker raw-snapshot retention, hosted
 scheduler cadence, hosted egress review, or production monitoring/alerting.
 
+## Task 37: Hosted Public-Risk Evidence Path Smoke
+
+**Files:**
+- Add: `scripts/hosted_public_risk_evidence_smoke.py`
+- Add: `tests/test_hosted_public_risk_evidence_smoke.py`
+- Modify: `docs/runbooks/official-realtime-source-of-truth.md`
+- Add: `docs/reviews/hosted-public-risk-evidence-smoke-2026-06-30-32baafa.json`
+- Add: `docs/reviews/hosted-public-risk-completion-evidence-2026-06-30-32baafa.json`
+
+**Interfaces:**
+- Consumes: hosted `/health` and `/v1/risk/assess`.
+- Produces: a public-risk evidence artifact plus a partial
+  `local-source-completion-evidence/v1` overlay for
+  `public_risk_worker_evidence_path`.
+
+- [x] Write failing tests for a hosted public-risk smoke artifact and partial
+  completion evidence overlay.
+- [x] Add a no-secret smoke that checks `data_freshness` for CWA/WRA realtime
+  sources, official rainfall/water-level evidence with `observed_at` and
+  `ingested_at`, and a populated `nearby_realtime_coverage` block.
+- [x] Run the smoke against `https://floodrisk.cc` after `main` deployed
+  `32baafa...`.
+- [x] Validate the partial completion overlay with
+  `scripts/local-source-completion-audit.py`.
+
+Completed 2026-06-30: the hosted public-risk smoke passed for deployment
+`32baafa...`, and the partial completion evidence overlay satisfies only the
+`public_risk_worker_evidence_path` requirements:
+`hosted_risk_response_worker_evidence_smoke` and
+`query_point_nearby_coverage_smoke`. The overall completion audit remains
+incomplete because required signal families, official authorization/contracts,
+hosted worker persistence/raw snapshot/scheduler/egress evidence, and
+production monitoring/alerting are still unresolved.
+
 ## Completion Gates
 
 The full objective is complete only when:
