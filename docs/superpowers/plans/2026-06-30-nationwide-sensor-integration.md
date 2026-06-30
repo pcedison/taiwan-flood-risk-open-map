@@ -1852,6 +1852,39 @@ completion report aligned with the separate follow-up monitor while preserving
 the current blockers until accepted signal-family, source-contract, hosted
 worker, monitoring, and production evidence is supplied.
 
+## Task 59: Current Main Hosted Deployment Evidence Refresh
+
+**Files:**
+- Add: `docs/reviews/hosted-deployment-smoke-2026-06-30-0634cdc.json`
+- Add: `docs/reviews/hosted-deployment-completion-evidence-2026-06-30-0634cdc.json`
+- Add: `docs/reviews/hosted-public-risk-evidence-smoke-2026-06-30-0634cdc.json`
+- Add: `docs/reviews/hosted-public-risk-completion-evidence-2026-06-30-0634cdc.json`
+- Add: `docs/reviews/completion-audit-2026-06-30-0634cdc.json`
+- Add: `docs/reviews/completion-audit-2026-06-30-0634cdc.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: hosted `/health`, `/ready`, and `/v1/risk/assess` smoke output for
+  deployed main merge SHA `0634cdc1ecf1d300ba18fb30008adef90da85e4a`.
+- Produces: public-safe completion evidence that satisfies the current
+  production deployment and public-risk worker evidence gates while preserving
+  the remaining source, hosted worker, and monitoring blockers.
+
+- [x] Re-run hosted deployment smoke against `https://floodrisk.cc` for the
+  deployed `0634cdc...` main SHA.
+- [x] Re-run hosted public risk evidence smoke against the Tainan query sample.
+- [x] Merge both completion overlays into the completion audit JSON and
+  Markdown report.
+- [x] Confirm the overall objective remains incomplete after the refresh.
+
+Completed 2026-06-30: production deployment evidence and public-risk evidence
+are now committed for deployed `main` SHA `0634cdc...`. The current public
+audit marks `production_deployment_evidence` and
+`public_risk_worker_evidence_path` satisfied, while
+`required_signal_families`, `official_authorization_and_contracts`,
+`hosted_worker_persisted_evidence`, and `production_monitoring_and_alerting`
+remain incomplete.
+
 ## Completion Gates
 
 The full objective is complete only when:
