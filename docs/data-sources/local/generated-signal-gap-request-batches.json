@@ -2,38 +2,36 @@
   {
     "target_signal_type": "pump_or_gate_status",
     "packet_type": "signal_gap_batch_request",
-    "county_count": 14,
+    "county_count": 13,
     "counties": [
       "連江縣",
       "金門縣",
       "臺東縣",
       "苗栗縣",
-      "嘉義市",
-      "桃園市",
       "澎湖縣",
-      "臺中市",
-      "臺南市",
       "南投縣",
+      "嘉義市",
       "基隆市",
       "宜蘭縣",
       "新北市",
-      "新竹縣"
+      "新竹縣",
+      "桃園市",
+      "臺中市"
     ],
     "requested_counterparties": [
       "連江縣政府公開資料或防災水利窗口",
       "金門縣政府 / KWIS 維運窗口",
       "臺東縣政府公開資料或水利防災維運窗口",
       "苗栗縣政府公開資料或水利防災維運窗口",
-      "嘉義市政府公開資料或水利防災維運窗口",
-      "桃園市政府公開資料或水利防災維運窗口",
       "澎湖縣政府公開資料或水利防災維運窗口",
-      "臺中市政府公開資料或水利防災維運窗口",
-      "臺南市政府公開資料或水利防災維運窗口",
       "南投縣政府公開資料或水利防災維運窗口",
+      "嘉義市政府公開資料或水利防災維運窗口",
       "基隆市政府公開資料或水利防災維運窗口",
       "宜蘭縣政府公開資料或水利防災維運窗口",
       "新北市政府公開資料或水利防災維運窗口",
-      "新竹縣政府公開資料或水利防災維運窗口"
+      "新竹縣政府公開資料或水利防災維運窗口",
+      "桃園市政府公開資料或水利防災維運窗口",
+      "臺中市政府公開資料或水利防災維運窗口"
     ],
     "tracking_statuses": [
       "monitoring_open_data_release",
@@ -57,7 +55,7 @@
       "worker_persisted_evidence_path"
     ],
     "next_step": "send_official_read_api_requests",
-    "packet_generator_command": "PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type pump_or_gate_status --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣 --county 嘉義市 --county 桃園市 --county 澎湖縣 --county 臺中市 --county 臺南市 --county 南投縣 --county 基隆市 --county 宜蘭縣 --county 新北市 --county 新竹縣",
+    "packet_generator_command": "PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type pump_or_gate_status --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣 --county 澎湖縣 --county 南投縣 --county 嘉義市 --county 基隆市 --county 宜蘭縣 --county 新北市 --county 新竹縣 --county 桃園市 --county 臺中市",
     "completion_gate": "Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for pump_or_gate_status, plus production ops evidence.",
     "batch_id": "signal-gap-batch/pump_or_gate_status",
     "dispatch_status": "not_sent",
@@ -120,32 +118,6 @@
       },
       {
         "manifest_section": "signal_family_gap_evidence",
-        "county": "嘉義市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "桃園市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
         "county": "澎湖縣",
         "signal_type": "pump_or_gate_status",
         "accepted_statuses": [
@@ -159,32 +131,6 @@
       },
       {
         "manifest_section": "signal_family_gap_evidence",
-        "county": "臺中市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺中市/pump_or_gate_status"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "臺南市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺南市/pump_or_gate_status"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
         "county": "南投縣",
         "signal_type": "pump_or_gate_status",
         "accepted_statuses": [
@@ -195,6 +141,19 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/signal-gap/南投縣/pump_or_gate_status"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "嘉義市",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status"
       },
       {
         "manifest_section": "signal_family_gap_evidence",
@@ -247,26 +206,48 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/signal-gap/新竹縣/pump_or_gate_status"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "桃園市",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "臺中市",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺中市/pump_or_gate_status"
       }
     ]
   },
   {
     "target_signal_type": "flood_depth",
     "packet_type": "signal_gap_batch_request",
-    "county_count": 5,
+    "county_count": 3,
     "counties": [
       "連江縣",
-      "嘉義市",
       "澎湖縣",
-      "臺北市",
-      "雲林縣"
+      "臺北市"
     ],
     "requested_counterparties": [
       "連江縣政府公開資料或防災水利窗口",
-      "嘉義市政府公開資料或水利防災維運窗口",
       "澎湖縣政府公開資料或水利防災維運窗口",
-      "臺北市政府公開資料或水利防災維運窗口",
-      "雲林縣政府公開資料或水利防災維運窗口"
+      "臺北市政府公開資料或水利防災維運窗口"
     ],
     "tracking_statuses": [
       "monitoring_open_data_release",
@@ -288,7 +269,7 @@
       "worker_persisted_evidence_path"
     ],
     "next_step": "send_official_read_api_requests",
-    "packet_generator_command": "PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type flood_depth --county 連江縣 --county 嘉義市 --county 澎湖縣 --county 臺北市 --county 雲林縣",
+    "packet_generator_command": "PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type flood_depth --county 連江縣 --county 澎湖縣 --county 臺北市",
     "completion_gate": "Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for flood_depth, plus production ops evidence.",
     "batch_id": "signal-gap-batch/flood_depth",
     "dispatch_status": "not_sent",
@@ -309,19 +290,6 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/signal-gap/連江縣/flood_depth"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "嘉義市",
-        "signal_type": "flood_depth",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/flood_depth"
       },
       {
         "manifest_section": "signal_family_gap_evidence",
@@ -348,43 +316,21 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺北市/flood_depth"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "雲林縣",
-        "signal_type": "flood_depth",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/雲林縣/flood_depth"
       }
     ]
   },
   {
     "target_signal_type": "sewer_water_level",
     "packet_type": "signal_gap_batch_request",
-    "county_count": 5,
+    "county_count": 1,
     "counties": [
-      "連江縣",
-      "嘉義市",
-      "桃園市",
-      "臺中市",
-      "臺南市"
+      "連江縣"
     ],
     "requested_counterparties": [
-      "連江縣政府公開資料或防災水利窗口",
-      "嘉義市政府公開資料或水利防災維運窗口",
-      "桃園市政府公開資料或水利防災維運窗口",
-      "臺中市政府公開資料或水利防災維運窗口",
-      "臺南市政府公開資料或水利防災維運窗口"
+      "連江縣政府公開資料或防災水利窗口"
     ],
     "tracking_statuses": [
-      "monitoring_open_data_release",
-      "needs_signal_gap_review"
+      "monitoring_open_data_release"
     ],
     "required_read_api_fields": [
       "observed_at",
@@ -402,7 +348,7 @@
       "worker_persisted_evidence_path"
     ],
     "next_step": "send_official_read_api_requests",
-    "packet_generator_command": "PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type sewer_water_level --county 連江縣 --county 嘉義市 --county 桃園市 --county 臺中市 --county 臺南市",
+    "packet_generator_command": "PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type sewer_water_level --county 連江縣",
     "completion_gate": "Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for sewer_water_level, plus production ops evidence.",
     "batch_id": "signal-gap-batch/sewer_water_level",
     "dispatch_status": "not_sent",
@@ -423,58 +369,6 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/signal-gap/連江縣/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "嘉義市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "桃園市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/桃園市/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "臺中市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺中市/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "臺南市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺南市/sewer_water_level"
       }
     ]
   }

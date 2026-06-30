@@ -239,72 +239,13 @@
 - [ ] 確認 scheduler cadence、重試策略與監控告警責任
 - [ ] 確認 hosted egress review 與 worker-persisted evidence path
 
-## 嘉義市：嘉義市缺漏水資訊訊號補齊請求
-
-- 類型：signal_gap_request
-- 需要人工介入：是
-- 追蹤對象：嘉義市政府公開資料或水利防災維運窗口
-- 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#7 / P2 / fill_sensor_signal_gap
-- 既有 production adapters：local.chiayi_city.water_level、local.chiayi_city.rainfall
-- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
-- Completion evidence targets:
-  - signal_family_gap_evidence / flood_depth; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/嘉義市/flood_depth
-  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/嘉義市/sewer_water_level
-  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status
-- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status
-- 排入此順位原因：existing adapters do not cover every required water signal family
-- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
-
-目前嘉義市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
-
-待辦：
-- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
-- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
-- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
-- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
-- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
-- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
-- [ ] 確認 scheduler cadence、重試策略與監控告警責任
-- [ ] 確認 hosted egress review 與 worker-persisted evidence path
-
-## 桃園市：桃園市缺漏水資訊訊號補齊請求
-
-- 類型：signal_gap_request
-- 需要人工介入：是
-- 追蹤對象：桃園市政府公開資料或水利防災維運窗口
-- 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#8 / P2 / fill_sensor_signal_gap
-- 既有 production adapters：local.taoyuan.flood_sensor、local.taoyuan.water_level、local.taoyuan.rainfall
-- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
-- Completion evidence targets:
-  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/桃園市/sewer_water_level
-  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/桃園市/pump_or_gate_status
-- 待補水資訊訊號：sewer_water_level、pump_or_gate_status
-- 排入此順位原因：existing adapters do not cover every required water signal family
-- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
-
-目前桃園市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
-
-待辦：
-- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
-- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
-- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
-- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
-- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
-- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
-- [ ] 確認 scheduler cadence、重試策略與監控告警責任
-- [ ] 確認 hosted egress review 與 worker-persisted evidence path
-
 ## 澎湖縣：澎湖縣缺漏水資訊訊號補齊請求
 
 - 類型：signal_gap_request
 - 需要人工介入：是
 - 追蹤對象：澎湖縣政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#9 / P2 / fill_sensor_signal_gap
+- 整合優先序：#7 / P2 / fill_sensor_signal_gap
 - 靜態 metadata 線索：澎湖縣區域排水疏濬工程
 - 靜態 metadata URL：
   - https://data.gov.tw/dataset/156926
@@ -330,83 +271,13 @@
 - [ ] 確認 scheduler cadence、重試策略與監控告警責任
 - [ ] 確認 hosted egress review 與 worker-persisted evidence path
 
-## 臺中市：臺中市缺漏水資訊訊號補齊請求
-
-- 類型：signal_gap_request
-- 需要人工介入：是
-- 追蹤對象：臺中市政府公開資料或水利防災維運窗口
-- 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#10 / P2 / fill_sensor_signal_gap
-- 既有 production adapters：local.taichung.water_level
-- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
-- Completion evidence targets:
-  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺中市/sewer_water_level
-  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺中市/pump_or_gate_status
-- 待補水資訊訊號：sewer_water_level、pump_or_gate_status
-- 排入此順位原因：existing adapters do not cover every required water signal family
-- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
-
-目前臺中市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
-
-待辦：
-- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
-- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
-- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
-- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
-- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
-- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
-- [ ] 確認 scheduler cadence、重試策略與監控告警責任
-- [ ] 確認 hosted egress review 與 worker-persisted evidence path
-
-## 臺南市：臺南市缺漏水資訊訊號補齊請求
-
-- 類型：signal_gap_request
-- 需要人工介入：是
-- 追蹤對象：臺南市政府公開資料或水利防災維運窗口
-- 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#11 / P2 / fill_sensor_signal_gap
-- 靜態 metadata 線索：臺南市管區域排水之水位站名稱及位置、114年度抽水站基本資料、114年度水門基本資料
-- 靜態 metadata URL：
-  - https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9
-  - https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3
-  - https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291
-- 已排除官方線索：臺南市管區域排水即時影像、水利署與台南市合建淹水感測器感測資料
-- 已排除官方線索 URL：
-  - https://soa.tainan.gov.tw/Api/Service/Get/427a8287-0bc1-4b45-92ac-53eb858b5b9c
-  - https://soa.tainan.gov.tw/Api/Service/Get/537b469d-e8c5-42ca-835e-bdde93bc61be
-- 排除原因：
-  - 2026-06-30 live smoke: regional-drainage CCTV returns GroupStationID, CameraID, Point, and ImageUrl only; image-only CCTV has no observed_at, measurement_value, or measurement_unit_or_type and cannot satisfy sewer_water_level or pump_or_gate_status.
-  - 2026-06-30 live smoke: WRA/Tainan joint flood-sensor endpoint returned data:null, so no station/device observation rows are available for production ingestion.
-- 既有 production adapters：local.tainan.flood_sensor
-- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
-- Completion evidence targets:
-  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺南市/sewer_water_level
-  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺南市/pump_or_gate_status
-- 待補水資訊訊號：sewer_water_level、pump_or_gate_status
-- 排入此順位原因：existing adapters do not cover every required water signal family
-- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
-
-目前臺南市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
-
-待辦：
-- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
-- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
-- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
-- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
-- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
-- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
-- [ ] 確認 scheduler cadence、重試策略與監控告警責任
-- [ ] 確認 hosted egress review 與 worker-persisted evidence path
-
 ## 南投縣：南投縣缺漏水資訊訊號補齊請求
 
 - 類型：signal_gap_request
 - 需要人工介入：是
 - 追蹤對象：南投縣政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#12 / P2 / fill_sensor_signal_gap
+- 整合優先序：#8 / P2 / fill_sensor_signal_gap
 - 既有 production adapters：local.nantou.sewer_water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
@@ -428,13 +299,41 @@
 - [ ] 確認 scheduler cadence、重試策略與監控告警責任
 - [ ] 確認 hosted egress review 與 worker-persisted evidence path
 
+## 嘉義市：嘉義市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：嘉義市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#9 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.chiayi_city.water_level、local.chiayi_city.rainfall
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前嘉義市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
+- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
+- [ ] 確認 scheduler cadence、重試策略與監控告警責任
+- [ ] 確認 hosted egress review 與 worker-persisted evidence path
+
 ## 基隆市：基隆市缺漏水資訊訊號補齊請求
 
 - 類型：signal_gap_request
 - 需要人工介入：是
 - 追蹤對象：基隆市政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#13 / P2 / fill_sensor_signal_gap
+- 整合優先序：#10 / P2 / fill_sensor_signal_gap
 - 既有 production adapters：local.keelung.water_level、local.keelung.flood_sensor、local.keelung.rainfall
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
@@ -462,7 +361,7 @@
 - 需要人工介入：是
 - 追蹤對象：宜蘭縣政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#14 / P2 / fill_sensor_signal_gap
+- 整合優先序：#11 / P2 / fill_sensor_signal_gap
 - 既有 production adapters：local.yilan.flood_sensor、local.yilan.water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
@@ -490,7 +389,7 @@
 - 需要人工介入：是
 - 追蹤對象：新北市政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#15 / P2 / fill_sensor_signal_gap
+- 整合優先序：#12 / P2 / fill_sensor_signal_gap
 - 靜態 metadata 線索：新北市各抽水站資訊、新北市水門資料
 - 靜態 metadata URL：
   - https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296
@@ -522,7 +421,7 @@
 - 需要人工介入：是
 - 追蹤對象：新竹縣政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#16 / P2 / fill_sensor_signal_gap
+- 整合優先序：#13 / P2 / fill_sensor_signal_gap
 - 既有 production adapters：local.hsinchu_county.flood_sensor
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
@@ -544,13 +443,69 @@
 - [ ] 確認 scheduler cadence、重試策略與監控告警責任
 - [ ] 確認 hosted egress review 與 worker-persisted evidence path
 
+## 桃園市：桃園市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：桃園市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#14 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.taoyuan.flood_sensor、local.taoyuan.water_level、local.taoyuan.rainfall
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/桃園市/pump_or_gate_status
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前桃園市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
+- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
+- [ ] 確認 scheduler cadence、重試策略與監控告警責任
+- [ ] 確認 hosted egress review 與 worker-persisted evidence path
+
+## 臺中市：臺中市缺漏水資訊訊號補齊請求
+
+- 類型：signal_gap_request
+- 需要人工介入：是
+- 追蹤對象：臺中市政府公開資料或水利防災維運窗口
+- 追蹤狀態：needs_signal_gap_review
+- 整合優先序：#15 / P2 / fill_sensor_signal_gap
+- 既有 production adapters：local.taichung.water_level
+- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
+- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺中市/pump_or_gate_status
+- 待補水資訊訊號：pump_or_gate_status
+- 排入此順位原因：existing adapters do not cover every required water signal family
+- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
+
+目前臺中市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
+
+待辦：
+- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
+- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
+- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
+- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
+- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
+- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
+- [ ] 確認 scheduler cadence、重試策略與監控告警責任
+- [ ] 確認 hosted egress review 與 worker-persisted evidence path
+
 ## 臺北市：臺北市缺漏水資訊訊號補齊請求
 
 - 類型：signal_gap_request
 - 需要人工介入：是
 - 追蹤對象：臺北市政府公開資料或水利防災維運窗口
 - 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#17 / P2 / fill_sensor_signal_gap
+- 整合優先序：#16 / P2 / fill_sensor_signal_gap
 - 既有 production adapters：local.taipei.sewer_water_level、local.taipei.river_water_level、local.taipei.pump_station
 - 既有 status-only 來源：臺北市水門啟閉狀態
 - 既有 status-only 訊號：gate_status
@@ -565,42 +520,6 @@
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
 
 目前臺北市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
-
-待辦：
-- [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料
-- [ ] 確認觀測時間、站點 ID、測值、單位與座標欄位
-- [ ] 確認 status-only 資料不會被當成水位、雨量或淹水深度
-- [ ] 若官方確認不存在，記錄不可取得證據與後續追蹤窗口
-- [ ] 確認 freshness policy 與 stale/degraded/failed 門檻
-- [ ] 確認 raw snapshot retention policy 與可稽核保存位置
-- [ ] 確認 scheduler cadence、重試策略與監控告警責任
-- [ ] 確認 hosted egress review 與 worker-persisted evidence path
-
-## 雲林縣：雲林縣缺漏水資訊訊號補齊請求
-
-- 類型：signal_gap_request
-- 需要人工介入：是
-- 追蹤對象：雲林縣政府公開資料或水利防災維運窗口
-- 追蹤狀態：needs_signal_gap_review
-- 整合優先序：#18 / P2 / fill_sensor_signal_gap
-- 靜態 metadata 線索：雲林縣淹水感測器座標、雲林縣抽水站資料、雲林縣水門點位
-- 靜態 metadata URL：
-  - https://opendata.yunlin.gov.tw/OpenDataContent.aspx?n=8350&s=1427
-  - https://yliflood.yunlin.gov.tw/ifloodboard
-- 既有 production adapters：local.yunlin.water_level
-- 既有 status-only 來源：雲林 iflood 淹水感測狀態
-- 既有 status-only 訊號：flood_sensor_status
-- status-only 來源 URL：
-  - https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5
-- Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
-- Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
-- Completion evidence targets:
-  - signal_family_gap_evidence / flood_depth; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/雲林縣/flood_depth
-- 待補水資訊訊號：flood_depth
-- 排入此順位原因：existing adapters do not cover every required water signal family
-- 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
-
-目前雲林縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。
 
 待辦：
 - [ ] 確認缺漏 signal families 是否存在官方 read API 或開放資料

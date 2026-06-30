@@ -1480,6 +1480,37 @@ does not itself prove hosted worker persistence or policy acceptance; the audit
 is accepted only when real hosted source-freshness and private policy evidence
 are supplied.
 
+## Task 47: Civil IoT Signal Gap Coverage Reconciliation
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_coverage.py`
+- Modify: `apps/api/tests/test_local_source_action_plan.py`
+- Modify: `apps/api/tests/test_admin_contract.py`
+- Modify: `tests/test_local_source_completion_audit_cli.py`
+- Modify: `docs/api/openapi.yaml`
+
+**Interfaces:**
+- Consumes: Civil IoT live adapter distribution smoke for flood sensors, sewer
+  water level, pump water level, and gate water level.
+- Produces: updated local source coverage and completion audit signal-family
+  blockers reflecting verified Civil IoT county coverage.
+
+- [x] Write a failing coverage test requiring Civil IoT-backed sewer, flood,
+  and pump coverage for verified counties.
+- [x] Reconcile Taoyuan, Taichung, Chiayi City, Tainan, and Yunlin coverage
+  against live adapter county distribution.
+- [x] Reduce current signal-family blockers from `pump_or_gate_status:14`,
+  `flood_depth:5`, `sewer_water_level:5` to `pump_or_gate_status:13`,
+  `flood_depth:3`, `sewer_water_level:1`.
+- [x] Keep metadata-only and non-measurement sources from being promoted to
+  realtime coverage.
+
+Completed 2026-06-30: Civil IoT live distribution evidence now reduces the
+signal-family blocker count from 24 to 17. This does not satisfy remaining
+signal-family completion; Lienchiang still lacks all three listed signal types,
+Taipei and Penghu still lack flood depth, and 13 counties still lack
+pump_or_gate_status.
+
 ## Completion Gates
 
 The full objective is complete only when:

@@ -584,197 +584,6 @@
     "non_qualifying_source_reasons": []
   },
   {
-    "county": "嘉義市",
-    "packet_type": "signal_gap_request",
-    "requires_human_intervention": true,
-    "subject": "嘉義市缺漏水資訊訊號補齊請求",
-    "source_urls": [],
-    "production_adapter_keys": [
-      "local.chiayi_city.water_level",
-      "local.chiayi_city.rainfall"
-    ],
-    "status_only_source_names": [],
-    "status_only_source_urls": [],
-    "status_only_signal_types": [],
-    "requested_counterparty": "嘉義市政府公開資料或水利防災維運窗口",
-    "tracking_status": "needs_signal_gap_review",
-    "last_followed_up_at": null,
-    "target_signal_types": [
-      "flood_depth",
-      "sewer_water_level",
-      "pump_or_gate_status"
-    ],
-    "required_read_api_fields": [
-      "observed_at",
-      "station_or_device_id",
-      "measurement_value",
-      "measurement_unit_or_type",
-      "longitude_latitude_or_joinable_station_metadata",
-      "official_source_url_and_license"
-    ],
-    "completion_evidence_targets": [
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "嘉義市",
-        "signal_type": "flood_depth",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/flood_depth"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "嘉義市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "嘉義市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status"
-      }
-    ],
-    "request_body": "目前嘉義市既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
-    "checklist": [
-      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
-      "確認觀測時間、站點 ID、測值、單位與座標欄位",
-      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
-      "確認 freshness policy 與 stale/degraded/failed 門檻",
-      "確認 raw snapshot retention policy 與可稽核保存位置",
-      "確認 scheduler cadence、重試策略與監控告警責任",
-      "確認 hosted egress review 與 worker-persisted evidence path"
-    ],
-    "production_operational_requirements": [
-      "freshness_policy",
-      "raw_snapshot_retention_policy",
-      "monitored_scheduler_cadence",
-      "hosted_egress_review",
-      "worker_persisted_evidence_path"
-    ],
-    "priority_rank": 7,
-    "priority_tier": "P2",
-    "workstream": "fill_sensor_signal_gap",
-    "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
-    "metadata_source_names": [],
-    "metadata_source_urls": [],
-    "non_qualifying_source_names": [],
-    "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": [],
-    "candidate_contract_findings": [],
-    "candidate_contract_missing_fields": [],
-    "candidate_contract_non_measurement_notes": []
-  },
-  {
-    "county": "桃園市",
-    "packet_type": "signal_gap_request",
-    "requires_human_intervention": true,
-    "subject": "桃園市缺漏水資訊訊號補齊請求",
-    "source_urls": [],
-    "production_adapter_keys": [
-      "local.taoyuan.flood_sensor",
-      "local.taoyuan.water_level",
-      "local.taoyuan.rainfall"
-    ],
-    "status_only_source_names": [],
-    "status_only_source_urls": [],
-    "status_only_signal_types": [],
-    "requested_counterparty": "桃園市政府公開資料或水利防災維運窗口",
-    "tracking_status": "needs_signal_gap_review",
-    "last_followed_up_at": null,
-    "target_signal_types": [
-      "sewer_water_level",
-      "pump_or_gate_status"
-    ],
-    "required_read_api_fields": [
-      "observed_at",
-      "station_or_device_id",
-      "measurement_value",
-      "measurement_unit_or_type",
-      "longitude_latitude_or_joinable_station_metadata",
-      "official_source_url_and_license"
-    ],
-    "completion_evidence_targets": [
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "桃園市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/桃園市/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "桃園市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status"
-      }
-    ],
-    "request_body": "目前桃園市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
-    "checklist": [
-      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
-      "確認觀測時間、站點 ID、測值、單位與座標欄位",
-      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
-      "確認 freshness policy 與 stale/degraded/failed 門檻",
-      "確認 raw snapshot retention policy 與可稽核保存位置",
-      "確認 scheduler cadence、重試策略與監控告警責任",
-      "確認 hosted egress review 與 worker-persisted evidence path"
-    ],
-    "production_operational_requirements": [
-      "freshness_policy",
-      "raw_snapshot_retention_policy",
-      "monitored_scheduler_cadence",
-      "hosted_egress_review",
-      "worker_persisted_evidence_path"
-    ],
-    "priority_rank": 8,
-    "priority_tier": "P2",
-    "workstream": "fill_sensor_signal_gap",
-    "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
-    "metadata_source_names": [],
-    "metadata_source_urls": [],
-    "non_qualifying_source_names": [],
-    "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": [],
-    "candidate_contract_findings": [],
-    "candidate_contract_missing_fields": [],
-    "candidate_contract_non_measurement_notes": []
-  },
-  {
     "county": "澎湖縣",
     "packet_type": "signal_gap_request",
     "requires_human_intervention": true,
@@ -847,7 +656,7 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
-    "priority_rank": 9,
+    "priority_rank": 7,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -861,197 +670,6 @@
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],
-    "candidate_contract_findings": [],
-    "candidate_contract_missing_fields": [],
-    "candidate_contract_non_measurement_notes": []
-  },
-  {
-    "county": "臺中市",
-    "packet_type": "signal_gap_request",
-    "requires_human_intervention": true,
-    "subject": "臺中市缺漏水資訊訊號補齊請求",
-    "source_urls": [],
-    "production_adapter_keys": [
-      "local.taichung.water_level"
-    ],
-    "status_only_source_names": [],
-    "status_only_source_urls": [],
-    "status_only_signal_types": [],
-    "requested_counterparty": "臺中市政府公開資料或水利防災維運窗口",
-    "tracking_status": "needs_signal_gap_review",
-    "last_followed_up_at": null,
-    "target_signal_types": [
-      "sewer_water_level",
-      "pump_or_gate_status"
-    ],
-    "required_read_api_fields": [
-      "observed_at",
-      "station_or_device_id",
-      "measurement_value",
-      "measurement_unit_or_type",
-      "longitude_latitude_or_joinable_station_metadata",
-      "official_source_url_and_license"
-    ],
-    "completion_evidence_targets": [
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "臺中市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺中市/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "臺中市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺中市/pump_or_gate_status"
-      }
-    ],
-    "request_body": "目前臺中市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
-    "checklist": [
-      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
-      "確認觀測時間、站點 ID、測值、單位與座標欄位",
-      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
-      "確認 freshness policy 與 stale/degraded/failed 門檻",
-      "確認 raw snapshot retention policy 與可稽核保存位置",
-      "確認 scheduler cadence、重試策略與監控告警責任",
-      "確認 hosted egress review 與 worker-persisted evidence path"
-    ],
-    "production_operational_requirements": [
-      "freshness_policy",
-      "raw_snapshot_retention_policy",
-      "monitored_scheduler_cadence",
-      "hosted_egress_review",
-      "worker_persisted_evidence_path"
-    ],
-    "priority_rank": 10,
-    "priority_tier": "P2",
-    "workstream": "fill_sensor_signal_gap",
-    "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
-    "metadata_source_names": [],
-    "metadata_source_urls": [],
-    "non_qualifying_source_names": [],
-    "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": [],
-    "candidate_contract_findings": [],
-    "candidate_contract_missing_fields": [],
-    "candidate_contract_non_measurement_notes": []
-  },
-  {
-    "county": "臺南市",
-    "packet_type": "signal_gap_request",
-    "requires_human_intervention": true,
-    "subject": "臺南市缺漏水資訊訊號補齊請求",
-    "source_urls": [],
-    "production_adapter_keys": [
-      "local.tainan.flood_sensor"
-    ],
-    "status_only_source_names": [],
-    "status_only_source_urls": [],
-    "status_only_signal_types": [],
-    "requested_counterparty": "臺南市政府公開資料或水利防災維運窗口",
-    "tracking_status": "needs_signal_gap_review",
-    "last_followed_up_at": null,
-    "target_signal_types": [
-      "sewer_water_level",
-      "pump_or_gate_status"
-    ],
-    "required_read_api_fields": [
-      "observed_at",
-      "station_or_device_id",
-      "measurement_value",
-      "measurement_unit_or_type",
-      "longitude_latitude_or_joinable_station_metadata",
-      "official_source_url_and_license"
-    ],
-    "completion_evidence_targets": [
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "臺南市",
-        "signal_type": "sewer_water_level",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺南市/sewer_water_level"
-      },
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "臺南市",
-        "signal_type": "pump_or_gate_status",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺南市/pump_or_gate_status"
-      }
-    ],
-    "request_body": "目前臺南市既有 production adapter 仍未覆蓋所有必要水資訊訊號：sewer_water_level、pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
-    "checklist": [
-      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
-      "確認觀測時間、站點 ID、測值、單位與座標欄位",
-      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
-      "確認 freshness policy 與 stale/degraded/failed 門檻",
-      "確認 raw snapshot retention policy 與可稽核保存位置",
-      "確認 scheduler cadence、重試策略與監控告警責任",
-      "確認 hosted egress review 與 worker-persisted evidence path"
-    ],
-    "production_operational_requirements": [
-      "freshness_policy",
-      "raw_snapshot_retention_policy",
-      "monitored_scheduler_cadence",
-      "hosted_egress_review",
-      "worker_persisted_evidence_path"
-    ],
-    "priority_rank": 11,
-    "priority_tier": "P2",
-    "workstream": "fill_sensor_signal_gap",
-    "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
-    "metadata_source_names": [
-      "臺南市管區域排水之水位站名稱及位置",
-      "114年度抽水站基本資料",
-      "114年度水門基本資料"
-    ],
-    "metadata_source_urls": [
-      "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9",
-      "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
-      "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291"
-    ],
-    "non_qualifying_source_names": [
-      "臺南市管區域排水即時影像",
-      "水利署與台南市合建淹水感測器感測資料"
-    ],
-    "non_qualifying_source_urls": [
-      "https://soa.tainan.gov.tw/Api/Service/Get/427a8287-0bc1-4b45-92ac-53eb858b5b9c",
-      "https://soa.tainan.gov.tw/Api/Service/Get/537b469d-e8c5-42ca-835e-bdde93bc61be"
-    ],
-    "non_qualifying_source_reasons": [
-      "2026-06-30 live smoke: regional-drainage CCTV returns GroupStationID, CameraID, Point, and ImageUrl only; image-only CCTV has no observed_at, measurement_value, or measurement_unit_or_type and cannot satisfy sewer_water_level or pump_or_gate_status.",
-      "2026-06-30 live smoke: WRA/Tainan joint flood-sensor endpoint returned data:null, so no station/device observation rows are available for production ingestion."
-    ],
     "candidate_contract_findings": [],
     "candidate_contract_missing_fields": [],
     "candidate_contract_non_measurement_notes": []
@@ -1115,7 +733,81 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
-    "priority_rank": 12,
+    "priority_rank": 8,
+    "priority_tier": "P2",
+    "workstream": "fill_sensor_signal_gap",
+    "priority_why_now": "existing adapters do not cover every required water signal family",
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
+  },
+  {
+    "county": "嘉義市",
+    "packet_type": "signal_gap_request",
+    "requires_human_intervention": true,
+    "subject": "嘉義市缺漏水資訊訊號補齊請求",
+    "source_urls": [],
+    "production_adapter_keys": [
+      "local.chiayi_city.water_level",
+      "local.chiayi_city.rainfall"
+    ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
+    "requested_counterparty": "嘉義市政府公開資料或水利防災維運窗口",
+    "tracking_status": "needs_signal_gap_review",
+    "last_followed_up_at": null,
+    "target_signal_types": [
+      "pump_or_gate_status"
+    ],
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "completion_evidence_targets": [
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "嘉義市",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status"
+      }
+    ],
+    "request_body": "目前嘉義市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
+    "checklist": [
+      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
+      "確認觀測時間、站點 ID、測值、單位與座標欄位",
+      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
+    ],
+    "priority_rank": 9,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -1190,7 +882,7 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
-    "priority_rank": 13,
+    "priority_rank": 10,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -1264,7 +956,7 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
-    "priority_rank": 14,
+    "priority_rank": 11,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -1340,7 +1032,7 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
-    "priority_rank": 15,
+    "priority_rank": 12,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -1419,7 +1111,155 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
-    "priority_rank": 16,
+    "priority_rank": 13,
+    "priority_tier": "P2",
+    "workstream": "fill_sensor_signal_gap",
+    "priority_why_now": "existing adapters do not cover every required water signal family",
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
+  },
+  {
+    "county": "桃園市",
+    "packet_type": "signal_gap_request",
+    "requires_human_intervention": true,
+    "subject": "桃園市缺漏水資訊訊號補齊請求",
+    "source_urls": [],
+    "production_adapter_keys": [
+      "local.taoyuan.flood_sensor",
+      "local.taoyuan.water_level",
+      "local.taoyuan.rainfall"
+    ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
+    "requested_counterparty": "桃園市政府公開資料或水利防災維運窗口",
+    "tracking_status": "needs_signal_gap_review",
+    "last_followed_up_at": null,
+    "target_signal_types": [
+      "pump_or_gate_status"
+    ],
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "completion_evidence_targets": [
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "桃園市",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status"
+      }
+    ],
+    "request_body": "目前桃園市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
+    "checklist": [
+      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
+      "確認觀測時間、站點 ID、測值、單位與座標欄位",
+      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
+    ],
+    "priority_rank": 14,
+    "priority_tier": "P2",
+    "workstream": "fill_sensor_signal_gap",
+    "priority_why_now": "existing adapters do not cover every required water signal family",
+    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
+    "metadata_source_names": [],
+    "metadata_source_urls": [],
+    "non_qualifying_source_names": [],
+    "non_qualifying_source_urls": [],
+    "non_qualifying_source_reasons": [],
+    "candidate_contract_findings": [],
+    "candidate_contract_missing_fields": [],
+    "candidate_contract_non_measurement_notes": []
+  },
+  {
+    "county": "臺中市",
+    "packet_type": "signal_gap_request",
+    "requires_human_intervention": true,
+    "subject": "臺中市缺漏水資訊訊號補齊請求",
+    "source_urls": [],
+    "production_adapter_keys": [
+      "local.taichung.water_level"
+    ],
+    "status_only_source_names": [],
+    "status_only_source_urls": [],
+    "status_only_signal_types": [],
+    "requested_counterparty": "臺中市政府公開資料或水利防災維運窗口",
+    "tracking_status": "needs_signal_gap_review",
+    "last_followed_up_at": null,
+    "target_signal_types": [
+      "pump_or_gate_status"
+    ],
+    "required_read_api_fields": [
+      "observed_at",
+      "station_or_device_id",
+      "measurement_value",
+      "measurement_unit_or_type",
+      "longitude_latitude_or_joinable_station_metadata",
+      "official_source_url_and_license"
+    ],
+    "completion_evidence_targets": [
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "臺中市",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺中市/pump_or_gate_status"
+      }
+    ],
+    "request_body": "目前臺中市既有 production adapter 仍未覆蓋所有必要水資訊訊號：pump_or_gate_status。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
+    "checklist": [
+      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
+      "確認觀測時間、站點 ID、測值、單位與座標欄位",
+      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
+      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
+      "確認 freshness policy 與 stale/degraded/failed 門檻",
+      "確認 raw snapshot retention policy 與可稽核保存位置",
+      "確認 scheduler cadence、重試策略與監控告警責任",
+      "確認 hosted egress review 與 worker-persisted evidence path"
+    ],
+    "production_operational_requirements": [
+      "freshness_policy",
+      "raw_snapshot_retention_policy",
+      "monitored_scheduler_cadence",
+      "hosted_egress_review",
+      "worker_persisted_evidence_path"
+    ],
+    "priority_rank": 15,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
@@ -1500,99 +1340,13 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
-    "priority_rank": 17,
+    "priority_rank": 16,
     "priority_tier": "P2",
     "workstream": "fill_sensor_signal_gap",
     "priority_why_now": "existing adapters do not cover every required water signal family",
     "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
     "metadata_source_names": [],
     "metadata_source_urls": [],
-    "non_qualifying_source_names": [],
-    "non_qualifying_source_urls": [],
-    "non_qualifying_source_reasons": [],
-    "candidate_contract_findings": [],
-    "candidate_contract_missing_fields": [],
-    "candidate_contract_non_measurement_notes": []
-  },
-  {
-    "county": "雲林縣",
-    "packet_type": "signal_gap_request",
-    "requires_human_intervention": true,
-    "subject": "雲林縣缺漏水資訊訊號補齊請求",
-    "source_urls": [],
-    "production_adapter_keys": [
-      "local.yunlin.water_level"
-    ],
-    "status_only_source_names": [
-      "雲林 iflood 淹水感測狀態"
-    ],
-    "status_only_source_urls": [
-      "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
-    ],
-    "status_only_signal_types": [
-      "flood_sensor_status"
-    ],
-    "requested_counterparty": "雲林縣政府公開資料或水利防災維運窗口",
-    "tracking_status": "needs_signal_gap_review",
-    "last_followed_up_at": null,
-    "target_signal_types": [
-      "flood_depth"
-    ],
-    "required_read_api_fields": [
-      "observed_at",
-      "station_or_device_id",
-      "measurement_value",
-      "measurement_unit_or_type",
-      "longitude_latitude_or_joinable_station_metadata",
-      "official_source_url_and_license"
-    ],
-    "completion_evidence_targets": [
-      {
-        "manifest_section": "signal_family_gap_evidence",
-        "county": "雲林縣",
-        "signal_type": "flood_depth",
-        "accepted_statuses": [
-          "accepted",
-          "authorization_gated_adapter",
-          "official_unavailable",
-          "production_adapter"
-        ],
-        "evidence_ref_required": true,
-        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/雲林縣/flood_depth"
-      }
-    ],
-    "request_body": "目前雲林縣既有 production adapter 仍未覆蓋所有必要水資訊訊號：flood_depth。請協助確認是否有官方公開 read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或下水道水位量測。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
-    "checklist": [
-      "確認缺漏 signal families 是否存在官方 read API 或開放資料",
-      "確認觀測時間、站點 ID、測值、單位與座標欄位",
-      "確認 status-only 資料不會被當成水位、雨量或淹水深度",
-      "若官方確認不存在，記錄不可取得證據與後續追蹤窗口",
-      "確認 freshness policy 與 stale/degraded/failed 門檻",
-      "確認 raw snapshot retention policy 與可稽核保存位置",
-      "確認 scheduler cadence、重試策略與監控告警責任",
-      "確認 hosted egress review 與 worker-persisted evidence path"
-    ],
-    "production_operational_requirements": [
-      "freshness_policy",
-      "raw_snapshot_retention_policy",
-      "monitored_scheduler_cadence",
-      "hosted_egress_review",
-      "worker_persisted_evidence_path"
-    ],
-    "priority_rank": 18,
-    "priority_tier": "P2",
-    "workstream": "fill_sensor_signal_gap",
-    "priority_why_now": "existing adapters do not cover every required water signal family",
-    "completion_gate": "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。",
-    "metadata_source_names": [
-      "雲林縣淹水感測器座標",
-      "雲林縣抽水站資料",
-      "雲林縣水門點位"
-    ],
-    "metadata_source_urls": [
-      "https://opendata.yunlin.gov.tw/OpenDataContent.aspx?n=8350&s=1427",
-      "https://yliflood.yunlin.gov.tw/ifloodboard"
-    ],
     "non_qualifying_source_names": [],
     "non_qualifying_source_urls": [],
     "non_qualifying_source_reasons": [],

@@ -1093,8 +1093,11 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
         "雲林 iflood 淹水感測狀態",
     ]
     assert counties["雲林縣"]["status_only_signal_types"] == ["flood_sensor_status"]
-    assert counties["雲林縣"]["flood_depth_available"] is False
-    assert "flood_depth" in counties["雲林縣"]["missing_signal_types"]
+    assert counties["雲林縣"]["flood_depth_available"] is True
+    assert "official.civil_iot.flood_sensor" in counties["雲林縣"][
+        "central_backbone_adapter_keys"
+    ]
+    assert "flood_depth" not in counties["雲林縣"]["missing_signal_types"]
     assert "sewer_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
     assert "gate_water_level" in counties["嘉義縣"]["central_backbone_signal_types"]
     assert counties["嘉義縣"]["local_direct_statuses"] == ["ready_implemented"]
@@ -1206,7 +1209,7 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert plan["central_backbone_minimum_complete_count"] == 22
     assert plan["central_backbone_remaining_count"] == 0
     assert plan["completion_audit"]["overall_status"] == "incomplete"
-    assert plan["completion_audit"]["summary"]["signal_gap_county_item_count"] == 24
+    assert plan["completion_audit"]["summary"]["signal_gap_county_item_count"] == 17
     assert plan["completion_audit"]["evidence_overlay"] == {
         "schema_version": None,
         "captured_at": None,
@@ -1224,13 +1227,13 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert audit_gates["required_signal_families"]["status"] == "incomplete"
     assert audit_gates["hosted_worker_persisted_evidence"]["status"] == "incomplete"
     assert plan["signal_gap_priority_groups"][0]["signal_type"] == "pump_or_gate_status"
-    assert plan["signal_gap_priority_groups"][0]["county_count"] == 14
+    assert plan["signal_gap_priority_groups"][0]["county_count"] == 13
     assert plan["signal_gap_priority_groups"][0]["highest_priority_tier"] == "P0"
     assert plan["signal_gap_priority_groups"][0]["tracking_statuses"] == {
         "monitoring_open_data_release": 1,
         "needs_authorization_request": 1,
         "needs_public_read_api_contract": 2,
-        "needs_signal_gap_review": 10,
+        "needs_signal_gap_review": 9,
     }
     assert "--signal-type pump_or_gate_status" in plan["signal_gap_priority_groups"][0][
         "discovery_monitor"
@@ -1238,7 +1241,7 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     request_batch = plan["signal_gap_priority_groups"][0]["official_request_batch"]
     assert request_batch["target_signal_type"] == "pump_or_gate_status"
     assert request_batch["packet_type"] == "signal_gap_batch_request"
-    assert request_batch["county_count"] == 14
+    assert request_batch["county_count"] == 13
     assert request_batch["next_step"] == "send_official_read_api_requests"
     assert "worker_persisted_evidence_path" in request_batch[
         "production_operational_requirements"
@@ -1302,15 +1305,8 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert signal_gaps["臺北市"]["status_only_signal_types"] == ["gate_status"]
     assert "嘉義市" in signal_gaps
     assert signal_gaps["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
-    assert "flood_depth" in signal_gaps["嘉義市"]["missing_signal_types"]
-    assert "雲林縣" in signal_gaps
-    assert signal_gaps["雲林縣"]["missing_signal_types"] == ["flood_depth"]
-    assert signal_gaps["雲林縣"]["status_only_source_urls"] == [
-        "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
-    ]
-    assert signal_gaps["雲林縣"]["status_only_signal_types"] == [
-        "flood_sensor_status"
-    ]
+    assert signal_gaps["嘉義市"]["missing_signal_types"] == ["pump_or_gate_status"]
+    assert "雲林縣" not in signal_gaps
     assert "高雄市" not in signal_gaps
     hualien = plan["authorization_requests"][0]
     assert hualien["requested_counterparty"] == "花蓮縣政府 / Senslink 行動水情維運窗口"

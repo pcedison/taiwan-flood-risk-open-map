@@ -885,9 +885,9 @@ paths:
                           total_counties: 22
                           local_direct_remaining_count: 2
                           central_backbone_remaining_count: 0
-                          unresolved_priority_item_count: 18
+                          unresolved_priority_item_count: 16
                           signal_gap_group_count: 3
-                          signal_gap_county_item_count: 24
+                          signal_gap_county_item_count: 17
                           authorization_request_count: 2
                           metadata_release_monitor_count: 1
                           public_api_contract_review_count: 3
@@ -911,9 +911,9 @@ paths:
                             status: incomplete
                             evidence: 3 signal families remain in signal_gap_priority_groups.
                             blocking_items:
-                              - pump_or_gate_status:14
-                              - flood_depth:5
-                              - sewer_water_level:5
+                              - pump_or_gate_status:13
+                              - flood_depth:3
+                              - sewer_water_level:1
                             next_workstream: send_official_read_api_requests
                           - gate_key: hosted_worker_persisted_evidence
                             status: incomplete
