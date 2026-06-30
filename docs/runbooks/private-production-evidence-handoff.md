@@ -177,6 +177,13 @@ and matching `requirement_evidence` entries. Each requirement-level entry needs
 its own `evidence_ref` plus `observed_at` for runtime observations or
 `reviewed_at` for policy and ownership approvals.
 
+For public/local evidence refs such as
+`docs/reviews/hosted-public-risk-evidence-smoke-YYYY-MM-DD-<sha>.json#/risk_assessment/worker_evidence`,
+the audit CLI resolves the JSON file, requires `status: passed` when the
+artifact has a status field, and verifies the JSON pointer exists. Private refs
+such as `private-ops://...` remain opaque indexes to private ops storage and
+are not read by the public CLI.
+
 ## Acceptance Mapping
 
 `P1-04` can move from `In Progress` to `Accepted` only when:

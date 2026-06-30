@@ -78,6 +78,20 @@ def test_local_source_completion_audit_cli_merges_completion_evidence_files(
 ) -> None:
     public_risk_evidence = tmp_path / "public-risk-evidence.json"
     hosted_worker_evidence = tmp_path / "hosted-worker-evidence.json"
+    public_risk_artifact = tmp_path / "public-risk-smoke.json"
+    public_risk_artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": "hosted-public-risk-evidence-smoke/v1",
+                "status": "passed",
+                "risk_assessment": {
+                    "worker_evidence": {"freshness_source_ids": ["cwa-rainfall"]},
+                    "nearby_coverage": {"query_radius_m": 500},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     public_risk_evidence.write_text(
         json.dumps(
             {
@@ -89,17 +103,13 @@ def test_local_source_completion_audit_cli_merges_completion_evidence_files(
                     {
                         "gate_key": "public_risk_worker_evidence_path",
                         "status": "accepted",
-                        "evidence_ref": "docs/reviews/public-risk.json",
+                        "evidence_ref": str(public_risk_artifact),
                         "satisfied_requirements": [
                             "hosted_risk_response_worker_evidence_smoke",
                             "query_point_nearby_coverage_smoke",
                         ],
-                        "requirement_evidence": _requirement_evidence(
-                            "public_risk_worker_evidence_path",
-                            (
-                                "hosted_risk_response_worker_evidence_smoke",
-                                "query_point_nearby_coverage_smoke",
-                            ),
+                        "requirement_evidence": _local_public_risk_requirement_evidence(
+                            public_risk_artifact
                         ),
                     }
                 ],
@@ -166,6 +176,72 @@ def test_local_source_completion_audit_cli_merges_completion_evidence_files(
     assert gates["hosted_worker_persisted_evidence"]["status"] == "satisfied"
     assert gates["production_monitoring_and_alerting"]["status"] == "incomplete"
     assert payload["overall_status"] == "incomplete"
+
+
+def test_local_source_completion_audit_cli_rejects_failed_local_evidence_ref(
+    tmp_path: Path,
+) -> None:
+    failed_artifact = tmp_path / "failed-public-risk-smoke.json"
+    failed_artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": "hosted-public-risk-evidence-smoke/v1",
+                "status": "failed",
+                "risk_assessment": {
+                    "worker_evidence": {},
+                    "nearby_coverage": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence_path = tmp_path / "local-source-completion-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-06-30T05:00:00+00:00",
+                "signal_family_gap_evidence": [],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [
+                    {
+                        "gate_key": "public_risk_worker_evidence_path",
+                        "status": "accepted",
+                        "evidence_ref": str(failed_artifact),
+                        "satisfied_requirements": [
+                            "hosted_risk_response_worker_evidence_smoke",
+                            "query_point_nearby_coverage_smoke",
+                        ],
+                        "requirement_evidence": _local_public_risk_requirement_evidence(
+                            failed_artifact
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert (
+        "local evidence_ref status must be 'passed'"
+        in result.stderr
+    )
+    assert str(failed_artifact) in result.stderr
 
 
 def _complete_evidence_overlay(plan: dict) -> dict:
@@ -275,6 +351,21 @@ def _requirement_evidence(gate_key: str, requirements: tuple[str, ...]) -> list[
             "observed_at": "2026-06-30T12:00:00+08:00",
         }
         for requirement in requirements
+    ]
+
+
+def _local_public_risk_requirement_evidence(artifact: Path) -> list[dict]:
+    return [
+        {
+            "requirement": "hosted_risk_response_worker_evidence_smoke",
+            "evidence_ref": f"{artifact}#/risk_assessment/worker_evidence",
+            "observed_at": "2026-06-30T05:00:00+00:00",
+        },
+        {
+            "requirement": "query_point_nearby_coverage_smoke",
+            "evidence_ref": f"{artifact}#/risk_assessment/nearby_coverage",
+            "observed_at": "2026-06-30T05:00:00+00:00",
+        },
     ]
 
 
