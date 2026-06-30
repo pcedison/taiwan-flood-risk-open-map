@@ -1372,6 +1372,32 @@ Completed 2026-06-30: operators now have a strict private evidence path for
 routing or scheduler ownership; the audit is accepted only when real private
 monitoring evidence is provided.
 
+## Task 43: Hosted Worker Persistence Evidence Overlay
+
+**Files:**
+- Add: `scripts/hosted_worker_evidence.py`
+- Add: `tests/test_hosted_worker_evidence.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+
+**Interfaces:**
+- Consumes: a private hosted worker manifest with freshness policy, raw
+  snapshot retention, scheduler cadence, hosted egress, and worker-persisted
+  evidence path proof.
+- Produces: a fail-closed `local-source-completion-evidence/v1` overlay for
+  `hosted_worker_persisted_evidence`.
+
+- [x] Write failing tests requiring valid hosted worker evidence to produce an
+  accepted completion overlay.
+- [x] Reject incomplete manifests that lack verified status, retention days,
+  scheduler cadence, hosted egress reviewer, or persisted adapter keys.
+- [x] Support PowerShell UTF-8 BOM JSON manifests.
+- [x] Document the private handoff command and required fields.
+
+Completed 2026-06-30: operators now have a strict private evidence path for
+all five `hosted_worker_persisted_evidence` requirements. This does not itself
+prove hosted worker persistence; the audit is accepted only when real private
+worker, scheduler, storage, and egress evidence is provided.
+
 ## Completion Gates
 
 The full objective is complete only when:

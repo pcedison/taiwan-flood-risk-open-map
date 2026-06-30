@@ -229,6 +229,37 @@ replaced with `accepted`, `authorization_gated_adapter`,
 filled dispatch overlay; keep it with the private official correspondence or
 ticketing record.
 
+For the `hosted_worker_persisted_evidence` gate, fill a private hosted worker
+manifest with verified evidence for all five required requirements:
+
+- `freshness_policy`: verified max-lag policy, evidence ref, and `observed_at`.
+- `raw_snapshot_retention_policy`: verified raw snapshot retention days,
+  evidence ref, and `reviewed_at`.
+- `monitored_scheduler_cadence`: verified scheduler cadence, evidence ref, and
+  `observed_at`.
+- `hosted_egress_review`: verified hosted egress review, reviewer, evidence
+  ref, and `reviewed_at`.
+- `worker_persisted_evidence_path`: verified worker-persisted evidence path,
+  adapter keys, evidence ref, and `observed_at`.
+
+Then validate and normalize that private manifest into a completion overlay:
+
+```powershell
+python scripts\hosted_worker_evidence.py `
+  --manifest-json <private-hosted-worker-manifest.json> `
+  --evidence-output <private-hosted-worker-evidence.json> `
+  --completion-evidence-output <private-hosted-worker-completion-evidence.json>
+```
+
+The CLI fails closed: `hosted_worker_persisted_evidence` is accepted only when
+`freshness_policy`, `raw_snapshot_retention_policy`,
+`monitored_scheduler_cadence`, `hosted_egress_review`, and
+`worker_persisted_evidence_path` all have verified status plus requirement
+level evidence. The admin-only `hosted_source_freshness_smoke.py` can prove
+`freshness_policy` and `worker_persisted_evidence_path`; the private hosted
+worker manifest remains the place to record raw snapshot retention, scheduler
+cadence, hosted egress review, and any private storage/adapter evidence.
+
 For the `production_monitoring_and_alerting` gate, fill a private monitoring
 manifest with one reviewed evidence block per required requirement:
 
