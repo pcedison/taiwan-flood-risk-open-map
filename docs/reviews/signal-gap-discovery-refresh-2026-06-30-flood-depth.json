@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-06-30T14:00:00+08:00",
+  "captured_at": "2026-06-30T18:05:00+08:00",
   "conclusion": "no_candidate_live_read_api_found",
   "discovery": {
     "candidate_count": 2,
@@ -56,13 +56,6 @@
     ],
     "summary": {
       "by_county": {
-        "嘉義市": {
-          "candidate_count": 0,
-          "candidate_live_read_api_count": 0,
-          "metadata_only_count": 0,
-          "readiness_state": "no_candidate",
-          "signal_types": []
-        },
         "澎湖縣": {
           "candidate_count": 0,
           "candidate_live_read_api_count": 0,
@@ -85,13 +78,6 @@
           "metadata_only_count": 0,
           "readiness_state": "no_candidate",
           "signal_types": []
-        },
-        "雲林縣": {
-          "candidate_count": 0,
-          "candidate_live_read_api_count": 0,
-          "metadata_only_count": 0,
-          "readiness_state": "no_candidate",
-          "signal_types": []
         }
       },
       "candidate_live_read_api_count_by_county": {},
@@ -100,17 +86,13 @@
       },
       "target_counties_without_candidates": [
         "連江縣",
-        "嘉義市",
-        "澎湖縣",
-        "雲林縣"
+        "澎湖縣"
       ]
     },
     "target_counties": [
       "連江縣",
-      "嘉義市",
       "澎湖縣",
-      "臺北市",
-      "雲林縣"
+      "臺北市"
     ]
   },
   "schema_version": "local-source-discovery-refresh/v1",

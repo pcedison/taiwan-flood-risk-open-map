@@ -1,5 +1,5 @@
 {
-  "captured_at": "2026-06-30T14:00:00+08:00",
+  "captured_at": "2026-06-30T18:05:00+08:00",
   "conclusion": "no_candidate_live_read_api_found",
   "discovery": {
     "candidate_count": 9,
@@ -301,13 +301,6 @@
             "pump_or_gate_status"
           ]
         },
-        "臺南市": {
-          "candidate_count": 0,
-          "candidate_live_read_api_count": 0,
-          "metadata_only_count": 0,
-          "readiness_state": "no_candidate",
-          "signal_types": []
-        },
         "臺東縣": {
           "candidate_count": 0,
           "candidate_live_read_api_count": 0,
@@ -348,10 +341,9 @@
         "金門縣",
         "臺東縣",
         "苗栗縣",
-        "嘉義市",
         "澎湖縣",
-        "臺南市",
         "南投縣",
+        "嘉義市",
         "基隆市",
         "宜蘭縣",
         "新竹縣"
@@ -362,16 +354,15 @@
       "金門縣",
       "臺東縣",
       "苗栗縣",
-      "嘉義市",
-      "桃園市",
       "澎湖縣",
-      "臺中市",
-      "臺南市",
       "南投縣",
+      "嘉義市",
       "基隆市",
       "宜蘭縣",
       "新北市",
-      "新竹縣"
+      "新竹縣",
+      "桃園市",
+      "臺中市"
     ]
   },
   "schema_version": "local-source-discovery-refresh/v1",
