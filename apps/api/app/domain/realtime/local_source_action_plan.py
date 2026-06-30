@@ -77,8 +77,10 @@ class CompletionEvidenceState:
     captured_at: str | None
     signal_family_gap_keys: frozenset[tuple[str, str]]
     signal_family_gap_dispatch_keys: frozenset[tuple[str, str]]
+    signal_family_gap_dispatch_follow_up_due_at_values: tuple[str, ...]
     source_contract_keys: frozenset[tuple[str, str]]
     source_contract_dispatch_keys: frozenset[tuple[str, str]]
+    source_contract_dispatch_follow_up_due_at_values: tuple[str, ...]
     production_gate_keys: frozenset[str]
     production_gate_requirement_keys: frozenset[tuple[str, str]]
     validation_errors: tuple[str, ...]
@@ -91,8 +93,20 @@ class CompletionEvidenceState:
             "signal_family_gap_dispatch_count": len(
                 self.signal_family_gap_dispatch_keys
             ),
+            "signal_family_gap_dispatch_follow_up_count": len(
+                self.signal_family_gap_dispatch_follow_up_due_at_values
+            ),
+            "signal_family_gap_next_follow_up_due_at": _first_or_none(
+                self.signal_family_gap_dispatch_follow_up_due_at_values
+            ),
             "source_contract_evidence_count": len(self.source_contract_keys),
             "source_contract_dispatch_count": len(self.source_contract_dispatch_keys),
+            "source_contract_dispatch_follow_up_count": len(
+                self.source_contract_dispatch_follow_up_due_at_values
+            ),
+            "source_contract_next_follow_up_due_at": _first_or_none(
+                self.source_contract_dispatch_follow_up_due_at_values
+            ),
             "production_gate_evidence_count": len(self.production_gate_keys),
             "production_gate_requirement_evidence_count": len(
                 self.production_gate_requirement_keys
@@ -396,8 +410,10 @@ def _completion_evidence_state(
             captured_at=None,
             signal_family_gap_keys=frozenset(),
             signal_family_gap_dispatch_keys=frozenset(),
+            signal_family_gap_dispatch_follow_up_due_at_values=(),
             source_contract_keys=frozenset(),
             source_contract_dispatch_keys=frozenset(),
+            source_contract_dispatch_follow_up_due_at_values=(),
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
             validation_errors=(),
@@ -415,8 +431,10 @@ def _completion_evidence_state(
             captured_at=captured_at if isinstance(captured_at, str) else None,
             signal_family_gap_keys=frozenset(),
             signal_family_gap_dispatch_keys=frozenset(),
+            signal_family_gap_dispatch_follow_up_due_at_values=(),
             source_contract_keys=frozenset(),
             source_contract_dispatch_keys=frozenset(),
+            source_contract_dispatch_follow_up_due_at_values=(),
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
             validation_errors=tuple(errors),
@@ -443,6 +461,16 @@ def _completion_evidence_state(
                 errors,
             )
         ),
+        signal_family_gap_dispatch_follow_up_due_at_values=tuple(
+            sorted(
+                _dispatch_follow_up_due_at_values(
+                    completion_evidence.get("signal_family_gap_evidence"),
+                    field="signal_family_gap_evidence",
+                    dispatched_statuses=DISPATCHED_SIGNAL_EVIDENCE_STATUSES,
+                    errors=errors,
+                )
+            )
+        ),
         source_contract_keys=frozenset(
             _accepted_source_contract_keys(
                 completion_evidence.get("source_contract_evidence"),
@@ -453,6 +481,16 @@ def _completion_evidence_state(
             _dispatched_source_contract_keys(
                 completion_evidence.get("source_contract_evidence"),
                 errors,
+            )
+        ),
+        source_contract_dispatch_follow_up_due_at_values=tuple(
+            sorted(
+                _dispatch_follow_up_due_at_values(
+                    completion_evidence.get("source_contract_evidence"),
+                    field="source_contract_evidence",
+                    dispatched_statuses=DISPATCHED_SOURCE_CONTRACT_EVIDENCE_STATUSES,
+                    errors=errors,
+                )
             )
         ),
         production_gate_keys=frozenset(
@@ -509,6 +547,23 @@ def _dispatched_signal_family_gap_keys(
             continue
         keys.add((str(county).strip(), str(signal_type).strip()))
     return keys
+
+
+def _dispatch_follow_up_due_at_values(
+    value: Any,
+    *,
+    field: str,
+    dispatched_statuses: set[str],
+    errors: list[str],
+) -> list[str]:
+    values: list[str] = []
+    for item in _list_evidence(value, field, errors):
+        if item.get("status") not in dispatched_statuses:
+            continue
+        follow_up_due_at = item.get("follow_up_due_at")
+        if _non_empty_string(follow_up_due_at):
+            values.append(str(follow_up_due_at).strip())
+    return values
 
 
 def _accepted_source_contract_keys(
@@ -778,10 +833,13 @@ def _signal_family_gate_evidence(
         total_count = sum(
             int(group["county_count"]) for group in signal_gap_priority_groups
         )
+        follow_up_text = _dispatch_follow_up_evidence_suffix(
+            evidence_state.signal_family_gap_dispatch_follow_up_due_at_values
+        )
         return (
             f"Dispatch evidence supplied for {dispatched_count}/{total_count} "
             "signal-family items; official reply, production adapter, or "
-            "official-unavailable evidence is still required."
+            f"official-unavailable evidence is still required.{follow_up_text}"
         )
     return (
         f"{len(signal_gap_priority_groups)} signal families remain in "
@@ -802,15 +860,33 @@ def _source_contract_gate_evidence(
         )
     dispatched_count = len(evidence_state.source_contract_dispatch_keys)
     if dispatched_count:
+        follow_up_text = _dispatch_follow_up_evidence_suffix(
+            evidence_state.source_contract_dispatch_follow_up_due_at_values
+        )
         return (
             f"Dispatch evidence supplied for {dispatched_count}/{required_count} "
             "source-contract blockers; official authorization, released metadata, "
             "contract verification, or official-unavailable evidence is still required."
+            f"{follow_up_text}"
         )
     return (
         "Formal credentials, official releases, and public read API contracts "
         "must clear before blocked local sources can become production adapters."
     )
+
+
+def _dispatch_follow_up_evidence_suffix(follow_up_due_at_values: tuple[str, ...]) -> str:
+    next_follow_up = _first_or_none(follow_up_due_at_values)
+    if next_follow_up is None:
+        return ""
+    return (
+        f" {len(follow_up_due_at_values)} dispatch items have follow-up due dates; "
+        f"next follow-up {next_follow_up}."
+    )
+
+
+def _first_or_none(values: tuple[str, ...]) -> str | None:
+    return values[0] if values else None
 
 
 def _production_gate_blocking_items(

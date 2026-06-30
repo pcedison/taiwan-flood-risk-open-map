@@ -232,6 +232,38 @@ def test_local_source_request_packets_cli_emits_signal_gap_dispatch_evidence() -
     }
 
 
+def test_local_source_request_packets_cli_adds_signal_gap_dispatch_follow_up_due_at() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--format",
+            "signal-gap-dispatch-evidence",
+            "--signal-type",
+            "flood_depth",
+            "--dispatch-evidence-ref",
+            "private-ops://local-source/dispatch/flood-depth-2026-06-30",
+            "--dispatched-at",
+            "2026-06-30T15:20:00+08:00",
+            "--follow-up-due-at",
+            "2026-07-07T09:00:00+08:00",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+
+    assert len(payload["signal_family_gap_evidence"]) == 3
+    assert {
+        item["follow_up_due_at"] for item in payload["signal_family_gap_evidence"]
+    } == {"2026-07-07T09:00:00+08:00"}
+
+
 def test_local_source_request_packets_cli_emits_source_contract_dispatch_evidence() -> None:
     result = subprocess.run(
         [

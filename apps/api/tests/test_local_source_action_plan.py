@@ -437,8 +437,12 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
         "captured_at": "2026-06-30T12:00:00+08:00",
         "signal_family_gap_evidence_count": 17,
         "signal_family_gap_dispatch_count": 0,
+        "signal_family_gap_dispatch_follow_up_count": 0,
+        "signal_family_gap_next_follow_up_due_at": None,
         "source_contract_evidence_count": 6,
         "source_contract_dispatch_count": 0,
+        "source_contract_dispatch_follow_up_count": 0,
+        "source_contract_next_follow_up_due_at": None,
         "production_gate_evidence_count": 4,
         "production_gate_requirement_evidence_count": 12,
         "validation_errors": [],
@@ -490,6 +494,55 @@ def test_local_source_action_plan_tracks_dispatched_source_contracts_without_acc
     ]
     assert "Dispatch evidence supplied for 1/6" in gates[
         "official_authorization_and_contracts"
+    ]["evidence"]
+
+
+def test_local_source_action_plan_tracks_signal_gap_dispatch_follow_up_due_dates() -> None:
+    evidence = {
+        "schema_version": "local-source-completion-evidence/v1",
+        "captured_at": "2026-06-30T19:20:00+08:00",
+        "signal_family_gap_evidence": [
+            {
+                "county": "\u9023\u6c5f\u7e23",
+                "signal_type": "flood_depth",
+                "status": "request_dispatched",
+                "evidence_ref": "private-ops://local-source/dispatch/flood-depth",
+                "dispatched_at": "2026-06-30T19:00:00+08:00",
+                "follow_up_due_at": "2026-07-07T09:00:00+08:00",
+            },
+            {
+                "county": "\u6f8e\u6e56\u7e23",
+                "signal_type": "flood_depth",
+                "status": "request_dispatched",
+                "evidence_ref": "private-ops://local-source/dispatch/flood-depth",
+                "dispatched_at": "2026-06-30T19:00:00+08:00",
+                "follow_up_due_at": "2026-07-05T09:00:00+08:00",
+            },
+        ],
+        "source_contract_evidence": [],
+        "production_gate_evidence": [],
+    }
+
+    plan = build_local_source_action_plan(
+        list_local_source_coverage(),
+        completion_evidence=evidence,
+    )
+    audit = plan["completion_audit"]
+    gates = {gate["gate_key"]: gate for gate in audit["gates"]}
+
+    assert audit["evidence_overlay"]["signal_family_gap_evidence_count"] == 0
+    assert audit["evidence_overlay"]["signal_family_gap_dispatch_count"] == 2
+    assert audit["evidence_overlay"]["signal_family_gap_dispatch_follow_up_count"] == 2
+    assert (
+        audit["evidence_overlay"]["signal_family_gap_next_follow_up_due_at"]
+        == "2026-07-05T09:00:00+08:00"
+    )
+    assert gates["required_signal_families"]["status"] == "incomplete"
+    assert "Dispatch evidence supplied for 2/17" in gates[
+        "required_signal_families"
+    ]["evidence"]
+    assert "next follow-up 2026-07-05T09:00:00+08:00" in gates[
+        "required_signal_families"
     ]["evidence"]
 
 
