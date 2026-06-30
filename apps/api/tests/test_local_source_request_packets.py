@@ -180,23 +180,14 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "status-only" in taipei["request_body"]
     assert "不得替代水位、雨量、淹水深度或下水道水位量測" in taipei["request_body"]
 
-    yunlin = next(packet for packet in packets if packet["county"] == "雲林縣")
-    assert yunlin["packet_type"] == "signal_gap_request"
-    assert yunlin["tracking_status"] == "needs_signal_gap_review"
-    assert yunlin["target_signal_types"] == ["flood_depth"]
-    assert yunlin["status_only_source_names"] == ["雲林 iflood 淹水感測狀態"]
-    assert yunlin["status_only_signal_types"] == ["flood_sensor_status"]
-    assert "status-only" in yunlin["request_body"]
+    assert all(packet["county"] != "雲林縣" for packet in packets)
+    assert all(packet["county"] != "臺南市" for packet in packets)
 
     chiayi_city = next(packet for packet in packets if packet["county"] == "嘉義市")
     assert chiayi_city["packet_type"] == "signal_gap_request"
     assert chiayi_city["tracking_status"] == "needs_signal_gap_review"
     assert chiayi_city["priority_tier"] == "P2"
-    assert chiayi_city["target_signal_types"] == [
-        "flood_depth",
-        "sewer_water_level",
-        "pump_or_gate_status",
-    ]
+    assert chiayi_city["target_signal_types"] == ["pump_or_gate_status"]
     assert "既有 production adapter 仍未覆蓋所有必要水資訊訊號" in chiayi_city["request_body"]
     assert "status-only" in chiayi_city["request_body"]
     assert (
@@ -217,7 +208,7 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
 
     assert top_gap["signal_type"] == "pump_or_gate_status"
     assert [packet["county"] for packet in packets] == top_gap["counties"]
-    assert len(packets) == top_gap["county_count"] == 14
+    assert len(packets) == top_gap["county_count"] == 13
     assert all(
         top_gap["signal_type"] in packet["target_signal_types"]
         for packet in packets
@@ -285,38 +276,6 @@ def test_official_request_packets_expose_completion_evidence_targets() -> None:
         {
             "manifest_section": "signal_family_gap_evidence",
             "county": "\u5609\u7fa9\u5e02",
-            "signal_type": "flood_depth",
-            "accepted_statuses": [
-                "accepted",
-                "authorization_gated_adapter",
-                "official_unavailable",
-                "production_adapter",
-            ],
-            "evidence_ref_required": True,
-            "private_evidence_ref_hint": (
-                "private-ops://local-source/signal-gap/"
-                "\u5609\u7fa9\u5e02/flood_depth"
-            ),
-        },
-        {
-            "manifest_section": "signal_family_gap_evidence",
-            "county": "\u5609\u7fa9\u5e02",
-            "signal_type": "sewer_water_level",
-            "accepted_statuses": [
-                "accepted",
-                "authorization_gated_adapter",
-                "official_unavailable",
-                "production_adapter",
-            ],
-            "evidence_ref_required": True,
-            "private_evidence_ref_hint": (
-                "private-ops://local-source/signal-gap/"
-                "\u5609\u7fa9\u5e02/sewer_water_level"
-            ),
-        },
-        {
-            "manifest_section": "signal_family_gap_evidence",
-            "county": "\u5609\u7fa9\u5e02",
             "signal_type": "pump_or_gate_status",
             "accepted_statuses": [
                 "accepted",
@@ -346,7 +305,7 @@ def test_completion_evidence_template_is_pending_draft_from_request_packets() ->
     assert template["captured_at"] == "2026-06-30T12:00:00+08:00"
     assert template["production_gate_evidence"] == []
     assert len(template["source_contract_evidence"]) == 6
-    assert len(template["signal_family_gap_evidence"]) == 24
+    assert len(template["signal_family_gap_evidence"]) == 17
 
     kinmen = next(
         item
@@ -370,15 +329,15 @@ def test_completion_evidence_template_is_pending_draft_from_request_packets() ->
         ),
     }
 
-    chiayi_flood_depth = next(
+    chiayi_pump_or_gate = next(
         item
         for item in template["signal_family_gap_evidence"]
         if item["county"] == "\u5609\u7fa9\u5e02"
-        and item["signal_type"] == "flood_depth"
+        and item["signal_type"] == "pump_or_gate_status"
     )
-    assert chiayi_flood_depth == {
+    assert chiayi_pump_or_gate == {
         "county": "\u5609\u7fa9\u5e02",
-        "signal_type": "flood_depth",
+        "signal_type": "pump_or_gate_status",
         "status": "pending",
         "accepted_statuses": [
             "accepted",
@@ -388,7 +347,7 @@ def test_completion_evidence_template_is_pending_draft_from_request_packets() ->
         ],
         "evidence_ref": (
             "private-ops://local-source/signal-gap/"
-            "\u5609\u7fa9\u5e02/flood_depth"
+            "\u5609\u7fa9\u5e02/pump_or_gate_status"
         ),
     }
 
@@ -406,7 +365,8 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
     assert "## 臺北市：臺北市缺漏水資訊訊號補齊請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
-    assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" in markdown
+    assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" not in markdown
+    assert "## 臺南市：臺南市缺漏水資訊訊號補齊請求" not in markdown
     assert "- 需要人工介入：是" in markdown
     assert "- 追蹤狀態：needs_public_read_api_contract" in markdown
     assert "- 追蹤狀態：needs_signal_gap_review" in markdown
@@ -423,9 +383,8 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "49 CWA rainfall stations" in markdown
     assert "9 WRA water-level stations" in markdown
     assert "not a latest-observation read API" in markdown
-    assert "- 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status" in markdown
+    assert "- 待補水資訊訊號：pump_or_gate_status" in markdown
     assert "- 既有 status-only 來源：臺北市水門啟閉狀態" in markdown
-    assert "- 既有 status-only 來源：雲林 iflood 淹水感測狀態" in markdown
     assert "- 候選系統缺少欄位：`observed_at`、`longitude_latitude_or_joinable_station_metadata`" in markdown
     assert "58 water-level monitoring stations" in markdown
     assert "10 town/city urban-planning areas" in markdown
@@ -517,52 +476,20 @@ def test_kinmen_packet_marks_upload_api_as_insufficient_for_read_adapter() -> No
     assert "Data: []" in kinmen["unauthorized_smoke_result"]
 
 
-def test_tainan_signal_gap_packet_carries_static_metadata_and_exclusion_reasons() -> None:
+def test_tainan_no_longer_emits_signal_gap_packet_after_civil_iot_coverage() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
 
     packets = build_official_request_packets(plan)
-    tainan = next(
-        packet
-        for packet in packets
-        if packet["county"] == "\u81fa\u5357\u5e02"
-    )
 
-    assert tainan["packet_type"] == "signal_gap_request"
-    assert tainan["target_signal_types"] == [
-        "sewer_water_level",
-        "pump_or_gate_status",
-    ]
-    assert tainan["metadata_source_names"] == [
-        "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e",
-        "114\u5e74\u5ea6\u62bd\u6c34\u7ad9\u57fa\u672c\u8cc7\u6599",
-        "114\u5e74\u5ea6\u6c34\u9580\u57fa\u672c\u8cc7\u6599",
-    ]
-    assert tainan["metadata_source_urls"] == [
-        "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9",
-        "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
-        "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291",
-    ]
-    assert any(
-        "427a8287-0bc1-4b45-92ac-53eb858b5b9c" in url
-        for url in tainan["non_qualifying_source_urls"]
-    )
-    assert any(
-        "ImageUrl" in reason and "measurement_value" in reason
-        for reason in tainan["non_qualifying_source_reasons"]
-    )
-    assert any(
-        "537b469d-e8c5-42ca-835e-bdde93bc61be" in url
-        for url in tainan["non_qualifying_source_urls"]
-    )
+    assert all(packet["county"] != "\u81fa\u5357\u5e02" for packet in packets)
 
 
-def test_rendered_tainan_signal_gap_packet_lists_static_metadata_sources() -> None:
+def test_rendered_packets_do_not_list_resolved_tainan_signal_gap_sources() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
     packets = build_official_request_packets(plan)
 
     markdown = render_official_request_packets_markdown(packets)
 
-    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e" in markdown
-    assert "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9" in markdown
-    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf" in markdown
-    assert "image-only CCTV" in markdown
+    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e" not in markdown
+    assert "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9" not in markdown
+    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf" not in markdown

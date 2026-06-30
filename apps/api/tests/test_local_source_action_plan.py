@@ -226,24 +226,13 @@ def test_local_source_action_plan_exposes_remaining_authorization_and_release_wo
     signal_gaps = {item["county"]: item for item in plan["sensor_signal_gap_reviews"]}
     assert "臺北市" in signal_gaps
     assert "嘉義市" in signal_gaps
-    assert "雲林縣" in signal_gaps
+    assert "雲林縣" not in signal_gaps
     assert signal_gaps["臺北市"]["missing_signal_types"] == ["flood_depth"]
     assert signal_gaps["臺北市"]["status_only_signal_types"] == ["gate_status"]
     assert signal_gaps["臺北市"]["status_only_source_urls"] == [
         "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
     ]
-    assert {
-        "flood_depth",
-        "sewer_water_level",
-        "pump_or_gate_status",
-    }.issubset(set(signal_gaps["嘉義市"]["missing_signal_types"]))
-    assert signal_gaps["雲林縣"]["missing_signal_types"] == ["flood_depth"]
-    assert signal_gaps["雲林縣"]["status_only_source_names"] == [
-        "雲林 iflood 淹水感測狀態"
-    ]
-    assert signal_gaps["雲林縣"]["status_only_signal_types"] == [
-        "flood_sensor_status"
-    ]
+    assert signal_gaps["嘉義市"]["missing_signal_types"] == ["pump_or_gate_status"]
     assert signal_gaps["嘉義市"]["workstream"] == "fill_sensor_signal_gap"
     assert "高雄市" not in signal_gaps
 
@@ -296,7 +285,7 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
     ]
     pump_or_gate = groups[0]
     assert pump_or_gate["rank"] == 1
-    assert pump_or_gate["county_count"] == 14
+    assert pump_or_gate["county_count"] == 13
     assert pump_or_gate["recommended_workstream"] == "bulk_signal_gap_discovery"
     assert pump_or_gate["completion_gate"] == (
         "For every listed county, add a production adapter, an authorization-gated "
@@ -321,14 +310,14 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
     ]
     assert "嘉義市" in pump_or_gate["counties"]
     assert pump_or_gate["highest_priority_tier"] == "P0"
-    assert pump_or_gate["tracking_statuses"]["needs_signal_gap_review"] == 10
+    assert pump_or_gate["tracking_statuses"]["needs_signal_gap_review"] == 9
     assert pump_or_gate["tracking_statuses"]["needs_public_read_api_contract"] == 2
     assert pump_or_gate["tracking_statuses"]["needs_authorization_request"] == 1
     assert pump_or_gate["tracking_statuses"]["monitoring_open_data_release"] == 1
     request_batch = pump_or_gate["official_request_batch"]
     assert request_batch["target_signal_type"] == "pump_or_gate_status"
     assert request_batch["packet_type"] == "signal_gap_batch_request"
-    assert request_batch["county_count"] == 14
+    assert request_batch["county_count"] == 13
     assert request_batch["counties"] == pump_or_gate["counties"]
     assert request_batch["required_read_api_fields"] == list(
         REQUIRED_REALTIME_READ_API_FIELDS
@@ -350,8 +339,34 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
     ]
 
     by_signal = {group["signal_type"]: group for group in groups}
-    assert by_signal["flood_depth"]["county_count"] == 5
-    assert by_signal["sewer_water_level"]["county_count"] == 5
+    assert by_signal["flood_depth"]["county_count"] == 3
+    assert by_signal["sewer_water_level"]["county_count"] == 1
+
+
+def test_local_source_coverage_applies_verified_civil_iot_signal_distribution() -> None:
+    records = {record.county: record for record in list_local_source_coverage()}
+
+    chiayi_city = records["\u5609\u7fa9\u5e02"]
+    assert "official.civil_iot.flood_sensor" in chiayi_city.central_backbone_adapter_keys
+    assert "official.civil_iot.sewer_water_level" in chiayi_city.central_backbone_adapter_keys
+    assert chiayi_city.missing_signal_types == ("pump_or_gate_status",)
+
+    taoyuan = records["\u6843\u5712\u5e02"]
+    assert "official.civil_iot.sewer_water_level" in taoyuan.central_backbone_adapter_keys
+    assert taoyuan.missing_signal_types == ("pump_or_gate_status",)
+
+    taichung = records["\u81fa\u4e2d\u5e02"]
+    assert "official.civil_iot.sewer_water_level" in taichung.central_backbone_adapter_keys
+    assert taichung.missing_signal_types == ("pump_or_gate_status",)
+
+    tainan = records["\u81fa\u5357\u5e02"]
+    assert "official.civil_iot.sewer_water_level" in tainan.central_backbone_adapter_keys
+    assert "official.civil_iot.pump_water_level" in tainan.central_backbone_adapter_keys
+    assert tainan.missing_signal_types == ()
+
+    yunlin = records["\u96f2\u6797\u7e23"]
+    assert "official.civil_iot.flood_sensor" in yunlin.central_backbone_adapter_keys
+    assert yunlin.missing_signal_types == ()
 
 
 def test_local_source_action_plan_audits_completion_gates() -> None:
@@ -364,9 +379,9 @@ def test_local_source_action_plan_audits_completion_gates() -> None:
         "total_counties": 22,
         "local_direct_remaining_count": 2,
         "central_backbone_remaining_count": 0,
-        "unresolved_priority_item_count": 18,
+        "unresolved_priority_item_count": 16,
         "signal_gap_group_count": 3,
-        "signal_gap_county_item_count": 24,
+        "signal_gap_county_item_count": 17,
         "authorization_request_count": 2,
         "metadata_release_monitor_count": 1,
         "public_api_contract_review_count": 3,
@@ -380,9 +395,9 @@ def test_local_source_action_plan_audits_completion_gates() -> None:
     signal_gate = gates["required_signal_families"]
     assert signal_gate["status"] == "incomplete"
     assert signal_gate["blocking_items"] == [
-        "pump_or_gate_status:14",
-        "flood_depth:5",
-        "sewer_water_level:5",
+        "pump_or_gate_status:13",
+        "flood_depth:3",
+        "sewer_water_level:1",
     ]
     assert signal_gate["next_workstream"] == "send_official_read_api_requests"
 
@@ -420,7 +435,7 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
     assert audit["evidence_overlay"] == {
         "schema_version": "local-source-completion-evidence/v1",
         "captured_at": "2026-06-30T12:00:00+08:00",
-        "signal_family_gap_evidence_count": 24,
+        "signal_family_gap_evidence_count": 17,
         "signal_family_gap_dispatch_count": 0,
         "source_contract_evidence_count": 6,
         "production_gate_evidence_count": 4,
@@ -530,36 +545,34 @@ def test_local_source_action_plan_rejects_production_gate_without_requirement_de
     ]
 
 
-def test_tainan_signal_gap_exposes_static_metadata_and_non_measurement_leads() -> None:
-    plan = build_local_source_action_plan(list_local_source_coverage())
+def test_tainan_coverage_preserves_static_metadata_and_non_measurement_leads() -> None:
+    records = {record.county: record for record in list_local_source_coverage()}
+    tainan = records["\u81fa\u5357\u5e02"]
 
-    tainan = next(
-        item
-        for item in plan["sensor_signal_gap_reviews"]
-        if item["county"] == "\u81fa\u5357\u5e02"
-    )
-
-    assert tainan["metadata_source_names"] == [
+    assert tainan.missing_signal_types == ()
+    assert "official.civil_iot.sewer_water_level" in tainan.central_backbone_adapter_keys
+    assert "official.civil_iot.pump_water_level" in tainan.central_backbone_adapter_keys
+    assert list(tainan.metadata_source_names) == [
         "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e",
         "114\u5e74\u5ea6\u62bd\u6c34\u7ad9\u57fa\u672c\u8cc7\u6599",
         "114\u5e74\u5ea6\u6c34\u9580\u57fa\u672c\u8cc7\u6599",
     ]
-    assert tainan["metadata_source_urls"] == [
+    assert list(tainan.metadata_source_urls) == [
         "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9",
         "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
         "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291",
     ]
-    assert tainan["non_qualifying_source_names"] == [
+    assert list(tainan.non_qualifying_source_names) == [
         "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf",
         "\u6c34\u5229\u7f72\u8207\u53f0\u5357\u5e02\u5408\u5efa\u6df9\u6c34\u611f\u6e2c\u5668\u611f\u6e2c\u8cc7\u6599",
     ]
     assert any(
         "ImageUrl" in reason and "image-only CCTV" in reason
-        for reason in tainan["non_qualifying_source_reasons"]
+        for reason in tainan.non_qualifying_source_reasons
     )
     assert any(
         "data:null" in reason
-        for reason in tainan["non_qualifying_source_reasons"]
+        for reason in tainan.non_qualifying_source_reasons
     )
 
 

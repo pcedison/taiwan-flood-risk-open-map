@@ -369,6 +369,13 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.civil_iot.flood_sensor",
+            "official.civil_iot.sewer_water_level",
+        ),
+        notes=(
+            "2026-06-30 Civil IoT live distribution smoke: "
+            "official.civil_iot.sewer_water_level fetched 66 Taoyuan records; "
+            "no pump/gate Civil IoT records were observed for Taoyuan, so "
+            "pump_or_gate_status remains missing.",
         ),
     ),
     LocalSourceCoverageRecord(
@@ -471,6 +478,13 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.wra_iow.flood_depth",
+            "official.civil_iot.sewer_water_level",
+        ),
+        notes=(
+            "2026-06-30 Civil IoT live distribution smoke: "
+            "official.civil_iot.sewer_water_level fetched 344 Taichung records; "
+            "no pump/gate Civil IoT records were observed for Taichung, so "
+            "pump_or_gate_status remains missing.",
         ),
     ),
     LocalSourceCoverageRecord(
@@ -522,6 +536,7 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         ),
         central_backbone_adapter_keys=(
             *NATIONAL_BASELINE_BACKBONE_KEYS,
+            "official.civil_iot.flood_sensor",
             "official.civil_iot.sewer_water_level",
             "official.civil_iot.pump_water_level",
             "official.civil_iot.gate_water_level",
@@ -555,7 +570,17 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             "https://data.chiayi.gov.tw/opendata/api/getResource?oid=df063695-0076-4dd6-9237-39c5f8ae6b4a&rid=d4c7da5c-b08f-4fd1-97c0-913c949c4613",
             "https://data.chiayi.gov.tw/opendata/api/getResource?oid=0c766c28-c16e-4eaa-8520-f7ffeee3776b&rid=5ad1cdc5-6a8a-48d4-b6b4-7edb9b384e1a",
         ),
-        central_backbone_adapter_keys=NATIONAL_BASELINE_BACKBONE_KEYS,
+        central_backbone_adapter_keys=(
+            *NATIONAL_BASELINE_BACKBONE_KEYS,
+            "official.civil_iot.flood_sensor",
+            "official.civil_iot.sewer_water_level",
+        ),
+        notes=(
+            "2026-06-30 Civil IoT live distribution smoke: "
+            "official.civil_iot.flood_sensor fetched 14 Chiayi City records and "
+            "official.civil_iot.sewer_water_level fetched 73 Chiayi City records; "
+            "pump_or_gate_status remains missing.",
+        ),
     ),
     LocalSourceCoverageRecord(
         county="嘉義縣",
@@ -620,6 +645,14 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.wra_iow.flood_depth",
             "official.civil_iot.flood_sensor",
+            "official.civil_iot.sewer_water_level",
+            "official.civil_iot.pump_water_level",
+        ),
+        notes=(
+            "2026-06-30 Civil IoT live distribution smoke: "
+            "official.civil_iot.sewer_water_level fetched 157 Tainan records and "
+            "official.civil_iot.pump_water_level fetched 2 Tainan records, "
+            "satisfying sewer_water_level and pump_or_gate_status coverage.",
         ),
     ),
     LocalSourceCoverageRecord(

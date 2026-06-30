@@ -80,66 +80,6 @@
       "evidence_ref": "private-ops://local-source/signal-gap/苗栗縣/pump_or_gate_status"
     },
     {
-      "county": "嘉義市",
-      "signal_type": "flood_depth",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/嘉義市/flood_depth"
-    },
-    {
-      "county": "嘉義市",
-      "signal_type": "sewer_water_level",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/嘉義市/sewer_water_level"
-    },
-    {
-      "county": "嘉義市",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status"
-    },
-    {
-      "county": "桃園市",
-      "signal_type": "sewer_water_level",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/桃園市/sewer_water_level"
-    },
-    {
-      "county": "桃園市",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status"
-    },
-    {
       "county": "澎湖縣",
       "signal_type": "flood_depth",
       "status": "pending",
@@ -164,54 +104,6 @@
       "evidence_ref": "private-ops://local-source/signal-gap/澎湖縣/pump_or_gate_status"
     },
     {
-      "county": "臺中市",
-      "signal_type": "sewer_water_level",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/臺中市/sewer_water_level"
-    },
-    {
-      "county": "臺中市",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/臺中市/pump_or_gate_status"
-    },
-    {
-      "county": "臺南市",
-      "signal_type": "sewer_water_level",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/臺南市/sewer_water_level"
-    },
-    {
-      "county": "臺南市",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/臺南市/pump_or_gate_status"
-    },
-    {
       "county": "南投縣",
       "signal_type": "pump_or_gate_status",
       "status": "pending",
@@ -222,6 +114,18 @@
         "production_adapter"
       ],
       "evidence_ref": "private-ops://local-source/signal-gap/南投縣/pump_or_gate_status"
+    },
+    {
+      "county": "嘉義市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status"
     },
     {
       "county": "基隆市",
@@ -272,6 +176,30 @@
       "evidence_ref": "private-ops://local-source/signal-gap/新竹縣/pump_or_gate_status"
     },
     {
+      "county": "桃園市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status"
+    },
+    {
+      "county": "臺中市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/臺中市/pump_or_gate_status"
+    },
+    {
       "county": "臺北市",
       "signal_type": "flood_depth",
       "status": "pending",
@@ -282,18 +210,6 @@
         "production_adapter"
       ],
       "evidence_ref": "private-ops://local-source/signal-gap/臺北市/flood_depth"
-    },
-    {
-      "county": "雲林縣",
-      "signal_type": "flood_depth",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/雲林縣/flood_depth"
     }
   ],
   "source_contract_evidence": [
