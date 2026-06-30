@@ -258,9 +258,19 @@ class LocalSourceCompletionAuditGate(ContractModel):
     next_workstream: str | None = None
 
 
+class LocalSourceCompletionEvidenceOverlay(ContractModel):
+    schema_version: str | None = None
+    captured_at: str | None = None
+    signal_family_gap_evidence_count: int = Field(ge=0)
+    source_contract_evidence_count: int = Field(ge=0)
+    production_gate_evidence_count: int = Field(ge=0)
+    validation_errors: list[str] = Field(default_factory=list)
+
+
 class LocalSourceCompletionAudit(ContractModel):
     overall_status: str
     summary: LocalSourceCompletionAuditSummary
+    evidence_overlay: LocalSourceCompletionEvidenceOverlay
     gates: list[LocalSourceCompletionAuditGate] = Field(default_factory=list)
     next_priority_workstreams: list[str] = Field(default_factory=list)
 

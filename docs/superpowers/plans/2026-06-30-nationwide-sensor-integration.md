@@ -949,6 +949,39 @@ families, official authorization/contracts, hosted worker-persisted evidence,
 monitoring/alerting, and hosted risk-response evidence as incomplete. This is a
 completion gate, not completion of the nationwide sensor objective.
 
+## Task 30: Completion Evidence Overlay
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Add: `scripts/local-source-completion-audit.py`
+- Add: `docs/data-sources/local/local-source-completion-evidence.example.json`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+- Test: `tests/test_local_source_completion_audit_cli.py`
+
+**Interfaces:**
+- Consumes: optional `local-source-completion-evidence/v1` JSON containing
+  signal-family evidence, source-contract evidence, and hosted production-gate
+  evidence. Private `evidence_ref` values remain in ops-controlled storage and
+  are never echoed by the public/admin audit.
+- Produces: an updated `completion_audit` where gates can become `satisfied`
+  only when accepted evidence covers the current blockers.
+
+- [x] Write failing tests proving a complete evidence overlay can satisfy
+  required signal-family, official authorization/contract, hosted persistence,
+  monitoring, and public-risk evidence gates.
+- [x] Add a CLI so operators can run:
+  `python scripts/local-source-completion-audit.py --completion-evidence-json <private.json> --fail-on-incomplete`.
+- [x] Add an example evidence manifest and OpenAPI schema for the aggregate
+  `evidence_overlay` summary.
+
+Completed 2026-06-30: completion gates now have a concrete evidence ingestion
+path. This does not create official approvals or hosted Zeabur evidence by
+itself; it lets those future private artifacts drive the same audit without
+rewriting code or manually editing completion status.
+
 ## Completion Gates
 
 The full objective is complete only when:

@@ -1207,6 +1207,14 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert plan["central_backbone_remaining_count"] == 0
     assert plan["completion_audit"]["overall_status"] == "incomplete"
     assert plan["completion_audit"]["summary"]["signal_gap_county_item_count"] == 24
+    assert plan["completion_audit"]["evidence_overlay"] == {
+        "schema_version": None,
+        "captured_at": None,
+        "signal_family_gap_evidence_count": 0,
+        "source_contract_evidence_count": 0,
+        "production_gate_evidence_count": 0,
+        "validation_errors": [],
+    }
     audit_gates = {
         gate["gate_key"]: gate for gate in plan["completion_audit"]["gates"]
     }

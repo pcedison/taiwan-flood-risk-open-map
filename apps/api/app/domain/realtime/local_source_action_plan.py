@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Mapping
 
 from app.domain.realtime.local_source_coverage import LocalSourceCoverageRecord
 
 
+COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 REQUIRED_REALTIME_READ_API_FIELDS = (
     "observed_at",
     "station_or_device_id",
@@ -21,10 +23,55 @@ PRODUCTION_OPERATIONAL_REQUIREMENTS = (
     "hosted_egress_review",
     "worker_persisted_evidence_path",
 )
+PRODUCTION_EVIDENCE_GATE_KEYS = (
+    "hosted_worker_persisted_evidence",
+    "production_monitoring_and_alerting",
+    "public_risk_worker_evidence_path",
+)
+ACCEPTED_SIGNAL_EVIDENCE_STATUSES = {
+    "accepted",
+    "authorization_gated_adapter",
+    "official_unavailable",
+    "production_adapter",
+}
+ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES = {
+    "accepted",
+    "authorized",
+    "contract_verified",
+    "official_unavailable",
+    "released",
+}
+ACCEPTED_PRODUCTION_GATE_EVIDENCE_STATUSES = {
+    "accepted",
+    "satisfied",
+    "verified",
+}
+
+
+@dataclass(frozen=True)
+class CompletionEvidenceState:
+    schema_version: str | None
+    captured_at: str | None
+    signal_family_gap_keys: frozenset[tuple[str, str]]
+    source_contract_keys: frozenset[tuple[str, str]]
+    production_gate_keys: frozenset[str]
+    validation_errors: tuple[str, ...]
+
+    def to_summary(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "captured_at": self.captured_at,
+            "signal_family_gap_evidence_count": len(self.signal_family_gap_keys),
+            "source_contract_evidence_count": len(self.source_contract_keys),
+            "production_gate_evidence_count": len(self.production_gate_keys),
+            "validation_errors": list(self.validation_errors),
+        }
 
 
 def build_local_source_action_plan(
     records: tuple[LocalSourceCoverageRecord, ...],
+    *,
+    completion_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     local_complete = [record for record in records if record.local_direct_complete]
     central_complete = [record for record in records if record.central_backbone_minimum_complete]
@@ -72,6 +119,7 @@ def build_local_source_action_plan(
             live_smoke_reviews=live_smoke_reviews,
             integration_priority_queue=integration_priority_queue,
             signal_gap_priority_groups=signal_gap_priority_groups,
+            completion_evidence=completion_evidence,
         ),
         "authorization_requests": authorization_requests,
         "metadata_release_monitors": metadata_release_monitors,
@@ -94,7 +142,9 @@ def _completion_audit(
     live_smoke_reviews: list[dict[str, Any]],
     integration_priority_queue: list[dict[str, Any]],
     signal_gap_priority_groups: list[dict[str, Any]],
+    completion_evidence: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
+    evidence_state = _completion_evidence_state(completion_evidence)
     signal_gap_county_item_count = sum(
         int(group["county_count"]) for group in signal_gap_priority_groups
     )
@@ -104,15 +154,30 @@ def _completion_audit(
     local_gate_status = (
         "satisfied" if len(tracked_counties) == len(records) else "incomplete"
     )
-    signal_blocking_items = [
-        f"{group['signal_type']}:{group['county_count']}"
-        for group in signal_gap_priority_groups
-    ]
-    source_contract_blocking_items = [
-        f"authorization_requests:{len(authorization_requests)}",
-        f"metadata_release_monitors:{len(metadata_release_monitors)}",
-        f"public_api_contract_reviews:{len(public_api_contract_reviews)}",
-    ]
+    signal_blocking_items = _signal_family_blocking_items(
+        signal_gap_priority_groups,
+        evidence_state=evidence_state,
+    )
+    source_contract_blocking_items = _source_contract_blocking_items(
+        authorization_requests=authorization_requests,
+        metadata_release_monitors=metadata_release_monitors,
+        public_api_contract_reviews=public_api_contract_reviews,
+        evidence_state=evidence_state,
+    )
+    signal_gate_satisfied = not signal_blocking_items
+    source_contract_gate_satisfied = not source_contract_blocking_items
+    hosted_evidence_satisfied = _production_gate_satisfied(
+        "hosted_worker_persisted_evidence",
+        evidence_state=evidence_state,
+    )
+    monitoring_evidence_satisfied = _production_gate_satisfied(
+        "production_monitoring_and_alerting",
+        evidence_state=evidence_state,
+    )
+    public_risk_evidence_satisfied = _production_gate_satisfied(
+        "public_risk_worker_evidence_path",
+        evidence_state=evidence_state,
+    )
     gates = [
         _audit_gate(
             gate_key="local_direct_or_tracked_request",
@@ -146,73 +211,98 @@ def _completion_audit(
         ),
         _audit_gate(
             gate_key="required_signal_families",
-            status="satisfied" if not signal_gap_priority_groups else "incomplete",
-            evidence=(
-                f"{len(signal_gap_priority_groups)} signal families remain in "
-                "signal_gap_priority_groups."
+            status="satisfied" if signal_gate_satisfied else "incomplete",
+            evidence=_signal_family_gate_evidence(
+                signal_gap_priority_groups,
+                evidence_state=evidence_state,
+                satisfied=signal_gate_satisfied,
             ),
             blocking_items=signal_blocking_items,
             next_workstream=(
                 None
-                if not signal_gap_priority_groups
+                if signal_gate_satisfied
                 else "send_official_read_api_requests"
             ),
         ),
         _audit_gate(
             gate_key="official_authorization_and_contracts",
-            status=(
-                "satisfied"
-                if not authorization_requests
-                and not metadata_release_monitors
-                and not public_api_contract_reviews
-                else "incomplete"
-            ),
-            evidence=(
-                "Formal credentials, official releases, and public read API "
-                "contracts must clear before blocked local sources can become "
-                "production adapters."
+            status="satisfied" if source_contract_gate_satisfied else "incomplete",
+            evidence=_source_contract_gate_evidence(
+                evidence_state=evidence_state,
+                satisfied=source_contract_gate_satisfied,
             ),
             blocking_items=source_contract_blocking_items,
-            next_workstream="resolve_authorization_gated_adapters",
+            next_workstream=(
+                None
+                if source_contract_gate_satisfied
+                else "resolve_authorization_gated_adapters"
+            ),
         ),
         _audit_gate(
             gate_key="hosted_worker_persisted_evidence",
-            status="incomplete",
-            evidence=(
-                "Hosted/production must prove worker-persisted evidence, raw "
-                "snapshots, staging rows, adapter runs, promoted latest rows, "
-                "and scheduler cadence per README and ADR-0010."
+            status="satisfied" if hosted_evidence_satisfied else "incomplete",
+            evidence=_production_gate_evidence(
+                "hosted_worker_persisted_evidence",
+                default_evidence=(
+                    "Hosted/production must prove worker-persisted evidence, raw "
+                    "snapshots, staging rows, adapter runs, promoted latest rows, "
+                    "and scheduler cadence per README and ADR-0010."
+                ),
+                evidence_state=evidence_state,
+                satisfied=hosted_evidence_satisfied,
             ),
-            blocking_items=list(PRODUCTION_OPERATIONAL_REQUIREMENTS),
-            next_workstream="hosted_persistence_and_scheduler_proof",
+            blocking_items=[] if hosted_evidence_satisfied else list(
+                PRODUCTION_OPERATIONAL_REQUIREMENTS
+            ),
+            next_workstream=(
+                None
+                if hosted_evidence_satisfied
+                else "hosted_persistence_and_scheduler_proof"
+            ),
         ),
         _audit_gate(
             gate_key="production_monitoring_and_alerting",
-            status="incomplete",
-            evidence=(
-                "Fresh/stale/failed source state needs hosted scrape jobs, "
-                "alert routing ownership, and monitored scheduler evidence."
+            status="satisfied" if monitoring_evidence_satisfied else "incomplete",
+            evidence=_production_gate_evidence(
+                "production_monitoring_and_alerting",
+                default_evidence=(
+                    "Fresh/stale/failed source state needs hosted scrape jobs, "
+                    "alert routing ownership, and monitored scheduler evidence."
+                ),
+                evidence_state=evidence_state,
+                satisfied=monitoring_evidence_satisfied,
             ),
-            blocking_items=[
+            blocking_items=[] if monitoring_evidence_satisfied else [
                 "hosted_alert_routing",
                 "scheduled_freshness_checks",
                 "worker_scheduler_alert_ownership",
             ],
-            next_workstream="monitoring_and_alerting_proof",
+            next_workstream=(
+                None
+                if monitoring_evidence_satisfied
+                else "monitoring_and_alerting_proof"
+            ),
         ),
         _audit_gate(
             gate_key="public_risk_worker_evidence_path",
-            status="incomplete",
-            evidence=(
-                "Hosted risk responses must use worker-persisted evidence and "
-                "query-point nearby coverage; direct official bridge calls are "
-                "local diagnostics only."
+            status="satisfied" if public_risk_evidence_satisfied else "incomplete",
+            evidence=_production_gate_evidence(
+                "public_risk_worker_evidence_path",
+                default_evidence=(
+                    "Hosted risk responses must use worker-persisted evidence and "
+                    "query-point nearby coverage; direct official bridge calls are "
+                    "local diagnostics only."
+                ),
+                evidence_state=evidence_state,
+                satisfied=public_risk_evidence_satisfied,
             ),
-            blocking_items=[
+            blocking_items=[] if public_risk_evidence_satisfied else [
                 "hosted_risk_response_worker_evidence_smoke",
                 "query_point_nearby_coverage_smoke",
             ],
-            next_workstream="hosted_risk_response_smoke",
+            next_workstream=(
+                None if public_risk_evidence_satisfied else "hosted_risk_response_smoke"
+            ),
         ),
     ]
     overall_status = (
@@ -234,14 +324,269 @@ def _completion_audit(
             "public_api_contract_review_count": len(public_api_contract_reviews),
             "live_smoke_review_count": len(live_smoke_reviews),
         },
+        "evidence_overlay": evidence_state.to_summary(),
         "gates": gates,
-        "next_priority_workstreams": [
-            "send_official_read_api_requests",
-            "resolve_authorization_gated_adapters",
-            "hosted_persistence_and_scheduler_proof",
-            "monitoring_and_alerting_proof",
-        ],
+        "next_priority_workstreams": _next_priority_workstreams(gates),
     }
+
+
+def _completion_evidence_state(
+    completion_evidence: Mapping[str, Any] | None,
+) -> CompletionEvidenceState:
+    if completion_evidence is None:
+        return CompletionEvidenceState(
+            schema_version=None,
+            captured_at=None,
+            signal_family_gap_keys=frozenset(),
+            source_contract_keys=frozenset(),
+            production_gate_keys=frozenset(),
+            validation_errors=(),
+        )
+
+    errors: list[str] = []
+    schema_version = completion_evidence.get("schema_version")
+    captured_at = completion_evidence.get("captured_at")
+    if schema_version != COMPLETION_EVIDENCE_SCHEMA_VERSION:
+        errors.append(
+            f"schema_version must be {COMPLETION_EVIDENCE_SCHEMA_VERSION!r}"
+        )
+        return CompletionEvidenceState(
+            schema_version=schema_version if isinstance(schema_version, str) else None,
+            captured_at=captured_at if isinstance(captured_at, str) else None,
+            signal_family_gap_keys=frozenset(),
+            source_contract_keys=frozenset(),
+            production_gate_keys=frozenset(),
+            validation_errors=tuple(errors),
+        )
+
+    return CompletionEvidenceState(
+        schema_version=schema_version,
+        captured_at=captured_at if isinstance(captured_at, str) else None,
+        signal_family_gap_keys=frozenset(
+            _accepted_signal_family_gap_keys(
+                completion_evidence.get("signal_family_gap_evidence"),
+                errors,
+            )
+        ),
+        source_contract_keys=frozenset(
+            _accepted_source_contract_keys(
+                completion_evidence.get("source_contract_evidence"),
+                errors,
+            )
+        ),
+        production_gate_keys=frozenset(
+            _accepted_production_gate_keys(
+                completion_evidence.get("production_gate_evidence"),
+                errors,
+            )
+        ),
+        validation_errors=tuple(errors),
+    )
+
+
+def _accepted_signal_family_gap_keys(
+    value: Any,
+    errors: list[str],
+) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for index, item in enumerate(_list_evidence(value, "signal_family_gap_evidence", errors)):
+        county = item.get("county")
+        signal_type = item.get("signal_type")
+        status = item.get("status")
+        if not _non_empty_string(county):
+            errors.append(f"signal_family_gap_evidence[{index}].county is required")
+            continue
+        if not _non_empty_string(signal_type):
+            errors.append(f"signal_family_gap_evidence[{index}].signal_type is required")
+            continue
+        if status not in ACCEPTED_SIGNAL_EVIDENCE_STATUSES:
+            continue
+        if not _non_empty_string(item.get("evidence_ref")):
+            errors.append(f"signal_family_gap_evidence[{index}].evidence_ref is required")
+            continue
+        keys.add((county, signal_type))
+    return keys
+
+
+def _accepted_source_contract_keys(
+    value: Any,
+    errors: list[str],
+) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for index, item in enumerate(_list_evidence(value, "source_contract_evidence", errors)):
+        county = item.get("county")
+        gate = item.get("gate")
+        status = item.get("status")
+        if not _non_empty_string(county):
+            errors.append(f"source_contract_evidence[{index}].county is required")
+            continue
+        if gate not in {
+            "authorization_request",
+            "metadata_release_monitor",
+            "public_api_contract_review",
+        }:
+            errors.append(f"source_contract_evidence[{index}].gate is invalid")
+            continue
+        if status not in ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES:
+            continue
+        if not _non_empty_string(item.get("evidence_ref")):
+            errors.append(f"source_contract_evidence[{index}].evidence_ref is required")
+            continue
+        keys.add((county, gate))
+    return keys
+
+
+def _accepted_production_gate_keys(
+    value: Any,
+    errors: list[str],
+) -> set[str]:
+    keys: set[str] = set()
+    for index, item in enumerate(_list_evidence(value, "production_gate_evidence", errors)):
+        gate_key = item.get("gate_key")
+        status = item.get("status")
+        if gate_key not in PRODUCTION_EVIDENCE_GATE_KEYS:
+            errors.append(f"production_gate_evidence[{index}].gate_key is invalid")
+            continue
+        if status not in ACCEPTED_PRODUCTION_GATE_EVIDENCE_STATUSES:
+            continue
+        if not _non_empty_string(item.get("evidence_ref")):
+            errors.append(f"production_gate_evidence[{index}].evidence_ref is required")
+            continue
+        keys.add(gate_key)
+    return keys
+
+
+def _list_evidence(
+    value: Any,
+    field: str,
+    errors: list[str],
+) -> list[Mapping[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        errors.append(f"{field} must be a list")
+        return []
+    items: list[Mapping[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            errors.append(f"{field}[{index}] must be an object")
+            continue
+        items.append(item)
+    return items
+
+
+def _signal_family_blocking_items(
+    signal_gap_priority_groups: list[dict[str, Any]],
+    *,
+    evidence_state: CompletionEvidenceState,
+) -> list[str]:
+    blocking_items: list[str] = []
+    for group in signal_gap_priority_groups:
+        signal_type = str(group["signal_type"])
+        missing_counties = [
+            str(county)
+            for county in group["counties"]
+            if (str(county), signal_type) not in evidence_state.signal_family_gap_keys
+        ]
+        if missing_counties:
+            blocking_items.append(f"{signal_type}:{len(missing_counties)}")
+    return blocking_items
+
+
+def _source_contract_blocking_items(
+    *,
+    authorization_requests: list[dict[str, Any]],
+    metadata_release_monitors: list[dict[str, Any]],
+    public_api_contract_reviews: list[dict[str, Any]],
+    evidence_state: CompletionEvidenceState,
+) -> list[str]:
+    required = (
+        ("authorization_requests", "authorization_request", authorization_requests),
+        ("metadata_release_monitors", "metadata_release_monitor", metadata_release_monitors),
+        (
+            "public_api_contract_reviews",
+            "public_api_contract_review",
+            public_api_contract_reviews,
+        ),
+    )
+    blocking_items: list[str] = []
+    for label, gate, items in required:
+        missing_count = sum(
+            1
+            for item in items
+            if (str(item["county"]), gate) not in evidence_state.source_contract_keys
+        )
+        if missing_count:
+            blocking_items.append(f"{label}:{missing_count}")
+    return blocking_items
+
+
+def _signal_family_gate_evidence(
+    signal_gap_priority_groups: list[dict[str, Any]],
+    *,
+    evidence_state: CompletionEvidenceState,
+    satisfied: bool,
+) -> str:
+    if satisfied:
+        return (
+            f"{len(evidence_state.signal_family_gap_keys)} accepted signal-family "
+            "evidence items cover current missing signal families."
+        )
+    return (
+        f"{len(signal_gap_priority_groups)} signal families remain in "
+        "signal_gap_priority_groups."
+    )
+
+
+def _source_contract_gate_evidence(
+    *,
+    evidence_state: CompletionEvidenceState,
+    satisfied: bool,
+) -> str:
+    if satisfied:
+        return (
+            f"{len(evidence_state.source_contract_keys)} accepted source-contract "
+            "evidence items cover current authorization and contract blockers."
+        )
+    return (
+        "Formal credentials, official releases, and public read API contracts "
+        "must clear before blocked local sources can become production adapters."
+    )
+
+
+def _production_gate_satisfied(
+    gate_key: str,
+    *,
+    evidence_state: CompletionEvidenceState,
+) -> bool:
+    return gate_key in evidence_state.production_gate_keys
+
+
+def _production_gate_evidence(
+    gate_key: str,
+    *,
+    default_evidence: str,
+    evidence_state: CompletionEvidenceState,
+    satisfied: bool,
+) -> str:
+    if satisfied:
+        return f"Accepted completion evidence supplied for {gate_key}."
+    return default_evidence
+
+
+def _next_priority_workstreams(gates: list[dict[str, Any]]) -> list[str]:
+    workstreams: dict[str, None] = {}
+    for gate in gates:
+        if gate["status"] == "satisfied":
+            continue
+        next_workstream = gate.get("next_workstream")
+        if next_workstream:
+            workstreams[str(next_workstream)] = None
+    return list(workstreams)
+
+
+def _non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _audit_gate(

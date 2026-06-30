@@ -892,6 +892,13 @@ paths:
                           metadata_release_monitor_count: 1
                           public_api_contract_review_count: 3
                           live_smoke_review_count: 0
+                        evidence_overlay:
+                          schema_version: null
+                          captured_at: null
+                          signal_family_gap_evidence_count: 0
+                          source_contract_evidence_count: 0
+                          production_gate_evidence_count: 0
+                          validation_errors: []
                         gates:
                           - gate_key: central_backbone_minimum_coverage
                             status: satisfied
@@ -920,6 +927,8 @@ paths:
                           - send_official_read_api_requests
                           - resolve_authorization_gated_adapters
                           - hosted_persistence_and_scheduler_proof
+                          - monitoring_and_alerting_proof
+                          - hosted_risk_response_smoke
                       signal_gap_priority_groups:
                         - rank: 1
                           signal_type: pump_or_gate_status
@@ -2730,11 +2739,45 @@ components:
             - "null"
       additionalProperties: false
 
+    LocalSourceCompletionEvidenceOverlay:
+      type: object
+      required:
+        - schema_version
+        - captured_at
+        - signal_family_gap_evidence_count
+        - source_contract_evidence_count
+        - production_gate_evidence_count
+        - validation_errors
+      properties:
+        schema_version:
+          type:
+            - string
+            - "null"
+        captured_at:
+          type:
+            - string
+            - "null"
+        signal_family_gap_evidence_count:
+          type: integer
+          minimum: 0
+        source_contract_evidence_count:
+          type: integer
+          minimum: 0
+        production_gate_evidence_count:
+          type: integer
+          minimum: 0
+        validation_errors:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
     LocalSourceCompletionAudit:
       type: object
       required:
         - overall_status
         - summary
+        - evidence_overlay
         - gates
         - next_priority_workstreams
       properties:
@@ -2745,6 +2788,8 @@ components:
             - incomplete
         summary:
           $ref: "#/components/schemas/LocalSourceCompletionAuditSummary"
+        evidence_overlay:
+          $ref: "#/components/schemas/LocalSourceCompletionEvidenceOverlay"
         gates:
           type: array
           items:

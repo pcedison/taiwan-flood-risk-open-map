@@ -1,0 +1,53 @@
+{
+  "schema_version": "local-source-completion-evidence/v1",
+  "captured_at": "2026-06-30T12:00:00+08:00",
+  "notes": [
+    "Template only. Store real official replies, tokens, hosted smoke transcripts, screenshots, and alert-route evidence in private ops storage.",
+    "The public audit reports only accepted evidence counts and gate status; it must not echo private evidence_ref values."
+  ],
+  "signal_family_gap_evidence": [
+    {
+      "county": "連江縣",
+      "signal_type": "flood_depth",
+      "status": "pending",
+      "evidence_ref": "private-ops://local-source/連江縣/flood_depth-official-reply"
+    }
+  ],
+  "source_contract_evidence": [
+    {
+      "county": "金門縣",
+      "gate": "authorization_request",
+      "status": "pending",
+      "evidence_ref": "private-ops://local-source/金門縣/kwis-read-token-approval"
+    },
+    {
+      "county": "連江縣",
+      "gate": "metadata_release_monitor",
+      "status": "pending",
+      "evidence_ref": "private-ops://local-source/連江縣/live-read-api-release"
+    },
+    {
+      "county": "屏東縣",
+      "gate": "public_api_contract_review",
+      "status": "pending",
+      "evidence_ref": "private-ops://local-source/屏東縣/pteoc-read-api-contract"
+    }
+  ],
+  "production_gate_evidence": [
+    {
+      "gate_key": "hosted_worker_persisted_evidence",
+      "status": "pending",
+      "evidence_ref": "private-ops://zeabur/worker-persisted-evidence-smoke"
+    },
+    {
+      "gate_key": "production_monitoring_and_alerting",
+      "status": "pending",
+      "evidence_ref": "private-ops://zeabur/source-freshness-alert-routing"
+    },
+    {
+      "gate_key": "public_risk_worker_evidence_path",
+      "status": "pending",
+      "evidence_ref": "private-ops://zeabur/public-risk-worker-evidence-smoke"
+    }
+  ]
+}
