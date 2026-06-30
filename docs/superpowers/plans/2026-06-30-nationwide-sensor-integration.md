@@ -1113,6 +1113,33 @@ draft is intentionally all `pending` and does not include hosted production
 gate evidence; Zeabur worker persistence, monitoring, and public-risk smoke
 still require real private ops evidence before the completion audit can pass.
 
+## Task 35: Production Public Smoke Evidence Artifact
+
+**Files:**
+- Modify: `scripts/taiwan_wide_public_beta_smoke.py`
+- Add: `tests/test_taiwan_wide_public_beta_smoke.py`
+- Add: `docs/reviews/production-public-beta-smoke-2026-06-30-f08c6346.json`
+
+**Interfaces:**
+- Consumes: hosted public `/health`, `/v1/geocode`, and `/v1/risk/assess`.
+- Produces: a repeatable JSON smoke artifact recording production
+  `deployment_sha`, sample count, failures, and public risk-query sample
+  coverage.
+
+- [x] Write a failing test for `--evidence-output`.
+- [x] Add JSON evidence output without changing the pass/fail semantics of the
+  existing smoke command.
+- [x] Run the smoke against `https://floodrisk.cc` after PR #13 was merged to
+  `main` and Zeabur reported production deployment success.
+
+Completed 2026-06-30: `main` advanced from `7e92cf6` to merge commit
+`f08c6346`, Zeabur reported a successful production deployment for that SHA,
+`/health` and `/ready` both returned `deployment_sha=f08c6346...`, and the
+Taiwan-wide public smoke passed 44 county/town samples. This proves deployment
+and public query smoke for the merge, but does not satisfy the remaining
+worker-persisted source evidence, raw snapshot retention, scheduler cadence,
+hosted egress, or admin freshness/alerting gates.
+
 ## Completion Gates
 
 The full objective is complete only when:

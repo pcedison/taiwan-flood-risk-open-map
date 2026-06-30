@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Assess every bundled Taiwan township/district. Use sparingly against hosted deployments.",
     )
     parser.add_argument("--timeout-seconds", type=float, default=20.0)
+    parser.add_argument(
+        "--evidence-output",
+        help="Optional JSON file capturing deployment SHA and sampled public risk-query smoke evidence.",
+    )
     args = parser.parse_args(argv)
 
     base_url = args.base_url.rstrip("/")
@@ -49,9 +53,16 @@ def main(argv: list[str] | None = None) -> int:
         all_towns=args.all_towns,
     )
     failures: list[str] = []
+    evidence_samples: list[dict[str, Any]] = []
+    health_evidence: dict[str, Any] = {"status_code": None}
     checked = 0
 
     health = request_json("GET", f"{base_url}/health", timeout_seconds=args.timeout_seconds)
+    health_evidence = {
+        "status_code": health.status_code,
+        "version": health.payload.get("version"),
+        "deployment_sha": health.payload.get("deployment_sha"),
+    }
     if health.status_code != 200:
         failures.append(f"/health returned HTTP {health.status_code}: {health.error or health.payload}")
     else:
@@ -67,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
                 base_url,
                 sample,
                 timeout_seconds=args.timeout_seconds,
+                evidence_samples=evidence_samples,
             )
         )
         checked += 1
@@ -75,9 +87,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"TAIWAN_WIDE_PUBLIC_BETA_SMOKE failed | checked={checked}")
         for failure in failures:
             print(f"- {failure}")
+        _write_evidence_output(
+            args.evidence_output,
+            base_url=base_url,
+            status="failed",
+            health=health_evidence,
+            sample_count=checked,
+            failures=failures,
+            samples=evidence_samples,
+        )
         return 1
 
     print(f"TAIWAN_WIDE_PUBLIC_BETA_SMOKE passed | checked={checked}")
+    _write_evidence_output(
+        args.evidence_output,
+        base_url=base_url,
+        status="passed",
+        health=health_evidence,
+        sample_count=checked,
+        failures=[],
+        samples=evidence_samples,
+    )
     return 0
 
 
@@ -108,6 +138,7 @@ def check_sample(
     sample: TaiwanAdminArea,
     *,
     timeout_seconds: float,
+    evidence_samples: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     failures: list[str] = []
     geocode = request_json(
@@ -172,6 +203,18 @@ def check_sample(
             f"risk={risk.payload.get('realtime', {}).get('level')}/"
             f"{risk.payload.get('historical', {}).get('level')}"
         )
+        if evidence_samples is not None:
+            evidence_samples.append(
+                {
+                    "level": sample.level,
+                    "name": sample.name,
+                    "county": sample.county,
+                    "source": candidate.get("source"),
+                    "precision": candidate.get("precision"),
+                    "risk_realtime_level": risk.payload.get("realtime", {}).get("level"),
+                    "risk_historical_level": risk.payload.get("historical", {}).get("level"),
+                }
+            )
     return failures
 
 
@@ -187,6 +230,32 @@ def require_risk_fields(payload: dict[str, Any], label: str) -> list[str]:
     if not isinstance(payload.get("evidence"), list):
         failures.append(f"{label} risk evidence should be a list")
     return failures
+
+
+def _write_evidence_output(
+    output_path: str | None,
+    *,
+    base_url: str,
+    status: str,
+    health: dict[str, Any],
+    sample_count: int,
+    failures: list[str],
+    samples: list[dict[str, Any]],
+) -> None:
+    if output_path is None:
+        return
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "taiwan-wide-public-beta-smoke/v1",
+        "base_url": base_url,
+        "status": status,
+        "health": health,
+        "sample_count": sample_count,
+        "failures": failures,
+        "samples": samples,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 class JsonResponse:
