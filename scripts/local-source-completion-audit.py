@@ -27,6 +27,23 @@ from app.domain.realtime.local_source_coverage import (  # noqa: E402
 
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 ACCEPTED_PRODUCTION_GATE_EVIDENCE_STATUSES = {"accepted", "satisfied", "verified"}
+HOSTED_SOURCE_FRESHNESS_SCHEMA_VERSION = "hosted-source-freshness-smoke/v1"
+HOSTED_WORKER_GATE_KEY = "hosted_worker_persisted_evidence"
+HOSTED_SOURCE_FRESHNESS_REQUIREMENTS = {
+    "freshness_policy",
+    "worker_persisted_evidence_path",
+}
+REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS = (
+    "official.cwa.rainfall",
+    "official.cwa.tide_level",
+    "official.wra.water_level",
+    "official.ncdr.cap",
+    "official.wra_iow.flood_depth",
+    "official.civil_iot.flood_sensor",
+    "official.civil_iot.sewer_water_level",
+    "official.civil_iot.pump_water_level",
+    "official.civil_iot.gate_water_level",
+)
 
 
 def main() -> int:
@@ -166,9 +183,14 @@ def _validate_local_evidence_refs(completion_evidence: dict[str, Any]) -> None:
             continue
         if item.get("status") not in ACCEPTED_PRODUCTION_GATE_EVIDENCE_STATUSES:
             continue
-        _validate_local_evidence_ref(
+        payload = _validate_local_evidence_ref(
             item.get("evidence_ref"),
             field=f"production_gate_evidence[{evidence_index}].evidence_ref",
+        )
+        _validate_hosted_source_backbone_evidence(
+            item,
+            evidence_index=evidence_index,
+            payload=payload,
         )
         requirement_evidence = item.get("requirement_evidence")
         if not isinstance(requirement_evidence, list):
@@ -186,12 +208,12 @@ def _validate_local_evidence_refs(completion_evidence: dict[str, Any]) -> None:
             )
 
 
-def _validate_local_evidence_ref(value: Any, *, field: str) -> None:
+def _validate_local_evidence_ref(value: Any, *, field: str) -> dict[str, Any] | None:
     if not isinstance(value, str) or not value.strip():
-        return
+        return None
     evidence_ref = value.strip()
     if "://" in evidence_ref:
-        return
+        return None
 
     path_part, pointer = _split_evidence_ref(evidence_ref)
     if not path_part:
@@ -214,6 +236,63 @@ def _validate_local_evidence_ref(value: Any, *, field: str) -> None:
         )
     if pointer:
         _resolve_json_pointer(payload, pointer, field=field, evidence_ref=evidence_ref)
+    return payload
+
+
+def _validate_hosted_source_backbone_evidence(
+    item: dict[str, Any],
+    *,
+    evidence_index: int,
+    payload: dict[str, Any] | None,
+) -> None:
+    if item.get("gate_key") != HOSTED_WORKER_GATE_KEY or payload is None:
+        return
+    if payload.get("schema_version") != HOSTED_SOURCE_FRESHNESS_SCHEMA_VERSION:
+        return
+
+    requirements = item.get("satisfied_requirements")
+    if not isinstance(requirements, list):
+        return
+    if HOSTED_SOURCE_FRESHNESS_REQUIREMENTS.isdisjoint(str(req) for req in requirements):
+        return
+
+    required_keys = _adapter_key_set(payload.get("required_adapter_keys"))
+    checked_keys = _checked_source_adapter_key_set(payload.get("checked_sources"))
+    expected_keys = set(REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS)
+    missing_required = sorted(expected_keys - required_keys)
+    missing_checked = sorted(expected_keys - checked_keys)
+    if not missing_required and not missing_checked:
+        return
+
+    details = []
+    if missing_required:
+        details.append(f"missing required_adapter_keys: {', '.join(missing_required)}")
+    if missing_checked:
+        details.append(f"missing checked_sources: {', '.join(missing_checked)}")
+    raise SystemExit(
+        "production_gate_evidence"
+        f"[{evidence_index}].evidence_ref: hosted source freshness evidence "
+        f"must cover the full hosted realtime backbone; {'; '.join(details)}"
+    )
+
+
+def _adapter_key_set(value: Any) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {str(item) for item in value if isinstance(item, str) and item.strip()}
+
+
+def _checked_source_adapter_key_set(value: Any) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    keys: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        adapter_key = item.get("adapter_key")
+        if isinstance(adapter_key, str) and adapter_key.strip():
+            keys.add(adapter_key)
+    return keys
 
 
 def _split_evidence_ref(evidence_ref: str) -> tuple[str, str | None]:
