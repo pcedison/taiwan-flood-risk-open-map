@@ -302,6 +302,25 @@ level evidence. The admin-only `hosted_source_freshness_smoke.py` can prove
 worker manifest remains the place to record raw snapshot retention, scheduler
 cadence, hosted egress review, and any private storage/adapter evidence.
 
+If `hosted_source_freshness_smoke.py` is used for the public-safe admin
+freshness and worker-persisted path requirements, operators can keep the
+remaining private policy/ops proof in a smaller
+`hosted-worker-policy-evidence-input/v1` manifest:
+
+```powershell
+python scripts\hosted_worker_policy_evidence.py `
+  --manifest-json <private-hosted-worker-policy-manifest.json> `
+  --evidence-output <private-hosted-worker-policy-evidence.json> `
+  --completion-evidence-output <private-hosted-worker-policy-completion-evidence.json>
+```
+
+This policy manifest covers only `raw_snapshot_retention_policy`,
+`monitored_scheduler_cadence`, and `hosted_egress_review`. Merge its completion
+overlay with the hosted source-freshness overlay in
+`local-source-completion-audit.py`; the hosted worker gate is satisfied only
+when all five requirement-level evidence entries are present across the merged
+overlays.
+
 For the `production_monitoring_and_alerting` gate, fill a private monitoring
 manifest with one reviewed evidence block per required requirement:
 

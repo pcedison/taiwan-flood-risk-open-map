@@ -1452,6 +1452,34 @@ flood-depth, or sewer-level coverage; the audit is accepted only when real
 private official replies, authorization-gated adapter evidence, production
 adapter evidence, or official-unavailable decisions are supplied.
 
+## Task 46: Hosted Worker Policy Evidence Overlay
+
+**Files:**
+- Add: `scripts/hosted_worker_policy_evidence.py`
+- Add: `tests/test_hosted_worker_policy_evidence.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+
+**Interfaces:**
+- Consumes: a private hosted worker policy manifest for raw snapshot
+  retention, scheduler cadence, and hosted egress review.
+- Produces: a mergeable fail-closed `local-source-completion-evidence/v1`
+  overlay for the remaining `hosted_worker_persisted_evidence` requirements
+  not proven by hosted source freshness smoke.
+
+- [x] Write failing tests requiring valid policy evidence to produce accepted
+  requirement-level completion overlay.
+- [x] Reject incomplete manifests that lack verified status, retention days,
+  scheduler cadence, egress reviewer, or requirement evidence.
+- [x] Support PowerShell UTF-8 BOM JSON manifests.
+- [x] Document how to merge the policy overlay with the hosted source-freshness
+  overlay.
+
+Completed 2026-06-30: operators can now split hosted-worker proof into
+public-safe admin freshness evidence plus private policy/ops evidence. This
+does not itself prove hosted worker persistence or policy acceptance; the audit
+is accepted only when real hosted source-freshness and private policy evidence
+are supplied.
+
 ## Completion Gates
 
 The full objective is complete only when:
