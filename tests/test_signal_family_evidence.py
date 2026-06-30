@@ -13,6 +13,13 @@ AUDIT_SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
 PRIVATE_HANDOFF_RUNBOOK = (
     REPO_ROOT / "docs" / "runbooks" / "private-production-evidence-handoff.md"
 )
+GENERATED_TEMPLATE = (
+    REPO_ROOT
+    / "docs"
+    / "data-sources"
+    / "local"
+    / "generated-signal-family-evidence-template.json"
+)
 sys.path.insert(0, str(API_APP))
 
 from app.domain.realtime.local_source_action_plan import (  # noqa: E402
@@ -155,10 +162,70 @@ def test_signal_family_evidence_accepts_powershell_utf8_bom_manifest(
     assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "passed"
 
 
+def test_signal_family_evidence_writes_pending_manifest_template(
+    tmp_path: Path,
+) -> None:
+    template_output = tmp_path / "signal-family-template.json"
+
+    result = _run_script(
+        "--template-output",
+        str(template_output),
+        "--captured-at",
+        "2026-07-01T00:20:00+08:00",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    template = json.loads(template_output.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "signal-family-evidence-input/v1"
+    assert template["captured_at"] == "2026-07-01T00:20:00+08:00"
+    assert template["template_status"] == "pending_official_evidence"
+    assert len(template["signal_family_gap_evidence"]) == len(_signal_family_entries())
+
+    first = template["signal_family_gap_evidence"][0]
+    assert first["status"] == "pending"
+    assert first["reviewed_at"] == "REPLACE_WITH_REVIEWED_AT"
+    assert first["accepted_statuses"] == sorted(ACCEPTED_SIGNAL_EVIDENCE_STATUSES)
+    assert first["evidence_ref"].startswith("private-ops://local-source/signal-gap/")
+
+    evidence_output = tmp_path / "signal-family-evidence.json"
+    validation = _run_script(
+        "--manifest-json",
+        str(template_output),
+        "--evidence-output",
+        str(evidence_output),
+    )
+
+    assert validation.returncode == 1
+    assert "status must be one of" in validation.stdout
+    assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_checked_in_signal_family_template_matches_current_backlog() -> None:
+    template = json.loads(GENERATED_TEMPLATE.read_text(encoding="utf-8"))
+    entries = template["signal_family_gap_evidence"]
+    expected_pairs = [
+        (entry["county"], entry["signal_type"]) for entry in _signal_family_entries()
+    ]
+
+    assert template["schema_version"] == "signal-family-evidence-input/v1"
+    assert template["template_status"] == "pending_official_evidence"
+    assert [(entry["county"], entry["signal_type"]) for entry in entries] == expected_pairs
+
+    for entry in entries:
+        assert entry["status"] == "pending"
+        assert entry["accepted_statuses"] == sorted(ACCEPTED_SIGNAL_EVIDENCE_STATUSES)
+        assert entry["reviewed_at"] == "REPLACE_WITH_REVIEWED_AT"
+        assert entry["evidence_ref"].startswith(
+            "private-ops://local-source/signal-gap/"
+        )
+
+
 def test_private_handoff_runbook_documents_signal_family_evidence_cli() -> None:
     runbook = PRIVATE_HANDOFF_RUNBOOK.read_text(encoding="utf-8")
 
     assert "scripts\\signal_family_evidence.py" in runbook
+    assert "--template-output <private-signal-family-manifest-template.json>" in runbook
     assert "--manifest-json <private-signal-family-manifest.json>" in runbook
     assert "signal-family-evidence-input/v1" in runbook
     assert "production_adapter" in runbook

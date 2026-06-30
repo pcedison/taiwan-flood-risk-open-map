@@ -44,7 +44,18 @@ def main(argv: list[str] | None = None) -> int:
             "optionally emit a local-source-completion-evidence/v1 overlay."
         )
     )
-    parser.add_argument("--manifest-json", required=True)
+    parser.add_argument("--manifest-json")
+    parser.add_argument(
+        "--captured-at",
+        help="Optional ISO 8601 timestamp for generated manifest templates.",
+    )
+    parser.add_argument(
+        "--template-output",
+        help=(
+            "Optional path for a pending source-contract-evidence-input/v1 "
+            "manifest template covering every current authorization/contract item."
+        ),
+    )
     parser.add_argument(
         "--evidence-output",
         help="Optional normalized source-contract-evidence/v1 artifact path.",
@@ -57,6 +68,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if args.template_output:
+        captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
+        _write_json(
+            args.template_output,
+            build_manifest_template(captured_at=captured_at),
+        )
+        print("SOURCE_CONTRACT_EVIDENCE_TEMPLATE written")
+        return 0
+
+    if not args.manifest_json:
+        parser.error("--manifest-json is required unless --template-output is used")
 
     manifest = _load_json(Path(args.manifest_json))
     captured_at = _captured_at(manifest)
@@ -136,6 +159,33 @@ def build_completion_evidence_overlay(
     }
 
 
+def build_manifest_template(*, captured_at: str) -> dict[str, Any]:
+    return {
+        "schema_version": INPUT_SCHEMA_VERSION,
+        "captured_at": captured_at,
+        "template_status": "pending_official_evidence",
+        "notes": [
+            "Fill this template only after authorization, API contract, metadata release, or official-unavailable evidence is accepted.",
+            "Keep filled private evidence refs and official correspondence in private ops storage; do not commit completed private evidence.",
+            "The default pending status is intentionally rejected by this CLI and by the completion audit.",
+        ],
+        "source_contract_evidence": [
+            {
+                "county": county,
+                "gate": gate,
+                "status": "pending",
+                "accepted_statuses": sorted(ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES),
+                "evidence_ref": (
+                    f"private-ops://local-source/source-contract/{county}/{gate}"
+                ),
+                "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+                "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM",
+            }
+            for county, gate in _ordered_required_source_contract_keys()
+        ],
+    }
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -154,11 +204,15 @@ def _captured_at(manifest: Mapping[str, Any]) -> str:
 
 
 def _required_source_contract_keys() -> set[tuple[str, str]]:
+    return set(_ordered_required_source_contract_keys())
+
+
+def _ordered_required_source_contract_keys() -> list[tuple[str, str]]:
     plan = build_local_source_action_plan(list_local_source_coverage())
-    keys: set[tuple[str, str]] = set()
+    keys: list[tuple[str, str]] = []
     for gate, bucket in GATE_BUCKETS:
         for item in plan[bucket]:
-            keys.add((str(item["county"]), gate))
+            keys.append((str(item["county"]), gate))
     return keys
 
 

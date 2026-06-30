@@ -1955,6 +1955,40 @@ local read API requests, authorization, public API contract follow-up, or
 official-unavailable evidence rather than promoting a newly discovered central
 IoT source.
 
+## Task 62: Pending Evidence Manifest Templates
+
+**Files:**
+- Modify: `scripts/signal_family_evidence.py`
+- Modify: `scripts/source_contract_evidence.py`
+- Modify: `tests/test_signal_family_evidence.py`
+- Modify: `tests/test_source_contract_evidence.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Add: `docs/data-sources/local/generated-signal-family-evidence-template.json`
+- Add: `docs/data-sources/local/generated-source-contract-evidence-template.json`
+
+**Interfaces:**
+- Consumes: current `signal_gap_priority_groups`, `authorization_requests`,
+  `metadata_release_monitors`, and `public_api_contract_reviews`.
+- Produces: public-safe pending manifest templates that operators can copy
+  into private ops storage, fill with accepted evidence refs, and validate
+  before emitting completion overlays.
+
+- [x] Write failing CLI tests proving both evidence tools can generate a
+  complete pending manifest template and that the pending template is rejected
+  as completion evidence.
+- [x] Add `--template-output` and optional `--captured-at` to
+  `signal_family_evidence.py` and `source_contract_evidence.py`.
+- [x] Generate public-safe templates for the current 17 signal-family gaps and
+  6 source authorization/contract items.
+- [x] Document the template generation step in the private production evidence
+  handoff runbook.
+
+Completed 2026-07-01: operators now have reproducible pending manifest
+templates for every current unresolved local-source completion item. The
+templates intentionally fail validation until each entry is replaced with
+accepted official reply, production adapter, authorization-gated adapter,
+contract verification, metadata release, or official-unavailable evidence.
+
 ## Completion Gates
 
 The full objective is complete only when:

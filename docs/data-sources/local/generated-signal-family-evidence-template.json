@@ -1,0 +1,250 @@
+{
+  "schema_version": "signal-family-evidence-input/v1",
+  "captured_at": "2026-07-01T00:30:00+08:00",
+  "template_status": "pending_official_evidence",
+  "notes": [
+    "Fill this template only after official reply, production adapter smoke, authorization-gated adapter evidence, or official-unavailable evidence is accepted.",
+    "Keep filled private evidence refs and official correspondence in private ops storage; do not commit completed private evidence.",
+    "The default pending status is intentionally rejected by this CLI and by the completion audit."
+  ],
+  "signal_family_gap_evidence": [
+    {
+      "county": "連江縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/連江縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "金門縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/金門縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "臺東縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/臺東縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "苗栗縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/苗栗縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "澎湖縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/澎湖縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "南投縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/南投縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "嘉義市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "基隆市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/基隆市/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "宜蘭縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/宜蘭縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "新北市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/新北市/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "新竹縣",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/新竹縣/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "桃園市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "臺中市",
+      "signal_type": "pump_or_gate_status",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/臺中市/pump_or_gate_status",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "連江縣",
+      "signal_type": "flood_depth",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/連江縣/flood_depth",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "澎湖縣",
+      "signal_type": "flood_depth",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/澎湖縣/flood_depth",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "臺北市",
+      "signal_type": "flood_depth",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/臺北市/flood_depth",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "連江縣",
+      "signal_type": "sewer_water_level",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorization_gated_adapter",
+        "official_unavailable",
+        "production_adapter"
+      ],
+      "evidence_ref": "private-ops://local-source/signal-gap/連江縣/sewer_water_level",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    }
+  ]
+}

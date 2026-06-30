@@ -13,6 +13,13 @@ AUDIT_SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
 PRIVATE_HANDOFF_RUNBOOK = (
     REPO_ROOT / "docs" / "runbooks" / "private-production-evidence-handoff.md"
 )
+GENERATED_TEMPLATE = (
+    REPO_ROOT
+    / "docs"
+    / "data-sources"
+    / "local"
+    / "generated-source-contract-evidence-template.json"
+)
 sys.path.insert(0, str(API_APP))
 
 from app.domain.realtime.local_source_action_plan import (  # noqa: E402
@@ -155,11 +162,77 @@ def test_source_contract_evidence_accepts_powershell_utf8_bom_manifest(
     assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "passed"
 
 
+def test_source_contract_evidence_writes_pending_manifest_template(
+    tmp_path: Path,
+) -> None:
+    template_output = tmp_path / "source-contract-template.json"
+
+    result = _run_script(
+        "--template-output",
+        str(template_output),
+        "--captured-at",
+        "2026-07-01T00:25:00+08:00",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    template = json.loads(template_output.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "source-contract-evidence-input/v1"
+    assert template["captured_at"] == "2026-07-01T00:25:00+08:00"
+    assert template["template_status"] == "pending_official_evidence"
+    assert len(template["source_contract_evidence"]) == len(_source_contract_entries())
+
+    first = template["source_contract_evidence"][0]
+    assert first["status"] == "pending"
+    assert first["reviewed_at"] == "REPLACE_WITH_REVIEWED_AT"
+    assert first["accepted_statuses"] == sorted(
+        ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES
+    )
+    assert first["evidence_ref"].startswith(
+        "private-ops://local-source/source-contract/"
+    )
+
+    evidence_output = tmp_path / "source-contract-evidence.json"
+    validation = _run_script(
+        "--manifest-json",
+        str(template_output),
+        "--evidence-output",
+        str(evidence_output),
+    )
+
+    assert validation.returncode == 1
+    assert "status must be one of" in validation.stdout
+    assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_checked_in_source_contract_template_matches_current_backlog() -> None:
+    template = json.loads(GENERATED_TEMPLATE.read_text(encoding="utf-8"))
+    entries = template["source_contract_evidence"]
+    expected_pairs = [
+        (entry["county"], entry["gate"]) for entry in _source_contract_entries()
+    ]
+
+    assert template["schema_version"] == "source-contract-evidence-input/v1"
+    assert template["template_status"] == "pending_official_evidence"
+    assert [(entry["county"], entry["gate"]) for entry in entries] == expected_pairs
+
+    for entry in entries:
+        assert entry["status"] == "pending"
+        assert entry["accepted_statuses"] == sorted(
+            ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES
+        )
+        assert entry["reviewed_at"] == "REPLACE_WITH_REVIEWED_AT"
+        assert entry["evidence_ref"].startswith(
+            "private-ops://local-source/source-contract/"
+        )
+
+
 def test_private_handoff_runbook_documents_source_contract_evidence_cli() -> None:
     runbook = PRIVATE_HANDOFF_RUNBOOK.read_text(encoding="utf-8")
 
     assert "scripts\\source_contract_evidence.py" in runbook
     assert "source-contract-dispatch-evidence" in runbook
+    assert "--template-output <private-source-contract-manifest-template.json>" in runbook
     assert "--manifest-json <private-source-contract-manifest.json>" in runbook
     assert "source-contract-evidence-input/v1" in runbook
     assert "authorization_request" in runbook

@@ -1,0 +1,102 @@
+{
+  "schema_version": "source-contract-evidence-input/v1",
+  "captured_at": "2026-07-01T00:30:00+08:00",
+  "template_status": "pending_official_evidence",
+  "notes": [
+    "Fill this template only after authorization, API contract, metadata release, or official-unavailable evidence is accepted.",
+    "Keep filled private evidence refs and official correspondence in private ops storage; do not commit completed private evidence.",
+    "The default pending status is intentionally rejected by this CLI and by the completion audit."
+  ],
+  "source_contract_evidence": [
+    {
+      "county": "花蓮縣",
+      "gate": "authorization_request",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "evidence_ref": "private-ops://local-source/source-contract/花蓮縣/authorization_request",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "金門縣",
+      "gate": "authorization_request",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "evidence_ref": "private-ops://local-source/source-contract/金門縣/authorization_request",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "連江縣",
+      "gate": "metadata_release_monitor",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "evidence_ref": "private-ops://local-source/source-contract/連江縣/metadata_release_monitor",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "苗栗縣",
+      "gate": "public_api_contract_review",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "evidence_ref": "private-ops://local-source/source-contract/苗栗縣/public_api_contract_review",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "屏東縣",
+      "gate": "public_api_contract_review",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "evidence_ref": "private-ops://local-source/source-contract/屏東縣/public_api_contract_review",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    },
+    {
+      "county": "臺東縣",
+      "gate": "public_api_contract_review",
+      "status": "pending",
+      "accepted_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "evidence_ref": "private-ops://local-source/source-contract/臺東縣/public_api_contract_review",
+      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
+    }
+  ]
+}
