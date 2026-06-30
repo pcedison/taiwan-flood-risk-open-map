@@ -1273,6 +1273,41 @@ artifacts. The current `b5f0fcf...` hosted public-risk artifact satisfies only
 authorization/contract blockers, hosted worker raw snapshot/scheduler/egress
 requirements, or monitoring/alerting requirements.
 
+## Task 40: Signal-Gap Discovery Evidence Artifacts
+
+**Files:**
+- Modify: `scripts/local-source-discovery-monitor.py`
+- Add: `tests/test_local_source_discovery_monitor_cli.py`
+- Add: `docs/reviews/signal-gap-discovery-refresh-2026-06-30-pump-or-gate.json`
+- Add: `docs/reviews/signal-gap-discovery-refresh-2026-06-30-flood-depth.json`
+- Add: `docs/reviews/signal-gap-discovery-refresh-2026-06-30-sewer-water-level.json`
+- Modify: `docs/data-sources/local/2026-06-28-local-source-verification-log.md`
+- Modify: `docs/data-sources/local/official-request-packets.md`
+
+**Interfaces:**
+- Consumes: current data.gov.tw dataset export through
+  `scripts/local-source-discovery-monitor.py`.
+- Produces: repeatable UTF-8 `local-source-discovery-refresh/v1` evidence
+  artifacts for the current required signal-family gap batches.
+
+- [x] Write failing CLI tests requiring `--captured-at` and `--evidence-output`
+  to produce a UTF-8 evidence artifact with a clear discovery conclusion.
+- [x] Add `--captured-at` and `--evidence-output` to the discovery monitor CLI
+  without changing classifier behavior or `--fail-on-candidate` semantics.
+- [x] Re-run the `pump_or_gate_status`, `flood_depth`, and
+  `sewer_water_level` batches against the current data.gov.tw export with
+  `--fail-on-candidate`.
+- [x] Capture reviewed discovery artifacts under `docs/reviews/`.
+
+Completed 2026-06-30: the refreshed evidence artifacts show 0
+`candidate_live_read_api` rows for all three current signal-family gap batches:
+`pump_or_gate_status` has 9 metadata-only candidates, `flood_depth` has 2
+metadata-only candidates, and `sewer_water_level` has 11 metadata-only
+candidates. This does not satisfy the signal-family completion gate; it
+prevents starting adapters from stale or false-live discovery output and keeps
+the next work focused on official read-API follow-up, authorization/contracts,
+or future release-monitor hits.
+
 ## Completion Gates
 
 The full objective is complete only when:

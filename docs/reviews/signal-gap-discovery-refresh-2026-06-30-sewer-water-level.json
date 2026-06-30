@@ -1,0 +1,319 @@
+{
+  "captured_at": "2026-06-30T14:00:00+08:00",
+  "conclusion": "no_candidate_live_read_api_found",
+  "discovery": {
+    "candidate_count": 11,
+    "candidates": [
+      {
+        "county": "臺中市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "120801",
+        "dataset_url": null,
+        "field_description": "資料集名稱;資料格式;資料集語系;下載網址;上架日期;資料資源欄位",
+        "matched_keywords": [
+          "雨水下水道"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=741e190d-cbb5-4061-aa56-c29c33984614"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "臺中市雨水下水道人孔圖",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "桃園市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "25924",
+        "dataset_url": null,
+        "field_description": "No;MH_NUM;X;Y;ROAD_NAME;MH_DEP;MH_TYP;MH_LENG;MH_WIDTH;ROAD_WID;FALL_MAX;MH_TLE;MH_GRD;MH_GRD_DEP;CITY_ID;TOWN_ID;CONS_ID;CONS_TIT;CONS_DEPT;CONS_NAME;CONS_DATE;KEYIN_DATE;MH_PIC;MH_EXVIEW;MH_MARK;NOTE;THETA;MODEL;MHN_TYP;MHN_LENG;MHN_WID;BH_LENG;BH_WID;BH_HGT",
+        "matched_keywords": [
+          "雨水下水道",
+          "位置"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "ZIP"
+        ],
+        "resource_urls": [
+          "https://opendata.tycg.gov.tw/api/dataset/829b49f0-54fc-447f-9036-c10d2b4fdeee/resource/4eaa36dc-205a-4f9f-84d3-477cb69bef72/download;https://opendata.tycg.gov.tw/api/dataset/829b49f0-54fc-447f-9036-c10d2b4fdeee/resource/e273d744-0dbc-4cd6-9d62-b7619b8c4c4a/download"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "桃園市全區雨水下水道人孔位置分佈圖",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "嘉義市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "52454",
+        "dataset_url": null,
+        "field_description": "ID;NUM;ORGAN;OP_CODE;BURY_DATE;B_NAME;B_TYPE;HEIGHT;D_HEIGHT;DIAMETER;DIAMETER1;DISTANCE;STATE;DEPTH",
+        "matched_keywords": [
+          "雨水下水道",
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "SHP"
+        ],
+        "resource_urls": [
+          "https://data.chiayi.gov.tw/opendata/api/getResource?oid=a682ccbe-29f2-4793-b6fe-622a828f0b29&rid=f3069b49-83f0-44b7-bb76-2d41a8fc361e"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "嘉義市雨水下水道人手孔圖資",
+        "update_frequency": "每1年"
+      },
+      {
+        "county": "臺中市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "84496",
+        "dataset_url": null,
+        "field_description": "編號;使用說明;檔案內容;檔案格式範圍;檔案網址;縣市別代碼;檔案說明",
+        "matched_keywords": [
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=2f59b898-4db1-4166-9c33-2230f3934806"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "臺中市公共設施管線之路面設施物圖資",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "桃園市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "149663",
+        "dataset_url": null,
+        "field_description": "類別碼;識別碼",
+        "matched_keywords": [
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [],
+        "resource_urls": [
+          "https://opendata.tycg.gov.tw/api/dataset/b4c22cc5-c376-40d2-a3fa-0697ef84f63c/resource/82a16d92-a9ee-4188-9646-c9ec1d0a43d8/download"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "桃園市公共管線圖資-下水道系統管線",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "臺南市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "176202",
+        "dataset_url": null,
+        "field_description": "PI_NUM;US_MH;DS_MH;SEW_CAT;PI_TYP;PI_LENG;PI_MAT;PI_CAT;PI_CURV;PI_INR;PI_LIF;dia;PI_THICK;SLOP;US_BLE;DS_BLE;CITY_ID;TOWN_ID;cons_id;cons_tit;CONS_NAME;CONS_DATE;KEYIN_DATE;NOTE",
+        "matched_keywords": [
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "SHP"
+        ],
+        "resource_urls": [
+          "https://data.tainan.gov.tw/Resource/d9e83f68-8f1e-49b8-874c-02346f862285?fileId=68d7d856-fb77-4642-9253-62413ab66d44&importFileType=ShapeFile&handler=DLGisFile"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "臺南市111年污水下水道管線圖資",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "桃園市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "25914",
+        "dataset_url": null,
+        "field_description": "No;SSEW_CAT;PI_NUM;US_MH;DS_MH;PI_TYP;PI_WIDT;PI_WIDB;PI_HEI;PI_LENG;PI_MAT;PI_THICK;PI_SLOP;DES_FLOW;DES_VELO;US_BLE;DS_BLE;CATCH_NUM;CITY_ID;TOWN_ID;CONS_ID;CONS_TIT;CONS_DEPT;CONS_NAME;CONS_DATE;KEYIN_DATE;NOTE",
+        "matched_keywords": [
+          "雨水下水道"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "ZIP"
+        ],
+        "resource_urls": [
+          "https://opendata.tycg.gov.tw/api/dataset/afddf360-578c-451f-8951-7fc4ef927c89/resource/ccfd4a1f-1e11-4174-81f4-9385a85e9334/download;https://opendata.tycg.gov.tw/api/dataset/afddf360-578c-451f-8951-7fc4ef927c89/resource/4734b9d0-22b8-4829-b5b4-1faf746486f3/download"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "桃園市全區雨水下水道管線分布圖",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "嘉義市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "52453",
+        "dataset_url": null,
+        "field_description": "ID;NUM;ORGAN;OP_CODE;P_NAME;MM_IN_CM;WIDTH;HEIGHT;MATERIAL;MIN_DP;MAX_DP;P_LONG;P_TYPE;BURY_DATE",
+        "matched_keywords": [
+          "雨水下水道",
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "SHP"
+        ],
+        "resource_urls": [
+          "https://data.chiayi.gov.tw/opendata/api/getResource?oid=470b1222-62cb-4170-ae6b-18032926e31c&rid=b7208631-5815-4426-a40b-931068c6e275"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "嘉義市雨水下水道管線圖資",
+        "update_frequency": "每1年"
+      },
+      {
+        "county": "臺中市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "120833",
+        "dataset_url": null,
+        "field_description": "資料集名稱;資料格式;資料集座標;連結網址;上架日期;機關代碼;資料資源欄位",
+        "matched_keywords": [
+          "雨水下水道"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=05537593-784b-4ffe-b820-1990648b5007"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "臺中市雨水下水道管線",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "桃園市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "149657",
+        "dataset_url": null,
+        "field_description": "類別碼;識別碼",
+        "matched_keywords": [
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [],
+        "resource_urls": [
+          "https://opendata.tycg.gov.tw/api/dataset/1336a7b1-8ec5-4d80-b6a2-acfdc334ec04/resource/e3e42452-fdf1-4c37-a66a-08c634a5dd3b/download"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "桃園市公共管線圖資-下水道系統人手孔",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "桃園市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "169636",
+        "dataset_url": null,
+        "field_description": "區公所;項目;一月;二月;三月;四月;五月;六月;七月;八月;九月;十月;十一月;十二月;總計",
+        "matched_keywords": [
+          "雨水下水道"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV;CSV;CSV;CSV;CSV;CSV;CSV"
+        ],
+        "resource_urls": [
+          "https://opendata.tycg.gov.tw/api/dataset/7fc13381-a83a-4191-90a6-f01762e3aece/resource/fcf93da8-6527-4b07-a630-34ff0106f1cb/download;https://opendata.tycg.gov.tw/api/dataset/7fc13381-a83a-4191-90a6-f01762e3aece/resource/39131ab0-cace-4f03-9d45-ef853f381cab/download;https://opendata.tycg.gov.tw/api/dataset/7fc13381-a83a-4191-90a6-f01762e3aece/resource/96bc0224-ddf9-458b-9a75-30fd81552d3d/download;https://opendata.tycg.gov.tw/api/dataset/7fc13381-a83a-4191-90a6-f01762e3aece/resource/7cd7d56b-6ac9-417d-8722-430e7d4c6f06/download;https://opendata.tycg.gov.tw/api/dataset/7fc13381-a83a-4191-90a6-f01762e3aece/resource/91f79184-014d-4b6b-9ef8-c0fe6a1becfd/download;https://opendata.tycg.gov.tw/api/dataset/7fc13381-a83a-4191-90a6-f01762e3aece/resource/95894e81-d65e-4af8-abec-d25eab5288f6/download;https://opendata.tycg.gov.tw/api/dataset/7fc13381-a83a-4191-90a6-f01762e3aece/resource/4d82e220-1ee0-436e-bb82-185533b09257/download"
+        ],
+        "signal_types": [
+          "sewer_water_level"
+        ],
+        "title": "桃園市政府雨水下水道巡檢調查及清淤長度統計表",
+        "update_frequency": "每1年"
+      }
+    ],
+    "required_signal_types": [
+      "sewer_water_level"
+    ],
+    "summary": {
+      "by_county": {
+        "嘉義市": {
+          "candidate_count": 2,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 2,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "sewer_water_level"
+          ]
+        },
+        "桃園市": {
+          "candidate_count": 5,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 5,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "sewer_water_level"
+          ]
+        },
+        "臺中市": {
+          "candidate_count": 3,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 3,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "sewer_water_level"
+          ]
+        },
+        "臺南市": {
+          "candidate_count": 1,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 1,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "sewer_water_level"
+          ]
+        },
+        "連江縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        }
+      },
+      "candidate_live_read_api_count_by_county": {},
+      "metadata_only_count_by_county": {
+        "嘉義市": 2,
+        "桃園市": 5,
+        "臺中市": 3,
+        "臺南市": 1
+      },
+      "target_counties_without_candidates": [
+        "連江縣"
+      ]
+    },
+    "target_counties": [
+      "連江縣",
+      "嘉義市",
+      "桃園市",
+      "臺中市",
+      "臺南市"
+    ]
+  },
+  "schema_version": "local-source-discovery-refresh/v1",
+  "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json"
+}

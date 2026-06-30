@@ -13,6 +13,15 @@ official adapters 維持。
 PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py
 ```
 
+For reviewable signal-gap refresh evidence, write UTF-8 JSON artifacts directly
+from the CLI instead of shell redirection:
+
+```bash
+PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --captured-at 2026-06-30T14:00:00+08:00 --evidence-output docs/reviews/signal-gap-discovery-refresh-YYYY-MM-DD-pump-or-gate.json --fail-on-candidate
+PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type flood_depth --captured-at 2026-06-30T14:00:00+08:00 --evidence-output docs/reviews/signal-gap-discovery-refresh-YYYY-MM-DD-flood-depth.json --fail-on-candidate
+PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type sewer_water_level --captured-at 2026-06-30T14:00:00+08:00 --evidence-output docs/reviews/signal-gap-discovery-refresh-YYYY-MM-DD-sewer-water-level.json --fail-on-candidate
+```
+
 此工具會掃 data.gov.tw 全站匯出，只針對金門縣與連江縣的水情關鍵字輸出
 `candidate_live_read_api` 或 `metadata_only`。它不會自動把候選來源升級為
 production adapter；候選仍需人工檢查 API contract、freshness、座標與授權。
