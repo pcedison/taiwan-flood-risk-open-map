@@ -22,6 +22,10 @@ PUBLIC_RISK_REQUIREMENTS = [
     "hosted_risk_response_worker_evidence_smoke",
     "query_point_nearby_coverage_smoke",
 ]
+PUBLIC_RISK_REQUIREMENT_EVIDENCE_PATHS = {
+    "hosted_risk_response_worker_evidence_smoke": "/risk_assessment/worker_evidence",
+    "query_point_nearby_coverage_smoke": "/risk_assessment/nearby_coverage",
+}
 OFFICIAL_REALTIME_EVENT_TYPES = {"rainfall", "water_level"}
 OFFICIAL_REALTIME_FRESHNESS_SOURCE_IDS = {"cwa-rainfall", "wra-water-level"}
 REQUIRED_NEARBY_SIGNALS = {
@@ -103,9 +107,14 @@ def main(argv: list[str] | None = None) -> int:
         failures.extend(check_risk_payload(risk.payload, radius_m=args.radius_m))
 
     status = "failed" if failures else "passed"
+    completion_evidence_ref = args.evidence_output or _default_completion_evidence_ref(
+        base_url,
+        health_evidence,
+    )
     artifact = build_evidence_artifact(
         base_url=base_url,
         captured_at=captured_at,
+        completion_evidence_ref=completion_evidence_ref,
         status=status,
         health=health_evidence,
         request={
@@ -130,8 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             args.completion_evidence_output,
             build_completion_evidence_overlay(
                 captured_at=captured_at,
-                evidence_ref=args.evidence_output
-                or _default_completion_evidence_ref(base_url, health_evidence),
+                evidence_ref=completion_evidence_ref,
             ),
         )
 
@@ -175,6 +183,7 @@ def build_evidence_artifact(
     *,
     base_url: str,
     captured_at: str,
+    completion_evidence_ref: str,
     status: str,
     health: Mapping[str, Any],
     request: Mapping[str, Any],
@@ -194,6 +203,10 @@ def build_evidence_artifact(
                 "gate_key": PUBLIC_RISK_GATE_KEY,
                 "status": "accepted",
                 "satisfied_requirements": PUBLIC_RISK_REQUIREMENTS,
+                "requirement_evidence": _requirement_evidence(
+                    captured_at=captured_at,
+                    evidence_ref=completion_evidence_ref,
+                ),
             }
         ],
         "failures": failures,
@@ -216,6 +229,10 @@ def build_completion_evidence_overlay(
                 "status": "accepted",
                 "evidence_ref": evidence_ref,
                 "satisfied_requirements": PUBLIC_RISK_REQUIREMENTS,
+                "requirement_evidence": _requirement_evidence(
+                    captured_at=captured_at,
+                    evidence_ref=evidence_ref,
+                ),
             }
         ],
     }
@@ -360,6 +377,17 @@ def _unique(values: list[str]) -> list[str]:
 def _default_completion_evidence_ref(base_url: str, health: Mapping[str, Any]) -> str:
     deployment_sha = health.get("deployment_sha") or "unknown-sha"
     return f"{base_url}/health#{deployment_sha}"
+
+
+def _requirement_evidence(*, captured_at: str, evidence_ref: str) -> list[dict[str, str]]:
+    return [
+        {
+            "requirement": requirement,
+            "evidence_ref": f"{evidence_ref}#{path}",
+            "observed_at": captured_at,
+        }
+        for requirement, path in PUBLIC_RISK_REQUIREMENT_EVIDENCE_PATHS.items()
+    ]
 
 
 def _write_json(output_path: str | None, payload: Mapping[str, Any]) -> None:

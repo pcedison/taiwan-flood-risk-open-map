@@ -18,6 +18,10 @@ DEPLOYMENT_REQUIREMENTS = [
     "main_branch_deployed_sha",
     "ready_dependency_smoke",
 ]
+DEPLOYMENT_REQUIREMENT_EVIDENCE_PATHS = {
+    "main_branch_deployed_sha": "/health/deployment_sha",
+    "ready_dependency_smoke": "/ready/dependencies",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,9 +67,14 @@ def main(argv: list[str] | None = None) -> int:
     failures.extend(_check_ready_dependencies(ready.payload))
 
     status = "failed" if failures else "passed"
+    completion_evidence_ref = args.evidence_output or _default_completion_evidence_ref(
+        base_url,
+        args.expected_deployment_sha,
+    )
     artifact = build_evidence_artifact(
         base_url=base_url,
         captured_at=captured_at,
+        completion_evidence_ref=completion_evidence_ref,
         expected_deployment_sha=args.expected_deployment_sha,
         status=status,
         health=health,
@@ -85,8 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             args.completion_evidence_output,
             build_completion_evidence_overlay(
                 captured_at=captured_at,
-                evidence_ref=args.evidence_output
-                or _default_completion_evidence_ref(base_url, args.expected_deployment_sha),
+                evidence_ref=completion_evidence_ref,
             ),
         )
 
@@ -101,6 +109,7 @@ def build_evidence_artifact(
     *,
     base_url: str,
     captured_at: str,
+    completion_evidence_ref: str,
     expected_deployment_sha: str,
     status: str,
     health: "JsonResponse",
@@ -120,6 +129,10 @@ def build_evidence_artifact(
                 "gate_key": DEPLOYMENT_GATE_KEY,
                 "status": "accepted",
                 "satisfied_requirements": DEPLOYMENT_REQUIREMENTS,
+                "requirement_evidence": _requirement_evidence(
+                    captured_at=captured_at,
+                    evidence_ref=completion_evidence_ref,
+                ),
             }
         ],
         "failures": failures,
@@ -142,6 +155,10 @@ def build_completion_evidence_overlay(
                 "status": "accepted",
                 "evidence_ref": evidence_ref,
                 "satisfied_requirements": DEPLOYMENT_REQUIREMENTS,
+                "requirement_evidence": _requirement_evidence(
+                    captured_at=captured_at,
+                    evidence_ref=evidence_ref,
+                ),
             }
         ],
     }
@@ -206,6 +223,17 @@ def _dependency_summary(payload: Mapping[str, Any]) -> dict[str, str]:
 
 def _default_completion_evidence_ref(base_url: str, deployment_sha: str) -> str:
     return f"{base_url}/health#{deployment_sha}"
+
+
+def _requirement_evidence(*, captured_at: str, evidence_ref: str) -> list[dict[str, str]]:
+    return [
+        {
+            "requirement": requirement,
+            "evidence_ref": f"{evidence_ref}#{path}",
+            "observed_at": captured_at,
+        }
+        for requirement, path in DEPLOYMENT_REQUIREMENT_EVIDENCE_PATHS.items()
+    ]
 
 
 def _write_json(output_path: str | None, payload: Mapping[str, Any]) -> None:

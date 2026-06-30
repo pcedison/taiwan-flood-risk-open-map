@@ -43,8 +43,8 @@ def main() -> int:
             "option to merge public-risk, hosted-source, monitoring, and private "
             "official-response evidence overlays. The command prints only "
             "aggregate counts and gate status, not evidence refs. Production "
-            "gates must include satisfied_requirements for each accepted "
-            "requirement."
+            "gates must include satisfied_requirements plus matching "
+            "requirement_evidence entries for each accepted requirement."
         ),
     )
     parser.add_argument(

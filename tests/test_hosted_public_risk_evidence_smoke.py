@@ -94,6 +94,18 @@ def test_hosted_public_risk_evidence_smoke_writes_artifacts(
                 "hosted_risk_response_worker_evidence_smoke",
                 "query_point_nearby_coverage_smoke",
             ],
+            "requirement_evidence": [
+                {
+                    "requirement": "hosted_risk_response_worker_evidence_smoke",
+                    "evidence_ref": f"{evidence_output}#/risk_assessment/worker_evidence",
+                    "observed_at": "2026-06-30T12:45:00+00:00",
+                },
+                {
+                    "requirement": "query_point_nearby_coverage_smoke",
+                    "evidence_ref": f"{evidence_output}#/risk_assessment/nearby_coverage",
+                    "observed_at": "2026-06-30T12:45:00+00:00",
+                },
+            ],
         }
     ]
 
@@ -111,6 +123,22 @@ def test_hosted_public_risk_evidence_smoke_writes_artifacts(
                 "satisfied_requirements": [
                     "hosted_risk_response_worker_evidence_smoke",
                     "query_point_nearby_coverage_smoke",
+                ],
+                "requirement_evidence": [
+                    {
+                        "requirement": "hosted_risk_response_worker_evidence_smoke",
+                        "evidence_ref": (
+                            f"{evidence_output}#/risk_assessment/worker_evidence"
+                        ),
+                        "observed_at": "2026-06-30T12:45:00+00:00",
+                    },
+                    {
+                        "requirement": "query_point_nearby_coverage_smoke",
+                        "evidence_ref": (
+                            f"{evidence_output}#/risk_assessment/nearby_coverage"
+                        ),
+                        "observed_at": "2026-06-30T12:45:00+00:00",
+                    },
                 ],
             }
         ],

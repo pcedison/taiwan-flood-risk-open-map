@@ -60,6 +60,9 @@ An accepted artifact may satisfy only the `production_deployment_evidence`
 requirements: `main_branch_deployed_sha` and `ready_dependency_smoke`. It does
 not prove worker raw snapshots, scheduler cadence, source egress, or
 monitoring ownership.
+The generated completion overlay must include one `requirement_evidence` item
+per satisfied requirement, pointing to the JSON section that proves that
+requirement.
 
 After each production deploy, run the hosted public-risk evidence smoke to prove
 that the public `/v1/risk/assess` response exposes both worker-style official
@@ -83,6 +86,9 @@ official realtime sources, `official` rainfall or water-level evidence with
 `public_risk_worker_evidence_path` completion requirements when the artifact is
 accepted, but it does not prove raw snapshot retention, scheduler cadence,
 hosted egress approval, or alert routing.
+The generated completion overlay must include one `requirement_evidence` item
+per satisfied requirement, pointing to the worker-evidence and nearby-coverage
+sections in the smoke artifact.
 
 ## Hosted Source-Freshness Smoke
 
@@ -115,3 +121,6 @@ An accepted artifact may satisfy only these
 
 It does not prove raw snapshot retention, monitored scheduler cadence, hosted
 egress review, alert routing, or worker scheduler ownership.
+Any accepted completion overlay for this gate must include one
+`requirement_evidence` item per satisfied requirement, with `observed_at` for
+runtime smoke evidence or `reviewed_at` for policy/approval evidence.

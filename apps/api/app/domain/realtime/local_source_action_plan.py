@@ -505,6 +505,13 @@ def _accepted_production_gate_requirement_keys(
             )
             continue
         allowed_requirements = set(PRODUCTION_GATE_REQUIRED_REQUIREMENTS[str(gate_key)])
+        requirement_evidence_keys = _accepted_production_gate_requirement_detail_keys(
+            item.get("requirement_evidence"),
+            evidence_index=index,
+            gate_key=str(gate_key),
+            allowed_requirements=allowed_requirements,
+            errors=errors,
+        )
         for requirement_index, requirement in enumerate(requirements):
             if not _non_empty_string(requirement):
                 errors.append(
@@ -520,7 +527,73 @@ def _accepted_production_gate_requirement_keys(
                     f"[{requirement_index}] is invalid for {gate_key}"
                 )
                 continue
+            if requirement_key not in requirement_evidence_keys:
+                errors.append(
+                    f"production_gate_evidence[{index}].requirement_evidence "
+                    f"missing accepted evidence for {requirement_key}"
+                )
+                continue
             keys.add((str(gate_key), requirement_key))
+    return keys
+
+
+def _accepted_production_gate_requirement_detail_keys(
+    value: Any,
+    *,
+    evidence_index: int,
+    gate_key: str,
+    allowed_requirements: set[str],
+    errors: list[str],
+) -> set[str]:
+    if not isinstance(value, list):
+        errors.append(
+            f"production_gate_evidence[{evidence_index}].requirement_evidence is required"
+        )
+        return set()
+
+    keys: set[str] = set()
+    for detail_index, detail in enumerate(value):
+        if not isinstance(detail, Mapping):
+            errors.append(
+                "production_gate_evidence"
+                f"[{evidence_index}].requirement_evidence[{detail_index}] "
+                "must be an object"
+            )
+            continue
+        requirement = detail.get("requirement")
+        if not _non_empty_string(requirement):
+            errors.append(
+                "production_gate_evidence"
+                f"[{evidence_index}].requirement_evidence[{detail_index}]"
+                ".requirement is required"
+            )
+            continue
+        requirement_key = str(requirement).strip()
+        if requirement_key not in allowed_requirements:
+            errors.append(
+                "production_gate_evidence"
+                f"[{evidence_index}].requirement_evidence[{detail_index}]"
+                f".requirement is invalid for {gate_key}"
+            )
+            continue
+        if not _non_empty_string(detail.get("evidence_ref")):
+            errors.append(
+                "production_gate_evidence"
+                f"[{evidence_index}].requirement_evidence[{detail_index}]"
+                ".evidence_ref is required"
+            )
+            continue
+        if not (
+            _non_empty_string(detail.get("observed_at"))
+            or _non_empty_string(detail.get("reviewed_at"))
+        ):
+            errors.append(
+                "production_gate_evidence"
+                f"[{evidence_index}].requirement_evidence[{detail_index}] "
+                "requires observed_at or reviewed_at"
+            )
+            continue
+        keys.add(requirement_key)
     return keys
 
 

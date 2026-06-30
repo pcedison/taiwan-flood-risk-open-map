@@ -32,6 +32,18 @@
       "satisfied_requirements": [
         "main_branch_deployed_sha",
         "ready_dependency_smoke"
+      ],
+      "requirement_evidence": [
+        {
+          "requirement": "main_branch_deployed_sha",
+          "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-06-30-19eb3ce.json#/health/deployment_sha",
+          "observed_at": "2026-06-30T14:40:00+08:00"
+        },
+        {
+          "requirement": "ready_dependency_smoke",
+          "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-06-30-19eb3ce.json#/ready/dependencies",
+          "observed_at": "2026-06-30T14:40:00+08:00"
+        }
       ]
     }
   ],
