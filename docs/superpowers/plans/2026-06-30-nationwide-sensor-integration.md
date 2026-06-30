@@ -753,6 +753,37 @@ release-monitor contract:
 Finding a `candidate_live_read_api` remains an escalation into source review
 and adapter TDD, not automatic production completion.
 
+## Task 24: Signal-Family Gap Priority Groups
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+
+**Interfaces:**
+- Consumes: the ranked `integration_priority_queue` and every county's
+  `missing_signal_types`.
+- Produces: `signal_gap_priority_groups`, grouped by required water signal
+  family so source discovery, official requests, and future adapter work can be
+  batched across counties.
+
+- [x] Write failing tests proving `pump_or_gate_status` is the top grouped gap.
+- [x] Count grouped counties and tracking states without changing county
+  completion counts.
+- [x] Add API and OpenAPI schema so operators can see that pump/gate status is
+  the largest remaining signal-family gap.
+- [x] Verify action-plan/admin contract tests, OpenAPI validation, and API lint.
+
+Completed 2026-06-30: action plan now reports
+`signal_gap_priority_groups`. The current largest batch is
+`pump_or_gate_status` across 14 counties/items, with P0 blockers preserved for
+Lienchiang and Kinmen and P2 signal-gap reviews preserved for ready counties.
+This is prioritization infrastructure; each listed county still needs a
+production adapter, authorization-gated adapter, or official unavailable-source
+record before the nationwide objective can be called complete.
+
 ## Completion Gates
 
 The full objective is complete only when:

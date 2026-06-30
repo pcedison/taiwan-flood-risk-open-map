@@ -291,6 +291,17 @@ class LocalSourceIntegrationPriorityItem(ContractModel):
     open_data_release_monitor: LocalSourceOpenDataReleaseMonitor | None = None
 
 
+class LocalSourceSignalGapPriorityGroup(ContractModel):
+    rank: int = Field(ge=1)
+    signal_type: str
+    county_count: int = Field(ge=0)
+    counties: list[str] = Field(default_factory=list)
+    highest_priority_tier: str
+    recommended_workstream: str
+    tracking_statuses: dict[str, int] = Field(default_factory=dict)
+    completion_gate: str
+
+
 class LocalSourceActionPlan(ContractModel):
     total_counties: int = Field(ge=0)
     local_direct_complete_count: int = Field(ge=0)
@@ -311,6 +322,9 @@ class LocalSourceActionPlan(ContractModel):
         default_factory=list
     )
     integration_priority_queue: list[LocalSourceIntegrationPriorityItem] = Field(
+        default_factory=list
+    )
+    signal_gap_priority_groups: list[LocalSourceSignalGapPriorityGroup] = Field(
         default_factory=list
     )
 

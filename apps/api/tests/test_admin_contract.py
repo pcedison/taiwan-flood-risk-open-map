@@ -1205,6 +1205,16 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert plan["local_direct_remaining_count"] == 2
     assert plan["central_backbone_minimum_complete_count"] == 22
     assert plan["central_backbone_remaining_count"] == 0
+    assert plan["signal_gap_priority_groups"][0]["signal_type"] == "pump_or_gate_status"
+    assert plan["signal_gap_priority_groups"][0]["county_count"] == 14
+    assert plan["signal_gap_priority_groups"][0]["highest_priority_tier"] == "P0"
+    assert plan["signal_gap_priority_groups"][0]["tracking_statuses"] == {
+        "monitoring_open_data_release": 1,
+        "needs_authorization_request": 1,
+        "needs_public_read_api_contract": 2,
+        "needs_signal_gap_review": 10,
+    }
+    assert "金門縣" in plan["signal_gap_priority_groups"][0]["counties"]
     assert [item["county"] for item in plan["authorization_requests"]] == [
         "花蓮縣",
         "金門縣",

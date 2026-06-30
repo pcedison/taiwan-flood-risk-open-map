@@ -879,6 +879,23 @@ paths:
                       local_direct_remaining_count: 2
                       central_backbone_minimum_complete_count: 22
                       central_backbone_remaining_count: 0
+                      signal_gap_priority_groups:
+                        - rank: 1
+                          signal_type: pump_or_gate_status
+                          county_count: 14
+                          counties:
+                            - 連江縣
+                            - 金門縣
+                            - 臺東縣
+                            - 苗栗縣
+                          highest_priority_tier: P0
+                          recommended_workstream: bulk_signal_gap_discovery
+                          tracking_statuses:
+                            monitoring_open_data_release: 1
+                            needs_authorization_request: 1
+                            needs_public_read_api_contract: 2
+                            needs_signal_gap_review: 10
+                          completion_gate: For every listed county, add a production adapter, an authorization-gated adapter, or an official unavailable/blocked-source record for pump_or_gate_status.
                       authorization_requests:
                         - county: 金門縣
                           reason: "KWIS SOAP/ASMX exposes token-gated read methods, but production read access still requires county authorization."
@@ -2509,6 +2526,7 @@ components:
         - live_smoke_reviews
         - sensor_signal_gap_reviews
         - integration_priority_queue
+        - signal_gap_priority_groups
       properties:
         total_counties:
           type: integer
@@ -2549,6 +2567,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LocalSourceIntegrationPriorityItem"
+        signal_gap_priority_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceSignalGapPriorityGroup"
       additionalProperties: false
 
     LocalSourceAuthorizationRequest:
@@ -2964,6 +2986,45 @@ components:
           anyOf:
             - $ref: "#/components/schemas/LocalSourceOpenDataReleaseMonitor"
             - type: "null"
+      additionalProperties: false
+
+    LocalSourceSignalGapPriorityGroup:
+      type: object
+      required:
+        - rank
+        - signal_type
+        - county_count
+        - counties
+        - highest_priority_tier
+        - recommended_workstream
+        - tracking_statuses
+        - completion_gate
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        signal_type:
+          type: string
+        county_count:
+          type: integer
+          minimum: 0
+        counties:
+          type: array
+          items:
+            type: string
+        highest_priority_tier:
+          type: string
+        recommended_workstream:
+          type: string
+          enum:
+            - bulk_signal_gap_discovery
+        tracking_statuses:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        completion_gate:
+          type: string
       additionalProperties: false
 
     LocalSourceCoverageSummary:

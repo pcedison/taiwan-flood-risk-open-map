@@ -22,6 +22,10 @@ def build_local_source_action_plan(
     local_complete = [record for record in records if record.local_direct_complete]
     central_complete = [record for record in records if record.central_backbone_minimum_complete]
     sensor_signal_gap_reviews = _sensor_signal_gap_reviews(records)
+    integration_priority_queue = _integration_priority_queue(
+        records,
+        sensor_signal_gap_reviews=sensor_signal_gap_reviews,
+    )
     return {
         "total_counties": len(records),
         "local_direct_complete_count": len(local_complete),
@@ -49,9 +53,9 @@ def build_local_source_action_plan(
             if record.next_action_code == "verify_live_smoke"
         ],
         "sensor_signal_gap_reviews": sensor_signal_gap_reviews,
-        "integration_priority_queue": _integration_priority_queue(
-            records,
-            sensor_signal_gap_reviews=sensor_signal_gap_reviews,
+        "integration_priority_queue": integration_priority_queue,
+        "signal_gap_priority_groups": _signal_gap_priority_groups(
+            integration_priority_queue
         ),
     }
 
@@ -265,6 +269,49 @@ def _open_data_release_monitor(
             "PYTHONPATH=apps/workers python "
             "scripts/local-source-discovery-monitor.py "
             f"--county {record.county} --fail-on-candidate"
+        ),
+    }
+
+
+def _signal_gap_priority_groups(
+    integration_priority_queue: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in integration_priority_queue:
+        for signal_type in item["missing_signal_types"]:
+            grouped.setdefault(signal_type, []).append(item)
+
+    ordered = sorted(
+        grouped.items(),
+        key=lambda entry: (-len(entry[1]), entry[0]),
+    )
+    return [
+        _signal_gap_priority_group(rank=index + 1, signal_type=signal_type, items=items)
+        for index, (signal_type, items) in enumerate(ordered)
+    ]
+
+
+def _signal_gap_priority_group(
+    *,
+    rank: int,
+    signal_type: str,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    tracking_statuses: dict[str, int] = {}
+    for item in items:
+        tracking_status = str(item["tracking_status"])
+        tracking_statuses[tracking_status] = tracking_statuses.get(tracking_status, 0) + 1
+    return {
+        "rank": rank,
+        "signal_type": signal_type,
+        "county_count": len(items),
+        "counties": [str(item["county"]) for item in items],
+        "highest_priority_tier": str(items[0]["priority_tier"]),
+        "recommended_workstream": "bulk_signal_gap_discovery",
+        "tracking_statuses": tracking_statuses,
+        "completion_gate": (
+            "For every listed county, add a production adapter, an authorization-gated "
+            f"adapter, or an official unavailable/blocked-source record for {signal_type}."
         ),
     }
 

@@ -283,6 +283,42 @@ def test_local_source_action_plan_prioritizes_signal_gap_reviews_after_blockers(
     assert "measurement_value" in priority_by_county["嘉義市"]["completion_gate"]
 
 
+def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+
+    groups = plan["signal_gap_priority_groups"]
+
+    assert [group["signal_type"] for group in groups] == [
+        "pump_or_gate_status",
+        "flood_depth",
+        "sewer_water_level",
+    ]
+    pump_or_gate = groups[0]
+    assert pump_or_gate["rank"] == 1
+    assert pump_or_gate["county_count"] == 14
+    assert pump_or_gate["recommended_workstream"] == "bulk_signal_gap_discovery"
+    assert pump_or_gate["completion_gate"] == (
+        "For every listed county, add a production adapter, an authorization-gated "
+        "adapter, or an official unavailable/blocked-source record for pump_or_gate_status."
+    )
+    assert pump_or_gate["counties"][:4] == [
+        "連江縣",
+        "金門縣",
+        "臺東縣",
+        "苗栗縣",
+    ]
+    assert "嘉義市" in pump_or_gate["counties"]
+    assert pump_or_gate["highest_priority_tier"] == "P0"
+    assert pump_or_gate["tracking_statuses"]["needs_signal_gap_review"] == 10
+    assert pump_or_gate["tracking_statuses"]["needs_public_read_api_contract"] == 2
+    assert pump_or_gate["tracking_statuses"]["needs_authorization_request"] == 1
+    assert pump_or_gate["tracking_statuses"]["monitoring_open_data_release"] == 1
+
+    by_signal = {group["signal_type"]: group for group in groups}
+    assert by_signal["flood_depth"]["county_count"] == 5
+    assert by_signal["sewer_water_level"]["county_count"] == 5
+
+
 def test_tainan_signal_gap_exposes_static_metadata_and_non_measurement_leads() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
 
