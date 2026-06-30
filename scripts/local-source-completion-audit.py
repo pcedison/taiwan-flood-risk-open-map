@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import sys
 from pathlib import Path
@@ -72,6 +73,14 @@ def main() -> int:
         help="Exit with status 1 when the resulting completion audit is incomplete.",
     )
     parser.add_argument(
+        "--as-of",
+        help=(
+            "Optional ISO 8601 timestamp used to count overdue dispatched "
+            "official request follow-ups. This does not expose private "
+            "evidence refs or treat dispatched requests as completion evidence."
+        ),
+    )
+    parser.add_argument(
         "--output",
         help=(
             "Optional path to write the aggregate completion-audit JSON artifact. "
@@ -93,10 +102,13 @@ def main() -> int:
             [Path(path) for path in args.completion_evidence_json]
         )
         _validate_local_evidence_refs(completion_evidence)
+    if args.as_of and not _is_iso_datetime(args.as_of):
+        parser.error("--as-of must be an ISO 8601 timestamp")
 
     plan = build_local_source_action_plan(
         list_local_source_coverage(),
         completion_evidence=completion_evidence,
+        follow_up_as_of=args.as_of,
     )
     audit = plan["completion_audit"]
     audit_json = json.dumps(audit, ensure_ascii=False, indent=2, sort_keys=True)
@@ -124,6 +136,17 @@ def _load_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SystemExit(f"{path}: completion evidence JSON must be an object")
     return payload
+
+
+def _is_iso_datetime(value: str) -> bool:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        datetime.fromisoformat(normalized)
+    except ValueError:
+        return False
+    return True
 
 
 def _load_and_merge_json(paths: list[Path]) -> dict[str, Any]:

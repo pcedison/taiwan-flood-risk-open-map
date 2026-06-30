@@ -298,6 +298,23 @@ counts, and the next follow-up due timestamp. It intentionally omits
 `evidence_ref` so operators can use it in ticket checks or CI-style monitors
 without leaking private correspondence indexes.
 
+When generating the aggregate completion audit for a dated review, pass the
+same timestamp to `local-source-completion-audit.py` so the public-safe audit
+also exposes overdue follow-up counts:
+
+```powershell
+python scripts\local-source-completion-audit.py `
+  --completion-evidence-json <private-signal-gap-dispatch-evidence.json> `
+  --completion-evidence-json <private-source-contract-dispatch-evidence.json> `
+  --as-of 2026-07-08T00:00:00+08:00 `
+  --markdown-output <private-completion-audit.md>
+```
+
+`--as-of` only counts overdue dispatch follow-ups in the audit overlay and gate
+evidence text. It does not print private evidence refs and does not convert a
+`request_dispatched` item into accepted signal-family or source-contract
+completion evidence.
+
 ```powershell
 python scripts\source_contract_evidence.py `
   --manifest-json <private-source-contract-manifest.json> `

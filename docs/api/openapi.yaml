@@ -895,13 +895,16 @@ paths:
                         evidence_overlay:
                           schema_version: null
                           captured_at: null
+                          follow_up_as_of: null
                           signal_family_gap_evidence_count: 0
                           signal_family_gap_dispatch_count: 0
                           signal_family_gap_dispatch_follow_up_count: 0
+                          signal_family_gap_dispatch_overdue_count: 0
                           signal_family_gap_next_follow_up_due_at: null
                           source_contract_evidence_count: 0
                           source_contract_dispatch_count: 0
                           source_contract_dispatch_follow_up_count: 0
+                          source_contract_dispatch_overdue_count: 0
                           source_contract_next_follow_up_due_at: null
                           production_gate_evidence_count: 0
                           production_gate_requirement_evidence_count: 0
@@ -2758,13 +2761,16 @@ components:
       required:
         - schema_version
         - captured_at
+        - follow_up_as_of
         - signal_family_gap_evidence_count
         - signal_family_gap_dispatch_count
         - signal_family_gap_dispatch_follow_up_count
+        - signal_family_gap_dispatch_overdue_count
         - signal_family_gap_next_follow_up_due_at
         - source_contract_evidence_count
         - source_contract_dispatch_count
         - source_contract_dispatch_follow_up_count
+        - source_contract_dispatch_overdue_count
         - source_contract_next_follow_up_due_at
         - production_gate_evidence_count
         - production_gate_requirement_evidence_count
@@ -2778,6 +2784,10 @@ components:
           type:
             - string
             - "null"
+        follow_up_as_of:
+          type:
+            - string
+            - "null"
         signal_family_gap_evidence_count:
           type: integer
           minimum: 0
@@ -2785,6 +2795,9 @@ components:
           type: integer
           minimum: 0
         signal_family_gap_dispatch_follow_up_count:
+          type: integer
+          minimum: 0
+        signal_family_gap_dispatch_overdue_count:
           type: integer
           minimum: 0
         signal_family_gap_next_follow_up_due_at:
@@ -2798,6 +2811,9 @@ components:
           type: integer
           minimum: 0
         source_contract_dispatch_follow_up_count:
+          type: integer
+          minimum: 0
+        source_contract_dispatch_overdue_count:
           type: integer
           minimum: 0
         source_contract_next_follow_up_due_at:
