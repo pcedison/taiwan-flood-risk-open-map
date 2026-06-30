@@ -85,3 +85,26 @@
 5. **彰化、連江**：目前主要是靜態 open data；連江水庫水位月報與
    `erbwater` 放流水 CEMS 已列為 `non_qualifying`，持續監看 metadata
    release，不列 production adapter。
+
+## 2026-06-30 signal-gap discovery refresh
+
+Commands run against the current data.gov.tw dataset export through
+`scripts/local-source-discovery-monitor.py --fail-on-candidate`:
+
+- `pump_or_gate_status`: 9 candidates, 0 `candidate_live_read_api`. New Taipei,
+  Taoyuan, and Taichung entries remain static station/gate/pump inventory or
+  GIS metadata; 11 counties in the batch still have no candidate.
+- `flood_depth`: 2 candidates, 0 `candidate_live_read_api`. Taipei entries are
+  rain/flood simulation or resilience-community metadata, not latest-observed
+  flood-depth sensors.
+- `sewer_water_level`: initial live refresh exposed 2 Taichung false-live
+  candidates (`120801` rainwater-sewer manhole map and `120833` rainwater-sewer
+  pipeline map). Both rows describe catalog/GIS download fields such as
+  `資料集名稱`, `資料格式`, `下載網址`, `上架日期`, and `資料資源欄位`, not
+  observed time, station/device id, or measurement value. The discovery
+  classifier was updated so these rows remain `metadata_only`; the rerun
+  reports 11 candidates, 0 `candidate_live_read_api`.
+
+Conclusion: no adapter implementation should start from the current live
+discovery refresh. The unresolved signal families still require official read
+API follow-up, authorization/contract evidence, or a future release-monitor hit.

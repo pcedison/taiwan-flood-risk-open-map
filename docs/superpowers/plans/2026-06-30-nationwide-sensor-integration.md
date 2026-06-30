@@ -1018,6 +1018,37 @@ production gate satisfied until all required requirements for that gate are
 accepted. This still does not create Zeabur production evidence; it prevents a
 single coarse evidence record from masking unfinished hosted requirements.
 
+## Task 32: Sewer Discovery False-Live Reclassification
+
+**Files:**
+- Modify: `apps/workers/app/ops/local_source_discovery_monitor.py`
+- Modify: `apps/workers/tests/test_local_source_discovery_monitor.py`
+- Modify: `docs/data-sources/local/2026-06-28-local-source-verification-log.md`
+
+**Interfaces:**
+- Consumes: live `data.gov.tw` discovery output for the current
+  `sewer_water_level` gap group.
+- Produces: discovery output that keeps data-catalog/GIS download listings as
+  `metadata_only` instead of `candidate_live_read_api`.
+
+- [x] Run current signal-gap discovery for `pump_or_gate_status`,
+  `flood_depth`, and `sewer_water_level`.
+- [x] Reproduce the false-live classification for Taichung datasets `120801`
+  and `120833`, whose fields describe data catalog downloads rather than
+  latest observations.
+- [x] Add a failing test proving Taichung rainwater-sewer GIS catalog rows are
+  not live sewer-water-level read APIs.
+- [x] Reclassify catalog download listings with fields such as `資料集名稱`,
+  `資料格式`, `下載網址`, `上架日期`, and `資料資源欄位` as static metadata.
+- [x] Re-run the live sewer discovery smoke with `--fail-on-candidate` and
+  confirm no `candidate_live_read_api` remains for the current sewer batch.
+
+Completed 2026-06-30: no new public read API adapter should be started from the
+current sewer-water-level discovery batch. Taichung, Taoyuan, Chiayi City, and
+Tainan results remain metadata/GIS candidates; Lienchiang still has no
+candidate. The next movement for `sewer_water_level` remains official read-API
+request follow-up or a future release-monitor hit.
+
 ## Completion Gates
 
 The full objective is complete only when:

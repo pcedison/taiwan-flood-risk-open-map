@@ -180,6 +180,45 @@ def test_discover_pump_station_inventory_export_is_not_live_read_api() -> None:
     assert "year(" in candidate_dict["field_description"]
 
 
+def test_discover_taichung_sewer_gis_catalog_is_not_live_read_api() -> None:
+    payload = [
+        {
+            "\u8cc7\u6599\u96c6\u8b58\u5225\u78bc": 120801,
+            "\u8cc7\u6599\u96c6\u540d\u7a31": (
+                "\u81fa\u4e2d\u5e02\u96e8\u6c34\u4e0b\u6c34\u9053"
+                "\u4eba\u5b54\u5716"
+            ),
+            "\u8cc7\u6599\u63d0\u4f9b\u5c6c\u6027": "\u6a94\u6848\u8cc7\u6599",
+            "\u6a94\u6848\u683c\u5f0f": "CSV",
+            "\u8cc7\u6599\u4e0b\u8f09\u7db2\u5740": (
+                "https://newdatacenter.taichung.gov.tw/api/v1/"
+                "no-auth/resource.download?rid=741e190d-cbb5-4061-aa56-c29c33984614"
+            ),
+            "\u4e3b\u8981\u6b04\u4f4d\u8aaa\u660e": (
+                "\u8cc7\u6599\u96c6\u540d\u7a31;"
+                "\u8cc7\u6599\u683c\u5f0f;"
+                "\u8cc7\u6599\u96c6\u8a9e\u7cfb;"
+                "\u4e0b\u8f09\u7db2\u5740;"
+                "\u4e0a\u67b6\u65e5\u671f;"
+                "\u8cc7\u6599\u8cc7\u6e90\u6b04\u4f4d"
+            ),
+            "\u66f4\u65b0\u983b\u7387": "\u4e0d\u5b9a\u671f\u66f4\u65b0",
+        }
+    ]
+
+    result = discover_local_source_candidates(
+        payload,
+        target_counties=("\u81fa\u4e2d\u5e02",),
+        required_signal_types=("sewer_water_level",),
+    )
+
+    assert len(result.candidates) == 1
+    candidate = result.candidates[0]
+    assert candidate.dataset_id == "120801"
+    assert candidate.readiness == "metadata_only"
+    assert candidate.signal_types == ("sewer_water_level",)
+
+
 def test_discover_signal_candidates_ignores_non_sensor_infrastructure_lists() -> None:
     payload = [
         {

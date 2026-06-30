@@ -283,6 +283,8 @@ def _looks_like_static_inventory(dataset: DataGovDataset) -> bool:
     frequency = (dataset.update_frequency or "").lower()
     fields = (dataset.field_description or "").lower()
     provision_type = dataset.data_provision_type or ""
+    if _fields_look_like_catalog_download_listing(fields):
+        return True
     has_annual_cadence = any(
         token in frequency for token in ("每1年", "每年", "yearly", "annual")
     )
@@ -290,6 +292,19 @@ def _looks_like_static_inventory(dataset: DataGovDataset) -> bool:
     return (has_annual_cadence or file_dataset) and _fields_look_like_static_inventory(
         fields
     )
+
+
+def _fields_look_like_catalog_download_listing(fields: str) -> bool:
+    catalog_tokens = (
+        "資料集名稱",
+        "資料格式",
+        "資料集語系",
+        "下載網址",
+        "連結網址",
+        "上架日期",
+        "資料資源欄位",
+    )
+    return sum(1 for token in catalog_tokens if token in fields) >= 3
 
 
 def _fields_look_like_static_inventory(fields: str) -> bool:
