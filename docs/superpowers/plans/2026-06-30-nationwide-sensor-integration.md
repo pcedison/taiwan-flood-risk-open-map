@@ -1664,6 +1664,35 @@ satisfied from public-safe evidence, while `required_signal_families`,
 `official_authorization_and_contracts`, `hosted_worker_persisted_evidence`, and
 `production_monitoring_and_alerting` remain incomplete.
 
+## Task 53: Hosted Source Freshness Full Backbone Gate
+
+**Files:**
+- Modify: `scripts/hosted_source_freshness_smoke.py`
+- Modify: `tests/test_hosted_source_freshness_smoke.py`
+- Modify: `docs/runbooks/official-realtime-source-of-truth.md`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+
+**Interfaces:**
+- Consumes: hosted `/admin/v1/sources` source diagnostics.
+- Produces: a stricter public-safe hosted source-freshness smoke that defaults
+  to the full official realtime backbone instead of a two-source CWA/WRA sample.
+
+- [x] Write a failing CLI/unit test proving omitted `--required-adapter-key`
+  arguments require the full hosted realtime backbone.
+- [x] Expand default required adapter keys to CWA rainfall/tide, WRA water
+  level, NCDR CAP, WRA IoW flood depth, and Civil IoT flood/sewer/pump/gate.
+- [x] Preserve repeated `--required-adapter-key` overrides for documented
+  incident or staged rollout checks.
+- [x] Update operator docs so narrowed checks are not used as completion
+  evidence for the full hosted worker path.
+
+Completed 2026-06-30: future hosted source-freshness completion evidence can no
+longer satisfy `freshness_policy` and `worker_persisted_evidence_path` by
+checking only `official.cwa.rainfall` and `official.wra.water_level`. This does
+not itself satisfy `hosted_worker_persisted_evidence`; an admin token, real
+hosted source diagnostics, raw snapshot retention, scheduler cadence, hosted
+egress review, and monitoring evidence are still required.
+
 ## Completion Gates
 
 The full objective is complete only when:

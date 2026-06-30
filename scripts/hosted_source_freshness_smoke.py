@@ -15,7 +15,14 @@ DEFAULT_BASE_URL = "https://floodrisk.cc"
 DEFAULT_ADMIN_TOKEN_ENV = "ADMIN_BEARER_TOKEN"
 DEFAULT_REQUIRED_ADAPTER_KEYS = (
     "official.cwa.rainfall",
+    "official.cwa.tide_level",
     "official.wra.water_level",
+    "official.ncdr.cap",
+    "official.wra_iow.flood_depth",
+    "official.civil_iot.flood_sensor",
+    "official.civil_iot.sewer_water_level",
+    "official.civil_iot.pump_water_level",
+    "official.civil_iot.gate_water_level",
 )
 EVIDENCE_SCHEMA_VERSION = "hosted-source-freshness-smoke/v1"
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
@@ -47,8 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         dest="required_adapter_keys",
         help=(
-            "Required adapter key returned by /admin/v1/sources. Defaults to "
-            "official.cwa.rainfall and official.wra.water_level when omitted."
+            "Required adapter key returned by /admin/v1/sources. Repeat to "
+            "override the default hosted realtime backbone check."
         ),
     )
     parser.add_argument(

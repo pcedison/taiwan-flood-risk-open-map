@@ -11,6 +11,75 @@ sys.path.insert(0, str(REPO_ROOT))
 from scripts import hosted_source_freshness_smoke as smoke  # noqa: E402
 
 
+FULL_OFFICIAL_BACKBONE = [
+    "official.cwa.rainfall",
+    "official.cwa.tide_level",
+    "official.wra.water_level",
+    "official.ncdr.cap",
+    "official.wra_iow.flood_depth",
+    "official.civil_iot.flood_sensor",
+    "official.civil_iot.sewer_water_level",
+    "official.civil_iot.pump_water_level",
+    "official.civil_iot.gate_water_level",
+]
+
+
+def test_hosted_source_freshness_smoke_defaults_to_full_official_backbone(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    evidence_output = tmp_path / "source-freshness-smoke.json"
+
+    monkeypatch.setenv("TEST_ADMIN_TOKEN", "secret-token")
+
+    def fake_request_json(
+        method: str,
+        url: str,
+        payload=None,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout_seconds: float,
+    ) -> smoke.JsonResponse:
+        del method, payload, headers, timeout_seconds
+        if url.endswith("/health"):
+            return smoke.JsonResponse(
+                status_code=200,
+                payload={
+                    "status": "ok",
+                    "version": "public-beta-mvp-2026-05-04",
+                    "deployment_sha": "abc123",
+                },
+            )
+        if url.endswith("/admin/v1/sources"):
+            return smoke.JsonResponse(
+                status_code=200,
+                payload={"sources": [_source_payload(key) for key in FULL_OFFICIAL_BACKBONE]},
+            )
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr(smoke, "request_json", fake_request_json)
+
+    result = smoke.main(
+        [
+            "--base-url",
+            "https://example.test",
+            "--admin-token-env",
+            "TEST_ADMIN_TOKEN",
+            "--captured-at",
+            "2026-06-30T05:10:00+00:00",
+            "--evidence-output",
+            str(evidence_output),
+        ]
+    )
+
+    assert result == 0
+    evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
+    assert evidence["required_adapter_keys"] == FULL_OFFICIAL_BACKBONE
+    assert [source["adapter_key"] for source in evidence["checked_sources"]] == (
+        FULL_OFFICIAL_BACKBONE
+    )
+
+
 def test_hosted_source_freshness_smoke_writes_partial_evidence(
     tmp_path: Path,
     monkeypatch,
@@ -171,55 +240,57 @@ def test_check_sources_rejects_missing_or_stale_required_source() -> None:
 def _sources_payload() -> dict:
     return {
         "sources": [
-            {
-                "id": "cwa-rainfall",
-                "name": "CWA rainfall",
-                "adapter_key": "official.cwa.rainfall",
-                "source_type": "official",
-                "license": "Government open data",
-                "update_frequency": "PT10M",
-                "health_status": "healthy",
-                "legal_basis": "L1",
-                "is_enabled": True,
-                "latest_observed_at": "2026-06-30T04:50:00Z",
-                "latest_fetched_at": "2026-06-30T04:55:00Z",
-                "latest_ingested_at": "2026-06-30T04:56:00Z",
-                "lag_seconds": 600,
-                "row_count": 7,
-                "covered_counties": ["Tainan City"],
-                "covered_county_count": 1,
-                "fresh_county_count": 1,
-                "stale_county_count": 0,
-                "station_count_by_county": {"Tainan City": 7},
-                "missing_counties": [],
-                "upstream_status": "succeeded",
-                "enabled_gates": ["data_sources.is_enabled", "SOURCE_CWA_API_ENABLED"],
-                "freshness_state": "fresh",
-            },
-            {
-                "id": "wra-water-level",
-                "name": "WRA water level",
-                "adapter_key": "official.wra.water_level",
-                "source_type": "official",
-                "license": "Government open data",
-                "update_frequency": "PT10M",
-                "health_status": "degraded",
-                "legal_basis": "L1",
-                "is_enabled": True,
-                "latest_observed_at": "2026-06-30T04:40:00Z",
-                "latest_fetched_at": "2026-06-30T04:55:00Z",
-                "latest_ingested_at": "2026-06-30T04:56:00Z",
-                "lag_seconds": 1400,
-                "row_count": 3,
-                "covered_counties": ["Tainan City"],
-                "covered_county_count": 1,
-                "fresh_county_count": 0,
-                "stale_county_count": 1,
-                "station_count_by_county": {"Tainan City": 3},
-                "missing_counties": [],
-                "upstream_status": "succeeded",
-                "enabled_gates": ["data_sources.is_enabled", "SOURCE_WRA_API_ENABLED"],
-                "freshness_state": "degraded",
-            },
+            _source_payload(
+                "official.cwa.rainfall",
+                row_count=7,
+                lag_seconds=600,
+                enabled_gates=["data_sources.is_enabled", "SOURCE_CWA_API_ENABLED"],
+            ),
+            _source_payload(
+                "official.wra.water_level",
+                health_status="degraded",
+                freshness_state="degraded",
+                row_count=3,
+                lag_seconds=1400,
+                observed_at="2026-06-30T04:40:00Z",
+                enabled_gates=["data_sources.is_enabled", "SOURCE_WRA_API_ENABLED"],
+            ),
         ]
+    }
+
+
+def _source_payload(
+    adapter_key: str,
+    *,
+    health_status: str = "healthy",
+    freshness_state: str = "fresh",
+    row_count: int = 5,
+    lag_seconds: int = 600,
+    observed_at: str = "2026-06-30T04:50:00Z",
+    enabled_gates: list[str] | None = None,
+) -> dict:
+    return {
+        "id": adapter_key.replace(".", "-"),
+        "name": adapter_key,
+        "adapter_key": adapter_key,
+        "source_type": "official",
+        "license": "Government open data",
+        "update_frequency": "PT10M",
+        "health_status": health_status,
+        "legal_basis": "L1",
+        "is_enabled": True,
+        "latest_observed_at": observed_at,
+        "latest_fetched_at": "2026-06-30T04:55:00Z",
+        "latest_ingested_at": "2026-06-30T04:56:00Z",
+        "lag_seconds": lag_seconds,
+        "row_count": row_count,
+        "covered_counties": ["Tainan City"],
+        "covered_county_count": 1,
+        "fresh_county_count": 1 if freshness_state == "fresh" else 0,
+        "stale_county_count": 0 if freshness_state == "fresh" else 1,
+        "station_count_by_county": {"Tainan City": row_count},
+        "missing_counties": [],
+        "upstream_status": "succeeded",
+        "enabled_gates": enabled_gates or ["data_sources.is_enabled"],
+        "freshness_state": freshness_state,
     }
