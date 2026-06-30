@@ -1240,6 +1240,39 @@ hosted admin smoke is pending because this local session does not have
 production artifact and the still-missing raw snapshot, scheduler, egress, and
 alerting evidence are recorded.
 
+## Task 39: Mergeable Completion Evidence Audit
+
+**Files:**
+- Modify: `scripts/local-source-completion-audit.py`
+- Modify: `tests/test_local_source_completion_audit_cli.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Add: `docs/reviews/hosted-public-risk-evidence-smoke-2026-06-30-b5f0fcf.json`
+- Add: `docs/reviews/hosted-public-risk-completion-evidence-2026-06-30-b5f0fcf.json`
+
+**Interfaces:**
+- Consumes: one or more `local-source-completion-evidence/v1` JSON overlays.
+- Produces: a merged completion audit where public smoke, hosted source,
+  monitoring, source-contract, and signal-family evidence can accumulate
+  without hand-editing a single private manifest.
+
+- [x] Write a failing CLI test proving repeated `--completion-evidence-json`
+  arguments merge production-gate requirement evidence from separate files.
+- [x] Add multi-file merge support to `scripts/local-source-completion-audit.py`
+  while preserving aggregate-only audit output.
+- [x] Re-run hosted public-risk evidence smoke against deployed `b5f0fcf...`
+  and capture current public-risk completion evidence under `docs/reviews/`.
+- [x] Validate that the merged audit marks only
+  `public_risk_worker_evidence_path` satisfied from the public-risk artifact
+  and keeps signal gaps, source contracts, hosted worker persistence, and
+  monitoring incomplete.
+
+Completed 2026-06-30: completion evidence can now be accumulated from multiple
+artifacts. The current `b5f0fcf...` hosted public-risk artifact satisfies only
+`public_risk_worker_evidence_path`; it does not reduce
+`pump_or_gate_status:14`, `flood_depth:5`, `sewer_water_level:5`,
+authorization/contract blockers, hosted worker raw snapshot/scheduler/egress
+requirements, or monitoring/alerting requirements.
+
 ## Completion Gates
 
 The full objective is complete only when:

@@ -148,6 +148,30 @@ replay evidence.
 7. Record the go/no-go decision, accepted risks, owner handoff, and next drill
    date in the private ops bundle.
 
+## Local-Source Completion Audit Evidence
+
+Nationwide local-source completion is audited by:
+
+```powershell
+python scripts\local-source-completion-audit.py `
+  --completion-evidence-json docs\reviews\hosted-public-risk-completion-evidence-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-json <private-source-contract-evidence.json> `
+  --completion-evidence-json <private-hosted-worker-evidence.json> `
+  --completion-evidence-json <private-monitoring-evidence.json> `
+  --fail-on-incomplete
+```
+
+Repeat `--completion-evidence-json` for each independent evidence bundle. The
+CLI merges signal-family, source-contract, and production-gate evidence before
+running the audit, so public smoke artifacts and private official replies do
+not need to be hand-merged into one JSON file.
+
+The command still prints only aggregate evidence counts and gate status. It
+does not echo `evidence_ref` values, and it must remain incomplete until every
+required signal family, official contract/authorization item, hosted worker
+requirement, monitoring requirement, and public-risk requirement has accepted
+evidence.
+
 ## Acceptance Mapping
 
 `P1-04` can move from `In Progress` to `Accepted` only when:
