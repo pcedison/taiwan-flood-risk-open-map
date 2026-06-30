@@ -1229,6 +1229,9 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "scripts/local-source-request-packets.py --format markdown"
         in request_batch["packet_generator_command"]
     )
+    assert "--signal-type pump_or_gate_status" in request_batch[
+        "packet_generator_command"
+    ]
     assert "金門縣" in plan["signal_gap_priority_groups"][0]["counties"]
     assert [item["county"] for item in plan["authorization_requests"]] == [
         "花蓮縣",

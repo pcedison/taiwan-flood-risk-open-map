@@ -77,6 +77,36 @@ def test_local_source_request_packets_cli_emits_json() -> None:
     )
 
 
+def test_local_source_request_packets_cli_filters_by_signal_type() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--format",
+            "json",
+            "--signal-type",
+            "pump_or_gate_status",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    counties = [packet["county"] for packet in payload]
+
+    assert len(payload) == 14
+    assert "\u91d1\u9580\u7e23" in counties
+    assert "\u96f2\u6797\u7e23" not in counties
+    assert all(
+        "pump_or_gate_status" in packet["target_signal_types"]
+        for packet in payload
+    )
+
+
 def test_local_source_request_packets_cli_writes_markdown_output(
     tmp_path: Path,
 ) -> None:

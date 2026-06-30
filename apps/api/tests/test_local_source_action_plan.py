@@ -344,6 +344,9 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
         "scripts/local-source-request-packets.py --format markdown"
         in request_batch["packet_generator_command"]
     )
+    assert "--signal-type pump_or_gate_status" in request_batch[
+        "packet_generator_command"
+    ]
 
     by_signal = {group["signal_type"]: group for group in groups}
     assert by_signal["flood_depth"]["county_count"] == 5

@@ -358,7 +358,7 @@ def _signal_group_official_request_batch(
         "next_step": "send_official_read_api_requests",
         "packet_generator_command": (
             "PYTHONPATH=apps/api python scripts/local-source-request-packets.py "
-            f"--format markdown {county_args}"
+            f"--format markdown --signal-type {signal_type} {county_args}"
         ),
         "completion_gate": (
             "Each county must provide a latest-observation read API, an "

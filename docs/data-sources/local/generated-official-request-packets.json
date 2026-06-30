@@ -145,6 +145,9 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
+    "target_signal_types": [
+      "pump_or_gate_status"
+    ],
     "priority_rank": 2,
     "priority_tier": "P0",
     "workstream": "request_official_authorization",
@@ -263,6 +266,9 @@
       "hosted_egress_review",
       "worker_persisted_evidence_path"
     ],
+    "target_signal_types": [
+      "pump_or_gate_status"
+    ],
     "priority_rank": 4,
     "priority_tier": "P2",
     "workstream": "verify_public_read_api_contract",
@@ -324,6 +330,9 @@
       "monitored_scheduler_cadence",
       "hosted_egress_review",
       "worker_persisted_evidence_path"
+    ],
+    "target_signal_types": [
+      "pump_or_gate_status"
     ],
     "priority_rank": 5,
     "priority_tier": "P2",

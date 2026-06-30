@@ -883,6 +883,40 @@ found zero live read API candidates, this batch is not an adapter
 implementation; it is the official read-API request and completion-gate contract
 needed before the nationwide sensor objective can be closed.
 
+## Task 28: Signal-Scoped Official Request Packet Generation
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `scripts/local-source-request-packets.py`
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: generated request packet artifacts and OpenAPI example.
+- Test: `apps/api/tests/test_local_source_request_packets.py`
+- Test: `tests/test_local_source_request_packets_cli.py`
+- Test: action-plan/admin contract tests.
+
+**Interfaces:**
+- Consumes: `signal_gap_priority_groups[].official_request_batch` and the
+  existing official request packet builder.
+- Produces: signal-scoped official request packets through
+  `scripts/local-source-request-packets.py --signal-type <signal>`, so the top
+  pump/gate batch can be generated directly from the admin action plan command.
+
+- [x] Write failing domain and CLI tests proving `pump_or_gate_status` filters
+  to the 14-county signal-gap batch.
+- [x] Carry `target_signal_types` onto authorization and contract packets via
+  their priority items so non-`signal_gap_request` blockers remain in the
+  signal-scoped batch.
+- [x] Add `--signal-type` to the packet CLI and action-plan batch command.
+- [x] Regenerate request packet artifacts so official follow-up documents show
+  target signal families consistently.
+
+Completed 2026-06-30: operators can now run the command exposed by
+`/admin/v1/local-source-action-plan` to generate only the official request
+packets relevant to the current `pump_or_gate_status` batch. This still does
+not complete the sensors; it removes a manual filtering step before official
+read-API outreach and keeps authorization, metadata-release, and public
+contract blockers in the same signal-scoped batch.
+
 ## Completion Gates
 
 The full objective is complete only when:

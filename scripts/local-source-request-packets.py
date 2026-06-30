@@ -45,16 +45,26 @@ def main() -> int:
         help="Only include the given county/city. Repeatable.",
     )
     parser.add_argument(
+        "--signal-type",
+        action="append",
+        dest="signal_types",
+        help=(
+            "Only include packets whose target signal types contain this value. "
+            "Repeatable."
+        ),
+    )
+    parser.add_argument(
         "--output",
         help="Optional output file. When omitted, content is written to stdout.",
     )
     args = parser.parse_args()
 
     plan = build_local_source_action_plan(list_local_source_coverage())
-    packets = build_official_request_packets(plan)
-    if args.counties:
-        wanted = set(args.counties)
-        packets = tuple(packet for packet in packets if packet["county"] in wanted)
+    packets = build_official_request_packets(
+        plan,
+        counties=set(args.counties) if args.counties else None,
+        signal_types=set(args.signal_types) if args.signal_types else None,
+    )
 
     content = _render_output(packets, output_format=args.format)
     if args.output:

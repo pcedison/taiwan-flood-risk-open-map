@@ -74,6 +74,7 @@
   - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Monitoring_Station_Sensor_Device_List
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：local_direct_source is not complete；official authorization is required before a production read API can run
 - 完成門檻：完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。
 
@@ -134,6 +135,7 @@
   - 2026-06-30 official audit review: Audit Office page says Taitung County Government built a flood and inundation warning system and later integrated 49 CWA rainfall stations plus 9 WRA water-level stations; this confirms system context but not a local-government latest-observation read API contract.
 - 候選系統不可當量測來源：
   - 2026-06-30 review: the Taitung evidence is a news article/audit summary, not a latest-observation read API; realtime camera references are image-only context, and central CWA/WRA station integration does not satisfy local pump_or_gate_status production ingestion.
+- 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：candidate source needs a public read API contract review
 - 完成門檻：公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。
 
@@ -166,6 +168,7 @@
   - 2026-06-30 curl smoke: the 114年度雨水下水道即時水情監測系統建置計畫 article says water gauges receive monthly maintenance and monthly reports track uptime, abnormalities, and improvements, but it exposes no latest-observation read API or station metadata file.
 - 候選系統不可當量測來源：
   - 2026-06-30 curl smoke: the public page exposes only an HTML article/JPGs; it is not a sewer_water_level read API and cannot satisfy pump_or_gate_status.
+- 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：candidate source needs a public read API contract review
 - 完成門檻：公開 read API contract 補齊 observed_at、station id、measurement_value、單位與座標 metadata。
 

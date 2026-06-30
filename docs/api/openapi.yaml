@@ -932,7 +932,7 @@ paths:
                               - hosted_egress_review
                               - worker_persisted_evidence_path
                             next_step: send_official_read_api_requests
-                            packet_generator_command: PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣
+                            packet_generator_command: PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type pump_or_gate_status --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣
                             completion_gate: Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for pump_or_gate_status, plus production ops evidence.
                           completion_gate: For every listed county, add a production adapter, an authorization-gated adapter, or an official unavailable/blocked-source record for pump_or_gate_status.
                       authorization_requests:

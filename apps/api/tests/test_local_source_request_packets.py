@@ -204,6 +204,29 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     )
 
 
+def test_official_request_packets_can_filter_signal_gap_batch() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+    top_gap = plan["signal_gap_priority_groups"][0]
+
+    packets = build_official_request_packets(
+        plan,
+        counties=set(top_gap["counties"]),
+        signal_types={top_gap["signal_type"]},
+    )
+
+    assert top_gap["signal_type"] == "pump_or_gate_status"
+    assert [packet["county"] for packet in packets] == top_gap["counties"]
+    assert len(packets) == top_gap["county_count"] == 14
+    assert all(
+        top_gap["signal_type"] in packet["target_signal_types"]
+        for packet in packets
+    )
+
+    kinmen = next(packet for packet in packets if packet["county"] == "\u91d1\u9580\u7e23")
+    assert kinmen["packet_type"] == "authorization_request"
+    assert kinmen["target_signal_types"] == ["pump_or_gate_status"]
+
+
 def test_render_official_request_packets_markdown_is_ready_for_outreach() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
     packets = build_official_request_packets(plan)

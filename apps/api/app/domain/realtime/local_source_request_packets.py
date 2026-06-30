@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Mapping
 
 PRODUCTION_OPERATIONAL_REQUIREMENTS = [
@@ -13,6 +14,9 @@ PRODUCTION_OPERATIONAL_REQUIREMENTS = [
 
 def build_official_request_packets(
     action_plan: Mapping[str, Any],
+    *,
+    counties: Iterable[str] | None = None,
+    signal_types: Iterable[str] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     packets: list[dict[str, Any]] = []
     priority_by_county = {
@@ -54,7 +58,37 @@ def build_official_request_packets(
         )
         for item in action_plan.get("sensor_signal_gap_reviews", [])
     )
-    return tuple(sorted(packets, key=_packet_sort_key))
+    ordered_packets = tuple(sorted(packets, key=_packet_sort_key))
+    return _filter_packets(
+        ordered_packets,
+        counties=counties,
+        signal_types=signal_types,
+    )
+
+
+def _filter_packets(
+    packets: tuple[dict[str, Any], ...],
+    *,
+    counties: Iterable[str] | None,
+    signal_types: Iterable[str] | None,
+) -> tuple[dict[str, Any], ...]:
+    county_filter = {str(county) for county in counties} if counties else None
+    signal_filter = (
+        {str(signal_type) for signal_type in signal_types} if signal_types else None
+    )
+    filtered: list[dict[str, Any]] = []
+    for packet in packets:
+        if county_filter is not None and str(packet.get("county", "")) not in county_filter:
+            continue
+        if signal_filter is not None:
+            packet_signals = {
+                str(signal_type)
+                for signal_type in packet.get("target_signal_types", [])
+            }
+            if packet_signals.isdisjoint(signal_filter):
+                continue
+        filtered.append(packet)
+    return tuple(filtered)
 
 
 def render_official_request_packets_markdown(
@@ -336,6 +370,13 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
     fields = _production_operational_packet_fields()
     if priority_item is None:
         return fields
+    target_signal_types = list(priority_item.get("missing_signal_types", []))
+    if not target_signal_types:
+        target_signal_types = list(
+            priority_item.get("central_backbone_missing_signal_types", [])
+        )
+    if target_signal_types:
+        fields["target_signal_types"] = target_signal_types
     return fields | {
         "priority_rank": priority_item.get("rank"),
         "priority_tier": priority_item.get("priority_tier"),
