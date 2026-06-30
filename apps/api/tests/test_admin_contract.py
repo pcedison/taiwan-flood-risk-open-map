@@ -1213,6 +1213,7 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "signal_family_gap_evidence_count": 0,
         "source_contract_evidence_count": 0,
         "production_gate_evidence_count": 0,
+        "production_gate_requirement_evidence_count": 0,
         "validation_errors": [],
     }
     audit_gates = {

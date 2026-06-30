@@ -36,7 +36,9 @@ def main() -> int:
         "--completion-evidence-json",
         help=(
             "Optional local-source-completion-evidence/v1 JSON file. The command "
-            "prints only aggregate counts and gate status, not evidence refs."
+            "prints only aggregate counts and gate status, not evidence refs. "
+            "Production gates must include satisfied_requirements for each "
+            "accepted requirement."
         ),
     )
     parser.add_argument(

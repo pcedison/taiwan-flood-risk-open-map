@@ -898,6 +898,7 @@ paths:
                           signal_family_gap_evidence_count: 0
                           source_contract_evidence_count: 0
                           production_gate_evidence_count: 0
+                          production_gate_requirement_evidence_count: 0
                           validation_errors: []
                         gates:
                           - gate_key: central_backbone_minimum_coverage
@@ -2747,6 +2748,7 @@ components:
         - signal_family_gap_evidence_count
         - source_contract_evidence_count
         - production_gate_evidence_count
+        - production_gate_requirement_evidence_count
         - validation_errors
       properties:
         schema_version:
@@ -2764,6 +2766,9 @@ components:
           type: integer
           minimum: 0
         production_gate_evidence_count:
+          type: integer
+          minimum: 0
+        production_gate_requirement_evidence_count:
           type: integer
           minimum: 0
         validation_errors:

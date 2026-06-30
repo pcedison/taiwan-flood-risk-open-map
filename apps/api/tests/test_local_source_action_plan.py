@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.domain.realtime.local_source_action_plan import (
+    PRODUCTION_GATE_REQUIRED_REQUIREMENTS,
     REQUIRED_REALTIME_READ_API_FIELDS,
     build_local_source_action_plan,
 )
@@ -415,6 +416,7 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
         "signal_family_gap_evidence_count": 24,
         "source_contract_evidence_count": 6,
         "production_gate_evidence_count": 3,
+        "production_gate_requirement_evidence_count": 10,
         "validation_errors": [],
     }
     assert gates["required_signal_families"]["status"] == "satisfied"
@@ -424,6 +426,54 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
     assert gates["hosted_worker_persisted_evidence"]["status"] == "satisfied"
     assert gates["production_monitoring_and_alerting"]["status"] == "satisfied"
     assert gates["public_risk_worker_evidence_path"]["status"] == "satisfied"
+
+
+def test_local_source_action_plan_requires_production_gate_requirement_evidence() -> None:
+    baseline = build_local_source_action_plan(list_local_source_coverage())
+    evidence = _complete_evidence_overlay(baseline)
+    evidence["production_gate_evidence"] = [
+        {
+            "gate_key": "hosted_worker_persisted_evidence",
+            "status": "accepted",
+            "evidence_ref": "private-ops://zeabur/worker-persisted-evidence",
+            "satisfied_requirements": [
+                "freshness_policy",
+                "raw_snapshot_retention_policy",
+            ],
+        },
+        {
+            "gate_key": "production_monitoring_and_alerting",
+            "status": "accepted",
+            "evidence_ref": "private-ops://zeabur/alert-routing",
+        },
+    ]
+
+    plan = build_local_source_action_plan(
+        list_local_source_coverage(),
+        completion_evidence=evidence,
+    )
+    audit = plan["completion_audit"]
+    gates = {gate["gate_key"]: gate for gate in audit["gates"]}
+
+    assert audit["overall_status"] == "incomplete"
+    assert audit["evidence_overlay"]["production_gate_evidence_count"] == 0
+    assert audit["evidence_overlay"]["production_gate_requirement_evidence_count"] == 2
+    assert (
+        "production_gate_evidence[1].satisfied_requirements is required"
+        in audit["evidence_overlay"]["validation_errors"]
+    )
+    assert gates["hosted_worker_persisted_evidence"]["status"] == "incomplete"
+    assert gates["hosted_worker_persisted_evidence"]["blocking_items"] == [
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+        "worker_persisted_evidence_path",
+    ]
+    assert gates["production_monitoring_and_alerting"]["status"] == "incomplete"
+    assert gates["production_monitoring_and_alerting"]["blocking_items"] == [
+        "hosted_alert_routing",
+        "scheduled_freshness_checks",
+        "worker_scheduler_alert_ownership",
+    ]
 
 
 def test_tainan_signal_gap_exposes_static_metadata_and_non_measurement_leads() -> None:
@@ -494,16 +544,31 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                 "gate_key": "hosted_worker_persisted_evidence",
                 "status": "accepted",
                 "evidence_ref": "private-ops://zeabur/worker-persisted-evidence",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "hosted_worker_persisted_evidence"
+                    ]
+                ),
             },
             {
                 "gate_key": "production_monitoring_and_alerting",
                 "status": "accepted",
                 "evidence_ref": "private-ops://zeabur/alert-routing",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "production_monitoring_and_alerting"
+                    ]
+                ),
             },
             {
                 "gate_key": "public_risk_worker_evidence_path",
                 "status": "accepted",
                 "evidence_ref": "private-ops://zeabur/public-risk-smoke",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "public_risk_worker_evidence_path"
+                    ]
+                ),
             },
         ],
     }

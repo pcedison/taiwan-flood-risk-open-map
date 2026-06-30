@@ -982,6 +982,42 @@ path. This does not create official approvals or hosted Zeabur evidence by
 itself; it lets those future private artifacts drive the same audit without
 rewriting code or manually editing completion status.
 
+## Task 31: Requirement-Level Production Gate Evidence
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Modify: `scripts/local-source-completion-audit.py`
+- Modify: `docs/data-sources/local/local-source-completion-evidence.example.json`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+- Test: `tests/test_local_source_completion_audit_cli.py`
+
+**Interfaces:**
+- Consumes: `production_gate_evidence[].satisfied_requirements` in the private
+  `local-source-completion-evidence/v1` JSON.
+- Produces: completion-audit production gates that can only pass when every
+  required production requirement for that gate is backed by accepted evidence.
+
+- [x] Write a failing test proving a coarse production gate evidence item does
+  not satisfy hosted/production completion.
+- [x] Require `hosted_worker_persisted_evidence` to cover freshness policy, raw
+  snapshot retention, monitored scheduler cadence, hosted egress review, and
+  worker-persisted evidence path individually.
+- [x] Require `production_monitoring_and_alerting` to cover hosted alert
+  routing, scheduled freshness checks, and worker/scheduler alert ownership.
+- [x] Require `public_risk_worker_evidence_path` to cover hosted public-risk
+  worker-evidence smoke and query-point nearby coverage smoke.
+- [x] Expose only aggregate requirement evidence counts and remaining blocking
+  items; never echo private `evidence_ref` values.
+
+Completed 2026-06-30: production completion evidence is now requirement-level.
+Partial hosted evidence reduces the relevant blocking list but cannot mark a
+production gate satisfied until all required requirements for that gate are
+accepted. This still does not create Zeabur production evidence; it prevents a
+single coarse evidence record from masking unfinished hosted requirements.
+
 ## Completion Gates
 
 The full objective is complete only when:

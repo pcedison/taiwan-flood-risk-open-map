@@ -28,6 +28,18 @@ PRODUCTION_EVIDENCE_GATE_KEYS = (
     "production_monitoring_and_alerting",
     "public_risk_worker_evidence_path",
 )
+PRODUCTION_GATE_REQUIRED_REQUIREMENTS = {
+    "hosted_worker_persisted_evidence": PRODUCTION_OPERATIONAL_REQUIREMENTS,
+    "production_monitoring_and_alerting": (
+        "hosted_alert_routing",
+        "scheduled_freshness_checks",
+        "worker_scheduler_alert_ownership",
+    ),
+    "public_risk_worker_evidence_path": (
+        "hosted_risk_response_worker_evidence_smoke",
+        "query_point_nearby_coverage_smoke",
+    ),
+}
 ACCEPTED_SIGNAL_EVIDENCE_STATUSES = {
     "accepted",
     "authorization_gated_adapter",
@@ -55,6 +67,7 @@ class CompletionEvidenceState:
     signal_family_gap_keys: frozenset[tuple[str, str]]
     source_contract_keys: frozenset[tuple[str, str]]
     production_gate_keys: frozenset[str]
+    production_gate_requirement_keys: frozenset[tuple[str, str]]
     validation_errors: tuple[str, ...]
 
     def to_summary(self) -> dict[str, Any]:
@@ -64,6 +77,9 @@ class CompletionEvidenceState:
             "signal_family_gap_evidence_count": len(self.signal_family_gap_keys),
             "source_contract_evidence_count": len(self.source_contract_keys),
             "production_gate_evidence_count": len(self.production_gate_keys),
+            "production_gate_requirement_evidence_count": len(
+                self.production_gate_requirement_keys
+            ),
             "validation_errors": list(self.validation_errors),
         }
 
@@ -166,18 +182,21 @@ def _completion_audit(
     )
     signal_gate_satisfied = not signal_blocking_items
     source_contract_gate_satisfied = not source_contract_blocking_items
-    hosted_evidence_satisfied = _production_gate_satisfied(
+    hosted_blocking_items = _production_gate_blocking_items(
         "hosted_worker_persisted_evidence",
         evidence_state=evidence_state,
     )
-    monitoring_evidence_satisfied = _production_gate_satisfied(
+    monitoring_blocking_items = _production_gate_blocking_items(
         "production_monitoring_and_alerting",
         evidence_state=evidence_state,
     )
-    public_risk_evidence_satisfied = _production_gate_satisfied(
+    public_risk_blocking_items = _production_gate_blocking_items(
         "public_risk_worker_evidence_path",
         evidence_state=evidence_state,
     )
+    hosted_evidence_satisfied = not hosted_blocking_items
+    monitoring_evidence_satisfied = not monitoring_blocking_items
+    public_risk_evidence_satisfied = not public_risk_blocking_items
     gates = [
         _audit_gate(
             gate_key="local_direct_or_tracked_request",
@@ -251,9 +270,7 @@ def _completion_audit(
                 evidence_state=evidence_state,
                 satisfied=hosted_evidence_satisfied,
             ),
-            blocking_items=[] if hosted_evidence_satisfied else list(
-                PRODUCTION_OPERATIONAL_REQUIREMENTS
-            ),
+            blocking_items=hosted_blocking_items,
             next_workstream=(
                 None
                 if hosted_evidence_satisfied
@@ -272,11 +289,7 @@ def _completion_audit(
                 evidence_state=evidence_state,
                 satisfied=monitoring_evidence_satisfied,
             ),
-            blocking_items=[] if monitoring_evidence_satisfied else [
-                "hosted_alert_routing",
-                "scheduled_freshness_checks",
-                "worker_scheduler_alert_ownership",
-            ],
+            blocking_items=monitoring_blocking_items,
             next_workstream=(
                 None
                 if monitoring_evidence_satisfied
@@ -296,10 +309,7 @@ def _completion_audit(
                 evidence_state=evidence_state,
                 satisfied=public_risk_evidence_satisfied,
             ),
-            blocking_items=[] if public_risk_evidence_satisfied else [
-                "hosted_risk_response_worker_evidence_smoke",
-                "query_point_nearby_coverage_smoke",
-            ],
+            blocking_items=public_risk_blocking_items,
             next_workstream=(
                 None if public_risk_evidence_satisfied else "hosted_risk_response_smoke"
             ),
@@ -340,6 +350,7 @@ def _completion_evidence_state(
             signal_family_gap_keys=frozenset(),
             source_contract_keys=frozenset(),
             production_gate_keys=frozenset(),
+            production_gate_requirement_keys=frozenset(),
             validation_errors=(),
         )
 
@@ -356,9 +367,16 @@ def _completion_evidence_state(
             signal_family_gap_keys=frozenset(),
             source_contract_keys=frozenset(),
             production_gate_keys=frozenset(),
+            production_gate_requirement_keys=frozenset(),
             validation_errors=tuple(errors),
         )
 
+    production_gate_requirement_keys = frozenset(
+        _accepted_production_gate_requirement_keys(
+            completion_evidence.get("production_gate_evidence"),
+            errors,
+        )
+    )
     return CompletionEvidenceState(
         schema_version=schema_version,
         captured_at=captured_at if isinstance(captured_at, str) else None,
@@ -375,11 +393,9 @@ def _completion_evidence_state(
             )
         ),
         production_gate_keys=frozenset(
-            _accepted_production_gate_keys(
-                completion_evidence.get("production_gate_evidence"),
-                errors,
-            )
+            _completed_production_gate_keys(production_gate_requirement_keys)
         ),
+        production_gate_requirement_keys=production_gate_requirement_keys,
         validation_errors=tuple(errors),
     )
 
@@ -436,11 +452,11 @@ def _accepted_source_contract_keys(
     return keys
 
 
-def _accepted_production_gate_keys(
+def _accepted_production_gate_requirement_keys(
     value: Any,
     errors: list[str],
-) -> set[str]:
-    keys: set[str] = set()
+) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
     for index, item in enumerate(_list_evidence(value, "production_gate_evidence", errors)):
         gate_key = item.get("gate_key")
         status = item.get("status")
@@ -452,8 +468,45 @@ def _accepted_production_gate_keys(
         if not _non_empty_string(item.get("evidence_ref")):
             errors.append(f"production_gate_evidence[{index}].evidence_ref is required")
             continue
-        keys.add(gate_key)
+        requirements = item.get("satisfied_requirements")
+        if not isinstance(requirements, list):
+            errors.append(
+                f"production_gate_evidence[{index}].satisfied_requirements is required"
+            )
+            continue
+        allowed_requirements = set(PRODUCTION_GATE_REQUIRED_REQUIREMENTS[str(gate_key)])
+        for requirement_index, requirement in enumerate(requirements):
+            if not _non_empty_string(requirement):
+                errors.append(
+                    "production_gate_evidence"
+                    f"[{index}].satisfied_requirements[{requirement_index}]"
+                    " must be a non-empty string"
+                )
+                continue
+            requirement_key = str(requirement).strip()
+            if requirement_key not in allowed_requirements:
+                errors.append(
+                    f"production_gate_evidence[{index}].satisfied_requirements"
+                    f"[{requirement_index}] is invalid for {gate_key}"
+                )
+                continue
+            keys.add((str(gate_key), requirement_key))
     return keys
+
+
+def _completed_production_gate_keys(
+    requirement_keys: frozenset[tuple[str, str]],
+) -> set[str]:
+    completed: set[str] = set()
+    for gate_key, requirements in PRODUCTION_GATE_REQUIRED_REQUIREMENTS.items():
+        missing_requirements = [
+            requirement
+            for requirement in requirements
+            if (gate_key, requirement) not in requirement_keys
+        ]
+        if not missing_requirements:
+            completed.add(gate_key)
+    return completed
 
 
 def _list_evidence(
@@ -554,12 +607,16 @@ def _source_contract_gate_evidence(
     )
 
 
-def _production_gate_satisfied(
+def _production_gate_blocking_items(
     gate_key: str,
     *,
     evidence_state: CompletionEvidenceState,
-) -> bool:
-    return gate_key in evidence_state.production_gate_keys
+) -> list[str]:
+    return [
+        requirement
+        for requirement in PRODUCTION_GATE_REQUIRED_REQUIREMENTS[gate_key]
+        if (gate_key, requirement) not in evidence_state.production_gate_requirement_keys
+    ]
 
 
 def _production_gate_evidence(
@@ -570,7 +627,18 @@ def _production_gate_evidence(
     satisfied: bool,
 ) -> str:
     if satisfied:
-        return f"Accepted completion evidence supplied for {gate_key}."
+        return f"Accepted completion evidence supplied for all {gate_key} requirements."
+    accepted_count = sum(
+        1
+        for requirement in PRODUCTION_GATE_REQUIRED_REQUIREMENTS[gate_key]
+        if (gate_key, requirement) in evidence_state.production_gate_requirement_keys
+    )
+    if accepted_count:
+        total_count = len(PRODUCTION_GATE_REQUIRED_REQUIREMENTS[gate_key])
+        return (
+            f"Accepted completion evidence supplied for {accepted_count}/"
+            f"{total_count} {gate_key} requirements."
+        )
     return default_evidence
 
 

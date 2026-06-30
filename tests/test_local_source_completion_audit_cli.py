@@ -12,6 +12,7 @@ SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
 sys.path.insert(0, str(API_APP))
 
 from app.domain.realtime.local_source_action_plan import (  # noqa: E402
+    PRODUCTION_GATE_REQUIRED_REQUIREMENTS,
     build_local_source_action_plan,
 )
 from app.domain.realtime.local_source_coverage import (  # noqa: E402
@@ -106,16 +107,31 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                 "gate_key": "hosted_worker_persisted_evidence",
                 "status": "accepted",
                 "evidence_ref": "private-ops://zeabur/worker-persisted-evidence",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "hosted_worker_persisted_evidence"
+                    ]
+                ),
             },
             {
                 "gate_key": "production_monitoring_and_alerting",
                 "status": "accepted",
                 "evidence_ref": "private-ops://zeabur/alert-routing",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "production_monitoring_and_alerting"
+                    ]
+                ),
             },
             {
                 "gate_key": "public_risk_worker_evidence_path",
                 "status": "accepted",
                 "evidence_ref": "private-ops://zeabur/public-risk-smoke",
+                "satisfied_requirements": list(
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "public_risk_worker_evidence_path"
+                    ]
+                ),
             },
         ],
     }
