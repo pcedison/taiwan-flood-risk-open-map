@@ -72,6 +72,88 @@ def test_local_source_completion_audit_cli_accepts_completion_evidence(
     assert gates["hosted_worker_persisted_evidence"]["status"] == "satisfied"
 
 
+def test_local_source_completion_audit_cli_merges_completion_evidence_files(
+    tmp_path: Path,
+) -> None:
+    public_risk_evidence = tmp_path / "public-risk-evidence.json"
+    hosted_worker_evidence = tmp_path / "hosted-worker-evidence.json"
+    public_risk_evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-06-30T05:00:00+00:00",
+                "signal_family_gap_evidence": [],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [
+                    {
+                        "gate_key": "public_risk_worker_evidence_path",
+                        "status": "accepted",
+                        "evidence_ref": "docs/reviews/public-risk.json",
+                        "satisfied_requirements": [
+                            "hosted_risk_response_worker_evidence_smoke",
+                            "query_point_nearby_coverage_smoke",
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    hosted_worker_evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-06-30T05:10:00+00:00",
+                "signal_family_gap_evidence": [],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [
+                    {
+                        "gate_key": "hosted_worker_persisted_evidence",
+                        "status": "accepted",
+                        "evidence_ref": "private-ops://zeabur/worker",
+                        "satisfied_requirements": list(
+                            PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                                "hosted_worker_persisted_evidence"
+                            ]
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(public_risk_evidence),
+            "--completion-evidence-json",
+            str(hosted_worker_evidence),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    gates = {gate["gate_key"]: gate for gate in payload["gates"]}
+
+    assert payload["evidence_overlay"]["production_gate_evidence_count"] == 2
+    assert (
+        payload["evidence_overlay"]["production_gate_requirement_evidence_count"]
+        == 7
+    )
+    assert gates["public_risk_worker_evidence_path"]["status"] == "satisfied"
+    assert gates["hosted_worker_persisted_evidence"]["status"] == "satisfied"
+    assert gates["production_monitoring_and_alerting"]["status"] == "incomplete"
+    assert payload["overall_status"] == "incomplete"
+
+
 def _complete_evidence_overlay(plan: dict) -> dict:
     return {
         "schema_version": "local-source-completion-evidence/v1",

@@ -1,0 +1,69 @@
+{
+  "schema_version": "hosted-public-risk-evidence-smoke/v1",
+  "captured_at": "2026-06-30T05:20:00+00:00",
+  "base_url": "https://floodrisk.cc",
+  "status": "passed",
+  "health": {
+    "status_code": 200,
+    "service": "flood-risk-api",
+    "version": "public-beta-mvp-2026-05-04",
+    "deployment_sha": "b5f0fcf754deaf6184dd6a59272df96a409a9c1e"
+  },
+  "request": {
+    "lat": 23.01929,
+    "lng": 120.18726,
+    "radius_m": 500,
+    "location_text": "Tainan hosted public risk evidence smoke b5f0fcf"
+  },
+  "risk_assessment": {
+    "assessment_id": "d6bb9053-e0c9-59f3-9605-db539c8d1636",
+    "levels": {
+      "realtime": "低",
+      "historical": "未知",
+      "confidence": "中"
+    },
+    "worker_evidence": {
+      "freshness_source_ids": [
+        "cwa-rainfall",
+        "wra-water-level"
+      ],
+      "official_evidence_event_types": [
+        "rainfall",
+        "water_level"
+      ]
+    },
+    "nearby_coverage": {
+      "overall_level": "medium",
+      "query_radius_m": 500,
+      "radius_buckets_m": [
+        500,
+        1000,
+        3000,
+        5000
+      ],
+      "signal_types": [
+        "rainfall",
+        "water_level",
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+        "flood_warning",
+        "status_only"
+      ],
+      "missing_signal_types": [
+        "flood_depth"
+      ]
+    }
+  },
+  "completion_evidence_targets": [
+    {
+      "gate_key": "public_risk_worker_evidence_path",
+      "status": "accepted",
+      "satisfied_requirements": [
+        "hosted_risk_response_worker_evidence_smoke",
+        "query_point_nearby_coverage_smoke"
+      ]
+    }
+  ],
+  "failures": []
+}
