@@ -1347,6 +1347,31 @@ satisfies only `production_deployment_evidence`; it does not reduce required
 signal-family gaps, official authorization/contracts, hosted worker raw
 snapshot/scheduler/egress requirements, or production monitoring/alerting.
 
+## Task 42: Hosted Monitoring Evidence Overlay
+
+**Files:**
+- Add: `scripts/hosted_monitoring_evidence.py`
+- Add: `tests/test_hosted_monitoring_evidence.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+
+**Interfaces:**
+- Consumes: a private hosted monitoring manifest with alert routing,
+  scheduled freshness check, and worker/scheduler ownership evidence.
+- Produces: a fail-closed `local-source-completion-evidence/v1` overlay for
+  `production_monitoring_and_alerting`.
+
+- [x] Write failing tests requiring valid monitoring evidence to produce an
+  accepted completion overlay.
+- [x] Reject incomplete manifests that lack owner, cadence, verified status, or
+  requirement-level evidence.
+- [x] Support PowerShell UTF-8 BOM JSON manifests.
+- [x] Document the private handoff command and required fields.
+
+Completed 2026-06-30: operators now have a strict private evidence path for
+`production_monitoring_and_alerting`. This does not itself prove hosted alert
+routing or scheduler ownership; the audit is accepted only when real private
+monitoring evidence is provided.
+
 ## Completion Gates
 
 The full objective is complete only when:
