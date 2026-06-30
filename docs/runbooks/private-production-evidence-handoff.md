@@ -219,6 +219,7 @@ python scripts\local-source-request-packets.py `
   --signal-type flood_depth `
   --dispatch-evidence-ref private-ops://local-source/dispatch/flood-depth-YYYY-MM-DD `
   --dispatched-at 2026-06-30T15:20:00+08:00 `
+  --follow-up-due-at 2026-07-07T09:00:00+08:00 `
   --output <private-signal-gap-dispatch-evidence.json>
 ```
 
@@ -227,7 +228,9 @@ keep `required_signal_families` incomplete until each county/signal entry is
 replaced with `accepted`, `authorization_gated_adapter`,
 `production_adapter`, or `official_unavailable` evidence. Do not commit a
 filled dispatch overlay; keep it with the private official correspondence or
-ticketing record.
+ticketing record. `--follow-up-due-at` is optional, but including it lets the
+audit expose the number of dispatch items with scheduled follow-up and the next
+follow-up timestamp without treating the request as accepted evidence.
 
 After official replies, authorization-gated adapter evidence, production
 adapter evidence, or official-unavailable decisions are accepted, normalize the
@@ -264,6 +267,7 @@ python scripts\local-source-request-packets.py `
   --format source-contract-dispatch-evidence `
   --dispatch-evidence-ref private-ops://local-source/source-contract-dispatch/YYYY-MM-DD `
   --dispatched-at 2026-06-30T18:10:00+08:00 `
+  --follow-up-due-at 2026-07-07T09:00:00+08:00 `
   --output <private-source-contract-dispatch-evidence.json>
 ```
 
@@ -272,7 +276,9 @@ progress, but it will keep `official_authorization_and_contracts` incomplete
 until each current county/gate item is replaced with `accepted`, `authorized`,
 `contract_verified`, `released`, or `official_unavailable` evidence. Do not
 commit a filled dispatch overlay; keep it with the private official
-correspondence or ticketing record.
+correspondence or ticketing record. `--follow-up-due-at` has the same
+non-completion meaning here: it only schedules follow-up visibility in the
+audit overlay.
 
 ```powershell
 python scripts\source_contract_evidence.py `

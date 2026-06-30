@@ -178,6 +178,7 @@ def build_signal_gap_dispatch_evidence_template(
     *,
     dispatch_evidence_ref: str,
     dispatched_at: str,
+    follow_up_due_at: str | None = None,
     captured_at: str | None = None,
 ) -> dict[str, Any]:
     signal_family_gap_evidence: list[dict[str, Any]] = []
@@ -192,6 +193,7 @@ def build_signal_gap_dispatch_evidence_template(
                 target,
                 dispatch_evidence_ref=dispatch_evidence_ref,
                 dispatched_at=dispatched_at,
+                follow_up_due_at=follow_up_due_at,
             )
             key = (str(item["county"]), str(item["signal_type"]))
             if key in seen_keys:
@@ -219,6 +221,7 @@ def build_source_contract_dispatch_evidence_template(
     *,
     dispatch_evidence_ref: str,
     dispatched_at: str,
+    follow_up_due_at: str | None = None,
     captured_at: str | None = None,
 ) -> dict[str, Any]:
     source_contract_evidence: list[dict[str, Any]] = []
@@ -233,6 +236,7 @@ def build_source_contract_dispatch_evidence_template(
                 target,
                 dispatch_evidence_ref=dispatch_evidence_ref,
                 dispatched_at=dispatched_at,
+                follow_up_due_at=follow_up_due_at,
             )
             key = (str(item["county"]), str(item["gate"]))
             if key in seen_keys:
@@ -326,8 +330,9 @@ def _signal_family_gap_dispatch_item(
     *,
     dispatch_evidence_ref: str,
     dispatched_at: str,
+    follow_up_due_at: str | None,
 ) -> dict[str, Any]:
-    return {
+    item = {
         "county": str(target.get("county", "")),
         "signal_type": str(target.get("signal_type", "")),
         "status": "request_dispatched",
@@ -337,6 +342,9 @@ def _signal_family_gap_dispatch_item(
         "evidence_ref": dispatch_evidence_ref,
         "dispatched_at": dispatched_at,
     }
+    if follow_up_due_at:
+        item["follow_up_due_at"] = follow_up_due_at
+    return item
 
 
 def _source_contract_dispatch_item(
@@ -344,8 +352,9 @@ def _source_contract_dispatch_item(
     *,
     dispatch_evidence_ref: str,
     dispatched_at: str,
+    follow_up_due_at: str | None,
 ) -> dict[str, Any]:
-    return {
+    item = {
         "county": str(target.get("county", "")),
         "gate": str(target.get("gate", "")),
         "status": "request_dispatched",
@@ -355,6 +364,9 @@ def _source_contract_dispatch_item(
         "evidence_ref": dispatch_evidence_ref,
         "dispatched_at": dispatched_at,
     }
+    if follow_up_due_at:
+        item["follow_up_due_at"] = follow_up_due_at
+    return item
 
 
 def _authorization_packet(

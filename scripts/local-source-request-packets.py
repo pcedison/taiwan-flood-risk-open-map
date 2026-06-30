@@ -85,6 +85,14 @@ def main() -> int:
             "signal-gap-dispatch-evidence and source-contract-dispatch-evidence."
         ),
     )
+    parser.add_argument(
+        "--follow-up-due-at",
+        help=(
+            "Optional ISO-8601 timestamp for the next official-response follow-up. "
+            "Used only by signal-gap-dispatch-evidence and "
+            "source-contract-dispatch-evidence."
+        ),
+    )
     args = parser.parse_args()
 
     plan = build_local_source_action_plan(list_local_source_coverage())
@@ -108,6 +116,7 @@ def main() -> int:
             packets,
             dispatch_evidence_ref=args.dispatch_evidence_ref,
             dispatched_at=args.dispatched_at,
+            follow_up_due_at=args.follow_up_due_at,
         )
         content = json.dumps(template, ensure_ascii=False, indent=2) + "\n"
         return _write_output(content, args.output)
@@ -135,6 +144,7 @@ def main() -> int:
                 batches,
                 dispatch_evidence_ref=args.dispatch_evidence_ref,
                 dispatched_at=args.dispatched_at,
+                follow_up_due_at=args.follow_up_due_at,
             )
             content = json.dumps(template, ensure_ascii=False, indent=2) + "\n"
             return _write_output(content, args.output)

@@ -1753,6 +1753,42 @@ API contracts. It does not reduce the current blocker counts; accepted official
 reply, authorization, contract verification, metadata release, or
 official-unavailable evidence is still required.
 
+## Task 56: Signal Gap Dispatch Follow-Up Tracking
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Modify: `scripts/local-source-request-packets.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Modify: action-plan, admin-contract, request-packet, and completion-audit tests.
+
+**Interfaces:**
+- Consumes: `signal-gap-dispatch-evidence` and
+  `source-contract-dispatch-evidence` overlays with optional
+  `follow_up_due_at`.
+- Produces: completion-audit overlay counts for dispatch follow-up scheduling
+  without satisfying `required_signal_families` or
+  `official_authorization_and_contracts`.
+
+- [x] Write failing tests proving signal-gap `request_dispatched` evidence can
+  carry `follow_up_due_at`, is counted as dispatch progress, and keeps
+  `required_signal_families` incomplete.
+- [x] Add `--follow-up-due-at` to dispatch overlay generation for signal-gap
+  and source-contract request packets.
+- [x] Expose follow-up counts and the next follow-up timestamp in the admin
+  action-plan contract and OpenAPI schema.
+- [x] Document that follow-up scheduling is private progress evidence and must
+  not be treated as accepted official coverage.
+
+Completed 2026-06-30: official request dispatch overlays can now record a
+follow-up due timestamp. The audit reports the number of dispatch items with
+scheduled follow-up and the next due timestamp while still requiring accepted
+official replies, production adapter evidence, authorization-gated adapter
+evidence, or official-unavailable decisions before any completion gate is
+satisfied.
+
 ## Completion Gates
 
 The full objective is complete only when:
