@@ -1140,6 +1140,39 @@ and public query smoke for the merge, but does not satisfy the remaining
 worker-persisted source evidence, raw snapshot retention, scheduler cadence,
 hosted egress, or admin freshness/alerting gates.
 
+## Task 36: Rate-Aware Production Public Smoke
+
+**Files:**
+- Modify: `scripts/taiwan_wide_public_beta_smoke.py`
+- Modify: `tests/test_taiwan_wide_public_beta_smoke.py`
+- Modify: `docs/runbooks/deploy-zeabur.md`
+- Modify: `docs/runbooks/open-data-geocoder-import.md`
+- Modify: `docs/runbooks/public-beta-readiness-2026-05-04.md`
+- Add: `docs/reviews/production-public-beta-smoke-2026-06-30-cebb3305.json`
+
+**Interfaces:**
+- Consumes: hosted public rate-limit headers from `/v1/geocode` and
+  `/v1/risk/assess`.
+- Produces: a production-safe public beta smoke command that respects 429
+  `Retry-After`, supports sample delay, and still writes JSON evidence.
+
+- [x] Reproduce the hosted smoke failure after PR #14 deployment:
+  the fast 44-sample run returned HTTP 429 for later samples because hosted
+  risk-assessment rate limiting is enabled.
+- [x] Write failing tests for 429 retry and sample delay propagation.
+- [x] Add `--request-delay-seconds`, `--rate-limit-retries`, and
+  `--rate-limit-retry-delay-seconds` to the smoke script.
+- [x] Update runbooks so production smoke examples use the rate-aware command.
+- [x] Re-run the production smoke against `https://floodrisk.cc` with
+  `deployment_sha=cebb3305...` and capture a 44-sample passing artifact.
+
+Completed 2026-06-30: PR #14 merge commit `cebb3305` was deployed by Zeabur,
+`/health` and `/ready` returned that SHA, and the rate-aware Taiwan-wide public
+smoke passed 44 county/town samples. This resolves the smoke-tool rate-limit
+false failure. It still does not satisfy source-family completion,
+authorization/contract approvals, worker raw-snapshot retention, hosted
+scheduler cadence, hosted egress review, or production monitoring/alerting.
+
 ## Completion Gates
 
 The full objective is complete only when:

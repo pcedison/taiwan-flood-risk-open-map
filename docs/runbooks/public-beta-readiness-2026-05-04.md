@@ -55,7 +55,13 @@ Repeat the hosted no-secret smoke after each Zeabur deployment with:
 
 ```powershell
 python scripts\hosted_public_beta_smoke.py --base-url https://floodrisk.cc
-python scripts\taiwan_wide_public_beta_smoke.py --base-url https://floodrisk.cc --include-town-samples
+python scripts\taiwan_wide_public_beta_smoke.py `
+  --base-url https://floodrisk.cc `
+  --include-town-samples `
+  --request-delay-seconds 2.2 `
+  --rate-limit-retries 8 `
+  --rate-limit-retry-delay-seconds 10 `
+  --evidence-output docs\reviews\production-public-beta-smoke-YYYY-MM-DD-<sha>.json
 ```
 
 ## 2026-05-06 Ops Update
