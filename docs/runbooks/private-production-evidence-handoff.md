@@ -280,6 +280,24 @@ correspondence or ticketing record. `--follow-up-due-at` has the same
 non-completion meaning here: it only schedules follow-up visibility in the
 audit overlay.
 
+To check whether dispatched official requests are due or overdue for follow-up
+without printing private evidence refs, run:
+
+```powershell
+python scripts\local-source-request-followups.py `
+  --completion-evidence-json <private-signal-gap-dispatch-evidence.json> `
+  --completion-evidence-json <private-source-contract-dispatch-evidence.json> `
+  --as-of 2026-07-08T00:00:00+08:00 `
+  --fail-on-overdue `
+  --output <private-followup-report.json>
+```
+
+The report contains only public-safe fields such as county, signal type or
+source-contract gate, follow-up due timestamp, aggregate pending/overdue
+counts, and the next follow-up due timestamp. It intentionally omits
+`evidence_ref` so operators can use it in ticket checks or CI-style monitors
+without leaking private correspondence indexes.
+
 ```powershell
 python scripts\source_contract_evidence.py `
   --manifest-json <private-source-contract-manifest.json> `
