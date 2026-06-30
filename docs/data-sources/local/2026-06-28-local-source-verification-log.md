@@ -126,3 +126,50 @@ Use those artifacts for release-monitor review and future PR evidence instead
 of PowerShell `Tee-Object`, because the CLI writes normalized UTF-8 JSON and
 records the source catalog URL, captured timestamp, target counties, required
 signal type, summary counts, and conclusion.
+
+## 2026-06-30 public API contract probe
+
+`scripts/public-api-contract-probe.py` now rechecks the current
+`public_api_contract_reviews` queue from the action plan. The probe is
+fail-closed: when a candidate URL exposes every production read API field in a
+machine-readable JSON/XML/CSV-style response, `--fail-on-live-candidate` exits
+non-zero so the source can be promoted into adapter implementation instead of
+remaining a contract blocker.
+
+Live command:
+
+```powershell
+python scripts\public-api-contract-probe.py `
+  --captured-at 2026-06-30T19:30:00+08:00 `
+  --timeout-seconds 20 `
+  --allow-insecure-tls `
+  --fail-on-live-candidate `
+  --output docs\reviews\public-api-contract-probe-2026-06-30.json
+```
+
+Result:
+
+- 3 counties probed: Miaoli, Pingtung, and Taitung.
+- 8 public candidate URLs returned HTTP 200 after explicitly disabling Python
+  TLS verification for these public government pages. The artifact records
+  `tls_verification=disabled`.
+- 0 `candidate_live_read_api` candidates were found.
+- Miaoli remains `public_html_missing_read_api_contract`; the public page is an
+  article/results page and still lacks `observed_at`, station/device id, and a
+  usable source/license contract for machine ingestion.
+- Pingtung remains split between `public_html_missing_read_api_contract` and
+  `non_measurement_context`: `/RainStation` exposes rainfall HTML without
+  observation time or joinable metadata, `/Flood` is warning-threshold context,
+  and `/Crawler` is image/CCTV context.
+- Taitung remains `public_html_missing_read_api_contract`: the county and audit
+  pages confirm system context but still do not expose latest-observation rows
+  with station/device id and machine-readable measurement fields.
+
+Evidence artifact:
+
+- `docs/reviews/public-api-contract-probe-2026-06-30.json`
+
+Conclusion: the current public contract queue still requires official read API
+contract follow-up. No adapter should be implemented from these HTML/news/audit
+pages without a real latest-observation endpoint, station metadata join, and
+accepted source/license contract.

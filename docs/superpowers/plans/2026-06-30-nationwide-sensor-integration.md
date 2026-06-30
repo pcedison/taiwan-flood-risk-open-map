@@ -1535,6 +1535,37 @@ Completed 2026-06-30: discovery evidence now matches the post-Civil-IoT
 it proves that the current public data.gov.tw export does not expose a
 promotion-ready live read API for the remaining signal gaps.
 
+## Task 49: Public API Contract Probe For Current Review Queue
+
+**Files:**
+- Add: `apps/api/app/domain/realtime/local_source_contract_probe.py`
+- Add: `apps/api/tests/test_local_source_contract_probe.py`
+- Add: `scripts/public-api-contract-probe.py`
+- Add: `tests/test_public_api_contract_probe_cli.py`
+- Add: `docs/reviews/public-api-contract-probe-2026-06-30.json`
+- Modify: `docs/data-sources/local/2026-06-28-local-source-verification-log.md`
+
+**Interfaces:**
+- Consumes: current `public_api_contract_reviews` from
+  `build_local_source_action_plan`.
+- Produces: a fail-closed live probe artifact for Miaoli, Pingtung, and
+  Taitung public contract blockers.
+
+- [x] Write failing tests for machine-readable read API detection, HTML blocker
+  detection, and non-measurement CCTV/warning context.
+- [x] Add a CLI with fixture mode, live URL probing, `--fail-on-live-candidate`,
+  and explicit `--allow-insecure-tls` recording for public government pages
+  that fail Python's strict certificate verifier.
+- [x] Run the live probe for the 3 current public API contract review counties
+  and 8 candidate URLs.
+- [x] Record that 0 `candidate_live_read_api` sources were found.
+
+Completed 2026-06-30: the public contract queue now has a reproducible probe
+artifact instead of only static notes. This does not satisfy the
+`official_authorization_and_contracts` gate; Miaoli, Pingtung, and Taitung still
+need official read API contracts, accepted unavailability records, or promoted
+production adapters before the blockers can clear.
+
 ## Completion Gates
 
 The full objective is complete only when:
