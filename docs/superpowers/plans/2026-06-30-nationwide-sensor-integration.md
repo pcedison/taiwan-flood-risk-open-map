@@ -1885,6 +1885,39 @@ audit marks `production_deployment_evidence` and
 `hosted_worker_persisted_evidence`, and `production_monitoring_and_alerting`
 remain incomplete.
 
+## Task 60: Hosted Monitoring Scheduled Smoke Workflow
+
+**Files:**
+- Add: `.github/workflows/hosted-monitoring.yml`
+- Add: `tests/test_hosted_monitoring_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: hosted deployment, public-risk, and hosted source-freshness smoke
+  scripts.
+- Produces: a scheduled GitHub Actions workflow that runs public hosted smokes
+  every 30 minutes and runs the admin `/admin/v1/sources` full-backbone
+  freshness smoke when `ADMIN_BEARER_TOKEN` is configured.
+
+- [x] Write a failing workflow contract test requiring schedule,
+  workflow-dispatch, public smoke commands, optional admin freshness smoke, and
+  artifact upload.
+- [x] Add `.github/workflows/hosted-monitoring.yml` with a 30-minute cron and
+  manual `expected_deployment_sha` override.
+- [x] Upload hosted monitoring JSON artifacts for later completion-evidence
+  review.
+- [x] Document that this creates scheduled smoke infrastructure but does not by
+  itself satisfy alert routing ownership or hosted worker policy evidence.
+
+Completed 2026-06-30: hosted monitoring smokes can now run on a GitHub Actions
+schedule and preserve JSON artifacts. This moves the
+`scheduled_freshness_checks` path from manual-only toward auditable automation,
+but `production_monitoring_and_alerting` remains incomplete until accepted
+alert routing ownership, scheduled source-freshness evidence, and
+worker/scheduler alert ownership are recorded through the monitoring evidence
+manifest.
+
 ## Completion Gates
 
 The full objective is complete only when:

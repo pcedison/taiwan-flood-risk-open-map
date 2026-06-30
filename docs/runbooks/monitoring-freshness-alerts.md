@@ -252,6 +252,37 @@ This smoke can support completion evidence for the hosted worker-persisted
 freshness path, but it is not a scheduler monitor and does not prove alert
 routing, raw snapshot retention, hosted egress approval, or incident ownership.
 
+## Hosted GitHub Actions Monitor
+
+The repository also has a scheduled hosted monitoring workflow:
+
+```text
+.github/workflows/hosted-monitoring.yml
+```
+
+It runs every 30 minutes and can also be started manually from GitHub Actions.
+Each run executes:
+
+- `scripts/hosted_deployment_smoke.py` against `https://floodrisk.cc`.
+- `scripts/hosted_public_risk_evidence_smoke.py` against the hosted public
+  risk API.
+- `scripts/hosted_source_freshness_smoke.py` when the repository secret
+  `ADMIN_BEARER_TOKEN` is configured.
+
+The workflow uploads its JSON artifacts as the `hosted-monitoring-<run-id>`
+artifact. These artifacts are useful evidence inputs for deployment,
+public-risk, and hosted source-freshness review. They do not, by themselves,
+complete the monitoring gate: `production_monitoring_and_alerting` still needs
+accepted alert routing ownership, scheduled source freshness evidence, and
+worker/scheduler alert ownership recorded through
+`scripts/hosted_monitoring_evidence.py`.
+
+Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
+for the workflow commit SHA, or provide the exact deployed SHA while verifying a
+specific release. If `ADMIN_BEARER_TOKEN` is not configured, the public smokes
+still run and the admin source freshness check is skipped with a notice rather
+than a leaked token or failed secret lookup.
+
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 
 ```powershell

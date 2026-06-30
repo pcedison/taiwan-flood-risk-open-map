@@ -1,0 +1,78 @@
+name: Hosted Monitoring
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_deployment_sha:
+        description: "Expected /health deployment_sha. Defaults to the workflow commit SHA."
+        required: false
+        type: string
+  schedule:
+    - cron: "*/30 * * * *"
+
+jobs:
+  hosted-monitoring:
+    name: Hosted monitoring smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ADMIN_BEARER_TOKEN: ${{ secrets.ADMIN_BEARER_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve expected deployment SHA
+        id: expected-sha
+        env:
+          INPUT_EXPECTED_DEPLOYMENT_SHA: ${{ github.event.inputs.expected_deployment_sha }}
+        run: |
+          set -euo pipefail
+          expected_sha="${INPUT_EXPECTED_DEPLOYMENT_SHA:-${GITHUB_SHA}}"
+          echo "sha=${expected_sha}" >> "${GITHUB_OUTPUT}"
+          echo "Expected hosted deployment SHA: ${expected_sha}"
+
+      - name: Prepare artifact directory
+        run: mkdir -p artifacts
+
+      - name: Hosted deployment smoke
+        run: |
+          set -euo pipefail
+          python scripts/hosted_deployment_smoke.py \
+            --expected-deployment-sha "${{ steps.expected-sha.outputs.sha }}" \
+            --evidence-output artifacts/hosted-deployment-smoke.json \
+            --completion-evidence-output artifacts/hosted-deployment-completion-evidence.json
+
+      - name: Hosted public risk evidence smoke
+        run: |
+          set -euo pipefail
+          python scripts/hosted_public_risk_evidence_smoke.py \
+            --evidence-output artifacts/hosted-public-risk-evidence-smoke.json \
+            --completion-evidence-output artifacts/hosted-public-risk-completion-evidence.json
+
+      - name: Hosted source freshness smoke
+        if: ${{ env.ADMIN_BEARER_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          python scripts/hosted_source_freshness_smoke.py \
+            --admin-token-env ADMIN_BEARER_TOKEN \
+            --evidence-output artifacts/hosted-source-freshness-smoke.json \
+            --completion-evidence-output artifacts/hosted-source-freshness-completion-evidence.json
+
+      - name: Skip admin freshness smoke without token
+        if: ${{ env.ADMIN_BEARER_TOKEN == '' }}
+        run: |
+          echo "::notice title=Hosted source freshness skipped::ADMIN_BEARER_TOKEN is not configured, so /admin/v1/sources freshness evidence was not collected."
+
+      - name: Upload hosted monitoring artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-monitoring-${{ github.run_id }}
+          path: artifacts/*.json
+          if-no-files-found: warn
