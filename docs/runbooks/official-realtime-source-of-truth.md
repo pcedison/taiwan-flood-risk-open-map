@@ -63,6 +63,9 @@ monitoring ownership.
 The generated completion overlay must include one `requirement_evidence` item
 per satisfied requirement, pointing to the JSON section that proves that
 requirement.
+When these refs point at local `docs/reviews/*.json` artifacts, the completion
+audit CLI verifies that the artifact exists, has `status: passed` when present,
+and that the JSON pointer exists.
 
 After each production deploy, run the hosted public-risk evidence smoke to prove
 that the public `/v1/risk/assess` response exposes both worker-style official
@@ -89,6 +92,8 @@ hosted egress approval, or alert routing.
 The generated completion overlay must include one `requirement_evidence` item
 per satisfied requirement, pointing to the worker-evidence and nearby-coverage
 sections in the smoke artifact.
+Those local JSON refs are resolved by the completion audit CLI, so a failed
+smoke artifact or missing JSON pointer cannot satisfy the gate.
 
 ## Hosted Source-Freshness Smoke
 
