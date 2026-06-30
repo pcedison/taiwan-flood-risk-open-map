@@ -784,6 +784,43 @@ This is prioritization infrastructure; each listed county still needs a
 production adapter, authorization-gated adapter, or official unavailable-source
 record before the nationwide objective can be called complete.
 
+## Task 25: Pump/Gate Signal Discovery Filter And Batch Command
+
+**Files:**
+- Modify: `apps/workers/app/ops/local_source_discovery_monitor.py`
+- Modify: `scripts/local-source-discovery-monitor.py`
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Test: `apps/workers/tests/test_local_source_discovery_monitor.py`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+
+**Interfaces:**
+- Consumes: the data.gov.tw dataset export and
+  `signal_gap_priority_groups[].signal_type`.
+- Produces: signal-targeted discovery results and a machine-readable
+  `discovery_monitor` command for each grouped signal gap.
+
+- [x] Write failing worker tests proving discovery can filter candidates by
+  required `pump_or_gate_status` signal type.
+- [x] Add `--signal-type` to the local-source discovery CLI so operators can
+  run grouped gap scans without manually reviewing unrelated rainfall, water
+  level, or flood-depth datasets.
+- [x] Attach a `discovery_monitor` command to signal-gap priority groups in
+  `/admin/v1/local-source-action-plan`.
+- [x] Update Pydantic and OpenAPI contracts for the new monitor object.
+- [x] Run a live data.gov.tw smoke against the current top pump/gate batch.
+
+Completed 2026-06-30: discovery can now scan the current top
+`pump_or_gate_status` gap directly:
+`PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --fail-on-candidate ...`.
+The live smoke found 11 pump/gate candidates across the 14-county batch,
+including one New Taipei `candidate_live_read_api`; most matches remain
+metadata-only and must still go through source review, authorization, adapter
+TDD, hosted persistence, and evidence smoke before production coverage can be
+claimed.
+
 ## Completion Gates
 
 The full objective is complete only when:

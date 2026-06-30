@@ -301,6 +301,17 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
         "For every listed county, add a production adapter, an authorization-gated "
         "adapter, or an official unavailable/blocked-source record for pump_or_gate_status."
     )
+    assert pump_or_gate["discovery_monitor"]["target_signal_type"] == (
+        "pump_or_gate_status"
+    )
+    assert pump_or_gate["discovery_monitor"]["candidate_readiness_field"] == (
+        "candidate_live_read_api"
+    )
+    assert "--signal-type pump_or_gate_status" in pump_or_gate["discovery_monitor"][
+        "command"
+    ]
+    assert "--county 金門縣" in pump_or_gate["discovery_monitor"]["command"]
+    assert "--county 嘉義市" in pump_or_gate["discovery_monitor"]["command"]
     assert pump_or_gate["counties"][:4] == [
         "連江縣",
         "金門縣",

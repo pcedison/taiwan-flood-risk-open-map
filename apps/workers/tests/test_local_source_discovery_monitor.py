@@ -96,6 +96,38 @@ def test_discover_local_source_candidates_summarizes_release_monitor_state() -> 
     assert summary["by_county"]["連江縣"]["signal_types"] == ["flood_prone_area"]
 
 
+def test_discover_local_source_candidates_filters_required_signal_types() -> None:
+    payload = [
+        {
+            "title": "桃園市抽水站即時運轉資料",
+            "description": "桃園市抽水站與水門即時狀態 API",
+            "identifier": "taoyuan-pump-live",
+            "distribution": [{"format": "JSON"}],
+        },
+        {
+            "title": "桃園市水位站即時觀測",
+            "description": "桃園市水位即時觀測 API",
+            "identifier": "taoyuan-water-level-live",
+            "distribution": [{"format": "JSON"}],
+        },
+    ]
+
+    result = discover_local_source_candidates(
+        payload,
+        target_counties=("桃園市",),
+        required_signal_types=("pump_or_gate_status",),
+    )
+
+    assert result.to_dict()["required_signal_types"] == ["pump_or_gate_status"]
+    assert len(result.candidates) == 1
+    candidate = result.candidates[0]
+    assert candidate.dataset_id == "taoyuan-pump-live"
+    assert candidate.signal_types == ("pump_or_gate_status",)
+    assert result.to_dict()["summary"]["by_county"]["桃園市"]["signal_types"] == [
+        "pump_or_gate_status"
+    ]
+
+
 def test_data_gov_dataset_parser_accepts_common_export_aliases() -> None:
     item = DataGovDataset.from_mapping(
         {

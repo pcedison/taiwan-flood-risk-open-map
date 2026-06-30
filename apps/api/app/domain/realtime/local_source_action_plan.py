@@ -309,9 +309,33 @@ def _signal_gap_priority_group(
         "highest_priority_tier": str(items[0]["priority_tier"]),
         "recommended_workstream": "bulk_signal_gap_discovery",
         "tracking_statuses": tracking_statuses,
+        "discovery_monitor": _signal_group_discovery_monitor(
+            signal_type=signal_type,
+            counties=[str(item["county"]) for item in items],
+        ),
         "completion_gate": (
             "For every listed county, add a production adapter, an authorization-gated "
             f"adapter, or an official unavailable/blocked-source record for {signal_type}."
+        ),
+    }
+
+
+def _signal_group_discovery_monitor(
+    *,
+    signal_type: str,
+    counties: list[str],
+) -> dict[str, Any]:
+    county_args = " ".join(f"--county {county}" for county in counties)
+    return {
+        "target_signal_type": signal_type,
+        "source_catalog": "data.gov.tw dataset export",
+        "source_catalog_url": DATA_GOV_DATASET_EXPORT_URL,
+        "candidate_readiness_field": "candidate_live_read_api",
+        "county_count": len(counties),
+        "command": (
+            "PYTHONPATH=apps/workers python "
+            "scripts/local-source-discovery-monitor.py "
+            f"--signal-type {signal_type} --fail-on-candidate {county_args}"
         ),
     }
 

@@ -214,6 +214,15 @@ class LocalSourceOpenDataReleaseMonitor(ContractModel):
     command: str
 
 
+class LocalSourceSignalGapDiscoveryMonitor(ContractModel):
+    target_signal_type: str
+    source_catalog: str
+    source_catalog_url: str
+    candidate_readiness_field: str
+    county_count: int = Field(ge=0)
+    command: str
+
+
 class LocalSourceMetadataReleaseMonitor(ContractModel):
     county: str
     reason: str | None = None
@@ -299,6 +308,7 @@ class LocalSourceSignalGapPriorityGroup(ContractModel):
     highest_priority_tier: str
     recommended_workstream: str
     tracking_statuses: dict[str, int] = Field(default_factory=dict)
+    discovery_monitor: LocalSourceSignalGapDiscoveryMonitor
     completion_gate: str
 
 

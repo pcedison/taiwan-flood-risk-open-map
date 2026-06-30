@@ -71,10 +71,12 @@ class LocalSourceCandidate:
 class DiscoveryResult:
     target_counties: tuple[str, ...]
     candidates: tuple[LocalSourceCandidate, ...]
+    required_signal_types: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "target_counties": list(self.target_counties),
+            "required_signal_types": list(self.required_signal_types),
             "candidate_count": len(self.candidates),
             "candidates": [candidate.to_dict() for candidate in self.candidates],
             "summary": _discovery_summary(self.target_counties, self.candidates),
@@ -88,14 +90,28 @@ def discover_local_source_candidates(
     payload: object,
     *,
     target_counties: Sequence[str] = DEFAULT_TARGET_COUNTIES,
+    required_signal_types: Sequence[str] = (),
 ) -> DiscoveryResult:
     candidates: list[LocalSourceCandidate] = []
+    required = tuple(
+        dict.fromkeys(
+            _normalized_signal_type(signal_type)
+            for signal_type in required_signal_types
+        )
+    )
     for dataset in _datasets(payload):
         for county in target_counties:
             candidate = _candidate_for_county(dataset, county)
-            if candidate is not None:
+            if candidate is not None and _matches_required_signal_types(
+                candidate,
+                required_signal_types=required,
+            ):
                 candidates.append(candidate)
-    return DiscoveryResult(target_counties=tuple(target_counties), candidates=tuple(candidates))
+    return DiscoveryResult(
+        target_counties=tuple(target_counties),
+        candidates=tuple(candidates),
+        required_signal_types=required,
+    )
 
 
 def fetch_data_gov_dataset_export(
@@ -217,7 +233,7 @@ def _signal_types(text: str) -> tuple[str, ...]:
         ("sewer_water_level", ("雨水下水道", "下水道")),
         ("flood_depth", ("淹水", "積淹水")),
         ("water_level", ("水位", "水情")),
-        ("pump_or_gate", ("抽水", "水門", "閘門")),
+        ("pump_or_gate_status", ("抽水", "水門", "閘門")),
         ("rainfall", ("雨量", "豪雨")),
         ("flood_prone_area", ("易淹水",)),
     )
@@ -225,6 +241,25 @@ def _signal_types(text: str) -> tuple[str, ...]:
         if any(token in text for token in tokens) and signal_type not in signal_types:
             signal_types.append(signal_type)
     return tuple(signal_types)
+
+
+def _matches_required_signal_types(
+    candidate: LocalSourceCandidate,
+    *,
+    required_signal_types: tuple[str, ...],
+) -> bool:
+    if not required_signal_types:
+        return True
+    candidate_signal_types = {
+        _normalized_signal_type(signal_type) for signal_type in candidate.signal_types
+    }
+    return bool(candidate_signal_types.intersection(required_signal_types))
+
+
+def _normalized_signal_type(signal_type: str) -> str:
+    if signal_type == "pump_or_gate":
+        return "pump_or_gate_status"
+    return signal_type
 
 
 def _datasets(payload: object) -> tuple[DataGovDataset, ...]:

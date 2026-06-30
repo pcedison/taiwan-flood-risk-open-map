@@ -895,6 +895,13 @@ paths:
                             needs_authorization_request: 1
                             needs_public_read_api_contract: 2
                             needs_signal_gap_review: 10
+                          discovery_monitor:
+                            target_signal_type: pump_or_gate_status
+                            source_catalog: data.gov.tw dataset export
+                            source_catalog_url: https://data.gov.tw/api/front/dataset/export?format=json
+                            candidate_readiness_field: candidate_live_read_api
+                            county_count: 14
+                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --fail-on-candidate --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣 --county 嘉義市 --county 桃園市 --county 澎湖縣 --county 臺中市 --county 臺南市 --county 南投縣 --county 基隆市 --county 宜蘭縣 --county 新北市 --county 新竹縣
                           completion_gate: For every listed county, add a production adapter, an authorization-gated adapter, or an official unavailable/blocked-source record for pump_or_gate_status.
                       authorization_requests:
                         - county: 金門縣
@@ -2988,6 +2995,34 @@ components:
             - type: "null"
       additionalProperties: false
 
+    LocalSourceSignalGapDiscoveryMonitor:
+      type: object
+      required:
+        - target_signal_type
+        - source_catalog
+        - source_catalog_url
+        - candidate_readiness_field
+        - county_count
+        - command
+      properties:
+        target_signal_type:
+          type: string
+        source_catalog:
+          type: string
+        source_catalog_url:
+          type: string
+          format: uri
+        candidate_readiness_field:
+          type: string
+          enum:
+            - candidate_live_read_api
+        county_count:
+          type: integer
+          minimum: 0
+        command:
+          type: string
+      additionalProperties: false
+
     LocalSourceSignalGapPriorityGroup:
       type: object
       required:
@@ -2998,6 +3033,7 @@ components:
         - highest_priority_tier
         - recommended_workstream
         - tracking_statuses
+        - discovery_monitor
         - completion_gate
       properties:
         rank:
@@ -3023,6 +3059,8 @@ components:
           additionalProperties:
             type: integer
             minimum: 0
+        discovery_monitor:
+          $ref: "#/components/schemas/LocalSourceSignalGapDiscoveryMonitor"
         completion_gate:
           type: string
       additionalProperties: false

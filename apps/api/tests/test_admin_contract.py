@@ -1214,6 +1214,9 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
         "needs_public_read_api_contract": 2,
         "needs_signal_gap_review": 10,
     }
+    assert "--signal-type pump_or_gate_status" in plan["signal_gap_priority_groups"][0][
+        "discovery_monitor"
+    ]["command"]
     assert "金門縣" in plan["signal_gap_priority_groups"][0]["counties"]
     assert [item["county"] for item in plan["authorization_requests"]] == [
         "花蓮縣",
