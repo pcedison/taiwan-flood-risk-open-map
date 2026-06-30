@@ -50,6 +50,45 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/source-contract/連江縣/metadata_release_monitor"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "連江縣",
+        "signal_type": "flood_depth",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/連江縣/flood_depth"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "連江縣",
+        "signal_type": "sewer_water_level",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/連江縣/sewer_water_level"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "連江縣",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/連江縣/pump_or_gate_status"
       }
     ],
     "request_body": "目前連江縣已由中央主幹補足最低水文脈絡，但地方公開資料仍只有靜態或 metadata 類資料。請協助釋出南竿、北竿、莒光、東引的雨水下水道水位、道路淹水感測器、抽水站或水門水位、易淹區鄰近水位站等地方直連 read API。 已查核但排除的官方線索：公開水庫水位為月報 PDF，沒有 observed_at/station_id/measurement_value 的即時 read API；公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。目前中央最低水文骨幹已補足；仍需補足地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
@@ -127,6 +166,19 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/source-contract/金門縣/authorization_request"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "金門縣",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/金門縣/pump_or_gate_status"
       }
     ],
     "request_body": "目前金門縣地方直連即時水情來源仍需要官方授權。請確認 KWIS 既有 read API methods 的正式 Token、可讀範圍與 production 使用條款；不要將設備上傳 API 當作查詢 API。請協助提供正式 API contract、申請方式、授權條款、rate limit、測站清冊、座標 metadata 與範例 response。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
@@ -310,6 +362,19 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/source-contract/臺東縣/public_api_contract_review"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "臺東縣",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/臺東縣/pump_or_gate_status"
       }
     ],
     "request_body": "目前臺東縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 curl smoke: Taitung County Government news page is a public HTML flood-control article citing WRA Eighth River Management Office; it says flood hotspots use a water-monitoring system with flood sensors, water-level stations, rain gauges, and realtime cameras, but exposes no public read API, observation rows, or station metadata file.；2026-06-30 official audit review: Audit Office page says Taitung County Government built a flood and inundation warning system and later integrated 49 CWA rainfall stations plus 9 WRA water-level stations; this confirms system context but not a local-government latest-observation read API contract. 目前缺少 production 必備欄位：observed_at、station_or_device_id、measurement_value、measurement_unit_or_type、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 review: the Taitung evidence is a news article/audit summary, not a latest-observation read API; realtime camera references are image-only context, and central CWA/WRA station integration does not satisfy local pump_or_gate_status production ingestion.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",
@@ -391,6 +456,19 @@
         ],
         "evidence_ref_required": true,
         "private_evidence_ref_hint": "private-ops://local-source/source-contract/苗栗縣/public_api_contract_review"
+      },
+      {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "苗栗縣",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+          "accepted",
+          "authorization_gated_adapter",
+          "official_unavailable",
+          "production_adapter"
+        ],
+        "evidence_ref_required": true,
+        "private_evidence_ref_hint": "private-ops://local-source/signal-gap/苗栗縣/pump_or_gate_status"
       }
     ],
     "request_body": "目前苗栗縣已有官方系統或成果頁線索，但尚未找到可公開機器讀取的最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、ArcGIS REST 或 SensorThings 等 read API，並提供授權條款、rate limit、站點 metadata 與範例 response。 已查核頁面事實：2026-06-30 curl smoke: official Miaoli page is a public HTML results-review article for the 114年度雨水下水道即時水情監測系統建置計畫; it states 58 water-level monitoring stations across 10 town/city urban-planning areas.；2026-06-30 curl smoke: the 114年度雨水下水道即時水情監測系統建置計畫 article says water gauges receive monthly maintenance and monthly reports track uptime, abnormalities, and improvements, but it exposes no latest-observation read API or station metadata file. 目前缺少 production 必備欄位：observed_at、station_or_device_id、measurement_value、measurement_unit_or_type、longitude_latitude_or_joinable_station_metadata 不可當量測來源：2026-06-30 curl smoke: the public page exposes only an HTML article/JPGs; it is not a sewer_water_level read API and cannot satisfy pump_or_gate_status.；在取得官方 read API 或可 join metadata 前，不得以 fetched_at 偽裝觀測時間。 Production 上線前也需確認 freshness policy、raw snapshot retention、scheduler cadence、hosted egress review，並走 worker-persisted evidence path。",

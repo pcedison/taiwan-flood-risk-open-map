@@ -6,6 +6,7 @@ from app.domain.realtime.local_source_action_plan import (
 )
 from app.domain.realtime.local_source_coverage import list_local_source_coverage
 from app.domain.realtime.local_source_request_packets import (
+    build_completion_evidence_template,
     build_official_request_packets,
     render_official_request_packets_markdown,
 )
@@ -254,13 +255,31 @@ def test_official_request_packets_expose_completion_evidence_targets() -> None:
                 "private-ops://local-source/source-contract/"
                 "\u91d1\u9580\u7e23/authorization_request"
             ),
-        }
+        },
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": "\u91d1\u9580\u7e23",
+            "signal_type": "pump_or_gate_status",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/signal-gap/"
+                "\u91d1\u9580\u7e23/pump_or_gate_status"
+            ),
+        },
     ]
-    assert lienchiang["completion_evidence_targets"][0]["gate"] == (
-        "metadata_release_monitor"
+    assert any(
+        target.get("gate") == "metadata_release_monitor"
+        for target in lienchiang["completion_evidence_targets"]
     )
-    assert pingtung["completion_evidence_targets"][0]["gate"] == (
-        "public_api_contract_review"
+    assert any(
+        target.get("gate") == "public_api_contract_review"
+        for target in pingtung["completion_evidence_targets"]
     )
     assert chiayi_city["completion_evidence_targets"] == [
         {
@@ -312,6 +331,66 @@ def test_official_request_packets_expose_completion_evidence_targets() -> None:
             ),
         },
     ]
+
+
+def test_completion_evidence_template_is_pending_draft_from_request_packets() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+    packets = build_official_request_packets(plan)
+
+    template = build_completion_evidence_template(
+        packets,
+        captured_at="2026-06-30T12:00:00+08:00",
+    )
+
+    assert template["schema_version"] == "local-source-completion-evidence/v1"
+    assert template["captured_at"] == "2026-06-30T12:00:00+08:00"
+    assert template["production_gate_evidence"] == []
+    assert len(template["source_contract_evidence"]) == 6
+    assert len(template["signal_family_gap_evidence"]) == 24
+
+    kinmen = next(
+        item
+        for item in template["source_contract_evidence"]
+        if item["county"] == "\u91d1\u9580\u7e23"
+    )
+    assert kinmen == {
+        "county": "\u91d1\u9580\u7e23",
+        "gate": "authorization_request",
+        "status": "pending",
+        "accepted_statuses": [
+            "accepted",
+            "authorized",
+            "contract_verified",
+            "official_unavailable",
+            "released",
+        ],
+        "evidence_ref": (
+            "private-ops://local-source/source-contract/"
+            "\u91d1\u9580\u7e23/authorization_request"
+        ),
+    }
+
+    chiayi_flood_depth = next(
+        item
+        for item in template["signal_family_gap_evidence"]
+        if item["county"] == "\u5609\u7fa9\u5e02"
+        and item["signal_type"] == "flood_depth"
+    )
+    assert chiayi_flood_depth == {
+        "county": "\u5609\u7fa9\u5e02",
+        "signal_type": "flood_depth",
+        "status": "pending",
+        "accepted_statuses": [
+            "accepted",
+            "authorization_gated_adapter",
+            "official_unavailable",
+            "production_adapter",
+        ],
+        "evidence_ref": (
+            "private-ops://local-source/signal-gap/"
+            "\u5609\u7fa9\u5e02/flood_depth"
+        ),
+    }
 
 
 def test_render_official_request_packets_markdown_is_ready_for_outreach() -> None:

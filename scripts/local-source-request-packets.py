@@ -23,6 +23,7 @@ from app.domain.realtime.local_source_coverage import (  # noqa: E402
     list_local_source_coverage,
 )
 from app.domain.realtime.local_source_request_packets import (  # noqa: E402
+    build_completion_evidence_template,
     build_official_request_packets,
     render_official_request_packets_markdown,
 )
@@ -34,7 +35,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--format",
-        choices=("markdown", "json"),
+        choices=("markdown", "json", "evidence-template"),
         default="markdown",
         help="Output format. Defaults to markdown.",
     )
@@ -85,6 +86,9 @@ def _render_output(
 ) -> str:
     if output_format == "json":
         return json.dumps(list(packets), ensure_ascii=False, indent=2) + "\n"
+    if output_format == "evidence-template":
+        template = build_completion_evidence_template(packets)
+        return json.dumps(template, ensure_ascii=False, indent=2) + "\n"
     return render_official_request_packets_markdown(packets)
 
 

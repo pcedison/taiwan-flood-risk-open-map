@@ -27,6 +27,9 @@
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
 - Completion evidence targets:
   - source_contract_evidence / metadata_release_monitor; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/連江縣/metadata_release_monitor
+  - signal_family_gap_evidence / flood_depth; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/連江縣/flood_depth
+  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/連江縣/sewer_water_level
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/連江縣/pump_or_gate_status
 - 待補地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status
 - 排入此順位原因：local_direct_source is not complete
 - 完成門檻：完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。
@@ -78,6 +81,7 @@
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
 - Completion evidence targets:
   - source_contract_evidence / authorization_request; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/金門縣/authorization_request
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/金門縣/pump_or_gate_status
 - 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：local_direct_source is not complete；official authorization is required before a production read API can run
 - 完成門檻：完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。
@@ -137,6 +141,7 @@
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
 - Completion evidence targets:
   - source_contract_evidence / public_api_contract_review; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/臺東縣/public_api_contract_review
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺東縣/pump_or_gate_status
 - 候選系統缺少欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
 - 候選系統查核事實：
   - 2026-06-30 curl smoke: Taitung County Government news page is a public HTML flood-control article citing WRA Eighth River Management Office; it says flood hotspots use a water-monitoring system with flood sensors, water-level stations, rain gauges, and realtime cameras, but exposes no public read API, observation rows, or station metadata file.
@@ -172,6 +177,7 @@
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
 - Completion evidence targets:
   - source_contract_evidence / public_api_contract_review; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/苗栗縣/public_api_contract_review
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/苗栗縣/pump_or_gate_status
 - 候選系統缺少欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
 - 候選系統查核事實：
   - 2026-06-30 curl smoke: official Miaoli page is a public HTML results-review article for the 114年度雨水下水道即時水情監測系統建置計畫; it states 58 water-level monitoring stations across 10 town/city urban-planning areas.

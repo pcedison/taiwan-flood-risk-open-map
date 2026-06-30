@@ -1081,6 +1081,38 @@ completion-evidence target needed after a formal reply lands. This does not
 create official approvals; it removes ambiguity between sending a request and
 recording accepted evidence for the completion audit.
 
+## Task 34: Request Packet Completion Evidence Draft
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `scripts/local-source-request-packets.py`
+- Modify: `apps/api/tests/test_local_source_request_packets.py`
+- Modify: `tests/test_local_source_request_packets_cli.py`
+- Modify: `docs/data-sources/local/generated-official-request-packets.md`
+- Modify: `docs/data-sources/local/generated-official-request-packets.json`
+- Add: `docs/data-sources/local/generated-completion-evidence-template.json`
+
+**Interfaces:**
+- Consumes: official request packets and their `completion_evidence_targets`.
+- Produces: a `local-source-completion-evidence/v1` draft manifest with every
+  current source-contract and signal-family blocker listed as `pending`, so
+  operators can fill accepted private evidence after official replies, adapter
+  smoke, or hosted evidence are actually available.
+
+- [x] Write failing tests proving authorization/metadata/contract packets also
+  expose signal-family evidence targets, not only source-contract targets.
+- [x] Add `build_completion_evidence_template()` so request packets can produce
+  a pending draft manifest without claiming any completion evidence.
+- [x] Add `scripts/local-source-request-packets.py --format evidence-template`.
+- [x] Regenerate request packet artifacts and the generated completion-evidence
+  draft.
+
+Completed 2026-06-30: official outreach now maps to both completion gates that
+matter: source-contract evidence and signal-family evidence. The generated
+draft is intentionally all `pending` and does not include hosted production
+gate evidence; Zeabur worker persistence, monitoring, and public-risk smoke
+still require real private ops evidence before the completion audit can pass.
+
 ## Completion Gates
 
 The full objective is complete only when:

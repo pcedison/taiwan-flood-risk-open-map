@@ -107,6 +107,66 @@ def test_local_source_request_packets_cli_filters_by_signal_type() -> None:
     )
 
 
+def test_local_source_request_packets_cli_emits_completion_evidence_template() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--format",
+            "evidence-template",
+            "--county",
+            "\u91d1\u9580\u7e23",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+
+    assert payload["schema_version"] == "local-source-completion-evidence/v1"
+    assert payload["captured_at"] == "REPLACE_WITH_CAPTURED_AT"
+    assert payload["signal_family_gap_evidence"] == [
+        {
+            "county": "\u91d1\u9580\u7e23",
+            "signal_type": "pump_or_gate_status",
+            "status": "pending",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref": (
+                "private-ops://local-source/signal-gap/"
+                "\u91d1\u9580\u7e23/pump_or_gate_status"
+            ),
+        }
+    ]
+    assert payload["production_gate_evidence"] == []
+    assert payload["source_contract_evidence"] == [
+        {
+            "county": "\u91d1\u9580\u7e23",
+            "gate": "authorization_request",
+            "status": "pending",
+            "accepted_statuses": [
+                "accepted",
+                "authorized",
+                "contract_verified",
+                "official_unavailable",
+                "released",
+            ],
+            "evidence_ref": (
+                "private-ops://local-source/source-contract/"
+                "\u91d1\u9580\u7e23/authorization_request"
+            ),
+        }
+    ]
+
+
 def test_local_source_request_packets_cli_writes_markdown_output(
     tmp_path: Path,
 ) -> None:

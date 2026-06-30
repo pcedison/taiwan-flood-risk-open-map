@@ -6,6 +6,7 @@ from typing import Any, Mapping
 from app.domain.realtime.local_source_action_plan import (
     ACCEPTED_SIGNAL_EVIDENCE_STATUSES,
     ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES,
+    COMPLETION_EVIDENCE_SCHEMA_VERSION,
 )
 
 PRODUCTION_OPERATIONAL_REQUIREMENTS = [
@@ -110,6 +111,72 @@ def render_official_request_packets_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def build_completion_evidence_template(
+    packets: tuple[dict[str, Any], ...],
+    *,
+    captured_at: str = "REPLACE_WITH_CAPTURED_AT",
+) -> dict[str, Any]:
+    source_contract_evidence: list[dict[str, Any]] = []
+    signal_family_gap_evidence: list[dict[str, Any]] = []
+    source_contract_keys: set[tuple[str, str]] = set()
+    signal_gap_keys: set[tuple[str, str]] = set()
+
+    for packet in packets:
+        for target in packet.get("completion_evidence_targets", []):
+            if not isinstance(target, Mapping):
+                continue
+            section = str(target.get("manifest_section", ""))
+            if section == "source_contract_evidence":
+                item = _source_contract_template_item(target)
+                key = (str(item["county"]), str(item["gate"]))
+                if key not in source_contract_keys:
+                    source_contract_keys.add(key)
+                    source_contract_evidence.append(item)
+            elif section == "signal_family_gap_evidence":
+                item = _signal_family_gap_template_item(target)
+                key = (str(item["county"]), str(item["signal_type"]))
+                if key not in signal_gap_keys:
+                    signal_gap_keys.add(key)
+                    signal_family_gap_evidence.append(item)
+
+    return {
+        "schema_version": COMPLETION_EVIDENCE_SCHEMA_VERSION,
+        "captured_at": captured_at,
+        "notes": [
+            "Draft generated from official request packets; every entry starts as pending.",
+            "Replace status and evidence_ref only after official reply, adapter smoke, or private ops evidence is accepted.",
+            "Do not commit filled private evidence refs, tokens, screenshots, or official reply transcripts.",
+        ],
+        "signal_family_gap_evidence": signal_family_gap_evidence,
+        "source_contract_evidence": source_contract_evidence,
+        "production_gate_evidence": [],
+    }
+
+
+def _source_contract_template_item(target: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "county": str(target.get("county", "")),
+        "gate": str(target.get("gate", "")),
+        "status": "pending",
+        "accepted_statuses": [
+            str(status) for status in target.get("accepted_statuses", [])
+        ],
+        "evidence_ref": str(target.get("private_evidence_ref_hint", "")),
+    }
+
+
+def _signal_family_gap_template_item(target: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "county": str(target.get("county", "")),
+        "signal_type": str(target.get("signal_type", "")),
+        "status": "pending",
+        "accepted_statuses": [
+            str(status) for status in target.get("accepted_statuses", [])
+        ],
+        "evidence_ref": str(target.get("private_evidence_ref_hint", "")),
+    }
+
+
 def _authorization_packet(
     item: Mapping[str, Any],
     *,
@@ -120,6 +187,7 @@ def _authorization_packet(
     source_urls = list(item.get("application_urls", []))
     reason = str(item.get("reason", ""))
     system_name = _authorization_system_name(item, reason)
+    target_signal_types = _priority_target_signal_types(priority_item)
     return {
         "county": county,
         "packet_type": "authorization_request",
@@ -130,9 +198,9 @@ def _authorization_packet(
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
         "required_read_api_fields": required_fields,
-        "completion_evidence_targets": _source_contract_evidence_targets(
-            county,
-            gate="authorization_request",
+        "completion_evidence_targets": (
+            _source_contract_evidence_targets(county, gate="authorization_request")
+            + _signal_gap_evidence_targets(county, signal_types=target_signal_types)
         ),
         "request_body": _authorization_request_body(county, system_name),
         "checklist": [
@@ -227,9 +295,9 @@ def _metadata_release_packet(
         "last_followed_up_at": item.get("last_followed_up_at"),
         "target_signal_types": target_signal_types,
         "required_read_api_fields": list(item.get("required_read_api_fields", [])),
-        "completion_evidence_targets": _source_contract_evidence_targets(
-            county,
-            gate="metadata_release_monitor",
+        "completion_evidence_targets": (
+            _source_contract_evidence_targets(county, gate="metadata_release_monitor")
+            + _signal_gap_evidence_targets(county, signal_types=target_signal_types)
         ),
         "request_body": request_body,
         "checklist": checklist,
@@ -268,6 +336,7 @@ def _public_api_contract_packet(
     non_measurement_notes = list(
         item.get("candidate_contract_non_measurement_notes", [])
     )
+    target_signal_types = _priority_target_signal_types(priority_item)
     return {
         "county": county,
         "packet_type": "public_api_contract_request",
@@ -281,9 +350,9 @@ def _public_api_contract_packet(
         "candidate_contract_findings": contract_findings,
         "candidate_contract_missing_fields": missing_fields,
         "candidate_contract_non_measurement_notes": non_measurement_notes,
-        "completion_evidence_targets": _source_contract_evidence_targets(
-            county,
-            gate="public_api_contract_review",
+        "completion_evidence_targets": (
+            _source_contract_evidence_targets(county, gate="public_api_contract_review")
+            + _signal_gap_evidence_targets(county, signal_types=target_signal_types)
         ),
         "request_body": (
             f"目前{county}已有官方系統或成果頁線索，但尚未找到可公開機器讀取的"
@@ -312,6 +381,7 @@ def _live_smoke_review_packet(
     source_urls = list(item.get("candidate_source_urls", []))
     source_names = list(item.get("candidate_source_names", []))
     required_fields = list(item.get("required_read_api_fields", []))
+    target_signal_types = _priority_target_signal_types(priority_item)
     return {
         "county": county,
         "packet_type": "live_smoke_review_request",
@@ -324,6 +394,10 @@ def _live_smoke_review_packet(
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
         "required_read_api_fields": required_fields,
+        "completion_evidence_targets": _signal_gap_evidence_targets(
+            county,
+            signal_types=target_signal_types,
+        ),
         "request_body": (
             f"目前{county}已有候選或部分 production adapter，但仍需要 live smoke "
             "複核觀測時間、站點 ID、測值、單位、座標與欄位語意。狀態或開關資料"
@@ -391,11 +465,7 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
     fields = _production_operational_packet_fields()
     if priority_item is None:
         return fields
-    target_signal_types = list(priority_item.get("missing_signal_types", []))
-    if not target_signal_types:
-        target_signal_types = list(
-            priority_item.get("central_backbone_missing_signal_types", [])
-        )
+    target_signal_types = _priority_target_signal_types(priority_item)
     if target_signal_types:
         fields["target_signal_types"] = target_signal_types
     return fields | {
@@ -437,6 +507,17 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
             [],
         ),
     }
+
+
+def _priority_target_signal_types(
+    priority_item: Mapping[str, Any] | None,
+) -> list[Any]:
+    if priority_item is None:
+        return []
+    target_signal_types = list(priority_item.get("missing_signal_types", []))
+    if target_signal_types:
+        return target_signal_types
+    return list(priority_item.get("central_backbone_missing_signal_types", []))
 
 
 def _source_contract_evidence_targets(
