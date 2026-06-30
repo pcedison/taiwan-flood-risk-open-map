@@ -54,6 +54,13 @@ def main() -> int:
         action="store_true",
         help="Exit with status 1 when the resulting completion audit is incomplete.",
     )
+    parser.add_argument(
+        "--output",
+        help=(
+            "Optional path to write the aggregate completion-audit JSON artifact. "
+            "The same JSON is still printed to stdout."
+        ),
+    )
     args = parser.parse_args()
 
     completion_evidence = None
@@ -68,7 +75,12 @@ def main() -> int:
         completion_evidence=completion_evidence,
     )
     audit = plan["completion_audit"]
-    print(json.dumps(audit, ensure_ascii=False, indent=2, sort_keys=True))
+    audit_json = json.dumps(audit, ensure_ascii=False, indent=2, sort_keys=True)
+    if args.output:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(f"{audit_json}\n", encoding="utf-8")
+    print(audit_json)
 
     if args.fail_on_incomplete and audit["overall_status"] != "satisfied":
         return 1
