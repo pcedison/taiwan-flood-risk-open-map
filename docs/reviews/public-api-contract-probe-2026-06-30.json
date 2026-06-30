@@ -1,0 +1,206 @@
+{
+  "schema_version": "public-api-contract-probe/v1",
+  "captured_at": "2026-06-30T19:30:00+08:00",
+  "conclusion": "no_candidate_live_read_api_found",
+  "summary": {
+    "public_api_contract_review_count": 3,
+    "probed_url_count": 8,
+    "candidate_live_read_api_count": 0,
+    "tls_verification": "disabled"
+  },
+  "counties": [
+    {
+      "county": "苗栗縣",
+      "tracking_status": "needs_public_read_api_contract",
+      "requested_counterparty": "苗栗縣政府公開資料或水利防災維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "probe_results": [
+        {
+          "url": "https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560",
+          "status_code": 200,
+          "content_type": "text/html; charset=utf-8",
+          "readiness": "public_html_missing_read_api_contract",
+          "detected_required_fields": [
+            "measurement_value",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id",
+            "official_source_url_and_license"
+          ],
+          "non_measurement_notes": [],
+          "error": null
+        }
+      ]
+    },
+    {
+      "county": "屏東縣",
+      "tracking_status": "needs_public_read_api_contract",
+      "requested_counterparty": "屏東縣政府公開資料或水利防災維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "probe_results": [
+        {
+          "url": "https://pteoc.pthg.gov.tw/",
+          "status_code": 200,
+          "content_type": "text/html; charset=utf-8",
+          "readiness": "public_html_missing_read_api_contract",
+          "detected_required_fields": [
+            "measurement_value",
+            "official_source_url_and_license"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata"
+          ],
+          "non_measurement_notes": [],
+          "error": null
+        },
+        {
+          "url": "https://pteoc.pthg.gov.tw/RainStation",
+          "status_code": 200,
+          "content_type": "text/html; charset=utf-8",
+          "readiness": "public_html_missing_read_api_contract",
+          "detected_required_fields": [
+            "measurement_value",
+            "measurement_unit_or_type",
+            "official_source_url_and_license"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id",
+            "longitude_latitude_or_joinable_station_metadata"
+          ],
+          "non_measurement_notes": [],
+          "error": null
+        },
+        {
+          "url": "https://pteoc.pthg.gov.tw/River",
+          "status_code": 200,
+          "content_type": "text/html; charset=utf-8",
+          "readiness": "public_html_missing_read_api_contract",
+          "detected_required_fields": [
+            "measurement_value",
+            "official_source_url_and_license"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata"
+          ],
+          "non_measurement_notes": [],
+          "error": null
+        },
+        {
+          "url": "https://pteoc.pthg.gov.tw/Flood",
+          "status_code": 200,
+          "content_type": "text/html; charset=utf-8",
+          "readiness": "non_measurement_context",
+          "detected_required_fields": [
+            "measurement_value",
+            "official_source_url_and_license"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata"
+          ],
+          "non_measurement_notes": [
+            "warning_threshold_only"
+          ],
+          "error": null
+        },
+        {
+          "url": "https://pteoc.pthg.gov.tw/Crawler",
+          "status_code": 200,
+          "content_type": "text/html; charset=utf-8",
+          "readiness": "non_measurement_context",
+          "detected_required_fields": [
+            "measurement_value",
+            "official_source_url_and_license"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata"
+          ],
+          "non_measurement_notes": [
+            "image_only_cctv"
+          ],
+          "error": null
+        }
+      ]
+    },
+    {
+      "county": "臺東縣",
+      "tracking_status": "needs_public_read_api_contract",
+      "requested_counterparty": "臺東縣政府公開資料或水利防災維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "probe_results": [
+        {
+          "url": "https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652",
+          "status_code": 200,
+          "content_type": "text/html; charset=utf-8",
+          "readiness": "public_html_missing_read_api_contract",
+          "detected_required_fields": [
+            "measurement_value",
+            "measurement_unit_or_type",
+            "longitude_latitude_or_joinable_station_metadata",
+            "official_source_url_and_license"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id"
+          ],
+          "non_measurement_notes": [],
+          "error": null
+        },
+        {
+          "url": "https://www.audit.gov.tw/p/406-1000-9612%2Cr12.php?Lang=zh-tw",
+          "status_code": 200,
+          "content_type": "text/html",
+          "readiness": "public_html_missing_read_api_contract",
+          "detected_required_fields": [
+            "measurement_unit_or_type"
+          ],
+          "missing_required_fields": [
+            "observed_at",
+            "station_or_device_id",
+            "measurement_value",
+            "longitude_latitude_or_joinable_station_metadata",
+            "official_source_url_and_license"
+          ],
+          "non_measurement_notes": [],
+          "error": null
+        }
+      ]
+    }
+  ]
+}
