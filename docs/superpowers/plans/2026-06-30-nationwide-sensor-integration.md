@@ -853,6 +853,36 @@ new pump/gate adapter should be started from that discovery result yet; the next
 production movement is official read-API request follow-up, authorization, or a
 new live candidate appearing in the release monitor.
 
+## Task 27: Signal Gap Official Request Batch Contract
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+
+**Interfaces:**
+- Consumes: `signal_gap_priority_groups` derived from the nationwide local
+  source coverage catalog.
+- Produces: `signal_gap_priority_groups[].official_request_batch`, including
+  target signal type, grouped counties, requested counterparties, required read
+  API fields, production operational requirements, and the request-packet
+  generator command.
+
+- [x] Write failing domain and admin-contract tests proving each grouped signal
+  gap exposes a formal official request batch.
+- [x] Attach required realtime read fields and production operational gates to
+  the grouped batch so missing sensor families cannot be presented as complete
+  integration.
+- [x] Update Pydantic and OpenAPI contracts for the new batch object.
+
+Completed 2026-06-30: the action plan now makes the next step explicit for the
+largest current gap, `pump_or_gate_status` across 14 counties. Because Task 26
+found zero live read API candidates, this batch is not an adapter
+implementation; it is the official read-API request and completion-gate contract
+needed before the nationwide sensor objective can be closed.
+
 ## Completion Gates
 
 The full objective is complete only when:

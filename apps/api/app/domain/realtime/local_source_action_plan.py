@@ -14,6 +14,13 @@ REQUIRED_REALTIME_READ_API_FIELDS = (
     "official_source_url_and_license",
 )
 DATA_GOV_DATASET_EXPORT_URL = "https://data.gov.tw/api/front/dataset/export?format=json"
+PRODUCTION_OPERATIONAL_REQUIREMENTS = (
+    "freshness_policy",
+    "raw_snapshot_retention_policy",
+    "monitored_scheduler_cadence",
+    "hosted_egress_review",
+    "worker_persisted_evidence_path",
+)
 
 
 def build_local_source_action_plan(
@@ -313,9 +320,50 @@ def _signal_gap_priority_group(
             signal_type=signal_type,
             counties=[str(item["county"]) for item in items],
         ),
+        "official_request_batch": _signal_group_official_request_batch(
+            signal_type=signal_type,
+            items=items,
+        ),
         "completion_gate": (
             "For every listed county, add a production adapter, an authorization-gated "
             f"adapter, or an official unavailable/blocked-source record for {signal_type}."
+        ),
+    }
+
+
+def _signal_group_official_request_batch(
+    *,
+    signal_type: str,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    counties = [str(item["county"]) for item in items]
+    county_args = " ".join(f"--county {county}" for county in counties)
+    requested_counterparties = tuple(
+        dict.fromkeys(str(item["requested_counterparty"]) for item in items)
+    )
+    tracking_statuses = tuple(
+        dict.fromkeys(str(item["tracking_status"]) for item in items)
+    )
+    return {
+        "target_signal_type": signal_type,
+        "packet_type": "signal_gap_batch_request",
+        "county_count": len(counties),
+        "counties": counties,
+        "requested_counterparties": list(requested_counterparties),
+        "tracking_statuses": list(tracking_statuses),
+        "required_read_api_fields": list(REQUIRED_REALTIME_READ_API_FIELDS),
+        "production_operational_requirements": list(
+            PRODUCTION_OPERATIONAL_REQUIREMENTS
+        ),
+        "next_step": "send_official_read_api_requests",
+        "packet_generator_command": (
+            "PYTHONPATH=apps/api python scripts/local-source-request-packets.py "
+            f"--format markdown {county_args}"
+        ),
+        "completion_gate": (
+            "Each county must provide a latest-observation read API, an "
+            "authorization-gated adapter path, or an official unavailable-source "
+            f"record for {signal_type}, plus production ops evidence."
         ),
     }
 

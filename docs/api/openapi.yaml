@@ -3023,6 +3023,60 @@ components:
           type: string
       additionalProperties: false
 
+    LocalSourceSignalGapOfficialRequestBatch:
+      type: object
+      required:
+        - target_signal_type
+        - packet_type
+        - county_count
+        - counties
+        - requested_counterparties
+        - tracking_statuses
+        - required_read_api_fields
+        - production_operational_requirements
+        - next_step
+        - packet_generator_command
+        - completion_gate
+      properties:
+        target_signal_type:
+          type: string
+        packet_type:
+          type: string
+          enum:
+            - signal_gap_batch_request
+        county_count:
+          type: integer
+          minimum: 0
+        counties:
+          type: array
+          items:
+            type: string
+        requested_counterparties:
+          type: array
+          items:
+            type: string
+        tracking_statuses:
+          type: array
+          items:
+            type: string
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
+        production_operational_requirements:
+          type: array
+          items:
+            type: string
+        next_step:
+          type: string
+          enum:
+            - send_official_read_api_requests
+        packet_generator_command:
+          type: string
+        completion_gate:
+          type: string
+      additionalProperties: false
+
     LocalSourceSignalGapPriorityGroup:
       type: object
       required:
@@ -3034,6 +3088,7 @@ components:
         - recommended_workstream
         - tracking_statuses
         - discovery_monitor
+        - official_request_batch
         - completion_gate
       properties:
         rank:
@@ -3061,6 +3116,8 @@ components:
             minimum: 0
         discovery_monitor:
           $ref: "#/components/schemas/LocalSourceSignalGapDiscoveryMonitor"
+        official_request_batch:
+          $ref: "#/components/schemas/LocalSourceSignalGapOfficialRequestBatch"
         completion_gate:
           type: string
       additionalProperties: false

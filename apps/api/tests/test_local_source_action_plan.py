@@ -324,6 +324,26 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
     assert pump_or_gate["tracking_statuses"]["needs_public_read_api_contract"] == 2
     assert pump_or_gate["tracking_statuses"]["needs_authorization_request"] == 1
     assert pump_or_gate["tracking_statuses"]["monitoring_open_data_release"] == 1
+    request_batch = pump_or_gate["official_request_batch"]
+    assert request_batch["target_signal_type"] == "pump_or_gate_status"
+    assert request_batch["packet_type"] == "signal_gap_batch_request"
+    assert request_batch["county_count"] == 14
+    assert request_batch["counties"] == pump_or_gate["counties"]
+    assert request_batch["required_read_api_fields"] == list(
+        REQUIRED_REALTIME_READ_API_FIELDS
+    )
+    assert request_batch["production_operational_requirements"] == [
+        "freshness_policy",
+        "raw_snapshot_retention_policy",
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+        "worker_persisted_evidence_path",
+    ]
+    assert request_batch["next_step"] == "send_official_read_api_requests"
+    assert (
+        "scripts/local-source-request-packets.py --format markdown"
+        in request_batch["packet_generator_command"]
+    )
 
     by_signal = {group["signal_type"]: group for group in groups}
     assert by_signal["flood_depth"]["county_count"] == 5

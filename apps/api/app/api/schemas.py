@@ -223,6 +223,20 @@ class LocalSourceSignalGapDiscoveryMonitor(ContractModel):
     command: str
 
 
+class LocalSourceSignalGapOfficialRequestBatch(ContractModel):
+    target_signal_type: str
+    packet_type: str
+    county_count: int = Field(ge=0)
+    counties: list[str] = Field(default_factory=list)
+    requested_counterparties: list[str] = Field(default_factory=list)
+    tracking_statuses: list[str] = Field(default_factory=list)
+    required_read_api_fields: list[str] = Field(default_factory=list)
+    production_operational_requirements: list[str] = Field(default_factory=list)
+    next_step: str
+    packet_generator_command: str
+    completion_gate: str
+
+
 class LocalSourceMetadataReleaseMonitor(ContractModel):
     county: str
     reason: str | None = None
@@ -309,6 +323,7 @@ class LocalSourceSignalGapPriorityGroup(ContractModel):
     recommended_workstream: str
     tracking_statuses: dict[str, int] = Field(default_factory=dict)
     discovery_monitor: LocalSourceSignalGapDiscoveryMonitor
+    official_request_batch: LocalSourceSignalGapOfficialRequestBatch
     completion_gate: str
 
 
