@@ -1918,6 +1918,43 @@ alert routing ownership, scheduled source-freshness evidence, and
 worker/scheduler alert ownership are recorded through the monitoring evidence
 manifest.
 
+## Task 61: Official Smoke Signal-Gap Evidence Crosswalk
+
+**Files:**
+- Add: `apps/api/app/domain/realtime/local_source_signal_gap_evidence.py`
+- Add: `scripts/local-source-signal-gap-evidence.py`
+- Add: `apps/api/tests/test_local_source_signal_gap_evidence.py`
+- Add: `tests/test_local_source_signal_gap_evidence_cli.py`
+- Add: `docs/reviews/official-realtime-live-smoke-2026-06-30-signal-gap-refresh.json`
+- Add: `docs/reviews/local-source-signal-gap-evidence-2026-06-30.json`
+- Modify: `docs/runbooks/civil-iot-live-enablement.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: `official-realtime-live-smoke/v1` artifacts and
+  `signal_gap_priority_groups` from the local-source action plan.
+- Produces: `local-source-signal-gap-evidence/v1` artifacts that show which
+  unresolved county/signal items are newly observed by official live smoke and
+  which remain unresolved.
+
+- [x] Write failing API and CLI tests proving official live-smoke observations
+  are compared to signal-gap groups without satisfying completion gates.
+- [x] Add a public-safe evidence builder and CLI with `--official-live-smoke-json`,
+  `--output`, and `--fail-on-unresolved`.
+- [x] Re-run official live smoke and emit a signal-gap crosswalk artifact.
+- [x] Document the repeatable smoke + crosswalk command sequence in the Civil
+  IoT live-enablement runbook.
+
+Completed 2026-06-30: the latest official live smoke was healthy for WRA and
+Civil IoT sources, with CWA rainfall skipped because no local
+`CWA_API_AUTHORIZATION` was available. The crosswalk found 0 newly observed
+official coverage items for the 17 unresolved signal-gap items, leaving
+`pump_or_gate_status:13`, `flood_depth:3`, and `sewer_water_level:1`
+unresolved. This confirms the next source-completion step remains official
+local read API requests, authorization, public API contract follow-up, or
+official-unavailable evidence rather than promoting a newly discovered central
+IoT source.
+
 ## Completion Gates
 
 The full objective is complete only when:

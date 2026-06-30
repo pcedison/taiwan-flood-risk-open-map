@@ -1,0 +1,208 @@
+{
+  "captured_at": "2026-06-30T20:35:00+08:00",
+  "completion_effect": "diagnostic_only",
+  "completion_note": "Official live-smoke observations are discovery evidence only. They do not close completion gates until the catalog, adapter path, source contract, and production evidence are accepted.",
+  "official_live_smoke": {
+    "captured_at": "2026-06-30T20:30:00+08:00",
+    "healthy": true,
+    "schema_version": "official-realtime-live-smoke/v1"
+  },
+  "schema_version": "local-source-signal-gap-evidence/v1",
+  "signal_gap_groups": [
+    {
+      "accepted_official_adapter_keys": [
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level"
+      ],
+      "completion_effect": "diagnostic_only",
+      "county_reviews": [
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "連江縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "金門縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "臺東縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "苗栗縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "澎湖縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "南投縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "嘉義市",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "基隆市",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "宜蘭縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "新北市",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "新竹縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "桃園市",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "臺中市",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        }
+      ],
+      "official_smoke_observed_counties": [],
+      "official_smoke_observed_county_count": 0,
+      "signal_type": "pump_or_gate_status",
+      "target_counties": [
+        "連江縣",
+        "金門縣",
+        "臺東縣",
+        "苗栗縣",
+        "澎湖縣",
+        "南投縣",
+        "嘉義市",
+        "基隆市",
+        "宜蘭縣",
+        "新北市",
+        "新竹縣",
+        "桃園市",
+        "臺中市"
+      ],
+      "target_county_count": 13,
+      "unresolved_counties": [
+        "連江縣",
+        "金門縣",
+        "臺東縣",
+        "苗栗縣",
+        "澎湖縣",
+        "南投縣",
+        "嘉義市",
+        "基隆市",
+        "宜蘭縣",
+        "新北市",
+        "新竹縣",
+        "桃園市",
+        "臺中市"
+      ],
+      "unresolved_county_count": 13
+    },
+    {
+      "accepted_official_adapter_keys": [
+        "official.wra_iow.flood_depth",
+        "official.civil_iot.flood_sensor"
+      ],
+      "completion_effect": "diagnostic_only",
+      "county_reviews": [
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "連江縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "澎湖縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        },
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "臺北市",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        }
+      ],
+      "official_smoke_observed_counties": [],
+      "official_smoke_observed_county_count": 0,
+      "signal_type": "flood_depth",
+      "target_counties": [
+        "連江縣",
+        "澎湖縣",
+        "臺北市"
+      ],
+      "target_county_count": 3,
+      "unresolved_counties": [
+        "連江縣",
+        "澎湖縣",
+        "臺北市"
+      ],
+      "unresolved_county_count": 3
+    },
+    {
+      "accepted_official_adapter_keys": [
+        "official.civil_iot.sewer_water_level"
+      ],
+      "completion_effect": "diagnostic_only",
+      "county_reviews": [
+        {
+          "completion_effect": "diagnostic_only",
+          "county": "連江縣",
+          "observed_official_adapters": [],
+          "status": "unresolved_after_official_smoke"
+        }
+      ],
+      "official_smoke_observed_counties": [],
+      "official_smoke_observed_county_count": 0,
+      "signal_type": "sewer_water_level",
+      "target_counties": [
+        "連江縣"
+      ],
+      "target_county_count": 1,
+      "unresolved_counties": [
+        "連江縣"
+      ],
+      "unresolved_county_count": 1
+    }
+  ],
+  "summary": {
+    "official_smoke_observed_item_count": 0,
+    "signal_group_count": 3,
+    "target_signal_gap_item_count": 17,
+    "unresolved_after_official_smoke_item_count": 17
+  }
+}

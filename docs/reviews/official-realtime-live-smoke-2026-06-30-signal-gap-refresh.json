@@ -1,0 +1,173 @@
+{
+  "captured_at": "2026-06-30T20:30:00+08:00",
+  "result": {
+    "healthy": true,
+    "results": [
+      {
+        "adapter_key": "official.cwa.rainfall",
+        "county_counts_by_county": {},
+        "covered_county_count": 0,
+        "fetched_count": 0,
+        "kinmen_count": 0,
+        "lienchiang_count": 0,
+        "message": "CWA_API_AUTHORIZATION is not available",
+        "normalized_count": 0,
+        "rejected_count": 0,
+        "status": "skipped"
+      },
+      {
+        "adapter_key": "official.wra.water_level",
+        "county_counts_by_county": {},
+        "covered_county_count": 0,
+        "fetched_count": 375,
+        "kinmen_count": 0,
+        "lienchiang_count": 0,
+        "message": null,
+        "normalized_count": 375,
+        "rejected_count": 0,
+        "status": "healthy"
+      },
+      {
+        "adapter_key": "official.wra_iow.flood_depth",
+        "county_counts_by_county": {
+          "南投縣": 9,
+          "嘉義市": 15,
+          "嘉義縣": 150,
+          "基隆市": 47,
+          "宜蘭縣": 68,
+          "屏東縣": 28,
+          "彰化縣": 85,
+          "新北市": 113,
+          "新竹市": 62,
+          "新竹縣": 3,
+          "桃園市": 129,
+          "臺中市": 261,
+          "臺南市": 111,
+          "臺東縣": 1,
+          "花蓮縣": 12,
+          "苗栗縣": 40,
+          "雲林縣": 142,
+          "高雄市": 79
+        },
+        "covered_county_count": 18,
+        "fetched_count": 1366,
+        "kinmen_count": 0,
+        "lienchiang_count": 0,
+        "message": null,
+        "normalized_count": 1355,
+        "rejected_count": 11,
+        "status": "healthy"
+      },
+      {
+        "adapter_key": "official.ncdr.cap",
+        "county_counts_by_county": {},
+        "covered_county_count": 0,
+        "fetched_count": 6168,
+        "kinmen_count": 0,
+        "lienchiang_count": 0,
+        "message": null,
+        "normalized_count": 0,
+        "rejected_count": 6168,
+        "status": "healthy"
+      },
+      {
+        "adapter_key": "official.civil_iot.flood_sensor",
+        "county_counts_by_county": {
+          "南投縣": 2,
+          "嘉義市": 14,
+          "嘉義縣": 245,
+          "基隆市": 49,
+          "宜蘭縣": 80,
+          "屏東縣": 20,
+          "彰化縣": 59,
+          "新北市": 128,
+          "新竹市": 76,
+          "新竹縣": 22,
+          "臺中市": 449,
+          "臺南市": 188,
+          "臺東縣": 2,
+          "花蓮縣": 13,
+          "苗栗縣": 40,
+          "金門縣": 7,
+          "雲林縣": 154,
+          "高雄市": 145
+        },
+        "covered_county_count": 18,
+        "fetched_count": 1951,
+        "kinmen_count": 7,
+        "lienchiang_count": 0,
+        "message": null,
+        "normalized_count": 1951,
+        "rejected_count": 0,
+        "status": "healthy"
+      },
+      {
+        "adapter_key": "official.civil_iot.sewer_water_level",
+        "county_counts_by_county": {
+          "南投縣": 68,
+          "嘉義市": 73,
+          "嘉義縣": 87,
+          "基隆市": 25,
+          "宜蘭縣": 62,
+          "屏東縣": 106,
+          "彰化縣": 86,
+          "新北市": 109,
+          "新竹市": 50,
+          "新竹縣": 67,
+          "桃園市": 66,
+          "澎湖縣": 34,
+          "臺中市": 344,
+          "臺北市": 128,
+          "臺南市": 157,
+          "臺東縣": 41,
+          "花蓮縣": 78,
+          "苗栗縣": 57,
+          "金門縣": 29,
+          "雲林縣": 102,
+          "高雄市": 249
+        },
+        "covered_county_count": 21,
+        "fetched_count": 2018,
+        "kinmen_count": 29,
+        "lienchiang_count": 0,
+        "message": null,
+        "normalized_count": 2018,
+        "rejected_count": 0,
+        "status": "healthy"
+      },
+      {
+        "adapter_key": "official.civil_iot.pump_water_level",
+        "county_counts_by_county": {
+          "嘉義縣": 2,
+          "新竹市": 4,
+          "臺南市": 2,
+          "雲林縣": 2
+        },
+        "covered_county_count": 4,
+        "fetched_count": 10,
+        "kinmen_count": 0,
+        "lienchiang_count": 0,
+        "message": null,
+        "normalized_count": 10,
+        "rejected_count": 0,
+        "status": "healthy"
+      },
+      {
+        "adapter_key": "official.civil_iot.gate_water_level",
+        "county_counts_by_county": {
+          "嘉義縣": 1,
+          "雲林縣": 6
+        },
+        "covered_county_count": 2,
+        "fetched_count": 50,
+        "kinmen_count": 0,
+        "lienchiang_count": 0,
+        "message": null,
+        "normalized_count": 50,
+        "rejected_count": 0,
+        "status": "healthy"
+      }
+    ]
+  },
+  "schema_version": "official-realtime-live-smoke/v1"
+}

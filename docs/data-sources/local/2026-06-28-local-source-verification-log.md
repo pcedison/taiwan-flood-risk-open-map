@@ -127,6 +127,37 @@ of PowerShell `Tee-Object`, because the CLI writes normalized UTF-8 JSON and
 records the source catalog URL, captured timestamp, target counties, required
 signal type, summary counts, and conclusion.
 
+## 2026-06-30 official smoke signal-gap crosswalk
+
+Commands:
+
+```powershell
+python scripts\official-realtime-live-smoke.py `
+  --timeout-seconds 30 `
+  --captured-at 2026-06-30T20:30:00+08:00 `
+  --evidence-output docs\reviews\official-realtime-live-smoke-2026-06-30-signal-gap-refresh.json
+
+python scripts\local-source-signal-gap-evidence.py `
+  --official-live-smoke-json docs\reviews\official-realtime-live-smoke-2026-06-30-signal-gap-refresh.json `
+  --captured-at 2026-06-30T20:35:00+08:00 `
+  --output docs\reviews\local-source-signal-gap-evidence-2026-06-30.json
+```
+
+Result: the latest official live smoke is healthy for WRA and Civil IoT sources,
+while CWA rainfall is safely skipped without `CWA_API_AUTHORIZATION`. The
+crosswalk found 0 newly observed official smoke items for the 17 unresolved
+local-source signal gaps. The remaining unresolved groups are still:
+
+- `pump_or_gate_status`: 13 county/signal items.
+- `flood_depth`: 3 county/signal items.
+- `sewer_water_level`: 1 county/signal item.
+
+Conclusion: central official live smoke currently does not expose new accepted
+coverage for the unresolved signal gaps. The next completion path remains
+official local read API requests, authorization, public API contract follow-up,
+or official-unavailable evidence; the crosswalk artifact is diagnostic only and
+does not satisfy completion gates by itself.
+
 ## 2026-06-30 public API contract probe
 
 `scripts/public-api-contract-probe.py` now rechecks the current
