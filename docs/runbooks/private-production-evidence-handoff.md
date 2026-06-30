@@ -301,6 +301,14 @@ level evidence. The admin-only `hosted_source_freshness_smoke.py` can prove
 `freshness_policy` and `worker_persisted_evidence_path`; the private hosted
 worker manifest remains the place to record raw snapshot retention, scheduler
 cadence, hosted egress review, and any private storage/adapter evidence.
+The public-safe smoke defaults to the full hosted realtime backbone
+(`official.cwa.rainfall`, `official.cwa.tide_level`, `official.wra.water_level`,
+`official.ncdr.cap`, `official.wra_iow.flood_depth`,
+`official.civil_iot.flood_sensor`, `official.civil_iot.sewer_water_level`,
+`official.civil_iot.pump_water_level`, and
+`official.civil_iot.gate_water_level`). Use repeated `--required-adapter-key`
+arguments only for a documented, narrower incident or staged rollout check; do
+not use a narrowed run as completion evidence for the full hosted worker path.
 
 If `hosted_source_freshness_smoke.py` is used for the public-safe admin
 freshness and worker-persisted path requirements, operators can keep the

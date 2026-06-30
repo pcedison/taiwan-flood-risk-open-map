@@ -117,25 +117,26 @@ smoke artifact or missing JSON pointer cannot satisfy the gate.
 ## Hosted Source-Freshness Smoke
 
 When an admin token is available, run the hosted source-freshness smoke after a
-production deploy to prove that `/admin/v1/sources` exposes enabled CWA/WRA
-source diagnostics with fresh or degraded-but-usable worker-persisted rows:
+production deploy to prove that `/admin/v1/sources` exposes enabled hosted
+realtime backbone diagnostics with fresh or degraded-but-usable
+worker-persisted rows:
 
 ```powershell
 python scripts\hosted_source_freshness_smoke.py `
   --base-url https://floodrisk.cc `
   --admin-token-env ADMIN_BEARER_TOKEN `
-  --required-adapter-key official.cwa.rainfall `
-  --required-adapter-key official.wra.water_level `
   --evidence-output docs\reviews\hosted-source-freshness-smoke-YYYY-MM-DD-<sha>.json `
   --completion-evidence-output docs\reviews\hosted-source-freshness-completion-evidence-YYYY-MM-DD-<sha>.json
 ```
 
 The smoke reads the admin token from the named environment variable and never
-writes the token into the artifact. It checks that each required source is
-enabled, has `healthy` or `degraded` source health, has `fresh` or `degraded`
-freshness, includes latest observed and ingested timestamps, has a positive
-`row_count`, has non-negative `lag_seconds`, and reports the
-`data_sources.is_enabled` gate.
+writes the token into the artifact. By default it requires the full hosted
+realtime backbone: CWA rainfall/tide, WRA water level, NCDR CAP, WRA IoW flood
+depth, and Civil IoT flood/sewer/pump/gate water-level adapters. It checks that
+each required source is enabled, has `healthy` or `degraded` source health, has
+`fresh` or `degraded` freshness, includes latest observed and ingested
+timestamps, has a positive `row_count`, has non-negative `lag_seconds`, and
+reports the `data_sources.is_enabled` gate.
 
 An accepted artifact may satisfy only these
 `hosted_worker_persisted_evidence` requirements:
