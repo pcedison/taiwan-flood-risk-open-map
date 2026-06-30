@@ -159,6 +159,7 @@ def test_private_handoff_runbook_documents_source_contract_evidence_cli() -> Non
     runbook = PRIVATE_HANDOFF_RUNBOOK.read_text(encoding="utf-8")
 
     assert "scripts\\source_contract_evidence.py" in runbook
+    assert "source-contract-dispatch-evidence" in runbook
     assert "--manifest-json <private-source-contract-manifest.json>" in runbook
     assert "source-contract-evidence-input/v1" in runbook
     assert "authorization_request" in runbook

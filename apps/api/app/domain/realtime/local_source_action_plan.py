@@ -54,6 +54,9 @@ ACCEPTED_SIGNAL_EVIDENCE_STATUSES = {
 DISPATCHED_SIGNAL_EVIDENCE_STATUSES = {
     "request_dispatched",
 }
+DISPATCHED_SOURCE_CONTRACT_EVIDENCE_STATUSES = {
+    "request_dispatched",
+}
 ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES = {
     "accepted",
     "authorized",
@@ -75,6 +78,7 @@ class CompletionEvidenceState:
     signal_family_gap_keys: frozenset[tuple[str, str]]
     signal_family_gap_dispatch_keys: frozenset[tuple[str, str]]
     source_contract_keys: frozenset[tuple[str, str]]
+    source_contract_dispatch_keys: frozenset[tuple[str, str]]
     production_gate_keys: frozenset[str]
     production_gate_requirement_keys: frozenset[tuple[str, str]]
     validation_errors: tuple[str, ...]
@@ -88,6 +92,7 @@ class CompletionEvidenceState:
                 self.signal_family_gap_dispatch_keys
             ),
             "source_contract_evidence_count": len(self.source_contract_keys),
+            "source_contract_dispatch_count": len(self.source_contract_dispatch_keys),
             "production_gate_evidence_count": len(self.production_gate_keys),
             "production_gate_requirement_evidence_count": len(
                 self.production_gate_requirement_keys
@@ -264,6 +269,11 @@ def _completion_audit(
             gate_key="official_authorization_and_contracts",
             status="satisfied" if source_contract_gate_satisfied else "incomplete",
             evidence=_source_contract_gate_evidence(
+                required_count=(
+                    len(authorization_requests)
+                    + len(metadata_release_monitors)
+                    + len(public_api_contract_reviews)
+                ),
                 evidence_state=evidence_state,
                 satisfied=source_contract_gate_satisfied,
             ),
@@ -387,6 +397,7 @@ def _completion_evidence_state(
             signal_family_gap_keys=frozenset(),
             signal_family_gap_dispatch_keys=frozenset(),
             source_contract_keys=frozenset(),
+            source_contract_dispatch_keys=frozenset(),
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
             validation_errors=(),
@@ -405,6 +416,7 @@ def _completion_evidence_state(
             signal_family_gap_keys=frozenset(),
             signal_family_gap_dispatch_keys=frozenset(),
             source_contract_keys=frozenset(),
+            source_contract_dispatch_keys=frozenset(),
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
             validation_errors=tuple(errors),
@@ -433,6 +445,12 @@ def _completion_evidence_state(
         ),
         source_contract_keys=frozenset(
             _accepted_source_contract_keys(
+                completion_evidence.get("source_contract_evidence"),
+                errors,
+            )
+        ),
+        source_contract_dispatch_keys=frozenset(
+            _dispatched_source_contract_keys(
                 completion_evidence.get("source_contract_evidence"),
                 errors,
             )
@@ -513,6 +531,34 @@ def _accepted_source_contract_keys(
             errors.append(f"source_contract_evidence[{index}].gate is invalid")
             continue
         if status not in ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES:
+            continue
+        if not _non_empty_string(item.get("evidence_ref")):
+            errors.append(f"source_contract_evidence[{index}].evidence_ref is required")
+            continue
+        keys.add((str(county).strip(), str(gate).strip()))
+    return keys
+
+
+def _dispatched_source_contract_keys(
+    value: Any,
+    errors: list[str],
+) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for index, item in enumerate(_list_evidence(value, "source_contract_evidence", errors)):
+        county = item.get("county")
+        gate = item.get("gate")
+        status = item.get("status")
+        if status not in DISPATCHED_SOURCE_CONTRACT_EVIDENCE_STATUSES:
+            continue
+        if not _non_empty_string(county):
+            errors.append(f"source_contract_evidence[{index}].county is required")
+            continue
+        if gate not in {
+            "authorization_request",
+            "metadata_release_monitor",
+            "public_api_contract_review",
+        }:
+            errors.append(f"source_contract_evidence[{index}].gate is invalid")
             continue
         if not _non_empty_string(item.get("evidence_ref")):
             errors.append(f"source_contract_evidence[{index}].evidence_ref is required")
@@ -745,6 +791,7 @@ def _signal_family_gate_evidence(
 
 def _source_contract_gate_evidence(
     *,
+    required_count: int,
     evidence_state: CompletionEvidenceState,
     satisfied: bool,
 ) -> str:
@@ -752,6 +799,13 @@ def _source_contract_gate_evidence(
         return (
             f"{len(evidence_state.source_contract_keys)} accepted source-contract "
             "evidence items cover current authorization and contract blockers."
+        )
+    dispatched_count = len(evidence_state.source_contract_dispatch_keys)
+    if dispatched_count:
+        return (
+            f"Dispatch evidence supplied for {dispatched_count}/{required_count} "
+            "source-contract blockers; official authorization, released metadata, "
+            "contract verification, or official-unavailable evidence is still required."
         )
     return (
         "Formal credentials, official releases, and public read API contracts "

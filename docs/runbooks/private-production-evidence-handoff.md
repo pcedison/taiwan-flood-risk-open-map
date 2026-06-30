@@ -255,6 +255,25 @@ contract manifest with accepted evidence for every current
 `authorization_request`, `metadata_release_monitor`, and
 `public_api_contract_review` item:
 
+When authorization or contract requests have been sent but the official reply
+has not yet been accepted, generate a private source-contract dispatch overlay
+instead of marking the gate complete:
+
+```powershell
+python scripts\local-source-request-packets.py `
+  --format source-contract-dispatch-evidence `
+  --dispatch-evidence-ref private-ops://local-source/source-contract-dispatch/YYYY-MM-DD `
+  --dispatched-at 2026-06-30T18:10:00+08:00 `
+  --output <private-source-contract-dispatch-evidence.json>
+```
+
+The audit will report `request_dispatched` as source-contract dispatch
+progress, but it will keep `official_authorization_and_contracts` incomplete
+until each current county/gate item is replaced with `accepted`, `authorized`,
+`contract_verified`, `released`, or `official_unavailable` evidence. Do not
+commit a filled dispatch overlay; keep it with the private official
+correspondence or ticketing record.
+
 ```powershell
 python scripts\source_contract_evidence.py `
   --manifest-json <private-source-contract-manifest.json> `

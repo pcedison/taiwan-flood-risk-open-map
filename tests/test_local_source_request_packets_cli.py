@@ -232,6 +232,52 @@ def test_local_source_request_packets_cli_emits_signal_gap_dispatch_evidence() -
     }
 
 
+def test_local_source_request_packets_cli_emits_source_contract_dispatch_evidence() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--format",
+            "source-contract-dispatch-evidence",
+            "--dispatch-evidence-ref",
+            "private-ops://local-source/source-contract-dispatch/2026-06-30",
+            "--dispatched-at",
+            "2026-06-30T18:10:00+08:00",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+
+    assert payload["schema_version"] == "local-source-completion-evidence/v1"
+    assert payload["captured_at"] == "2026-06-30T18:10:00+08:00"
+    assert payload["signal_family_gap_evidence"] == []
+    assert payload["production_gate_evidence"] == []
+    assert len(payload["source_contract_evidence"]) == 6
+    first = payload["source_contract_evidence"][0]
+    assert first == {
+        "county": "\u9023\u6c5f\u7e23",
+        "gate": "metadata_release_monitor",
+        "status": "request_dispatched",
+        "accepted_statuses": [
+            "accepted",
+            "authorized",
+            "contract_verified",
+            "official_unavailable",
+            "released",
+        ],
+        "evidence_ref": (
+            "private-ops://local-source/source-contract-dispatch/2026-06-30"
+        ),
+        "dispatched_at": "2026-06-30T18:10:00+08:00",
+    }
+
+
 def test_local_source_request_packets_cli_emits_completion_evidence_template() -> None:
     result = subprocess.run(
         [
