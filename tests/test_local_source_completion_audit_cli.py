@@ -235,6 +235,34 @@ def test_local_source_completion_audit_cli_tracks_dispatched_signal_gap_without_
     ]["evidence"]
 
 
+def test_local_source_completion_audit_cli_writes_output_artifact(
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "completion-audit.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--output",
+            str(output_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    stdout_payload = json.loads(result.stdout)
+    output_payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert output_payload == stdout_payload
+    assert output_payload["overall_status"] == "incomplete"
+    assert output_payload["summary"]["signal_gap_county_item_count"] == 24
+
+
 def test_local_source_completion_audit_cli_rejects_failed_local_evidence_ref(
     tmp_path: Path,
 ) -> None:
