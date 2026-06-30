@@ -902,6 +902,38 @@ paths:
                             candidate_readiness_field: candidate_live_read_api
                             county_count: 14
                             command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --fail-on-candidate --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣 --county 嘉義市 --county 桃園市 --county 澎湖縣 --county 臺中市 --county 臺南市 --county 南投縣 --county 基隆市 --county 宜蘭縣 --county 新北市 --county 新竹縣
+                          official_request_batch:
+                            target_signal_type: pump_or_gate_status
+                            packet_type: signal_gap_batch_request
+                            county_count: 14
+                            counties:
+                              - 連江縣
+                              - 金門縣
+                              - 臺東縣
+                              - 苗栗縣
+                            requested_counterparties:
+                              - county water-resource authority
+                            tracking_statuses:
+                              - monitoring_open_data_release
+                              - needs_authorization_request
+                              - needs_public_read_api_contract
+                              - needs_signal_gap_review
+                            required_read_api_fields:
+                              - observed_at
+                              - station_or_device_id
+                              - measurement_value
+                              - measurement_unit_or_type
+                              - longitude_latitude_or_joinable_station_metadata
+                              - official_source_url_and_license
+                            production_operational_requirements:
+                              - freshness_policy
+                              - raw_snapshot_retention_policy
+                              - monitored_scheduler_cadence
+                              - hosted_egress_review
+                              - worker_persisted_evidence_path
+                            next_step: send_official_read_api_requests
+                            packet_generator_command: PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣
+                            completion_gate: Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for pump_or_gate_status, plus production ops evidence.
                           completion_gate: For every listed county, add a production adapter, an authorization-gated adapter, or an official unavailable/blocked-source record for pump_or_gate_status.
                       authorization_requests:
                         - county: 金門縣
