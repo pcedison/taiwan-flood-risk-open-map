@@ -51,6 +51,9 @@ ACCEPTED_SIGNAL_EVIDENCE_STATUSES = {
     "official_unavailable",
     "production_adapter",
 }
+DISPATCHED_SIGNAL_EVIDENCE_STATUSES = {
+    "request_dispatched",
+}
 ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES = {
     "accepted",
     "authorized",
@@ -70,6 +73,7 @@ class CompletionEvidenceState:
     schema_version: str | None
     captured_at: str | None
     signal_family_gap_keys: frozenset[tuple[str, str]]
+    signal_family_gap_dispatch_keys: frozenset[tuple[str, str]]
     source_contract_keys: frozenset[tuple[str, str]]
     production_gate_keys: frozenset[str]
     production_gate_requirement_keys: frozenset[tuple[str, str]]
@@ -80,6 +84,9 @@ class CompletionEvidenceState:
             "schema_version": self.schema_version,
             "captured_at": self.captured_at,
             "signal_family_gap_evidence_count": len(self.signal_family_gap_keys),
+            "signal_family_gap_dispatch_count": len(
+                self.signal_family_gap_dispatch_keys
+            ),
             "source_contract_evidence_count": len(self.source_contract_keys),
             "production_gate_evidence_count": len(self.production_gate_keys),
             "production_gate_requirement_evidence_count": len(
@@ -378,6 +385,7 @@ def _completion_evidence_state(
             schema_version=None,
             captured_at=None,
             signal_family_gap_keys=frozenset(),
+            signal_family_gap_dispatch_keys=frozenset(),
             source_contract_keys=frozenset(),
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
@@ -395,6 +403,7 @@ def _completion_evidence_state(
             schema_version=schema_version if isinstance(schema_version, str) else None,
             captured_at=captured_at if isinstance(captured_at, str) else None,
             signal_family_gap_keys=frozenset(),
+            signal_family_gap_dispatch_keys=frozenset(),
             source_contract_keys=frozenset(),
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
@@ -412,6 +421,12 @@ def _completion_evidence_state(
         captured_at=captured_at if isinstance(captured_at, str) else None,
         signal_family_gap_keys=frozenset(
             _accepted_signal_family_gap_keys(
+                completion_evidence.get("signal_family_gap_evidence"),
+                errors,
+            )
+        ),
+        signal_family_gap_dispatch_keys=frozenset(
+            _dispatched_signal_family_gap_keys(
                 completion_evidence.get("signal_family_gap_evidence"),
                 errors,
             )
@@ -446,6 +461,30 @@ def _accepted_signal_family_gap_keys(
             errors.append(f"signal_family_gap_evidence[{index}].signal_type is required")
             continue
         if status not in ACCEPTED_SIGNAL_EVIDENCE_STATUSES:
+            continue
+        if not _non_empty_string(item.get("evidence_ref")):
+            errors.append(f"signal_family_gap_evidence[{index}].evidence_ref is required")
+            continue
+        keys.add((str(county).strip(), str(signal_type).strip()))
+    return keys
+
+
+def _dispatched_signal_family_gap_keys(
+    value: Any,
+    errors: list[str],
+) -> set[tuple[str, str]]:
+    keys: set[tuple[str, str]] = set()
+    for index, item in enumerate(_list_evidence(value, "signal_family_gap_evidence", errors)):
+        county = item.get("county")
+        signal_type = item.get("signal_type")
+        status = item.get("status")
+        if status not in DISPATCHED_SIGNAL_EVIDENCE_STATUSES:
+            continue
+        if not _non_empty_string(county):
+            errors.append(f"signal_family_gap_evidence[{index}].county is required")
+            continue
+        if not _non_empty_string(signal_type):
+            errors.append(f"signal_family_gap_evidence[{index}].signal_type is required")
             continue
         if not _non_empty_string(item.get("evidence_ref")):
             errors.append(f"signal_family_gap_evidence[{index}].evidence_ref is required")
@@ -687,6 +726,16 @@ def _signal_family_gate_evidence(
         return (
             f"{len(evidence_state.signal_family_gap_keys)} accepted signal-family "
             "evidence items cover current missing signal families."
+        )
+    dispatched_count = len(evidence_state.signal_family_gap_dispatch_keys)
+    if dispatched_count:
+        total_count = sum(
+            int(group["county_count"]) for group in signal_gap_priority_groups
+        )
+        return (
+            f"Dispatch evidence supplied for {dispatched_count}/{total_count} "
+            "signal-family items; official reply, production adapter, or "
+            "official-unavailable evidence is still required."
         )
     return (
         f"{len(signal_gap_priority_groups)} signal families remain in "

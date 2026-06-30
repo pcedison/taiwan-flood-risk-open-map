@@ -896,6 +896,7 @@ paths:
                           schema_version: null
                           captured_at: null
                           signal_family_gap_evidence_count: 0
+                          signal_family_gap_dispatch_count: 0
                           source_contract_evidence_count: 0
                           production_gate_evidence_count: 0
                           production_gate_requirement_evidence_count: 0
@@ -2753,6 +2754,7 @@ components:
         - schema_version
         - captured_at
         - signal_family_gap_evidence_count
+        - signal_family_gap_dispatch_count
         - source_contract_evidence_count
         - production_gate_evidence_count
         - production_gate_requirement_evidence_count
@@ -2767,6 +2769,9 @@ components:
             - string
             - "null"
         signal_family_gap_evidence_count:
+          type: integer
+          minimum: 0
+        signal_family_gap_dispatch_count:
           type: integer
           minimum: 0
         source_contract_evidence_count:
