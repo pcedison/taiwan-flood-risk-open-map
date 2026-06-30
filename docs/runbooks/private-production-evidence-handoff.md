@@ -229,6 +229,31 @@ replaced with `accepted`, `authorization_gated_adapter`,
 filled dispatch overlay; keep it with the private official correspondence or
 ticketing record.
 
+For the `production_monitoring_and_alerting` gate, fill a private monitoring
+manifest with one reviewed evidence block per required requirement:
+
+- `hosted_alert_routing`: verified alert route, owner, evidence ref, and
+  `reviewed_at`.
+- `scheduled_freshness_checks`: verified hosted freshness monitor or scheduled
+  job, cadence, evidence ref, and `observed_at`.
+- `worker_scheduler_alert_ownership`: verified worker/scheduler owner, evidence
+  ref, and `reviewed_at`.
+
+Then validate and normalize that private manifest into a completion overlay:
+
+```powershell
+python scripts\hosted_monitoring_evidence.py `
+  --manifest-json <private-monitoring-manifest.json> `
+  --evidence-output <private-hosted-monitoring-evidence.json> `
+  --completion-evidence-output <private-monitoring-evidence.json>
+```
+
+The CLI fails closed: `production_monitoring_and_alerting` is accepted only
+when `hosted_alert_routing`, `scheduled_freshness_checks`, and
+`worker_scheduler_alert_ownership` all have verified status plus requirement
+level evidence. Keep the filled outputs private if they contain routing names,
+ticket links, incident channels, or on-call ownership.
+
 ## Acceptance Mapping
 
 `P1-04` can move from `In Progress` to `Accepted` only when:
