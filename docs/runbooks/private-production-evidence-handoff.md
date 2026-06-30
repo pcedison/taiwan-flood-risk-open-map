@@ -229,6 +229,27 @@ replaced with `accepted`, `authorization_gated_adapter`,
 filled dispatch overlay; keep it with the private official correspondence or
 ticketing record.
 
+For the `official_authorization_and_contracts` gate, fill a private source
+contract manifest with accepted evidence for every current
+`authorization_request`, `metadata_release_monitor`, and
+`public_api_contract_review` item:
+
+```powershell
+python scripts\source_contract_evidence.py `
+  --manifest-json <private-source-contract-manifest.json> `
+  --evidence-output <private-source-contract-evidence.json> `
+  --completion-evidence-output <private-source-contract-completion-evidence.json>
+```
+
+The manifest schema is `source-contract-evidence-input/v1`. Each
+`source_contract_evidence` entry must include `county`, `gate`, accepted
+`status`, `evidence_ref`, and `reviewed_at`. Accepted statuses are
+`accepted`, `authorized`, `contract_verified`, `official_unavailable`, and
+`released`. The CLI compares the manifest against the current action plan and
+fails closed if any required county/gate is missing, pending, duplicated, or no
+longer required. Keep filled manifests and normalized outputs private if they
+contain official reply refs, contract links, reviewer names, or ticket IDs.
+
 For the `hosted_worker_persisted_evidence` gate, fill a private hosted worker
 manifest with verified evidence for all five required requirements:
 
