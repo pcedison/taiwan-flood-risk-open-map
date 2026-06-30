@@ -173,6 +173,47 @@ def render_signal_gap_request_batches_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def build_signal_gap_dispatch_evidence_template(
+    batches: tuple[dict[str, Any], ...],
+    *,
+    dispatch_evidence_ref: str,
+    dispatched_at: str,
+    captured_at: str | None = None,
+) -> dict[str, Any]:
+    signal_family_gap_evidence: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for batch in batches:
+        for target in batch.get("completion_evidence_targets", []):
+            if not isinstance(target, Mapping):
+                continue
+            if str(target.get("manifest_section", "")) != "signal_family_gap_evidence":
+                continue
+            item = _signal_family_gap_dispatch_item(
+                target,
+                dispatch_evidence_ref=dispatch_evidence_ref,
+                dispatched_at=dispatched_at,
+            )
+            key = (str(item["county"]), str(item["signal_type"]))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            signal_family_gap_evidence.append(item)
+
+    return {
+        "schema_version": COMPLETION_EVIDENCE_SCHEMA_VERSION,
+        "captured_at": captured_at or dispatched_at,
+        "notes": [
+            "Draft generated from signal-gap official request batches.",
+            "request_dispatched records proof that an official request was sent; it does not satisfy completion gates.",
+            "Replace status and evidence_ref only after official reply, adapter smoke, or private ops evidence is accepted.",
+            "Do not commit filled private evidence refs, tokens, screenshots, or official reply transcripts.",
+        ],
+        "signal_family_gap_evidence": signal_family_gap_evidence,
+        "source_contract_evidence": [],
+        "production_gate_evidence": [],
+    }
+
+
 def build_completion_evidence_template(
     packets: tuple[dict[str, Any], ...],
     *,
@@ -236,6 +277,24 @@ def _signal_family_gap_template_item(target: Mapping[str, Any]) -> dict[str, Any
             str(status) for status in target.get("accepted_statuses", [])
         ],
         "evidence_ref": str(target.get("private_evidence_ref_hint", "")),
+    }
+
+
+def _signal_family_gap_dispatch_item(
+    target: Mapping[str, Any],
+    *,
+    dispatch_evidence_ref: str,
+    dispatched_at: str,
+) -> dict[str, Any]:
+    return {
+        "county": str(target.get("county", "")),
+        "signal_type": str(target.get("signal_type", "")),
+        "status": "request_dispatched",
+        "accepted_statuses": [
+            str(status) for status in target.get("accepted_statuses", [])
+        ],
+        "evidence_ref": dispatch_evidence_ref,
+        "dispatched_at": dispatched_at,
     }
 
 

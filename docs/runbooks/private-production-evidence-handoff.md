@@ -210,6 +210,25 @@ private bundle turns every listed `completion_evidence_targets` entry into an
 accepted `signal_family_gap_evidence` item or an accepted official-unavailable
 record.
 
+When a batch has been sent but the official reply has not yet been accepted,
+generate a private dispatch overlay instead of marking the signal gap complete:
+
+```powershell
+python scripts\local-source-request-packets.py `
+  --format signal-gap-dispatch-evidence `
+  --signal-type flood_depth `
+  --dispatch-evidence-ref private-ops://local-source/dispatch/flood-depth-YYYY-MM-DD `
+  --dispatched-at 2026-06-30T15:20:00+08:00 `
+  --output <private-signal-gap-dispatch-evidence.json>
+```
+
+The audit will report `request_dispatched` as dispatch progress, but it will
+keep `required_signal_families` incomplete until each county/signal entry is
+replaced with `accepted`, `authorization_gated_adapter`,
+`production_adapter`, or `official_unavailable` evidence. Do not commit a
+filled dispatch overlay; keep it with the private official correspondence or
+ticketing record.
+
 ## Acceptance Mapping
 
 `P1-04` can move from `In Progress` to `Accepted` only when:

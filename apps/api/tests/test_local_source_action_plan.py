@@ -421,6 +421,7 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
         "schema_version": "local-source-completion-evidence/v1",
         "captured_at": "2026-06-30T12:00:00+08:00",
         "signal_family_gap_evidence_count": 24,
+        "signal_family_gap_dispatch_count": 0,
         "source_contract_evidence_count": 6,
         "production_gate_evidence_count": 4,
         "production_gate_requirement_evidence_count": 12,

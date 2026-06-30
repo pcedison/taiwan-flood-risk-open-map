@@ -25,6 +25,7 @@ from app.domain.realtime.local_source_coverage import (  # noqa: E402
 from app.domain.realtime.local_source_request_packets import (  # noqa: E402
     build_completion_evidence_template,
     build_official_request_packets,
+    build_signal_gap_dispatch_evidence_template,
     build_signal_gap_request_batches,
     render_official_request_packets_markdown,
     render_signal_gap_request_batches_markdown,
@@ -43,6 +44,7 @@ def main() -> int:
             "evidence-template",
             "signal-gap-batches-json",
             "signal-gap-batches-markdown",
+            "signal-gap-dispatch-evidence",
         ),
         default="markdown",
         help="Output format. Defaults to markdown.",
@@ -66,14 +68,49 @@ def main() -> int:
         "--output",
         help="Optional output file. When omitted, content is written to stdout.",
     )
+    parser.add_argument(
+        "--dispatch-evidence-ref",
+        help=(
+            "Private evidence ref proving the official request dispatch. "
+            "Required for signal-gap-dispatch-evidence."
+        ),
+    )
+    parser.add_argument(
+        "--dispatched-at",
+        help=(
+            "ISO-8601 dispatch timestamp. Required for "
+            "signal-gap-dispatch-evidence."
+        ),
+    )
     args = parser.parse_args()
 
     plan = build_local_source_action_plan(list_local_source_coverage())
-    if args.format in {"signal-gap-batches-json", "signal-gap-batches-markdown"}:
+    if args.format in {
+        "signal-gap-batches-json",
+        "signal-gap-batches-markdown",
+        "signal-gap-dispatch-evidence",
+    }:
         batches = build_signal_gap_request_batches(
             plan,
             signal_types=set(args.signal_types) if args.signal_types else None,
         )
+        if args.format == "signal-gap-dispatch-evidence":
+            if not args.dispatch_evidence_ref:
+                parser.error(
+                    "--dispatch-evidence-ref is required for "
+                    "signal-gap-dispatch-evidence"
+                )
+            if not args.dispatched_at:
+                parser.error(
+                    "--dispatched-at is required for signal-gap-dispatch-evidence"
+                )
+            template = build_signal_gap_dispatch_evidence_template(
+                batches,
+                dispatch_evidence_ref=args.dispatch_evidence_ref,
+                dispatched_at=args.dispatched_at,
+            )
+            content = json.dumps(template, ensure_ascii=False, indent=2) + "\n"
+            return _write_output(content, args.output)
         content = (
             json.dumps(list(batches), ensure_ascii=False, indent=2) + "\n"
             if args.format == "signal-gap-batches-json"

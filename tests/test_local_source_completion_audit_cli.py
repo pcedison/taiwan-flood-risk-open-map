@@ -178,6 +178,63 @@ def test_local_source_completion_audit_cli_merges_completion_evidence_files(
     assert payload["overall_status"] == "incomplete"
 
 
+def test_local_source_completion_audit_cli_tracks_dispatched_signal_gap_without_accepting_it(
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "dispatch-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-06-30T15:00:00+08:00",
+                "signal_family_gap_evidence": [
+                    {
+                        "county": "\u9023\u6c5f\u7e23",
+                        "signal_type": "flood_depth",
+                        "status": "request_dispatched",
+                        "evidence_ref": (
+                            "private-ops://local-source/dispatch/flood-depth"
+                        ),
+                    }
+                ],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    gates = {gate["gate_key"]: gate for gate in payload["gates"]}
+
+    assert payload["evidence_overlay"]["signal_family_gap_evidence_count"] == 0
+    assert payload["evidence_overlay"]["signal_family_gap_dispatch_count"] == 1
+    assert gates["required_signal_families"]["status"] == "incomplete"
+    assert gates["required_signal_families"]["blocking_items"] == [
+        "pump_or_gate_status:14",
+        "flood_depth:5",
+        "sewer_water_level:5",
+    ]
+    assert "Dispatch evidence supplied for 1/24" in gates[
+        "required_signal_families"
+    ]["evidence"]
+
+
 def test_local_source_completion_audit_cli_rejects_failed_local_evidence_ref(
     tmp_path: Path,
 ) -> None:
