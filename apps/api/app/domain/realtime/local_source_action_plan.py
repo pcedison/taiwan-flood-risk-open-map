@@ -404,7 +404,7 @@ def _accepted_signal_family_gap_keys(
         if not _non_empty_string(item.get("evidence_ref")):
             errors.append(f"signal_family_gap_evidence[{index}].evidence_ref is required")
             continue
-        keys.add((county, signal_type))
+        keys.add((str(county).strip(), str(signal_type).strip()))
     return keys
 
 
@@ -432,7 +432,7 @@ def _accepted_source_contract_keys(
         if not _non_empty_string(item.get("evidence_ref")):
             errors.append(f"source_contract_evidence[{index}].evidence_ref is required")
             continue
-        keys.add((county, gate))
+        keys.add((str(county).strip(), str(gate).strip()))
     return keys
 
 
