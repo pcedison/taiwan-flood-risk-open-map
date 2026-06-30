@@ -4,7 +4,7 @@ import json
 import os
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -45,6 +45,7 @@ class SmokeSourceResult:
     covered_county_count: int = 0
     kinmen_count: int = 0
     lienchiang_count: int = 0
+    county_counts_by_county: Mapping[str, int] = field(default_factory=dict)
     message: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -57,6 +58,7 @@ class SmokeSourceResult:
             "covered_county_count": self.covered_county_count,
             "kinmen_count": self.kinmen_count,
             "lienchiang_count": self.lienchiang_count,
+            "county_counts_by_county": dict(self.county_counts_by_county),
             "message": self.message,
         }
 
@@ -233,6 +235,7 @@ def _source_result_from_adapter_run(
         covered_county_count=len(counties),
         kinmen_count=counties.get("金門縣", 0),
         lienchiang_count=counties.get("連江縣", 0),
+        county_counts_by_county=dict(sorted(counties.items())),
         message=message,
     )
 

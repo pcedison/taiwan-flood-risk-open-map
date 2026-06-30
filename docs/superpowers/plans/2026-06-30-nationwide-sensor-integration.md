@@ -1600,6 +1600,37 @@ overall objective remains incomplete because signal-family blockers,
 official authorization/contracts, hosted worker persistence evidence, and
 production monitoring/alerting still require accepted evidence.
 
+## Task 51: Official Live Smoke County Distribution Evidence
+
+**Files:**
+- Modify: `apps/workers/app/ops/official_realtime_live_smoke.py`
+- Modify: `apps/workers/tests/test_official_realtime_live_smoke.py`
+- Modify: `scripts/official-realtime-live-smoke.py`
+- Add: `tests/test_official_realtime_live_smoke_cli.py`
+- Add: `docs/reviews/official-realtime-live-smoke-2026-06-30.json`
+
+**Interfaces:**
+- Consumes: live CWA/WRA/WRA IoW/NCDR/Civil IoT official backbone adapter
+  smoke results.
+- Produces: public-safe evidence with per-adapter county distribution counts,
+  so remaining signal-family blockers can be checked against actual current
+  upstream coverage.
+
+- [x] Write failing tests requiring smoke result dictionaries to expose
+  `county_counts_by_county`.
+- [x] Add `--evidence-output` to `scripts/official-realtime-live-smoke.py`.
+- [x] Run the live smoke and commit the current county distribution artifact.
+- [x] Confirm current central live coverage does not reduce the 17 remaining
+  signal-family blockers.
+
+Completed 2026-06-30: live smoke evidence now records exact county
+distribution for each official realtime adapter. The run confirms that
+`flood_depth` remains missing for Taipei, Penghu, and Lienchiang;
+`sewer_water_level` remains missing for Lienchiang; and Civil IoT pump/gate
+water-level coverage currently appears only in 嘉義縣、新竹市、臺南市、雲林縣,
+so the 13 `pump_or_gate_status` blocker counties remain
+unresolved.
+
 ## Completion Gates
 
 The full objective is complete only when:
