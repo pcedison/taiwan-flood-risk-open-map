@@ -41,6 +41,25 @@ in hosted runtime by default.
   current `observed_at` timestamps.
 - Confirm API responses include healthy `cwa-rainfall` or `wra-water-level`
   freshness before describing realtime official data as available.
+- Confirm unresolved local official signal families are tracked through the
+  generated request batches before calling nationwide nearby sensor coverage
+  complete:
+
+  ```powershell
+  python scripts\local-source-request-packets.py `
+    --format signal-gap-batches-json `
+    --output docs\data-sources\local\generated-signal-gap-request-batches.json
+
+  python scripts\local-source-request-packets.py `
+    --format signal-gap-batches-markdown `
+    --output docs\data-sources\local\generated-signal-gap-request-batches.md
+  ```
+
+  The generated batches currently cover `pump_or_gate_status`, `flood_depth`,
+  and `sewer_water_level`. A batch remains incomplete until every listed county
+  has an official read API, an authorization-gated adapter path, a production
+  adapter, or an accepted official-unavailable-source record in private
+  completion evidence.
 
 ## Hosted Public-Risk Smoke
 
