@@ -69,7 +69,7 @@ def test_taipei_evacuate_gate_retries_public_mirror_and_stays_gate_status(
     )
     attempted_urls: list[str] = []
 
-    def fake_urlopen(request: Request, *, timeout: int):
+    def fake_urlopen(request: Request, *, timeout: int, context=None):
         url = request.full_url
         attempted_urls.append(url)
         if "wic.heo.taipei" in url:
