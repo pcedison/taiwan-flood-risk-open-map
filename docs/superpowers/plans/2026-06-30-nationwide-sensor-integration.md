@@ -1693,6 +1693,33 @@ not itself satisfy `hosted_worker_persisted_evidence`; an admin token, real
 hosted source diagnostics, raw snapshot retention, scheduler cadence, hosted
 egress review, and monitoring evidence are still required.
 
+## Task 54: Reject Narrow Hosted Source Completion Evidence
+
+**Files:**
+- Modify: `scripts/local-source-completion-audit.py`
+- Modify: `tests/test_local_source_completion_audit_cli.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+
+**Interfaces:**
+- Consumes: local `hosted-source-freshness-smoke/v1` artifacts referenced by
+  `local-source-completion-evidence/v1` overlays.
+- Produces: completion-audit validation that rejects narrowed hosted source
+  freshness artifacts when they are used as hosted worker completion evidence.
+
+- [x] Write a failing audit test proving a two-adapter hosted source artifact
+  cannot satisfy hosted worker freshness/worker-path evidence.
+- [x] Keep full hosted realtime backbone artifacts accepted for the
+  `freshness_policy` and `worker_persisted_evidence_path` requirements while
+  leaving raw snapshots, scheduler cadence, and hosted egress still incomplete.
+- [x] Update private evidence handoff docs so operators know the audit now
+  enforces the full-backbone requirement for public-safe local artifacts.
+
+Completed 2026-06-30: the completion audit now blocks a local
+`hosted-source-freshness-smoke/v1` artifact from being counted as hosted worker
+evidence unless both `required_adapter_keys` and `checked_sources` include CWA
+rainfall/tide, WRA water level, NCDR CAP, WRA IoW flood depth, and Civil IoT
+flood/sewer/pump/gate adapters.
+
 ## Completion Gates
 
 The full objective is complete only when:

@@ -309,6 +309,10 @@ The public-safe smoke defaults to the full hosted realtime backbone
 `official.civil_iot.gate_water_level`). Use repeated `--required-adapter-key`
 arguments only for a documented, narrower incident or staged rollout check; do
 not use a narrowed run as completion evidence for the full hosted worker path.
+The local completion audit enforces this for public-safe local
+`hosted-source-freshness-smoke/v1` artifacts by rejecting evidence whose
+`required_adapter_keys` or `checked_sources` omit any hosted realtime backbone
+adapter.
 
 If `hosted_source_freshness_smoke.py` is used for the public-safe admin
 freshness and worker-persisted path requirements, operators can keep the

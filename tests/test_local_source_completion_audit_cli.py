@@ -19,6 +19,18 @@ from app.domain.realtime.local_source_coverage import (  # noqa: E402
     list_local_source_coverage,
 )
 
+FULL_HOSTED_SOURCE_ADAPTER_KEYS = [
+    "official.cwa.rainfall",
+    "official.cwa.tide_level",
+    "official.wra.water_level",
+    "official.ncdr.cap",
+    "official.wra_iow.flood_depth",
+    "official.civil_iot.flood_sensor",
+    "official.civil_iot.sewer_water_level",
+    "official.civil_iot.pump_water_level",
+    "official.civil_iot.gate_water_level",
+]
+
 
 def test_local_source_completion_audit_cli_reports_incomplete_by_default() -> None:
     result = subprocess.run(
@@ -362,6 +374,168 @@ def test_local_source_completion_audit_cli_rejects_failed_local_evidence_ref(
         in result.stderr
     )
     assert str(failed_artifact) in result.stderr
+
+
+def test_local_source_completion_audit_cli_rejects_narrow_hosted_source_freshness_evidence(
+    tmp_path: Path,
+) -> None:
+    hosted_source_artifact = tmp_path / "hosted-source-freshness-smoke.json"
+    hosted_source_artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": "hosted-source-freshness-smoke/v1",
+                "status": "passed",
+                "required_adapter_keys": [
+                    "official.cwa.rainfall",
+                    "official.wra.water_level",
+                ],
+                "checked_sources": [
+                    {"adapter_key": "official.cwa.rainfall"},
+                    {"adapter_key": "official.wra.water_level"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence_path = tmp_path / "local-source-completion-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-06-30T05:00:00+00:00",
+                "signal_family_gap_evidence": [],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [
+                    {
+                        "gate_key": "hosted_worker_persisted_evidence",
+                        "status": "accepted",
+                        "evidence_ref": str(hosted_source_artifact),
+                        "satisfied_requirements": [
+                            "freshness_policy",
+                            "worker_persisted_evidence_path",
+                        ],
+                        "requirement_evidence": [
+                            {
+                                "requirement": "freshness_policy",
+                                "evidence_ref": (
+                                    f"{hosted_source_artifact}#/checked_sources"
+                                ),
+                                "observed_at": "2026-06-30T05:00:00+00:00",
+                            },
+                            {
+                                "requirement": "worker_persisted_evidence_path",
+                                "evidence_ref": (
+                                    f"{hosted_source_artifact}#/checked_sources"
+                                ),
+                                "observed_at": "2026-06-30T05:00:00+00:00",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "must cover the full hosted realtime backbone" in result.stderr
+    assert "official.cwa.tide_level" in result.stderr
+
+
+def test_local_source_completion_audit_cli_accepts_full_hosted_source_freshness_evidence(
+    tmp_path: Path,
+) -> None:
+    hosted_source_artifact = tmp_path / "hosted-source-freshness-smoke.json"
+    hosted_source_artifact.write_text(
+        json.dumps(
+            {
+                "schema_version": "hosted-source-freshness-smoke/v1",
+                "status": "passed",
+                "required_adapter_keys": FULL_HOSTED_SOURCE_ADAPTER_KEYS,
+                "checked_sources": [
+                    {"adapter_key": adapter_key}
+                    for adapter_key in FULL_HOSTED_SOURCE_ADAPTER_KEYS
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence_path = tmp_path / "local-source-completion-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-06-30T05:00:00+00:00",
+                "signal_family_gap_evidence": [],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [
+                    {
+                        "gate_key": "hosted_worker_persisted_evidence",
+                        "status": "accepted",
+                        "evidence_ref": str(hosted_source_artifact),
+                        "satisfied_requirements": [
+                            "freshness_policy",
+                            "worker_persisted_evidence_path",
+                        ],
+                        "requirement_evidence": [
+                            {
+                                "requirement": "freshness_policy",
+                                "evidence_ref": (
+                                    f"{hosted_source_artifact}#/checked_sources"
+                                ),
+                                "observed_at": "2026-06-30T05:00:00+00:00",
+                            },
+                            {
+                                "requirement": "worker_persisted_evidence_path",
+                                "evidence_ref": (
+                                    f"{hosted_source_artifact}#/checked_sources"
+                                ),
+                                "observed_at": "2026-06-30T05:00:00+00:00",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    gates = {gate["gate_key"]: gate for gate in payload["gates"]}
+    assert gates["hosted_worker_persisted_evidence"]["blocking_items"] == [
+        "raw_snapshot_retention_policy",
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+    ]
 
 
 def _complete_evidence_overlay(plan: dict) -> dict:
