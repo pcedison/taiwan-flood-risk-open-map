@@ -127,6 +127,21 @@ removes only that strict-chain flag while keeping CA verification and hostname
 verification enabled. Treat any remaining certificate error as a hosted egress
 or upstream certificate incident, not as permission to disable TLS verification.
 
+After each official live smoke, compare the observed county distribution with
+the unresolved local-source signal gaps:
+
+```bash
+PYTHONPATH=apps/api python scripts/local-source-signal-gap-evidence.py \
+  --official-live-smoke-json docs/reviews/official-realtime-live-smoke-YYYY-MM-DD.json \
+  --output docs/reviews/local-source-signal-gap-evidence-YYYY-MM-DD.json
+```
+
+Use `--fail-on-unresolved` only in a completion rehearsal where every remaining
+signal-gap item is expected to be covered. The output is diagnostic evidence:
+`official_smoke_observed` means a source should be reviewed for catalog,
+adapter, source-contract, and production-evidence work; it does not satisfy the
+completion gate by itself.
+
 For a broader gate that also scans unresolved local-source discovery for 金門縣
 and 連江縣, run:
 
