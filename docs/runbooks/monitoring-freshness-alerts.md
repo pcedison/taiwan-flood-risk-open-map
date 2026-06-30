@@ -268,13 +268,17 @@ Each run executes:
   risk API.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
+- `scripts/local-source-completion-audit.py` with every completion-evidence
+  overlay produced by the hosted smoke steps.
 
-The workflow uploads its JSON artifacts as the `hosted-monitoring-<run-id>`
-artifact. These artifacts are useful evidence inputs for deployment,
-public-risk, and hosted source-freshness review. They do not, by themselves,
-complete the monitoring gate: `production_monitoring_and_alerting` still needs
-accepted alert routing ownership, scheduled source freshness evidence, and
-worker/scheduler alert ownership recorded through
+The workflow uploads JSON and Markdown artifacts as the
+`hosted-monitoring-<run-id>` artifact, including
+`hosted-completion-audit.json` and `hosted-completion-audit.md`. These artifacts
+are useful evidence inputs for deployment, public-risk, and hosted
+source-freshness review. They do not, by themselves, complete the monitoring
+gate: `production_monitoring_and_alerting` still needs accepted alert routing
+ownership, scheduled source freshness evidence, and worker/scheduler alert
+ownership recorded through
 `scripts/hosted_monitoring_evidence.py`.
 
 Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it

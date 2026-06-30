@@ -26,6 +26,8 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/hosted_deployment_smoke.py" in step_text
     assert "scripts/hosted_public_risk_evidence_smoke.py" in step_text
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
+    assert "scripts/local-source-completion-audit.py" in step_text
+    assert "--markdown-output artifacts/hosted-completion-audit.md" in step_text
     assert "actions/upload-artifact@v4" in step_text
 
     source_freshness_step = next(
@@ -41,3 +43,10 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     )
     assert missing_token_step["if"] == "${{ env.ADMIN_BEARER_TOKEN == '' }}"
     assert "::notice" in missing_token_step["run"]
+
+    audit_step = next(
+        step for step in steps if step.get("name") == "Hosted completion audit"
+    )
+    assert audit_step["if"] == "${{ always() }}"
+    assert "artifacts/*-completion-evidence.json" in audit_step["run"]
+    assert "--output artifacts/hosted-completion-audit.json" in audit_step["run"]
