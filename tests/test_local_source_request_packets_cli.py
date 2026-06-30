@@ -107,6 +107,89 @@ def test_local_source_request_packets_cli_filters_by_signal_type() -> None:
     )
 
 
+def test_local_source_request_packets_cli_emits_signal_gap_batches_json() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--format",
+            "signal-gap-batches-json",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+
+    assert [batch["target_signal_type"] for batch in payload] == [
+        "pump_or_gate_status",
+        "flood_depth",
+        "sewer_water_level",
+    ]
+    pump_batch = payload[0]
+    assert pump_batch["batch_id"] == "signal-gap-batch/pump_or_gate_status"
+    assert pump_batch["dispatch_status"] == "not_sent"
+    assert pump_batch["sent_at"] is None
+    assert pump_batch["follow_up_due_at"] is None
+    assert pump_batch["official_reply_ref"] is None
+    assert pump_batch["county_count"] == 14
+    assert "\u91d1\u9580\u7e23" in pump_batch["counties"]
+    assert pump_batch["private_evidence_ref_hint"] == (
+        "private-ops://local-source/signal-gap-batch/pump_or_gate_status"
+    )
+    assert pump_batch["completion_evidence_targets"][0] == {
+        "manifest_section": "signal_family_gap_evidence",
+        "county": "\u9023\u6c5f\u7e23",
+        "signal_type": "pump_or_gate_status",
+        "accepted_statuses": [
+            "accepted",
+            "authorization_gated_adapter",
+            "official_unavailable",
+            "production_adapter",
+        ],
+        "evidence_ref_required": True,
+        "private_evidence_ref_hint": (
+            "private-ops://local-source/signal-gap/"
+            "\u9023\u6c5f\u7e23/pump_or_gate_status"
+        ),
+    }
+    assert len(pump_batch["completion_evidence_targets"]) == 14
+
+
+def test_local_source_request_packets_cli_emits_signal_gap_batches_markdown() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--format",
+            "signal-gap-batches-markdown",
+            "--signal-type",
+            "flood_depth",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    markdown = result.stdout
+    assert "# Signal Gap Official Request Batches" in markdown
+    assert "## flood_depth" in markdown
+    assert "- Batch id: `signal-gap-batch/flood_depth`" in markdown
+    assert "- Dispatch status: `not_sent`" in markdown
+    assert "- County count: 5" in markdown
+    assert "`private-ops://local-source/signal-gap-batch/flood_depth`" in markdown
+    assert "Completion evidence targets" in markdown
+    assert "signal_family_gap_evidence / flood_depth" in markdown
+    assert "pump_or_gate_status" not in markdown
+
+
 def test_local_source_request_packets_cli_emits_completion_evidence_template() -> None:
     result = subprocess.run(
         [

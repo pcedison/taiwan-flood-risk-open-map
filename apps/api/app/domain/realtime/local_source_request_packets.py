@@ -72,6 +72,51 @@ def build_official_request_packets(
     )
 
 
+def build_signal_gap_request_batches(
+    action_plan: Mapping[str, Any],
+    *,
+    signal_types: Iterable[str] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    signal_filter = (
+        {str(signal_type) for signal_type in signal_types} if signal_types else None
+    )
+    batches: list[dict[str, Any]] = []
+    for group in action_plan.get("signal_gap_priority_groups", []):
+        if not isinstance(group, Mapping):
+            continue
+        request_batch = group.get("official_request_batch")
+        if not isinstance(request_batch, Mapping):
+            continue
+        target_signal_type = str(request_batch.get("target_signal_type", ""))
+        if signal_filter is not None and target_signal_type not in signal_filter:
+            continue
+        counties = [str(county) for county in request_batch.get("counties", [])]
+        batch = dict(request_batch)
+        batch.update(
+            {
+                "batch_id": f"signal-gap-batch/{target_signal_type}",
+                "dispatch_status": "not_sent",
+                "sent_at": None,
+                "follow_up_due_at": None,
+                "official_reply_ref": None,
+                "private_evidence_ref_hint": (
+                    "private-ops://local-source/signal-gap-batch/"
+                    f"{target_signal_type}"
+                ),
+                "completion_evidence_targets": [
+                    target
+                    for county in counties
+                    for target in _signal_gap_evidence_targets(
+                        county,
+                        signal_types=[target_signal_type],
+                    )
+                ],
+            }
+        )
+        batches.append(batch)
+    return tuple(batches)
+
+
 def _filter_packets(
     packets: tuple[dict[str, Any], ...],
     *,
@@ -108,6 +153,23 @@ def render_official_request_packets_markdown(
     ]
     for packet in packets:
         lines.extend(_render_packet_markdown(packet))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_signal_gap_request_batches_markdown(
+    batches: tuple[dict[str, Any], ...],
+) -> str:
+    lines = [
+        "# Signal Gap Official Request Batches",
+        "",
+        "Generated from the local-source action plan. Each batch tracks one "
+        "missing signal family and the counties that need an official read API, "
+        "authorization-gated adapter path, production adapter, or official "
+        "unavailable-source record.",
+        "",
+    ]
+    for batch in batches:
+        lines.extend(_render_signal_gap_batch_markdown(batch))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -830,3 +892,45 @@ def _completion_evidence_target_line(target: Mapping[str, Any]) -> str:
         f"{section} / {target_key}; accepted statuses: {statuses}; "
         f"evidence_ref hint: {evidence_ref_hint}"
     )
+
+
+def _render_signal_gap_batch_markdown(batch: Mapping[str, Any]) -> list[str]:
+    target_signal_type = str(batch.get("target_signal_type", ""))
+    lines = [
+        f"## {target_signal_type}",
+        "",
+        f"- Batch id: `{batch.get('batch_id')}`",
+        f"- Dispatch status: `{batch.get('dispatch_status')}`",
+        f"- Sent at: `{batch.get('sent_at')}`",
+        f"- Follow-up due at: `{batch.get('follow_up_due_at')}`",
+        f"- Official reply ref: `{batch.get('official_reply_ref')}`",
+        f"- County count: {batch.get('county_count')}",
+        f"- Private evidence hint: `{batch.get('private_evidence_ref_hint')}`",
+    ]
+    if batch.get("counties"):
+        lines.append("- Counties: " + ", ".join(str(county) for county in batch["counties"]))
+    if batch.get("requested_counterparties"):
+        lines.append("- Requested counterparties:")
+        lines.extend(
+            f"  - {counterparty}"
+            for counterparty in batch["requested_counterparties"]
+        )
+    if batch.get("required_read_api_fields"):
+        fields = ", ".join(f"`{field}`" for field in batch["required_read_api_fields"])
+        lines.append(f"- Required read API fields: {fields}")
+    if batch.get("production_operational_requirements"):
+        requirements = ", ".join(
+            f"`{requirement}`"
+            for requirement in batch["production_operational_requirements"]
+        )
+        lines.append(f"- Production operational requirements: {requirements}")
+    if batch.get("packet_generator_command"):
+        lines.append(f"- Packet generator command: `{batch['packet_generator_command']}`")
+    if batch.get("completion_gate"):
+        lines.append(f"- Completion gate: {batch['completion_gate']}")
+    if batch.get("completion_evidence_targets"):
+        lines.append("- Completion evidence targets:")
+        for target in batch["completion_evidence_targets"]:
+            lines.append(f"  - {_completion_evidence_target_line(target)}")
+    lines.append("")
+    return lines

@@ -184,6 +184,32 @@ artifact has a status field, and verifies the JSON pointer exists. Private refs
 such as `private-ops://...` remain opaque indexes to private ops storage and
 are not read by the public CLI.
 
+Before asking operators to fill private refs, regenerate the public request
+artifacts that describe the remaining official local-source gaps:
+
+```powershell
+python scripts\local-source-request-packets.py `
+  --format signal-gap-batches-json `
+  --output docs\data-sources\local\generated-signal-gap-request-batches.json
+
+python scripts\local-source-request-packets.py `
+  --format signal-gap-batches-markdown `
+  --output docs\data-sources\local\generated-signal-gap-request-batches.md
+```
+
+These generated batch files group unresolved `pump_or_gate_status`,
+`flood_depth`, and `sewer_water_level` requirements by signal family. Each
+batch starts with `dispatch_status: not_sent` and a `private-ops://` evidence
+hint. The public files are safe to commit because they contain only request
+metadata, not official replies, tokens, contact transcripts, or screenshots.
+
+After an operator sends a batch request or receives an official answer, record
+the real dispatch status, reply reference, and county-level decision in the
+private completion evidence bundle. The public audit is accepted only when the
+private bundle turns every listed `completion_evidence_targets` entry into an
+accepted `signal_family_gap_evidence` item or an accepted official-unavailable
+record.
+
 ## Acceptance Mapping
 
 `P1-04` can move from `In Progress` to `Accepted` only when:
