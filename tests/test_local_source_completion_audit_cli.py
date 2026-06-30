@@ -247,6 +247,113 @@ def test_local_source_completion_audit_cli_tracks_dispatched_signal_gap_without_
     ]["evidence"]
 
 
+def test_local_source_completion_audit_cli_reports_overdue_dispatch_followups(
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "dispatch-evidence.json"
+    markdown_output_path = tmp_path / "completion-audit.md"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-06-30T15:00:00+08:00",
+                "signal_family_gap_evidence": [
+                    {
+                        "county": "\u9023\u6c5f\u7e23",
+                        "signal_type": "flood_depth",
+                        "status": "request_dispatched",
+                        "evidence_ref": (
+                            "private-ops://local-source/dispatch/flood-depth"
+                        ),
+                        "follow_up_due_at": "2026-07-07T09:00:00+08:00",
+                    }
+                ],
+                "source_contract_evidence": [
+                    {
+                        "county": "\u91d1\u9580\u7e23",
+                        "gate": "authorization_request",
+                        "status": "request_dispatched",
+                        "evidence_ref": (
+                            "private-ops://local-source/source-contract/kinmen"
+                        ),
+                        "follow_up_due_at": "2026-07-07T09:00:00+08:00",
+                    },
+                    {
+                        "county": "\u82b1\u84ee\u7e23",
+                        "gate": "authorization_request",
+                        "status": "request_dispatched",
+                        "evidence_ref": (
+                            "private-ops://local-source/source-contract/hualien"
+                        ),
+                        "follow_up_due_at": "2026-07-09T09:00:00+08:00",
+                    },
+                ],
+                "production_gate_evidence": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+            "--as-of",
+            "2026-07-08T00:00:00+08:00",
+            "--markdown-output",
+            str(markdown_output_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    overlay = payload["evidence_overlay"]
+    gates = {gate["gate_key"]: gate for gate in payload["gates"]}
+    markdown = markdown_output_path.read_text(encoding="utf-8")
+
+    assert overlay["follow_up_as_of"] == "2026-07-08T00:00:00+08:00"
+    assert overlay["signal_family_gap_dispatch_overdue_count"] == 1
+    assert overlay["source_contract_dispatch_overdue_count"] == 1
+    assert overlay["source_contract_next_follow_up_due_at"] == (
+        "2026-07-07T09:00:00+08:00"
+    )
+    assert "1 dispatch follow-up items are overdue" in gates[
+        "required_signal_families"
+    ]["evidence"]
+    assert "1 dispatch follow-up items are overdue" in gates[
+        "official_authorization_and_contracts"
+    ]["evidence"]
+    assert "`signal_family_gap_dispatch_overdue_count`: `1`" in markdown
+    assert "`source_contract_dispatch_overdue_count`: `1`" in markdown
+    assert "private-ops://" not in markdown
+
+
+def test_local_source_completion_audit_cli_rejects_invalid_as_of() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--as-of",
+            "not-a-date",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "--as-of must be an ISO 8601 timestamp" in result.stderr
+
+
 def test_local_source_completion_audit_cli_writes_output_artifact(
     tmp_path: Path,
 ) -> None:

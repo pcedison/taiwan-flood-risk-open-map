@@ -1820,6 +1820,38 @@ still does not satisfy `required_signal_families` or
 from becoming invisible while waiting for accepted replies or production
 adapter evidence.
 
+## Task 58: Completion Audit Follow-Up Overdue Visibility
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `scripts/local-source-completion-audit.py`
+- Modify: `tests/test_local_source_completion_audit_cli.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: private dispatch overlays with `follow_up_due_at` and an audit
+  review timestamp passed as `--as-of`.
+- Produces: public-safe completion audit overlay fields for signal-family and
+  source-contract overdue follow-up counts, without exposing `evidence_ref` or
+  accepting dispatched requests as completion evidence.
+
+- [x] Write a failing completion-audit CLI test requiring `--as-of` to report
+  overdue signal-family and source-contract dispatch follow-ups.
+- [x] Add optional `follow_up_as_of` plumbing to the local-source action-plan
+  completion audit.
+- [x] Add `--as-of` to `local-source-completion-audit.py` and include overdue
+  counts in JSON/Markdown output.
+- [x] Document that overdue visibility is an operator review aid, not a
+  completion substitute for official replies, production adapters, or
+  official-unavailable evidence.
+
+Completed 2026-06-30: the aggregate completion audit can now show dated
+overdue follow-up counts for dispatched official requests. This keeps the main
+completion report aligned with the separate follow-up monitor while preserving
+the current blockers until accepted signal-family, source-contract, hosted
+worker, monitoring, and production evidence is supplied.
+
 ## Completion Gates
 
 The full objective is complete only when:

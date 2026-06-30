@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Mapping
 
 from app.domain.realtime.local_source_coverage import LocalSourceCoverageRecord
@@ -75,12 +76,15 @@ ACCEPTED_PRODUCTION_GATE_EVIDENCE_STATUSES = {
 class CompletionEvidenceState:
     schema_version: str | None
     captured_at: str | None
+    follow_up_as_of: str | None
     signal_family_gap_keys: frozenset[tuple[str, str]]
     signal_family_gap_dispatch_keys: frozenset[tuple[str, str]]
     signal_family_gap_dispatch_follow_up_due_at_values: tuple[str, ...]
+    signal_family_gap_dispatch_overdue_count: int
     source_contract_keys: frozenset[tuple[str, str]]
     source_contract_dispatch_keys: frozenset[tuple[str, str]]
     source_contract_dispatch_follow_up_due_at_values: tuple[str, ...]
+    source_contract_dispatch_overdue_count: int
     production_gate_keys: frozenset[str]
     production_gate_requirement_keys: frozenset[tuple[str, str]]
     validation_errors: tuple[str, ...]
@@ -89,12 +93,16 @@ class CompletionEvidenceState:
         return {
             "schema_version": self.schema_version,
             "captured_at": self.captured_at,
+            "follow_up_as_of": self.follow_up_as_of,
             "signal_family_gap_evidence_count": len(self.signal_family_gap_keys),
             "signal_family_gap_dispatch_count": len(
                 self.signal_family_gap_dispatch_keys
             ),
             "signal_family_gap_dispatch_follow_up_count": len(
                 self.signal_family_gap_dispatch_follow_up_due_at_values
+            ),
+            "signal_family_gap_dispatch_overdue_count": (
+                self.signal_family_gap_dispatch_overdue_count
             ),
             "signal_family_gap_next_follow_up_due_at": _first_or_none(
                 self.signal_family_gap_dispatch_follow_up_due_at_values
@@ -103,6 +111,9 @@ class CompletionEvidenceState:
             "source_contract_dispatch_count": len(self.source_contract_dispatch_keys),
             "source_contract_dispatch_follow_up_count": len(
                 self.source_contract_dispatch_follow_up_due_at_values
+            ),
+            "source_contract_dispatch_overdue_count": (
+                self.source_contract_dispatch_overdue_count
             ),
             "source_contract_next_follow_up_due_at": _first_or_none(
                 self.source_contract_dispatch_follow_up_due_at_values
@@ -119,6 +130,7 @@ def build_local_source_action_plan(
     records: tuple[LocalSourceCoverageRecord, ...],
     *,
     completion_evidence: Mapping[str, Any] | None = None,
+    follow_up_as_of: str | None = None,
 ) -> dict[str, Any]:
     local_complete = [record for record in records if record.local_direct_complete]
     central_complete = [record for record in records if record.central_backbone_minimum_complete]
@@ -167,6 +179,7 @@ def build_local_source_action_plan(
             integration_priority_queue=integration_priority_queue,
             signal_gap_priority_groups=signal_gap_priority_groups,
             completion_evidence=completion_evidence,
+            follow_up_as_of=follow_up_as_of,
         ),
         "authorization_requests": authorization_requests,
         "metadata_release_monitors": metadata_release_monitors,
@@ -190,8 +203,12 @@ def _completion_audit(
     integration_priority_queue: list[dict[str, Any]],
     signal_gap_priority_groups: list[dict[str, Any]],
     completion_evidence: Mapping[str, Any] | None,
+    follow_up_as_of: str | None,
 ) -> dict[str, Any]:
-    evidence_state = _completion_evidence_state(completion_evidence)
+    evidence_state = _completion_evidence_state(
+        completion_evidence,
+        follow_up_as_of=follow_up_as_of,
+    )
     signal_gap_county_item_count = sum(
         int(group["county_count"]) for group in signal_gap_priority_groups
     )
@@ -403,17 +420,22 @@ def _completion_audit(
 
 def _completion_evidence_state(
     completion_evidence: Mapping[str, Any] | None,
+    *,
+    follow_up_as_of: str | None,
 ) -> CompletionEvidenceState:
     if completion_evidence is None:
         return CompletionEvidenceState(
             schema_version=None,
             captured_at=None,
+            follow_up_as_of=follow_up_as_of,
             signal_family_gap_keys=frozenset(),
             signal_family_gap_dispatch_keys=frozenset(),
             signal_family_gap_dispatch_follow_up_due_at_values=(),
+            signal_family_gap_dispatch_overdue_count=0,
             source_contract_keys=frozenset(),
             source_contract_dispatch_keys=frozenset(),
             source_contract_dispatch_follow_up_due_at_values=(),
+            source_contract_dispatch_overdue_count=0,
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
             validation_errors=(),
@@ -429,12 +451,15 @@ def _completion_evidence_state(
         return CompletionEvidenceState(
             schema_version=schema_version if isinstance(schema_version, str) else None,
             captured_at=captured_at if isinstance(captured_at, str) else None,
+            follow_up_as_of=follow_up_as_of,
             signal_family_gap_keys=frozenset(),
             signal_family_gap_dispatch_keys=frozenset(),
             signal_family_gap_dispatch_follow_up_due_at_values=(),
+            signal_family_gap_dispatch_overdue_count=0,
             source_contract_keys=frozenset(),
             source_contract_dispatch_keys=frozenset(),
             source_contract_dispatch_follow_up_due_at_values=(),
+            source_contract_dispatch_overdue_count=0,
             production_gate_keys=frozenset(),
             production_gate_requirement_keys=frozenset(),
             validation_errors=tuple(errors),
@@ -446,9 +471,30 @@ def _completion_evidence_state(
             errors,
         )
     )
+    signal_follow_up_due_at_values = tuple(
+        sorted(
+            _dispatch_follow_up_due_at_values(
+                completion_evidence.get("signal_family_gap_evidence"),
+                field="signal_family_gap_evidence",
+                dispatched_statuses=DISPATCHED_SIGNAL_EVIDENCE_STATUSES,
+                errors=errors,
+            )
+        )
+    )
+    source_contract_follow_up_due_at_values = tuple(
+        sorted(
+            _dispatch_follow_up_due_at_values(
+                completion_evidence.get("source_contract_evidence"),
+                field="source_contract_evidence",
+                dispatched_statuses=DISPATCHED_SOURCE_CONTRACT_EVIDENCE_STATUSES,
+                errors=errors,
+            )
+        )
+    )
     return CompletionEvidenceState(
         schema_version=schema_version,
         captured_at=captured_at if isinstance(captured_at, str) else None,
+        follow_up_as_of=follow_up_as_of,
         signal_family_gap_keys=frozenset(
             _accepted_signal_family_gap_keys(
                 completion_evidence.get("signal_family_gap_evidence"),
@@ -461,15 +507,12 @@ def _completion_evidence_state(
                 errors,
             )
         ),
-        signal_family_gap_dispatch_follow_up_due_at_values=tuple(
-            sorted(
-                _dispatch_follow_up_due_at_values(
-                    completion_evidence.get("signal_family_gap_evidence"),
-                    field="signal_family_gap_evidence",
-                    dispatched_statuses=DISPATCHED_SIGNAL_EVIDENCE_STATUSES,
-                    errors=errors,
-                )
-            )
+        signal_family_gap_dispatch_follow_up_due_at_values=(
+            signal_follow_up_due_at_values
+        ),
+        signal_family_gap_dispatch_overdue_count=_dispatch_follow_up_overdue_count(
+            signal_follow_up_due_at_values,
+            follow_up_as_of=follow_up_as_of,
         ),
         source_contract_keys=frozenset(
             _accepted_source_contract_keys(
@@ -483,15 +526,12 @@ def _completion_evidence_state(
                 errors,
             )
         ),
-        source_contract_dispatch_follow_up_due_at_values=tuple(
-            sorted(
-                _dispatch_follow_up_due_at_values(
-                    completion_evidence.get("source_contract_evidence"),
-                    field="source_contract_evidence",
-                    dispatched_statuses=DISPATCHED_SOURCE_CONTRACT_EVIDENCE_STATUSES,
-                    errors=errors,
-                )
-            )
+        source_contract_dispatch_follow_up_due_at_values=(
+            source_contract_follow_up_due_at_values
+        ),
+        source_contract_dispatch_overdue_count=_dispatch_follow_up_overdue_count(
+            source_contract_follow_up_due_at_values,
+            follow_up_as_of=follow_up_as_of,
         ),
         production_gate_keys=frozenset(
             _completed_production_gate_keys(production_gate_requirement_keys)
@@ -564,6 +604,40 @@ def _dispatch_follow_up_due_at_values(
         if _non_empty_string(follow_up_due_at):
             values.append(str(follow_up_due_at).strip())
     return values
+
+
+def _dispatch_follow_up_overdue_count(
+    follow_up_due_at_values: tuple[str, ...],
+    *,
+    follow_up_as_of: str | None,
+) -> int:
+    if not follow_up_as_of:
+        return 0
+    as_of = _parse_iso_datetime(follow_up_as_of)
+    if as_of is None:
+        return 0
+
+    overdue_count = 0
+    for value in follow_up_due_at_values:
+        due_at = _parse_iso_datetime(value)
+        if due_at is None:
+            continue
+        try:
+            if due_at <= as_of:
+                overdue_count += 1
+        except TypeError:
+            continue
+    return overdue_count
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
 
 
 def _accepted_source_contract_keys(
@@ -834,7 +908,9 @@ def _signal_family_gate_evidence(
             int(group["county_count"]) for group in signal_gap_priority_groups
         )
         follow_up_text = _dispatch_follow_up_evidence_suffix(
-            evidence_state.signal_family_gap_dispatch_follow_up_due_at_values
+            evidence_state.signal_family_gap_dispatch_follow_up_due_at_values,
+            overdue_count=evidence_state.signal_family_gap_dispatch_overdue_count,
+            follow_up_as_of=evidence_state.follow_up_as_of,
         )
         return (
             f"Dispatch evidence supplied for {dispatched_count}/{total_count} "
@@ -861,7 +937,9 @@ def _source_contract_gate_evidence(
     dispatched_count = len(evidence_state.source_contract_dispatch_keys)
     if dispatched_count:
         follow_up_text = _dispatch_follow_up_evidence_suffix(
-            evidence_state.source_contract_dispatch_follow_up_due_at_values
+            evidence_state.source_contract_dispatch_follow_up_due_at_values,
+            overdue_count=evidence_state.source_contract_dispatch_overdue_count,
+            follow_up_as_of=evidence_state.follow_up_as_of,
         )
         return (
             f"Dispatch evidence supplied for {dispatched_count}/{required_count} "
@@ -875,13 +953,24 @@ def _source_contract_gate_evidence(
     )
 
 
-def _dispatch_follow_up_evidence_suffix(follow_up_due_at_values: tuple[str, ...]) -> str:
+def _dispatch_follow_up_evidence_suffix(
+    follow_up_due_at_values: tuple[str, ...],
+    *,
+    overdue_count: int,
+    follow_up_as_of: str | None,
+) -> str:
     next_follow_up = _first_or_none(follow_up_due_at_values)
     if next_follow_up is None:
         return ""
+    overdue_text = ""
+    if overdue_count:
+        overdue_text = (
+            f" {overdue_count} dispatch follow-up items are overdue"
+            f"{f' as of {follow_up_as_of}' if follow_up_as_of else ''}."
+        )
     return (
         f" {len(follow_up_due_at_values)} dispatch items have follow-up due dates; "
-        f"next follow-up {next_follow_up}."
+        f"next follow-up {next_follow_up}.{overdue_text}"
     )
 
 
