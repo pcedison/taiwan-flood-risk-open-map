@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 
@@ -10,6 +11,14 @@ SCRIPT = REPO_ROOT / "scripts" / "local-source-discovery-monitor.py"
 
 
 def _load_script_module():
+    preserved_app_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "app" or name.startswith("app.ops")
+    }
+    for name in preserved_app_modules:
+        sys.modules.pop(name, None)
+
     spec = importlib.util.spec_from_file_location(
         "local_source_discovery_monitor_cli",
         SCRIPT,
@@ -17,7 +26,14 @@ def _load_script_module():
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        for name in tuple(sys.modules):
+            if name == "app" or name.startswith("app.ops"):
+                sys.modules.pop(name, None)
+        sys.modules.update(preserved_app_modules)
     return module
 
 

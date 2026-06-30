@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from html.parser import HTMLParser
@@ -20,6 +21,7 @@ REQUIRED_READ_API_FIELDS = (
 CandidateSourceStatus = Literal[
     "promotion_ready",
     "status_only_ready",
+    "blocked_fetch_error",
     "blocked_timeout",
     "needs_authorization_or_session",
     "needs_api_contract",
@@ -172,6 +174,62 @@ CANDIDATE_SOURCE_DEFINITIONS: tuple[CandidateSourceDefinition, ...] = (
         ),
     ),
     CandidateSourceDefinition(
+        key="taipei_flood_depth_simulation_metadata",
+        county="臺北市",
+        name="臺北市降雨積水模擬圖",
+        url="https://data.taipei/dataset/detail?id=fa1e8012-ebb4-473b-888e-97f9a9ce365e",
+        expected_signal_types=("flood_depth",),
+        notes=("Flood-depth context only; 5-year simulation metadata is not a realtime sensor feed.",),
+    ),
+    CandidateSourceDefinition(
+        key="new_taipei_pump_station_metadata",
+        county="新北市",
+        name="新北市各抽水站資訊",
+        url="https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296",
+        expected_signal_types=("pump_status",),
+        notes=("Annual static inventory; use for metadata only until an observed status API is found.",),
+    ),
+    CandidateSourceDefinition(
+        key="new_taipei_water_gate_metadata",
+        county="新北市",
+        name="新北市水門資料",
+        url="https://data.ntpc.gov.tw/datasets/bf784279-31aa-44bc-a210-33151d03e7ab",
+        expected_signal_types=("gate_status",),
+        notes=("Annual static inventory; use for metadata only until an observed status API is found.",),
+    ),
+    CandidateSourceDefinition(
+        key="taoyuan_water_gate_metadata",
+        county="桃園市",
+        name="桃園市政府水務局管理水門資訊",
+        url="https://opendata.tycg.gov.tw/api/dataset/1232b08a-121f-4505-ab39-14f40b12aa19/resource/8fe03219-d637-47d2-a771-0ce8635e55fa/download",
+        expected_signal_types=("gate_status",),
+        notes=("Static water-gate inventory; not a current gate-open/gate-closed observation.",),
+    ),
+    CandidateSourceDefinition(
+        key="taoyuan_pump_inventory",
+        county="桃園市",
+        name="桃園市政府水務局抽水機",
+        url="https://opendata.tycg.gov.tw/api/dataset/328dc013-6d8a-41be-bacf-706d6c61a9de/resource/260e3099-8e5f-47e0-ace6-f7653d9ea0de/download",
+        expected_signal_types=("pump_status",),
+        notes=("Annual static pump inventory; not a pump runtime/status observation.",),
+    ),
+    CandidateSourceDefinition(
+        key="taichung_pump_station_metadata",
+        county="臺中市",
+        name="臺中市各抽水站資訊",
+        url="https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=87e89521-27f4-4beb-8aea-fa07be55e609",
+        expected_signal_types=("pump_status",),
+        notes=("Static/open-data metadata; not a realtime pump status feed.",),
+    ),
+    CandidateSourceDefinition(
+        key="taichung_gate_metadata",
+        county="臺中市",
+        name="臺中市市管水門",
+        url="https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=7c597e67-ae3d-419f-bf93-d27fd5238d82",
+        expected_signal_types=("gate_status",),
+        notes=("Static/open-data metadata; not a realtime gate status feed.",),
+    ),
+    CandidateSourceDefinition(
         key="miaoli_sewer_monitoring",
         county="苗栗縣",
         name="苗栗縣雨水下水道即時水情監測",
@@ -204,6 +262,22 @@ CANDIDATE_SOURCE_DEFINITIONS: tuple[CandidateSourceDefinition, ...] = (
         metadata_url="https://wrbswi.kcg.gov.tw/SFC/api/rain/base",
     ),
     CandidateSourceDefinition(
+        key="tainan_pump_station_metadata",
+        county="臺南市",
+        name="臺南市抽水站基本資料",
+        url="https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3",
+        expected_signal_types=("pump_status",),
+        notes=("Static station metadata; do not treat as pump operation/status evidence.",),
+    ),
+    CandidateSourceDefinition(
+        key="tainan_water_gate_metadata",
+        county="臺南市",
+        name="臺南市水門基本資料",
+        url="https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291",
+        expected_signal_types=("gate_status",),
+        notes=("Static gate metadata; do not treat as gate operation/status evidence.",),
+    ),
+    CandidateSourceDefinition(
         key="pingtung_pteoc_rain_station",
         county="屏東縣",
         name="屏東防災資訊整合平台雨量站",
@@ -218,6 +292,47 @@ CANDIDATE_SOURCE_DEFINITIONS: tuple[CandidateSourceDefinition, ...] = (
         url="https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652",
         expected_signal_types=("flood_warning", "flood_depth"),
         existing_adapter_key="local.taitung.flood_sensor",
+    ),
+    CandidateSourceDefinition(
+        key="penghu_drainage_metadata",
+        county="澎湖縣",
+        name="澎湖縣區域排水疏濬工程",
+        url="https://data.gov.tw/dataset/156926",
+        expected_signal_types=("flood_depth", "pump_status"),
+        notes=("Static drainage-work context; not a flood-depth or pump/gate observation.",),
+    ),
+    CandidateSourceDefinition(
+        key="hualien_senslink_login",
+        county="花蓮縣",
+        name="花蓮行動水情登入型儀表板",
+        url="https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index",
+        expected_signal_types=("flood_depth", "pump_status"),
+        existing_adapter_key="local.hualien.flood_sensor",
+        notes=("Login-gated dashboard; requires official authorization before API contract review.",),
+    ),
+    CandidateSourceDefinition(
+        key="kinmen_kwis_token_gated_api",
+        county="金門縣",
+        name="金門水情系統 KWIS SOAP/ASMX",
+        url="https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL",
+        expected_signal_types=("flood_depth", "water_level", "pump_status"),
+        notes=("WSDL is visible, but read methods require a county-issued token.",),
+    ),
+    CandidateSourceDefinition(
+        key="lienchiang_flood_prone_metadata",
+        county="連江縣",
+        name="連江縣大潮、豪雨易淹水地區",
+        url="https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5",
+        expected_signal_types=("flood_depth",),
+        notes=("Static flood-prone-area metadata; not a realtime flood-depth feed.",),
+    ),
+    CandidateSourceDefinition(
+        key="lienchiang_erbwater_non_qualifying",
+        county="連江縣",
+        name="連江縣資訊公開查詢系統即時監測值",
+        url="http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx",
+        expected_signal_types=("water_quality",),
+        notes=("Environmental discharge/CEMS context; not a flood-risk water sensor.",),
     ),
 )
 CANDIDATE_SOURCE_KEYS = tuple(definition.key for definition in CANDIDATE_SOURCE_DEFINITIONS)
@@ -241,12 +356,17 @@ def fetch_candidate_source(
     definition: CandidateSourceDefinition,
     *,
     timeout_seconds: int = 20,
+    verify_tls: bool = True,
 ) -> CandidateSourceFetchResult:
     attempted_urls: list[str] = []
     last_fetch: CandidateSourceFetchResult | None = None
     for url in (definition.url, *definition.fallback_urls):
         attempted_urls.append(url)
-        fetch = _fetch_candidate_url(url, timeout_seconds=timeout_seconds)
+        fetch = _fetch_candidate_url(
+            url,
+            timeout_seconds=timeout_seconds,
+            verify_tls=verify_tls,
+        )
         last_fetch = fetch
         if not _should_try_fallback(fetch):
             return replace(fetch, attempted_urls=tuple(attempted_urls))
@@ -261,13 +381,15 @@ def _fetch_candidate_url(
     url: str,
     *,
     timeout_seconds: int,
+    verify_tls: bool,
 ) -> CandidateSourceFetchResult:
     request = Request(
         url,
         headers={"Accept": "*/*", "User-Agent": "FloodRiskTaiwan/0.1 local-source-candidate-smoke"},
     )
+    context = None if verify_tls else ssl._create_unverified_context()
     try:
-        with urlopen(request, timeout=max(1, timeout_seconds)) as response:
+        with urlopen(request, timeout=max(1, timeout_seconds), context=context) as response:
             body_bytes = response.read()
             body = body_bytes.decode("utf-8-sig", errors="replace")
             content_type = response.headers.get("content-type")
@@ -330,6 +452,15 @@ def qualify_candidate_source_fetch(
             fetch,
             status="blocked_timeout",
             next_action="retry_live_smoke",
+            missing_required_fields=REQUIRED_READ_API_FIELDS,
+            observed_capabilities=(),
+        )
+    if fetch.error or fetch.status_code is None:
+        return _qualification(
+            definition,
+            fetch,
+            status="blocked_fetch_error",
+            next_action="retry_live_smoke_or_manual_review",
             missing_required_fields=REQUIRED_READ_API_FIELDS,
             observed_capabilities=(),
         )

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
+import json
 import sys
 from pathlib import Path
 
@@ -41,10 +43,27 @@ def main() -> int:
         help="Per-source request timeout.",
     )
     parser.add_argument(
+        "--allow-insecure-tls",
+        action="store_true",
+        help=(
+            "Allow probing public government pages whose certificate chain is "
+            "rejected by Python's strict TLS verifier. The artifact records this "
+            "as tls_verification=disabled."
+        ),
+    )
+    parser.add_argument(
         "--format",
         choices=("json", "markdown"),
         default="json",
         help="Output format.",
+    )
+    parser.add_argument(
+        "--captured-at",
+        help="Optional ISO 8601 timestamp for a reproducible evidence artifact.",
+    )
+    parser.add_argument(
+        "--output",
+        help="Optional UTF-8 JSON evidence artifact output path.",
     )
     parser.add_argument(
         "--fail-on-promotion-ready",
@@ -64,16 +83,30 @@ def main() -> int:
             fetch_results[definition.key] = fetch_candidate_source(
                 definition,
                 timeout_seconds=max(1, args.timeout_seconds),
+                verify_tls=not args.allow_insecure_tls,
             )
 
     result = qualify_static_candidate_sources(
         fetch_results=fetch_results,
         definitions=definitions,
     )
+    payload = result.to_dict()
+    if args.output:
+        _write_json(
+            Path(args.output),
+            _artifact(
+                captured_at=args.captured_at
+                or datetime.now(UTC).replace(microsecond=0).isoformat(),
+                result=payload,
+                tls_verification=(
+                    "disabled" if args.allow_insecure_tls else "enabled"
+                ),
+            ),
+        )
     if args.format == "markdown":
         print(_markdown(result))
     else:
-        print(result.to_json())
+        print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
     if args.fail_on_promotion_ready and any(
         source.status == "promotion_ready" and source.next_action == "start_adapter_tdd"
@@ -81,6 +114,34 @@ def main() -> int:
     ):
         return 1
     return 0
+
+
+def _artifact(*, captured_at: str, result: dict, tls_verification: str) -> dict:
+    status_counts = result.get("status_counts", {})
+    promotion_ready_count = (
+        status_counts.get("promotion_ready", 0)
+        if isinstance(status_counts, dict)
+        else 0
+    )
+    return {
+        "schema_version": "local-source-candidate-smoke/v1",
+        "captured_at": captured_at,
+        "summary": {
+            "source_count": result.get("source_count", 0),
+            "promotion_ready_count": promotion_ready_count,
+            "tls_verification": tls_verification,
+            "status_counts": status_counts,
+        },
+        "result": result,
+    }
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _markdown(result: CandidateSourceSmokeResult) -> str:
