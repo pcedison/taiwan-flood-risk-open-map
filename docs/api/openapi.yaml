@@ -879,6 +879,47 @@ paths:
                       local_direct_remaining_count: 2
                       central_backbone_minimum_complete_count: 22
                       central_backbone_remaining_count: 0
+                      completion_audit:
+                        overall_status: incomplete
+                        summary:
+                          total_counties: 22
+                          local_direct_remaining_count: 2
+                          central_backbone_remaining_count: 0
+                          unresolved_priority_item_count: 18
+                          signal_gap_group_count: 3
+                          signal_gap_county_item_count: 24
+                          authorization_request_count: 2
+                          metadata_release_monitor_count: 1
+                          public_api_contract_review_count: 3
+                          live_smoke_review_count: 0
+                        gates:
+                          - gate_key: central_backbone_minimum_coverage
+                            status: satisfied
+                            evidence: central_backbone_remaining_count=0
+                            blocking_items: []
+                            next_workstream: null
+                          - gate_key: required_signal_families
+                            status: incomplete
+                            evidence: 3 signal families remain in signal_gap_priority_groups.
+                            blocking_items:
+                              - pump_or_gate_status:14
+                              - flood_depth:5
+                              - sewer_water_level:5
+                            next_workstream: send_official_read_api_requests
+                          - gate_key: hosted_worker_persisted_evidence
+                            status: incomplete
+                            evidence: Hosted/production must prove worker-persisted evidence before completion.
+                            blocking_items:
+                              - freshness_policy
+                              - raw_snapshot_retention_policy
+                              - monitored_scheduler_cadence
+                              - hosted_egress_review
+                              - worker_persisted_evidence_path
+                            next_workstream: hosted_persistence_and_scheduler_proof
+                        next_priority_workstreams:
+                          - send_official_read_api_requests
+                          - resolve_authorization_gated_adapters
+                          - hosted_persistence_and_scheduler_proof
                       signal_gap_priority_groups:
                         - rank: 1
                           signal_type: pump_or_gate_status
@@ -2559,6 +2600,7 @@ components:
         - local_direct_remaining_count
         - central_backbone_minimum_complete_count
         - central_backbone_remaining_count
+        - completion_audit
         - authorization_requests
         - metadata_release_monitors
         - public_api_contract_reviews
@@ -2582,6 +2624,8 @@ components:
         central_backbone_remaining_count:
           type: integer
           minimum: 0
+        completion_audit:
+          $ref: "#/components/schemas/LocalSourceCompletionAudit"
         authorization_requests:
           type: array
           items:
@@ -2610,6 +2654,105 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LocalSourceSignalGapPriorityGroup"
+      additionalProperties: false
+
+    LocalSourceCompletionAuditSummary:
+      type: object
+      required:
+        - total_counties
+        - local_direct_remaining_count
+        - central_backbone_remaining_count
+        - unresolved_priority_item_count
+        - signal_gap_group_count
+        - signal_gap_county_item_count
+        - authorization_request_count
+        - metadata_release_monitor_count
+        - public_api_contract_review_count
+        - live_smoke_review_count
+      properties:
+        total_counties:
+          type: integer
+          minimum: 0
+        local_direct_remaining_count:
+          type: integer
+          minimum: 0
+        central_backbone_remaining_count:
+          type: integer
+          minimum: 0
+        unresolved_priority_item_count:
+          type: integer
+          minimum: 0
+        signal_gap_group_count:
+          type: integer
+          minimum: 0
+        signal_gap_county_item_count:
+          type: integer
+          minimum: 0
+        authorization_request_count:
+          type: integer
+          minimum: 0
+        metadata_release_monitor_count:
+          type: integer
+          minimum: 0
+        public_api_contract_review_count:
+          type: integer
+          minimum: 0
+        live_smoke_review_count:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    LocalSourceCompletionAuditGate:
+      type: object
+      required:
+        - gate_key
+        - status
+        - evidence
+        - blocking_items
+        - next_workstream
+      properties:
+        gate_key:
+          type: string
+        status:
+          type: string
+          enum:
+            - satisfied
+            - incomplete
+        evidence:
+          type: string
+        blocking_items:
+          type: array
+          items:
+            type: string
+        next_workstream:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    LocalSourceCompletionAudit:
+      type: object
+      required:
+        - overall_status
+        - summary
+        - gates
+        - next_priority_workstreams
+      properties:
+        overall_status:
+          type: string
+          enum:
+            - satisfied
+            - incomplete
+        summary:
+          $ref: "#/components/schemas/LocalSourceCompletionAuditSummary"
+        gates:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceCompletionAuditGate"
+        next_priority_workstreams:
+          type: array
+          items:
+            type: string
       additionalProperties: false
 
     LocalSourceAuthorizationRequest:

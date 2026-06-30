@@ -353,6 +353,49 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
     assert by_signal["sewer_water_level"]["county_count"] == 5
 
 
+def test_local_source_action_plan_audits_completion_gates() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+
+    audit = plan["completion_audit"]
+
+    assert audit["overall_status"] == "incomplete"
+    assert audit["summary"] == {
+        "total_counties": 22,
+        "local_direct_remaining_count": 2,
+        "central_backbone_remaining_count": 0,
+        "unresolved_priority_item_count": 18,
+        "signal_gap_group_count": 3,
+        "signal_gap_county_item_count": 24,
+        "authorization_request_count": 2,
+        "metadata_release_monitor_count": 1,
+        "public_api_contract_review_count": 3,
+        "live_smoke_review_count": 0,
+    }
+    gates = {gate["gate_key"]: gate for gate in audit["gates"]}
+
+    assert gates["central_backbone_minimum_coverage"]["status"] == "satisfied"
+    assert gates["local_direct_or_tracked_request"]["status"] == "satisfied"
+
+    signal_gate = gates["required_signal_families"]
+    assert signal_gate["status"] == "incomplete"
+    assert signal_gate["blocking_items"] == [
+        "pump_or_gate_status:14",
+        "flood_depth:5",
+        "sewer_water_level:5",
+    ]
+    assert signal_gate["next_workstream"] == "send_official_read_api_requests"
+
+    hosted_gate = gates["hosted_worker_persisted_evidence"]
+    assert hosted_gate["status"] == "incomplete"
+    assert "worker-persisted evidence" in hosted_gate["evidence"]
+
+    assert audit["next_priority_workstreams"][:3] == [
+        "send_official_read_api_requests",
+        "resolve_authorization_gated_adapters",
+        "hosted_persistence_and_scheduler_proof",
+    ]
+
+
 def test_tainan_signal_gap_exposes_static_metadata_and_non_measurement_leads() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
 

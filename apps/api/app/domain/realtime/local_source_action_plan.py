@@ -28,10 +28,33 @@ def build_local_source_action_plan(
 ) -> dict[str, Any]:
     local_complete = [record for record in records if record.local_direct_complete]
     central_complete = [record for record in records if record.central_backbone_minimum_complete]
+    authorization_requests = [
+        _authorization_request(record)
+        for record in records
+        if record.next_action_code == "request_official_authorization"
+    ]
+    metadata_release_monitors = [
+        _metadata_release_monitor(record)
+        for record in records
+        if "metadata_only" in record.local_direct_statuses
+    ]
+    public_api_contract_reviews = [
+        _public_api_contract_review(record)
+        for record in records
+        if record.next_action_code == "verify_public_api_contract"
+    ]
+    live_smoke_reviews = [
+        _live_smoke_review(record)
+        for record in records
+        if record.next_action_code == "verify_live_smoke"
+    ]
     sensor_signal_gap_reviews = _sensor_signal_gap_reviews(records)
     integration_priority_queue = _integration_priority_queue(
         records,
         sensor_signal_gap_reviews=sensor_signal_gap_reviews,
+    )
+    signal_gap_priority_groups = _signal_gap_priority_groups(
+        integration_priority_queue
     )
     return {
         "total_counties": len(records),
@@ -39,31 +62,202 @@ def build_local_source_action_plan(
         "local_direct_remaining_count": len(records) - len(local_complete),
         "central_backbone_minimum_complete_count": len(central_complete),
         "central_backbone_remaining_count": len(records) - len(central_complete),
-        "authorization_requests": [
-            _authorization_request(record)
-            for record in records
-            if record.next_action_code == "request_official_authorization"
-        ],
-        "metadata_release_monitors": [
-            _metadata_release_monitor(record)
-            for record in records
-            if "metadata_only" in record.local_direct_statuses
-        ],
-        "public_api_contract_reviews": [
-            _public_api_contract_review(record)
-            for record in records
-            if record.next_action_code == "verify_public_api_contract"
-        ],
-        "live_smoke_reviews": [
-            _live_smoke_review(record)
-            for record in records
-            if record.next_action_code == "verify_live_smoke"
-        ],
+        "completion_audit": _completion_audit(
+            records=records,
+            local_direct_remaining_count=len(records) - len(local_complete),
+            central_backbone_remaining_count=len(records) - len(central_complete),
+            authorization_requests=authorization_requests,
+            metadata_release_monitors=metadata_release_monitors,
+            public_api_contract_reviews=public_api_contract_reviews,
+            live_smoke_reviews=live_smoke_reviews,
+            integration_priority_queue=integration_priority_queue,
+            signal_gap_priority_groups=signal_gap_priority_groups,
+        ),
+        "authorization_requests": authorization_requests,
+        "metadata_release_monitors": metadata_release_monitors,
+        "public_api_contract_reviews": public_api_contract_reviews,
+        "live_smoke_reviews": live_smoke_reviews,
         "sensor_signal_gap_reviews": sensor_signal_gap_reviews,
         "integration_priority_queue": integration_priority_queue,
-        "signal_gap_priority_groups": _signal_gap_priority_groups(
-            integration_priority_queue
+        "signal_gap_priority_groups": signal_gap_priority_groups,
+    }
+
+
+def _completion_audit(
+    *,
+    records: tuple[LocalSourceCoverageRecord, ...],
+    local_direct_remaining_count: int,
+    central_backbone_remaining_count: int,
+    authorization_requests: list[dict[str, Any]],
+    metadata_release_monitors: list[dict[str, Any]],
+    public_api_contract_reviews: list[dict[str, Any]],
+    live_smoke_reviews: list[dict[str, Any]],
+    integration_priority_queue: list[dict[str, Any]],
+    signal_gap_priority_groups: list[dict[str, Any]],
+) -> dict[str, Any]:
+    signal_gap_county_item_count = sum(
+        int(group["county_count"]) for group in signal_gap_priority_groups
+    )
+    tracked_counties = {
+        record.county for record in records if record.local_direct_complete
+    } | {str(item["county"]) for item in integration_priority_queue}
+    local_gate_status = (
+        "satisfied" if len(tracked_counties) == len(records) else "incomplete"
+    )
+    signal_blocking_items = [
+        f"{group['signal_type']}:{group['county_count']}"
+        for group in signal_gap_priority_groups
+    ]
+    source_contract_blocking_items = [
+        f"authorization_requests:{len(authorization_requests)}",
+        f"metadata_release_monitors:{len(metadata_release_monitors)}",
+        f"public_api_contract_reviews:{len(public_api_contract_reviews)}",
+    ]
+    gates = [
+        _audit_gate(
+            gate_key="local_direct_or_tracked_request",
+            status=local_gate_status,
+            evidence=(
+                "Every county has local direct coverage or appears in the "
+                "tracked integration priority/request workflow."
+            ),
+            blocking_items=[] if local_gate_status == "satisfied" else [
+                "untracked_local_direct_gap"
+            ],
+            next_workstream=None if local_gate_status == "satisfied" else (
+                "create_official_request_packet"
+            ),
         ),
+        _audit_gate(
+            gate_key="central_backbone_minimum_coverage",
+            status="satisfied" if central_backbone_remaining_count == 0 else (
+                "incomplete"
+            ),
+            evidence=(
+                f"central_backbone_remaining_count="
+                f"{central_backbone_remaining_count}"
+            ),
+            blocking_items=[] if central_backbone_remaining_count == 0 else [
+                "central_backbone_missing_counties"
+            ],
+            next_workstream=None if central_backbone_remaining_count == 0 else (
+                "restore_hydrologic_backbone"
+            ),
+        ),
+        _audit_gate(
+            gate_key="required_signal_families",
+            status="satisfied" if not signal_gap_priority_groups else "incomplete",
+            evidence=(
+                f"{len(signal_gap_priority_groups)} signal families remain in "
+                "signal_gap_priority_groups."
+            ),
+            blocking_items=signal_blocking_items,
+            next_workstream=(
+                None
+                if not signal_gap_priority_groups
+                else "send_official_read_api_requests"
+            ),
+        ),
+        _audit_gate(
+            gate_key="official_authorization_and_contracts",
+            status=(
+                "satisfied"
+                if not authorization_requests
+                and not metadata_release_monitors
+                and not public_api_contract_reviews
+                else "incomplete"
+            ),
+            evidence=(
+                "Formal credentials, official releases, and public read API "
+                "contracts must clear before blocked local sources can become "
+                "production adapters."
+            ),
+            blocking_items=source_contract_blocking_items,
+            next_workstream="resolve_authorization_gated_adapters",
+        ),
+        _audit_gate(
+            gate_key="hosted_worker_persisted_evidence",
+            status="incomplete",
+            evidence=(
+                "Hosted/production must prove worker-persisted evidence, raw "
+                "snapshots, staging rows, adapter runs, promoted latest rows, "
+                "and scheduler cadence per README and ADR-0010."
+            ),
+            blocking_items=list(PRODUCTION_OPERATIONAL_REQUIREMENTS),
+            next_workstream="hosted_persistence_and_scheduler_proof",
+        ),
+        _audit_gate(
+            gate_key="production_monitoring_and_alerting",
+            status="incomplete",
+            evidence=(
+                "Fresh/stale/failed source state needs hosted scrape jobs, "
+                "alert routing ownership, and monitored scheduler evidence."
+            ),
+            blocking_items=[
+                "hosted_alert_routing",
+                "scheduled_freshness_checks",
+                "worker_scheduler_alert_ownership",
+            ],
+            next_workstream="monitoring_and_alerting_proof",
+        ),
+        _audit_gate(
+            gate_key="public_risk_worker_evidence_path",
+            status="incomplete",
+            evidence=(
+                "Hosted risk responses must use worker-persisted evidence and "
+                "query-point nearby coverage; direct official bridge calls are "
+                "local diagnostics only."
+            ),
+            blocking_items=[
+                "hosted_risk_response_worker_evidence_smoke",
+                "query_point_nearby_coverage_smoke",
+            ],
+            next_workstream="hosted_risk_response_smoke",
+        ),
+    ]
+    overall_status = (
+        "satisfied" if all(gate["status"] == "satisfied" for gate in gates) else (
+            "incomplete"
+        )
+    )
+    return {
+        "overall_status": overall_status,
+        "summary": {
+            "total_counties": len(records),
+            "local_direct_remaining_count": local_direct_remaining_count,
+            "central_backbone_remaining_count": central_backbone_remaining_count,
+            "unresolved_priority_item_count": len(integration_priority_queue),
+            "signal_gap_group_count": len(signal_gap_priority_groups),
+            "signal_gap_county_item_count": signal_gap_county_item_count,
+            "authorization_request_count": len(authorization_requests),
+            "metadata_release_monitor_count": len(metadata_release_monitors),
+            "public_api_contract_review_count": len(public_api_contract_reviews),
+            "live_smoke_review_count": len(live_smoke_reviews),
+        },
+        "gates": gates,
+        "next_priority_workstreams": [
+            "send_official_read_api_requests",
+            "resolve_authorization_gated_adapters",
+            "hosted_persistence_and_scheduler_proof",
+            "monitoring_and_alerting_proof",
+        ],
+    }
+
+
+def _audit_gate(
+    *,
+    gate_key: str,
+    status: str,
+    evidence: str,
+    blocking_items: list[str],
+    next_workstream: str | None,
+) -> dict[str, Any]:
+    return {
+        "gate_key": gate_key,
+        "status": status,
+        "evidence": evidence,
+        "blocking_items": blocking_items,
+        "next_workstream": next_workstream,
     }
 
 

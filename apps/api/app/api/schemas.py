@@ -237,6 +237,34 @@ class LocalSourceSignalGapOfficialRequestBatch(ContractModel):
     completion_gate: str
 
 
+class LocalSourceCompletionAuditSummary(ContractModel):
+    total_counties: int = Field(ge=0)
+    local_direct_remaining_count: int = Field(ge=0)
+    central_backbone_remaining_count: int = Field(ge=0)
+    unresolved_priority_item_count: int = Field(ge=0)
+    signal_gap_group_count: int = Field(ge=0)
+    signal_gap_county_item_count: int = Field(ge=0)
+    authorization_request_count: int = Field(ge=0)
+    metadata_release_monitor_count: int = Field(ge=0)
+    public_api_contract_review_count: int = Field(ge=0)
+    live_smoke_review_count: int = Field(ge=0)
+
+
+class LocalSourceCompletionAuditGate(ContractModel):
+    gate_key: str
+    status: str
+    evidence: str
+    blocking_items: list[str] = Field(default_factory=list)
+    next_workstream: str | None = None
+
+
+class LocalSourceCompletionAudit(ContractModel):
+    overall_status: str
+    summary: LocalSourceCompletionAuditSummary
+    gates: list[LocalSourceCompletionAuditGate] = Field(default_factory=list)
+    next_priority_workstreams: list[str] = Field(default_factory=list)
+
+
 class LocalSourceMetadataReleaseMonitor(ContractModel):
     county: str
     reason: str | None = None
@@ -333,6 +361,7 @@ class LocalSourceActionPlan(ContractModel):
     local_direct_remaining_count: int = Field(ge=0)
     central_backbone_minimum_complete_count: int = Field(ge=0)
     central_backbone_remaining_count: int = Field(ge=0)
+    completion_audit: LocalSourceCompletionAudit
     authorization_requests: list[LocalSourceAuthorizationRequest] = Field(
         default_factory=list
     )

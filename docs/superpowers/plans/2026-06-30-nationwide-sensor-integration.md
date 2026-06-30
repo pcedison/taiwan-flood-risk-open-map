@@ -917,6 +917,38 @@ not complete the sensors; it removes a manual filtering step before official
 read-API outreach and keeps authorization, metadata-release, and public
 contract blockers in the same signal-scoped batch.
 
+## Task 29: Completion Gate Audit In Action Plan
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_action_plan.py`
+- Modify: `apps/api/app/api/schemas.py`
+- Modify: `docs/api/openapi.yaml`
+- Test: `apps/api/tests/test_local_source_action_plan.py`
+- Test: `apps/api/tests/test_admin_contract.py`
+
+**Interfaces:**
+- Consumes: local-source action plan counts, signal-gap priority groups,
+  authorization requests, metadata-release monitors, public API contract
+  reviews, and live-smoke reviews.
+- Produces: `plan["completion_audit"]`, a machine-readable audit of which
+  nationwide completion gates are satisfied and which remain incomplete.
+
+- [x] Write failing domain and admin-contract tests proving the action plan
+  reports incomplete completion gates.
+- [x] Add gate summaries for local direct/tracked-request coverage, central
+  backbone coverage, required signal families, official authorization and
+  contracts, hosted worker-persisted evidence, production monitoring, and the
+  hosted public-risk evidence path.
+- [x] Update Pydantic and OpenAPI contracts so the admin endpoint can be used as
+  the canonical unfinished-work checklist.
+
+Completed 2026-06-30: `/admin/v1/local-source-action-plan` now returns
+`completion_audit.overall_status=incomplete` with exact blockers. The current
+audit records central backbone coverage as satisfied, but keeps required signal
+families, official authorization/contracts, hosted worker-persisted evidence,
+monitoring/alerting, and hosted risk-response evidence as incomplete. This is a
+completion gate, not completion of the nationwide sensor objective.
+
 ## Completion Gates
 
 The full objective is complete only when:

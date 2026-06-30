@@ -1205,6 +1205,14 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert plan["local_direct_remaining_count"] == 2
     assert plan["central_backbone_minimum_complete_count"] == 22
     assert plan["central_backbone_remaining_count"] == 0
+    assert plan["completion_audit"]["overall_status"] == "incomplete"
+    assert plan["completion_audit"]["summary"]["signal_gap_county_item_count"] == 24
+    audit_gates = {
+        gate["gate_key"]: gate for gate in plan["completion_audit"]["gates"]
+    }
+    assert audit_gates["central_backbone_minimum_coverage"]["status"] == "satisfied"
+    assert audit_gates["required_signal_families"]["status"] == "incomplete"
+    assert audit_gates["hosted_worker_persisted_evidence"]["status"] == "incomplete"
     assert plan["signal_gap_priority_groups"][0]["signal_type"] == "pump_or_gate_status"
     assert plan["signal_gap_priority_groups"][0]["county_count"] == 14
     assert plan["signal_gap_priority_groups"][0]["highest_priority_tier"] == "P0"
