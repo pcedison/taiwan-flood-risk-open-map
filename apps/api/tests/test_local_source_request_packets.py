@@ -227,6 +227,93 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
     assert kinmen["target_signal_types"] == ["pump_or_gate_status"]
 
 
+def test_official_request_packets_expose_completion_evidence_targets() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+
+    packets = build_official_request_packets(plan)
+
+    kinmen = next(packet for packet in packets if packet["county"] == "\u91d1\u9580\u7e23")
+    lienchiang = next(packet for packet in packets if packet["county"] == "\u9023\u6c5f\u7e23")
+    pingtung = next(packet for packet in packets if packet["county"] == "\u5c4f\u6771\u7e23")
+    chiayi_city = next(packet for packet in packets if packet["county"] == "\u5609\u7fa9\u5e02")
+
+    assert kinmen["completion_evidence_targets"] == [
+        {
+            "manifest_section": "source_contract_evidence",
+            "county": "\u91d1\u9580\u7e23",
+            "gate": "authorization_request",
+            "accepted_statuses": [
+                "accepted",
+                "authorized",
+                "contract_verified",
+                "official_unavailable",
+                "released",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/source-contract/"
+                "\u91d1\u9580\u7e23/authorization_request"
+            ),
+        }
+    ]
+    assert lienchiang["completion_evidence_targets"][0]["gate"] == (
+        "metadata_release_monitor"
+    )
+    assert pingtung["completion_evidence_targets"][0]["gate"] == (
+        "public_api_contract_review"
+    )
+    assert chiayi_city["completion_evidence_targets"] == [
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": "\u5609\u7fa9\u5e02",
+            "signal_type": "flood_depth",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/signal-gap/"
+                "\u5609\u7fa9\u5e02/flood_depth"
+            ),
+        },
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": "\u5609\u7fa9\u5e02",
+            "signal_type": "sewer_water_level",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/signal-gap/"
+                "\u5609\u7fa9\u5e02/sewer_water_level"
+            ),
+        },
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": "\u5609\u7fa9\u5e02",
+            "signal_type": "pump_or_gate_status",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/signal-gap/"
+                "\u5609\u7fa9\u5e02/pump_or_gate_status"
+            ),
+        },
+    ]
+
+
 def test_render_official_request_packets_markdown_is_ready_for_outreach() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
     packets = build_official_request_packets(plan)
@@ -272,6 +359,12 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "scheduler cadence" in markdown
     assert "hosted egress" in markdown
     assert "worker-persisted evidence" in markdown
+    assert "Completion evidence targets:" in markdown
+    assert "source_contract_evidence / authorization_request" in markdown
+    assert "source_contract_evidence / public_api_contract_review" in markdown
+    assert "signal_family_gap_evidence / flood_depth" in markdown
+    assert "private-ops://local-source/source-contract/" in markdown
+    assert "private-ops://local-source/signal-gap/" in markdown
 
 
 def test_lienchiang_packet_tracks_p0_local_direct_release_priority() -> None:

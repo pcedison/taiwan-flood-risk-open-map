@@ -3,6 +3,11 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Mapping
 
+from app.domain.realtime.local_source_action_plan import (
+    ACCEPTED_SIGNAL_EVIDENCE_STATUSES,
+    ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES,
+)
+
 PRODUCTION_OPERATIONAL_REQUIREMENTS = [
     "freshness_policy",
     "raw_snapshot_retention_policy",
@@ -125,6 +130,10 @@ def _authorization_packet(
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
         "required_read_api_fields": required_fields,
+        "completion_evidence_targets": _source_contract_evidence_targets(
+            county,
+            gate="authorization_request",
+        ),
         "request_body": _authorization_request_body(county, system_name),
         "checklist": [
             "確認是否可提供最新觀測 read API",
@@ -218,6 +227,10 @@ def _metadata_release_packet(
         "last_followed_up_at": item.get("last_followed_up_at"),
         "target_signal_types": target_signal_types,
         "required_read_api_fields": list(item.get("required_read_api_fields", [])),
+        "completion_evidence_targets": _source_contract_evidence_targets(
+            county,
+            gate="metadata_release_monitor",
+        ),
         "request_body": request_body,
         "checklist": checklist,
     } | _priority_packet_fields(priority_item)
@@ -268,6 +281,10 @@ def _public_api_contract_packet(
         "candidate_contract_findings": contract_findings,
         "candidate_contract_missing_fields": missing_fields,
         "candidate_contract_non_measurement_notes": non_measurement_notes,
+        "completion_evidence_targets": _source_contract_evidence_targets(
+            county,
+            gate="public_api_contract_review",
+        ),
         "request_body": (
             f"目前{county}已有官方系統或成果頁線索，但尚未找到可公開機器讀取的"
             "最新觀測 read API contract。請協助確認是否可提供 JSON、CSV、XML、"
@@ -348,6 +365,10 @@ def _signal_gap_packet(
         "last_followed_up_at": item.get("last_followed_up_at"),
         "target_signal_types": missing_signal_types,
         "required_read_api_fields": required_fields,
+        "completion_evidence_targets": _signal_gap_evidence_targets(
+            county,
+            signal_types=missing_signal_types,
+        ),
         "request_body": (
             f"目前{county}既有 production adapter 仍未覆蓋所有必要水資訊訊號："
             f"{signal_summary}。請協助確認是否有官方公開 read API、開放資料或"
@@ -416,6 +437,45 @@ def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str
             [],
         ),
     }
+
+
+def _source_contract_evidence_targets(
+    county: str,
+    *,
+    gate: str,
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "manifest_section": "source_contract_evidence",
+            "county": county,
+            "gate": gate,
+            "accepted_statuses": sorted(ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES),
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                f"private-ops://local-source/source-contract/{county}/{gate}"
+            ),
+        }
+    ]
+
+
+def _signal_gap_evidence_targets(
+    county: str,
+    *,
+    signal_types: list[Any],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": county,
+            "signal_type": str(signal_type),
+            "accepted_statuses": sorted(ACCEPTED_SIGNAL_EVIDENCE_STATUSES),
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                f"private-ops://local-source/signal-gap/{county}/{signal_type}"
+            ),
+        }
+        for signal_type in signal_types
+    ]
 
 
 def _production_operational_packet_fields() -> dict[str, Any]:
@@ -639,6 +699,10 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
             for requirement in packet["production_operational_requirements"]
         )
         lines.append(f"- Production ops gates: {requirements}")
+    if packet.get("completion_evidence_targets"):
+        lines.append("- Completion evidence targets:")
+        for target in packet["completion_evidence_targets"]:
+            lines.append(f"  - {_completion_evidence_target_line(target)}")
     if packet.get("candidate_contract_missing_fields"):
         fields = "、".join(
             f"`{field}`" for field in packet["candidate_contract_missing_fields"]
@@ -671,3 +735,17 @@ def _render_packet_markdown(packet: Mapping[str, Any]) -> list[str]:
     lines.extend(f"- [ ] {item}" for item in packet.get("checklist", []))
     lines.append("")
     return lines
+
+
+def _completion_evidence_target_line(target: Mapping[str, Any]) -> str:
+    section = str(target.get("manifest_section", ""))
+    if target.get("gate"):
+        target_key = str(target["gate"])
+    else:
+        target_key = str(target.get("signal_type", ""))
+    statuses = ", ".join(str(status) for status in target.get("accepted_statuses", []))
+    evidence_ref_hint = str(target.get("private_evidence_ref_hint", ""))
+    return (
+        f"{section} / {target_key}; accepted statuses: {statuses}; "
+        f"evidence_ref hint: {evidence_ref_hint}"
+    )

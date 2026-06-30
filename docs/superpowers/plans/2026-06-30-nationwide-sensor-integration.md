@@ -1049,6 +1049,38 @@ Tainan results remain metadata/GIS candidates; Lienchiang still has no
 candidate. The next movement for `sewer_water_level` remains official read-API
 request follow-up or a future release-monitor hit.
 
+## Task 33: Completion Evidence Targets In Request Packets
+
+**Files:**
+- Modify: `apps/api/app/domain/realtime/local_source_request_packets.py`
+- Modify: `apps/api/tests/test_local_source_request_packets.py`
+- Modify: `tests/test_local_source_request_packets_cli.py`
+- Modify: `docs/data-sources/local/generated-official-request-packets.md`
+- Modify: `docs/data-sources/local/generated-official-request-packets.json`
+
+**Interfaces:**
+- Consumes: action-plan authorization requests, metadata-release monitors,
+  public API contract reviews, and signal-gap requests.
+- Produces: `completion_evidence_targets` on every official request packet so
+  an accepted official reply can be translated into the private
+  `local-source-completion-evidence/v1` manifest without guessing.
+
+- [x] Write a failing test requiring authorization, metadata-release, public
+  contract, and signal-gap packets to expose their target completion evidence
+  section, gate or signal type, accepted statuses, and private evidence-ref
+  hint.
+- [x] Add source-contract evidence targets for `authorization_request`,
+  `metadata_release_monitor`, and `public_api_contract_review` packets.
+- [x] Add signal-family evidence targets for every missing signal type carried
+  by a `signal_gap_request`.
+- [x] Render completion evidence targets into Markdown outreach packets and
+  regenerate JSON/Markdown artifacts.
+
+Completed 2026-06-30: official outreach artifacts now include the exact
+completion-evidence target needed after a formal reply lands. This does not
+create official approvals; it removes ambiguity between sending a request and
+recording accepted evidence for the completion audit.
+
 ## Completion Gates
 
 The full objective is complete only when:

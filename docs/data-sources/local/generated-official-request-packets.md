@@ -25,6 +25,8 @@
   - 公開即時監測頁為放流水環保 CEMS，不是淹水、水位、雨水下水道、抽水站或水門觀測。
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - source_contract_evidence / metadata_release_monitor; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/連江縣/metadata_release_monitor
 - 待補地方直連訊號：flood_depth、sewer_water_level、pump_or_gate_status
 - 排入此順位原因：local_direct_source is not complete
 - 完成門檻：完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。
@@ -74,6 +76,8 @@
   - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?op=KWIS_Get_Monitoring_Station_Sensor_Device_List
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - source_contract_evidence / authorization_request; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/金門縣/authorization_request
 - 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：local_direct_source is not complete；official authorization is required before a production read API can run
 - 完成門檻：完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。
@@ -102,6 +106,8 @@
   - https://www.hl.gov.tw/News_Content.aspx?n=32725&s=116294
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - source_contract_evidence / authorization_request; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/花蓮縣/authorization_request
 - 排入此順位原因：official authorization is required before a production read API can run
 - 完成門檻：取得官方授權或公開 read API contract，確認用途不是設備上傳 API。
 
@@ -129,6 +135,8 @@
   - https://www.audit.gov.tw/p/406-1000-9612%2Cr12.php?Lang=zh-tw
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - source_contract_evidence / public_api_contract_review; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/臺東縣/public_api_contract_review
 - 候選系統缺少欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
 - 候選系統查核事實：
   - 2026-06-30 curl smoke: Taitung County Government news page is a public HTML flood-control article citing WRA Eighth River Management Office; it says flood hotspots use a water-monitoring system with flood sensors, water-level stations, rain gauges, and realtime cameras, but exposes no public read API, observation rows, or station metadata file.
@@ -162,6 +170,8 @@
   - https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - source_contract_evidence / public_api_contract_review; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/苗栗縣/public_api_contract_review
 - 候選系統缺少欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`
 - 候選系統查核事實：
   - 2026-06-30 curl smoke: official Miaoli page is a public HTML results-review article for the 114年度雨水下水道即時水情監測系統建置計畫; it states 58 water-level monitoring stations across 10 town/city urban-planning areas.
@@ -199,6 +209,8 @@
   - https://pteoc.pthg.gov.tw/Crawler
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - source_contract_evidence / public_api_contract_review; accepted statuses: accepted, authorized, contract_verified, official_unavailable, released; evidence_ref hint: private-ops://local-source/source-contract/屏東縣/public_api_contract_review
 - 候選系統缺少欄位：`observed_at`、`longitude_latitude_or_joinable_station_metadata`
 - 候選系統查核事實：
   - 2026-06-30 smoke: RainStation/Details/C0R190 and RainStation/Details/01Q610 are public HTML pages; the table exposes 雨量(mm), 10分鐘雨量, 1小時雨量, 3小時雨量, 6小時雨量, 12小時雨量, and 24小時雨量.
@@ -231,6 +243,10 @@
 - 既有 production adapters：local.chiayi_city.water_level、local.chiayi_city.rainfall
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / flood_depth; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/嘉義市/flood_depth
+  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/嘉義市/sewer_water_level
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/嘉義市/pump_or_gate_status
 - 待補水資訊訊號：flood_depth、sewer_water_level、pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -257,6 +273,9 @@
 - 既有 production adapters：local.taoyuan.flood_sensor、local.taoyuan.water_level、local.taoyuan.rainfall
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/桃園市/sewer_water_level
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/桃園市/pump_or_gate_status
 - 待補水資訊訊號：sewer_water_level、pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -286,6 +305,9 @@
 - 既有 production adapters：local.penghu.water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / flood_depth; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/澎湖縣/flood_depth
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/澎湖縣/pump_or_gate_status
 - 待補水資訊訊號：flood_depth、pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -312,6 +334,9 @@
 - 既有 production adapters：local.taichung.water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺中市/sewer_water_level
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺中市/pump_or_gate_status
 - 待補水資訊訊號：sewer_water_level、pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -350,6 +375,9 @@
 - 既有 production adapters：local.tainan.flood_sensor
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / sewer_water_level; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺南市/sewer_water_level
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺南市/pump_or_gate_status
 - 待補水資訊訊號：sewer_water_level、pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -376,6 +404,8 @@
 - 既有 production adapters：local.nantou.sewer_water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/南投縣/pump_or_gate_status
 - 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -402,6 +432,8 @@
 - 既有 production adapters：local.keelung.water_level、local.keelung.flood_sensor、local.keelung.rainfall
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/基隆市/pump_or_gate_status
 - 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -428,6 +460,8 @@
 - 既有 production adapters：local.yilan.flood_sensor、local.yilan.water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/宜蘭縣/pump_or_gate_status
 - 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -458,6 +492,8 @@
 - 既有 production adapters：local.new_taipei.water_level、local.new_taipei.flood_sensor、local.new_taipei.rainfall、local.new_taipei.drainage_water_level
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/新北市/pump_or_gate_status
 - 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -484,6 +520,8 @@
 - 既有 production adapters：local.hsinchu_county.flood_sensor
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / pump_or_gate_status; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/新竹縣/pump_or_gate_status
 - 待補水資訊訊號：pump_or_gate_status
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -514,6 +552,8 @@
   - https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / flood_depth; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/臺北市/flood_depth
 - 待補水資訊訊號：flood_depth
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
@@ -548,6 +588,8 @@
   - https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5
 - Production read API 必備欄位：`observed_at`、`station_or_device_id`、`measurement_value`、`measurement_unit_or_type`、`longitude_latitude_or_joinable_station_metadata`、`official_source_url_and_license`
 - Production ops gates: freshness_policy, raw_snapshot_retention_policy, monitored_scheduler_cadence, hosted_egress_review, worker_persisted_evidence_path
+- Completion evidence targets:
+  - signal_family_gap_evidence / flood_depth; accepted statuses: accepted, authorization_gated_adapter, official_unavailable, production_adapter; evidence_ref hint: private-ops://local-source/signal-gap/雲林縣/flood_depth
 - 待補水資訊訊號：flood_depth
 - 排入此順位原因：existing adapters do not cover every required water signal family
 - 完成門檻：補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。
