@@ -815,11 +815,43 @@ record before the nationwide objective can be called complete.
 Completed 2026-06-30: discovery can now scan the current top
 `pump_or_gate_status` gap directly:
 `PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --fail-on-candidate ...`.
-The live smoke found 11 pump/gate candidates across the 14-county batch,
-including one New Taipei `candidate_live_read_api`; most matches remain
-metadata-only and must still go through source review, authorization, adapter
-TDD, hosted persistence, and evidence smoke before production coverage can be
-claimed.
+The first live smoke found 11 pump/gate candidates across the 14-county batch
+and temporarily flagged one New Taipei item as `candidate_live_read_api`.
+Task 26 corrected that interpretation after source review showed the item is an
+annual pump-station inventory, not a latest-observation read API.
+
+## Task 26: Pump/Gate Discovery Precision And False-Live Reclassification
+
+**Files:**
+- Modify: `apps/workers/app/ops/local_source_discovery_monitor.py`
+- Test: `apps/workers/tests/test_local_source_discovery_monitor.py`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: data.gov.tw export metadata fields such as `資料下載網址`,
+  `主要欄位說明`, `更新頻率`, and `資料提供屬性`.
+- Produces: cleaner pump/gate discovery output that separates annual static
+  inventories from real latest-observation read API candidates and avoids
+  same-name city/county cross-matches.
+
+- [x] Write failing tests proving New Taipei dataset `125249` is metadata-only:
+  it updates yearly and exposes station name, completion year, address, river,
+  and pump type, not observed time or pump/gate status rows.
+- [x] Parse the official data.gov.tw export field aliases so discovery output
+  preserves download URLs, update frequency, and field descriptions.
+- [x] Exclude non-sensor infrastructure/statistics lists such as drought wells,
+  visit/contact lists, and sewer facility-count datasets from pump/gate
+  discovery.
+- [x] Prevent `嘉義市` from matching `嘉義縣` sources and `新竹縣` from matching
+  `新竹市` sources through the short-name fallback.
+- [x] Re-run the live pump/gate data.gov.tw smoke.
+
+Completed 2026-06-30: the corrected live smoke returns 9 pump/gate metadata-only
+candidates across Taoyuan, Taichung, and New Taipei, with zero
+`candidate_live_read_api` matches in the current 14-county batch. This means no
+new pump/gate adapter should be started from that discovery result yet; the next
+production movement is official read-API request follow-up, authorization, or a
+new live candidate appearing in the release monitor.
 
 ## Completion Gates
 

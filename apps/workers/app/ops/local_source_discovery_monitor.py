@@ -19,12 +19,26 @@ METADATA_KEYWORDS = ("易淹水", "清冊", "地區", "圖資", "位置")
 NON_WATER_KEYWORDS = ("觀光", "旅遊", "景點", "停車", "餐飲", "枯旱", "補助款")
 
 
+NON_SENSOR_INFRASTRUCTURE_KEYWORDS = (
+    "\u6297\u65f1",
+    "\u6c34\u4e95",
+    "\u53c3\u8a2a",
+    "\u806f\u7d61\u4eba",
+    "\u96fb\u8a71",
+    "\u7ba1\u7dda\u9577\u5ea6",
+    "\u6c61\u6c34\u8655\u7406\u8a2d\u65bd",
+)
+
+
 @dataclass(frozen=True)
 class DataGovDataset:
     title: str
     description: str | None = None
     identifier: str | None = None
     url: str | None = None
+    field_description: str | None = None
+    update_frequency: str | None = None
+    data_provision_type: str | None = None
     resource_formats: tuple[str, ...] = ()
     resource_urls: tuple[str, ...] = ()
 
@@ -36,6 +50,23 @@ class DataGovDataset:
             description=_first_text(item, "description", "資料集描述", "notes"),
             identifier=_first_text(item, "identifier", "資料集識別碼", "dataset_id", "id"),
             url=_first_text(item, "url", "資料集網址", "landingPage"),
+            field_description=_first_text(
+                item,
+                "fieldDescription",
+                "field_description",
+                "\u4e3b\u8981\u6b04\u4f4d\u8aaa\u660e",
+            ),
+            update_frequency=_first_text(
+                item,
+                "accrualPeriodicity",
+                "update_frequency",
+                "\u66f4\u65b0\u983b\u7387",
+            ),
+            data_provision_type=_first_text(
+                item,
+                "data_provision_type",
+                "\u8cc7\u6599\u63d0\u4f9b\u5c6c\u6027",
+            ),
             resource_formats=_resource_formats(item, distributions),
             resource_urls=_resource_urls(item, distributions),
         )
@@ -52,6 +83,9 @@ class LocalSourceCandidate:
     matched_keywords: tuple[str, ...]
     resource_formats: tuple[str, ...]
     resource_urls: tuple[str, ...]
+    field_description: str | None = None
+    update_frequency: str | None = None
+    data_provision_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,6 +98,9 @@ class LocalSourceCandidate:
             "matched_keywords": list(self.matched_keywords),
             "resource_formats": list(self.resource_formats),
             "resource_urls": list(self.resource_urls),
+            "field_description": self.field_description,
+            "update_frequency": self.update_frequency,
+            "data_provision_type": self.data_provision_type,
         }
 
 
@@ -190,20 +227,26 @@ def _candidate_for_county(
             dataset.description or "",
             dataset.identifier or "",
             dataset.url or "",
+            dataset.field_description or "",
+            dataset.update_frequency or "",
+            dataset.data_provision_type or "",
             " ".join(dataset.resource_formats),
             " ".join(dataset.resource_urls),
         )
         if part
     )
-    if county not in text and _short_county_name(county) not in text:
+    if not _text_matches_county(text, county):
         return None
-    if any(keyword in text for keyword in NON_WATER_KEYWORDS):
+    if any(
+        keyword in text
+        for keyword in (*NON_WATER_KEYWORDS, *NON_SENSOR_INFRASTRUCTURE_KEYWORDS)
+    ):
         return None
     matched = _matched_keywords(text, (*WATER_KEYWORDS, *LIVE_KEYWORDS, *METADATA_KEYWORDS))
     signal_types = _signal_types(text)
     if not matched or not signal_types:
         return None
-    readiness = _readiness(text, dataset.resource_formats)
+    readiness = _readiness(dataset, text, dataset.resource_formats)
     return LocalSourceCandidate(
         county=county,
         title=dataset.title,
@@ -214,15 +257,61 @@ def _candidate_for_county(
         matched_keywords=matched,
         resource_formats=dataset.resource_formats,
         resource_urls=dataset.resource_urls,
+        field_description=dataset.field_description,
+        update_frequency=dataset.update_frequency,
+        data_provision_type=dataset.data_provision_type,
     )
 
 
-def _readiness(text: str, resource_formats: tuple[str, ...]) -> CandidateReadiness:
+def _readiness(
+    dataset: DataGovDataset,
+    text: str,
+    resource_formats: tuple[str, ...],
+) -> CandidateReadiness:
     upper_formats = {item.upper() for item in resource_formats}
     has_machine_readable = bool(upper_formats.intersection({"JSON", "XML", "CSV", "API"}))
-    if has_machine_readable and any(keyword in text for keyword in LIVE_KEYWORDS):
+    if (
+        has_machine_readable
+        and any(keyword in text for keyword in LIVE_KEYWORDS)
+        and not _looks_like_static_inventory(dataset)
+    ):
         return "candidate_live_read_api"
     return "metadata_only"
+
+
+def _looks_like_static_inventory(dataset: DataGovDataset) -> bool:
+    frequency = (dataset.update_frequency or "").lower()
+    fields = (dataset.field_description or "").lower()
+    provision_type = dataset.data_provision_type or ""
+    has_annual_cadence = any(
+        token in frequency for token in ("每1年", "每年", "yearly", "annual")
+    )
+    file_dataset = "檔案資料" in provision_type
+    return (has_annual_cadence or file_dataset) and _fields_look_like_static_inventory(
+        fields
+    )
+
+
+def _fields_look_like_static_inventory(fields: str) -> bool:
+    if not fields:
+        return False
+    observation_tokens = (
+        "observed_at",
+        "datatime",
+        "rectime",
+        "timestamp",
+        "sourcetime",
+        "infotime",
+        "data_time",
+        "資料時間",
+        "觀測時間",
+        "監測時間",
+        "更新時間",
+    )
+    if any(token in fields for token in observation_tokens):
+        return False
+    static_tokens = ("year(", "竣工", "地址", "address", "型式", "清冊")
+    return any(token in fields for token in static_tokens)
 
 
 def _signal_types(text: str) -> tuple[str, ...]:
@@ -320,15 +409,39 @@ def _short_county_name(county: str) -> str:
     return county.removesuffix("縣").removesuffix("市")
 
 
+def _text_matches_county(text: str, county: str) -> bool:
+    if county in text:
+        return True
+    short_name = _short_county_name(county)
+    if not short_name or short_name not in text:
+        return False
+    other_suffixes = ("市", "縣") if county.endswith("縣") else ("縣", "市")
+    for suffix in other_suffixes:
+        other_name = f"{short_name}{suffix}"
+        if other_name != county and other_name in text:
+            return False
+    return True
+
+
+DATA_GOV_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "title": ("\u8cc7\u6599\u96c6\u540d\u7a31",),
+    "description": ("\u8cc7\u6599\u96c6\u63cf\u8ff0",),
+    "identifier": ("\u8cc7\u6599\u96c6\u8b58\u5225\u78bc",),
+    "format": ("\u6a94\u6848\u683c\u5f0f",),
+    "downloadurl": ("\u8cc7\u6599\u4e0b\u8f09\u7db2\u5740",),
+}
+
+
 def _first_text(item: Mapping[str, Any], *keys: str) -> str | None:
     lowered = {str(key).lower(): value for key, value in item.items()}
     for key in keys:
-        value = item.get(key)
-        if value is None:
-            value = lowered.get(key.lower())
-        if value is None:
-            continue
-        text = str(value).strip()
-        if text:
-            return text
+        for candidate_key in (key, *DATA_GOV_KEY_ALIASES.get(key.lower(), ())):
+            value = item.get(candidate_key)
+            if value is None:
+                value = lowered.get(candidate_key.lower())
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
     return None

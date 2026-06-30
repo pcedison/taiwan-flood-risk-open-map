@@ -128,6 +128,122 @@ def test_discover_local_source_candidates_filters_required_signal_types() -> Non
     ]
 
 
+def test_discover_pump_station_inventory_export_is_not_live_read_api() -> None:
+    payload = [
+        {
+            "\u8cc7\u6599\u96c6\u8b58\u5225\u78bc": 125249,
+            "\u8cc7\u6599\u96c6\u540d\u7a31": (
+                "\u65b0\u5317\u5e02\u5404\u62bd\u6c34\u7ad9\u8cc7\u8a0a"
+            ),
+            "\u8cc7\u6599\u63d0\u4f9b\u5c6c\u6027": "\u6a94\u6848\u8cc7\u6599",
+            "\u6a94\u6848\u683c\u5f0f": "CSV",
+            "\u8cc7\u6599\u4e0b\u8f09\u7db2\u5740": (
+                "https://data.ntpc.gov.tw/api/datasets/"
+                "3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296/csv/file"
+            ),
+            "\u8cc7\u6599\u96c6\u63cf\u8ff0": (
+                "\u62bd\u6c34\u7ad9\u6240\u5728\u7684\u4f4d\u7f6e\u662f"
+                "\u96e8\u6c34\u4e0b\u6c34\u9053\u7684\u672b\u7aef\uff0c"
+                "\u7576\u5927\u96e8\u6216\u6f32\u6f6e\u6642\uff0c"
+                "\u5c0e\u81f4\u5824\u5916\u6c34\u4f4d\u9ad8\u65bc"
+                "\u5824\u5167\u6c34\u4f4d\u5c31\u8981\u95dc\u9589"
+                "\u91cd\u529b\u9598\u9580\u3002"
+            ),
+            "\u4e3b\u8981\u6b04\u4f4d\u8aaa\u660e": (
+                "title(\u62bd\u6c34\u7ad9\u540d\u7a31);"
+                "year(\u7ae3\u5de5\u5e74\u5ea6);"
+                "address(\u5730\u5740);river(\u6cb3\u7cfb);"
+                "pump_type(\u62bd\u6c34\u6a5f\u578b\u5f0f)"
+            ),
+            "\u63d0\u4f9b\u6a5f\u95dc": "\u65b0\u5317\u5e02\u653f\u5e9c\u6c34\u5229\u5c40",
+            "\u66f4\u65b0\u983b\u7387": "\u6bcf1\u5e74",
+        }
+    ]
+
+    result = discover_local_source_candidates(
+        payload,
+        target_counties=("\u65b0\u5317\u5e02",),
+        required_signal_types=("pump_or_gate_status",),
+    )
+
+    assert len(result.candidates) == 1
+    candidate = result.candidates[0]
+    assert candidate.dataset_id == "125249"
+    assert candidate.readiness == "metadata_only"
+    assert candidate.signal_types == ("sewer_water_level", "water_level", "pump_or_gate_status")
+    assert candidate.resource_urls == (
+        "https://data.ntpc.gov.tw/api/datasets/"
+        "3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296/csv/file",
+    )
+    candidate_dict = candidate.to_dict()
+    assert candidate_dict["update_frequency"] == "\u6bcf1\u5e74"
+    assert "year(" in candidate_dict["field_description"]
+
+
+def test_discover_signal_candidates_ignores_non_sensor_infrastructure_lists() -> None:
+    payload = [
+        {
+            "title": "\u65b0\u5317\u5e02\u6297\u65f1\u6c34\u4e95",
+            "description": "\u542b\u62bd\u6c34\u91cf\u8207\u6c34\u4e95\u4f4d\u7f6e",
+            "identifier": "drought-well",
+            "distribution": [{"format": "CSV"}],
+        },
+        {
+            "title": "\u65b0\u5317\u5e02\u62bd\u6c34\u7ad9\u53c3\u8a2a\u8cc7\u8a0a",
+            "description": "\u62bd\u6c34\u7ad9\u806f\u7d61\u4eba\u8207\u96fb\u8a71",
+            "identifier": "pump-visit",
+            "distribution": [{"format": "CSV"}],
+        },
+        {
+            "title": "\u6f8e\u6e56\u7e23\u6c61\u6c34\u4e0b\u6c34\u9053\u5df2\u5efa\u8a2d\u7ba1\u7dda\u9577\u5ea6\u53ca\u8a2d\u65bd",
+            "description": "\u6c61\u6c34\u8655\u7406\u8a2d\u65bd\u8207\u62bd\u6c34\u7ad9\u6578\u91cf",
+            "identifier": "sewer-statistics",
+            "distribution": [{"format": "CSV;JSON;XML"}],
+        },
+        {
+            "title": "\u65b0\u5317\u5e02\u6c34\u9580\u8cc7\u6599",
+            "description": "\u6c34\u9580\u540d\u7a31\u3001\u62bd\u6c34\u7ad9\u540d\u7a31\u8207\u884c\u653f\u5340",
+            "identifier": "water-gate-metadata",
+            "distribution": [{"format": "CSV"}],
+        },
+    ]
+
+    result = discover_local_source_candidates(
+        payload,
+        target_counties=("\u65b0\u5317\u5e02", "\u6f8e\u6e56\u7e23"),
+        required_signal_types=("pump_or_gate_status",),
+    )
+
+    assert [candidate.dataset_id for candidate in result.candidates] == [
+        "water-gate-metadata"
+    ]
+
+
+def test_discover_candidates_does_not_cross_match_city_and_county_names() -> None:
+    payload = [
+        {
+            "title": "\u5609\u7fa9\u7e23\u8f44\u5167\u62bd\u6c34\u7ad9",
+            "description": "\u5609\u7fa9\u7e23\u62bd\u6c34\u7ad9\u6e05\u518a",
+            "identifier": "chiayi-county-pump",
+            "distribution": [{"format": "CSV"}],
+        },
+        {
+            "title": "\u65b0\u7af9\u5e02\u62bd\u6c34\u7ad9\u8cc7\u8a0a",
+            "description": "\u65b0\u7af9\u5e02\u62bd\u6c34\u7ad9\u6e05\u518a",
+            "identifier": "hsinchu-city-pump",
+            "distribution": [{"format": "CSV"}],
+        },
+    ]
+
+    result = discover_local_source_candidates(
+        payload,
+        target_counties=("\u5609\u7fa9\u5e02", "\u65b0\u7af9\u7e23"),
+        required_signal_types=("pump_or_gate_status",),
+    )
+
+    assert result.candidates == ()
+
+
 def test_data_gov_dataset_parser_accepts_common_export_aliases() -> None:
     item = DataGovDataset.from_mapping(
         {
