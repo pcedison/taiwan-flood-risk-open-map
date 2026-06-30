@@ -61,6 +61,13 @@ def main() -> int:
             "The same JSON is still printed to stdout."
         ),
     )
+    parser.add_argument(
+        "--markdown-output",
+        help=(
+            "Optional path to write a public-safe Markdown summary of the "
+            "aggregate completion audit."
+        ),
+    )
     args = parser.parse_args()
 
     completion_evidence = None
@@ -80,6 +87,13 @@ def main() -> int:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(f"{audit_json}\n", encoding="utf-8")
+    if args.markdown_output:
+        markdown_output_path = Path(args.markdown_output)
+        markdown_output_path.parent.mkdir(parents=True, exist_ok=True)
+        markdown_output_path.write_text(
+            _render_markdown_audit(audit),
+            encoding="utf-8",
+        )
     print(audit_json)
 
     if args.fail_on_incomplete and audit["overall_status"] != "satisfied":
@@ -239,6 +253,82 @@ def _resolve_json_pointer(
                 continue
         raise SystemExit(f"{field}: local evidence_ref JSON pointer not found: {evidence_ref}")
     return current
+
+
+def _render_markdown_audit(audit: dict[str, Any]) -> str:
+    lines = [
+        "# Local Source Completion Audit",
+        "",
+        f"- Overall status: {_inline_code(audit.get('overall_status'))}",
+    ]
+    next_workstreams = audit.get("next_priority_workstreams")
+    if isinstance(next_workstreams, list):
+        lines.append(f"- Next workstreams: {_inline_code_list(next_workstreams)}")
+    lines.extend(["", "## Summary", ""])
+
+    summary = audit.get("summary")
+    if isinstance(summary, dict) and summary:
+        for key in sorted(summary):
+            lines.append(f"- {_inline_code(key)}: {_inline_code(summary[key])}")
+    else:
+        lines.append("- No summary fields supplied.")
+
+    lines.extend(
+        [
+            "",
+            "## Gate Status",
+            "",
+            "| Gate | Status | Blocking items | Next workstream |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    gates = audit.get("gates")
+    if isinstance(gates, list):
+        for gate in gates:
+            if not isinstance(gate, dict):
+                continue
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        _markdown_cell(_inline_code(gate.get("gate_key"))),
+                        _markdown_cell(_inline_code(gate.get("status"))),
+                        _markdown_cell(
+                            _inline_code_list(gate.get("blocking_items"))
+                        ),
+                        _markdown_cell(_inline_code(gate.get("next_workstream"))),
+                    )
+                )
+                + " |"
+            )
+
+    lines.extend(["", "## Evidence Overlay", ""])
+    overlay = audit.get("evidence_overlay")
+    if isinstance(overlay, dict) and overlay:
+        for key in sorted(overlay):
+            lines.append(f"- {_inline_code(key)}: {_inline_code(overlay[key])}")
+    else:
+        lines.append("- No evidence overlay supplied.")
+
+    return "\n".join(lines) + "\n"
+
+
+def _inline_code(value: Any) -> str:
+    if value is None:
+        return "`none`"
+    if isinstance(value, (list, tuple)):
+        return _inline_code_list(value)
+    return f"`{str(value).replace('`', '\\`')}`"
+
+
+def _inline_code_list(value: Any) -> str:
+    if not isinstance(value, (list, tuple)) or not value:
+        return "`none`"
+    return ", ".join(_inline_code(item) for item in value)
+
+
+def _markdown_cell(value: str) -> str:
+    return value.replace("|", "\\|")
 
 
 if __name__ == "__main__":

@@ -263,6 +263,41 @@ def test_local_source_completion_audit_cli_writes_output_artifact(
     assert output_payload["summary"]["signal_gap_county_item_count"] == 17
 
 
+def test_local_source_completion_audit_cli_writes_markdown_report(
+    tmp_path: Path,
+) -> None:
+    json_output_path = tmp_path / "completion-audit.json"
+    markdown_output_path = tmp_path / "completion-audit.md"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--output",
+            str(json_output_path),
+            "--markdown-output",
+            str(markdown_output_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(json_output_path.read_text(encoding="utf-8"))
+    markdown = markdown_output_path.read_text(encoding="utf-8")
+
+    assert payload["overall_status"] == "incomplete"
+    assert "# Local Source Completion Audit" in markdown
+    assert "- Overall status: `incomplete`" in markdown
+    assert "| `required_signal_families` | `incomplete` |" in markdown
+    assert "`pump_or_gate_status:13`, `flood_depth:3`, `sewer_water_level:1`" in markdown
+    assert "`send_official_read_api_requests`" in markdown
+    assert "`production_deployment_evidence` | `incomplete`" in markdown
+
+
 def test_local_source_completion_audit_cli_rejects_failed_local_evidence_ref(
     tmp_path: Path,
 ) -> None:
