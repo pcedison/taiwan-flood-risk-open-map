@@ -1207,6 +1207,39 @@ incomplete because required signal families, official authorization/contracts,
 hosted worker persistence/raw snapshot/scheduler/egress evidence, and
 production monitoring/alerting are still unresolved.
 
+## Task 38: Hosted Source-Freshness Evidence Smoke
+
+**Files:**
+- Add: `scripts/hosted_source_freshness_smoke.py`
+- Add: `tests/test_hosted_source_freshness_smoke.py`
+- Modify: `docs/runbooks/official-realtime-source-of-truth.md`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+
+**Interfaces:**
+- Consumes: hosted `/health` and admin-only `/admin/v1/sources`.
+- Produces: a source-freshness evidence artifact plus a partial
+  `local-source-completion-evidence/v1` overlay for the
+  `hosted_worker_persisted_evidence` requirements that `/admin/v1/sources` can
+  actually prove.
+
+- [x] Write failing tests for admin token usage, checked CWA/WRA source
+  summaries, and the partial completion evidence overlay.
+- [x] Add a token-safe hosted source freshness smoke that reads the admin token
+  from an environment variable and never writes it to the artifact.
+- [x] Limit completion targets to `freshness_policy` and
+  `worker_persisted_evidence_path`; do not claim raw snapshot retention,
+  scheduler cadence, hosted egress review, alert routing, or scheduler
+  ownership.
+- [ ] Run the smoke against production after a valid `ADMIN_BEARER_TOKEN` is
+  available and capture an accepted artifact under `docs/reviews/`.
+- [ ] Validate that production artifact with `scripts/local-source-completion-audit.py`.
+
+Status 2026-06-30: implementation and unit tests are complete, but the actual
+hosted admin smoke is pending because this local session does not have
+`ADMIN_BEARER_TOKEN`. The full completion audit remains incomplete until the
+production artifact and the still-missing raw snapshot, scheduler, egress, and
+alerting evidence are recorded.
+
 ## Completion Gates
 
 The full objective is complete only when:

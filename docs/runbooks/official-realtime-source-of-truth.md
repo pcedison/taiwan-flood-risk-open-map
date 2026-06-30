@@ -66,3 +66,35 @@ official realtime sources, `official` rainfall or water-level evidence with
 `public_risk_worker_evidence_path` completion requirements when the artifact is
 accepted, but it does not prove raw snapshot retention, scheduler cadence,
 hosted egress approval, or alert routing.
+
+## Hosted Source-Freshness Smoke
+
+When an admin token is available, run the hosted source-freshness smoke after a
+production deploy to prove that `/admin/v1/sources` exposes enabled CWA/WRA
+source diagnostics with fresh or degraded-but-usable worker-persisted rows:
+
+```powershell
+python scripts\hosted_source_freshness_smoke.py `
+  --base-url https://floodrisk.cc `
+  --admin-token-env ADMIN_BEARER_TOKEN `
+  --required-adapter-key official.cwa.rainfall `
+  --required-adapter-key official.wra.water_level `
+  --evidence-output docs\reviews\hosted-source-freshness-smoke-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-output docs\reviews\hosted-source-freshness-completion-evidence-YYYY-MM-DD-<sha>.json
+```
+
+The smoke reads the admin token from the named environment variable and never
+writes the token into the artifact. It checks that each required source is
+enabled, has `healthy` or `degraded` source health, has `fresh` or `degraded`
+freshness, includes latest observed and ingested timestamps, has a positive
+`row_count`, has non-negative `lag_seconds`, and reports the
+`data_sources.is_enabled` gate.
+
+An accepted artifact may satisfy only these
+`hosted_worker_persisted_evidence` requirements:
+
+- `freshness_policy`
+- `worker_persisted_evidence_path`
+
+It does not prove raw snapshot retention, monitored scheduler cadence, hosted
+egress review, alert routing, or worker scheduler ownership.

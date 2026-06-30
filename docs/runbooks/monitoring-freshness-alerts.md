@@ -236,6 +236,22 @@ From the repository root:
   -MaxAgeMinutes 60
 ```
 
+For hosted release evidence against the admin source contract, use the Python
+smoke. It records only aggregate source diagnostics and reads the token from the
+named environment variable:
+
+```powershell
+python scripts\hosted_source_freshness_smoke.py `
+  --base-url "https://<api-domain>" `
+  --admin-token-env ADMIN_BEARER_TOKEN `
+  --evidence-output ".\tmp\hosted-source-freshness-smoke.json" `
+  --completion-evidence-output ".\tmp\hosted-source-freshness-completion-evidence.json"
+```
+
+This smoke can support completion evidence for the hosted worker-persisted
+freshness path, but it is not a scheduler monitor and does not prove alert
+routing, raw snapshot retention, hosted egress approval, or incident ownership.
+
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 
 ```powershell
