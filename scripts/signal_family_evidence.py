@@ -39,7 +39,18 @@ def main(argv: list[str] | None = None) -> int:
             "local-source-completion-evidence/v1 overlay."
         )
     )
-    parser.add_argument("--manifest-json", required=True)
+    parser.add_argument("--manifest-json")
+    parser.add_argument(
+        "--captured-at",
+        help="Optional ISO 8601 timestamp for generated manifest templates.",
+    )
+    parser.add_argument(
+        "--template-output",
+        help=(
+            "Optional path for a pending signal-family-evidence-input/v1 "
+            "manifest template covering every currently required county/signal gap."
+        ),
+    )
     parser.add_argument(
         "--evidence-output",
         help="Optional normalized signal-family-evidence/v1 artifact path.",
@@ -52,6 +63,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if args.template_output:
+        captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
+        _write_json(
+            args.template_output,
+            build_manifest_template(captured_at=captured_at),
+        )
+        print("SIGNAL_FAMILY_EVIDENCE_TEMPLATE written")
+        return 0
+
+    if not args.manifest_json:
+        parser.error("--manifest-json is required unless --template-output is used")
 
     manifest = _load_json(Path(args.manifest_json))
     captured_at = _captured_at(manifest)
@@ -131,6 +154,33 @@ def build_completion_evidence_overlay(
     }
 
 
+def build_manifest_template(*, captured_at: str) -> dict[str, Any]:
+    return {
+        "schema_version": INPUT_SCHEMA_VERSION,
+        "captured_at": captured_at,
+        "template_status": "pending_official_evidence",
+        "notes": [
+            "Fill this template only after official reply, production adapter smoke, authorization-gated adapter evidence, or official-unavailable evidence is accepted.",
+            "Keep filled private evidence refs and official correspondence in private ops storage; do not commit completed private evidence.",
+            "The default pending status is intentionally rejected by this CLI and by the completion audit.",
+        ],
+        "signal_family_gap_evidence": [
+            {
+                "county": county,
+                "signal_type": signal_type,
+                "status": "pending",
+                "accepted_statuses": sorted(ACCEPTED_SIGNAL_EVIDENCE_STATUSES),
+                "evidence_ref": (
+                    f"private-ops://local-source/signal-gap/{county}/{signal_type}"
+                ),
+                "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+                "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM",
+            }
+            for county, signal_type in _ordered_required_signal_family_keys()
+        ],
+    }
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -149,12 +199,16 @@ def _captured_at(manifest: Mapping[str, Any]) -> str:
 
 
 def _required_signal_family_keys() -> set[tuple[str, str]]:
+    return set(_ordered_required_signal_family_keys())
+
+
+def _ordered_required_signal_family_keys() -> list[tuple[str, str]]:
     plan = build_local_source_action_plan(list_local_source_coverage())
-    keys: set[tuple[str, str]] = set()
+    keys: list[tuple[str, str]] = []
     for group in plan["signal_gap_priority_groups"]:
         signal_type = str(group["signal_type"])
         for county in group["counties"]:
-            keys.add((str(county), signal_type))
+            keys.append((str(county), signal_type))
     return keys
 
 

@@ -238,10 +238,20 @@ private signal-family manifest into a completion overlay:
 
 ```powershell
 python scripts\signal_family_evidence.py `
+  --template-output <private-signal-family-manifest-template.json> `
+  --captured-at 2026-07-01T09:00:00+08:00
+
+python scripts\signal_family_evidence.py `
   --manifest-json <private-signal-family-manifest.json> `
   --evidence-output <private-signal-family-evidence.json> `
   --completion-evidence-output <private-signal-family-completion-evidence.json>
 ```
+
+The checked-in
+`docs/data-sources/local/generated-signal-family-evidence-template.json` file is
+a public-safe starting template for the current signal-family backlog. It keeps
+all entries at `pending`, so it is useful for private ops handoff but is not
+completion evidence.
 
 The manifest schema is `signal-family-evidence-input/v1`. Each
 `signal_family_gap_evidence` entry must include `county`, `signal_type`,
@@ -257,6 +267,18 @@ For the `official_authorization_and_contracts` gate, fill a private source
 contract manifest with accepted evidence for every current
 `authorization_request`, `metadata_release_monitor`, and
 `public_api_contract_review` item:
+
+```powershell
+python scripts\source_contract_evidence.py `
+  --template-output <private-source-contract-manifest-template.json> `
+  --captured-at 2026-07-01T09:00:00+08:00
+```
+
+The checked-in
+`docs/data-sources/local/generated-source-contract-evidence-template.json` file
+is a public-safe starting template for the current authorization, metadata
+release, and public API contract backlog. It also remains `pending` by default
+and must not be treated as accepted evidence.
 
 When authorization or contract requests have been sent but the official reply
 has not yet been accepted, generate a private source-contract dispatch overlay
