@@ -1511,6 +1511,30 @@ signal-family completion; Lienchiang still lacks all three listed signal types,
 Taipei and Penghu still lack flood depth, and 13 counties still lack
 pump_or_gate_status.
 
+## Task 48: Current Signal Gap Discovery Evidence Refresh
+
+**Files:**
+- Modify: `docs/reviews/signal-gap-discovery-refresh-2026-06-30-pump-or-gate.json`
+- Modify: `docs/reviews/signal-gap-discovery-refresh-2026-06-30-flood-depth.json`
+- Modify: `docs/reviews/signal-gap-discovery-refresh-2026-06-30-sewer-water-level.json`
+- Modify: `docs/data-sources/local/2026-06-28-local-source-verification-log.md`
+
+**Interfaces:**
+- Consumes: current `signal_gap_priority_groups` discovery monitor commands.
+- Produces: refreshed UTF-8 discovery evidence for the 17 remaining
+  county/signal blockers.
+
+- [x] Re-run current `pump_or_gate_status` discovery for the 13-county batch.
+- [x] Re-run current `flood_depth` discovery for Lienchiang, Penghu, and Taipei.
+- [x] Re-run current `sewer_water_level` discovery for Lienchiang only.
+- [x] Record that all three current discovery runs found 0
+  `candidate_live_read_api` datasets.
+
+Completed 2026-06-30: discovery evidence now matches the post-Civil-IoT
+17-item signal gap list. This does not reduce the completion audit blockers;
+it proves that the current public data.gov.tw export does not expose a
+promotion-ready live read API for the remaining signal gaps.
+
 ## Completion Gates
 
 The full objective is complete only when:

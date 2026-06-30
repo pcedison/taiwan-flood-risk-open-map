@@ -91,26 +91,28 @@
 Commands run against the current data.gov.tw dataset export through
 `scripts/local-source-discovery-monitor.py --fail-on-candidate`:
 
-- `pump_or_gate_status`: 9 candidates, 0 `candidate_live_read_api`. New Taipei,
+- `pump_or_gate_status`: current action-plan batch has 13 county/signal items.
+  The refresh found 9 candidates and 0 `candidate_live_read_api`. New Taipei,
   Taoyuan, and Taichung entries remain static station/gate/pump inventory or
-  GIS metadata; 11 counties in the batch still have no candidate.
+  GIS metadata; 10 counties in the current batch still have no candidate.
 - `flood_depth`: 2 candidates, 0 `candidate_live_read_api`. Taipei entries are
   rain/flood simulation or resilience-community metadata, not latest-observed
-  flood-depth sensors.
-- `sewer_water_level`: initial live refresh exposed 2 Taichung false-live
+  flood-depth sensors; Lienchiang and Penghu still have no candidate.
+- `sewer_water_level`: current action-plan batch now only contains Lienchiang
+  and found 0 candidates. A historical broad refresh exposed 2 Taichung false-live
   candidates (`120801` rainwater-sewer manhole map and `120833` rainwater-sewer
   pipeline map). Both rows describe catalog/GIS download fields such as
   `資料集名稱`, `資料格式`, `下載網址`, `上架日期`, and `資料資源欄位`, not
   observed time, station/device id, or measurement value. The discovery
-  classifier was updated so these rows remain `metadata_only`; the rerun
-  reports 11 candidates, 0 `candidate_live_read_api`.
+  classifier keeps those rows as `metadata_only`; they are no longer in the
+  current sewer-water-level batch after Civil IoT coverage reconciliation.
 
 Conclusion: no adapter implementation should start from the current live
 discovery refresh. The unresolved signal families still require official read
 API follow-up, authorization/contract evidence, or a future release-monitor hit.
 
-Evidence artifacts captured 2026-06-30 with
-`scripts/local-source-discovery-monitor.py --captured-at 2026-06-30T14:00:00+08:00 --evidence-output ... --fail-on-candidate`:
+Evidence artifacts refreshed 2026-06-30 with
+`scripts/local-source-discovery-monitor.py --captured-at 2026-06-30T18:05:00+08:00 --evidence-output ... --fail-on-candidate`:
 
 - `docs/reviews/signal-gap-discovery-refresh-2026-06-30-pump-or-gate.json`:
   `pump_or_gate_status`, 9 metadata-only candidates, 0 live read API
@@ -118,7 +120,7 @@ Evidence artifacts captured 2026-06-30 with
 - `docs/reviews/signal-gap-discovery-refresh-2026-06-30-flood-depth.json`:
   `flood_depth`, 2 metadata-only candidates, 0 live read API candidates.
 - `docs/reviews/signal-gap-discovery-refresh-2026-06-30-sewer-water-level.json`:
-  `sewer_water_level`, 11 metadata-only candidates, 0 live read API candidates.
+  `sewer_water_level`, 0 candidates, 0 live read API candidates.
 
 Use those artifacts for release-monitor review and future PR evidence instead
 of PowerShell `Tee-Object`, because the CLI writes normalized UTF-8 JSON and
