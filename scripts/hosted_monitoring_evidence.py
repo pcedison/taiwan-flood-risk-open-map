@@ -34,7 +34,18 @@ def main(argv: list[str] | None = None) -> int:
             "production_monitoring_and_alerting."
         )
     )
-    parser.add_argument("--manifest-json", required=True)
+    parser.add_argument("--manifest-json")
+    parser.add_argument(
+        "--captured-at",
+        help="Optional ISO 8601 timestamp for generated manifest templates.",
+    )
+    parser.add_argument(
+        "--template-output",
+        help=(
+            "Optional path for a pending hosted-monitoring-evidence-input/v1 "
+            "manifest template covering every hosted monitoring requirement."
+        ),
+    )
     parser.add_argument(
         "--evidence-output",
         help="Optional normalized hosted-monitoring-evidence/v1 artifact path.",
@@ -48,6 +59,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if args.template_output:
+        captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
+        _write_json(
+            args.template_output,
+            build_manifest_template(captured_at=captured_at),
+        )
+        print("HOSTED_MONITORING_EVIDENCE_TEMPLATE written")
+        return 0
+
+    if not args.manifest_json:
+        parser.error("--manifest-json is required unless --template-output is used")
 
     manifest_path = Path(args.manifest_json)
     manifest = _load_json(manifest_path)
@@ -144,6 +167,44 @@ def build_completion_evidence_overlay(
                 ),
             }
         ],
+    }
+
+
+def build_manifest_template(*, captured_at: str) -> dict[str, Any]:
+    return {
+        "schema_version": INPUT_SCHEMA_VERSION,
+        "captured_at": captured_at,
+        "template_status": "pending_private_evidence",
+        "notes": [
+            "Fill this template only after hosted alert routing and scheduler monitoring evidence are accepted.",
+            "Keep filled private evidence refs in private ops storage; do not commit completed private evidence.",
+            "The default pending status is intentionally rejected by this CLI and by the completion audit.",
+        ],
+        "hosted_alert_routing": {
+            "status": "pending",
+            "accepted_status": ACCEPTED_STATUS,
+            "owner": "REPLACE_WITH_OWNER",
+            "evidence_ref": "private-ops://hosted-monitoring/hosted_alert_routing",
+            "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+        },
+        "scheduled_freshness_checks": {
+            "status": "pending",
+            "accepted_status": ACCEPTED_STATUS,
+            "cadence": "REPLACE_WITH_ISO_8601_DURATION",
+            "evidence_ref": (
+                "private-ops://hosted-monitoring/scheduled_freshness_checks"
+            ),
+            "observed_at": "REPLACE_WITH_OBSERVED_AT",
+        },
+        "worker_scheduler_alert_ownership": {
+            "status": "pending",
+            "accepted_status": ACCEPTED_STATUS,
+            "owner": "REPLACE_WITH_OWNER",
+            "evidence_ref": (
+                "private-ops://hosted-monitoring/worker_scheduler_alert_ownership"
+            ),
+            "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
+        },
     }
 
 

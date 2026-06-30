@@ -12,6 +12,20 @@ AUDIT_SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
 PRIVATE_HANDOFF_RUNBOOK = (
     REPO_ROOT / "docs" / "runbooks" / "private-production-evidence-handoff.md"
 )
+GENERATED_TEMPLATE = (
+    REPO_ROOT
+    / "docs"
+    / "data-sources"
+    / "local"
+    / "generated-hosted-worker-evidence-template.json"
+)
+HOSTED_WORKER_REQUIREMENTS = [
+    "freshness_policy",
+    "raw_snapshot_retention_policy",
+    "monitored_scheduler_cadence",
+    "hosted_egress_review",
+    "worker_persisted_evidence_path",
+]
 
 
 def test_hosted_worker_evidence_writes_completion_overlay(tmp_path: Path) -> None:
@@ -303,13 +317,99 @@ def test_hosted_worker_evidence_accepts_powershell_utf8_bom_manifest(
     assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "passed"
 
 
+def test_hosted_worker_evidence_writes_pending_manifest_template(
+    tmp_path: Path,
+) -> None:
+    template_output = tmp_path / "hosted-worker-template.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--template-output",
+            str(template_output),
+            "--captured-at",
+            "2026-07-01T01:15:00+08:00",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    template = json.loads(template_output.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "hosted-worker-evidence-input/v1"
+    assert template["captured_at"] == "2026-07-01T01:15:00+08:00"
+    assert template["template_status"] == "pending_private_evidence"
+    assert _template_requirement_keys(template) == HOSTED_WORKER_REQUIREMENTS
+
+    for requirement in HOSTED_WORKER_REQUIREMENTS:
+        item = template[requirement]
+        assert item["status"] == "pending"
+        assert item["accepted_status"] == "verified"
+        assert item["evidence_ref"].startswith("private-ops://hosted-worker/")
+
+    evidence_output = tmp_path / "hosted-worker-evidence.json"
+    validation = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--manifest-json",
+            str(template_output),
+            "--evidence-output",
+            str(evidence_output),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert validation.returncode == 1
+    assert "status must be verified" in validation.stdout
+    assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_checked_in_hosted_worker_template_matches_requirements() -> None:
+    template = json.loads(GENERATED_TEMPLATE.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "hosted-worker-evidence-input/v1"
+    assert template["template_status"] == "pending_private_evidence"
+    assert _template_requirement_keys(template) == HOSTED_WORKER_REQUIREMENTS
+
+    for requirement in HOSTED_WORKER_REQUIREMENTS:
+        item = template[requirement]
+        assert item["status"] == "pending"
+        assert item["accepted_status"] == "verified"
+        assert item["evidence_ref"] == f"private-ops://hosted-worker/{requirement}"
+
+
 def test_private_handoff_runbook_documents_hosted_worker_evidence_cli() -> None:
     runbook = PRIVATE_HANDOFF_RUNBOOK.read_text(encoding="utf-8")
 
     assert "scripts\\hosted_worker_evidence.py" in runbook
+    assert "--template-output <private-hosted-worker-manifest-template.json>" in runbook
     assert "--manifest-json <private-hosted-worker-manifest.json>" in runbook
     assert "hosted_worker_persisted_evidence" in runbook
     assert "raw_snapshot_retention_policy" in runbook
     assert "monitored_scheduler_cadence" in runbook
     assert "hosted_egress_review" in runbook
     assert "worker_persisted_evidence_path" in runbook
+
+
+def _template_requirement_keys(template: dict[str, object]) -> list[str]:
+    return [
+        key
+        for key in template
+        if key
+        not in {
+            "schema_version",
+            "captured_at",
+            "template_status",
+            "notes",
+        }
+    ]

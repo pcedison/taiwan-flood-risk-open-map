@@ -1989,6 +1989,44 @@ templates intentionally fail validation until each entry is replaced with
 accepted official reply, production adapter, authorization-gated adapter,
 contract verification, metadata release, or official-unavailable evidence.
 
+## Task 63: Hosted Worker And Monitoring Evidence Templates
+
+**Files:**
+- Modify: `scripts/hosted_worker_evidence.py`
+- Modify: `scripts/hosted_worker_policy_evidence.py`
+- Modify: `scripts/hosted_monitoring_evidence.py`
+- Modify: `tests/test_hosted_worker_evidence.py`
+- Modify: `tests/test_hosted_worker_policy_evidence.py`
+- Modify: `tests/test_hosted_monitoring_evidence.py`
+- Modify: `docs/runbooks/private-production-evidence-handoff.md`
+- Add: `docs/data-sources/local/generated-hosted-worker-evidence-template.json`
+- Add: `docs/data-sources/local/generated-hosted-worker-policy-evidence-template.json`
+- Add: `docs/data-sources/local/generated-hosted-monitoring-evidence-template.json`
+
+**Interfaces:**
+- Consumes: hosted worker persisted evidence requirements, hosted worker policy
+  requirements, and production monitoring/alerting requirements from the
+  completion audit gates.
+- Produces: public-safe pending manifest templates that operators can copy
+  into private ops storage, fill with verified evidence refs, and validate
+  before emitting completion overlays.
+
+- [x] Write failing CLI tests proving each hosted evidence tool can generate a
+  complete pending manifest template and that the pending template is rejected
+  as completion evidence.
+- [x] Add `--template-output` and optional `--captured-at` to hosted worker,
+  hosted worker policy, and hosted monitoring evidence CLIs.
+- [x] Generate public-safe templates for the current hosted worker persisted,
+  hosted worker policy, and hosted monitoring/alerting gates.
+- [x] Document the template generation step in the private production evidence
+  handoff runbook.
+
+Completed 2026-07-01: hosted worker and monitoring blockers now have the same
+operator handoff pattern as local source gaps. The templates intentionally fail
+validation until each requirement is replaced with verified private evidence,
+so they move the project closer to acceptance without overstating production
+readiness.
+
 ## Completion Gates
 
 The full objective is complete only when:
