@@ -370,10 +370,20 @@ Then validate and normalize that private manifest into a completion overlay:
 
 ```powershell
 python scripts\hosted_worker_evidence.py `
+  --template-output <private-hosted-worker-manifest-template.json> `
+  --captured-at 2026-07-01T09:30:00+08:00
+
+python scripts\hosted_worker_evidence.py `
   --manifest-json <private-hosted-worker-manifest.json> `
   --evidence-output <private-hosted-worker-evidence.json> `
   --completion-evidence-output <private-hosted-worker-completion-evidence.json>
 ```
+
+The checked-in
+`docs/data-sources/local/generated-hosted-worker-evidence-template.json` file
+is a public-safe starting template for the current hosted worker persisted
+evidence gate. It keeps every requirement at `pending`, so it is useful for
+private ops handoff but is not completion evidence.
 
 The CLI fails closed: `hosted_worker_persisted_evidence` is accepted only when
 `freshness_policy`, `raw_snapshot_retention_policy`,
@@ -403,10 +413,20 @@ remaining private policy/ops proof in a smaller
 
 ```powershell
 python scripts\hosted_worker_policy_evidence.py `
+  --template-output <private-hosted-worker-policy-manifest-template.json> `
+  --captured-at 2026-07-01T09:30:00+08:00
+
+python scripts\hosted_worker_policy_evidence.py `
   --manifest-json <private-hosted-worker-policy-manifest.json> `
   --evidence-output <private-hosted-worker-policy-evidence.json> `
   --completion-evidence-output <private-hosted-worker-policy-completion-evidence.json>
 ```
+
+The checked-in
+`docs/data-sources/local/generated-hosted-worker-policy-evidence-template.json`
+file is a public-safe starting template for the smaller private policy/ops
+manifest. It also remains `pending` by default and must not be treated as
+accepted evidence.
 
 This policy manifest covers only `raw_snapshot_retention_policy`,
 `monitored_scheduler_cadence`, and `hosted_egress_review`. Merge its completion
@@ -429,10 +449,20 @@ Then validate and normalize that private manifest into a completion overlay:
 
 ```powershell
 python scripts\hosted_monitoring_evidence.py `
+  --template-output <private-monitoring-manifest-template.json> `
+  --captured-at 2026-07-01T09:30:00+08:00
+
+python scripts\hosted_monitoring_evidence.py `
   --manifest-json <private-monitoring-manifest.json> `
   --evidence-output <private-hosted-monitoring-evidence.json> `
   --completion-evidence-output <private-monitoring-evidence.json>
 ```
+
+The checked-in
+`docs/data-sources/local/generated-hosted-monitoring-evidence-template.json`
+file is a public-safe starting template for the hosted monitoring and alerting
+gate. It remains `pending` by default and must not be treated as accepted
+evidence.
 
 The CLI fails closed: `production_monitoring_and_alerting` is accepted only
 when `hosted_alert_routing`, `scheduled_freshness_checks`, and

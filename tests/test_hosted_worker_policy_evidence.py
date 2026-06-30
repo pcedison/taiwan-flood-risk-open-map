@@ -12,6 +12,18 @@ AUDIT_SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
 PRIVATE_HANDOFF_RUNBOOK = (
     REPO_ROOT / "docs" / "runbooks" / "private-production-evidence-handoff.md"
 )
+GENERATED_TEMPLATE = (
+    REPO_ROOT
+    / "docs"
+    / "data-sources"
+    / "local"
+    / "generated-hosted-worker-policy-evidence-template.json"
+)
+HOSTED_WORKER_POLICY_REQUIREMENTS = [
+    "raw_snapshot_retention_policy",
+    "monitored_scheduler_cadence",
+    "hosted_egress_review",
+]
 
 
 def test_hosted_worker_policy_evidence_writes_mergeable_completion_overlay(
@@ -238,6 +250,59 @@ def test_hosted_worker_policy_evidence_accepts_powershell_utf8_bom_manifest(
     assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "passed"
 
 
+def test_hosted_worker_policy_evidence_writes_pending_manifest_template(
+    tmp_path: Path,
+) -> None:
+    template_output = tmp_path / "hosted-worker-policy-template.json"
+
+    result = _run_script(
+        "--template-output",
+        str(template_output),
+        "--captured-at",
+        "2026-07-01T01:20:00+08:00",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    template = json.loads(template_output.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "hosted-worker-policy-evidence-input/v1"
+    assert template["captured_at"] == "2026-07-01T01:20:00+08:00"
+    assert template["template_status"] == "pending_private_evidence"
+    assert _template_requirement_keys(template) == HOSTED_WORKER_POLICY_REQUIREMENTS
+
+    for requirement in HOSTED_WORKER_POLICY_REQUIREMENTS:
+        item = template[requirement]
+        assert item["status"] == "pending"
+        assert item["accepted_status"] == "verified"
+        assert item["evidence_ref"].startswith("private-ops://hosted-worker-policy/")
+
+    evidence_output = tmp_path / "hosted-worker-policy-evidence.json"
+    validation = _run_script(
+        "--manifest-json",
+        str(template_output),
+        "--evidence-output",
+        str(evidence_output),
+    )
+
+    assert validation.returncode == 1
+    assert "status must be verified" in validation.stdout
+    assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_checked_in_hosted_worker_policy_template_matches_requirements() -> None:
+    template = json.loads(GENERATED_TEMPLATE.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "hosted-worker-policy-evidence-input/v1"
+    assert template["template_status"] == "pending_private_evidence"
+    assert _template_requirement_keys(template) == HOSTED_WORKER_POLICY_REQUIREMENTS
+
+    for requirement in HOSTED_WORKER_POLICY_REQUIREMENTS:
+        item = template[requirement]
+        assert item["status"] == "pending"
+        assert item["accepted_status"] == "verified"
+        assert item["evidence_ref"] == f"private-ops://hosted-worker-policy/{requirement}"
+
+
 def test_hosted_worker_policy_evidence_requires_evidence_output_for_completion_overlay(
     tmp_path: Path,
 ) -> None:
@@ -287,6 +352,7 @@ def test_private_handoff_runbook_documents_hosted_worker_policy_evidence_cli() -
     runbook = PRIVATE_HANDOFF_RUNBOOK.read_text(encoding="utf-8")
 
     assert "scripts\\hosted_worker_policy_evidence.py" in runbook
+    assert "--template-output <private-hosted-worker-policy-manifest-template.json>" in runbook
     assert "--manifest-json <private-hosted-worker-policy-manifest.json>" in runbook
     assert "hosted-worker-policy-evidence-input/v1" in runbook
     assert "raw_snapshot_retention_policy" in runbook
@@ -336,3 +402,17 @@ def _run_script(*args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+def _template_requirement_keys(template: dict[str, object]) -> list[str]:
+    return [
+        key
+        for key in template
+        if key
+        not in {
+            "schema_version",
+            "captured_at",
+            "template_status",
+            "notes",
+        }
+    ]

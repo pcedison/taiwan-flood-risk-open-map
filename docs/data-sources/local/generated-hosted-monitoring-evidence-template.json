@@ -1,0 +1,31 @@
+{
+  "schema_version": "hosted-monitoring-evidence-input/v1",
+  "captured_at": "2026-07-01T01:30:00+08:00",
+  "template_status": "pending_private_evidence",
+  "notes": [
+    "Fill this template only after hosted alert routing and scheduler monitoring evidence are accepted.",
+    "Keep filled private evidence refs in private ops storage; do not commit completed private evidence.",
+    "The default pending status is intentionally rejected by this CLI and by the completion audit."
+  ],
+  "hosted_alert_routing": {
+    "status": "pending",
+    "accepted_status": "verified",
+    "owner": "REPLACE_WITH_OWNER",
+    "evidence_ref": "private-ops://hosted-monitoring/hosted_alert_routing",
+    "reviewed_at": "REPLACE_WITH_REVIEWED_AT"
+  },
+  "scheduled_freshness_checks": {
+    "status": "pending",
+    "accepted_status": "verified",
+    "cadence": "REPLACE_WITH_ISO_8601_DURATION",
+    "evidence_ref": "private-ops://hosted-monitoring/scheduled_freshness_checks",
+    "observed_at": "REPLACE_WITH_OBSERVED_AT"
+  },
+  "worker_scheduler_alert_ownership": {
+    "status": "pending",
+    "accepted_status": "verified",
+    "owner": "REPLACE_WITH_OWNER",
+    "evidence_ref": "private-ops://hosted-monitoring/worker_scheduler_alert_ownership",
+    "reviewed_at": "REPLACE_WITH_REVIEWED_AT"
+  }
+}

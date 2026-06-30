@@ -12,6 +12,18 @@ AUDIT_SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
 PRIVATE_HANDOFF_RUNBOOK = (
     REPO_ROOT / "docs" / "runbooks" / "private-production-evidence-handoff.md"
 )
+GENERATED_TEMPLATE = (
+    REPO_ROOT
+    / "docs"
+    / "data-sources"
+    / "local"
+    / "generated-hosted-monitoring-evidence-template.json"
+)
+HOSTED_MONITORING_REQUIREMENTS = [
+    "hosted_alert_routing",
+    "scheduled_freshness_checks",
+    "worker_scheduler_alert_ownership",
+]
 
 
 def test_hosted_monitoring_evidence_writes_completion_overlay(
@@ -246,12 +258,98 @@ def test_hosted_monitoring_evidence_accepts_powershell_utf8_bom_manifest(
     assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "passed"
 
 
+def test_hosted_monitoring_evidence_writes_pending_manifest_template(
+    tmp_path: Path,
+) -> None:
+    template_output = tmp_path / "hosted-monitoring-template.json"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--template-output",
+            str(template_output),
+            "--captured-at",
+            "2026-07-01T01:25:00+08:00",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    template = json.loads(template_output.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "hosted-monitoring-evidence-input/v1"
+    assert template["captured_at"] == "2026-07-01T01:25:00+08:00"
+    assert template["template_status"] == "pending_private_evidence"
+    assert _template_requirement_keys(template) == HOSTED_MONITORING_REQUIREMENTS
+
+    for requirement in HOSTED_MONITORING_REQUIREMENTS:
+        item = template[requirement]
+        assert item["status"] == "pending"
+        assert item["accepted_status"] == "verified"
+        assert item["evidence_ref"].startswith("private-ops://hosted-monitoring/")
+
+    evidence_output = tmp_path / "hosted-monitoring-evidence.json"
+    validation = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--manifest-json",
+            str(template_output),
+            "--evidence-output",
+            str(evidence_output),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert validation.returncode == 1
+    assert "status must be verified" in validation.stdout
+    assert json.loads(evidence_output.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+def test_checked_in_hosted_monitoring_template_matches_requirements() -> None:
+    template = json.loads(GENERATED_TEMPLATE.read_text(encoding="utf-8"))
+
+    assert template["schema_version"] == "hosted-monitoring-evidence-input/v1"
+    assert template["template_status"] == "pending_private_evidence"
+    assert _template_requirement_keys(template) == HOSTED_MONITORING_REQUIREMENTS
+
+    for requirement in HOSTED_MONITORING_REQUIREMENTS:
+        item = template[requirement]
+        assert item["status"] == "pending"
+        assert item["accepted_status"] == "verified"
+        assert item["evidence_ref"] == f"private-ops://hosted-monitoring/{requirement}"
+
+
 def test_private_handoff_runbook_documents_monitoring_evidence_cli() -> None:
     runbook = PRIVATE_HANDOFF_RUNBOOK.read_text(encoding="utf-8")
 
     assert "scripts\\hosted_monitoring_evidence.py" in runbook
+    assert "--template-output <private-monitoring-manifest-template.json>" in runbook
     assert "--manifest-json <private-monitoring-manifest.json>" in runbook
     assert "production_monitoring_and_alerting" in runbook
     assert "hosted_alert_routing" in runbook
     assert "scheduled_freshness_checks" in runbook
     assert "worker_scheduler_alert_ownership" in runbook
+
+
+def _template_requirement_keys(template: dict[str, object]) -> list[str]:
+    return [
+        key
+        for key in template
+        if key
+        not in {
+            "schema_version",
+            "captured_at",
+            "template_status",
+            "notes",
+        }
+    ]
