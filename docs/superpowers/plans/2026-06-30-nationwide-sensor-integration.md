@@ -995,10 +995,12 @@ rewriting code or manually editing completion status.
 - Test: `tests/test_local_source_completion_audit_cli.py`
 
 **Interfaces:**
-- Consumes: `production_gate_evidence[].satisfied_requirements` in the private
+- Consumes: `production_gate_evidence[].satisfied_requirements` and matching
+  `production_gate_evidence[].requirement_evidence[]` entries in the private
   `local-source-completion-evidence/v1` JSON.
 - Produces: completion-audit production gates that can only pass when every
-  required production requirement for that gate is backed by accepted evidence.
+  required production requirement for that gate is backed by requirement-level
+  accepted evidence.
 
 - [x] Write a failing test proving a coarse production gate evidence item does
   not satisfy hosted/production completion.

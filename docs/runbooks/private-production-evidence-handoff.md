@@ -172,6 +172,10 @@ does not echo `evidence_ref` values, and it must remain incomplete until every
 required signal family, official contract/authorization item, hosted worker
 requirement, monitoring requirement, and public-risk requirement has accepted
 evidence.
+Accepted production-gate evidence must include both `satisfied_requirements`
+and matching `requirement_evidence` entries. Each requirement-level entry needs
+its own `evidence_ref` plus `observed_at` for runtime observations or
+`reviewed_at` for policy and ownership approvals.
 
 ## Acceptance Mapping
 

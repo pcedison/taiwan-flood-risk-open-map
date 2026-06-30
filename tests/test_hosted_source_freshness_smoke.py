@@ -106,6 +106,18 @@ def test_hosted_source_freshness_smoke_writes_partial_evidence(
                 "freshness_policy",
                 "worker_persisted_evidence_path",
             ],
+            "requirement_evidence": [
+                {
+                    "requirement": "freshness_policy",
+                    "evidence_ref": f"{evidence_output}#/checked_sources",
+                    "observed_at": "2026-06-30T05:10:00+00:00",
+                },
+                {
+                    "requirement": "worker_persisted_evidence_path",
+                    "evidence_ref": f"{evidence_output}#/checked_sources",
+                    "observed_at": "2026-06-30T05:10:00+00:00",
+                },
+            ],
         }
     ]
 
@@ -123,6 +135,18 @@ def test_hosted_source_freshness_smoke_writes_partial_evidence(
                 "satisfied_requirements": [
                     "freshness_policy",
                     "worker_persisted_evidence_path",
+                ],
+                "requirement_evidence": [
+                    {
+                        "requirement": "freshness_policy",
+                        "evidence_ref": f"{evidence_output}#/checked_sources",
+                        "observed_at": "2026-06-30T05:10:00+00:00",
+                    },
+                    {
+                        "requirement": "worker_persisted_evidence_path",
+                        "evidence_ref": f"{evidence_output}#/checked_sources",
+                        "observed_at": "2026-06-30T05:10:00+00:00",
+                    },
                 ],
             }
         ],

@@ -94,6 +94,13 @@ def test_local_source_completion_audit_cli_merges_completion_evidence_files(
                             "hosted_risk_response_worker_evidence_smoke",
                             "query_point_nearby_coverage_smoke",
                         ],
+                        "requirement_evidence": _requirement_evidence(
+                            "public_risk_worker_evidence_path",
+                            (
+                                "hosted_risk_response_worker_evidence_smoke",
+                                "query_point_nearby_coverage_smoke",
+                            ),
+                        ),
                     }
                 ],
             }
@@ -116,6 +123,12 @@ def test_local_source_completion_audit_cli_merges_completion_evidence_files(
                             PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
                                 "hosted_worker_persisted_evidence"
                             ]
+                        ),
+                        "requirement_evidence": _requirement_evidence(
+                            "hosted_worker_persisted_evidence",
+                            PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                                "hosted_worker_persisted_evidence"
+                            ],
                         ),
                     }
                 ],
@@ -195,6 +208,12 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                         "hosted_worker_persisted_evidence"
                     ]
                 ),
+                "requirement_evidence": _requirement_evidence(
+                    "hosted_worker_persisted_evidence",
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "hosted_worker_persisted_evidence"
+                    ],
+                ),
             },
             {
                 "gate_key": "production_deployment_evidence",
@@ -204,6 +223,12 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                     PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
                         "production_deployment_evidence"
                     ]
+                ),
+                "requirement_evidence": _requirement_evidence(
+                    "production_deployment_evidence",
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "production_deployment_evidence"
+                    ],
                 ),
             },
             {
@@ -215,6 +240,12 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                         "production_monitoring_and_alerting"
                     ]
                 ),
+                "requirement_evidence": _requirement_evidence(
+                    "production_monitoring_and_alerting",
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "production_monitoring_and_alerting"
+                    ],
+                ),
             },
             {
                 "gate_key": "public_risk_worker_evidence_path",
@@ -225,9 +256,26 @@ def _complete_evidence_overlay(plan: dict) -> dict:
                         "public_risk_worker_evidence_path"
                     ]
                 ),
+                "requirement_evidence": _requirement_evidence(
+                    "public_risk_worker_evidence_path",
+                    PRODUCTION_GATE_REQUIRED_REQUIREMENTS[
+                        "public_risk_worker_evidence_path"
+                    ],
+                ),
             },
         ],
     }
+
+
+def _requirement_evidence(gate_key: str, requirements: tuple[str, ...]) -> list[dict]:
+    return [
+        {
+            "requirement": requirement,
+            "evidence_ref": f"private-ops://local-source/{gate_key}/{requirement}",
+            "observed_at": "2026-06-30T12:00:00+08:00",
+        }
+        for requirement in requirements
+    ]
 
 
 def _source_contract_evidence(items: list[dict], *, gate: str) -> list[dict]:

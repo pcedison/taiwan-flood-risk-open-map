@@ -24,6 +24,10 @@ HOSTED_WORKER_REQUIREMENTS = [
     "freshness_policy",
     "worker_persisted_evidence_path",
 ]
+HOSTED_WORKER_REQUIREMENT_EVIDENCE_PATHS = {
+    "freshness_policy": "/checked_sources",
+    "worker_persisted_evidence_path": "/checked_sources",
+}
 ACCEPTABLE_HEALTH_STATUSES = {"healthy", "degraded"}
 ACCEPTABLE_FRESHNESS_STATES = {"fresh", "degraded"}
 REQUIRED_SOURCE_GATE = "data_sources.is_enabled"
@@ -115,9 +119,14 @@ def main(argv: list[str] | None = None) -> int:
             )
 
     status = "failed" if failures else "passed"
+    completion_evidence_ref = args.evidence_output or _default_completion_evidence_ref(
+        base_url,
+        health_evidence,
+    )
     artifact = build_evidence_artifact(
         base_url=base_url,
         captured_at=captured_at,
+        completion_evidence_ref=completion_evidence_ref,
         status=status,
         health=health_evidence,
         required_adapter_keys=required_adapter_keys,
@@ -137,8 +146,7 @@ def main(argv: list[str] | None = None) -> int:
             args.completion_evidence_output,
             build_completion_evidence_overlay(
                 captured_at=captured_at,
-                evidence_ref=args.evidence_output
-                or _default_completion_evidence_ref(base_url, health_evidence),
+                evidence_ref=completion_evidence_ref,
             ),
         )
 
@@ -177,6 +185,7 @@ def build_evidence_artifact(
     *,
     base_url: str,
     captured_at: str,
+    completion_evidence_ref: str,
     status: str,
     health: Mapping[str, Any],
     required_adapter_keys: Sequence[str],
@@ -199,6 +208,10 @@ def build_evidence_artifact(
                 "gate_key": HOSTED_WORKER_GATE_KEY,
                 "status": "accepted",
                 "satisfied_requirements": HOSTED_WORKER_REQUIREMENTS,
+                "requirement_evidence": _requirement_evidence(
+                    captured_at=captured_at,
+                    evidence_ref=completion_evidence_ref,
+                ),
             }
         ],
         "failures": failures,
@@ -221,6 +234,10 @@ def build_completion_evidence_overlay(
                 "status": "accepted",
                 "evidence_ref": evidence_ref,
                 "satisfied_requirements": HOSTED_WORKER_REQUIREMENTS,
+                "requirement_evidence": _requirement_evidence(
+                    captured_at=captured_at,
+                    evidence_ref=evidence_ref,
+                ),
             }
         ],
     }
@@ -298,6 +315,17 @@ def _non_empty_string(value: Any) -> bool:
 def _default_completion_evidence_ref(base_url: str, health: Mapping[str, Any]) -> str:
     deployment_sha = health.get("deployment_sha") or "unknown-sha"
     return f"{base_url}/admin/v1/sources#{deployment_sha}"
+
+
+def _requirement_evidence(*, captured_at: str, evidence_ref: str) -> list[dict[str, str]]:
+    return [
+        {
+            "requirement": requirement,
+            "evidence_ref": f"{evidence_ref}#{path}",
+            "observed_at": captured_at,
+        }
+        for requirement, path in HOSTED_WORKER_REQUIREMENT_EVIDENCE_PATHS.items()
+    ]
 
 
 def _write_json(output_path: str | None, payload: Mapping[str, Any]) -> None:

@@ -80,6 +80,18 @@ def test_hosted_deployment_smoke_writes_evidence_and_completion_overlay(
                 "main_branch_deployed_sha",
                 "ready_dependency_smoke",
             ],
+            "requirement_evidence": [
+                {
+                    "requirement": "main_branch_deployed_sha",
+                    "evidence_ref": f"{evidence_output}#/health/deployment_sha",
+                    "observed_at": "2026-06-30T14:20:00+08:00",
+                },
+                {
+                    "requirement": "ready_dependency_smoke",
+                    "evidence_ref": f"{evidence_output}#/ready/dependencies",
+                    "observed_at": "2026-06-30T14:20:00+08:00",
+                },
+            ],
         }
     ]
 
@@ -97,6 +109,18 @@ def test_hosted_deployment_smoke_writes_evidence_and_completion_overlay(
                 "satisfied_requirements": [
                     "main_branch_deployed_sha",
                     "ready_dependency_smoke",
+                ],
+                "requirement_evidence": [
+                    {
+                        "requirement": "main_branch_deployed_sha",
+                        "evidence_ref": f"{evidence_output}#/health/deployment_sha",
+                        "observed_at": "2026-06-30T14:20:00+08:00",
+                    },
+                    {
+                        "requirement": "ready_dependency_smoke",
+                        "evidence_ref": f"{evidence_output}#/ready/dependencies",
+                        "observed_at": "2026-06-30T14:20:00+08:00",
+                    },
                 ],
             }
         ],
