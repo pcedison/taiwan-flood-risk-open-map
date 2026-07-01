@@ -36,6 +36,7 @@ from app.domain.realtime.local_source_request_packets import (  # noqa: E402
 
 
 SCHEMA_VERSION = "local-source-request-packet-bundle/v1"
+COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 DISPATCH_CHECKLIST_SCHEMA_VERSION = "local-source-dispatch-coverage-checklist/v1"
 DISPATCH_QUEUE_SCHEMA_VERSION = "local-source-request-dispatch-queue/v1"
 DISPATCH_EVIDENCE_SECRET_NAME = "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64"
@@ -82,6 +83,10 @@ def main() -> int:
         dispatched_at=DISPATCHED_AT_PLACEHOLDER,
         follow_up_due_at=FOLLOW_UP_DUE_AT_PLACEHOLDER,
     )
+    request_dispatch_evidence_draft = _request_dispatch_evidence_draft(
+        signal_dispatch_template=signal_dispatch_template,
+        source_contract_template=source_contract_template,
+    )
     dispatch_checklist = _dispatch_coverage_checklist(
         captured_at=args.captured_at,
         signal_dispatch_template=signal_dispatch_template,
@@ -112,6 +117,9 @@ def main() -> int:
         "local-source-source-contract-dispatch-template.json": _json(
             source_contract_template
         ),
+        "local-source-request-dispatch-evidence-draft.json": _json(
+            request_dispatch_evidence_draft
+        ),
         "local-source-dispatch-coverage-checklist.json": _json(
             dispatch_checklist
         ),
@@ -123,6 +131,7 @@ def main() -> int:
         batches,
         official_template=official_template,
         source_contract_template=source_contract_template,
+        request_dispatch_evidence_draft=request_dispatch_evidence_draft,
         dispatch_queue=dispatch_queue,
     )
     all_file_names = tuple(
@@ -165,6 +174,7 @@ def _summary(
     *,
     official_template: dict[str, Any],
     source_contract_template: dict[str, Any],
+    request_dispatch_evidence_draft: dict[str, Any],
     dispatch_queue: dict[str, Any],
 ) -> dict[str, int]:
     signal_gap_county_item_count = sum(
@@ -176,6 +186,9 @@ def _summary(
     source_contract_targets = len(
         source_contract_template.get("source_contract_evidence", [])
     )
+    request_dispatch_draft_targets = len(
+        request_dispatch_evidence_draft.get("signal_family_gap_evidence", [])
+    ) + len(request_dispatch_evidence_draft.get("source_contract_evidence", []))
     dispatch_queue_summary = _mapping(dispatch_queue.get("summary"))
     return {
         "official_request_packet_count": len(packets),
@@ -184,6 +197,7 @@ def _summary(
         "signal_gap_batch_count": len(batches),
         "signal_gap_county_item_count": signal_gap_county_item_count,
         "source_contract_completion_target_count": source_contract_targets,
+        "request_dispatch_evidence_draft_item_count": request_dispatch_draft_targets,
         "dispatch_queue_item_count": _int(
             dispatch_queue_summary.get("dispatch_queue_item_count")
         ),
@@ -193,6 +207,30 @@ def _summary(
         "source_contract_dispatch_queue_item_count": _int(
             dispatch_queue_summary.get("source_contract_dispatch_queue_item_count")
         ),
+    }
+
+
+def _request_dispatch_evidence_draft(
+    *,
+    signal_dispatch_template: dict[str, Any],
+    source_contract_template: dict[str, Any],
+) -> dict[str, Any]:
+    signal_items = [
+        dict(item)
+        for item in signal_dispatch_template.get("signal_family_gap_evidence", [])
+        if isinstance(item, dict)
+    ]
+    source_contract_items = [
+        dict(item)
+        for item in source_contract_template.get("source_contract_evidence", [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "schema_version": COMPLETION_EVIDENCE_SCHEMA_VERSION,
+        "captured_at": DISPATCHED_AT_PLACEHOLDER,
+        "signal_family_gap_evidence": signal_items,
+        "source_contract_evidence": source_contract_items,
+        "production_gate_evidence": [],
     }
 
 
@@ -515,6 +553,8 @@ def _file_purpose(name: str) -> str:
         return "placeholder dispatch overlay template for signal-family requests"
     if name.endswith("source-contract-dispatch-template.json"):
         return "placeholder dispatch overlay template for source-contract requests"
+    if name.endswith("request-dispatch-evidence-draft.json"):
+        return "single private dispatch evidence draft for LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 after review"
     if name.endswith("dispatch-coverage-checklist.json"):
         return "public-safe checklist for private dispatch evidence coverage"
     if name.endswith("request-dispatch-queue.json"):

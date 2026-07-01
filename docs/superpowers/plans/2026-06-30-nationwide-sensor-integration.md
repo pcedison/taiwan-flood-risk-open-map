@@ -2434,6 +2434,41 @@ smoke SHA details when the artifact exists. This keeps stale Zeabur deployments
 visible in GitHub issue history while still preventing failed or wrong-SHA
 smoke runs from emitting completion evidence.
 
+## Task 76: Local Source Dispatch Evidence Draft
+
+**Files:**
+- Modify: `scripts/local-source-request-packet-bundle.py`
+- Modify: `tests/test_local_source_request_packet_bundle_cli.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: `local-source-signal-gap-dispatch-template.json` and
+  `local-source-source-contract-dispatch-template.json`.
+- Produces: `local-source-request-dispatch-evidence-draft.json`, a single
+  `local-source-completion-evidence/v1` draft for reviewed private
+  `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` handling.
+
+- [x] Write a failing bundle CLI test requiring the new draft artifact,
+  `local-source-completion-evidence/v1` schema, 17 signal-family rows,
+  6 source-contract rows, `request_dispatched` status, and placeholder private
+  evidence refs.
+- [x] Add the minimal bundle generator output by combining the existing
+  dispatch templates without changing their completion semantics.
+- [x] Add manifest/summary visibility so operators can see the 23-row draft
+  target count.
+- [x] Document that the draft is an operator starting point only; filled
+  private evidence must stay out of git/artifacts and still pass the
+  follow-up/completion audit routes before gates can be accepted.
+
+Completed 2026-07-01: the request packet bundle now includes a single
+dispatch evidence draft that matches the private follow-up overlay schema. This
+reduces the manual joining step between signal-family and source-contract
+dispatch templates, but it does not satisfy `required_signal_families` or
+`official_authorization_and_contracts`; the public artifact still uses
+placeholders until actual official dispatch evidence is privately reviewed.
+
 ## Completion Gates
 
 The full objective is complete only when:

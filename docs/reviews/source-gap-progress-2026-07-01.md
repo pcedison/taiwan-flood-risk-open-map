@@ -106,13 +106,23 @@ The bundle includes:
 - `local-source-signal-gap-request-batches.md`
 - `local-source-signal-gap-dispatch-template.json`
 - `local-source-source-contract-dispatch-template.json`
+- `local-source-request-dispatch-evidence-draft.json`
 - `local-source-dispatch-coverage-checklist.json`
 - `local-source-request-dispatch-queue.json`
 
 This is still not completion evidence: the dispatch templates contain
-placeholders, and the coverage checklist intentionally excludes private
-evidence refs. Dispatch records must be filled only inside private evidence
-handling after actual official dispatch or accepted replies.
+placeholders, the draft contains placeholder private evidence refs, and the
+coverage checklist intentionally excludes private evidence refs. Dispatch
+records must be filled only inside private evidence handling after actual
+official dispatch or accepted replies.
+
+`local-source-request-dispatch-evidence-draft.json` combines the 17
+signal-family dispatch rows and 6 source-contract dispatch rows into one
+`local-source-completion-evidence/v1` starting point for
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`. This removes the manual step of
+joining two separate templates, but it is still public-safe placeholder output:
+the filled version must stay in private ops storage and is accepted only after
+the follow-up/completion audit routes sanitize and validate it.
 
 The request dispatch queue is the machine-readable operator checklist for the
 same work. It groups the remaining dispatch work into 9 public-safe rows:
