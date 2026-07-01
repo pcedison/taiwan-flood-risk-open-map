@@ -725,11 +725,14 @@ By default the workflow fails when any signal-gap group or source-contract item
 still needs official dispatch. The failure route creates or comments on the
 single public-safe issue
 `[local-source-dispatch-watchdog] Local source dispatch required`. The issue
-body includes only run URL, SHA, aggregate counts, and gate categories; it does
-not include tokens, private evidence refs, manifests, or official
-correspondence. If a future run finds no dispatch is required, the workflow
-comments on and closes that same issue so the GitHub issue state follows the
-watchdog state.
+body includes only run URL, SHA, aggregate counts, gate categories, and
+public-safe operator next steps. It does not include tokens, private evidence
+refs, manifests, or official correspondence. The next steps point operators to
+review the request packet bundle, send signal-family and source-contract
+follow-up requests, then store reviewed dispatch progress in
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` only after private review. If a
+future run finds no dispatch is required, the workflow comments on and closes
+that same issue so the GitHub issue state follows the watchdog state.
 
 This watchdog is not completion evidence. It is an operational reminder that
 `required_signal_families` and `official_authorization_and_contracts` still

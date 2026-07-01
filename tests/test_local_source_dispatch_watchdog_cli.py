@@ -129,6 +129,29 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
         "send_official_read_api_requests",
         "resolve_authorization_gated_adapters",
     ]
+    assert payload["operator_next_steps"] == [
+        (
+            "Review the uploaded local-source request packet bundle before sending "
+            "official requests."
+        ),
+        (
+            "Send signal-family read API requests for 3 unresolved groups: "
+            "pump_or_gate_status."
+        ),
+        (
+            "Send source-contract follow-up for 6 items across authorization, "
+            "metadata release, and public API contract review gates."
+        ),
+        (
+            "After dispatch, generate private dispatch evidence and store it in "
+            "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 only after review."
+        ),
+        (
+            "Do not mark completion until accepted official reply, production "
+            "adapter, authorization-gated adapter, or official-unavailable evidence "
+            "is recorded."
+        ),
+    ]
     assert payload["signal_gap_groups"][0]["target_signal_type"] == (
         "pump_or_gate_status"
     )
@@ -142,6 +165,8 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
     assert "private-ops://" not in result.stdout
     assert "private-ops://" not in json.dumps(payload, ensure_ascii=False)
     assert "pump_or_gate_status" in markdown
+    assert "Operator Next Steps" in markdown
+    assert "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64" in markdown
     assert "official request" in markdown
 
 

@@ -57,6 +57,9 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     script = issue_step["with"]["script"]
     assert "local-source-dispatch-watchdog" in script
     assert "Local source dispatch required" in script
+    assert "operator_next_steps" in script
+    assert "Operator next steps:" in script
+    assert "stepLines" in script
     assert "github.rest.issues.create" in script
     assert "github.rest.issues.createComment" in script
     assert "private evidence" in script

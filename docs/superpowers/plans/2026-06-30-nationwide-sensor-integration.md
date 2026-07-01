@@ -2336,6 +2336,42 @@ watchdogs now have both failure-open/comment and success-close lifecycle paths.
 This improves operational alert hygiene, but the open gates remain incomplete
 until their underlying evidence is accepted.
 
+## Task 73: Local Source Dispatch Operator Next Steps
+
+**Files:**
+- Modify: `scripts/local-source-dispatch-watchdog.py`
+- Modify: `.github/workflows/local-source-dispatch-watchdog.yml`
+- Modify: `tests/test_local_source_dispatch_watchdog_cli.py`
+- Modify: `tests/test_local_source_dispatch_watchdog_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+
+**Interfaces:**
+- Consumes: `local-source-signal-gap-dispatch-readiness/v1` and
+  `local-source-contract-dispatch-readiness/v1` artifacts.
+- Produces: public-safe `operator_next_steps` in
+  `local-source-dispatch-watchdog/v1` JSON/Markdown and the stable
+  `[local-source-dispatch-watchdog] Local source dispatch required` issue
+  route.
+
+- [x] Write a failing CLI test requiring public-safe operator next steps
+  without private evidence refs.
+- [x] Add next steps that point operators to request packet review,
+  signal-family request dispatch, source-contract follow-up, reviewed
+  `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` setup, and accepted completion
+  evidence requirements.
+- [x] Write a failing workflow contract test requiring the issue route to print
+  the report's operator next steps.
+- [x] Document that this improves official request handoff but does not satisfy
+  `required_signal_families` or `official_authorization_and_contracts`.
+
+Completed 2026-07-01: local-source dispatch alerts now tell operators exactly
+what to do next instead of only reporting counts. The issue route remains
+public-safe and still omits tokens, private evidence refs, manifests, and
+official correspondence. The completion gates remain incomplete until accepted
+official replies, production adapters, authorization-gated adapters, released
+contracts, or official-unavailable evidence are recorded.
+
 ## Completion Gates
 
 The full objective is complete only when:
