@@ -260,8 +260,10 @@ The repository also has a scheduled hosted monitoring workflow:
 .github/workflows/hosted-monitoring.yml
 ```
 
-It runs every 30 minutes and can also be started manually from GitHub Actions.
-Each run executes:
+It runs twice per hour at `7,37 * * * *` and can also be started manually from
+GitHub Actions. The offset avoids the high-load top-of-hour and half-hour
+GitHub Actions schedule windows while preserving the 30-minute cadence. Each
+run executes:
 
 - `scripts/public-api-contract-probe.py` before hosted deployment smoke, so the
   public API contract-review queue is refreshed even when the deployed SHA is
@@ -305,8 +307,8 @@ Each run executes:
   expected main SHA within the accepted freshness window, and it writes a
   public-safe JSON/Markdown report without reading secrets.
 - `.github/workflows/hosted-monitoring-schedule-watchdog.yml` runs that same
-  schedule-readiness watchdog at `17,47 * * * *`, offset from the main Hosted
-  Monitoring cron. It uploads public-safe JSON/Markdown artifacts and opens or
+  schedule-readiness watchdog at `17,47 * * * *`, ten minutes after the main
+  Hosted Monitoring cron. It uploads public-safe JSON/Markdown artifacts and opens or
   comments on `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`
   when the latest real schedule run is missing, failed, stale, or on the wrong
   SHA. On a successful readiness run, it comments on and closes that stable

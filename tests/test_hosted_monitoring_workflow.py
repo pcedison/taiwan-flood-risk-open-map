@@ -34,7 +34,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "default": "false",
         "type": "boolean",
     }
-    assert triggers["schedule"][0]["cron"] == "*/30 * * * *"
+    assert triggers["schedule"][0]["cron"] == "7,37 * * * *"
 
     job = workflow["jobs"]["hosted-monitoring"]
     assert job["permissions"] == {"contents": "read", "issues": "write"}
@@ -283,6 +283,9 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         schedule_evidence_step["run"]
     )
     assert "--event-name \"${GITHUB_EVENT_NAME}\"" in schedule_evidence_step["run"]
+    assert "--cron \"${{ github.event.schedule || '7,37 * * * *' }}\"" in (
+        schedule_evidence_step["run"]
+    )
     assert "--evidence-output artifacts/hosted-monitoring-schedule-evidence.json" in (
         schedule_evidence_step["run"]
     )
