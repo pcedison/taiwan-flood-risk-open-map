@@ -44,6 +44,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         "local-source-signal-gap-request-batches.md",
         "local-source-signal-gap-dispatch-template.json",
         "local-source-source-contract-dispatch-template.json",
+        "local-source-dispatch-coverage-checklist.json",
     }
     assert {path.name for path in output_dir.iterdir()} == expected_files
 
@@ -89,6 +90,36 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         item["evidence_ref"]
         for item in source_contract_template["source_contract_evidence"]
     } == {"REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF"}
+
+    dispatch_checklist = json.loads(
+        (
+            output_dir / "local-source-dispatch-coverage-checklist.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert (
+        dispatch_checklist["schema_version"]
+        == "local-source-dispatch-coverage-checklist/v1"
+    )
+    assert dispatch_checklist["secret_name"] == (
+        "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64"
+    )
+    assert dispatch_checklist["summary"] == {
+        "total_dispatch_item_count": 23,
+        "signal_family_gap_dispatch_item_count": 17,
+        "source_contract_dispatch_item_count": 6,
+    }
+    assert {
+        item["completion_gate"]
+        for item in dispatch_checklist["signal_family_gap_dispatch_items"]
+    } == {"required_signal_families"}
+    assert {
+        item["completion_gate"]
+        for item in dispatch_checklist["source_contract_dispatch_items"]
+    } == {"official_authorization_and_contracts"}
+    assert "private-ops://" not in json.dumps(
+        dispatch_checklist,
+        ensure_ascii=False,
+    )
 
     summary_markdown = (
         output_dir / "local-source-request-packet-bundle.md"

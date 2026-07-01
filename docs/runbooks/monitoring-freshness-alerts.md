@@ -425,6 +425,7 @@ every hosted monitoring run:
 - `local-source-signal-gap-request-batches.md`
 - `local-source-signal-gap-dispatch-template.json`
 - `local-source-source-contract-dispatch-template.json`
+- `local-source-dispatch-coverage-checklist.json`
 - `hosted-monitoring-schedule-evidence.json`
 - `hosted-monitoring-schedule-completion-evidence.json` on scheduled runs only
   after earlier non-`always()` monitoring checks pass
@@ -455,10 +456,10 @@ the gate without accepted private source-contract evidence.
 
 The `local-source-request-packet-bundle-*` and related `local-source-*template`
 artifacts are the operator handoff for that same unfinished work. They collect
-the generated official request bodies, signal-family batches, and placeholder
-dispatch/completion overlays in one hosted artifact set. They intentionally use
-placeholder evidence refs and are not folded into the completion audit as
-accepted evidence.
+the generated official request bodies, signal-family batches, placeholder
+dispatch/completion overlays, and a public-safe dispatch coverage checklist in
+one hosted artifact set. They intentionally use placeholder evidence refs or no
+evidence refs and are not folded into the completion audit as accepted evidence.
 
 `hosted-private-evidence-readiness.json` lists the configured/missing state for
 `ADMIN_BEARER_TOKEN`, `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
@@ -720,7 +721,7 @@ at `7 16 * * *` and can also be started manually. The workflow refreshes:
 - signal-gap discovery from the public data.gov.tw export,
 - signal-gap dispatch readiness,
 - source-contract dispatch readiness,
-- the public-safe request packet bundle,
+- the public-safe request packet bundle and dispatch coverage checklist,
 - `local-source-dispatch-watchdog/v1` JSON and Markdown summaries.
 
 By default the workflow fails when any signal-gap group or source-contract item
