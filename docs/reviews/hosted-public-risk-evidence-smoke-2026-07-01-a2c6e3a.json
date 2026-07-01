@@ -1,0 +1,82 @@
+{
+  "schema_version": "hosted-public-risk-evidence-smoke/v1",
+  "captured_at": "2026-07-01T07:23:46+00:00",
+  "base_url": "https://floodrisk.cc",
+  "status": "passed",
+  "health": {
+    "status_code": 200,
+    "service": "flood-risk-api",
+    "version": "public-beta-mvp-2026-05-04",
+    "deployment_sha": "a2c6e3a6d5f6819a2d3b5c1ffa0805c655eb4838"
+  },
+  "request": {
+    "lat": 23.01929,
+    "lng": 120.18726,
+    "radius_m": 500,
+    "location_text": "Tainan hosted public risk evidence smoke"
+  },
+  "risk_assessment": {
+    "assessment_id": "522cb530-5bf2-5daf-8be6-9a56ec5932d8",
+    "levels": {
+      "realtime": "低",
+      "historical": "未知",
+      "confidence": "中"
+    },
+    "worker_evidence": {
+      "freshness_source_ids": [
+        "cwa-rainfall",
+        "wra-water-level"
+      ],
+      "official_evidence_event_types": [
+        "rainfall",
+        "water_level"
+      ]
+    },
+    "nearby_coverage": {
+      "overall_level": "low",
+      "query_radius_m": 500,
+      "radius_buckets_m": [
+        500,
+        1000,
+        3000,
+        5000
+      ],
+      "signal_types": [
+        "rainfall",
+        "water_level",
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status",
+        "flood_warning",
+        "status_only"
+      ],
+      "missing_signal_types": [
+        "rainfall",
+        "flood_depth"
+      ]
+    }
+  },
+  "completion_evidence_targets": [
+    {
+      "gate_key": "public_risk_worker_evidence_path",
+      "status": "accepted",
+      "satisfied_requirements": [
+        "hosted_risk_response_worker_evidence_smoke",
+        "query_point_nearby_coverage_smoke"
+      ],
+      "requirement_evidence": [
+        {
+          "requirement": "hosted_risk_response_worker_evidence_smoke",
+          "evidence_ref": "docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-a2c6e3a.json#/risk_assessment/worker_evidence",
+          "observed_at": "2026-07-01T07:23:46+00:00"
+        },
+        {
+          "requirement": "query_point_nearby_coverage_smoke",
+          "evidence_ref": "docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-a2c6e3a.json#/risk_assessment/nearby_coverage",
+          "observed_at": "2026-07-01T07:23:46+00:00"
+        }
+      ]
+    }
+  ],
+  "failures": []
+}

@@ -224,6 +224,37 @@ Hosted Monitoring schedule run is failed, stale, and on older SHA
 `scheduled_freshness_checks` completion evidence was emitted for
 `fd3a4598ca8f72f32a0ce768ab3c8a8fb69874f0`.
 
+## Current Main Evidence Refresh After Schedule Watchdog
+
+After PR #67 merged, hosted deployment and public risk smoke were refreshed for
+main merge SHA `a2c6e3a6d5f6819a2d3b5c1ffa0805c655eb4838`.
+
+Artifacts:
+
+- `docs/reviews/hosted-deployment-smoke-2026-07-01-a2c6e3a.json`
+- `docs/reviews/hosted-deployment-completion-evidence-2026-07-01-a2c6e3a.json`
+- `docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-a2c6e3a.json`
+- `docs/reviews/hosted-public-risk-completion-evidence-2026-07-01-a2c6e3a.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-a2c6e3a.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-a2c6e3a.md`
+- `docs/reviews/completion-audit-2026-07-01-a2c6e3a.json`
+- `docs/reviews/completion-audit-2026-07-01-a2c6e3a.md`
+
+The hosted deployment smoke passed for the current Zeabur deployment SHA, and
+the public risk evidence smoke passed against the Tainan query-point scenario.
+The refreshed completion audit still reports `overall_status: incomplete`:
+`production_deployment_evidence` and `public_risk_worker_evidence_path` are
+satisfied for this deployed SHA, while the source-family,
+official authorization/contract, hosted worker, and monitoring gates remain
+blocked.
+
+The schedule readiness refresh still reports `status: failed`. The latest real
+Hosted Monitoring `schedule` run is run `28493475510`, failed on older SHA
+`9d671d2a4a63ec30ff8a79204b7346304404f15f`, and was stale relative to the
+90-minute readiness window when checked. No `scheduled_freshness_checks`
+completion evidence was emitted for
+`a2c6e3a6d5f6819a2d3b5c1ffa0805c655eb4838`.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,
