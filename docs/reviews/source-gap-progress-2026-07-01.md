@@ -197,6 +197,14 @@ The 2026-07-01 live watchdog run checked the current expected main SHA
 90-minute readiness window. No `scheduled_freshness_checks` completion overlay
 was produced from that watchdog run.
 
+The schedule watchdog now performs one remediation action when readiness fails:
+it dispatches Hosted Monitoring with the expected main SHA and uploads
+`hosted-monitoring-schedule-fallback-dispatch.json`. This keeps hosted
+freshness smoke moving even when the direct GitHub `schedule` event is stale.
+The fallback dispatch is intentionally not accepted as
+`scheduled_freshness_checks` completion evidence; the gate still requires a
+successful real schedule run or reviewed private monitoring evidence.
+
 Hosted Monitoring failures now also have a public-safe issue route:
 `[hosted-monitoring-alert] Hosted Monitoring failure`. The workflow creates the
 issue once and comments on later failures with only the run URL, workflow,
