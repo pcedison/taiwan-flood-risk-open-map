@@ -270,6 +270,9 @@ Each run executes:
   data.gov.tw dataset export for every current signal-gap group.
 - `scripts/local-source-signal-gap-dispatch-readiness.py` to turn the latest
   signal-gap discovery summary into a public-safe dispatch checklist.
+- `scripts/local-source-contract-dispatch-readiness.py` to publish a
+  public-safe checklist for authorization, metadata release, and public API
+  contract request dispatch.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -332,6 +335,7 @@ every hosted monitoring run:
 - `signal-gap-discovery-refresh-flood-depth.json`
 - `signal-gap-discovery-refresh-sewer-water-level.json`
 - `signal-gap-dispatch-readiness.json`
+- `source-contract-dispatch-readiness.json`
 
 These artifacts monitor whether official open-data catalogs have published new
 machine-readable candidates for the unresolved signal families. A
@@ -345,6 +349,12 @@ private dispatch evidence refs. It lists each unresolved signal family, the
 current discovery counts, whether official read API requests should still be
 sent, and the exact command operators can use to generate private dispatch
 evidence after sending those requests.
+
+`source-contract-dispatch-readiness.json` provides the same public-safe dispatch
+checklist for the `official_authorization_and_contracts` gate. It lists the
+remaining authorization requests, metadata-release monitor, and public API
+contract reviews, but it does not prove requests were sent and does not satisfy
+the gate without accepted private source-contract evidence.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 

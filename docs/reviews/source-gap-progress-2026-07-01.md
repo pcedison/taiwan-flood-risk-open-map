@@ -70,6 +70,23 @@ the run. Scheduled monitoring remains non-strict by default.
 Hosted Monitoring also now uploads `signal-gap-dispatch-readiness.json` on every
 scheduled/manual run after the data.gov.tw discovery refresh.
 
+## Source Contract Dispatch Readiness
+
+Hosted Monitoring now also uploads `source-contract-dispatch-readiness.json`.
+The local 2026-07-01 review artifact is:
+
+- `docs/reviews/source-contract-dispatch-readiness-2026-07-01.json`
+
+It records that all six current `official_authorization_and_contracts` items
+still need dispatch/follow-up:
+
+- `authorization_request`: 2
+- `metadata_release_monitor`: 1
+- `public_api_contract_review`: 3
+
+This remains progress tracking only. The gate is still incomplete until private
+source-contract evidence is accepted for each county/gate item.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

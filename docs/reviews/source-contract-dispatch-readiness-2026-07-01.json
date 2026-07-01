@@ -1,0 +1,228 @@
+{
+  "captured_at": "2026-07-01T12:20:00+08:00",
+  "groups": [
+    {
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_recommended": true,
+      "gate": "authorization_request",
+      "item_count": 2
+    },
+    {
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_recommended": true,
+      "gate": "metadata_release_monitor",
+      "item_count": 1
+    },
+    {
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_recommended": true,
+      "gate": "public_api_contract_review",
+      "item_count": 3
+    }
+  ],
+  "items": [
+    {
+      "accepted_completion_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "county": "花蓮縣",
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --county '花蓮縣' --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "source_contract_completion_evidence_missing",
+        "official_request_or_release_followup_required"
+      ],
+      "dispatch_recommended": true,
+      "gate": "authorization_request",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format markdown --county '花蓮縣'",
+      "packet_type": "authorization_request",
+      "requested_counterparty": "花蓮縣政府 / Senslink 行動水情維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_types": [],
+      "tracking_status": "needs_authorization_request"
+    },
+    {
+      "accepted_completion_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "county": "金門縣",
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --county '金門縣' --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "source_contract_completion_evidence_missing",
+        "official_request_or_release_followup_required"
+      ],
+      "dispatch_recommended": true,
+      "gate": "authorization_request",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format markdown --county '金門縣'",
+      "packet_type": "authorization_request",
+      "requested_counterparty": "金門縣政府 / KWIS 維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_types": [
+        "pump_or_gate_status"
+      ],
+      "tracking_status": "needs_authorization_request"
+    },
+    {
+      "accepted_completion_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "county": "連江縣",
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --county '連江縣' --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "source_contract_completion_evidence_missing",
+        "official_request_or_release_followup_required"
+      ],
+      "dispatch_recommended": true,
+      "gate": "metadata_release_monitor",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format markdown --county '連江縣'",
+      "packet_type": "metadata_release_request",
+      "requested_counterparty": "連江縣政府公開資料或防災水利窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_types": [
+        "flood_depth",
+        "sewer_water_level",
+        "pump_or_gate_status"
+      ],
+      "tracking_status": "monitoring_open_data_release"
+    },
+    {
+      "accepted_completion_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "county": "屏東縣",
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --county '屏東縣' --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "source_contract_completion_evidence_missing",
+        "official_request_or_release_followup_required"
+      ],
+      "dispatch_recommended": true,
+      "gate": "public_api_contract_review",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format markdown --county '屏東縣'",
+      "packet_type": "public_api_contract_request",
+      "requested_counterparty": "屏東縣政府公開資料或水利防災維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_types": [],
+      "tracking_status": "needs_public_read_api_contract"
+    },
+    {
+      "accepted_completion_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "county": "臺東縣",
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --county '臺東縣' --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "source_contract_completion_evidence_missing",
+        "official_request_or_release_followup_required"
+      ],
+      "dispatch_recommended": true,
+      "gate": "public_api_contract_review",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format markdown --county '臺東縣'",
+      "packet_type": "public_api_contract_request",
+      "requested_counterparty": "臺東縣政府公開資料或水利防災維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_types": [
+        "pump_or_gate_status"
+      ],
+      "tracking_status": "needs_public_read_api_contract"
+    },
+    {
+      "accepted_completion_statuses": [
+        "accepted",
+        "authorized",
+        "contract_verified",
+        "official_unavailable",
+        "released"
+      ],
+      "county": "苗栗縣",
+      "dispatch_command": "python scripts/local-source-request-packets.py --format source-contract-dispatch-evidence --county '苗栗縣' --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "source_contract_completion_evidence_missing",
+        "official_request_or_release_followup_required"
+      ],
+      "dispatch_recommended": true,
+      "gate": "public_api_contract_review",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format markdown --county '苗栗縣'",
+      "packet_type": "public_api_contract_request",
+      "requested_counterparty": "苗栗縣政府公開資料或水利防災維運窗口",
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_types": [
+        "pump_or_gate_status"
+      ],
+      "tracking_status": "needs_public_read_api_contract"
+    }
+  ],
+  "notes": [
+    "This public artifact is a dispatch checklist, not proof that requests were sent.",
+    "It intentionally omits private evidence refs, official reply refs, tokens, and correspondence.",
+    "The official_authorization_and_contracts gate remains incomplete until accepted source-contract evidence is recorded."
+  ],
+  "schema_version": "local-source-contract-dispatch-readiness/v1",
+  "summary": {
+    "authorization_request_count": 2,
+    "dispatch_recommended_item_count": 6,
+    "metadata_release_monitor_count": 1,
+    "public_api_contract_review_count": 3,
+    "source_contract_item_count": 6
+  }
+}
