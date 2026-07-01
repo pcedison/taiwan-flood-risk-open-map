@@ -154,6 +154,18 @@ as `skipped` and do not produce completion evidence, and the monitoring gate
 still needs accepted evidence for `hosted_alert_routing` and
 `worker_scheduler_alert_ownership`.
 
+The schedule itself is now checked by a separate public-safe watchdog artifact:
+
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01.md`
+
+The 2026-07-01 live watchdog run checked the current expected main SHA
+`2d86ca32718ae4ef65a8e30c59c84028b0000a1b`. The latest real GitHub
+`schedule` event was still run `28493475510`, which failed on older SHA
+`9d671d2a4a63ec30ff8a79204b7346304404f15f` and was stale relative to the
+90-minute readiness window. No `scheduled_freshness_checks` completion overlay
+was produced from that watchdog run.
+
 ## Hosted Private Evidence Template Bundle
 
 Hosted Monitoring now also publishes a public-safe private evidence template
@@ -198,5 +210,8 @@ authorization/contract, hosted worker, and monitoring gates remain blocked.
   evidence path still require accepted hosted/private evidence.
 - `production_monitoring_and_alerting`: alert routing, scheduled freshness
   checks, and worker/scheduler alert ownership still require accepted evidence.
+  The schedule watchdog currently shows the latest real scheduled run is failed,
+  stale, and not on the current main SHA, so even the `scheduled_freshness_checks`
+  sub-requirement remains unaccepted for the current deployed SHA.
 - `ADMIN_BEARER_TOKEN` and the optional private evidence secrets are not proven
   configured from this local run.

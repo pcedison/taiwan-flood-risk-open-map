@@ -290,6 +290,11 @@ Each run executes:
   schedule-run evidence. On real `schedule` events it also emits partial
   completion evidence for `scheduled_freshness_checks`; manual runs only write
   a skipped evidence artifact.
+- `scripts/hosted-monitoring-schedule-readiness.py` for an operator-side
+  watchdog check of GitHub Actions schedule metadata. It can confirm whether
+  the latest Hosted Monitoring `schedule` run completed successfully on the
+  expected main SHA within the accepted freshness window, and it writes a
+  public-safe JSON/Markdown report without reading secrets.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -449,6 +454,26 @@ monitoring run came from the scheduled trigger. If and only if
 `production_monitoring_and_alerting`. It does not satisfy `hosted_alert_routing`
 or `worker_scheduler_alert_ownership`; those still require the reviewed private
 monitoring manifest.
+
+When the schedule itself needs an external readiness check, run:
+
+```powershell
+python scripts\hosted-monitoring-schedule-readiness.py `
+  --repo "pcedison/taiwan-flood-risk-open-map" `
+  --workflow-name "Hosted Monitoring" `
+  --captured-at "$(Get-Date -Format o)" `
+  --expected-head-sha "$(git rev-parse origin/main)" `
+  --max-age-minutes 90 `
+  --output ".\docs\reviews\hosted-monitoring-schedule-readiness-YYYY-MM-DD.json" `
+  --markdown-output ".\docs\reviews\hosted-monitoring-schedule-readiness-YYYY-MM-DD.md" `
+  --completion-evidence-output ".\tmp\hosted-monitoring-schedule-completion-evidence.json"
+```
+
+The completion-evidence output is written only when the latest GitHub
+`schedule` run is successful, recent, and on the expected SHA. It can supply
+only the `scheduled_freshness_checks` requirement; `hosted_alert_routing` and
+`worker_scheduler_alert_ownership` still require the private hosted monitoring
+manifest.
 
 The hosted private evidence template bundle is an operator handoff, not
 evidence. It publishes pending manifest templates and route mapping for
