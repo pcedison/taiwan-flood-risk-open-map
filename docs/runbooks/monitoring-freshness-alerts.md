@@ -295,6 +295,13 @@ Each run executes:
   the latest Hosted Monitoring `schedule` run completed successfully on the
   expected main SHA within the accepted freshness window, and it writes a
   public-safe JSON/Markdown report without reading secrets.
+- `.github/workflows/hosted-monitoring-schedule-watchdog.yml` runs that same
+  schedule-readiness watchdog at `17,47 * * * *`, offset from the main Hosted
+  Monitoring cron. It uploads public-safe JSON/Markdown artifacts and opens or
+  comments on `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`
+  when the latest real schedule run is missing, failed, stale, or on the wrong
+  SHA. This catches the case where manual Hosted Monitoring dispatches pass but
+  the true GitHub `schedule` path still has not recovered.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -327,6 +334,14 @@ alert channel, but it is not enough by itself to satisfy
 `hosted_alert_routing`; accepted monitoring evidence still needs an owner,
 review timestamp, and evidence ref through the private hosted monitoring
 manifest.
+
+The schedule watchdog issue route is separate from the Hosted Monitoring
+failure route. Its issue title is
+`[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`; it includes
+only the watchdog run URL, workflow, event, and SHA. It does not satisfy
+`scheduled_freshness_checks` on its own. It makes the missing/failing/stale
+schedule state visible until a real Hosted Monitoring `schedule` run succeeds
+on the expected main SHA and emits accepted completion evidence.
 
 Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
 for the workflow commit SHA, or provide the exact deployed SHA while verifying a

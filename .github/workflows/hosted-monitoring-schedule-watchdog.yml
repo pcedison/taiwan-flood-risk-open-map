@@ -1,0 +1,119 @@
+name: Hosted Monitoring Schedule Watchdog
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_head_sha:
+        description: "Expected Hosted Monitoring schedule run SHA. Defaults to this workflow SHA."
+        required: false
+        type: string
+      max_age_minutes:
+        description: "Maximum accepted age for the latest Hosted Monitoring schedule run."
+        required: false
+        default: 90
+        type: number
+      fail_on_not_ready:
+        description: "Fail the watchdog run and route an issue when schedule readiness is not accepted."
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: "17,47 * * * *"
+
+jobs:
+  hosted-schedule-watchdog:
+    name: Hosted schedule watchdog
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      EXPECTED_HEAD_SHA: ${{ github.event.inputs.expected_head_sha || github.sha }}
+      MAX_AGE_MINUTES: ${{ github.event.inputs.max_age_minutes || '90' }}
+      FAIL_ON_NOT_READY: ${{ github.event.inputs.fail_on_not_ready || 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare artifact directory
+        run: mkdir -p artifacts
+
+      - name: Hosted Monitoring schedule readiness
+        run: |
+          set -euo pipefail
+          readiness_args=()
+          if [ "${FAIL_ON_NOT_READY}" = "true" ]; then
+            readiness_args+=(--fail-on-not-ready)
+          fi
+          python scripts/hosted-monitoring-schedule-readiness.py \
+            --expected-head-sha "${EXPECTED_HEAD_SHA}" \
+            --max-age-minutes "${MAX_AGE_MINUTES}" \
+            --output artifacts/hosted-monitoring-schedule-readiness.json \
+            --markdown-output artifacts/hosted-monitoring-schedule-readiness.md \
+            --completion-evidence-output artifacts/hosted-monitoring-schedule-completion-evidence.json \
+            "${readiness_args[@]}"
+
+      - name: Upload schedule watchdog artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-schedule-watchdog-${{ github.run_id }}
+          path: |
+            artifacts/*.json
+            artifacts/*.md
+          if-no-files-found: warn
+
+      - name: Route schedule watchdog failure issue
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "[hosted-schedule-watchdog]";
+            const title = `${marker} Hosted Monitoring schedule not ready`;
+            const runUrl = [
+              process.env.GITHUB_SERVER_URL,
+              process.env.GITHUB_REPOSITORY,
+              "actions/runs",
+              process.env.GITHUB_RUN_ID,
+            ].join("/");
+            const body = [
+              "Hosted Monitoring schedule readiness failed.",
+              "",
+              `- run: ${runUrl}`,
+              `- workflow: ${process.env.GITHUB_WORKFLOW}`,
+              `- event: ${process.env.GITHUB_EVENT_NAME}`,
+              `- sha: ${process.env.GITHUB_SHA}`,
+              "",
+              "Artifacts, if uploaded, are attached to the workflow run.",
+              "This issue route is public-safe and does not include tokens, manifests, or private evidence refs.",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+            const existing = issues.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+              });
+            }

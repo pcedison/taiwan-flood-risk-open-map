@@ -2126,6 +2126,35 @@ Completed 2026-07-01: deployment and public-risk evidence are refreshed for
 latest real GitHub `schedule` run is failed, stale, and on older SHA
 `9d671d2a4a63ec30ff8a79204b7346304404f15f`.
 
+## Task 67: Hosted Schedule Watchdog Workflow
+
+**Files:**
+- Add: `.github/workflows/hosted-monitoring-schedule-watchdog.yml`
+- Add: `tests/test_hosted_monitoring_schedule_watchdog_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: `scripts/hosted-monitoring-schedule-readiness.py`, GitHub Actions
+  schedule-run metadata, and the current workflow SHA.
+- Produces: a scheduled public-safe watchdog workflow at `17,47 * * * *`,
+  uploaded readiness artifacts, and a stable GitHub Issue route
+  `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`.
+
+- [x] Write a failing workflow contract test requiring a scheduled watchdog,
+  `actions: read`, `issues: write`, artifact upload, and failure issue routing.
+- [x] Add a GitHub Actions workflow that runs the existing schedule-readiness
+  CLI with `--fail-on-not-ready`.
+- [x] Document that this closes the observability gap for failed/stale/wrong-SHA
+  real schedule runs but does not itself satisfy `scheduled_freshness_checks`.
+
+Completed 2026-07-01: Hosted Monitoring schedule readiness now has its own
+scheduled watchdog workflow and public-safe issue route. The gate remains
+incomplete until a real Hosted Monitoring `schedule` run succeeds recently on
+the expected main SHA and until monitoring ownership/evidence refs are accepted
+through the private monitoring manifest.
+
 ## Completion Gates
 
 The full objective is complete only when:
