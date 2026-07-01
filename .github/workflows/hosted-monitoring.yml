@@ -85,6 +85,13 @@ jobs:
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --output artifacts/signal-gap-dispatch-readiness.json
 
+      - name: Local source contract dispatch readiness
+        run: |
+          set -euo pipefail
+          python scripts/local-source-contract-dispatch-readiness.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/source-contract-dispatch-readiness.json
+
       - name: Require admin source freshness token
         if: ${{ env.REQUIRE_ADMIN_SOURCE_FRESHNESS == 'true' && env.ADMIN_BEARER_TOKEN == '' }}
         run: |
