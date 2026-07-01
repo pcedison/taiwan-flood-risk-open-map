@@ -318,6 +318,16 @@ ownership, scheduled source freshness evidence, and worker/scheduler alert
 ownership recorded through
 `scripts/hosted_monitoring_evidence.py`.
 
+When Hosted Monitoring fails, the workflow now routes a public-safe GitHub issue
+under the stable title `[hosted-monitoring-alert] Hosted Monitoring failure`.
+The route creates the issue once and adds comments on later failures, including
+only the run URL, workflow, event, and SHA. It intentionally omits secrets,
+private manifests, and private evidence refs. This gives operators a visible
+alert channel, but it is not enough by itself to satisfy
+`hosted_alert_routing`; accepted monitoring evidence still needs an owner,
+review timestamp, and evidence ref through the private hosted monitoring
+manifest.
+
 Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
 for the workflow commit SHA, or provide the exact deployed SHA while verifying a
 specific release. The hosted deployment smoke retries for a bounded window so
