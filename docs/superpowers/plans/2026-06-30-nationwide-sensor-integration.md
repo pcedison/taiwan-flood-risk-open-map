@@ -2303,6 +2303,39 @@ incomplete until a real scheduled run succeeds on the current main SHA and the
 private monitoring manifest accepts alert routing and worker/scheduler alert
 ownership.
 
+## Task 72: Watchdog Issue Recovery Close
+
+**Files:**
+- Modify: `.github/workflows/hosted-monitoring-schedule-watchdog.yml`
+- Modify: `.github/workflows/local-source-dispatch-watchdog.yml`
+- Modify: `.github/workflows/github-actions-secret-readiness-watchdog.yml`
+- Modify: `tests/test_hosted_monitoring_schedule_watchdog_workflow.py`
+- Modify: `tests/test_local_source_dispatch_watchdog_workflow.py`
+- Modify: `tests/test_github_actions_secret_readiness_watchdog_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: the stable public-safe watchdog issue routes for schedule
+  readiness, local-source dispatch, and GitHub Actions secret readiness.
+- Produces: success-path issue lifecycle handling that comments on and closes
+  the matching stable issue when the watchdog later passes.
+
+- [x] Write failing workflow contract tests requiring a success-path close step
+  for the three watchdog issue routes.
+- [x] Add `github-script` success steps that find the matching open issue,
+  write a public-safe resolved comment, and close it with `state_reason:
+  completed`.
+- [x] Document that issue closure clears stale alert state only; it does not
+  satisfy source-family, source-contract, hosted worker, or monitoring
+  completion gates by itself.
+
+Completed 2026-07-01: the schedule, local-source dispatch, and secret readiness
+watchdogs now have both failure-open/comment and success-close lifecycle paths.
+This improves operational alert hygiene, but the open gates remain incomplete
+until their underlying evidence is accepted.
+
 ## Completion Gates
 
 The full objective is complete only when:

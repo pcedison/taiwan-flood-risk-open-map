@@ -309,8 +309,10 @@ Each run executes:
   Monitoring cron. It uploads public-safe JSON/Markdown artifacts and opens or
   comments on `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`
   when the latest real schedule run is missing, failed, stale, or on the wrong
-  SHA. This catches the case where manual Hosted Monitoring dispatches pass but
-  the true GitHub `schedule` path still has not recovered.
+  SHA. On a successful readiness run, it comments on and closes that stable
+  issue if it is still open. This catches the case where manual Hosted
+  Monitoring dispatches pass but the true GitHub `schedule` path still has not
+  recovered, while also clearing stale alerts after recovery.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -350,7 +352,9 @@ failure route. Its issue title is
 only the watchdog run URL, workflow, event, and SHA. It does not satisfy
 `scheduled_freshness_checks` on its own. It makes the missing/failing/stale
 schedule state visible until a real Hosted Monitoring `schedule` run succeeds
-on the expected main SHA and emits accepted completion evidence.
+on the expected main SHA and emits accepted completion evidence. When the
+watchdog later passes, it closes the stale issue automatically after adding a
+public-safe resolved comment.
 
 Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
 for the workflow commit SHA, or provide the exact deployed SHA while verifying a
@@ -723,7 +727,9 @@ single public-safe issue
 `[local-source-dispatch-watchdog] Local source dispatch required`. The issue
 body includes only run URL, SHA, aggregate counts, and gate categories; it does
 not include tokens, private evidence refs, manifests, or official
-correspondence.
+correspondence. If a future run finds no dispatch is required, the workflow
+comments on and closes that same issue so the GitHub issue state follows the
+watchdog state.
 
 This watchdog is not completion evidence. It is an operational reminder that
 `required_signal_families` and `official_authorization_and_contracts` still
@@ -749,7 +755,10 @@ By default the workflow fails when required secret routes still block completion
 gates. The failure route creates or comments on the stable public-safe issue
 `[secret-readiness-watchdog] GitHub Actions required secrets missing`. The issue
 body includes only run URL, SHA, aggregate counts, blocked gate keys, and
-missing secret names.
+missing secret names. If a future run has no completion-blocking missing
+secrets, the workflow comments on and closes that same issue. The close action
+does not prove the decoded private evidence manifests are valid; it only proves
+the secret-presence watchdog no longer sees missing required inputs.
 
 This watchdog is not completion evidence. It proves whether the required GitHub
 Actions inputs are configured enough to attempt the private evidence routes.

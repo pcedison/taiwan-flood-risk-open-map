@@ -77,3 +77,17 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert "Hosted Monitoring schedule not ready" in alert_routing_step["with"]["script"]
     assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
     assert "github.rest.issues.createComment" in alert_routing_step["with"]["script"]
+
+    resolve_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Close resolved schedule watchdog issue"
+    )
+    assert resolve_step["if"] == "${{ success() }}"
+    assert resolve_step["uses"] == "actions/github-script@v7"
+    resolve_script = resolve_step["with"]["script"]
+    assert "hosted-schedule-watchdog" in resolve_script
+    assert "Hosted Monitoring schedule not ready" in resolve_script
+    assert "github.rest.issues.createComment" in resolve_script
+    assert "github.rest.issues.update" in resolve_script
+    assert "resolved" in resolve_script

@@ -178,6 +178,9 @@ real GitHub `schedule` path remains failed, stale, or on an older SHA. It still
 does not satisfy `scheduled_freshness_checks`; only a recent successful real
 Hosted Monitoring `schedule` run on the expected main SHA can emit that
 completion evidence.
+When a later schedule-readiness watchdog run passes, it now comments on and
+closes that same issue automatically, keeping stale GitHub alerts from
+lingering after recovery.
 
 The 2026-07-01 live watchdog run checked the current expected main SHA
 `2d86ca32718ae4ef65a8e30c59c84028b0000a1b`. The latest real GitHub
@@ -276,6 +279,8 @@ source-contract dispatch readiness, and the request packet bundle. It then
 produces a `local-source-dispatch-watchdog/v1` JSON/Markdown artifact and, by
 default, fails when official dispatch work remains. Failure routes to the stable
 issue `[local-source-dispatch-watchdog] Local source dispatch required`.
+When a later watchdog run reports no remaining dispatch work, the workflow now
+comments on and closes that same issue automatically.
 
 The current local run reports `status: dispatch_required` with 17 signal-gap
 county-items, 3 signal-gap groups, 11 metadata-only candidates, 0 live read API
@@ -297,6 +302,8 @@ It does not call the Actions secrets-list API, because `GITHUB_TOKEN` cannot
 list repository secrets. It fails by default when required secret routes still
 block completion gates. Failure routes to the stable issue
 `[secret-readiness-watchdog] GitHub Actions required secrets missing`.
+When a later watchdog run no longer sees completion-blocking missing inputs,
+the workflow now comments on and closes that same issue automatically.
 
 The current local run found 0 of 5 tracked secret inputs configured, 4
 required-for-completion secret inputs missing, and 2 completion-gate blockers:
