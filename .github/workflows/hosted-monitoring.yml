@@ -7,6 +7,11 @@ on:
         description: "Expected /health deployment_sha. Defaults to the workflow commit SHA."
         required: false
         type: string
+      require_admin_source_freshness:
+        description: "Fail the workflow when ADMIN_BEARER_TOKEN is missing instead of skipping /admin/v1/sources freshness evidence."
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "*/30 * * * *"
 
@@ -18,6 +23,9 @@ jobs:
       contents: read
     env:
       ADMIN_BEARER_TOKEN: ${{ secrets.ADMIN_BEARER_TOKEN }}
+      HOSTED_WORKER_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 }}
+      HOSTED_MONITORING_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 }}
+      REQUIRE_ADMIN_SOURCE_FRESHNESS: ${{ github.event.inputs.require_admin_source_freshness || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -55,6 +63,12 @@ jobs:
             --evidence-output artifacts/hosted-public-risk-evidence-smoke.json \
             --completion-evidence-output artifacts/hosted-public-risk-completion-evidence.json
 
+      - name: Require admin source freshness token
+        if: ${{ env.REQUIRE_ADMIN_SOURCE_FRESHNESS == 'true' && env.ADMIN_BEARER_TOKEN == '' }}
+        run: |
+          echo "::error title=ADMIN_BEARER_TOKEN is required::Set the ADMIN_BEARER_TOKEN repository secret or disable require_admin_source_freshness for non-release monitoring runs."
+          exit 1
+
       - name: Hosted source freshness smoke
         if: ${{ env.ADMIN_BEARER_TOKEN != '' }}
         run: |
@@ -65,9 +79,41 @@ jobs:
             --completion-evidence-output artifacts/hosted-source-freshness-completion-evidence.json
 
       - name: Skip admin freshness smoke without token
-        if: ${{ env.ADMIN_BEARER_TOKEN == '' }}
+        if: ${{ env.ADMIN_BEARER_TOKEN == '' && env.REQUIRE_ADMIN_SOURCE_FRESHNESS != 'true' }}
         run: |
           echo "::notice title=Hosted source freshness skipped::ADMIN_BEARER_TOKEN is not configured, so /admin/v1/sources freshness evidence was not collected."
+
+      - name: Hosted worker private evidence
+        if: ${{ env.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 != '' }}
+        run: |
+          set -euo pipefail
+          worker_manifest="${RUNNER_TEMP}/hosted-worker-evidence-manifest.json"
+          printf '%s' "${HOSTED_WORKER_EVIDENCE_MANIFEST_B64}" | base64 --decode > "${worker_manifest}"
+          python scripts/hosted_worker_evidence.py \
+            --manifest-json "${worker_manifest}" \
+            --evidence-output artifacts/hosted-worker-evidence.json \
+            --completion-evidence-output artifacts/hosted-worker-completion-evidence.json
+
+      - name: Skip hosted worker private evidence without manifest
+        if: ${{ env.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 == '' }}
+        run: |
+          echo "::notice title=Hosted worker private evidence skipped::HOSTED_WORKER_EVIDENCE_MANIFEST_B64 is not configured, so hosted_worker_persisted_evidence was not collected."
+
+      - name: Hosted monitoring private evidence
+        if: ${{ env.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 != '' }}
+        run: |
+          set -euo pipefail
+          monitoring_manifest="${RUNNER_TEMP}/hosted-monitoring-evidence-manifest.json"
+          printf '%s' "${HOSTED_MONITORING_EVIDENCE_MANIFEST_B64}" | base64 --decode > "${monitoring_manifest}"
+          python scripts/hosted_monitoring_evidence.py \
+            --manifest-json "${monitoring_manifest}" \
+            --evidence-output artifacts/hosted-monitoring-evidence.json \
+            --completion-evidence-output artifacts/hosted-monitoring-completion-evidence.json
+
+      - name: Skip hosted monitoring private evidence without manifest
+        if: ${{ env.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 == '' }}
+        run: |
+          echo "::notice title=Hosted monitoring private evidence skipped::HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 is not configured, so production_monitoring_and_alerting evidence was not collected."
 
       - name: Hosted completion audit
         if: ${{ always() }}
