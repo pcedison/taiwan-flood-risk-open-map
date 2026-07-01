@@ -42,6 +42,9 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert job["env"]["HOSTED_WORKER_EVIDENCE_MANIFEST_B64"] == (
         "${{ secrets.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 }}"
     )
+    assert job["env"]["HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64"] == (
+        "${{ secrets.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 }}"
+    )
     assert job["env"]["HOSTED_MONITORING_EVIDENCE_MANIFEST_B64"] == (
         "${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 }}"
     )
@@ -61,6 +64,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/hosted_public_risk_evidence_smoke.py" in step_text
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
     assert "scripts/hosted_worker_evidence.py" in step_text
+    assert "scripts/hosted_worker_policy_evidence.py" in step_text
     assert "scripts/hosted_monitoring_evidence.py" in step_text
     assert "scripts/local-source-signal-gap-discovery-refresh.py" in step_text
     assert "scripts/local-source-signal-gap-dispatch-readiness.py" in step_text
@@ -83,9 +87,10 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         step for step in steps if step.get("name") == "Hosted source freshness smoke"
     )
     assert source_freshness_step["if"] == "${{ env.ADMIN_BEARER_TOKEN != '' }}"
-    assert "--completion-evidence-output artifacts/hosted-source-freshness-completion-evidence.json" in (
-        source_freshness_step["run"]
-    )
+    assert (
+        "--completion-evidence-output "
+        "artifacts/hosted-source-freshness-completion-evidence.json"
+    ) in source_freshness_step["run"]
 
     missing_token_step = next(
         step for step in steps if step.get("name") == "Skip admin freshness smoke without token"
@@ -103,6 +108,31 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "--completion-evidence-output artifacts/hosted-worker-completion-evidence.json" in (
         worker_evidence_step["run"]
     )
+
+    worker_policy_evidence_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Hosted worker policy private evidence"
+    )
+    assert worker_policy_evidence_step["if"] == (
+        "${{ env.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 != '' }}"
+    )
+    assert "base64 --decode" in worker_policy_evidence_step["run"]
+    assert "scripts/hosted_worker_policy_evidence.py" in worker_policy_evidence_step["run"]
+    assert (
+        "--completion-evidence-output "
+        "artifacts/hosted-worker-policy-completion-evidence.json"
+    ) in worker_policy_evidence_step["run"]
+
+    missing_worker_policy_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Skip hosted worker policy private evidence without manifest"
+    )
+    assert missing_worker_policy_step["if"] == (
+        "${{ env.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 == '' }}"
+    )
+    assert "::notice" in missing_worker_policy_step["run"]
 
     monitoring_evidence_step = next(
         step for step in steps if step.get("name") == "Hosted monitoring private evidence"

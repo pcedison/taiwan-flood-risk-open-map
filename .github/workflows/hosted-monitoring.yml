@@ -29,6 +29,7 @@ jobs:
     env:
       ADMIN_BEARER_TOKEN: ${{ secrets.ADMIN_BEARER_TOKEN }}
       HOSTED_WORKER_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 }}
+      HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 }}
       HOSTED_MONITORING_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 }}
       LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64: ${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}
       REQUIRE_ADMIN_SOURCE_FRESHNESS: ${{ github.event.inputs.require_admin_source_freshness || 'false' }}
@@ -134,6 +135,22 @@ jobs:
         if: ${{ env.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 == '' }}
         run: |
           echo "::notice title=Hosted worker private evidence skipped::HOSTED_WORKER_EVIDENCE_MANIFEST_B64 is not configured, so hosted_worker_persisted_evidence was not collected."
+
+      - name: Hosted worker policy private evidence
+        if: ${{ env.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 != '' }}
+        run: |
+          set -euo pipefail
+          worker_policy_manifest="${RUNNER_TEMP}/hosted-worker-policy-evidence-manifest.json"
+          printf '%s' "${HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64}" | base64 --decode > "${worker_policy_manifest}"
+          python scripts/hosted_worker_policy_evidence.py \
+            --manifest-json "${worker_policy_manifest}" \
+            --evidence-output artifacts/hosted-worker-policy-evidence.json \
+            --completion-evidence-output artifacts/hosted-worker-policy-completion-evidence.json
+
+      - name: Skip hosted worker policy private evidence without manifest
+        if: ${{ env.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 == '' }}
+        run: |
+          echo "::notice title=Hosted worker policy private evidence skipped::HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 is not configured, so raw snapshot retention, scheduler cadence, and hosted egress policy evidence were not collected."
 
       - name: Hosted monitoring private evidence
         if: ${{ env.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 != '' }}

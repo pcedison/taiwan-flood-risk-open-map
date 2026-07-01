@@ -279,6 +279,8 @@ Each run executes:
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
   `HOSTED_WORKER_EVIDENCE_MANIFEST_B64` is configured.
+- `scripts/hosted_worker_policy_evidence.py` when the repository secret
+  `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64` is configured.
 - `scripts/hosted_monitoring_evidence.py` when the repository secret
   `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64` is configured.
 - `scripts/local-source-request-followups.py` when the repository secret
@@ -313,12 +315,24 @@ runs leave this non-strict by default so they can publish the public-safe
 follow-up report without turning a known external-response wait into a red
 build unless operators opt in.
 
-The two hosted `*_MANIFEST_B64` secrets are optional base64-encoded JSON
-manifests validated by the evidence CLIs. Use them only for reviewed private
-ops refs and requirement statuses; do not store raw provider secrets, tokens,
-screenshots, or full incident transcripts in these GitHub secrets. When
+The three hosted evidence `*_MANIFEST_B64` secrets are optional base64-encoded
+JSON manifests validated by the evidence CLIs. Use them only for reviewed
+private ops refs and requirement statuses; do not store raw provider secrets,
+tokens, screenshots, or full incident transcripts in these GitHub secrets. When
 present, their generated completion overlays are folded into
 `hosted-completion-audit.json` alongside the public smoke evidence.
+
+`HOSTED_WORKER_EVIDENCE_MANIFEST_B64` is the all-in-one hosted worker route for
+`freshness_policy`, `raw_snapshot_retention_policy`,
+`monitored_scheduler_cadence`, `hosted_egress_review`, and
+`worker_persisted_evidence_path`. Operators can instead use the split route:
+`ADMIN_BEARER_TOKEN` supplies hosted source freshness evidence for
+`freshness_policy` and `worker_persisted_evidence_path`, while
+`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64` supplies
+`raw_snapshot_retention_policy`, `monitored_scheduler_cadence`, and
+`hosted_egress_review`. Either route still requires the decoded private
+manifests to pass their evidence CLIs before the completion audit can accept the
+gate.
 
 `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is also optional. It should contain
 a base64-encoded `local-source-completion-evidence/v1` dispatch overlay whose
@@ -361,11 +375,14 @@ the gate without accepted private source-contract evidence.
 
 `hosted-private-evidence-readiness.json` lists the configured/missing state for
 `ADMIN_BEARER_TOKEN`, `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
+`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`,
 `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`, and
 `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`. It never prints or decodes secret
-values. It is useful for release review triage, but configured secrets still do
-not satisfy completion gates unless their decoded private manifests produce
-accepted completion evidence.
+values. It also records the alternative hosted-worker completion routes, so a
+release review can tell whether the all-in-one worker manifest route or the
+split admin-freshness plus worker-policy route is currently unblocked.
+Configured secrets still do not satisfy completion gates unless their decoded
+private manifests produce accepted completion evidence.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 
