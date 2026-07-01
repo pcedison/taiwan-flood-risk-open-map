@@ -2469,6 +2469,44 @@ dispatch templates, but it does not satisfy `required_signal_families` or
 `official_authorization_and_contracts`; the public artifact still uses
 placeholders until actual official dispatch evidence is privately reviewed.
 
+## Task 77: Hosted Schedule Recovery Evidence Snapshot
+
+**Files:**
+- Add: `docs/reviews/hosted-deployment-smoke-2026-07-01-624f548.json`
+- Add: `docs/reviews/hosted-deployment-completion-evidence-2026-07-01-624f548.json`
+- Add: `docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-624f548.json`
+- Add: `docs/reviews/hosted-public-risk-completion-evidence-2026-07-01-624f548.json`
+- Add: `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-624f548.json`
+- Add: `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-624f548.md`
+- Add: `docs/reviews/hosted-monitoring-schedule-completion-evidence-2026-07-01-624f548.json`
+- Add: `docs/reviews/completion-audit-2026-07-01-624f548.json`
+- Add: `docs/reviews/completion-audit-2026-07-01-624f548.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: Hosted Monitoring schedule run `28521755183`, schedule watchdog
+  recovery run `28521878774`, and deployed main SHA
+  `624f548340a2126ecc56a4e38c14da89d1d6b27a`.
+- Produces: public-safe evidence that `scheduled_freshness_checks` is no
+  longer a `production_monitoring_and_alerting` blocker for the current
+  deployed SHA.
+
+- [x] Persist hosted deployment and public risk smoke evidence for `624f548`.
+- [x] Persist schedule readiness and schedule completion evidence from a real
+  GitHub `schedule` event, not from manual dispatch.
+- [x] Persist the completion audit showing
+  `production_monitoring_and_alerting` now blocks only on
+  `hosted_alert_routing` and `worker_scheduler_alert_ownership`.
+- [x] Update source-gap progress without claiming hosted worker private
+  evidence, local-source official dispatch, or monitoring ownership is
+  complete.
+
+Completed 2026-07-01: the real Hosted Monitoring `schedule` path recovered on
+the current deployed main SHA, and the stale schedule-watchdog issue closed.
+This satisfies only `scheduled_freshness_checks`; the broader monitoring gate
+still requires reviewed alert routing and worker/scheduler ownership evidence.
+
 ## Completion Gates
 
 The full objective is complete only when:
