@@ -18,7 +18,7 @@ on:
         default: false
         type: boolean
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "7,37 * * * *"
 
 jobs:
   hosted-monitoring:
@@ -223,7 +223,7 @@ jobs:
             --workflow-name "${GITHUB_WORKFLOW}" \
             --run-id "${GITHUB_RUN_ID}" \
             --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            --cron "${{ github.event.schedule || '*/30 * * * *' }}" \
+            --cron "${{ github.event.schedule || '7,37 * * * *' }}" \
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --evidence-output artifacts/hosted-monitoring-schedule-evidence.json \
             --completion-evidence-output artifacts/hosted-monitoring-schedule-completion-evidence.json
