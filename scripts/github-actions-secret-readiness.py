@@ -34,6 +34,8 @@ class CompletionRoute:
     gate_key: str
     route_key: str
     secret_names: tuple[str, ...]
+    satisfied_requirements: tuple[str, ...]
+    next_operator_action: str
 
 
 SECRET_SPECS = (
@@ -75,6 +77,17 @@ COMPLETION_ROUTES = (
         gate_key="hosted_worker_persisted_evidence",
         route_key="hosted_worker_full_manifest",
         secret_names=("HOSTED_WORKER_EVIDENCE_MANIFEST_B64",),
+        satisfied_requirements=(
+            "freshness_policy",
+            "raw_snapshot_retention_policy",
+            "monitored_scheduler_cadence",
+            "hosted_egress_review",
+            "worker_persisted_evidence_path",
+        ),
+        next_operator_action=(
+            "Set HOSTED_WORKER_EVIDENCE_MANIFEST_B64 with a reviewed full worker "
+            "evidence manifest."
+        ),
     ),
     CompletionRoute(
         gate_key="hosted_worker_persisted_evidence",
@@ -83,11 +96,32 @@ COMPLETION_ROUTES = (
             "ADMIN_BEARER_TOKEN",
             "HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64",
         ),
+        satisfied_requirements=(
+            "freshness_policy",
+            "worker_persisted_evidence_path",
+            "raw_snapshot_retention_policy",
+            "monitored_scheduler_cadence",
+            "hosted_egress_review",
+        ),
+        next_operator_action=(
+            "Set ADMIN_BEARER_TOKEN for hosted source freshness evidence and "
+            "HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 for retention, cadence, "
+            "and egress evidence."
+        ),
     ),
     CompletionRoute(
         gate_key="production_monitoring_and_alerting",
         route_key="hosted_monitoring_manifest",
         secret_names=("HOSTED_MONITORING_EVIDENCE_MANIFEST_B64",),
+        satisfied_requirements=(
+            "hosted_alert_routing",
+            "scheduled_freshness_checks",
+            "worker_scheduler_alert_ownership",
+        ),
+        next_operator_action=(
+            "Set HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 with reviewed alert "
+            "routing, scheduled checks, and ownership evidence."
+        ),
     ),
 )
 
@@ -244,6 +278,18 @@ def render_markdown(artifact: Mapping[str, Any]) -> str:
         for blocker in blockers:
             missing = ", ".join(f"`{name}`" for name in blocker["missing_secret_names"])
             lines.append(f"- `{blocker['gate_key']}`: missing {missing}")
+            for route in blocker["unsatisfied_routes"]:
+                route_missing = ", ".join(
+                    f"`{name}`" for name in route["missing_secret_names"]
+                )
+                route_requirements = ", ".join(
+                    f"`{name}`" for name in route["satisfied_requirements"]
+                )
+                lines.append(
+                    f"  - `{route['route_key']}`: missing {route_missing}; "
+                    f"requirements: {route_requirements}; "
+                    f"next: {route['next_operator_action']}"
+                )
     lines.extend(
         [
             "",
@@ -328,6 +374,8 @@ def _completion_routes(configured: Mapping[str, str | None]) -> list[dict[str, A
                 "configured": not missing,
                 "required_secret_names": list(route.secret_names),
                 "missing_secret_names": missing,
+                "satisfied_requirements": list(route.satisfied_requirements),
+                "next_operator_action": route.next_operator_action,
             }
         )
     return routes
@@ -347,6 +395,8 @@ def _completion_gate_blockers(
                     route.secret_names,
                     configured,
                 ),
+                "satisfied_requirements": list(route.satisfied_requirements),
+                "next_operator_action": route.next_operator_action,
             }
             for route in routes
             if _missing_secret_names(route.secret_names, configured)
