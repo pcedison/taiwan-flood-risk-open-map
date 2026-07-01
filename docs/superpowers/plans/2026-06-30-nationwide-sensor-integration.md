@@ -2409,6 +2409,31 @@ GitHub issue route. Operators can see the first queue rows directly in the
 issue before opening artifacts, while private evidence refs, manifests, tokens,
 and official correspondence remain excluded.
 
+## Task 75: Hosted Monitoring Deployment SHA Failure Details
+
+**Files:**
+- Modify: `.github/workflows/hosted-monitoring.yml`
+- Modify: `tests/test_hosted_monitoring_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+
+**Interfaces:**
+- Consumes: `artifacts/hosted-deployment-smoke.json` from Hosted Monitoring.
+- Produces: public-safe Hosted Monitoring failure issue comments that include
+  expected deployment SHA, `/health` deployment SHA, `/ready` deployment SHA,
+  and bounded deployment smoke failure messages.
+
+- [x] Write a failing workflow contract test requiring the hosted monitoring
+  failure issue route to read the hosted deployment smoke artifact.
+- [x] Add public-safe issue lines for expected, health, and ready deployment
+  SHA values so Zeabur lag is visible without opening artifacts.
+- [x] Document that these issue details improve triage but do not satisfy
+  `production_deployment_evidence` or `production_monitoring_and_alerting`.
+
+Completed 2026-07-01: Hosted Monitoring failure issues now include deployment
+smoke SHA details when the artifact exists. This keeps stale Zeabur deployments
+visible in GitHub issue history while still preventing failed or wrong-SHA
+smoke runs from emitting completion evidence.
+
 ## Completion Gates
 
 The full objective is complete only when:

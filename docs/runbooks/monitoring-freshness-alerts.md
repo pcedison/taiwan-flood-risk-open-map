@@ -346,9 +346,13 @@ ownership recorded through
 When Hosted Monitoring fails, the workflow now routes a public-safe GitHub issue
 under the stable title `[hosted-monitoring-alert] Hosted Monitoring failure`.
 The route creates the issue once and adds comments on later failures, including
-only the run URL, workflow, event, and SHA. It intentionally omits secrets,
-private manifests, and private evidence refs. This gives operators a visible
-alert channel, but it is not enough by itself to satisfy
+only the run URL, workflow, event, SHA, and the public hosted deployment smoke
+summary when that artifact exists. The deployment summary includes the expected
+deployment SHA, the `/health` deployment SHA, the `/ready` deployment SHA, and
+the first bounded failure messages so a Zeabur lag is visible directly in the
+issue body. It intentionally omits secrets, private manifests, and private
+evidence refs. This gives operators a visible alert channel, but it is not
+enough by itself to satisfy
 `hosted_alert_routing`; accepted monitoring evidence still needs an owner,
 review timestamp, and evidence ref through the private hosted monitoring
 manifest.
