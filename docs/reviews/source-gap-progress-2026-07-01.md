@@ -87,6 +87,30 @@ still need dispatch/follow-up:
 This remains progress tracking only. The gate is still incomplete until private
 source-contract evidence is accepted for each county/gate item.
 
+## Request Packet Bundle
+
+Hosted Monitoring now also writes a `local-source-request-packet-bundle`
+artifact set. This moves the remaining request work one step closer to
+operation by publishing the exact generated official request packets,
+signal-gap batches, and placeholder dispatch/completion templates on every
+scheduled/manual monitoring run.
+
+The bundle includes:
+
+- `local-source-request-packet-bundle-manifest.json`
+- `local-source-request-packet-bundle.md`
+- `local-source-official-request-packets.json`
+- `local-source-official-request-packets.md`
+- `local-source-official-request-completion-template.json`
+- `local-source-signal-gap-request-batches.json`
+- `local-source-signal-gap-request-batches.md`
+- `local-source-signal-gap-dispatch-template.json`
+- `local-source-source-contract-dispatch-template.json`
+
+This is still not completion evidence: the dispatch templates contain
+placeholders and must be replaced only inside private evidence handling after
+actual official dispatch or accepted replies.
+
 ## Hosted Private Evidence Readiness
 
 Hosted Monitoring also uploads `hosted-private-evidence-readiness.json`. The

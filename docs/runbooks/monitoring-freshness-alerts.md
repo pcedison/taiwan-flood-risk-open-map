@@ -273,6 +273,10 @@ Each run executes:
 - `scripts/local-source-contract-dispatch-readiness.py` to publish a
   public-safe checklist for authorization, metadata release, and public API
   contract request dispatch.
+- `scripts/local-source-request-packet-bundle.py` to publish the generated
+  official request packets, signal-gap request batches, and placeholder
+  dispatch/completion templates operators need for the remaining official
+  request work.
 - `scripts/hosted_private_evidence_readiness.py` to publish which private
   evidence/admin-token inputs are configured or missing without printing values.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
@@ -353,6 +357,15 @@ every hosted monitoring run:
 - `signal-gap-dispatch-readiness.json`
 - `source-contract-dispatch-readiness.json`
 - `hosted-private-evidence-readiness.json`
+- `local-source-request-packet-bundle-manifest.json`
+- `local-source-request-packet-bundle.md`
+- `local-source-official-request-packets.json`
+- `local-source-official-request-packets.md`
+- `local-source-official-request-completion-template.json`
+- `local-source-signal-gap-request-batches.json`
+- `local-source-signal-gap-request-batches.md`
+- `local-source-signal-gap-dispatch-template.json`
+- `local-source-source-contract-dispatch-template.json`
 
 These artifacts monitor whether official open-data catalogs have published new
 machine-readable candidates for the unresolved signal families. A
@@ -372,6 +385,13 @@ checklist for the `official_authorization_and_contracts` gate. It lists the
 remaining authorization requests, metadata-release monitor, and public API
 contract reviews, but it does not prove requests were sent and does not satisfy
 the gate without accepted private source-contract evidence.
+
+The `local-source-request-packet-bundle-*` and related `local-source-*template`
+artifacts are the operator handoff for that same unfinished work. They collect
+the generated official request bodies, signal-family batches, and placeholder
+dispatch/completion overlays in one hosted artifact set. They intentionally use
+placeholder evidence refs and are not folded into the completion audit as
+accepted evidence.
 
 `hosted-private-evidence-readiness.json` lists the configured/missing state for
 `ADMIN_BEARER_TOKEN`, `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
