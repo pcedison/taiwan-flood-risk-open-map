@@ -70,6 +70,10 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert resolve_step["if"] == "${{ success() }}"
     assert resolve_step["uses"] == "actions/github-script@v7"
     resolve_script = resolve_step["with"]["script"]
+    assert 'const fs = require("fs");' in resolve_script
+    assert "artifacts/local-source-dispatch-watchdog.json" in resolve_script
+    assert 'report.status !== "no_dispatch_required"' in resolve_script
+    assert "summary.dispatch_required !== false" in resolve_script
     assert "local-source-dispatch-watchdog" in resolve_script
     assert "Local source dispatch required" in resolve_script
     assert "github.rest.issues.createComment" in resolve_script

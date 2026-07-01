@@ -86,6 +86,9 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert resolve_step["if"] == "${{ success() }}"
     assert resolve_step["uses"] == "actions/github-script@v7"
     resolve_script = resolve_step["with"]["script"]
+    assert 'const fs = require("fs");' in resolve_script
+    assert "artifacts/hosted-monitoring-schedule-readiness.json" in resolve_script
+    assert 'report.status !== "passed"' in resolve_script
     assert "hosted-schedule-watchdog" in resolve_script
     assert "Hosted Monitoring schedule not ready" in resolve_script
     assert "github.rest.issues.createComment" in resolve_script
