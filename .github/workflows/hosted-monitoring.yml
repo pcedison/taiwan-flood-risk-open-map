@@ -107,6 +107,13 @@ jobs:
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --output artifacts/hosted-private-evidence-readiness.json
 
+      - name: Hosted private evidence template bundle
+        run: |
+          set -euo pipefail
+          python scripts/hosted_private_evidence_template_bundle.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output-dir artifacts
+
       - name: Hosted monitoring schedule evidence
         run: |
           set -euo pipefail

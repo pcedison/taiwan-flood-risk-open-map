@@ -154,6 +154,20 @@ as `skipped` and do not produce completion evidence, and the monitoring gate
 still needs accepted evidence for `hosted_alert_routing` and
 `worker_scheduler_alert_ownership`.
 
+## Hosted Private Evidence Template Bundle
+
+Hosted Monitoring now also publishes a public-safe private evidence template
+bundle. It includes pending manifest templates for:
+
+- `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`
+- `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`
+- `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`
+
+The bundle does not satisfy any completion gate by itself. Its value is making
+the remaining hosted/private evidence path explicit in every monitoring
+artifact so operators can fill, review, encode, and set the correct secret
+without reconstructing schema requirements from scattered runbooks.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

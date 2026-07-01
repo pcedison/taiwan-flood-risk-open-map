@@ -67,6 +67,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/hosted_worker_policy_evidence.py" in step_text
     assert "scripts/hosted_monitoring_evidence.py" in step_text
     assert "scripts/hosted_monitoring_schedule_evidence.py" in step_text
+    assert "scripts/hosted_private_evidence_template_bundle.py" in step_text
     assert "scripts/local-source-signal-gap-discovery-refresh.py" in step_text
     assert "scripts/local-source-signal-gap-dispatch-readiness.py" in step_text
     assert "scripts/local-source-contract-dispatch-readiness.py" in step_text
@@ -235,6 +236,17 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         private_evidence_readiness_step["run"]
     )
     assert "--captured-at" in private_evidence_readiness_step["run"]
+
+    private_evidence_template_bundle_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Hosted private evidence template bundle"
+    )
+    assert "scripts/hosted_private_evidence_template_bundle.py" in (
+        private_evidence_template_bundle_step["run"]
+    )
+    assert "--output-dir artifacts" in private_evidence_template_bundle_step["run"]
+    assert "--captured-at" in private_evidence_template_bundle_step["run"]
 
     schedule_evidence_step = next(
         step
