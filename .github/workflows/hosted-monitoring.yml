@@ -57,6 +57,14 @@ jobs:
       - name: Prepare artifact directory
         run: mkdir -p artifacts
 
+      - name: Public API contract probe
+        run: |
+          set -euo pipefail
+          python scripts/public-api-contract-probe.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --allow-insecure-tls \
+            --output artifacts/public-api-contract-probe.json
+
       - name: Hosted deployment smoke
         run: |
           set -euo pipefail

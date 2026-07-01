@@ -263,6 +263,12 @@ The repository also has a scheduled hosted monitoring workflow:
 It runs every 30 minutes and can also be started manually from GitHub Actions.
 Each run executes:
 
+- `scripts/public-api-contract-probe.py` before hosted deployment smoke, so the
+  public API contract-review queue is refreshed even when the deployed SHA is
+  stale. Hosted Monitoring uses `--allow-insecure-tls` for this diagnostic probe
+  because the reviewed public government pages have certificate-chain issues;
+  the artifact records `tls_verification=disabled` and is not accepted
+  completion evidence.
 - `scripts/hosted_deployment_smoke.py` against `https://floodrisk.cc`.
 - `scripts/hosted_public_risk_evidence_smoke.py` against the hosted public
   risk API.
@@ -398,6 +404,7 @@ every hosted monitoring run:
 - `signal-gap-discovery-refresh-flood-depth.json`
 - `signal-gap-discovery-refresh-sewer-water-level.json`
 - `signal-gap-dispatch-readiness.json`
+- `public-api-contract-probe.json`
 - `source-contract-dispatch-readiness.json`
 - `hosted-private-evidence-readiness.json`
 - `local-source-request-packet-bundle-manifest.json`

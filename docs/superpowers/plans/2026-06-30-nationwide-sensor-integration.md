@@ -2238,6 +2238,37 @@ integration`). The watchdog now uses GitHub expression booleans to write a
 presence-only input artifact before running the same readiness CLI, so failed
 completion gates still upload public-safe JSON/Markdown artifacts.
 
+## Task 70: Hosted Public API Contract Probe Artifact
+
+**Files:**
+- Modify: `.github/workflows/hosted-monitoring.yml`
+- Modify: `tests/test_hosted_monitoring_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: the existing `public_api_contract_reviews` queue from
+  `/admin/v1/local-source-action-plan` domain code.
+- Produces: `public-api-contract-probe.json` in each Hosted Monitoring artifact
+  set before hosted deployment smoke, so source-contract review visibility is
+  preserved even when Zeabur is serving an older SHA.
+
+- [x] Write a failing workflow contract test requiring Hosted Monitoring to run
+  `scripts/public-api-contract-probe.py`.
+- [x] Require the step to run before hosted deployment smoke so stale deployment
+  failures do not suppress public API contract-review evidence.
+- [x] Use the established `--allow-insecure-tls` diagnostic mode and record that
+  this is not completion evidence.
+- [x] Run the live probe locally and document the current 3-county, 8-URL,
+  0-live-candidate result.
+
+Completed 2026-07-01: public API contract-review visibility is now part of the
+hosted monitoring artifact set. The current live probe still found no
+`candidate_live_read_api`, so `official_authorization_and_contracts` remains
+incomplete and still needs official contract replies, released APIs, or accepted
+official-unavailable evidence.
+
 ## Completion Gates
 
 The full objective is complete only when:
