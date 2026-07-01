@@ -174,3 +174,59 @@ def test_hosted_deployment_smoke_fails_when_ready_sha_differs(
     assert "ready deployment_sha old-sha did not match expected abc123" in evidence[
         "failures"
     ]
+
+
+def test_hosted_deployment_smoke_retries_until_deployed_sha_matches(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    evidence_output = tmp_path / "hosted-deployment-smoke.json"
+    calls: list[str] = []
+
+    def fake_request_json(url: str, *, timeout_seconds: float) -> smoke.JsonResponse:
+        del timeout_seconds
+        calls.append(url)
+        attempt = (len(calls) + 1) // 2
+        deployment_sha = "old-sha" if attempt == 1 else "abc123"
+        payload = {
+            "status": "ok",
+            "service": "flood-risk-api",
+            "deployment_sha": deployment_sha,
+        }
+        if url.endswith("/ready"):
+            payload["dependencies"] = {
+                "database": {"status": "healthy"},
+                "redis": {"status": "healthy"},
+            }
+        return smoke.JsonResponse(status_code=200, payload=payload)
+
+    monkeypatch.setattr(smoke, "request_json", fake_request_json)
+
+    result = smoke.main(
+        [
+            "--base-url",
+            "https://example.test",
+            "--expected-deployment-sha",
+            "abc123",
+            "--captured-at",
+            "2026-07-01T14:10:00+08:00",
+            "--retry-count",
+            "2",
+            "--retry-delay-seconds",
+            "0",
+            "--evidence-output",
+            str(evidence_output),
+        ]
+    )
+
+    assert result == 0
+    assert calls == [
+        "https://example.test/health",
+        "https://example.test/ready",
+        "https://example.test/health",
+        "https://example.test/ready",
+    ]
+    evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
+    assert evidence["status"] == "passed"
+    assert evidence["attempt_count"] == 2
+    assert evidence["health"]["deployment_sha"] == "abc123"

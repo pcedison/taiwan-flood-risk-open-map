@@ -311,13 +311,15 @@ ownership recorded through
 
 Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
 for the workflow commit SHA, or provide the exact deployed SHA while verifying a
-specific release. It also accepts `require_admin_source_freshness`; set that to
-`true` for release or completion-gate runs where `/admin/v1/sources` freshness
-evidence must be present. In strict mode, the workflow fails fast if the
-repository secret `ADMIN_BEARER_TOKEN` is missing. For routine scheduled
-monitoring, the default remains non-strict: if `ADMIN_BEARER_TOKEN` is not
-configured, the public smokes still run and the admin source freshness check is
-skipped with a notice rather than a leaked token or failed secret lookup.
+specific release. The hosted deployment smoke retries for a bounded window so
+scheduled runs do not fail simply because Zeabur is still catching up to a fresh
+main push. It also accepts `require_admin_source_freshness`; set that to `true`
+for release or completion-gate runs where `/admin/v1/sources` freshness evidence
+must be present. In strict mode, the workflow fails fast if the repository
+secret `ADMIN_BEARER_TOKEN` is missing. For routine scheduled monitoring, the
+default remains non-strict: if `ADMIN_BEARER_TOKEN` is not configured, the
+public smokes still run and the admin source freshness check is skipped with a
+notice rather than a leaked token or failed secret lookup.
 
 Manual dispatch also accepts `fail_on_overdue_local_source_followups`. Set it
 to `true` when a release/completion review should fail if the private

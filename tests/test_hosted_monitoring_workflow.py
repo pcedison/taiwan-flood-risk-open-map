@@ -95,6 +95,12 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "artifacts/hosted-source-freshness-completion-evidence.json"
     ) in source_freshness_step["run"]
 
+    deployment_smoke_step = next(
+        step for step in steps if step.get("name") == "Hosted deployment smoke"
+    )
+    assert "--retry-count 6" in deployment_smoke_step["run"]
+    assert "--retry-delay-seconds 45" in deployment_smoke_step["run"]
+
     missing_token_step = next(
         step for step in steps if step.get("name") == "Skip admin freshness smoke without token"
     )

@@ -61,6 +61,8 @@ jobs:
           set -euo pipefail
           python scripts/hosted_deployment_smoke.py \
             --expected-deployment-sha "${{ steps.expected-sha.outputs.sha }}" \
+            --retry-count 6 \
+            --retry-delay-seconds 45 \
             --evidence-output artifacts/hosted-deployment-smoke.json \
             --completion-evidence-output artifacts/hosted-deployment-completion-evidence.json
 

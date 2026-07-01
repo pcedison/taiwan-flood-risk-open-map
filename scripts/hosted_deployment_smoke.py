@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 import sys
+from time import sleep
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -43,6 +44,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument(
+        "--retry-count",
+        type=int,
+        default=1,
+        help="Maximum deployment-smoke attempts before failing.",
+    )
+    parser.add_argument(
+        "--retry-delay-seconds",
+        type=float,
+        default=0.0,
+        help="Delay between failed deployment-smoke attempts.",
+    )
+    parser.add_argument(
         "--evidence-output",
         help="Optional JSON file capturing hosted deployment smoke evidence.",
     )
@@ -57,14 +70,25 @@ def main(argv: list[str] | None = None) -> int:
 
     base_url = args.base_url.rstrip("/")
     captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
+    attempts = max(1, args.retry_count)
+    attempt_count = 0
     failures: list[str] = []
+    health = JsonResponse(status_code=0, payload={}, error="not requested")
+    ready = JsonResponse(status_code=0, payload={}, error="not requested")
 
-    health = request_json(f"{base_url}/health", timeout_seconds=args.timeout_seconds)
-    ready = request_json(f"{base_url}/ready", timeout_seconds=args.timeout_seconds)
+    for attempt in range(1, attempts + 1):
+        attempt_count = attempt
+        failures = []
+        health = request_json(f"{base_url}/health", timeout_seconds=args.timeout_seconds)
+        ready = request_json(f"{base_url}/ready", timeout_seconds=args.timeout_seconds)
 
-    failures.extend(_check_endpoint("health", health, args.expected_deployment_sha))
-    failures.extend(_check_endpoint("ready", ready, args.expected_deployment_sha))
-    failures.extend(_check_ready_dependencies(ready.payload))
+        failures.extend(_check_endpoint("health", health, args.expected_deployment_sha))
+        failures.extend(_check_endpoint("ready", ready, args.expected_deployment_sha))
+        failures.extend(_check_ready_dependencies(ready.payload))
+        if not failures:
+            break
+        if attempt < attempts and args.retry_delay_seconds > 0:
+            sleep(args.retry_delay_seconds)
 
     status = "failed" if failures else "passed"
     completion_evidence_ref = args.evidence_output or _default_completion_evidence_ref(
@@ -79,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         status=status,
         health=health,
         ready=ready,
+        attempt_count=attempt_count,
         failures=failures,
     )
     _write_json(args.evidence_output, artifact)
@@ -114,6 +139,7 @@ def build_evidence_artifact(
     status: str,
     health: "JsonResponse",
     ready: "JsonResponse",
+    attempt_count: int,
     failures: list[str],
 ) -> dict[str, Any]:
     return {
@@ -122,6 +148,7 @@ def build_evidence_artifact(
         "base_url": base_url,
         "status": status,
         "expected_deployment_sha": expected_deployment_sha,
+        "attempt_count": attempt_count,
         "health": _endpoint_summary(health),
         "ready": _endpoint_summary(ready),
         "completion_evidence_targets": [
