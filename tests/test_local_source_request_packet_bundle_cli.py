@@ -44,6 +44,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         "local-source-signal-gap-request-batches.md",
         "local-source-signal-gap-dispatch-template.json",
         "local-source-source-contract-dispatch-template.json",
+        "local-source-request-dispatch-evidence-draft.json",
         "local-source-dispatch-coverage-checklist.json",
         "local-source-request-dispatch-queue.json",
     }
@@ -62,6 +63,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         "signal_gap_batch_count": 3,
         "signal_gap_county_item_count": 17,
         "source_contract_completion_target_count": 6,
+        "request_dispatch_evidence_draft_item_count": 23,
         "dispatch_queue_item_count": 9,
         "signal_gap_dispatch_queue_item_count": 3,
         "source_contract_dispatch_queue_item_count": 6,
@@ -93,6 +95,36 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
     assert {
         item["evidence_ref"]
         for item in source_contract_template["source_contract_evidence"]
+    } == {"REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF"}
+
+    dispatch_evidence_draft = json.loads(
+        (
+            output_dir / "local-source-request-dispatch-evidence-draft.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert (
+        dispatch_evidence_draft["schema_version"]
+        == "local-source-completion-evidence/v1"
+    )
+    assert dispatch_evidence_draft["captured_at"] == "REPLACE_WITH_DISPATCHED_AT"
+    assert len(dispatch_evidence_draft["signal_family_gap_evidence"]) == 17
+    assert len(dispatch_evidence_draft["source_contract_evidence"]) == 6
+    assert dispatch_evidence_draft["production_gate_evidence"] == []
+    assert {
+        item["status"]
+        for item in dispatch_evidence_draft["signal_family_gap_evidence"]
+    } == {"request_dispatched"}
+    assert {
+        item["status"]
+        for item in dispatch_evidence_draft["source_contract_evidence"]
+    } == {"request_dispatched"}
+    assert {
+        item["evidence_ref"]
+        for item in dispatch_evidence_draft["signal_family_gap_evidence"]
+    } == {"REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF"}
+    assert {
+        item["evidence_ref"]
+        for item in dispatch_evidence_draft["source_contract_evidence"]
     } == {"REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF"}
 
     dispatch_checklist = json.loads(
