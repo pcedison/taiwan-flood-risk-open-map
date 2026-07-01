@@ -69,6 +69,9 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
     script = issue_step["with"]["script"]
     assert "secret-readiness-watchdog" in script
     assert "GitHub Actions required secrets missing" in script
+    assert "satisfied_requirements" in script
+    assert "next_operator_action" in script
+    assert "Route details:" in script
     assert "Operator next steps:" in script
     assert "docs/runbooks/monitoring-freshness-alerts.md" in script
     assert "ADMIN_BEARER_TOKEN unlocks admin source freshness smoke" in script

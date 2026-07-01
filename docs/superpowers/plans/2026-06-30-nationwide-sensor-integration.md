@@ -2507,6 +2507,39 @@ the current deployed main SHA, and the stale schedule-watchdog issue closed.
 This satisfies only `scheduled_freshness_checks`; the broader monitoring gate
 still requires reviewed alert routing and worker/scheduler ownership evidence.
 
+## Task 78: Secret Readiness Route Detail Handoff
+
+**Files:**
+- Modify: `scripts/github-actions-secret-readiness.py`
+- Modify: `.github/workflows/github-actions-secret-readiness-watchdog.yml`
+- Modify: `tests/test_github_actions_secret_readiness_cli.py`
+- Modify: `tests/test_github_actions_secret_readiness_watchdog_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+
+**Interfaces:**
+- Consumes: presence-only GitHub Actions secret rows from
+  `github-actions-secret-readiness-watchdog.yml`.
+- Produces: public-safe completion-route details in
+  `github-actions-secret-readiness/v1`, Markdown summaries, and the stable
+  `[secret-readiness-watchdog] GitHub Actions required secrets missing` issue.
+
+- [x] Write failing CLI and workflow tests requiring unsatisfied routes to list
+  missing secret names, satisfied requirements, and next operator action.
+- [x] Add route requirement/action fields to the public-safe readiness artifact
+  and Markdown output without reading or printing secret values.
+- [x] Route the same public-safe details into the stable GitHub issue so
+  operators can see which private evidence path to complete from issue history.
+- [x] Document that this improves `hosted_worker_persisted_evidence` and
+  `production_monitoring_and_alerting` handoff clarity but does not satisfy
+  either gate without configured secrets and accepted private evidence manifests.
+
+Completed 2026-07-01: GitHub secret readiness failures now show the missing
+completion route, the exact requirements that route would satisfy, and the next
+operator action in both artifacts and issue history. The route remains
+presence-only and public-safe; completion still requires private evidence CLI
+validation and the aggregate completion audit.
+
 ## Completion Gates
 
 The full objective is complete only when:

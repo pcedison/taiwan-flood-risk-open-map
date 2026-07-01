@@ -485,6 +485,26 @@ This improves the handoff for the remaining `required_signal_families` and
 gate. Accepted official reply, production adapter, authorization-gated adapter,
 or official-unavailable evidence is still required.
 
+## Secret Readiness Route Detail Handoff
+
+The GitHub Actions secret readiness artifact and stable issue route now include
+public-safe route details for each blocked completion gate. For every
+unsatisfied route, the JSON/Markdown artifact and
+`[secret-readiness-watchdog] GitHub Actions required secrets missing` issue can
+show:
+
+- the route key,
+- the missing secret names,
+- the requirements the route would satisfy, and
+- the next operator action.
+
+This makes the remaining hosted/private evidence handoff clearer for
+`hosted_worker_persisted_evidence` and `production_monitoring_and_alerting`.
+It still does not expose secret values, decoded manifests, private evidence
+refs, or tokens, and it does not satisfy either gate until the required secrets
+are configured and their decoded private evidence manifests pass the evidence
+CLIs and completion audit.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

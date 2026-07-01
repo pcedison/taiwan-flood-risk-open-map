@@ -788,11 +788,13 @@ API because `GITHUB_TOKEN` cannot list Actions secrets.
 By default the workflow fails when required secret routes still block completion
 gates. The failure route creates or comments on the stable public-safe issue
 `[secret-readiness-watchdog] GitHub Actions required secrets missing`. The issue
-body includes only run URL, SHA, aggregate counts, blocked gate keys, and
-missing secret names. If a future run has no completion-blocking missing
-secrets, the workflow comments on and closes that same issue. The close action
-does not prove the decoded private evidence manifests are valid; it only proves
-the secret-presence watchdog no longer sees missing required inputs.
+body includes only run URL, SHA, aggregate counts, blocked gate keys, missing
+secret names, and public route details for the requirements each route would
+satisfy plus the next operator action. If a future run has no
+completion-blocking missing secrets, the workflow comments on and closes that
+same issue. The close action does not prove the decoded private evidence
+manifests are valid; it only proves the secret-presence watchdog no longer sees
+missing required inputs.
 
 This watchdog is not completion evidence. It proves whether the required GitHub
 Actions inputs are configured enough to attempt the private evidence routes.
