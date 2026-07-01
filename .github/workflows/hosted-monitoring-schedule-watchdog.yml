@@ -75,6 +75,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require("fs");
             const marker = "[hosted-schedule-watchdog]";
             const title = `${marker} Hosted Monitoring schedule not ready`;
             const runUrl = [
@@ -83,6 +84,20 @@ jobs:
               "actions/runs",
               process.env.GITHUB_RUN_ID,
             ].join("/");
+            const reportPath = "artifacts/hosted-monitoring-schedule-readiness.json";
+            let report = {};
+            let summary = {};
+            let latest = {};
+            let failureLines = ["- report unavailable"];
+            if (fs.existsSync(reportPath)) {
+              report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+              summary = report.summary || {};
+              latest = report.latest_schedule_run || {};
+              const failures = Array.isArray(report.failures) ? report.failures : [];
+              failureLines = failures.length
+                ? failures.map((failure) => `- ${failure.code}: ${failure.message}`)
+                : ["- none"];
+            }
             const body = [
               "Hosted Monitoring schedule readiness failed.",
               "",
@@ -90,6 +105,15 @@ jobs:
               `- workflow: ${process.env.GITHUB_WORKFLOW}`,
               `- event: ${process.env.GITHUB_EVENT_NAME}`,
               `- sha: ${process.env.GITHUB_SHA}`,
+              `- readiness status: ${report.status ?? "unknown"}`,
+              `- expected head sha: ${report.expected_head_sha ?? "unknown"}`,
+              `- latest schedule run: ${latest.url ?? "unknown"}`,
+              `- latest schedule sha: ${latest.head_sha ?? "unknown"}`,
+              `- latest schedule conclusion: ${latest.conclusion ?? "unknown"}`,
+              `- latest schedule age minutes: ${summary.age_minutes ?? "unknown"} / max ${summary.max_age_minutes ?? "unknown"}`,
+              "",
+              "Failure reasons:",
+              ...failureLines,
               "",
               "Artifacts, if uploaded, are attached to the workflow run.",
               "This issue route is public-safe and does not include tokens, manifests, or private evidence refs.",
