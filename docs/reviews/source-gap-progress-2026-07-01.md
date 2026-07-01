@@ -113,6 +113,12 @@ placeholders, and the coverage checklist intentionally excludes private
 evidence refs. Dispatch records must be filled only inside private evidence
 handling after actual official dispatch or accepted replies.
 
+The hosted and dispatch-watchdog workflows now run signal-gap discovery refresh
+with fetch-failure degradation. When the live data.gov.tw export times out, the
+summary artifact records `source_catalog_fetch_status: failed` and downstream
+dispatch readiness/request bundle artifacts still use the static local-source
+plan instead of routing an unknown-count watchdog issue.
+
 ## Hosted Private Evidence Readiness
 
 Hosted Monitoring also uploads `hosted-private-evidence-readiness.json`. The

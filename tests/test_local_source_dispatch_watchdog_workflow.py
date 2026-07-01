@@ -38,6 +38,7 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "actions/checkout@v4" in step_text
     assert "actions/setup-python@v5" in step_text
     assert "scripts/local-source-signal-gap-discovery-refresh.py" in step_text
+    assert "--allow-fetch-failure" in step_text
     assert "scripts/local-source-signal-gap-dispatch-readiness.py" in step_text
     assert "scripts/local-source-contract-dispatch-readiness.py" in step_text
     assert "scripts/local-source-request-packet-bundle.py" in step_text

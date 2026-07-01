@@ -448,6 +448,12 @@ current discovery counts, whether official read API requests should still be
 sent, and the exact command operators can use to generate private dispatch
 evidence after sending those requests.
 
+If the live data.gov.tw export times out during hosted monitoring or the local
+source dispatch watchdog, `signal-gap-discovery-refresh-summary.json` is still
+written with `source_catalog_fetch_status: failed`. The downstream dispatch
+readiness and request packet bundle continue from the static local-source plan
+so operator handoff artifacts do not collapse to unknown counts.
+
 `source-contract-dispatch-readiness.json` provides the same public-safe dispatch
 checklist for the `official_authorization_and_contracts` gate. It lists the
 remaining authorization requests, metadata-release monitor, and public API
