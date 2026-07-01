@@ -159,6 +159,17 @@ The schedule itself is now checked by a separate public-safe watchdog artifact:
 - `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01.json`
 - `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01.md`
 
+The watchdog is also wired into
+`.github/workflows/hosted-monitoring-schedule-watchdog.yml`, scheduled at
+`17,47 * * * *`. That workflow uses the same public-safe schedule metadata
+check and routes failures to
+`[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`. This closes
+the observability gap where manual Hosted Monitoring runs can pass while the
+real GitHub `schedule` path remains failed, stale, or on an older SHA. It still
+does not satisfy `scheduled_freshness_checks`; only a recent successful real
+Hosted Monitoring `schedule` run on the expected main SHA can emit that
+completion evidence.
+
 The 2026-07-01 live watchdog run checked the current expected main SHA
 `2d86ca32718ae4ef65a8e30c59c84028b0000a1b`. The latest real GitHub
 `schedule` event was still run `28493475510`, which failed on older SHA
@@ -227,7 +238,8 @@ Hosted Monitoring schedule run is failed, stale, and on older SHA
   The schedule watchdog currently shows the latest real scheduled run is failed,
   stale, and not on the current main SHA, so even the `scheduled_freshness_checks`
   sub-requirement remains unaccepted for the current deployed SHA. GitHub Issue
-  routing now exists for workflow failures, but `hosted_alert_routing` remains
-  unaccepted until ownership and evidence refs are reviewed.
+  routing now exists for Hosted Monitoring failures and schedule-watchdog
+  failures, but `hosted_alert_routing` remains unaccepted until ownership and
+  evidence refs are reviewed.
 - `ADMIN_BEARER_TOKEN` and the optional private evidence secrets are not proven
   configured from this local run.
