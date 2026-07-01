@@ -301,3 +301,50 @@ jobs:
                 body,
               });
             }
+
+      - name: Close resolved hosted monitoring failure issue
+        if: ${{ success() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "[hosted-monitoring-alert]";
+            const title = `${marker} Hosted Monitoring failure`;
+            const runUrl = [
+              process.env.GITHUB_SERVER_URL,
+              process.env.GITHUB_REPOSITORY,
+              "actions/runs",
+              process.env.GITHUB_RUN_ID,
+            ].join("/");
+            const body = [
+              "Hosted Monitoring failure resolved.",
+              "",
+              `- run: ${runUrl}`,
+              `- workflow: ${process.env.GITHUB_WORKFLOW}`,
+              `- event: ${process.env.GITHUB_EVENT_NAME}`,
+              `- sha: ${process.env.GITHUB_SHA}`,
+              "",
+              "Closing the stale hosted monitoring failure issue.",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+            const existing = issues.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                state: "closed",
+                state_reason: "completed",
+              });
+            }
