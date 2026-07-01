@@ -756,8 +756,11 @@ still needs official dispatch. The failure route creates or comments on the
 single public-safe issue
 `[local-source-dispatch-watchdog] Local source dispatch required`. The issue
 body includes only run URL, SHA, aggregate counts, gate categories, and
-public-safe operator next steps plus the first grouped queue rows. It does not
-include tokens, private evidence refs, manifests, or official correspondence.
+public-safe operator next steps plus the first grouped queue rows. Those queue
+rows include the request type, completion target count, required read API
+fields, accepted completion statuses, and public counterparty label when
+available. They do not include tokens, private evidence refs, manifests, or
+official correspondence.
 The next steps point operators to review the request packet bundle, send
 signal-family and source-contract follow-up requests, then store reviewed
 dispatch progress in

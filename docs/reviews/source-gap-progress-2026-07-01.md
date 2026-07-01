@@ -505,6 +505,27 @@ refs, or tokens, and it does not satisfy either gate until the required secrets
 are configured and their decoded private evidence manifests pass the evidence
 CLIs and completion audit.
 
+## Local Source Dispatch Queue Detail Handoff
+
+The local-source dispatch watchdog now preserves the public-safe request queue
+details that were already present in the request packet bundle. The
+`local-source-dispatch-watchdog/v1` artifact, Markdown report, and stable
+`[local-source-dispatch-watchdog] Local source dispatch required` issue can show
+for each grouped queue row:
+
+- request type and completion target count,
+- the remaining completion gate,
+- required read API fields,
+- accepted completion statuses, and
+- public counterparty or county label when available.
+
+This reduces the chance that official request dispatch loses the actual
+acceptance criteria for `required_signal_families` or
+`official_authorization_and_contracts`. It still does not satisfy either gate:
+operators must send the official requests, keep private correspondence out of
+public artifacts, and record reviewed dispatch or completion evidence through
+the private overlay path.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

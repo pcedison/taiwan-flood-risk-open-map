@@ -249,22 +249,50 @@ def _source_contract_items(value: Any) -> list[dict[str, Any]]:
 
 
 def _request_dispatch_queue_items(value: Any) -> list[dict[str, Any]]:
-    return [
-        {
-            "rank": _int(item.get("rank")),
-            "queue_id": str(item.get("queue_id", "")),
-            "request_type": str(item.get("request_type", "")),
-            "completion_gate": str(item.get("completion_gate", "")),
-            "target_signal_type": str(item.get("target_signal_type", "")),
-            "source_contract_gate": str(item.get("source_contract_gate", "")),
-            "county": str(item.get("county", "")),
-            "status": str(item.get("status", "")),
-            "completion_target_count": _int(item.get("completion_target_count")),
-            "county_count": _int(item.get("county_count")),
-        }
-        for item in _list_of_mappings(value)
-        if str(item.get("status", "")) == "needs_dispatch"
-    ]
+    items: list[dict[str, Any]] = []
+    for item in _list_of_mappings(value):
+        if str(item.get("status", "")) != "needs_dispatch":
+            continue
+        requested_counterparties = _queue_strings(
+            item,
+            singular_key="requested_counterparty",
+            plural_key="requested_counterparties",
+        )
+        tracking_statuses = _queue_strings(
+            item,
+            singular_key="tracking_status",
+            plural_key="tracking_statuses",
+        )
+        items.append(
+            {
+                "rank": _int(item.get("rank")),
+                "queue_id": str(item.get("queue_id", "")),
+                "request_type": str(item.get("request_type", "")),
+                "completion_gate": str(item.get("completion_gate", "")),
+                "target_signal_type": str(item.get("target_signal_type", "")),
+                "source_contract_gate": str(item.get("source_contract_gate", "")),
+                "county": str(item.get("county", "")),
+                "status": str(item.get("status", "")),
+                "completion_target_count": _int(item.get("completion_target_count")),
+                "county_count": _int(item.get("county_count")),
+                "completion_gate_requirement": str(
+                    item.get("completion_gate_requirement", "")
+                ),
+                "required_read_api_fields": _string_list(
+                    item.get("required_read_api_fields")
+                ),
+                "accepted_completion_statuses": _string_list(
+                    item.get("accepted_completion_statuses")
+                ),
+                "requested_counterparty": requested_counterparties[0]
+                if requested_counterparties
+                else "",
+                "requested_counterparties": requested_counterparties,
+                "tracking_status": tracking_statuses[0] if tracking_statuses else "",
+                "tracking_statuses": tracking_statuses,
+            }
+        )
+    return items
 
 
 def _next_workstreams(
@@ -393,6 +421,23 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                 f"{item.get('request_type')} / {label} "
                 f"(completion targets: {item.get('completion_target_count')})"
             )
+            detail_parts = []
+            if item.get("requested_counterparty"):
+                detail_parts.append(f"counterparty: `{item.get('requested_counterparty')}`")
+            required_fields = _string_list(item.get("required_read_api_fields"))
+            if required_fields:
+                detail_parts.append(
+                    "required fields: "
+                    + ", ".join(f"`{field}`" for field in required_fields)
+                )
+            accepted_statuses = _string_list(item.get("accepted_completion_statuses"))
+            if accepted_statuses:
+                detail_parts.append(
+                    "accepted statuses: "
+                    + ", ".join(f"`{status}`" for status in accepted_statuses)
+                )
+            if detail_parts:
+                lines.append(f"  - {'; '.join(detail_parts)}")
     else:
         lines.append("- none")
     lines.extend(
@@ -419,6 +464,19 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value]
+
+
+def _queue_strings(
+    item: Mapping[str, Any],
+    *,
+    singular_key: str,
+    plural_key: str,
+) -> list[str]:
+    plural_values = _string_list(item.get(plural_key))
+    if plural_values:
+        return plural_values
+    singular_value = str(item.get(singular_key, ""))
+    return [singular_value] if singular_value else []
 
 
 def _int(value: Any) -> int:

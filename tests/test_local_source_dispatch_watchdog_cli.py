@@ -106,6 +106,21 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
                         "target_signal_type": "pump_or_gate_status",
                         "completion_target_count": 13,
                         "county_count": 13,
+                        "requested_counterparties": [
+                            "Flood control office batch",
+                        ],
+                        "tracking_statuses": [
+                            "needs_signal_gap_review",
+                        ],
+                        "completion_gate_requirement": "latest-observation read API or official unavailable record required",
+                        "required_read_api_fields": [
+                            "observed_at",
+                            "station_or_device_id",
+                        ],
+                        "accepted_completion_statuses": [
+                            "accepted",
+                            "official_unavailable",
+                        ],
                     },
                     {
                         "rank": 4,
@@ -116,6 +131,20 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
                         "source_contract_gate": "authorization_request",
                         "county": "kinmen",
                         "completion_target_count": 1,
+                        "requested_counterparties": [
+                            "Kinmen KWIS operator",
+                        ],
+                        "tracking_statuses": [
+                            "needs_authorization_request",
+                        ],
+                        "required_read_api_fields": [
+                            "observed_at",
+                            "measurement_value",
+                        ],
+                        "accepted_completion_statuses": [
+                            "authorized",
+                            "official_unavailable",
+                        ],
                     },
                 ],
             }
@@ -218,6 +247,25 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
             "status": "needs_dispatch",
             "completion_target_count": 13,
             "county_count": 13,
+            "completion_gate_requirement": (
+                "latest-observation read API or official unavailable record required"
+            ),
+            "required_read_api_fields": [
+                "observed_at",
+                "station_or_device_id",
+            ],
+            "accepted_completion_statuses": [
+                "accepted",
+                "official_unavailable",
+            ],
+            "requested_counterparty": "Flood control office batch",
+            "requested_counterparties": [
+                "Flood control office batch",
+            ],
+            "tracking_status": "needs_signal_gap_review",
+            "tracking_statuses": [
+                "needs_signal_gap_review",
+            ],
         },
         {
             "rank": 4,
@@ -230,6 +278,23 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
             "status": "needs_dispatch",
             "completion_target_count": 1,
             "county_count": 0,
+            "completion_gate_requirement": "",
+            "required_read_api_fields": [
+                "observed_at",
+                "measurement_value",
+            ],
+            "accepted_completion_statuses": [
+                "authorized",
+                "official_unavailable",
+            ],
+            "requested_counterparty": "Kinmen KWIS operator",
+            "requested_counterparties": [
+                "Kinmen KWIS operator",
+            ],
+            "tracking_status": "needs_authorization_request",
+            "tracking_statuses": [
+                "needs_authorization_request",
+            ],
         },
     ]
     assert "private-ops://" not in result.stdout
@@ -237,6 +302,10 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
     assert "pump_or_gate_status" in markdown
     assert "Request Dispatch Queue" in markdown
     assert "signal-gap-batch/pump_or_gate_status" in markdown
+    assert "required fields: `observed_at`, `station_or_device_id`" in markdown
+    assert "accepted statuses: `accepted`, `official_unavailable`" in markdown
+    assert "Flood control office batch" in markdown
+    assert "Kinmen KWIS operator" in markdown
     assert "Operator Next Steps" in markdown
     assert "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64" in markdown
     assert "official request" in markdown

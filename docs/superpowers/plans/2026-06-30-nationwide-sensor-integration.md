@@ -2540,6 +2540,41 @@ operator action in both artifacts and issue history. The route remains
 presence-only and public-safe; completion still requires private evidence CLI
 validation and the aggregate completion audit.
 
+## Task 79: Local Source Dispatch Queue Detail Handoff
+
+**Files:**
+- Modify: `scripts/local-source-dispatch-watchdog.py`
+- Modify: `.github/workflows/local-source-dispatch-watchdog.yml`
+- Modify: `tests/test_local_source_dispatch_watchdog_cli.py`
+- Modify: `tests/test_local_source_dispatch_watchdog_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: `local-source-request-dispatch-queue/v1` rows with required read
+  API fields, accepted completion statuses, tracking status, and public
+  counterparty labels.
+- Produces: the same public-safe queue detail in
+  `local-source-dispatch-watchdog/v1`, Markdown reports, and the stable
+  `[local-source-dispatch-watchdog] Local source dispatch required` issue.
+
+- [x] Write failing CLI and workflow tests requiring queue rows to preserve
+  required fields, accepted statuses, and counterparty/tracking detail.
+- [x] Keep the watchdog report public-safe while carrying those queue details
+  through to Markdown.
+- [x] Add the same details to the issue route so official request operators can
+  see the acceptance criteria without downloading artifacts first.
+- [x] Document that this improves dispatch handoff for
+  `required_signal_families` and `official_authorization_and_contracts`, but
+  does not satisfy either gate until official dispatch/completion evidence is
+  reviewed.
+
+Completed 2026-07-01: local-source dispatch alerts now preserve the public
+acceptance criteria for each grouped request row. The artifact and issue route
+remain free of tokens, private evidence refs, manifests, and correspondence,
+while making the next official request action more precise.
+
 ## Completion Gates
 
 The full objective is complete only when:
