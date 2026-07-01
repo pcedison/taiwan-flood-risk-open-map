@@ -87,6 +87,25 @@ still need dispatch/follow-up:
 This remains progress tracking only. The gate is still incomplete until private
 source-contract evidence is accepted for each county/gate item.
 
+## Hosted Private Evidence Readiness
+
+Hosted Monitoring now also uploads `hosted-private-evidence-readiness.json`.
+The local 2026-07-01 no-secret review artifact is:
+
+- `docs/reviews/hosted-private-evidence-readiness-2026-07-01.json`
+
+It records the configured/missing state for the admin token and private evidence
+manifest inputs without printing secret values. The current no-secret review
+shows these completion-gate blockers:
+
+- `hosted_worker_persisted_evidence`: `ADMIN_BEARER_TOKEN`,
+  `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`
+- `production_monitoring_and_alerting`:
+  `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`
+
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is also missing, but it remains
+progress/follow-up visibility rather than accepted completion evidence.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,
