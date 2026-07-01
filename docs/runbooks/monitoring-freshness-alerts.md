@@ -279,6 +279,9 @@ Each run executes:
   request work.
 - `scripts/hosted_private_evidence_readiness.py` to publish which private
   evidence/admin-token inputs are configured or missing without printing values.
+- `scripts/hosted_private_evidence_template_bundle.py` to publish public-safe
+  pending templates for the hosted worker, worker-policy split route, and
+  hosted monitoring private evidence manifests.
 - `scripts/hosted_monitoring_schedule_evidence.py` to publish public-safe
   schedule-run evidence. On real `schedule` events it also emits partial
   completion evidence for `scheduled_freshness_checks`; manual runs only write
@@ -372,6 +375,11 @@ every hosted monitoring run:
 - `local-source-source-contract-dispatch-template.json`
 - `hosted-monitoring-schedule-evidence.json`
 - `hosted-monitoring-schedule-completion-evidence.json` on scheduled runs only
+- `hosted-private-evidence-template-bundle-manifest.json`
+- `hosted-private-evidence-template-bundle.md`
+- `hosted-worker-evidence-template.json`
+- `hosted-worker-policy-evidence-template.json`
+- `hosted-monitoring-evidence-template.json`
 
 These artifacts monitor whether official open-data catalogs have published new
 machine-readable candidates for the unresolved signal families. A
@@ -418,6 +426,14 @@ monitoring run came from the scheduled trigger. If and only if
 `production_monitoring_and_alerting`. It does not satisfy `hosted_alert_routing`
 or `worker_scheduler_alert_ownership`; those still require the reviewed private
 monitoring manifest.
+
+The hosted private evidence template bundle is an operator handoff, not
+evidence. It publishes pending manifest templates and route mapping for
+`HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
+`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`, and
+`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`. Filled manifests must stay in
+private ops storage and be encoded into the matching GitHub secret only after
+review.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 
