@@ -304,6 +304,28 @@ watchdog does not satisfy any gate; it makes missing hosted/private evidence
 inputs visible in GitHub until reviewed manifests and accepted evidence are
 provided.
 
+## Hosted Public API Contract Probe
+
+Hosted Monitoring now runs `scripts/public-api-contract-probe.py` before hosted
+deployment smoke. This keeps the `public_api_contract_review` portion of
+`official_authorization_and_contracts` refreshed even if Zeabur is still serving
+an older SHA and the hosted deployment smoke fails.
+
+The current local live probe used `--allow-insecure-tls` to match the existing
+operator runbook for these public government pages. The artifact records
+`tls_verification=disabled`; no secrets or private refs are used. The 2026-07-01
+result remains:
+
+- 3 public API contract-review counties probed: Miaoli, Pingtung, and Taitung.
+- 8 candidate URLs probed.
+- 0 `candidate_live_read_api` results.
+- Miaoli and Taitung remain public HTML contract blockers.
+- Pingtung has public HTML plus non-measurement CCTV/context pages.
+
+This does not satisfy `official_authorization_and_contracts`. It prevents the
+public API contract-review queue from going stale and will expose a future live
+candidate if one appears.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

@@ -60,6 +60,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
 
     steps = job["steps"]
     step_text = "\n".join(str(step) for step in steps)
+    assert "scripts/public-api-contract-probe.py" in step_text
     assert "scripts/hosted_deployment_smoke.py" in step_text
     assert "scripts/hosted_public_risk_evidence_smoke.py" in step_text
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
@@ -100,6 +101,19 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     )
     assert "--retry-count 6" in deployment_smoke_step["run"]
     assert "--retry-delay-seconds 45" in deployment_smoke_step["run"]
+
+    contract_probe_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Public API contract probe"
+    )
+    assert steps.index(contract_probe_step) < steps.index(deployment_smoke_step)
+    assert "scripts/public-api-contract-probe.py" in contract_probe_step["run"]
+    assert "--output artifacts/public-api-contract-probe.json" in (
+        contract_probe_step["run"]
+    )
+    assert "--captured-at" in contract_probe_step["run"]
+    assert "--allow-insecure-tls" in contract_probe_step["run"]
 
     missing_token_step = next(
         step for step in steps if step.get("name") == "Skip admin freshness smoke without token"
