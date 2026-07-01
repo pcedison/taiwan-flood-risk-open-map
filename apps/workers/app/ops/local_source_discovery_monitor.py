@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from time import sleep
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -155,16 +156,34 @@ def fetch_data_gov_dataset_export(
     *,
     url: str = DATA_GOV_DATASET_EXPORT_URL,
     timeout_seconds: int = 20,
+    max_attempts: int = 3,
+    retry_delay_seconds: float = 1.0,
 ) -> object:
     request = Request(
         url,
         headers={"Accept": "application/json", "User-Agent": DISCOVERY_USER_AGENT},
     )
-    try:
-        with urlopen(request, timeout=timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8-sig"))
-    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Failed to fetch data.gov.tw dataset export: {exc}") from exc
+    attempts = max(1, max_attempts)
+    last_fetch_error: BaseException | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8-sig"))
+        except (HTTPError, URLError, TimeoutError) as exc:
+            last_fetch_error = exc
+            if attempt >= attempts:
+                break
+            if retry_delay_seconds > 0:
+                sleep(retry_delay_seconds)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Failed to fetch data.gov.tw dataset export: {exc}") from exc
+
+    if last_fetch_error is not None:
+        raise RuntimeError(
+            f"Failed to fetch data.gov.tw dataset export after {attempts} attempts: "
+            f"{last_fetch_error}"
+        ) from last_fetch_error
+    raise RuntimeError("Failed to fetch data.gov.tw dataset export")
 
 
 def _discovery_summary(

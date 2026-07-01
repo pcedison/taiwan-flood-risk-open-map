@@ -4,6 +4,7 @@ from app.ops.local_source_discovery_monitor import (
     DEFAULT_TARGET_COUNTIES,
     DataGovDataset,
     discover_local_source_candidates,
+    fetch_data_gov_dataset_export,
 )
 
 
@@ -299,6 +300,42 @@ def test_data_gov_dataset_parser_accepts_common_export_aliases() -> None:
     assert item.identifier == "lienchiang-sewer"
     assert item.resource_formats == ("CSV",)
     assert item.resource_urls == ("https://example.test/lienchiang/sewer.csv",)
+
+
+def test_fetch_data_gov_dataset_export_retries_transient_timeout(monkeypatch) -> None:
+    attempts = 0
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'[{"title":"ok"}]'
+
+    def fake_urlopen(_request: object, *, timeout: int) -> Response:
+        nonlocal attempts
+        attempts += 1
+        assert timeout == 3
+        if attempts == 1:
+            raise TimeoutError("read timed out")
+        return Response()
+
+    monkeypatch.setattr(
+        "app.ops.local_source_discovery_monitor.urlopen",
+        fake_urlopen,
+    )
+
+    payload = fetch_data_gov_dataset_export(
+        timeout_seconds=3,
+        max_attempts=2,
+        retry_delay_seconds=0,
+    )
+
+    assert payload == [{"title": "ok"}]
+    assert attempts == 2
 
 
 def test_discover_local_source_candidates_ignores_drought_and_subsidy_datasets() -> None:
