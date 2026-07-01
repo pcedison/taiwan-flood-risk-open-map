@@ -77,6 +77,14 @@ jobs:
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --output-dir artifacts
 
+      - name: Local source signal-gap dispatch readiness
+        run: |
+          set -euo pipefail
+          python scripts/local-source-signal-gap-dispatch-readiness.py \
+            --discovery-summary-json artifacts/signal-gap-discovery-refresh-summary.json \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/signal-gap-dispatch-readiness.json
+
       - name: Require admin source freshness token
         if: ${{ env.REQUIRE_ADMIN_SOURCE_FRESHNESS == 'true' && env.ADMIN_BEARER_TOKEN == '' }}
         run: |
