@@ -266,6 +266,8 @@ Each run executes:
 - `scripts/hosted_deployment_smoke.py` against `https://floodrisk.cc`.
 - `scripts/hosted_public_risk_evidence_smoke.py` against the hosted public
   risk API.
+- `scripts/local-source-signal-gap-discovery-refresh.py` against the
+  data.gov.tw dataset export for every current signal-gap group.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -319,6 +321,21 @@ sanitized completion overlay with `evidence_ref` replaced by
 `private-ops://redacted/local-source-request-dispatch`. That sanitized overlay
 lets the aggregate audit show dispatch and overdue-follow-up counts without
 uploading private correspondence refs.
+
+Signal-gap discovery refresh artifacts are public-safe and are uploaded on
+every hosted monitoring run:
+
+- `signal-gap-discovery-refresh-summary.json`
+- `signal-gap-discovery-refresh-pump-or-gate-status.json`
+- `signal-gap-discovery-refresh-flood-depth.json`
+- `signal-gap-discovery-refresh-sewer-water-level.json`
+
+These artifacts monitor whether official open-data catalogs have published new
+machine-readable candidates for the unresolved signal families. A
+`candidate_live_read_api_found` conclusion is not completion by itself; it is a
+triage signal to review the API contract, freshness fields, coordinates, and
+license before turning it into an accepted production adapter or source-contract
+evidence.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 

@@ -1,0 +1,370 @@
+{
+  "captured_at": "2026-07-01T11:25:00+08:00",
+  "conclusion": "no_candidate_live_read_api_found",
+  "discovery": {
+    "candidate_count": 9,
+    "candidates": [
+      {
+        "county": "新北市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "125249",
+        "dataset_url": null,
+        "field_description": "title(抽水站名稱);year(竣工年度);address(地址);river(河系);pump_type(抽水機型式)",
+        "matched_keywords": [
+          "水位",
+          "雨水下水道",
+          "抽水",
+          "閘門",
+          "位置"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://data.ntpc.gov.tw/api/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296/csv/file"
+        ],
+        "signal_types": [
+          "sewer_water_level",
+          "water_level",
+          "pump_or_gate_status"
+        ],
+        "title": "新北市各抽水站資訊",
+        "update_frequency": "每1年"
+      },
+      {
+        "county": "桃園市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "46582",
+        "dataset_url": null,
+        "field_description": "項次;本局水門名稱;水門型式;緯度;經度;位置",
+        "matched_keywords": [
+          "水門",
+          "位置"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://opendata.tycg.gov.tw/api/dataset/1232b08a-121f-4505-ab39-14f40b12aa19/resource/8fe03219-d637-47d2-a771-0ce8635e55fa/download"
+        ],
+        "signal_types": [
+          "pump_or_gate_status"
+        ],
+        "title": "桃園市政府水務局管理水門資訊",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "臺中市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "84426",
+        "dataset_url": null,
+        "field_description": "圖資名稱;資料格式;坐標系統;下載網址;上架日期;資料資源欄位",
+        "matched_keywords": [
+          "淹水",
+          "抽水",
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=87e89521-27f4-4beb-8aea-fa07be55e609"
+        ],
+        "signal_types": [
+          "flood_depth",
+          "pump_or_gate_status"
+        ],
+        "title": "臺中市各抽水站資訊",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "臺中市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "105967",
+        "dataset_url": null,
+        "field_description": "圖資名稱;資料格式;坐標系統;下載網址;上架日期;資料資源欄位",
+        "matched_keywords": [
+          "水門",
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "JSON;CSV;XML"
+        ],
+        "resource_urls": [
+          "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=7c597e67-ae3d-419f-bf93-d27fd5238d82;https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=e2770fab-2343-43d0-9972-98d50c8ea5a1;https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=c29de2c2-cc30-4804-b120-4eeff2f33cef"
+        ],
+        "signal_types": [
+          "pump_or_gate_status"
+        ],
+        "title": "臺中市市管水門",
+        "update_frequency": "不定期更新"
+      },
+      {
+        "county": "新北市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "125531",
+        "dataset_url": null,
+        "field_description": "seqno(編號);water_gate(水門名稱);water_pumping_station(抽水站名稱);river(水系);district(行政區)",
+        "matched_keywords": [
+          "抽水",
+          "水門",
+          "閘門"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://data.ntpc.gov.tw/api/datasets/bf784279-31aa-44bc-a210-33151d03e7ab/csv/file"
+        ],
+        "signal_types": [
+          "pump_or_gate_status"
+        ],
+        "title": "新北市水門資料",
+        "update_frequency": "每1年"
+      },
+      {
+        "county": "新北市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "124083",
+        "dataset_url": null,
+        "field_description": "area(地區);rd_name(位置);name(機型名稱);quantity(數量);outfall(排出口)",
+        "matched_keywords": [
+          "淹水",
+          "抽水",
+          "地區",
+          "位置"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://data.ntpc.gov.tw/api/datasets/fae7f80a-b075-4977-a654-bfdc11dc4cc6/csv/file"
+        ],
+        "signal_types": [
+          "flood_depth",
+          "pump_or_gate_status"
+        ],
+        "title": "新北市颱風期間各型移動式抽水機佈設資訊",
+        "update_frequency": "每1年"
+      },
+      {
+        "county": "桃園市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "152939",
+        "dataset_url": null,
+        "field_description": "名稱;數量",
+        "matched_keywords": [
+          "抽水"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://opendata.tycg.gov.tw/api/dataset/328dc013-6d8a-41be-bacf-706d6c61a9de/resource/260e3099-8e5f-47e0-ace6-f7653d9ea0de/download"
+        ],
+        "signal_types": [
+          "pump_or_gate_status"
+        ],
+        "title": "桃園市政府水務局抽水機",
+        "update_frequency": "每1年"
+      },
+      {
+        "county": "新北市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "124551",
+        "dataset_url": null,
+        "field_description": "seqno(編號);name(橫移門名稱);latitude(緯度);longitude(經度);district(行政區);areacode(地址-行政區域代碼\t);water_pumping_station(鄰近抽水站);intersection(鄰近路口);car_and_motorcycle_pass_available(可汽機車通行)",
+        "matched_keywords": [
+          "水位",
+          "抽水"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://data.ntpc.gov.tw/api/datasets/c40bf768-8a36-4b99-94db-622c27122d61/csv/file"
+        ],
+        "signal_types": [
+          "water_level",
+          "pump_or_gate_status"
+        ],
+        "title": "新北市橫移門資訊",
+        "update_frequency": "每1年"
+      },
+      {
+        "county": "臺中市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "84399",
+        "dataset_url": null,
+        "field_description": "圖資名稱;資料格式;坐標系統;下載網址;上架日期;資料資源欄位",
+        "matched_keywords": [
+          "水門",
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=6adab4a9-49a9-4bcc-8c06-921ab6aed61e"
+        ],
+        "signal_types": [
+          "pump_or_gate_status"
+        ],
+        "title": "臺中市區公所水門",
+        "update_frequency": "每1年"
+      }
+    ],
+    "required_signal_types": [
+      "pump_or_gate_status"
+    ],
+    "summary": {
+      "by_county": {
+        "南投縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "嘉義市": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "基隆市": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "宜蘭縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "新北市": {
+          "candidate_count": 4,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 4,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "sewer_water_level",
+            "water_level",
+            "pump_or_gate_status",
+            "flood_depth"
+          ]
+        },
+        "新竹縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "桃園市": {
+          "candidate_count": 2,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 2,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "pump_or_gate_status"
+          ]
+        },
+        "澎湖縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "臺中市": {
+          "candidate_count": 3,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 3,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "flood_depth",
+            "pump_or_gate_status"
+          ]
+        },
+        "臺東縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "苗栗縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "連江縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "金門縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        }
+      },
+      "candidate_live_read_api_count_by_county": {},
+      "metadata_only_count_by_county": {
+        "新北市": 4,
+        "桃園市": 2,
+        "臺中市": 3
+      },
+      "target_counties_without_candidates": [
+        "連江縣",
+        "金門縣",
+        "臺東縣",
+        "苗栗縣",
+        "澎湖縣",
+        "南投縣",
+        "嘉義市",
+        "基隆市",
+        "宜蘭縣",
+        "新竹縣"
+      ]
+    },
+    "target_counties": [
+      "連江縣",
+      "金門縣",
+      "臺東縣",
+      "苗栗縣",
+      "澎湖縣",
+      "南投縣",
+      "嘉義市",
+      "基隆市",
+      "宜蘭縣",
+      "新北市",
+      "新竹縣",
+      "桃園市",
+      "臺中市"
+    ]
+  },
+  "schema_version": "local-source-discovery-refresh/v1",
+  "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json"
+}

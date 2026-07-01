@@ -1,0 +1,215 @@
+{
+  "captured_at": "2026-07-01T11:25:00+08:00",
+  "groups": [
+    {
+      "artifact_name": "signal-gap-discovery-refresh-pump-or-gate-status.json",
+      "candidate_count": 9,
+      "candidate_live_read_api_count": 0,
+      "county_count": 13,
+      "metadata_only_count": 9,
+      "readiness_by_county": {
+        "南投縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "嘉義市": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "基隆市": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "宜蘭縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "新北市": {
+          "candidate_count": 4,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 4,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "sewer_water_level",
+            "water_level",
+            "pump_or_gate_status",
+            "flood_depth"
+          ]
+        },
+        "新竹縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "桃園市": {
+          "candidate_count": 2,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 2,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "pump_or_gate_status"
+          ]
+        },
+        "澎湖縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "臺中市": {
+          "candidate_count": 3,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 3,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "flood_depth",
+            "pump_or_gate_status"
+          ]
+        },
+        "臺東縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "苗栗縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "連江縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "金門縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        }
+      },
+      "signal_type": "pump_or_gate_status",
+      "target_counties": [
+        "連江縣",
+        "金門縣",
+        "臺東縣",
+        "苗栗縣",
+        "澎湖縣",
+        "南投縣",
+        "嘉義市",
+        "基隆市",
+        "宜蘭縣",
+        "新北市",
+        "新竹縣",
+        "桃園市",
+        "臺中市"
+      ],
+      "target_counties_without_candidates": [
+        "連江縣",
+        "金門縣",
+        "臺東縣",
+        "苗栗縣",
+        "澎湖縣",
+        "南投縣",
+        "嘉義市",
+        "基隆市",
+        "宜蘭縣",
+        "新竹縣"
+      ]
+    },
+    {
+      "artifact_name": "signal-gap-discovery-refresh-flood-depth.json",
+      "candidate_count": 2,
+      "candidate_live_read_api_count": 0,
+      "county_count": 3,
+      "metadata_only_count": 2,
+      "readiness_by_county": {
+        "澎湖縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "臺北市": {
+          "candidate_count": 2,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 2,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "flood_depth"
+          ]
+        },
+        "連江縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        }
+      },
+      "signal_type": "flood_depth",
+      "target_counties": [
+        "連江縣",
+        "澎湖縣",
+        "臺北市"
+      ],
+      "target_counties_without_candidates": [
+        "連江縣",
+        "澎湖縣"
+      ]
+    },
+    {
+      "artifact_name": "signal-gap-discovery-refresh-sewer-water-level.json",
+      "candidate_count": 0,
+      "candidate_live_read_api_count": 0,
+      "county_count": 1,
+      "metadata_only_count": 0,
+      "readiness_by_county": {
+        "連江縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        }
+      },
+      "signal_type": "sewer_water_level",
+      "target_counties": [
+        "連江縣"
+      ],
+      "target_counties_without_candidates": [
+        "連江縣"
+      ]
+    }
+  ],
+  "live_candidate_signal_types": [],
+  "schema_version": "local-source-signal-gap-discovery-refresh/v1",
+  "signal_gap_group_count": 3,
+  "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json",
+  "total_candidate_count": 11,
+  "total_candidate_live_read_api_count": 0,
+  "total_metadata_only_count": 11
+}

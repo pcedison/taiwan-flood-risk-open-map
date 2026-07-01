@@ -62,6 +62,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
     assert "scripts/hosted_worker_evidence.py" in step_text
     assert "scripts/hosted_monitoring_evidence.py" in step_text
+    assert "scripts/local-source-signal-gap-discovery-refresh.py" in step_text
     assert "scripts/local-source-request-followups.py" in step_text
     assert "scripts/local-source-completion-audit.py" in step_text
     assert "--markdown-output artifacts/hosted-completion-audit.md" in step_text
@@ -136,6 +137,15 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 == '' }}"
     )
     assert "::notice" in missing_dispatch_step["run"]
+
+    signal_gap_discovery_step = next(
+        step for step in steps if step.get("name") == "Local source signal-gap discovery refresh"
+    )
+    assert "scripts/local-source-signal-gap-discovery-refresh.py" in (
+        signal_gap_discovery_step["run"]
+    )
+    assert "--output-dir artifacts" in signal_gap_discovery_step["run"]
+    assert "--captured-at" in signal_gap_discovery_step["run"]
 
     audit_step = next(
         step for step in steps if step.get("name") == "Hosted completion audit"
