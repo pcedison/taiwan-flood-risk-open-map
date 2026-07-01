@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from http.client import IncompleteRead
+
 from app.ops.local_source_discovery_monitor import (
     DEFAULT_TARGET_COUNTIES,
     DataGovDataset,
@@ -322,6 +324,85 @@ def test_fetch_data_gov_dataset_export_retries_transient_timeout(monkeypatch) ->
         if attempts == 1:
             raise TimeoutError("read timed out")
         return Response()
+
+    monkeypatch.setattr(
+        "app.ops.local_source_discovery_monitor.urlopen",
+        fake_urlopen,
+    )
+
+    payload = fetch_data_gov_dataset_export(
+        timeout_seconds=3,
+        max_attempts=2,
+        retry_delay_seconds=0,
+    )
+
+    assert payload == [{"title": "ok"}]
+    assert attempts == 2
+
+
+def test_fetch_data_gov_dataset_export_retries_incomplete_chunked_read(monkeypatch) -> None:
+    attempts = 0
+
+    class Response:
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'[{"title":"ok"}]'
+
+    class IncompleteResponse(Response):
+        def read(self) -> bytes:
+            raise IncompleteRead(b'{"partial":')
+
+    def fake_urlopen(_request: object, *, timeout: int) -> Response:
+        nonlocal attempts
+        attempts += 1
+        assert timeout == 3
+        if attempts == 1:
+            return IncompleteResponse()
+        return Response()
+
+    monkeypatch.setattr(
+        "app.ops.local_source_discovery_monitor.urlopen",
+        fake_urlopen,
+    )
+
+    payload = fetch_data_gov_dataset_export(
+        timeout_seconds=3,
+        max_attempts=2,
+        retry_delay_seconds=0,
+    )
+
+    assert payload == [{"title": "ok"}]
+    assert attempts == 2
+
+
+def test_fetch_data_gov_dataset_export_retries_partial_json_response(monkeypatch) -> None:
+    attempts = 0
+
+    class Response:
+        def __init__(self, body: bytes) -> None:
+            self.body = body
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return self.body
+
+    def fake_urlopen(_request: object, *, timeout: int) -> Response:
+        nonlocal attempts
+        attempts += 1
+        assert timeout == 3
+        if attempts == 1:
+            return Response(b'{"partial":')
+        return Response(b'[{"title":"ok"}]')
 
     monkeypatch.setattr(
         "app.ops.local_source_discovery_monitor.urlopen",

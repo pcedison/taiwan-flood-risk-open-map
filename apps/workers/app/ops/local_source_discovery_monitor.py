@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from http.client import IncompleteRead
 from time import sleep
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
@@ -169,14 +170,19 @@ def fetch_data_gov_dataset_export(
         try:
             with urlopen(request, timeout=timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8-sig"))
-        except (HTTPError, URLError, TimeoutError) as exc:
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            IncompleteRead,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
             last_fetch_error = exc
             if attempt >= attempts:
                 break
             if retry_delay_seconds > 0:
                 sleep(retry_delay_seconds)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"Failed to fetch data.gov.tw dataset export: {exc}") from exc
 
     if last_fetch_error is not None:
         raise RuntimeError(
