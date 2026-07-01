@@ -273,6 +273,8 @@ Each run executes:
 - `scripts/local-source-contract-dispatch-readiness.py` to publish a
   public-safe checklist for authorization, metadata release, and public API
   contract request dispatch.
+- `scripts/hosted_private_evidence_readiness.py` to publish which private
+  evidence/admin-token inputs are configured or missing without printing values.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -336,6 +338,7 @@ every hosted monitoring run:
 - `signal-gap-discovery-refresh-sewer-water-level.json`
 - `signal-gap-dispatch-readiness.json`
 - `source-contract-dispatch-readiness.json`
+- `hosted-private-evidence-readiness.json`
 
 These artifacts monitor whether official open-data catalogs have published new
 machine-readable candidates for the unresolved signal families. A
@@ -355,6 +358,14 @@ checklist for the `official_authorization_and_contracts` gate. It lists the
 remaining authorization requests, metadata-release monitor, and public API
 contract reviews, but it does not prove requests were sent and does not satisfy
 the gate without accepted private source-contract evidence.
+
+`hosted-private-evidence-readiness.json` lists the configured/missing state for
+`ADMIN_BEARER_TOKEN`, `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
+`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`, and
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`. It never prints or decodes secret
+values. It is useful for release review triage, but configured secrets still do
+not satisfy completion gates unless their decoded private manifests produce
+accepted completion evidence.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 

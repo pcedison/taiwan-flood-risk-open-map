@@ -1,0 +1,96 @@
+{
+  "captured_at": "2026-07-01T13:10:00+08:00",
+  "completion_gate_blockers": [
+    {
+      "gate_key": "hosted_worker_persisted_evidence",
+      "missing_secret_names": [
+        "ADMIN_BEARER_TOKEN",
+        "HOSTED_WORKER_EVIDENCE_MANIFEST_B64"
+      ]
+    },
+    {
+      "gate_key": "production_monitoring_and_alerting",
+      "missing_secret_names": [
+        "HOSTED_MONITORING_EVIDENCE_MANIFEST_B64"
+      ]
+    }
+  ],
+  "notes": [
+    "This artifact records only whether required environment variables are configured.",
+    "It never prints, decodes, hashes, or previews secret values.",
+    "Configured secrets still need their underlying private evidence to be reviewed before a completion gate can be accepted."
+  ],
+  "schema_version": "hosted-private-evidence-readiness/v1",
+  "secrets": [
+    {
+      "blocks_completion_gates": [
+        "hosted_worker_persisted_evidence"
+      ],
+      "configured": false,
+      "name": "ADMIN_BEARER_TOKEN",
+      "next_operator_action": "Set the ADMIN_BEARER_TOKEN repository secret before release-gate Hosted Monitoring runs that require /admin/v1/sources freshness evidence.",
+      "required_evidence_requirements": [
+        "freshness_policy",
+        "worker_persisted_evidence_path"
+      ],
+      "required_for_completion": true,
+      "unblocks": [
+        "hosted_source_freshness_smoke"
+      ]
+    },
+    {
+      "blocks_completion_gates": [
+        "hosted_worker_persisted_evidence"
+      ],
+      "configured": false,
+      "name": "HOSTED_WORKER_EVIDENCE_MANIFEST_B64",
+      "next_operator_action": "Store a reviewed hosted-worker evidence manifest as base64 after private freshness, retention, cadence, egress, and worker evidence refs are accepted.",
+      "required_evidence_requirements": [
+        "freshness_policy",
+        "raw_snapshot_retention_policy",
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+        "worker_persisted_evidence_path"
+      ],
+      "required_for_completion": true,
+      "unblocks": [
+        "hosted_worker_private_evidence"
+      ]
+    },
+    {
+      "blocks_completion_gates": [
+        "production_monitoring_and_alerting"
+      ],
+      "configured": false,
+      "name": "HOSTED_MONITORING_EVIDENCE_MANIFEST_B64",
+      "next_operator_action": "Store a reviewed hosted-monitoring evidence manifest as base64 after alert routing, scheduled checks, and ownership evidence are accepted.",
+      "required_evidence_requirements": [
+        "hosted_alert_routing",
+        "scheduled_freshness_checks",
+        "worker_scheduler_alert_ownership"
+      ],
+      "required_for_completion": true,
+      "unblocks": [
+        "hosted_monitoring_private_evidence"
+      ]
+    },
+    {
+      "blocks_completion_gates": [],
+      "configured": false,
+      "name": "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64",
+      "next_operator_action": "Optionally store a reviewed dispatch overlay as base64 to publish public-safe pending or overdue official request follow-up counts.",
+      "required_evidence_requirements": [
+        "official_request_dispatch_followup_visibility"
+      ],
+      "required_for_completion": false,
+      "unblocks": [
+        "local_source_request_dispatch_followups"
+      ]
+    }
+  ],
+  "summary": {
+    "configured_secret_count": 0,
+    "missing_completion_gate_secret_count": 3,
+    "missing_secret_count": 4
+  }
+}
