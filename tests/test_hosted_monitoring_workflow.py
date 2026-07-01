@@ -273,6 +273,12 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         for step in steps
         if step.get("name") == "Hosted monitoring schedule evidence"
     )
+    assert steps.index(schedule_evidence_step) > steps.index(source_freshness_step)
+    assert steps.index(schedule_evidence_step) > steps.index(worker_evidence_step)
+    assert steps.index(schedule_evidence_step) > steps.index(worker_policy_evidence_step)
+    assert steps.index(schedule_evidence_step) > steps.index(monitoring_evidence_step)
+    assert steps.index(schedule_evidence_step) > steps.index(dispatch_followups_step)
+    assert steps.index(schedule_evidence_step) > steps.index(missing_dispatch_step)
     assert "scripts/hosted_monitoring_schedule_evidence.py" in (
         schedule_evidence_step["run"]
     )
@@ -289,6 +295,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         step for step in steps if step.get("name") == "Hosted completion audit"
     )
     assert audit_step["if"] == "${{ always() }}"
+    assert steps.index(schedule_evidence_step) < steps.index(audit_step)
     assert "artifacts/*-completion-evidence.json" in audit_step["run"]
     assert "--output artifacts/hosted-completion-audit.json" in audit_step["run"]
 

@@ -2269,6 +2269,40 @@ hosted monitoring artifact set. The current live probe still found no
 incomplete and still needs official contract replies, released APIs, or accepted
 official-unavailable evidence.
 
+## Task 71: Hosted Schedule Evidence Ordering Guard
+
+**Files:**
+- Modify: `.github/workflows/hosted-monitoring.yml`
+- Modify: `tests/test_hosted_monitoring_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: Hosted Monitoring schedule evidence generation and every
+  non-`always()` hosted monitoring check that can fail before completion audit.
+- Produces: a workflow ordering guard that emits
+  `hosted-monitoring-schedule-completion-evidence.json` only after deployment,
+  public risk, admin freshness, private hosted evidence, and local-source
+  follow-up checks have passed.
+
+- [x] Write a failing workflow contract test proving the schedule evidence step
+  must run after admin freshness, hosted worker/private monitoring evidence,
+  and local-source follow-up handling.
+- [x] Move the schedule evidence step immediately before Hosted completion audit
+  so failed non-`always()` checks prevent misleading partial schedule completion
+  evidence.
+- [x] Document that this hardens `scheduled_freshness_checks` evidence but does
+  not complete `production_monitoring_and_alerting` without a successful real
+  schedule run plus accepted alert routing and worker/scheduler ownership
+  evidence.
+
+Completed 2026-07-01: Hosted Monitoring no longer writes schedule completion
+evidence before later monitor checks have a chance to fail. The gate remains
+incomplete until a real scheduled run succeeds on the current main SHA and the
+private monitoring manifest accepts alert routing and worker/scheduler alert
+ownership.
+
 ## Completion Gates
 
 The full objective is complete only when:

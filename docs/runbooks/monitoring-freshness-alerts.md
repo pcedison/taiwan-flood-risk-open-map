@@ -295,7 +295,10 @@ Each run executes:
 - `scripts/hosted_monitoring_schedule_evidence.py` to publish public-safe
   schedule-run evidence. On real `schedule` events it also emits partial
   completion evidence for `scheduled_freshness_checks`; manual runs only write
-  a skipped evidence artifact.
+  a skipped evidence artifact. This step runs after the hosted deployment,
+  public risk, admin freshness, private evidence, and request follow-up checks,
+  so a later failing monitor cannot leave behind a misleading schedule
+  completion overlay.
 - `scripts/hosted-monitoring-schedule-readiness.py` for an operator-side
   watchdog check of GitHub Actions schedule metadata. It can confirm whether
   the latest Hosted Monitoring `schedule` run completed successfully on the
@@ -418,6 +421,7 @@ every hosted monitoring run:
 - `local-source-source-contract-dispatch-template.json`
 - `hosted-monitoring-schedule-evidence.json`
 - `hosted-monitoring-schedule-completion-evidence.json` on scheduled runs only
+  after earlier non-`always()` monitoring checks pass
 - `hosted-private-evidence-template-bundle-manifest.json`
 - `hosted-private-evidence-template-bundle.md`
 - `hosted-worker-evidence-template.json`
@@ -480,7 +484,8 @@ evidence has been reviewed, and it does not replace the workflow-generated
 
 `hosted-monitoring-schedule-evidence.json` records whether the current hosted
 monitoring run came from the scheduled trigger. If and only if
-`GITHUB_EVENT_NAME` is `schedule`, the workflow also uploads
+`GITHUB_EVENT_NAME` is `schedule` and the preceding hosted monitoring checks
+have not failed, the workflow also uploads
 `hosted-monitoring-schedule-completion-evidence.json`, which satisfies the
 `scheduled_freshness_checks` requirement of
 `production_monitoring_and_alerting`. It does not satisfy `hosted_alert_routing`
