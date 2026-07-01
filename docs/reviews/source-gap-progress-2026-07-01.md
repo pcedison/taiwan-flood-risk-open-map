@@ -166,6 +166,13 @@ The 2026-07-01 live watchdog run checked the current expected main SHA
 90-minute readiness window. No `scheduled_freshness_checks` completion overlay
 was produced from that watchdog run.
 
+Hosted Monitoring failures now also have a public-safe issue route:
+`[hosted-monitoring-alert] Hosted Monitoring failure`. The workflow creates the
+issue once and comments on later failures with only the run URL, workflow,
+event, and SHA. This is alert-route infrastructure, not accepted completion
+evidence; the `hosted_alert_routing` requirement still needs reviewed owner and
+evidence refs through the private hosted monitoring manifest.
+
 ## Hosted Private Evidence Template Bundle
 
 Hosted Monitoring now also publishes a public-safe private evidence template
@@ -212,6 +219,8 @@ authorization/contract, hosted worker, and monitoring gates remain blocked.
   checks, and worker/scheduler alert ownership still require accepted evidence.
   The schedule watchdog currently shows the latest real scheduled run is failed,
   stale, and not on the current main SHA, so even the `scheduled_freshness_checks`
-  sub-requirement remains unaccepted for the current deployed SHA.
+  sub-requirement remains unaccepted for the current deployed SHA. GitHub Issue
+  routing now exists for workflow failures, but `hosted_alert_routing` remains
+  unaccepted until ownership and evidence refs are reviewed.
 - `ADMIN_BEARER_TOKEN` and the optional private evidence secrets are not proven
   configured from this local run.

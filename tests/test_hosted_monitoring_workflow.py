@@ -37,7 +37,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert triggers["schedule"][0]["cron"] == "*/30 * * * *"
 
     job = workflow["jobs"]["hosted-monitoring"]
-    assert job["permissions"] == {"contents": "read"}
+    assert job["permissions"] == {"contents": "read", "issues": "write"}
     assert job["env"]["ADMIN_BEARER_TOKEN"] == "${{ secrets.ADMIN_BEARER_TOKEN }}"
     assert job["env"]["HOSTED_WORKER_EVIDENCE_MANIFEST_B64"] == (
         "${{ secrets.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 }}"
@@ -277,3 +277,16 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert audit_step["if"] == "${{ always() }}"
     assert "artifacts/*-completion-evidence.json" in audit_step["run"]
     assert "--output artifacts/hosted-completion-audit.json" in audit_step["run"]
+
+    alert_routing_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Route hosted monitoring failure issue"
+    )
+    assert alert_routing_step["if"] == "${{ failure() }}"
+    assert alert_routing_step["uses"] == "actions/github-script@v7"
+    assert "hosted-monitoring-alert" in alert_routing_step["with"]["script"]
+    assert "Hosted Monitoring failure" in alert_routing_step["with"]["script"]
+    assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
+    assert "github.rest.issues.createComment" in alert_routing_step["with"]["script"]
+    assert "process.env.GITHUB_RUN_ID" in alert_routing_step["with"]["script"]

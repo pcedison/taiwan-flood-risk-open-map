@@ -2065,6 +2065,33 @@ the `scheduled_freshness_checks` requirement honest until a real successful,
 fresh schedule run appears on the expected main SHA. Alert routing and
 worker/scheduler alert ownership still require private monitoring evidence.
 
+## Task 65: Hosted Monitoring Failure Issue Route
+
+**Files:**
+- Modify: `.github/workflows/hosted-monitoring.yml`
+- Modify: `tests/test_hosted_monitoring_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+
+**Interfaces:**
+- Consumes: Hosted Monitoring job failure state and GitHub Actions context.
+- Produces: a public-safe GitHub Issue alert route under
+  `[hosted-monitoring-alert] Hosted Monitoring failure`, creating the issue once
+  and adding comments on later failures.
+
+- [x] Write a failing workflow contract test requiring `issues: write` and a
+  failure-only GitHub issue routing step.
+- [x] Add `actions/github-script` routing after artifact upload, using only run
+  URL, workflow, event, and SHA.
+- [x] Document that this provides an alert channel but still does not satisfy
+  `hosted_alert_routing` without accepted private monitoring evidence naming an
+  owner, review timestamp, and evidence ref.
+
+Completed 2026-07-01: Hosted Monitoring failures now have a no-secret GitHub
+Issue route. This moves `production_monitoring_and_alerting` closer to
+operation, but the completion gate remains incomplete until the route is
+reviewed, owned, and recorded in a valid hosted monitoring evidence manifest.
+
 ## Completion Gates
 
 The full objective is complete only when:
