@@ -82,6 +82,10 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
     assert resolve_step["if"] == "${{ success() }}"
     assert resolve_step["uses"] == "actions/github-script@v7"
     resolve_script = resolve_step["with"]["script"]
+    assert 'const fs = require("fs");' in resolve_script
+    assert "artifacts/github-actions-secret-readiness.json" in resolve_script
+    assert "summary.completion_gate_blocker_count !== 0" in resolve_script
+    assert "summary.missing_required_for_completion_count !== 0" in resolve_script
     assert "secret-readiness-watchdog" in resolve_script
     assert "GitHub Actions required secrets missing" in resolve_script
     assert "github.rest.issues.createComment" in resolve_script

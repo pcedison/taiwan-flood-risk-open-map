@@ -155,8 +155,25 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require("fs");
             const marker = "[local-source-dispatch-watchdog]";
             const title = `${marker} Local source dispatch required`;
+            const reportPath = "artifacts/local-source-dispatch-watchdog.json";
+            if (!fs.existsSync(reportPath)) {
+              core.info(`Skip closing ${title}: ${reportPath} was not written.`);
+              return;
+            }
+            const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+            const summary = report.summary || {};
+            if (
+              report.status !== "no_dispatch_required" ||
+              summary.dispatch_required !== false
+            ) {
+              core.info(
+                `Skip closing ${title}: dispatch status is ${report.status}.`,
+              );
+              return;
+            }
             const runUrl = [
               process.env.GITHUB_SERVER_URL,
               process.env.GITHUB_REPOSITORY,
@@ -170,6 +187,8 @@ jobs:
               `- workflow: ${process.env.GITHUB_WORKFLOW}`,
               `- event: ${process.env.GITHUB_EVENT_NAME}`,
               `- sha: ${process.env.GITHUB_SHA}`,
+              `- status: ${report.status}`,
+              `- dispatch required: ${summary.dispatch_required}`,
               "",
               "Closing the stale local source dispatch issue.",
             ].join("\n");
