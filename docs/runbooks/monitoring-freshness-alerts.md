@@ -725,10 +725,13 @@ hosted/private evidence secret path visible in GitHub. It runs daily at
 `23 16 * * *` and can also be started manually with
 `fail_on_completion_blockers`.
 
-The workflow uses `scripts/github-actions-secret-readiness.py` to read GitHub
-Actions secret metadata through `gh secret list`. It records only secret names,
-presence, and update metadata. It never reads, prints, decodes, or uploads
-secret values.
+The workflow uses GitHub expression booleans such as
+`${{ secrets.ADMIN_BEARER_TOKEN != '' }}` to generate a presence-only JSON file
+before calling `scripts/github-actions-secret-readiness.py`. It records only
+secret names and configured/not-configured state. It never reads, prints,
+decodes, or uploads secret values. Local operator runs can still use
+`gh secret list` metadata, but the scheduled workflow intentionally avoids that
+API because `GITHUB_TOKEN` cannot list Actions secrets.
 
 By default the workflow fails when required secret routes still block completion
 gates. The failure route creates or comments on the stable public-safe issue
