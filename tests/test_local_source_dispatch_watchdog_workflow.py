@@ -65,6 +65,9 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "Local source dispatch required" in script
     assert "operator_next_steps" in script
     assert "request_dispatch_queue_items" in script
+    assert "required_read_api_fields" in script
+    assert "accepted_completion_statuses" in script
+    assert "requested_counterparty" in script
     assert "Request dispatch queue:" in script
     assert "Operator next steps:" in script
     assert "stepLines" in script

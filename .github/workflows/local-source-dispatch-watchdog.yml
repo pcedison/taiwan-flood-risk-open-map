@@ -126,7 +126,10 @@ jobs:
                   .slice(0, 5)
                   .map((item) => {
                     const label = item.target_signal_type || item.source_contract_gate || "unknown";
-                    return `- ${item.queue_id}: ${item.request_type} / ${label} (${item.completion_target_count} completion targets)`;
+                    const fields = (item.required_read_api_fields || []).join(", ") || "not listed";
+                    const statuses = (item.accepted_completion_statuses || []).join(", ") || "not listed";
+                    const counterparty = item.requested_counterparty || item.county || "not listed";
+                    return `- ${item.queue_id}: ${item.request_type} / ${label} (${item.completion_target_count} completion targets); fields ${fields}; accepted ${statuses}; counterparty ${counterparty}`;
                   })
               : ["- See uploaded request dispatch queue artifact for grouped dispatch items."];
             const body = [
