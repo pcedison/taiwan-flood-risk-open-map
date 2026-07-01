@@ -311,3 +311,18 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
     assert "github.rest.issues.createComment" in alert_routing_step["with"]["script"]
     assert "process.env.GITHUB_RUN_ID" in alert_routing_step["with"]["script"]
+
+    resolve_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Close resolved hosted monitoring failure issue"
+    )
+    assert resolve_step["if"] == "${{ success() }}"
+    assert resolve_step["uses"] == "actions/github-script@v7"
+    resolve_script = resolve_step["with"]["script"]
+    assert "hosted-monitoring-alert" in resolve_script
+    assert "Hosted Monitoring failure" in resolve_script
+    assert "Hosted Monitoring failure resolved" in resolve_script
+    assert "github.rest.issues.createComment" in resolve_script
+    assert "github.rest.issues.update" in resolve_script
+    assert "state_reason" in resolve_script
