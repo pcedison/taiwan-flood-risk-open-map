@@ -69,6 +69,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/local-source-signal-gap-discovery-refresh.py" in step_text
     assert "scripts/local-source-signal-gap-dispatch-readiness.py" in step_text
     assert "scripts/local-source-contract-dispatch-readiness.py" in step_text
+    assert "scripts/local-source-request-packet-bundle.py" in step_text
     assert "scripts/hosted_private_evidence_readiness.py" in step_text
     assert "scripts/local-source-request-followups.py" in step_text
     assert "scripts/local-source-completion-audit.py" in step_text
@@ -209,6 +210,17 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         source_contract_dispatch_step["run"]
     )
     assert "--captured-at" in source_contract_dispatch_step["run"]
+
+    request_packet_bundle_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Local source request packet bundle"
+    )
+    assert "scripts/local-source-request-packet-bundle.py" in (
+        request_packet_bundle_step["run"]
+    )
+    assert "--output-dir artifacts" in request_packet_bundle_step["run"]
+    assert "--captured-at" in request_packet_bundle_step["run"]
 
     private_evidence_readiness_step = next(
         step

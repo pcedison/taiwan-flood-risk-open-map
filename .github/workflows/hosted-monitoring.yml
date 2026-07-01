@@ -93,6 +93,13 @@ jobs:
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --output artifacts/source-contract-dispatch-readiness.json
 
+      - name: Local source request packet bundle
+        run: |
+          set -euo pipefail
+          python scripts/local-source-request-packet-bundle.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output-dir artifacts
+
       - name: Hosted private evidence readiness
         run: |
           set -euo pipefail
