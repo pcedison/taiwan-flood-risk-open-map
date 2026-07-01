@@ -229,6 +229,22 @@ The fallback dispatch is intentionally not accepted as
 `scheduled_freshness_checks` completion evidence; the gate still requires a
 successful real schedule run or reviewed private monitoring evidence.
 
+Follow-up 2026-07-01: after main advanced to
+`624f548340a2126ecc56a4e38c14da89d1d6b27a`, real Hosted Monitoring schedule
+run `28521755183` completed successfully on that SHA. The schedule readiness
+artifact `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-624f548.json`
+is `passed`, and
+`docs/reviews/hosted-monitoring-schedule-completion-evidence-2026-07-01-624f548.json`
+was emitted by the scheduled run. This satisfies the
+`scheduled_freshness_checks` sub-requirement for the current deployed SHA, but
+does not satisfy `hosted_alert_routing` or
+`worker_scheduler_alert_ownership`.
+
+The follow-up schedule watchdog run on the same SHA passed and closed the stale
+`[hosted-schedule-watchdog] Hosted Monitoring schedule not ready` GitHub issue.
+Open public watchdog issues now correctly focus on the remaining local-source
+dispatch and private evidence secret readiness work.
+
 Hosted Monitoring failures now also have a public-safe issue route:
 `[hosted-monitoring-alert] Hosted Monitoring failure`. The workflow creates the
 issue once and comments on later failures with only the run URL, workflow,
@@ -417,6 +433,39 @@ Hosted Monitoring `schedule` run is run `28504711491`, failed on older SHA
 `scheduled_freshness_checks` completion evidence was emitted for
 `f9d5159ec0c156b2ca302d4e076a3e3310ebf5a5`.
 
+## Current Main Evidence Refresh After Schedule Recovery
+
+After PR #94 merged, hosted deployment, public risk evidence, Hosted Monitoring
+schedule readiness, and completion audit evidence were refreshed for main merge
+SHA `624f548340a2126ecc56a4e38c14da89d1d6b27a`.
+
+Artifacts:
+
+- `docs/reviews/hosted-deployment-smoke-2026-07-01-624f548.json`
+- `docs/reviews/hosted-deployment-completion-evidence-2026-07-01-624f548.json`
+- `docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-624f548.json`
+- `docs/reviews/hosted-public-risk-completion-evidence-2026-07-01-624f548.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-624f548.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-624f548.md`
+- `docs/reviews/hosted-monitoring-schedule-completion-evidence-2026-07-01-624f548.json`
+- `docs/reviews/completion-audit-2026-07-01-624f548.json`
+- `docs/reviews/completion-audit-2026-07-01-624f548.md`
+
+The hosted deployment smoke passed: `/health` and `/ready` both reported
+deployment SHA `624f548340a2126ecc56a4e38c14da89d1d6b27a`, and `/ready`
+reported healthy database and Redis dependencies. The public risk evidence
+smoke also passed for the Tainan query-point scenario, with worker-style
+official evidence and query-point nearby coverage still present in the public
+risk response.
+
+The refreshed audit still reports `overall_status: incomplete`.
+`production_deployment_evidence`, `public_risk_worker_evidence_path`, and the
+`scheduled_freshness_checks` portion of
+`production_monitoring_and_alerting` are satisfied for this deployed SHA. The
+monitoring gate remains incomplete because `hosted_alert_routing` and
+`worker_scheduler_alert_ownership` still require accepted private monitoring
+evidence.
+
 ## Local Source Dispatch Next Steps
 
 The local-source dispatch watchdog now writes public-safe `operator_next_steps`
@@ -445,13 +494,13 @@ or official-unavailable evidence is still required.
 - `hosted_worker_persisted_evidence`: freshness policy, raw snapshot retention,
   monitored scheduler cadence, hosted egress review, and worker persisted
   evidence path still require accepted hosted/private evidence.
-- `production_monitoring_and_alerting`: alert routing, scheduled freshness
-  checks, and worker/scheduler alert ownership still require accepted evidence.
-  The schedule watchdog currently shows the latest real scheduled run is failed,
-  stale, and not on the current main SHA, so even the `scheduled_freshness_checks`
-  sub-requirement remains unaccepted for the current deployed SHA. GitHub Issue
-  routing now exists for Hosted Monitoring failures and schedule-watchdog
-  failures, but `hosted_alert_routing` remains unaccepted until ownership and
-  evidence refs are reviewed.
+- `production_monitoring_and_alerting`: `scheduled_freshness_checks` is now
+  satisfied by the successful real Hosted Monitoring schedule run on
+  `624f548340a2126ecc56a4e38c14da89d1d6b27a`. The gate still requires accepted
+  evidence for `hosted_alert_routing` and `worker_scheduler_alert_ownership`.
+  GitHub Issue routing exists for Hosted Monitoring failures and
+  schedule-watchdog failures, but routing and ownership remain unaccepted until
+  owner, review timestamp, and evidence refs are reviewed through the hosted
+  monitoring private manifest.
 - `ADMIN_BEARER_TOKEN` and the optional private evidence secrets are not proven
   configured from this local run.

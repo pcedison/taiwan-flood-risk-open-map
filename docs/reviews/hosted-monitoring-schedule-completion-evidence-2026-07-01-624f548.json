@@ -1,0 +1,23 @@
+{
+  "schema_version": "local-source-completion-evidence/v1",
+  "captured_at": "2026-07-01T13:39:24Z",
+  "signal_family_gap_evidence": [],
+  "source_contract_evidence": [],
+  "production_gate_evidence": [
+    {
+      "gate_key": "production_monitoring_and_alerting",
+      "status": "accepted",
+      "evidence_ref": "artifacts/hosted-monitoring-schedule-evidence.json",
+      "satisfied_requirements": [
+        "scheduled_freshness_checks"
+      ],
+      "requirement_evidence": [
+        {
+          "requirement": "scheduled_freshness_checks",
+          "evidence_ref": "artifacts/hosted-monitoring-schedule-evidence.json#/schedule_evidence",
+          "observed_at": "2026-07-01T13:39:24Z"
+        }
+      ]
+    }
+  ]
+}
