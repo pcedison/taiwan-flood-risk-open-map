@@ -718,6 +718,32 @@ This watchdog is not completion evidence. It is an operational reminder that
 need accepted official reply, authorization-gated adapter,
 production-adapter, release, or official-unavailable evidence.
 
+## GitHub Actions Secret Readiness Watchdog
+
+`.github/workflows/github-actions-secret-readiness-watchdog.yml` keeps the
+hosted/private evidence secret path visible in GitHub. It runs daily at
+`23 16 * * *` and can also be started manually with
+`fail_on_completion_blockers`.
+
+The workflow uses `scripts/github-actions-secret-readiness.py` to read GitHub
+Actions secret metadata through `gh secret list`. It records only secret names,
+presence, and update metadata. It never reads, prints, decodes, or uploads
+secret values.
+
+By default the workflow fails when required secret routes still block completion
+gates. The failure route creates or comments on the stable public-safe issue
+`[secret-readiness-watchdog] GitHub Actions required secrets missing`. The issue
+body includes only run URL, SHA, aggregate counts, blocked gate keys, and
+missing secret names.
+
+This watchdog is not completion evidence. It proves whether the required GitHub
+Actions inputs are configured enough to attempt the private evidence routes.
+`hosted_worker_persisted_evidence` still needs accepted hosted worker/admin
+freshness/policy evidence, and `production_monitoring_and_alerting` still needs
+accepted hosted monitoring evidence. Configured secrets are only inputs; their
+decoded manifests must still pass the relevant evidence CLIs and completion
+audit.
+
 ## Reading Alerts
 
 When a freshness alert fires, first read these labels:

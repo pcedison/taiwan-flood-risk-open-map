@@ -275,6 +275,34 @@ candidates, and 6 source-contract items needing dispatch. This does not satisfy
 the remaining official request path visible in GitHub until accepted evidence is
 recorded.
 
+## GitHub Actions Secret Readiness Watchdog
+
+The hosted/private evidence secret path now has its own public-safe watchdog:
+
+- `.github/workflows/github-actions-secret-readiness-watchdog.yml`
+- `scripts/github-actions-secret-readiness.py`
+
+The workflow reads only GitHub Actions secret names and update metadata, writes
+`github-actions-secret-readiness.json` and `.md` artifacts, and fails by default
+when required secret routes still block completion gates. Failure routes to the
+stable issue
+`[secret-readiness-watchdog] GitHub Actions required secrets missing`.
+
+The current local run found 0 of 5 tracked secret inputs configured, 4
+required-for-completion secret inputs missing, and 2 completion-gate blockers:
+
+- `hosted_worker_persisted_evidence`: missing `ADMIN_BEARER_TOKEN`,
+  `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`, and
+  `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`.
+- `production_monitoring_and_alerting`: missing
+  `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`.
+
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is also missing, but it is a
+follow-up visibility input rather than a direct completion-gate input. This
+watchdog does not satisfy any gate; it makes missing hosted/private evidence
+inputs visible in GitHub until reviewed manifests and accepted evidence are
+provided.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

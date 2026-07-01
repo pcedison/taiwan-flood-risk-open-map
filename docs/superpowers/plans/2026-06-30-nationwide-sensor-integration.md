@@ -2193,6 +2193,44 @@ accepted official reply, authorization-gated adapter, production adapter,
 metadata release, contract verification, or official-unavailable evidence is
 recorded.
 
+## Task 69: GitHub Actions Secret Readiness Watchdog
+
+**Files:**
+- Add: `.github/workflows/github-actions-secret-readiness-watchdog.yml`
+- Add: `tests/test_github_actions_secret_readiness_watchdog_workflow.py`
+- Modify: `scripts/github-actions-secret-readiness.py`
+- Modify: `tests/test_github_actions_secret_readiness_cli.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: GitHub Actions secret names and update metadata through `gh secret
+  list`, plus the existing hosted/private evidence route model.
+- Produces: `github-actions-secret-readiness` JSON/Markdown artifacts, a
+  scheduled and manually dispatchable GitHub Actions watchdog, and the stable
+  public-safe issue route
+  `[secret-readiness-watchdog] GitHub Actions required secrets missing`.
+
+- [x] Write a failing CLI test proving secret readiness can fail closed when
+  completion-gate blockers remain.
+- [x] Add `--fail-on-completion-blockers` to the secret-readiness CLI without
+  printing or decoding secret values.
+- [x] Write a failing workflow contract test requiring daily schedule, artifact
+  upload, metadata-only secret inspection, and failure issue routing.
+- [x] Add the GitHub Actions workflow that routes missing required secret inputs
+  to a stable issue.
+- [x] Document that this is operational readiness tracking only, not completion
+  evidence for `hosted_worker_persisted_evidence` or
+  `production_monitoring_and_alerting`.
+
+Completed 2026-07-01: hosted/private evidence inputs now have a dedicated
+watchdog instead of relying only on local manual secret-readiness checks. The
+current local run still found 0 of 5 tracked inputs configured, 4 required
+completion inputs missing, and 2 completion-gate blockers. The affected hosted
+and monitoring gates remain incomplete until reviewed private manifests and
+accepted evidence overlays are provided.
+
 ## Completion Gates
 
 The full objective is complete only when:
