@@ -2092,6 +2092,40 @@ Issue route. This moves `production_monitoring_and_alerting` closer to
 operation, but the completion gate remains incomplete until the route is
 reviewed, owned, and recorded in a valid hosted monitoring evidence manifest.
 
+## Task 66: Current Main Evidence Refresh After Alert Route
+
+**Files:**
+- Add: `docs/reviews/hosted-deployment-smoke-2026-07-01-fd3a459.json`
+- Add: `docs/reviews/hosted-deployment-completion-evidence-2026-07-01-fd3a459.json`
+- Add: `docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-fd3a459.json`
+- Add: `docs/reviews/hosted-public-risk-completion-evidence-2026-07-01-fd3a459.json`
+- Add: `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-fd3a459.json`
+- Add: `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-fd3a459.md`
+- Add: `docs/reviews/completion-audit-2026-07-01-fd3a459.json`
+- Add: `docs/reviews/completion-audit-2026-07-01-fd3a459.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+
+**Interfaces:**
+- Consumes: hosted deployment smoke, hosted public risk evidence smoke, and
+  Hosted Monitoring schedule-run metadata for main merge SHA
+  `fd3a4598ca8f72f32a0ce768ab3c8a8fb69874f0`.
+- Produces: public-safe evidence artifacts and a refreshed completion audit for
+  the current deployed main SHA.
+
+- [x] Re-run hosted deployment smoke and public risk evidence smoke against the
+  current deployed main SHA.
+- [x] Re-run schedule readiness watchdog for the current main SHA.
+- [x] Rebuild the completion audit using the accepted deployment and public-risk
+  completion overlays only.
+- [x] Update the source-gap progress note without claiming unfinished gates are
+  satisfied.
+
+Completed 2026-07-01: deployment and public-risk evidence are refreshed for
+`fd3a4598ca8f72f32a0ce768ab3c8a8fb69874f0`. The refreshed audit remains
+`overall_status: incomplete`; schedule readiness is still failed because the
+latest real GitHub `schedule` run is failed, stale, and on older SHA
+`9d671d2a4a63ec30ff8a79204b7346304404f15f`.
+
 ## Completion Gates
 
 The full objective is complete only when:

@@ -189,22 +189,29 @@ without reconstructing schema requirements from scattered runbooks.
 
 ## Current Main Evidence Refresh
 
-After PR #59 merged, hosted deployment and public risk smoke were refreshed for
-main merge SHA `e717fde5e157be8c1762730a9b790269112c5cbd`.
+After PR #65 merged, hosted deployment and public risk smoke were refreshed for
+main merge SHA `fd3a4598ca8f72f32a0ce768ab3c8a8fb69874f0`.
 
 Artifacts:
 
-- `docs/reviews/hosted-deployment-smoke-2026-07-01-e717fde.json`
-- `docs/reviews/hosted-deployment-completion-evidence-2026-07-01-e717fde.json`
-- `docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-e717fde.json`
-- `docs/reviews/hosted-public-risk-completion-evidence-2026-07-01-e717fde.json`
-- `docs/reviews/completion-audit-2026-07-01-e717fde.json`
-- `docs/reviews/completion-audit-2026-07-01-e717fde.md`
+- `docs/reviews/hosted-deployment-smoke-2026-07-01-fd3a459.json`
+- `docs/reviews/hosted-deployment-completion-evidence-2026-07-01-fd3a459.json`
+- `docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-fd3a459.json`
+- `docs/reviews/hosted-public-risk-completion-evidence-2026-07-01-fd3a459.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-fd3a459.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-fd3a459.md`
+- `docs/reviews/completion-audit-2026-07-01-fd3a459.json`
+- `docs/reviews/completion-audit-2026-07-01-fd3a459.md`
 
 The refreshed completion audit still reports `overall_status: incomplete`.
 `production_deployment_evidence` and `public_risk_worker_evidence_path` are
 satisfied for this deployed SHA, while the source-family, official
-authorization/contract, hosted worker, and monitoring gates remain blocked.
+authorization/contract, hosted worker, and monitoring gates remain blocked. The
+schedule readiness refresh still reports `status: failed`: the latest real
+Hosted Monitoring schedule run is failed, stale, and on older SHA
+`9d671d2a4a63ec30ff8a79204b7346304404f15f`, so no
+`scheduled_freshness_checks` completion evidence was emitted for
+`fd3a4598ca8f72f32a0ce768ab3c8a8fb69874f0`.
 
 ## Still Unfinished
 
