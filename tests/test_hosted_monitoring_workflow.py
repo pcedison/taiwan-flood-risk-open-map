@@ -25,6 +25,15 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "default": "false",
         "type": "boolean",
     }
+    assert workflow_dispatch_inputs["fail_on_overdue_local_source_followups"] == {
+        "description": (
+            "Fail when private local-source request dispatch evidence contains "
+            "overdue official follow-ups."
+        ),
+        "required": "false",
+        "default": "false",
+        "type": "boolean",
+    }
     assert triggers["schedule"][0]["cron"] == "*/30 * * * *"
 
     job = workflow["jobs"]["hosted-monitoring"]
@@ -36,8 +45,14 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert job["env"]["HOSTED_MONITORING_EVIDENCE_MANIFEST_B64"] == (
         "${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 }}"
     )
+    assert job["env"]["LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64"] == (
+        "${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}"
+    )
     assert job["env"]["REQUIRE_ADMIN_SOURCE_FRESHNESS"] == (
         "${{ github.event.inputs.require_admin_source_freshness || 'false' }}"
+    )
+    assert job["env"]["FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS"] == (
+        "${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}"
     )
 
     steps = job["steps"]
@@ -47,6 +62,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
     assert "scripts/hosted_worker_evidence.py" in step_text
     assert "scripts/hosted_monitoring_evidence.py" in step_text
+    assert "scripts/local-source-request-followups.py" in step_text
     assert "scripts/local-source-completion-audit.py" in step_text
     assert "--markdown-output artifacts/hosted-completion-audit.md" in step_text
     assert "actions/upload-artifact@v4" in step_text
@@ -94,6 +110,32 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "--completion-evidence-output artifacts/hosted-monitoring-completion-evidence.json" in (
         monitoring_evidence_step["run"]
     )
+
+    dispatch_followups_step = next(
+        step for step in steps if step.get("name") == "Local source request dispatch follow-ups"
+    )
+    assert dispatch_followups_step["if"] == (
+        "${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 != '' }}"
+    )
+    assert "base64 --decode" in dispatch_followups_step["run"]
+    assert "--output artifacts/local-source-request-followups.json" in (
+        dispatch_followups_step["run"]
+    )
+    assert (
+        "--sanitized-completion-evidence-output "
+        "artifacts/local-source-request-dispatch-completion-evidence.json"
+    ) in dispatch_followups_step["run"]
+    assert "--fail-on-overdue" in dispatch_followups_step["run"]
+
+    missing_dispatch_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Skip local source request dispatch follow-ups without manifest"
+    )
+    assert missing_dispatch_step["if"] == (
+        "${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 == '' }}"
+    )
+    assert "::notice" in missing_dispatch_step["run"]
 
     audit_step = next(
         step for step in steps if step.get("name") == "Hosted completion audit"

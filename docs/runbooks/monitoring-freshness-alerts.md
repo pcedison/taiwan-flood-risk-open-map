@@ -272,6 +272,8 @@ Each run executes:
   `HOSTED_WORKER_EVIDENCE_MANIFEST_B64` is configured.
 - `scripts/hosted_monitoring_evidence.py` when the repository secret
   `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64` is configured.
+- `scripts/local-source-request-followups.py` when the repository secret
+  `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is configured.
 - `scripts/local-source-completion-audit.py` with every completion-evidence
   overlay produced by the hosted smoke steps.
 
@@ -295,12 +297,28 @@ monitoring, the default remains non-strict: if `ADMIN_BEARER_TOKEN` is not
 configured, the public smokes still run and the admin source freshness check is
 skipped with a notice rather than a leaked token or failed secret lookup.
 
-The two `*_MANIFEST_B64` secrets are optional base64-encoded JSON manifests
-validated by the evidence CLIs. Use them only for reviewed private ops refs and
-requirement statuses; do not store raw provider secrets, tokens, screenshots, or
-full incident transcripts in these GitHub secrets. When present, their generated
-completion overlays are folded into `hosted-completion-audit.json` alongside the
-public smoke evidence.
+Manual dispatch also accepts `fail_on_overdue_local_source_followups`. Set it
+to `true` when a release/completion review should fail if the private
+local-source dispatch evidence contains overdue official follow-ups. Scheduled
+runs leave this non-strict by default so they can publish the public-safe
+follow-up report without turning a known external-response wait into a red
+build unless operators opt in.
+
+The two hosted `*_MANIFEST_B64` secrets are optional base64-encoded JSON
+manifests validated by the evidence CLIs. Use them only for reviewed private
+ops refs and requirement statuses; do not store raw provider secrets, tokens,
+screenshots, or full incident transcripts in these GitHub secrets. When
+present, their generated completion overlays are folded into
+`hosted-completion-audit.json` alongside the public smoke evidence.
+
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is also optional. It should contain
+a base64-encoded `local-source-completion-evidence/v1` dispatch overlay whose
+items are still `status: request_dispatched`. The workflow decodes it only into
+runner temp storage, writes `local-source-request-followups.json`, and writes a
+sanitized completion overlay with `evidence_ref` replaced by
+`private-ops://redacted/local-source-request-dispatch`. That sanitized overlay
+lets the aggregate audit show dispatch and overdue-follow-up counts without
+uploading private correspondence refs.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 

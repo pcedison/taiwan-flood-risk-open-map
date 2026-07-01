@@ -18,6 +18,7 @@ if hasattr(sys.stderr, "reconfigure"):
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 FOLLOWUPS_SCHEMA_VERSION = "local-source-request-followups/v1"
 DISPATCHED_STATUS = "request_dispatched"
+SANITIZED_DISPATCH_EVIDENCE_REF = "private-ops://redacted/local-source-request-dispatch"
 
 
 def main() -> int:
@@ -47,6 +48,14 @@ def main() -> int:
         help="Optional path to write the public-safe follow-up JSON report.",
     )
     parser.add_argument(
+        "--sanitized-completion-evidence-output",
+        help=(
+            "Optional path to write a public-safe local-source-completion-evidence/v1 "
+            "overlay that preserves request_dispatched counts and follow-up dates "
+            "without copying private evidence refs."
+        ),
+    )
+    parser.add_argument(
         "--fail-on-overdue",
         action="store_true",
         help="Exit with status 1 when one or more follow-ups are overdue.",
@@ -61,6 +70,19 @@ def main() -> int:
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(content, encoding="utf-8")
+    if args.sanitized_completion_evidence_output:
+        sanitized_output_path = Path(args.sanitized_completion_evidence_output)
+        sanitized_output_path.parent.mkdir(parents=True, exist_ok=True)
+        sanitized_output_path.write_text(
+            json.dumps(
+                _build_sanitized_completion_evidence_overlay(overlays),
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     print(content, end="")
 
     if args.fail_on_overdue and report["summary"]["overdue_count"]:
@@ -146,6 +168,67 @@ def _dispatch_items(overlays: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 section="source_contract_evidence",
             )
         )
+    return items
+
+
+def _build_sanitized_completion_evidence_overlay(
+    overlays: list[dict[str, Any]],
+) -> dict[str, Any]:
+    captured_values = [
+        str(overlay["captured_at"])
+        for overlay in overlays
+        if isinstance(overlay.get("captured_at"), str)
+    ]
+    signal_items: list[dict[str, str]] = []
+    source_contract_items: list[dict[str, str]] = []
+    for overlay in overlays:
+        signal_items.extend(
+            _sanitized_dispatch_items(
+                overlay.get("signal_family_gap_evidence"),
+                section="signal_family_gap_evidence",
+            )
+        )
+        source_contract_items.extend(
+            _sanitized_dispatch_items(
+                overlay.get("source_contract_evidence"),
+                section="source_contract_evidence",
+            )
+        )
+    return {
+        "schema_version": COMPLETION_EVIDENCE_SCHEMA_VERSION,
+        "captured_at": max(captured_values) if captured_values else None,
+        "signal_family_gap_evidence": signal_items,
+        "source_contract_evidence": source_contract_items,
+        "production_gate_evidence": [],
+    }
+
+
+def _sanitized_dispatch_items(value: Any, *, section: str) -> list[dict[str, str]]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise SystemExit(f"{section}: completion evidence field must be an array")
+    items: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise SystemExit(f"{section}[{index}] must be an object")
+        if item.get("status") != DISPATCHED_STATUS:
+            continue
+
+        public_item = {
+            "county": str(item.get("county", "")),
+            "status": DISPATCHED_STATUS,
+            "evidence_ref": SANITIZED_DISPATCH_EVIDENCE_REF,
+        }
+        if section == "signal_family_gap_evidence":
+            public_item["signal_type"] = str(item.get("signal_type", ""))
+        if section == "source_contract_evidence":
+            public_item["gate"] = str(item.get("gate", ""))
+        if isinstance(item.get("dispatched_at"), str):
+            public_item["dispatched_at"] = str(item["dispatched_at"])
+        if isinstance(item.get("follow_up_due_at"), str):
+            public_item["follow_up_due_at"] = str(item["follow_up_due_at"])
+        items.append(public_item)
     return items
 
 

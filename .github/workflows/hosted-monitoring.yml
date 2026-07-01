@@ -12,6 +12,11 @@ on:
         required: false
         default: false
         type: boolean
+      fail_on_overdue_local_source_followups:
+        description: "Fail when private local-source request dispatch evidence contains overdue official follow-ups."
+        required: false
+        default: false
+        type: boolean
   schedule:
     - cron: "*/30 * * * *"
 
@@ -25,7 +30,9 @@ jobs:
       ADMIN_BEARER_TOKEN: ${{ secrets.ADMIN_BEARER_TOKEN }}
       HOSTED_WORKER_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 }}
       HOSTED_MONITORING_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 }}
+      LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64: ${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}
       REQUIRE_ADMIN_SOURCE_FRESHNESS: ${{ github.event.inputs.require_admin_source_freshness || 'false' }}
+      FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS: ${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,6 +121,28 @@ jobs:
         if: ${{ env.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 == '' }}
         run: |
           echo "::notice title=Hosted monitoring private evidence skipped::HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 is not configured, so production_monitoring_and_alerting evidence was not collected."
+
+      - name: Local source request dispatch follow-ups
+        if: ${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 != '' }}
+        run: |
+          set -euo pipefail
+          dispatch_manifest="${RUNNER_TEMP}/local-source-request-dispatch-evidence.json"
+          printf '%s' "${LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64}" | base64 --decode > "${dispatch_manifest}"
+          followup_args=()
+          if [ "${FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS}" = "true" ]; then
+            followup_args+=(--fail-on-overdue)
+          fi
+          python scripts/local-source-request-followups.py \
+            --completion-evidence-json "${dispatch_manifest}" \
+            --as-of "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/local-source-request-followups.json \
+            --sanitized-completion-evidence-output artifacts/local-source-request-dispatch-completion-evidence.json \
+            "${followup_args[@]}"
+
+      - name: Skip local source request dispatch follow-ups without manifest
+        if: ${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 == '' }}
+        run: |
+          echo "::notice title=Local source request dispatch follow-ups skipped::LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 is not configured, so official request dispatch follow-up evidence was not collected."
 
       - name: Hosted completion audit
         if: ${{ always() }}

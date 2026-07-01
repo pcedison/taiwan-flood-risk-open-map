@@ -320,6 +320,35 @@ counts, and the next follow-up due timestamp. It intentionally omits
 `evidence_ref` so operators can use it in ticket checks or CI-style monitors
 without leaking private correspondence indexes.
 
+To let the scheduled Hosted Monitoring workflow report official-request
+follow-up state, store a reviewed dispatch overlay as a base64 GitHub secret:
+
+```powershell
+$encoded = [Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes(
+    (Get-Content -Raw <private-local-source-dispatch-evidence.json>)
+  )
+)
+$encoded | gh secret set LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 `
+  --repo pcedison/taiwan-flood-risk-open-map `
+  --body-file -
+```
+
+This secret must contain only dispatch progress evidence, not official reply
+content, provider credentials, personal contact details, screenshots, or access
+tokens. The workflow decodes it into runner temp storage, writes
+`local-source-request-followups.json`, and emits a sanitized
+`local-source-request-dispatch-completion-evidence.json` where every
+`evidence_ref` is replaced by
+`private-ops://redacted/local-source-request-dispatch`. That sanitized overlay
+is safe to upload as an artifact and lets the aggregate completion audit count
+`request_dispatched` progress without treating it as accepted completion.
+
+For release/completion reviews, manually dispatch Hosted Monitoring with
+`fail_on_overdue_local_source_followups=true` if overdue official follow-ups
+should fail the run. Scheduled monitoring defaults to non-strict mode so it can
+continue publishing follow-up evidence while official responses are pending.
+
 When generating the aggregate completion audit for a dated review, pass the
 same timestamp to `local-source-completion-audit.py` so the public-safe audit
 also exposes overdue follow-up counts:
