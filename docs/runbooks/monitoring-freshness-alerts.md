@@ -693,6 +693,31 @@ The local Compose worker and scheduler services mount the shared collector
 directory, but these variables remain empty by default. Set them explicitly in
 `.env` or the shell when validating queue and scheduler dashboard panels.
 
+## Local Source Dispatch Watchdog
+
+`.github/workflows/local-source-dispatch-watchdog.yml` keeps the unresolved
+local-source request path visible outside private correspondence. It runs daily
+at `7 16 * * *` and can also be started manually. The workflow refreshes:
+
+- signal-gap discovery from the public data.gov.tw export,
+- signal-gap dispatch readiness,
+- source-contract dispatch readiness,
+- the public-safe request packet bundle,
+- `local-source-dispatch-watchdog/v1` JSON and Markdown summaries.
+
+By default the workflow fails when any signal-gap group or source-contract item
+still needs official dispatch. The failure route creates or comments on the
+single public-safe issue
+`[local-source-dispatch-watchdog] Local source dispatch required`. The issue
+body includes only run URL, SHA, aggregate counts, and gate categories; it does
+not include tokens, private evidence refs, manifests, or official
+correspondence.
+
+This watchdog is not completion evidence. It is an operational reminder that
+`required_signal_families` and `official_authorization_and_contracts` still
+need accepted official reply, authorization-gated adapter,
+production-adapter, release, or official-unavailable evidence.
+
 ## Reading Alerts
 
 When a freshness alert fires, first read these labels:

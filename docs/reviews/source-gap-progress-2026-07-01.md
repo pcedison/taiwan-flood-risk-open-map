@@ -255,6 +255,26 @@ Hosted Monitoring `schedule` run is run `28493475510`, failed on older SHA
 completion evidence was emitted for
 `a2c6e3a6d5f6819a2d3b5c1ffa0805c655eb4838`.
 
+## Local Source Dispatch Watchdog
+
+The remaining local-source dispatch work now has its own public-safe watchdog:
+
+- `.github/workflows/local-source-dispatch-watchdog.yml`
+- `scripts/local-source-dispatch-watchdog.py`
+
+The workflow refreshes signal-gap discovery, signal-gap dispatch readiness,
+source-contract dispatch readiness, and the request packet bundle. It then
+produces a `local-source-dispatch-watchdog/v1` JSON/Markdown artifact and, by
+default, fails when official dispatch work remains. Failure routes to the stable
+issue `[local-source-dispatch-watchdog] Local source dispatch required`.
+
+The current local run reports `status: dispatch_required` with 17 signal-gap
+county-items, 3 signal-gap groups, 11 metadata-only candidates, 0 live read API
+candidates, and 6 source-contract items needing dispatch. This does not satisfy
+`required_signal_families` or `official_authorization_and_contracts`; it makes
+the remaining official request path visible in GitHub until accepted evidence is
+recorded.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

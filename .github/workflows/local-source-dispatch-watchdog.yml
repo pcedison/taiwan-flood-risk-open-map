@@ -1,0 +1,151 @@
+name: Local Source Dispatch Watchdog
+
+on:
+  workflow_dispatch:
+    inputs:
+      fail_on_dispatch_required:
+        description: "Fail and route an issue when local-source request dispatch is still required."
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    - cron: "7 16 * * *"
+
+jobs:
+  local-source-dispatch-watchdog:
+    name: Local source dispatch watchdog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      FAIL_ON_DISPATCH_REQUIRED: ${{ github.event.inputs.fail_on_dispatch_required || 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare artifact directory
+        run: mkdir -p artifacts/request-packet-bundle
+
+      - name: Local source signal-gap discovery refresh
+        run: |
+          set -euo pipefail
+          python scripts/local-source-signal-gap-discovery-refresh.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output-dir artifacts
+
+      - name: Local source signal-gap dispatch readiness
+        run: |
+          set -euo pipefail
+          python scripts/local-source-signal-gap-dispatch-readiness.py \
+            --discovery-summary-json artifacts/signal-gap-discovery-refresh-summary.json \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/local-source-signal-gap-dispatch-readiness.json
+
+      - name: Local source contract dispatch readiness
+        run: |
+          set -euo pipefail
+          python scripts/local-source-contract-dispatch-readiness.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/local-source-contract-dispatch-readiness.json
+
+      - name: Local source request packet bundle
+        run: |
+          set -euo pipefail
+          python scripts/local-source-request-packet-bundle.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output-dir artifacts/request-packet-bundle
+
+      - name: Local source dispatch watchdog
+        run: |
+          set -euo pipefail
+          watchdog_args=()
+          if [ "${FAIL_ON_DISPATCH_REQUIRED}" = "true" ]; then
+            watchdog_args+=(--fail-on-dispatch-required)
+          fi
+          python scripts/local-source-dispatch-watchdog.py \
+            --signal-gap-dispatch-readiness-json artifacts/local-source-signal-gap-dispatch-readiness.json \
+            --source-contract-dispatch-readiness-json artifacts/local-source-contract-dispatch-readiness.json \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/local-source-dispatch-watchdog.json \
+            --markdown-output artifacts/local-source-dispatch-watchdog.md \
+            "${watchdog_args[@]}"
+
+      - name: Upload local source dispatch artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-source-dispatch-watchdog-${{ github.run_id }}
+          path: |
+            artifacts/**/*.json
+            artifacts/**/*.md
+          if-no-files-found: warn
+
+      - name: Route local source dispatch watchdog issue
+        if: ${{ failure() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "[local-source-dispatch-watchdog]";
+            const title = `${marker} Local source dispatch required`;
+            const runUrl = [
+              process.env.GITHUB_SERVER_URL,
+              process.env.GITHUB_REPOSITORY,
+              "actions/runs",
+              process.env.GITHUB_RUN_ID,
+            ].join("/");
+            const reportPath = "artifacts/local-source-dispatch-watchdog.json";
+            let summary = {};
+            let status = "watchdog_failed_before_report";
+            if (fs.existsSync(reportPath)) {
+              const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+              status = report.status;
+              summary = report.summary || {};
+            }
+            const body = [
+              "Local source dispatch watchdog requires operator follow-up.",
+              "",
+              `- run: ${runUrl}`,
+              `- workflow: ${process.env.GITHUB_WORKFLOW}`,
+              `- event: ${process.env.GITHUB_EVENT_NAME}`,
+              `- sha: ${process.env.GITHUB_SHA}`,
+              `- status: ${status}`,
+              `- signal gap groups needing dispatch: ${summary.signal_gap_dispatch_recommended_group_count ?? "unknown"}`,
+              `- signal gap county-items: ${summary.signal_gap_county_item_count ?? "unknown"}`,
+              `- source contract items needing dispatch: ${summary.source_contract_dispatch_recommended_item_count ?? "unknown"}`,
+              `- authorization requests: ${summary.authorization_request_count ?? "unknown"}`,
+              `- metadata release monitors: ${summary.metadata_release_monitor_count ?? "unknown"}`,
+              `- public API contract reviews: ${summary.public_api_contract_review_count ?? "unknown"}`,
+              "",
+              "Artifacts, if uploaded, are attached to the workflow run.",
+              "This issue route is public-safe and does not include tokens, private evidence refs, manifests, or official correspondence.",
+            ].join("\n");
+            const { owner, repo } = context.repo;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100,
+            });
+            const existing = issues.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+              });
+            }

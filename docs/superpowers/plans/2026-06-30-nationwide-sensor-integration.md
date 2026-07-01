@@ -2155,6 +2155,44 @@ incomplete until a real Hosted Monitoring `schedule` run succeeds recently on
 the expected main SHA and until monitoring ownership/evidence refs are accepted
 through the private monitoring manifest.
 
+## Task 68: Local Source Dispatch Watchdog
+
+**Files:**
+- Add: `scripts/local-source-dispatch-watchdog.py`
+- Add: `tests/test_local_source_dispatch_watchdog_cli.py`
+- Add: `.github/workflows/local-source-dispatch-watchdog.yml`
+- Add: `tests/test_local_source_dispatch_watchdog_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+- Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
+
+**Interfaces:**
+- Consumes: signal-gap dispatch readiness and source-contract dispatch
+  readiness artifacts.
+- Produces: `local-source-dispatch-watchdog/v1` JSON/Markdown artifacts, a
+  scheduled and manually dispatchable GitHub Actions watchdog, and the stable
+  public-safe issue route
+  `[local-source-dispatch-watchdog] Local source dispatch required`.
+
+- [x] Write failing CLI tests proving dispatch-required state exits 1 without
+  exposing private evidence refs.
+- [x] Add a public-safe watchdog CLI with JSON and Markdown output plus
+  `--fail-on-dispatch-required`.
+- [x] Write a failing workflow contract test requiring daily schedule, artifact
+  upload, request bundle refresh, and failure issue routing.
+- [x] Add the GitHub Actions workflow that refreshes discovery/readiness
+  artifacts and routes dispatch-required state to a stable issue.
+- [x] Document that this is operational tracking only, not completion evidence
+  for `required_signal_families` or `official_authorization_and_contracts`.
+
+Completed 2026-07-01: local-source official request dispatch work now has a
+dedicated watchdog instead of being visible only through hosted monitoring
+artifacts. It still does not satisfy the completion gates; it keeps the 17
+signal-gap county-items and 6 source-contract dispatch items active until
+accepted official reply, authorization-gated adapter, production adapter,
+metadata release, contract verification, or official-unavailable evidence is
+recorded.
+
 ## Completion Gates
 
 The full objective is complete only when:
