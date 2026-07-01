@@ -45,6 +45,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         "local-source-signal-gap-dispatch-template.json",
         "local-source-source-contract-dispatch-template.json",
         "local-source-dispatch-coverage-checklist.json",
+        "local-source-request-dispatch-queue.json",
     }
     assert {path.name for path in output_dir.iterdir()} == expected_files
 
@@ -61,6 +62,9 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         "signal_gap_batch_count": 3,
         "signal_gap_county_item_count": 17,
         "source_contract_completion_target_count": 6,
+        "dispatch_queue_item_count": 9,
+        "signal_gap_dispatch_queue_item_count": 3,
+        "source_contract_dispatch_queue_item_count": 6,
     }
     assert manifest["remaining_completion_gates"] == [
         "required_signal_families",
@@ -118,6 +122,56 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
     } == {"official_authorization_and_contracts"}
     assert "private-ops://" not in json.dumps(
         dispatch_checklist,
+        ensure_ascii=False,
+    )
+
+    dispatch_queue = json.loads(
+        (output_dir / "local-source-request-dispatch-queue.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (
+        dispatch_queue["schema_version"]
+        == "local-source-request-dispatch-queue/v1"
+    )
+    assert dispatch_queue["captured_at"] == "2026-07-01T15:40:00+08:00"
+    assert dispatch_queue["secret_name"] == (
+        "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64"
+    )
+    assert dispatch_queue["summary"] == {
+        "dispatch_queue_item_count": 9,
+        "signal_gap_dispatch_queue_item_count": 3,
+        "source_contract_dispatch_queue_item_count": 6,
+        "signal_gap_completion_target_count": 17,
+        "source_contract_completion_target_count": 6,
+    }
+    assert [item["queue_id"] for item in dispatch_queue["items"][:3]] == [
+        "signal-gap-batch/pump_or_gate_status",
+        "signal-gap-batch/flood_depth",
+        "signal-gap-batch/sewer_water_level",
+    ]
+    first_signal_item = dispatch_queue["items"][0]
+    assert first_signal_item["request_type"] == "signal_gap_batch_request"
+    assert first_signal_item["completion_gate"] == "required_signal_families"
+    assert first_signal_item["target_signal_type"] == "pump_or_gate_status"
+    assert first_signal_item["completion_target_count"] == 13
+    assert first_signal_item["status"] == "needs_dispatch"
+    assert first_signal_item["private_dispatch_manifest_section"] == (
+        "signal_family_gap_evidence"
+    )
+    assert {
+        item["completion_gate"]
+        for item in dispatch_queue["items"]
+        if item["request_type"] == "source_contract_request"
+    } == {"official_authorization_and_contracts"}
+    assert {
+        item["private_dispatch_manifest_section"]
+        for item in dispatch_queue["items"]
+        if item["request_type"] == "source_contract_request"
+    } == {"source_contract_evidence"}
+    assert "private-ops://" not in json.dumps(dispatch_queue, ensure_ascii=False)
+    assert "REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF" not in json.dumps(
+        dispatch_queue,
         ensure_ascii=False,
     )
 

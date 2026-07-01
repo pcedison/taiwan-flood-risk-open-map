@@ -284,7 +284,7 @@ run executes:
 - `scripts/local-source-request-packet-bundle.py` to publish the generated
   official request packets, signal-gap request batches, and placeholder
   dispatch/completion templates operators need for the remaining official
-  request work.
+  request work, plus a public-safe grouped dispatch queue.
 - `scripts/hosted_private_evidence_readiness.py` to publish which private
   evidence/admin-token inputs are configured or missing without printing values.
 - `scripts/github-actions-secret-readiness.py` for an operator-side check of
@@ -432,6 +432,7 @@ every hosted monitoring run:
 - `local-source-signal-gap-dispatch-template.json`
 - `local-source-source-contract-dispatch-template.json`
 - `local-source-dispatch-coverage-checklist.json`
+- `local-source-request-dispatch-queue.json`
 - `hosted-monitoring-schedule-evidence.json`
 - `hosted-monitoring-schedule-completion-evidence.json` on scheduled runs only
   after earlier non-`always()` monitoring checks pass
@@ -469,9 +470,10 @@ the gate without accepted private source-contract evidence.
 The `local-source-request-packet-bundle-*` and related `local-source-*template`
 artifacts are the operator handoff for that same unfinished work. They collect
 the generated official request bodies, signal-family batches, placeholder
-dispatch/completion overlays, and a public-safe dispatch coverage checklist in
-one hosted artifact set. They intentionally use placeholder evidence refs or no
-evidence refs and are not folded into the completion audit as accepted evidence.
+dispatch/completion overlays, a public-safe dispatch coverage checklist, and a
+9-row grouped dispatch queue in one hosted artifact set. They intentionally use
+placeholder evidence refs or no evidence refs and are not folded into the
+completion audit as accepted evidence.
 
 `hosted-private-evidence-readiness.json` lists the configured/missing state for
 `ADMIN_BEARER_TOKEN`, `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
