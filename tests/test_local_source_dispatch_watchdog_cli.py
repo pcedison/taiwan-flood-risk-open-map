@@ -15,6 +15,7 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
 ) -> None:
     signal_gap_path = tmp_path / "signal-gap-dispatch-readiness.json"
     source_contract_path = tmp_path / "source-contract-dispatch-readiness.json"
+    request_queue_path = tmp_path / "request-dispatch-queue.json"
     output_path = tmp_path / "dispatch-watchdog.json"
     markdown_path = tmp_path / "dispatch-watchdog.md"
     signal_gap_path.write_text(
@@ -83,6 +84,44 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
         ),
         encoding="utf-8",
     )
+    request_queue_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-request-dispatch-queue/v1",
+                "captured_at": "2026-07-01T03:12:00Z",
+                "summary": {
+                    "dispatch_queue_item_count": 9,
+                    "signal_gap_dispatch_queue_item_count": 3,
+                    "source_contract_dispatch_queue_item_count": 6,
+                    "signal_gap_completion_target_count": 17,
+                    "source_contract_completion_target_count": 6,
+                },
+                "items": [
+                    {
+                        "rank": 1,
+                        "queue_id": "signal-gap-batch/pump_or_gate_status",
+                        "request_type": "signal_gap_batch_request",
+                        "status": "needs_dispatch",
+                        "completion_gate": "required_signal_families",
+                        "target_signal_type": "pump_or_gate_status",
+                        "completion_target_count": 13,
+                        "county_count": 13,
+                    },
+                    {
+                        "rank": 4,
+                        "queue_id": "source-contract/authorization_request/kinmen",
+                        "request_type": "source_contract_request",
+                        "status": "needs_dispatch",
+                        "completion_gate": "official_authorization_and_contracts",
+                        "source_contract_gate": "authorization_request",
+                        "county": "kinmen",
+                        "completion_target_count": 1,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = subprocess.run(
         [
@@ -92,6 +131,8 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
             str(signal_gap_path),
             "--source-contract-dispatch-readiness-json",
             str(source_contract_path),
+            "--request-dispatch-queue-json",
+            str(request_queue_path),
             "--captured-at",
             "2026-07-01T12:30:00+08:00",
             "--output",
@@ -124,6 +165,9 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
         "authorization_request_count": 2,
         "metadata_release_monitor_count": 1,
         "public_api_contract_review_count": 3,
+        "request_dispatch_queue_item_count": 9,
+        "request_dispatch_queue_signal_gap_item_count": 3,
+        "request_dispatch_queue_source_contract_item_count": 6,
     }
     assert payload["next_workstreams"] == [
         "send_official_read_api_requests",
@@ -162,9 +206,37 @@ def test_local_source_dispatch_watchdog_cli_fails_when_dispatch_required(
         "tracking_status": "needs_authorization_request",
         "target_signal_types": ["pump_or_gate_status"],
     }
+    assert payload["request_dispatch_queue_items"] == [
+        {
+            "rank": 1,
+            "queue_id": "signal-gap-batch/pump_or_gate_status",
+            "request_type": "signal_gap_batch_request",
+            "completion_gate": "required_signal_families",
+            "target_signal_type": "pump_or_gate_status",
+            "source_contract_gate": "",
+            "county": "",
+            "status": "needs_dispatch",
+            "completion_target_count": 13,
+            "county_count": 13,
+        },
+        {
+            "rank": 4,
+            "queue_id": "source-contract/authorization_request/kinmen",
+            "request_type": "source_contract_request",
+            "completion_gate": "official_authorization_and_contracts",
+            "target_signal_type": "",
+            "source_contract_gate": "authorization_request",
+            "county": "kinmen",
+            "status": "needs_dispatch",
+            "completion_target_count": 1,
+            "county_count": 0,
+        },
+    ]
     assert "private-ops://" not in result.stdout
     assert "private-ops://" not in json.dumps(payload, ensure_ascii=False)
     assert "pump_or_gate_status" in markdown
+    assert "Request Dispatch Queue" in markdown
+    assert "signal-gap-batch/pump_or_gate_status" in markdown
     assert "Operator Next Steps" in markdown
     assert "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64" in markdown
     assert "official request" in markdown

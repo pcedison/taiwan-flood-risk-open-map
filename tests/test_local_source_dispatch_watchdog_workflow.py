@@ -44,6 +44,11 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "scripts/local-source-request-packet-bundle.py" in step_text
     assert "scripts/local-source-dispatch-watchdog.py" in step_text
     assert "--fail-on-dispatch-required" in step_text
+    assert "--request-dispatch-queue-json" in step_text
+    assert (
+        "artifacts/request-packet-bundle/local-source-request-dispatch-queue.json"
+        in step_text
+    )
     assert "--output artifacts/local-source-dispatch-watchdog.json" in step_text
     assert "--markdown-output artifacts/local-source-dispatch-watchdog.md" in step_text
     assert "actions/upload-artifact@v4" in step_text
@@ -59,6 +64,8 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "local-source-dispatch-watchdog" in script
     assert "Local source dispatch required" in script
     assert "operator_next_steps" in script
+    assert "request_dispatch_queue_items" in script
+    assert "Request dispatch queue:" in script
     assert "Operator next steps:" in script
     assert "stepLines" in script
     assert "github.rest.issues.create" in script

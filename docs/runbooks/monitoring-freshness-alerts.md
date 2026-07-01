@@ -736,6 +736,7 @@ at `7 16 * * *` and can also be started manually. The workflow refreshes:
 - signal-gap dispatch readiness,
 - source-contract dispatch readiness,
 - the public-safe request packet bundle and dispatch coverage checklist,
+- the grouped request dispatch queue,
 - `local-source-dispatch-watchdog/v1` JSON and Markdown summaries.
 
 By default the workflow fails when any signal-gap group or source-contract item
@@ -743,10 +744,11 @@ still needs official dispatch. The failure route creates or comments on the
 single public-safe issue
 `[local-source-dispatch-watchdog] Local source dispatch required`. The issue
 body includes only run URL, SHA, aggregate counts, gate categories, and
-public-safe operator next steps. It does not include tokens, private evidence
-refs, manifests, or official correspondence. The next steps point operators to
-review the request packet bundle, send signal-family and source-contract
-follow-up requests, then store reviewed dispatch progress in
+public-safe operator next steps plus the first grouped queue rows. It does not
+include tokens, private evidence refs, manifests, or official correspondence.
+The next steps point operators to review the request packet bundle, send
+signal-family and source-contract follow-up requests, then store reviewed
+dispatch progress in
 `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` only after private review. If a
 future run finds no dispatch is required, the workflow comments on and closes
 that same issue so the GitHub issue state follows the watchdog state.

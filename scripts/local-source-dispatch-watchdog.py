@@ -18,6 +18,7 @@ if hasattr(sys.stderr, "reconfigure"):
 SCHEMA_VERSION = "local-source-dispatch-watchdog/v1"
 SIGNAL_GAP_SCHEMA_VERSION = "local-source-signal-gap-dispatch-readiness/v1"
 SOURCE_CONTRACT_SCHEMA_VERSION = "local-source-contract-dispatch-readiness/v1"
+REQUEST_DISPATCH_QUEUE_SCHEMA_VERSION = "local-source-request-dispatch-queue/v1"
 
 
 def main() -> int:
@@ -36,6 +37,10 @@ def main() -> int:
         "--source-contract-dispatch-readiness-json",
         required=True,
         help="local-source-contract-dispatch-readiness/v1 JSON artifact.",
+    )
+    parser.add_argument(
+        "--request-dispatch-queue-json",
+        help="Optional local-source-request-dispatch-queue/v1 JSON artifact.",
     )
     parser.add_argument(
         "--captured-at",
@@ -61,9 +66,19 @@ def main() -> int:
         expected_schema=SOURCE_CONTRACT_SCHEMA_VERSION,
         label="source contract dispatch readiness",
     )
+    request_queue = (
+        _load_json(
+            Path(args.request_dispatch_queue_json),
+            expected_schema=REQUEST_DISPATCH_QUEUE_SCHEMA_VERSION,
+            label="request dispatch queue",
+        )
+        if args.request_dispatch_queue_json
+        else {}
+    )
     report = build_watchdog_report(
         signal_gap,
         source_contract,
+        request_queue,
         captured_at=args.captured_at,
     )
     content = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
@@ -86,14 +101,21 @@ def main() -> int:
 def build_watchdog_report(
     signal_gap: Mapping[str, Any],
     source_contract: Mapping[str, Any],
+    request_queue: Mapping[str, Any] | None = None,
     *,
     captured_at: str,
 ) -> dict[str, Any]:
     signal_gap_summary = _mapping(signal_gap.get("summary"))
     source_contract_summary = _mapping(source_contract.get("summary"))
+    request_queue_summary = _mapping(
+        request_queue.get("summary") if request_queue else None
+    )
     signal_gap_groups = _signal_gap_groups(signal_gap.get("groups"))
     source_contract_groups = _source_contract_groups(source_contract.get("groups"))
     source_contract_items = _source_contract_items(source_contract.get("items"))
+    request_dispatch_queue_items = _request_dispatch_queue_items(
+        request_queue.get("items") if request_queue else None
+    )
 
     signal_dispatch_count = _int(
         signal_gap_summary.get("dispatch_recommended_group_count")
@@ -133,6 +155,15 @@ def build_watchdog_report(
             "public_api_contract_review_count": _int(
                 source_contract_summary.get("public_api_contract_review_count")
             ),
+            "request_dispatch_queue_item_count": _int(
+                request_queue_summary.get("dispatch_queue_item_count")
+            ),
+            "request_dispatch_queue_signal_gap_item_count": _int(
+                request_queue_summary.get("signal_gap_dispatch_queue_item_count")
+            ),
+            "request_dispatch_queue_source_contract_item_count": _int(
+                request_queue_summary.get("source_contract_dispatch_queue_item_count")
+            ),
         },
         "next_workstreams": _next_workstreams(
             signal_dispatch_count=signal_dispatch_count,
@@ -146,6 +177,7 @@ def build_watchdog_report(
         "signal_gap_groups": signal_gap_groups,
         "source_contract_groups": source_contract_groups,
         "source_contract_items": source_contract_items,
+        "request_dispatch_queue_items": request_dispatch_queue_items,
         "notes": [
             "This watchdog report is public-safe and omits private evidence refs.",
             "Dispatch required means official request, release, or contract follow-up is still needed; it is not completion evidence.",
@@ -213,6 +245,25 @@ def _source_contract_items(value: Any) -> list[dict[str, Any]]:
         }
         for item in _list_of_mappings(value)
         if bool(item.get("dispatch_recommended"))
+    ]
+
+
+def _request_dispatch_queue_items(value: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "rank": _int(item.get("rank")),
+            "queue_id": str(item.get("queue_id", "")),
+            "request_type": str(item.get("request_type", "")),
+            "completion_gate": str(item.get("completion_gate", "")),
+            "target_signal_type": str(item.get("target_signal_type", "")),
+            "source_contract_gate": str(item.get("source_contract_gate", "")),
+            "county": str(item.get("county", "")),
+            "status": str(item.get("status", "")),
+            "completion_target_count": _int(item.get("completion_target_count")),
+            "county_count": _int(item.get("county_count")),
+        }
+        for item in _list_of_mappings(value)
+        if str(item.get("status", "")) == "needs_dispatch"
     ]
 
 
@@ -326,6 +377,21 @@ def render_markdown(report: Mapping[str, Any]) -> str:
                 f"`{item.get('county')}` / `{item.get('gate')}`: "
                 f"{item.get('tracking_status')} "
                 f"(signals: {signals})"
+            )
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Request Dispatch Queue", ""])
+    queue_items = report.get("request_dispatch_queue_items")
+    if isinstance(queue_items, list) and queue_items:
+        for item in queue_items:
+            if not isinstance(item, Mapping):
+                continue
+            label = str(item.get("target_signal_type") or item.get("source_contract_gate"))
+            lines.append(
+                "- "
+                f"`{item.get('queue_id')}`: "
+                f"{item.get('request_type')} / {label} "
+                f"(completion targets: {item.get('completion_target_count')})"
             )
     else:
         lines.append("- none")
