@@ -106,10 +106,12 @@ The bundle includes:
 - `local-source-signal-gap-request-batches.md`
 - `local-source-signal-gap-dispatch-template.json`
 - `local-source-source-contract-dispatch-template.json`
+- `local-source-dispatch-coverage-checklist.json`
 
 This is still not completion evidence: the dispatch templates contain
-placeholders and must be replaced only inside private evidence handling after
-actual official dispatch or accepted replies.
+placeholders, and the coverage checklist intentionally excludes private
+evidence refs. Dispatch records must be filled only inside private evidence
+handling after actual official dispatch or accepted replies.
 
 ## Hosted Private Evidence Readiness
 

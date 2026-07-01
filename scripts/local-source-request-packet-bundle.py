@@ -36,6 +36,8 @@ from app.domain.realtime.local_source_request_packets import (  # noqa: E402
 
 
 SCHEMA_VERSION = "local-source-request-packet-bundle/v1"
+DISPATCH_CHECKLIST_SCHEMA_VERSION = "local-source-dispatch-coverage-checklist/v1"
+DISPATCH_EVIDENCE_SECRET_NAME = "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64"
 SIGNAL_DISPATCH_REF_PLACEHOLDER = "REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF"
 DISPATCHED_AT_PLACEHOLDER = "REPLACE_WITH_DISPATCHED_AT"
 FOLLOW_UP_DUE_AT_PLACEHOLDER = "REPLACE_WITH_FOLLOW_UP_DUE_AT"
@@ -79,6 +81,11 @@ def main() -> int:
         dispatched_at=DISPATCHED_AT_PLACEHOLDER,
         follow_up_due_at=FOLLOW_UP_DUE_AT_PLACEHOLDER,
     )
+    dispatch_checklist = _dispatch_coverage_checklist(
+        captured_at=args.captured_at,
+        signal_dispatch_template=signal_dispatch_template,
+        source_contract_template=source_contract_template,
+    )
 
     files: dict[str, str] = {
         "local-source-official-request-packets.json": _json(packets),
@@ -97,6 +104,9 @@ def main() -> int:
         ),
         "local-source-source-contract-dispatch-template.json": _json(
             source_contract_template
+        ),
+        "local-source-dispatch-coverage-checklist.json": _json(
+            dispatch_checklist
         ),
     }
 
@@ -195,6 +205,67 @@ def _manifest(
     }
 
 
+def _dispatch_coverage_checklist(
+    *,
+    captured_at: str,
+    signal_dispatch_template: dict[str, Any],
+    source_contract_template: dict[str, Any],
+) -> dict[str, Any]:
+    signal_items = [
+        _signal_dispatch_checklist_item(item)
+        for item in signal_dispatch_template.get("signal_family_gap_evidence", [])
+        if isinstance(item, dict)
+    ]
+    source_contract_items = [
+        _source_contract_dispatch_checklist_item(item)
+        for item in source_contract_template.get("source_contract_evidence", [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "schema_version": DISPATCH_CHECKLIST_SCHEMA_VERSION,
+        "captured_at": captured_at,
+        "secret_name": DISPATCH_EVIDENCE_SECRET_NAME,
+        "summary": {
+            "total_dispatch_item_count": len(signal_items) + len(source_contract_items),
+            "signal_family_gap_dispatch_item_count": len(signal_items),
+            "source_contract_dispatch_item_count": len(source_contract_items),
+        },
+        "signal_family_gap_dispatch_items": signal_items,
+        "source_contract_dispatch_items": source_contract_items,
+        "notes": [
+            "Checklist is public-safe and intentionally excludes evidence_ref values.",
+            "Each item should appear in private dispatch evidence only after the official request is sent.",
+            "request_dispatched tracks operator follow-up and does not satisfy completion gates.",
+        ],
+    }
+
+
+def _signal_dispatch_checklist_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "completion_gate": "required_signal_families",
+        "county": str(item.get("county", "")),
+        "signal_type": str(item.get("signal_type", "")),
+        "dispatch_status": "request_dispatched",
+        "follow_up_due_at_required": True,
+        "accepted_completion_statuses": [
+            str(status) for status in item.get("accepted_statuses", [])
+        ],
+    }
+
+
+def _source_contract_dispatch_checklist_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "completion_gate": "official_authorization_and_contracts",
+        "county": str(item.get("county", "")),
+        "gate": str(item.get("gate", "")),
+        "dispatch_status": "request_dispatched",
+        "follow_up_due_at_required": True,
+        "accepted_completion_statuses": [
+            str(status) for status in item.get("accepted_statuses", [])
+        ],
+    }
+
+
 def _summary_markdown(
     *,
     captured_at: str,
@@ -252,6 +323,8 @@ def _file_purpose(name: str) -> str:
         return "placeholder dispatch overlay template for signal-family requests"
     if name.endswith("source-contract-dispatch-template.json"):
         return "placeholder dispatch overlay template for source-contract requests"
+    if name.endswith("dispatch-coverage-checklist.json"):
+        return "public-safe checklist for private dispatch evidence coverage"
     return "request packet bundle artifact"
 
 
