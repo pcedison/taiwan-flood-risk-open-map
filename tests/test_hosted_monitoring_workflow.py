@@ -315,6 +315,10 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
     assert "github.rest.issues.createComment" in alert_routing_step["with"]["script"]
     assert "process.env.GITHUB_RUN_ID" in alert_routing_step["with"]["script"]
+    assert "artifacts/hosted-deployment-smoke.json" in alert_routing_step["with"]["script"]
+    assert "expected deployment SHA" in alert_routing_step["with"]["script"]
+    assert "health deployment SHA" in alert_routing_step["with"]["script"]
+    assert "ready deployment SHA" in alert_routing_step["with"]["script"]
 
     resolve_step = next(
         step
