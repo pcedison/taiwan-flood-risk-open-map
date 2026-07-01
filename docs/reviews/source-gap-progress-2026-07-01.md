@@ -107,11 +107,18 @@ The bundle includes:
 - `local-source-signal-gap-dispatch-template.json`
 - `local-source-source-contract-dispatch-template.json`
 - `local-source-dispatch-coverage-checklist.json`
+- `local-source-request-dispatch-queue.json`
 
 This is still not completion evidence: the dispatch templates contain
 placeholders, and the coverage checklist intentionally excludes private
 evidence refs. Dispatch records must be filled only inside private evidence
 handling after actual official dispatch or accepted replies.
+
+The request dispatch queue is the machine-readable operator checklist for the
+same work. It groups the remaining dispatch work into 9 public-safe rows:
+3 signal-family batch requests and 6 source-contract requests. It preserves the
+17 signal-family completion target count and 6 source-contract completion
+target count without exposing private evidence refs.
 
 The hosted and dispatch-watchdog workflows now run signal-gap discovery refresh
 with fetch-failure degradation. When the live data.gov.tw export times out, the
