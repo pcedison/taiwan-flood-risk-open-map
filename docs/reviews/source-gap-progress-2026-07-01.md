@@ -89,17 +89,28 @@ source-contract evidence is accepted for each county/gate item.
 
 ## Hosted Private Evidence Readiness
 
-Hosted Monitoring now also uploads `hosted-private-evidence-readiness.json`.
-The local 2026-07-01 no-secret review artifact is:
+Hosted Monitoring also uploads `hosted-private-evidence-readiness.json`. The
+latest route-aware local 2026-07-01 no-secret review artifacts are:
 
 - `docs/reviews/hosted-private-evidence-readiness-2026-07-01.json`
+- `docs/reviews/hosted-private-evidence-readiness-routes-2026-07-01.json`
 
 It records the configured/missing state for the admin token and private evidence
-manifest inputs without printing secret values. The current no-secret review
-shows these completion-gate blockers:
+manifest inputs without printing secret values. The route-aware review now
+tracks two acceptable paths for `hosted_worker_persisted_evidence`:
+
+- `hosted_worker_full_manifest`: one all-in-one
+  `HOSTED_WORKER_EVIDENCE_MANIFEST_B64` manifest can satisfy all five hosted
+  worker requirements.
+- `hosted_worker_admin_freshness_plus_policy_manifest`: `ADMIN_BEARER_TOKEN`
+  plus `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64` can split the same gate
+  between hosted source freshness evidence and hosted worker policy evidence.
+
+The current no-secret review shows these completion-gate blockers:
 
 - `hosted_worker_persisted_evidence`: `ADMIN_BEARER_TOKEN`,
-  `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`
+  `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
+  `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`
 - `production_monitoring_and_alerting`:
   `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`
 
