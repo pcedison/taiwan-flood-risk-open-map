@@ -73,3 +73,17 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
     assert "github.rest.issues.createComment" in script
     assert "secret values" in script
     assert "secrets.ADMIN_BEARER_TOKEN }}" not in step_text
+
+    resolve_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Close resolved secret readiness issue"
+    )
+    assert resolve_step["if"] == "${{ success() }}"
+    assert resolve_step["uses"] == "actions/github-script@v7"
+    resolve_script = resolve_step["with"]["script"]
+    assert "secret-readiness-watchdog" in resolve_script
+    assert "GitHub Actions required secrets missing" in resolve_script
+    assert "github.rest.issues.createComment" in resolve_script
+    assert "github.rest.issues.update" in resolve_script
+    assert "resolved" in resolve_script
