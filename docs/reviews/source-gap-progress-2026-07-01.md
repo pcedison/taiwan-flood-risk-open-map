@@ -36,6 +36,23 @@ accepted evidence must still come from a production adapter, an
 authorization-gated adapter, or an official unavailable-source decision for each
 remaining county/signal item.
 
+## Dispatch Readiness
+
+The hosted discovery refresh is now converted into a public-safe dispatch
+readiness artifact:
+
+- `docs/reviews/hosted-signal-gap-dispatch-readiness-2026-07-01.json`
+
+The artifact does not include `private-ops://` refs and does not prove requests
+were sent. It records that all three unresolved signal groups still need
+official read API dispatch:
+
+- `pump_or_gate_status`: 13 target counties, 9 metadata-only candidates,
+  0 live read API candidates.
+- `flood_depth`: 3 target counties, 2 metadata-only candidates,
+  0 live read API candidates.
+- `sewer_water_level`: 1 target county, 0 candidates.
+
 ## Workflow Progress
 
 Hosted Monitoring now supports an optional
@@ -49,6 +66,9 @@ private evidence refs replaced by
 Manual workflow dispatch can set `fail_on_overdue_local_source_followups=true`
 for release/completion reviews where overdue official follow-ups should fail
 the run. Scheduled monitoring remains non-strict by default.
+
+Hosted Monitoring also now uploads `signal-gap-dispatch-readiness.json` on every
+scheduled/manual run after the data.gov.tw discovery refresh.
 
 ## Still Unfinished
 

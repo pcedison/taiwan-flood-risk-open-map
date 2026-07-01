@@ -268,6 +268,8 @@ Each run executes:
   risk API.
 - `scripts/local-source-signal-gap-discovery-refresh.py` against the
   data.gov.tw dataset export for every current signal-gap group.
+- `scripts/local-source-signal-gap-dispatch-readiness.py` to turn the latest
+  signal-gap discovery summary into a public-safe dispatch checklist.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -329,6 +331,7 @@ every hosted monitoring run:
 - `signal-gap-discovery-refresh-pump-or-gate-status.json`
 - `signal-gap-discovery-refresh-flood-depth.json`
 - `signal-gap-discovery-refresh-sewer-water-level.json`
+- `signal-gap-dispatch-readiness.json`
 
 These artifacts monitor whether official open-data catalogs have published new
 machine-readable candidates for the unresolved signal families. A
@@ -336,6 +339,12 @@ machine-readable candidates for the unresolved signal families. A
 triage signal to review the API contract, freshness fields, coordinates, and
 license before turning it into an accepted production adapter or source-contract
 evidence.
+
+`signal-gap-dispatch-readiness.json` is also public-safe. It does not include
+private dispatch evidence refs. It lists each unresolved signal family, the
+current discovery counts, whether official read API requests should still be
+sent, and the exact command operators can use to generate private dispatch
+evidence after sending those requests.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 
