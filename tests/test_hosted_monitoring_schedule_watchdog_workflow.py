@@ -73,10 +73,16 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     )
     assert alert_routing_step["if"] == "${{ failure() }}"
     assert alert_routing_step["uses"] == "actions/github-script@v7"
-    assert "hosted-schedule-watchdog" in alert_routing_step["with"]["script"]
-    assert "Hosted Monitoring schedule not ready" in alert_routing_step["with"]["script"]
-    assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
-    assert "github.rest.issues.createComment" in alert_routing_step["with"]["script"]
+    alert_script = alert_routing_step["with"]["script"]
+    assert 'const fs = require("fs");' in alert_script
+    assert "artifacts/hosted-monitoring-schedule-readiness.json" in alert_script
+    assert "failure.code" in alert_script
+    assert "latest_schedule_run" in alert_script
+    assert "summary.age_minutes" in alert_script
+    assert "hosted-schedule-watchdog" in alert_script
+    assert "Hosted Monitoring schedule not ready" in alert_script
+    assert "github.rest.issues.create" in alert_script
+    assert "github.rest.issues.createComment" in alert_script
 
     resolve_step = next(
         step
