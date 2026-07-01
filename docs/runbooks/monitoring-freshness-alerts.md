@@ -268,6 +268,10 @@ Each run executes:
   risk API.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
+- `scripts/hosted_worker_evidence.py` when the repository secret
+  `HOSTED_WORKER_EVIDENCE_MANIFEST_B64` is configured.
+- `scripts/hosted_monitoring_evidence.py` when the repository secret
+  `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64` is configured.
 - `scripts/local-source-completion-audit.py` with every completion-evidence
   overlay produced by the hosted smoke steps.
 
@@ -283,9 +287,20 @@ ownership recorded through
 
 Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
 for the workflow commit SHA, or provide the exact deployed SHA while verifying a
-specific release. If `ADMIN_BEARER_TOKEN` is not configured, the public smokes
-still run and the admin source freshness check is skipped with a notice rather
-than a leaked token or failed secret lookup.
+specific release. It also accepts `require_admin_source_freshness`; set that to
+`true` for release or completion-gate runs where `/admin/v1/sources` freshness
+evidence must be present. In strict mode, the workflow fails fast if the
+repository secret `ADMIN_BEARER_TOKEN` is missing. For routine scheduled
+monitoring, the default remains non-strict: if `ADMIN_BEARER_TOKEN` is not
+configured, the public smokes still run and the admin source freshness check is
+skipped with a notice rather than a leaked token or failed secret lookup.
+
+The two `*_MANIFEST_B64` secrets are optional base64-encoded JSON manifests
+validated by the evidence CLIs. Use them only for reviewed private ops refs and
+requirement statuses; do not store raw provider secrets, tokens, screenshots, or
+full incident transcripts in these GitHub secrets. When present, their generated
+completion overlays are folded into `hosted-completion-audit.json` alongside the
+public smoke evidence.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 

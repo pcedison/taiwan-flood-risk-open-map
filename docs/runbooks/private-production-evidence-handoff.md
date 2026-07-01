@@ -379,6 +379,26 @@ python scripts\hosted_worker_evidence.py `
   --completion-evidence-output <private-hosted-worker-completion-evidence.json>
 ```
 
+To let the scheduled Hosted Monitoring workflow include this private gate in
+its aggregate completion audit, store the reviewed manifest as a base64 GitHub
+secret. The workflow decodes it only on the GitHub runner and writes normalized
+public-safe artifacts under `hosted-monitoring-<run-id>`:
+
+```powershell
+$encoded = [Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes(
+    (Get-Content -Raw <private-hosted-worker-manifest.json>)
+  )
+)
+$encoded | gh secret set HOSTED_WORKER_EVIDENCE_MANIFEST_B64 `
+  --repo pcedison/taiwan-flood-risk-open-map `
+  --body-file -
+```
+
+The manifest should contain reviewed private evidence refs and statuses only.
+Do not place upstream credentials, admin bearer tokens, raw snapshots, full
+incident transcripts, or screenshots in the GitHub secret.
+
 The checked-in
 `docs/data-sources/local/generated-hosted-worker-evidence-template.json` file
 is a public-safe starting template for the current hosted worker persisted
@@ -457,6 +477,24 @@ python scripts\hosted_monitoring_evidence.py `
   --evidence-output <private-hosted-monitoring-evidence.json> `
   --completion-evidence-output <private-monitoring-evidence.json>
 ```
+
+To include this private monitoring gate in the scheduled Hosted Monitoring
+aggregate audit, store the reviewed manifest as a base64 GitHub secret:
+
+```powershell
+$encoded = [Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes(
+    (Get-Content -Raw <private-monitoring-manifest.json>)
+  )
+)
+$encoded | gh secret set HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 `
+  --repo pcedison/taiwan-flood-risk-open-map `
+  --body-file -
+```
+
+Keep the manifest limited to reviewed owner/cadence/evidence-ref fields. Do not
+store alert-channel secrets, notification payloads, credentials, or full
+incident transcripts in the GitHub secret.
 
 The checked-in
 `docs/data-sources/local/generated-hosted-monitoring-evidence-template.json`
