@@ -120,6 +120,13 @@ same work. It groups the remaining dispatch work into 9 public-safe rows:
 17 signal-family completion target count and 6 source-contract completion
 target count without exposing private evidence refs.
 
+The local-source dispatch watchdog now reads that queue and copies the
+public-safe queue rows into `local-source-dispatch-watchdog.json`, the Markdown
+summary, and the stable GitHub issue route. The issue body shows the first
+queue rows so operators can see which grouped official requests need action
+without opening every bundle artifact. This is still dispatch tracking only,
+not completion evidence.
+
 The hosted and dispatch-watchdog workflows now run signal-gap discovery refresh
 with fetch-failure degradation. When the live data.gov.tw export times out, the
 summary artifact records `source_catalog_fetch_status: failed` and downstream

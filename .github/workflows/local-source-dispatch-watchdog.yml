@@ -72,6 +72,7 @@ jobs:
           python scripts/local-source-dispatch-watchdog.py \
             --signal-gap-dispatch-readiness-json artifacts/local-source-signal-gap-dispatch-readiness.json \
             --source-contract-dispatch-readiness-json artifacts/local-source-contract-dispatch-readiness.json \
+            --request-dispatch-queue-json artifacts/request-packet-bundle/local-source-request-dispatch-queue.json \
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --output artifacts/local-source-dispatch-watchdog.json \
             --markdown-output artifacts/local-source-dispatch-watchdog.md \
@@ -105,6 +106,7 @@ jobs:
             let summary = {};
             let status = "watchdog_failed_before_report";
             let operator_next_steps = [];
+            let request_dispatch_queue_items = [];
             if (fs.existsSync(reportPath)) {
               const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
               status = report.status;
@@ -112,10 +114,21 @@ jobs:
               operator_next_steps = Array.isArray(report.operator_next_steps)
                 ? report.operator_next_steps
                 : [];
+              request_dispatch_queue_items = Array.isArray(report.request_dispatch_queue_items)
+                ? report.request_dispatch_queue_items
+                : [];
             }
             const stepLines = operator_next_steps.length
               ? operator_next_steps.map((step) => `- ${step}`)
               : ["- See uploaded local-source dispatch artifacts for next actions."];
+            const queueLines = request_dispatch_queue_items.length
+              ? request_dispatch_queue_items
+                  .slice(0, 5)
+                  .map((item) => {
+                    const label = item.target_signal_type || item.source_contract_gate || "unknown";
+                    return `- ${item.queue_id}: ${item.request_type} / ${label} (${item.completion_target_count} completion targets)`;
+                  })
+              : ["- See uploaded request dispatch queue artifact for grouped dispatch items."];
             const body = [
               "Local source dispatch watchdog requires operator follow-up.",
               "",
@@ -133,6 +146,9 @@ jobs:
               "",
               "Operator next steps:",
               ...stepLines,
+              "",
+              "Request dispatch queue:",
+              ...queueLines,
               "",
               "Artifacts, if uploaded, are attached to the workflow run.",
               "This issue route is public-safe and does not include tokens, private evidence refs, manifests, or official correspondence.",

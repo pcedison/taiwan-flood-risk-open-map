@@ -2372,6 +2372,43 @@ official correspondence. The completion gates remain incomplete until accepted
 official replies, production adapters, authorization-gated adapters, released
 contracts, or official-unavailable evidence are recorded.
 
+## Task 74: Local Source Dispatch Queue Watchdog Integration
+
+**Files:**
+- Modify: `scripts/local-source-dispatch-watchdog.py`
+- Modify: `.github/workflows/local-source-dispatch-watchdog.yml`
+- Modify: `tests/test_local_source_dispatch_watchdog_cli.py`
+- Modify: `tests/test_local_source_dispatch_watchdog_workflow.py`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+
+**Interfaces:**
+- Consumes: `local-source-request-dispatch-queue/v1` from the request packet
+  bundle, plus existing signal-gap and source-contract dispatch readiness
+  artifacts.
+- Produces: `request_dispatch_queue_items` in
+  `local-source-dispatch-watchdog/v1`, Markdown queue rows, and issue-route
+  queue lines under `[local-source-dispatch-watchdog] Local source dispatch
+  required`.
+
+- [x] Write a failing CLI test requiring the watchdog to include public-safe
+  grouped queue rows without private evidence refs.
+- [x] Add optional `--request-dispatch-queue-json` support and sanitize the
+  queue into rank, queue id, request type, completion gate, signal/gate,
+  county, status, and completion-target counts.
+- [x] Write a failing workflow test requiring the local-source dispatch
+  watchdog workflow to pass the queue artifact and print queue lines in the
+  stable GitHub issue route.
+- [x] Document that this makes the official request dispatch issue actionable
+  without satisfying `required_signal_families` or
+  `official_authorization_and_contracts`.
+
+Completed 2026-07-01: the local-source dispatch watchdog now carries the
+9-row grouped request dispatch queue into its JSON/Markdown report and stable
+GitHub issue route. Operators can see the first queue rows directly in the
+issue before opening artifacts, while private evidence refs, manifests, tokens,
+and official correspondence remain excluded.
+
 ## Completion Gates
 
 The full objective is complete only when:
