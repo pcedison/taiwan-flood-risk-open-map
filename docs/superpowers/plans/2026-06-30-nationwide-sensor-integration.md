@@ -2027,6 +2027,44 @@ validation until each requirement is replaced with verified private evidence,
 so they move the project closer to acceptance without overstating production
 readiness.
 
+## Task 64: Hosted Monitoring Schedule Readiness Watchdog
+
+**Files:**
+- Add: `scripts/hosted-monitoring-schedule-readiness.py`
+- Add: `tests/test_hosted_monitoring_schedule_readiness_cli.py`
+- Add: `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01.json`
+- Add: `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01.md`
+- Modify: `docs/runbooks/monitoring-freshness-alerts.md`
+- Modify: `docs/reviews/source-gap-progress-2026-07-01.md`
+
+**Interfaces:**
+- Consumes: public-safe GitHub Actions schedule-run metadata from
+  `gh run list --event schedule`.
+- Produces: a schedule readiness artifact that checks the latest Hosted
+  Monitoring scheduled run conclusion, head SHA, and freshness window, and
+  emits partial completion evidence only when the latest schedule run is
+  successful, recent, and on the expected main SHA.
+
+- [x] Write failing CLI tests proving recent successful schedule runs can emit
+  `scheduled_freshness_checks` completion evidence while failed/wrong-SHA/stale
+  runs cannot.
+- [x] Add the watchdog CLI with `--runs-json` fixture support,
+  `--expected-head-sha`, `--max-age-minutes`, Markdown output, optional
+  completion-evidence output, and `--fail-on-not-ready`.
+- [x] Run the watchdog against the live GitHub repository for current main
+  `2d86ca32718ae4ef65a8e30c59c84028b0000a1b`.
+- [x] Record that the latest real Hosted Monitoring schedule run is still the
+  failed pre-fix run `28493475510`, on SHA
+  `9d671d2a4a63ec30ff8a79204b7346304404f15f`, so no
+  `scheduled_freshness_checks` completion overlay was produced.
+
+Completed 2026-07-01: the project can now detect and document when GitHub
+scheduled Hosted Monitoring has not yet produced acceptable post-fix schedule
+evidence. This does not satisfy `production_monitoring_and_alerting`; it keeps
+the `scheduled_freshness_checks` requirement honest until a real successful,
+fresh schedule run appears on the expected main SHA. Alert routing and
+worker/scheduler alert ownership still require private monitoring evidence.
+
 ## Completion Gates
 
 The full objective is complete only when:
