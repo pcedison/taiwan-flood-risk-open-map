@@ -279,6 +279,10 @@ Each run executes:
   request work.
 - `scripts/hosted_private_evidence_readiness.py` to publish which private
   evidence/admin-token inputs are configured or missing without printing values.
+- `scripts/github-actions-secret-readiness.py` for an operator-side check of
+  required GitHub Actions secret names. It reads only `gh secret list` metadata
+  (`name` and `updatedAt`) and can write a public-safe JSON/Markdown artifact;
+  it never reads or prints secret contents.
 - `scripts/hosted_private_evidence_template_bundle.py` to publish public-safe
   pending templates for the hosted worker, worker-policy split route, and
   hosted monitoring private evidence manifests.
@@ -419,6 +423,23 @@ release review can tell whether the all-in-one worker manifest route or the
 split admin-freshness plus worker-policy route is currently unblocked.
 Configured secrets still do not satisfy completion gates unless their decoded
 private manifests produce accepted completion evidence.
+
+Use this local operator command when you need a GitHub-history-friendly snapshot
+of whether the repository Actions secrets are present before a release or
+completion review:
+
+```powershell
+python scripts\github-actions-secret-readiness.py `
+  --repo "pcedison/taiwan-flood-risk-open-map" `
+  --captured-at "$(Get-Date -Format o)" `
+  --output ".\docs\reviews\github-actions-secret-readiness-YYYY-MM-DD.json" `
+  --markdown-output ".\docs\reviews\github-actions-secret-readiness-YYYY-MM-DD.md"
+```
+
+This artifact is public-safe because GitHub exposes only secret names and update
+timestamps through `gh secret list`. It does not prove the underlying private
+evidence has been reviewed, and it does not replace the workflow-generated
+`hosted-private-evidence-readiness.json`.
 
 `hosted-monitoring-schedule-evidence.json` records whether the current hosted
 monitoring run came from the scheduled trigger. If and only if
