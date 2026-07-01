@@ -342,6 +342,41 @@ This does not satisfy `official_authorization_and_contracts`. It prevents the
 public API contract-review queue from going stale and will expose a future live
 candidate if one appears.
 
+## Current Main Evidence Refresh After Secret Readiness Next Steps
+
+After PR #82 merged, hosted deployment and public risk smoke were refreshed for
+main merge SHA `f9d5159ec0c156b2ca302d4e076a3e3310ebf5a5`.
+
+Artifacts:
+
+- `docs/reviews/hosted-deployment-smoke-2026-07-01-f9d5159.json`
+- `docs/reviews/hosted-deployment-completion-evidence-2026-07-01-f9d5159.json`
+- `docs/reviews/hosted-public-risk-evidence-smoke-2026-07-01-f9d5159.json`
+- `docs/reviews/hosted-public-risk-completion-evidence-2026-07-01-f9d5159.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-f9d5159.json`
+- `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01-f9d5159.md`
+- `docs/reviews/completion-audit-2026-07-01-f9d5159.json`
+- `docs/reviews/completion-audit-2026-07-01-f9d5159.md`
+
+The hosted deployment smoke passed: `/health` and `/ready` both reported
+deployment SHA `f9d5159ec0c156b2ca302d4e076a3e3310ebf5a5`, and `/ready`
+reported healthy database and Redis dependencies. The public risk evidence
+smoke also passed for the Tainan query-point scenario, with worker-style
+official evidence and query-point nearby coverage still present in the public
+risk response.
+
+The refreshed completion audit still reports `overall_status: incomplete`.
+`production_deployment_evidence` and `public_risk_worker_evidence_path` are
+satisfied for this deployed SHA, while the source-family, official
+authorization/contract, hosted worker, and monitoring gates remain blocked.
+
+The schedule readiness refresh still reports `status: failed`. The latest real
+Hosted Monitoring `schedule` run is run `28504711491`, failed on older SHA
+`4ee414807a0230cb44462bdc91f64d39f5b303c9`, and did not execute on
+`f9d5159ec0c156b2ca302d4e076a3e3310ebf5a5`. No
+`scheduled_freshness_checks` completion evidence was emitted for
+`f9d5159ec0c156b2ca302d4e076a3e3310ebf5a5`.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,
