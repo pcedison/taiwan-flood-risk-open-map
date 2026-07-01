@@ -154,6 +154,15 @@ as `skipped` and do not produce completion evidence, and the monitoring gate
 still needs accepted evidence for `hosted_alert_routing` and
 `worker_scheduler_alert_ownership`.
 
+Follow-up hardening: the schedule completion evidence step now runs after the
+hosted deployment smoke, public risk smoke, admin freshness check, private
+hosted evidence validation, and local-source follow-up handling. A failing
+non-`always()` monitoring check therefore prevents
+`hosted-monitoring-schedule-completion-evidence.json` from being emitted for
+that run. This keeps `scheduled_freshness_checks` evidence aligned with a
+successful scheduled monitor rather than merely with the presence of a
+`schedule` event.
+
 The schedule itself is now checked by a separate public-safe watchdog artifact:
 
 - `docs/reviews/hosted-monitoring-schedule-readiness-2026-07-01.json`

@@ -125,19 +125,6 @@ jobs:
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --output-dir artifacts
 
-      - name: Hosted monitoring schedule evidence
-        run: |
-          set -euo pipefail
-          python scripts/hosted_monitoring_schedule_evidence.py \
-            --event-name "${GITHUB_EVENT_NAME}" \
-            --workflow-name "${GITHUB_WORKFLOW}" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            --cron "${{ github.event.schedule || '*/30 * * * *' }}" \
-            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --evidence-output artifacts/hosted-monitoring-schedule-evidence.json \
-            --completion-evidence-output artifacts/hosted-monitoring-schedule-completion-evidence.json
-
       - name: Require admin source freshness token
         if: ${{ env.REQUIRE_ADMIN_SOURCE_FRESHNESS == 'true' && env.ADMIN_BEARER_TOKEN == '' }}
         run: |
@@ -227,6 +214,19 @@ jobs:
         if: ${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 == '' }}
         run: |
           echo "::notice title=Local source request dispatch follow-ups skipped::LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 is not configured, so official request dispatch follow-up evidence was not collected."
+
+      - name: Hosted monitoring schedule evidence
+        run: |
+          set -euo pipefail
+          python scripts/hosted_monitoring_schedule_evidence.py \
+            --event-name "${GITHUB_EVENT_NAME}" \
+            --workflow-name "${GITHUB_WORKFLOW}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --cron "${{ github.event.schedule || '*/30 * * * *' }}" \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --evidence-output artifacts/hosted-monitoring-schedule-evidence.json \
+            --completion-evidence-output artifacts/hosted-monitoring-schedule-completion-evidence.json
 
       - name: Hosted completion audit
         if: ${{ always() }}
