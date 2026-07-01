@@ -32,10 +32,16 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         "default": "true",
         "type": "boolean",
     }
+    assert workflow_dispatch_inputs["dispatch_hosted_monitoring_on_failure"] == {
+        "description": "Dispatch Hosted Monitoring as a fallback when schedule readiness fails.",
+        "required": "false",
+        "default": "true",
+        "type": "boolean",
+    }
 
     job = workflow["jobs"]["hosted-schedule-watchdog"]
     assert job["permissions"] == {
-        "actions": "read",
+        "actions": "write",
         "contents": "read",
         "issues": "write",
     }
@@ -48,6 +54,9 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     )
     assert job["env"]["FAIL_ON_NOT_READY"] == (
         "${{ github.event.inputs.fail_on_not_ready || 'true' }}"
+    )
+    assert job["env"]["DISPATCH_HOSTED_MONITORING_ON_FAILURE"] == (
+        "${{ github.event.inputs.dispatch_hosted_monitoring_on_failure || 'true' }}"
     )
 
     steps = job["steps"]
@@ -64,7 +73,22 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         "--completion-evidence-output "
         "artifacts/hosted-monitoring-schedule-completion-evidence.json"
     ) in step_text
+    assert "Dispatch fallback Hosted Monitoring" in step_text
+    assert "hosted-monitoring-schedule-fallback-dispatch.json" in step_text
+    assert "createWorkflowDispatch" in step_text
+    assert "hosted-monitoring.yml" in step_text
+    assert "expected_deployment_sha: expectedHeadSha" in step_text
     assert "actions/upload-artifact@v4" in step_text
+
+    fallback_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Dispatch fallback Hosted Monitoring"
+    )
+    assert fallback_step["if"] == (
+        "${{ failure() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' }}"
+    )
+    assert fallback_step["uses"] == "actions/github-script@v7"
 
     alert_routing_step = next(
         step
@@ -79,6 +103,8 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert "failure.code" in alert_script
     assert "latest_schedule_run" in alert_script
     assert "summary.age_minutes" in alert_script
+    assert "hosted-monitoring-schedule-fallback-dispatch.json" in alert_script
+    assert "fallback dispatch status" in alert_script
     assert "hosted-schedule-watchdog" in alert_script
     assert "Hosted Monitoring schedule not ready" in alert_script
     assert "github.rest.issues.create" in alert_script

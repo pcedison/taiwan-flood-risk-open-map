@@ -17,6 +17,11 @@ on:
         required: false
         default: true
         type: boolean
+      dispatch_hosted_monitoring_on_failure:
+        description: "Dispatch Hosted Monitoring as a fallback when schedule readiness fails."
+        required: false
+        default: true
+        type: boolean
   schedule:
     - cron: "17,47 * * * *"
 
@@ -25,7 +30,7 @@ jobs:
     name: Hosted schedule watchdog
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       contents: read
       issues: write
     env:
@@ -33,6 +38,7 @@ jobs:
       EXPECTED_HEAD_SHA: ${{ github.event.inputs.expected_head_sha || github.sha }}
       MAX_AGE_MINUTES: ${{ github.event.inputs.max_age_minutes || '90' }}
       FAIL_ON_NOT_READY: ${{ github.event.inputs.fail_on_not_ready || 'true' }}
+      DISPATCH_HOSTED_MONITORING_ON_FAILURE: ${{ github.event.inputs.dispatch_hosted_monitoring_on_failure || 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,6 +65,59 @@ jobs:
             --markdown-output artifacts/hosted-monitoring-schedule-readiness.md \
             --completion-evidence-output artifacts/hosted-monitoring-schedule-completion-evidence.json \
             "${readiness_args[@]}"
+
+      - name: Dispatch fallback Hosted Monitoring
+        if: ${{ failure() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const { owner, repo } = context.repo;
+            const workflowId = "hosted-monitoring.yml";
+            const expectedHeadSha = process.env.EXPECTED_HEAD_SHA;
+            const runUrl = [
+              process.env.GITHUB_SERVER_URL,
+              process.env.GITHUB_REPOSITORY,
+              "actions/runs",
+              process.env.GITHUB_RUN_ID,
+            ].join("/");
+            const evidence = {
+              schema_version: "hosted-monitoring-schedule-fallback-dispatch/v1",
+              captured_at: new Date().toISOString(),
+              status: "requested",
+              reason: "schedule_readiness_failed",
+              source_watchdog_run: {
+                workflow: process.env.GITHUB_WORKFLOW,
+                event: process.env.GITHUB_EVENT_NAME,
+                run_id: process.env.GITHUB_RUN_ID,
+                run_url: runUrl,
+                head_sha: process.env.GITHUB_SHA,
+              },
+              target_workflow: {
+                workflow_id: workflowId,
+                ref: "main",
+                inputs: {
+                  expected_deployment_sha: expectedHeadSha,
+                },
+              },
+              notes: [
+                "Fallback dispatch is schedule watchdog remediation, not scheduled_freshness_checks completion evidence.",
+                "Completion evidence still requires a successful accepted scheduled monitor or reviewed private monitoring evidence.",
+              ],
+            };
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: workflowId,
+              ref: "main",
+              inputs: {
+                expected_deployment_sha: expectedHeadSha,
+              },
+            });
+            fs.writeFileSync(
+              "artifacts/hosted-monitoring-schedule-fallback-dispatch.json",
+              `${JSON.stringify(evidence, null, 2)}\n`,
+            );
 
       - name: Upload schedule watchdog artifacts
         if: ${{ always() }}
@@ -88,6 +147,7 @@ jobs:
             let report = {};
             let summary = {};
             let latest = {};
+            let fallback = {};
             let failureLines = ["- report unavailable"];
             if (fs.existsSync(reportPath)) {
               report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
@@ -97,6 +157,10 @@ jobs:
               failureLines = failures.length
                 ? failures.map((failure) => `- ${failure.code}: ${failure.message}`)
                 : ["- none"];
+            }
+            const fallbackPath = "artifacts/hosted-monitoring-schedule-fallback-dispatch.json";
+            if (fs.existsSync(fallbackPath)) {
+              fallback = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
             }
             const body = [
               "Hosted Monitoring schedule readiness failed.",
@@ -111,6 +175,8 @@ jobs:
               `- latest schedule sha: ${latest.head_sha ?? "unknown"}`,
               `- latest schedule conclusion: ${latest.conclusion ?? "unknown"}`,
               `- latest schedule age minutes: ${summary.age_minutes ?? "unknown"} / max ${summary.max_age_minutes ?? "unknown"}`,
+              `- fallback dispatch status: ${fallback.status ?? "not_requested"}`,
+              `- fallback target workflow: ${fallback.target_workflow?.workflow_id ?? "unknown"}`,
               "",
               "Failure reasons:",
               ...failureLines,

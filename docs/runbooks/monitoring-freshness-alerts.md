@@ -311,7 +311,12 @@ run executes:
   Hosted Monitoring cron. It uploads public-safe JSON/Markdown artifacts and opens or
   comments on `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`
   when the latest real schedule run is missing, failed, stale, or on the wrong
-  SHA. On a successful readiness run, it comments on and closes that stable
+  SHA. When readiness fails, it can also dispatch Hosted Monitoring as a
+  fallback and upload
+  `hosted-monitoring-schedule-fallback-dispatch.json` so the hosted freshness
+  smoke still gets a remediation attempt. That fallback dispatch is operational
+  recovery evidence, not `scheduled_freshness_checks` completion evidence. On a
+  successful readiness run, the watchdog comments on and closes that stable
   issue if it is still open. This catches the case where manual Hosted
   Monitoring dispatches pass but the true GitHub `schedule` path still has not
   recovered, while also clearing stale alerts after recovery.
@@ -351,12 +356,13 @@ manifest.
 The schedule watchdog issue route is separate from the Hosted Monitoring
 failure route. Its issue title is
 `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`; it includes
-only the watchdog run URL, workflow, event, and SHA. It does not satisfy
-`scheduled_freshness_checks` on its own. It makes the missing/failing/stale
-schedule state visible until a real Hosted Monitoring `schedule` run succeeds
-on the expected main SHA and emits accepted completion evidence. When the
-watchdog later passes, it closes the stale issue automatically after adding a
-public-safe resolved comment.
+only the watchdog run URL, workflow, event, SHA, schedule-readiness summary,
+and fallback dispatch status. It does not satisfy `scheduled_freshness_checks`
+on its own. It makes the missing/failing/stale schedule state visible and can
+kick a fallback Hosted Monitoring run until a real Hosted Monitoring `schedule`
+run succeeds on the expected main SHA and emits accepted completion evidence.
+When the watchdog later passes, it closes the stale issue automatically after
+adding a public-safe resolved comment.
 
 Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
 for the workflow commit SHA, or provide the exact deployed SHA while verifying a
