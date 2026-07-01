@@ -202,6 +202,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     )
     assert "--output-dir artifacts" in signal_gap_discovery_step["run"]
     assert "--captured-at" in signal_gap_discovery_step["run"]
+    assert "--allow-fetch-failure" in signal_gap_discovery_step["run"]
 
     signal_gap_dispatch_step = next(
         step

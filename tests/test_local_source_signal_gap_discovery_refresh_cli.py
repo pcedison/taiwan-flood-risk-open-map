@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -151,3 +153,87 @@ def test_local_source_signal_gap_discovery_refresh_can_fail_on_live_candidate(
     assert result.returncode == 1
     summary = json.loads(result.stdout)
     assert summary["total_candidate_live_read_api_count"] == 1
+
+
+def test_local_source_signal_gap_discovery_refresh_can_degrade_on_live_fetch_failure(
+    tmp_path: Path,
+    capsys: Any,
+    monkeypatch: Any,
+) -> None:
+    module = _load_script_module()
+    output_dir = tmp_path / "artifacts"
+    monkeypatch.setattr(module, "_load_worker_discovery_module", lambda: _FailingDiscovery())
+
+    result = module.main(
+        [
+            "--allow-fetch-failure",
+            "--captured-at",
+            "2026-07-01T19:40:00+08:00",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    assert result == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["source_catalog_fetch_status"] == "failed"
+    assert "timed out" in summary["source_catalog_fetch_error"]
+    assert summary["total_candidate_live_read_api_count"] == 0
+    assert summary["signal_gap_group_count"] == 3
+
+    pump = json.loads(
+        (output_dir / "signal-gap-discovery-refresh-pump-or-gate-status.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert pump["conclusion"] == "source_catalog_fetch_failed"
+    assert pump["source_catalog_fetch_status"] == "failed"
+
+
+def _load_script_module() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "local_source_signal_gap_discovery_refresh_under_test",
+        SCRIPT,
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _FailingDiscovery:
+    DATA_GOV_DATASET_EXPORT_URL = "https://data.gov.tw/api/front/dataset/export?format=json"
+
+    @staticmethod
+    def fetch_data_gov_dataset_export(**_kwargs: Any) -> object:
+        raise RuntimeError("Failed to fetch data.gov.tw dataset export: timed out")
+
+    @staticmethod
+    def discover_local_source_candidates(
+        payload: object,
+        *,
+        target_counties: list[str],
+        required_signal_types: tuple[str, ...],
+    ) -> "_EmptyDiscoveryResult":
+        assert payload == []
+        assert required_signal_types
+        return _EmptyDiscoveryResult(target_counties)
+
+
+class _EmptyDiscoveryResult:
+    def __init__(self, target_counties: list[str]) -> None:
+        self._target_counties = target_counties
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_count": 0,
+            "candidates": [],
+            "summary": {
+                "by_county": {
+                    county: {"readiness_state": "no_candidate"}
+                    for county in self._target_counties
+                },
+                "target_counties_without_candidates": self._target_counties,
+            },
+        }

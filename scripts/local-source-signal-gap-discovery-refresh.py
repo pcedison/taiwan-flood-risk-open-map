@@ -73,17 +73,35 @@ def main(argv: list[str] | None = None) -> int:
             "candidate_live_read_api result."
         ),
     )
+    parser.add_argument(
+        "--allow-fetch-failure",
+        action="store_true",
+        help=(
+            "When the live data.gov.tw export cannot be fetched, continue with "
+            "empty discovery payloads and mark artifacts as fetch failed. "
+            "Fixture JSON loading remains strict."
+        ),
+    )
     args = parser.parse_args(argv)
 
     discovery = _load_worker_discovery_module()
     captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
-    payload = (
-        _load_json(Path(args.dataset_export_json))
-        if args.dataset_export_json
-        else discovery.fetch_data_gov_dataset_export(
-            timeout_seconds=max(1, args.timeout_seconds)
-        )
-    )
+    source_catalog_fetch_status = "fixture"
+    source_catalog_fetch_error = None
+    if args.dataset_export_json:
+        payload = _load_json(Path(args.dataset_export_json))
+    else:
+        try:
+            payload = discovery.fetch_data_gov_dataset_export(
+                timeout_seconds=max(1, args.timeout_seconds)
+            )
+            source_catalog_fetch_status = "fetched"
+        except RuntimeError as exc:
+            if not args.allow_fetch_failure:
+                raise
+            payload = []
+            source_catalog_fetch_status = "failed"
+            source_catalog_fetch_error = str(exc)
     plan = build_local_source_action_plan(list_local_source_coverage())
     output_dir = Path(args.output_dir) if args.output_dir else None
     summary = build_signal_gap_discovery_refresh(
@@ -92,6 +110,8 @@ def main(argv: list[str] | None = None) -> int:
         discovery_module=discovery,
         captured_at=captured_at,
         output_dir=output_dir,
+        source_catalog_fetch_status=source_catalog_fetch_status,
+        source_catalog_fetch_error=source_catalog_fetch_error,
     )
     output = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True)
     print(output)
@@ -107,6 +127,8 @@ def build_signal_gap_discovery_refresh(
     discovery_module: Any,
     captured_at: str,
     output_dir: Path | None,
+    source_catalog_fetch_status: str = "fetched",
+    source_catalog_fetch_error: str | None = None,
 ) -> dict[str, Any]:
     groups: list[dict[str, Any]] = []
     total_candidate_count = 0
@@ -131,6 +153,8 @@ def build_signal_gap_discovery_refresh(
             captured_at=captured_at,
             source_catalog_url=discovery_module.DATA_GOV_DATASET_EXPORT_URL,
             result=result,
+            source_catalog_fetch_status=source_catalog_fetch_status,
+            source_catalog_fetch_error=source_catalog_fetch_error,
         )
         artifact_name = f"signal-gap-discovery-refresh-{_signal_slug(signal_type)}.json"
         if output_dir is not None:
@@ -165,6 +189,7 @@ def build_signal_gap_discovery_refresh(
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "captured_at": captured_at,
         "source_catalog_url": discovery_module.DATA_GOV_DATASET_EXPORT_URL,
+        "source_catalog_fetch_status": source_catalog_fetch_status,
         "signal_gap_group_count": len(groups),
         "total_candidate_count": total_candidate_count,
         "total_candidate_live_read_api_count": total_live_count,
@@ -172,6 +197,8 @@ def build_signal_gap_discovery_refresh(
         "live_candidate_signal_types": live_candidate_signal_types,
         "groups": groups,
     }
+    if source_catalog_fetch_error:
+        summary["source_catalog_fetch_error"] = source_catalog_fetch_error
     if output_dir is not None:
         _write_json(output_dir / "signal-gap-discovery-refresh-summary.json", summary)
     return summary
@@ -182,23 +209,31 @@ def _build_discovery_artifact(
     captured_at: str,
     source_catalog_url: str,
     result: Any,
+    source_catalog_fetch_status: str,
+    source_catalog_fetch_error: str | None,
 ) -> dict[str, Any]:
     result_dict = result.to_dict()
     live_candidate_found = any(
         candidate.get("readiness") == "candidate_live_read_api"
         for candidate in result_dict["candidates"]
     )
-    return {
+    if source_catalog_fetch_status == "failed":
+        conclusion = "source_catalog_fetch_failed"
+    elif live_candidate_found:
+        conclusion = "candidate_live_read_api_found"
+    else:
+        conclusion = "no_candidate_live_read_api_found"
+    artifact = {
         "schema_version": DISCOVERY_SCHEMA_VERSION,
         "captured_at": captured_at,
         "source_catalog_url": source_catalog_url,
-        "conclusion": (
-            "candidate_live_read_api_found"
-            if live_candidate_found
-            else "no_candidate_live_read_api_found"
-        ),
+        "source_catalog_fetch_status": source_catalog_fetch_status,
+        "conclusion": conclusion,
         "discovery": result_dict,
     }
+    if source_catalog_fetch_error:
+        artifact["source_catalog_fetch_error"] = source_catalog_fetch_error
+    return artifact
 
 
 def _candidate_count(result_dict: Mapping[str, Any], *, readiness: str) -> int:

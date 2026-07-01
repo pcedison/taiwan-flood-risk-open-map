@@ -87,6 +87,7 @@ jobs:
           set -euo pipefail
           python scripts/local-source-signal-gap-discovery-refresh.py \
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --allow-fetch-failure \
             --output-dir artifacts
 
       - name: Local source signal-gap dispatch readiness
