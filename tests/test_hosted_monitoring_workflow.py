@@ -66,6 +66,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/hosted_worker_evidence.py" in step_text
     assert "scripts/hosted_worker_policy_evidence.py" in step_text
     assert "scripts/hosted_monitoring_evidence.py" in step_text
+    assert "scripts/hosted_monitoring_schedule_evidence.py" in step_text
     assert "scripts/local-source-signal-gap-discovery-refresh.py" in step_text
     assert "scripts/local-source-signal-gap-dispatch-readiness.py" in step_text
     assert "scripts/local-source-contract-dispatch-readiness.py" in step_text
@@ -234,6 +235,23 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         private_evidence_readiness_step["run"]
     )
     assert "--captured-at" in private_evidence_readiness_step["run"]
+
+    schedule_evidence_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Hosted monitoring schedule evidence"
+    )
+    assert "scripts/hosted_monitoring_schedule_evidence.py" in (
+        schedule_evidence_step["run"]
+    )
+    assert "--event-name \"${GITHUB_EVENT_NAME}\"" in schedule_evidence_step["run"]
+    assert "--evidence-output artifacts/hosted-monitoring-schedule-evidence.json" in (
+        schedule_evidence_step["run"]
+    )
+    assert (
+        "--completion-evidence-output "
+        "artifacts/hosted-monitoring-schedule-completion-evidence.json"
+    ) in schedule_evidence_step["run"]
 
     audit_step = next(
         step for step in steps if step.get("name") == "Hosted completion audit"

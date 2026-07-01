@@ -279,6 +279,10 @@ Each run executes:
   request work.
 - `scripts/hosted_private_evidence_readiness.py` to publish which private
   evidence/admin-token inputs are configured or missing without printing values.
+- `scripts/hosted_monitoring_schedule_evidence.py` to publish public-safe
+  schedule-run evidence. On real `schedule` events it also emits partial
+  completion evidence for `scheduled_freshness_checks`; manual runs only write
+  a skipped evidence artifact.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -366,6 +370,8 @@ every hosted monitoring run:
 - `local-source-signal-gap-request-batches.md`
 - `local-source-signal-gap-dispatch-template.json`
 - `local-source-source-contract-dispatch-template.json`
+- `hosted-monitoring-schedule-evidence.json`
+- `hosted-monitoring-schedule-completion-evidence.json` on scheduled runs only
 
 These artifacts monitor whether official open-data catalogs have published new
 machine-readable candidates for the unresolved signal families. A
@@ -403,6 +409,15 @@ release review can tell whether the all-in-one worker manifest route or the
 split admin-freshness plus worker-policy route is currently unblocked.
 Configured secrets still do not satisfy completion gates unless their decoded
 private manifests produce accepted completion evidence.
+
+`hosted-monitoring-schedule-evidence.json` records whether the current hosted
+monitoring run came from the scheduled trigger. If and only if
+`GITHUB_EVENT_NAME` is `schedule`, the workflow also uploads
+`hosted-monitoring-schedule-completion-evidence.json`, which satisfies the
+`scheduled_freshness_checks` requirement of
+`production_monitoring_and_alerting`. It does not satisfy `hosted_alert_routing`
+or `worker_scheduler_alert_ownership`; those still require the reviewed private
+monitoring manifest.
 
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 
