@@ -132,6 +132,7 @@ def test_hosted_deployment_smoke_fails_when_ready_sha_differs(
     monkeypatch,
 ) -> None:
     evidence_output = tmp_path / "hosted-deployment-smoke.json"
+    completion_output = tmp_path / "deployment-completion-evidence.json"
 
     def fake_request_json(url: str, *, timeout_seconds: float) -> smoke.JsonResponse:
         if url.endswith("/health"):
@@ -165,12 +166,16 @@ def test_hosted_deployment_smoke_fails_when_ready_sha_differs(
             "2026-06-30T14:25:00+08:00",
             "--evidence-output",
             str(evidence_output),
+            "--completion-evidence-output",
+            str(completion_output),
         ]
     )
 
     assert result == 1
+    assert not completion_output.exists()
     evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
     assert evidence["status"] == "failed"
+    assert evidence["completion_evidence_targets"] == []
     assert "ready deployment_sha old-sha did not match expected abc123" in evidence[
         "failures"
     ]

@@ -151,17 +151,21 @@ def build_evidence_artifact(
         "attempt_count": attempt_count,
         "health": _endpoint_summary(health),
         "ready": _endpoint_summary(ready),
-        "completion_evidence_targets": [
-            {
-                "gate_key": DEPLOYMENT_GATE_KEY,
-                "status": "accepted",
-                "satisfied_requirements": DEPLOYMENT_REQUIREMENTS,
-                "requirement_evidence": _requirement_evidence(
-                    captured_at=captured_at,
-                    evidence_ref=completion_evidence_ref,
-                ),
-            }
-        ],
+        "completion_evidence_targets": (
+            [
+                {
+                    "gate_key": DEPLOYMENT_GATE_KEY,
+                    "status": "accepted",
+                    "satisfied_requirements": DEPLOYMENT_REQUIREMENTS,
+                    "requirement_evidence": _requirement_evidence(
+                        captured_at=captured_at,
+                        evidence_ref=completion_evidence_ref,
+                    ),
+                }
+            ]
+            if status == "passed"
+            else []
+        ),
         "failures": failures,
     }
 
