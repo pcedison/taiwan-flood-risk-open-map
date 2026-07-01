@@ -165,6 +165,66 @@ def test_github_actions_secret_readiness_cli_writes_stdout_when_no_output(
     assert "value" not in result.stdout
 
 
+def test_github_actions_secret_readiness_cli_accepts_presence_rows(
+    tmp_path: Path,
+) -> None:
+    secrets_json = tmp_path / "secret-presence.json"
+    output_json = tmp_path / "github-actions-secret-readiness.json"
+    secrets_json.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "ADMIN_BEARER_TOKEN",
+                    "configured": True,
+                },
+                {
+                    "name": "HOSTED_WORKER_EVIDENCE_MANIFEST_B64",
+                    "configured": False,
+                },
+                {
+                    "name": "HOSTED_MONITORING_EVIDENCE_MANIFEST_B64",
+                    "configured": False,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo",
+            "pcedison/taiwan-flood-risk-open-map",
+            "--captured-at",
+            "2026-07-01T14:05:00+08:00",
+            "--secrets-json",
+            str(secrets_json),
+            "--output",
+            str(output_json),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    readiness_by_name = {item["name"]: item for item in payload["secrets"]}
+    assert readiness_by_name["ADMIN_BEARER_TOKEN"]["configured"] is True
+    assert readiness_by_name["ADMIN_BEARER_TOKEN"]["updated_at"] is None
+    assert readiness_by_name["HOSTED_WORKER_EVIDENCE_MANIFEST_B64"][
+        "configured"
+    ] is False
+    assert readiness_by_name["HOSTED_MONITORING_EVIDENCE_MANIFEST_B64"][
+        "configured"
+    ] is False
+    assert payload["summary"]["configured_tracked_secret_count"] == 1
+    assert payload["summary"]["missing_required_for_completion_count"] == 3
+
+
 def test_github_actions_secret_readiness_cli_can_fail_on_completion_blockers(
     tmp_path: Path,
 ) -> None:

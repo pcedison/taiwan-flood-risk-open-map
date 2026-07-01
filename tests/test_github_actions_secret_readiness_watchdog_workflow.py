@@ -26,18 +26,34 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
 
     job = workflow["jobs"]["secret-readiness-watchdog"]
     assert job["permissions"] == {
-        "actions": "read",
         "contents": "read",
         "issues": "write",
     }
-    assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert job["env"]["FAIL_ON_COMPLETION_BLOCKERS"] == (
         "${{ github.event.inputs.fail_on_completion_blockers || 'true' }}"
+    )
+    assert job["env"]["ADMIN_BEARER_TOKEN_CONFIGURED"] == (
+        "${{ secrets.ADMIN_BEARER_TOKEN != '' }}"
+    )
+    assert job["env"]["HOSTED_WORKER_EVIDENCE_MANIFEST_B64_CONFIGURED"] == (
+        "${{ secrets.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 != '' }}"
+    )
+    assert job["env"]["HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64_CONFIGURED"] == (
+        "${{ secrets.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 != '' }}"
+    )
+    assert job["env"]["HOSTED_MONITORING_EVIDENCE_MANIFEST_B64_CONFIGURED"] == (
+        "${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 != '' }}"
+    )
+    assert job["env"]["LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64_CONFIGURED"] == (
+        "${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 != '' }}"
     )
 
     steps = job["steps"]
     step_text = "\n".join(str(step) for step in steps)
+    assert "gh secret list" not in step_text
+    assert "github-actions-secret-presence.json" in step_text
     assert "scripts/github-actions-secret-readiness.py" in step_text
+    assert "--secrets-json artifacts/github-actions-secret-presence.json" in step_text
     assert "--fail-on-completion-blockers" in step_text
     assert "--output artifacts/github-actions-secret-readiness.json" in step_text
     assert "--markdown-output artifacts/github-actions-secret-readiness.md" in step_text
@@ -56,4 +72,4 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
     assert "github.rest.issues.create" in script
     assert "github.rest.issues.createComment" in script
     assert "secret values" in script
-    assert "secrets." not in step_text
+    assert "secrets.ADMIN_BEARER_TOKEN }}" not in step_text

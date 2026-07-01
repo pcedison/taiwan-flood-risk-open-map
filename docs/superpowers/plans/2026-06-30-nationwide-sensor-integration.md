@@ -2205,8 +2205,9 @@ recorded.
 - Modify: `docs/superpowers/plans/2026-06-30-nationwide-sensor-integration.md`
 
 **Interfaces:**
-- Consumes: GitHub Actions secret names and update metadata through `gh secret
-  list`, plus the existing hosted/private evidence route model.
+- Consumes: GitHub Actions secret names with either local `gh secret list`
+  update metadata or workflow-generated configured/not-configured booleans, plus
+  the existing hosted/private evidence route model.
 - Produces: `github-actions-secret-readiness` JSON/Markdown artifacts, a
   scheduled and manually dispatchable GitHub Actions watchdog, and the stable
   public-safe issue route
@@ -2230,6 +2231,12 @@ current local run still found 0 of 5 tracked inputs configured, 4 required
 completion inputs missing, and 2 completion-gate blockers. The affected hosted
 and monitoring gates remain incomplete until reviewed private manifests and
 accepted evidence overlays are provided.
+
+Follow-up 2026-07-01: the merged workflow proved that `GITHUB_TOKEN` cannot list
+Actions secrets through `gh secret list` (`403 Resource not accessible by
+integration`). The watchdog now uses GitHub expression booleans to write a
+presence-only input artifact before running the same readiness CLI, so failed
+completion gates still upload public-safe JSON/Markdown artifacts.
 
 ## Completion Gates
 

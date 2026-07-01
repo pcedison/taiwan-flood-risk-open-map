@@ -113,7 +113,9 @@ def main() -> int:
         "--secrets-json",
         help=(
             "Optional path to JSON produced by `gh secret list --app actions "
-            "--json name,updatedAt`. When omitted, the command is run locally."
+            "--json name,updatedAt`, or a public-safe presence JSON with "
+            "`name` and `configured` fields. When omitted, the command is run "
+            "locally."
         ),
     )
     parser.add_argument(
@@ -199,7 +201,7 @@ def build_secret_readiness_artifact(
         "completion_routes": _completion_routes(configured),
         "completion_gate_blockers": blockers,
         "notes": [
-            "This artifact is based only on GitHub Actions secret names and update timestamps.",
+            "This artifact is based only on GitHub Actions secret names and presence/update metadata.",
             "It never reads, decodes, hashes, or previews secret data.",
             "Configured secrets still need their private evidence manifests to pass validation before completion gates can be accepted.",
         ],
@@ -292,6 +294,8 @@ def _configured_secret_map(secret_rows: list[Mapping[str, Any]]) -> dict[str, st
     for row in secret_rows:
         name = row.get("name")
         if not isinstance(name, str) or not name:
+            continue
+        if "configured" in row and row.get("configured") is not True:
             continue
         updated_at = row.get("updatedAt")
         configured[name] = updated_at if isinstance(updated_at, str) else None

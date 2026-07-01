@@ -282,10 +282,11 @@ The hosted/private evidence secret path now has its own public-safe watchdog:
 - `.github/workflows/github-actions-secret-readiness-watchdog.yml`
 - `scripts/github-actions-secret-readiness.py`
 
-The workflow reads only GitHub Actions secret names and update metadata, writes
-`github-actions-secret-readiness.json` and `.md` artifacts, and fails by default
-when required secret routes still block completion gates. Failure routes to the
-stable issue
+The workflow writes a presence-only secret input file from GitHub expression
+booleans, then emits `github-actions-secret-readiness.json` and `.md` artifacts.
+It does not call the Actions secrets-list API, because `GITHUB_TOKEN` cannot
+list repository secrets. It fails by default when required secret routes still
+block completion gates. Failure routes to the stable issue
 `[secret-readiness-watchdog] GitHub Actions required secrets missing`.
 
 The current local run found 0 of 5 tracked secret inputs configured, 4
