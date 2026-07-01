@@ -70,6 +70,13 @@ jobs:
             --evidence-output artifacts/hosted-public-risk-evidence-smoke.json \
             --completion-evidence-output artifacts/hosted-public-risk-completion-evidence.json
 
+      - name: Local source signal-gap discovery refresh
+        run: |
+          set -euo pipefail
+          python scripts/local-source-signal-gap-discovery-refresh.py \
+            --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output-dir artifacts
+
       - name: Require admin source freshness token
         if: ${{ env.REQUIRE_ADMIN_SOURCE_FRESHNESS == 'true' && env.ADMIN_BEARER_TOKEN == '' }}
         run: |
