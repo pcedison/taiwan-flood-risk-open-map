@@ -141,6 +141,19 @@ The current no-secret review shows these completion-gate blockers:
 `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is also missing, but it remains
 progress/follow-up visibility rather than accepted completion evidence.
 
+## Hosted Schedule Evidence
+
+Hosted Monitoring now emits `hosted-monitoring-schedule-evidence.json` on every
+run. For real GitHub `schedule` events only, it also emits
+`hosted-monitoring-schedule-completion-evidence.json`, satisfying the
+`scheduled_freshness_checks` requirement inside
+`production_monitoring_and_alerting`.
+
+This is intentionally partial evidence. Manual workflow dispatches are recorded
+as `skipped` and do not produce completion evidence, and the monitoring gate
+still needs accepted evidence for `hosted_alert_routing` and
+`worker_scheduler_alert_ownership`.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,
