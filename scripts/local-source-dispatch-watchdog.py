@@ -138,6 +138,11 @@ def build_watchdog_report(
             signal_dispatch_count=signal_dispatch_count,
             source_contract_dispatch_count=source_contract_dispatch_count,
         ),
+        "operator_next_steps": _operator_next_steps(
+            signal_dispatch_count=signal_dispatch_count,
+            source_contract_dispatch_count=source_contract_dispatch_count,
+            signal_gap_groups=signal_gap_groups,
+        ),
         "signal_gap_groups": signal_gap_groups,
         "source_contract_groups": source_contract_groups,
         "source_contract_items": source_contract_items,
@@ -224,6 +229,55 @@ def _next_workstreams(
     return workstreams
 
 
+def _operator_next_steps(
+    *,
+    signal_dispatch_count: int,
+    source_contract_dispatch_count: int,
+    signal_gap_groups: list[dict[str, Any]],
+) -> list[str]:
+    steps = [
+        (
+            "Review the uploaded local-source request packet bundle before sending "
+            "official requests."
+        )
+    ]
+    if signal_dispatch_count:
+        signal_types = _dispatch_signal_types(signal_gap_groups)
+        signal_type_text = ", ".join(signal_types) if signal_types else "see artifacts"
+        steps.append(
+            "Send signal-family read API requests for "
+            f"{signal_dispatch_count} unresolved groups: {signal_type_text}."
+        )
+    if source_contract_dispatch_count:
+        steps.append(
+            "Send source-contract follow-up for "
+            f"{source_contract_dispatch_count} items across authorization, "
+            "metadata release, and public API contract review gates."
+        )
+    steps.extend(
+        [
+            (
+                "After dispatch, generate private dispatch evidence and store it in "
+                "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 only after review."
+            ),
+            (
+                "Do not mark completion until accepted official reply, production "
+                "adapter, authorization-gated adapter, or official-unavailable evidence "
+                "is recorded."
+            ),
+        ]
+    )
+    return steps
+
+
+def _dispatch_signal_types(signal_gap_groups: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(group.get("target_signal_type"))
+        for group in signal_gap_groups
+        if group.get("dispatch_recommended") and group.get("target_signal_type")
+    ]
+
+
 def render_markdown(report: Mapping[str, Any]) -> str:
     summary = _mapping(report.get("summary"))
     lines = [
@@ -236,9 +290,16 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         f"- signal gap county-items: `{summary.get('signal_gap_county_item_count')}`",
         f"- source contract items needing dispatch: `{summary.get('source_contract_dispatch_recommended_item_count')}`",
         "",
-        "## Signal Gap Groups",
+        "## Operator Next Steps",
         "",
     ]
+    next_steps = report.get("operator_next_steps")
+    if isinstance(next_steps, list) and next_steps:
+        for step in next_steps:
+            lines.append(f"- {step}")
+    else:
+        lines.append("- none")
+    lines.extend(["", "## Signal Gap Groups", ""])
     signal_groups = report.get("signal_gap_groups")
     if isinstance(signal_groups, list) and signal_groups:
         for group in signal_groups:

@@ -377,6 +377,25 @@ Hosted Monitoring `schedule` run is run `28504711491`, failed on older SHA
 `scheduled_freshness_checks` completion evidence was emitted for
 `f9d5159ec0c156b2ca302d4e076a3e3310ebf5a5`.
 
+## Local Source Dispatch Next Steps
+
+The local-source dispatch watchdog now writes public-safe `operator_next_steps`
+into `local-source-dispatch-watchdog.json`, the Markdown artifact, and the
+stable GitHub issue
+`[local-source-dispatch-watchdog] Local source dispatch required`.
+
+The next steps tell operators to review the request packet bundle, send the
+remaining signal-family read API requests, send the source-contract follow-up
+requests, and store reviewed dispatch progress in
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` after private review. The issue
+route still omits tokens, private evidence refs, manifests, and official
+correspondence.
+
+This improves the handoff for the remaining `required_signal_families` and
+`official_authorization_and_contracts` work, but it does not satisfy either
+gate. Accepted official reply, production adapter, authorization-gated adapter,
+or official-unavailable evidence is still required.
+
 ## Still Unfinished
 
 - `required_signal_families`: `pump_or_gate_status:13`, `flood_depth:3`,

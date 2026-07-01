@@ -103,11 +103,18 @@ jobs:
             const reportPath = "artifacts/local-source-dispatch-watchdog.json";
             let summary = {};
             let status = "watchdog_failed_before_report";
+            let operator_next_steps = [];
             if (fs.existsSync(reportPath)) {
               const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
               status = report.status;
               summary = report.summary || {};
+              operator_next_steps = Array.isArray(report.operator_next_steps)
+                ? report.operator_next_steps
+                : [];
             }
+            const stepLines = operator_next_steps.length
+              ? operator_next_steps.map((step) => `- ${step}`)
+              : ["- See uploaded local-source dispatch artifacts for next actions."];
             const body = [
               "Local source dispatch watchdog requires operator follow-up.",
               "",
@@ -122,6 +129,9 @@ jobs:
               `- authorization requests: ${summary.authorization_request_count ?? "unknown"}`,
               `- metadata release monitors: ${summary.metadata_release_monitor_count ?? "unknown"}`,
               `- public API contract reviews: ${summary.public_api_contract_review_count ?? "unknown"}`,
+              "",
+              "Operator next steps:",
+              ...stepLines,
               "",
               "Artifacts, if uploaded, are attached to the workflow run.",
               "This issue route is public-safe and does not include tokens, private evidence refs, manifests, or official correspondence.",
