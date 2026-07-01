@@ -163,3 +163,38 @@ def test_github_actions_secret_readiness_cli_writes_stdout_when_no_output(
     assert payload["summary"]["configured_tracked_secret_count"] == 0
     assert payload["summary"]["missing_required_for_completion_count"] == 4
     assert "value" not in result.stdout
+
+
+def test_github_actions_secret_readiness_cli_can_fail_on_completion_blockers(
+    tmp_path: Path,
+) -> None:
+    secrets_json = tmp_path / "gh-secrets.json"
+    output_json = tmp_path / "github-actions-secret-readiness.json"
+    secrets_json.write_text("[]", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--repo",
+            "pcedison/taiwan-flood-risk-open-map",
+            "--captured-at",
+            "2026-07-01T14:05:00+08:00",
+            "--secrets-json",
+            str(secrets_json),
+            "--output",
+            str(output_json),
+            "--fail-on-completion-blockers",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    assert payload["summary"]["completion_gate_blocker_count"] == 2
+    assert "ADMIN_BEARER_TOKEN" in json.dumps(payload, ensure_ascii=False)
+    assert "secret-admin-token-value" not in result.stdout

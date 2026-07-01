@@ -124,6 +124,11 @@ def main() -> int:
         "--markdown-output",
         help="Optional Markdown summary output path.",
     )
+    parser.add_argument(
+        "--fail-on-completion-blockers",
+        action="store_true",
+        help="Exit 1 when required secret routes still block completion gates.",
+    )
     args = parser.parse_args()
 
     if args.secrets_json:
@@ -151,6 +156,11 @@ def main() -> int:
         markdown_path = Path(args.markdown_output)
         markdown_path.parent.mkdir(parents=True, exist_ok=True)
         markdown_path.write_text(render_markdown(artifact), encoding="utf-8")
+    if (
+        args.fail_on_completion_blockers
+        and artifact["summary"]["completion_gate_blocker_count"] > 0
+    ):
+        return 1
     return 0
 
 
