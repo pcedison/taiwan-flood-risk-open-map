@@ -576,6 +576,38 @@ def query_nearby_realtime_coverage_rows(
     statement_timeout_ms: int = 1500,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[NearbyCoverageRow, ...]:
+    latest_rows = _query_nearby_latest_coverage_rows(
+        database_url=database_url,
+        lat=lat,
+        lng=lng,
+        radius_buckets_m=radius_buckets_m,
+        observed_since=observed_since,
+        statement_timeout_ms=statement_timeout_ms,
+        connection_factory=connection_factory,
+    )
+    if latest_rows:
+        return latest_rows
+    return _query_nearby_evidence_coverage_rows(
+        database_url=database_url,
+        lat=lat,
+        lng=lng,
+        radius_buckets_m=radius_buckets_m,
+        observed_since=observed_since,
+        statement_timeout_ms=statement_timeout_ms,
+        connection_factory=connection_factory,
+    )
+
+
+def _query_nearby_latest_coverage_rows(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    radius_buckets_m: tuple[int, ...],
+    observed_since: datetime | None,
+    statement_timeout_ms: int,
+    connection_factory: ConnectionFactory | None,
+) -> tuple[NearbyCoverageRow, ...]:
     max_radius_m = max(radius_buckets_m)
     observed_filter = "AND latest.observed_at >= %s::timestamptz" if observed_since else ""
     observed_params: tuple[datetime, ...] = (observed_since,) if observed_since else ()
@@ -619,6 +651,106 @@ def query_nearby_realtime_coverage_rows(
         if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
             return ()
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
+    except (OSError, psycopg.Error) as exc:
+        raise EvidenceRepositoryUnavailable(str(exc)) from exc
+
+
+def _query_nearby_evidence_coverage_rows(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    radius_buckets_m: tuple[int, ...],
+    observed_since: datetime | None,
+    statement_timeout_ms: int,
+    connection_factory: ConnectionFactory | None,
+) -> tuple[NearbyCoverageRow, ...]:
+    max_radius_m = max(radius_buckets_m)
+    observed_filter = "AND e.observed_at >= %s::timestamptz" if observed_since else ""
+    observed_params: tuple[datetime, ...] = (observed_since,) if observed_since else ()
+    sql = f"""
+        WITH query_point AS (
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                (%s::double precision / 90000.0) AS degree_radius
+        ),
+        candidate_rows AS (
+            SELECT
+                COALESCE(ds.adapter_key, e.source_id) AS adapter_key,
+                e.source_id,
+                e.event_type,
+                COALESCE(
+                    NULLIF(e.properties->>'station_id', ''),
+                    CASE
+                        WHEN split_part(e.source_id, ':', 3) <> ''
+                        THEN split_part(e.source_id, ':', 2)
+                        ELSE e.source_id
+                    END
+                ) AS station_id,
+                e.observed_at,
+                e.ingested_at,
+                ST_Distance(e.geom::geography, qp.geog) AS distance_to_query_m,
+                CASE
+                    WHEN e.observed_at IS NULL THEN 'stale'
+                    WHEN e.observed_at >= now() - interval '10 minutes' THEN 'fresh'
+                    WHEN e.observed_at >= now() - interval '60 minutes' THEN 'stale'
+                    ELSE 'stale'
+                END AS freshness_state
+            FROM evidence e
+            LEFT JOIN data_sources ds ON ds.id = e.data_source_id
+            CROSS JOIN query_point qp
+            WHERE e.source_type = 'official'
+                AND e.ingestion_status = 'accepted'
+                AND e.privacy_level IN ('public', 'aggregated')
+                AND e.geom IS NOT NULL
+                AND e.event_type IN (
+                    'rainfall',
+                    'water_level',
+                    'flood_report',
+                    'flood_warning',
+                    'flood_sensor',
+                    'river_water_level',
+                    'pond_water_level',
+                    'sewer_water_level',
+                    'pump_water_level',
+                    'gate_water_level',
+                    'status_only'
+                )
+                {observed_filter}
+                AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
+                AND ST_DWithin(e.geom::geography, qp.geog, %s)
+        )
+        SELECT
+            adapter_key,
+            source_id,
+            event_type,
+            station_id,
+            observed_at,
+            ingested_at,
+            distance_to_query_m,
+            freshness_state
+        FROM (
+            SELECT DISTINCT ON (adapter_key, event_type, station_id)
+                *
+            FROM candidate_rows
+            ORDER BY
+                adapter_key,
+                event_type,
+                station_id,
+                observed_at DESC NULLS LAST,
+                ingested_at DESC
+        ) latest_evidence
+        ORDER BY distance_to_query_m ASC, observed_at DESC NULLS LAST
+        LIMIT 200
+    """
+    params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
+    try:
+        with _connect(database_url, connection_factory) as connection:
+            with connection.cursor() as cursor:
+                _apply_statement_timeout(cursor, statement_timeout_ms)
+                cursor.execute(sql, params)
+                return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -975,16 +1107,28 @@ def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
 
 
 def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:
+    source_id = str(row["source_id"])
     return NearbyCoverageRow(
         adapter_key=str(row["adapter_key"]),
-        source_id=str(row["source_id"]),
+        source_id=source_id,
         event_type=str(row["event_type"]),
-        station_id=str(row["station_id"]) if row.get("station_id") is not None else None,
+        station_id=_normalized_station_id(
+            str(row["station_id"]) if row.get("station_id") is not None else None,
+            source_id,
+        ),
         observed_at=row.get("observed_at"),
         ingested_at=row["ingested_at"],
         distance_to_query_m=float(row["distance_to_query_m"]),
         freshness_state=str(row["freshness_state"]),
     )
+
+
+def _normalized_station_id(station_id: str | None, source_id: str) -> str | None:
+    candidate = station_id or source_id
+    parts = candidate.split(":", 2)
+    if len(parts) == 3 and parts[1]:
+        return parts[1]
+    return candidate or None
 
 
 def _upsert_params(record: EvidenceUpsert) -> tuple[object, ...]:
