@@ -19,10 +19,12 @@ from app.api.schemas import (
 )
 from app.core.config import Settings
 from app.domain.evidence import EvidenceUpsert
+from app.domain.evidence.repository import NearbyCoverageRow
 from app.domain.geocoding import stable_uuid
 from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.history.news_enrichment import OnDemandNewsSearchResult
 from app.domain.profiles import RiskProfileRecord
+from app.domain.realtime.nearby_coverage import build_nearby_realtime_coverage
 from app.domain.realtime import (
     OfficialRealtimeBundle,
     OfficialRealtimeObservation,
@@ -286,7 +288,6 @@ def assess_risk(
     )
     if cached_response is not None:
         return cached_response
-    nearby_coverage = dependencies.nearby_realtime_coverage(risk_request, now=created_at)
     assessment_id = stable_uuid(
         "assessment",
         risk_request.point.lat,
@@ -303,6 +304,12 @@ def assess_risk(
         cwa_enabled=settings.source_cwa_api_enabled,
         wra_enabled=settings.source_wra_api_enabled,
         now=created_at,
+    )
+    nearby_coverage = _nearby_realtime_coverage_with_bridge_fallback(
+        dependencies.nearby_realtime_coverage(risk_request, now=created_at),
+        realtime_bundle,
+        request=risk_request,
+        created_at=created_at,
     )
     db_evidence_items = dependencies.nearby_db_evidence(risk_request)
     can_cache_response = db_evidence_items is not None or not settings.evidence_repository_enabled
@@ -553,6 +560,60 @@ def assess_risk(
             ttl_seconds=settings.risk_assessment_response_cache_seconds,
         )
     return response
+
+
+def _nearby_realtime_coverage_with_bridge_fallback(
+    coverage: NearbyRealtimeCoverage,
+    realtime_bundle: OfficialRealtimeBundle,
+    *,
+    request: RiskAssessRequest,
+    created_at: datetime,
+) -> NearbyRealtimeCoverage:
+    if coverage.overall_level != "unavailable" or not realtime_bundle.observations:
+        return coverage
+    return build_nearby_realtime_coverage(
+        rows=tuple(
+            _nearby_coverage_row_from_observation(observation, now=created_at)
+            for observation in realtime_bundle.observations
+        ),
+        query_radius_m=request.radius_m,
+        evaluated_at=created_at,
+    )
+
+
+def _nearby_coverage_row_from_observation(
+    observation: OfficialRealtimeObservation,
+    *,
+    now: datetime,
+) -> NearbyCoverageRow:
+    return NearbyCoverageRow(
+        adapter_key=_official_realtime_adapter_key(observation),
+        source_id=observation.source_id,
+        event_type=observation.event_type,
+        station_id=observation.source_id,
+        observed_at=observation.observed_at,
+        ingested_at=observation.ingested_at,
+        distance_to_query_m=observation.distance_to_query_m,
+        freshness_state=_official_realtime_freshness_state(observation, now=now),
+    )
+
+
+def _official_realtime_adapter_key(observation: OfficialRealtimeObservation) -> str:
+    if observation.event_type == "rainfall":
+        return "official.cwa.rainfall"
+    if observation.event_type == "water_level":
+        return "official.wra.water_level"
+    return f"official.realtime.{observation.event_type}"
+
+
+def _official_realtime_freshness_state(
+    observation: OfficialRealtimeObservation,
+    *,
+    now: datetime,
+) -> str:
+    if observation.observed_at >= now - timedelta(minutes=10):
+        return "fresh"
+    return "stale"
 
 
 def _merge_realtime_data_freshness(
