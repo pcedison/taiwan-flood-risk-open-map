@@ -7,6 +7,10 @@ on:
         description: "Expected Hosted Monitoring schedule run SHA. Defaults to this workflow SHA."
         required: false
         type: string
+      expected_deployment_sha:
+        description: "Expected fallback Hosted Monitoring deployment SHA. Defaults to production-release branch HEAD."
+        required: false
+        type: string
       max_age_minutes:
         description: "Maximum accepted age for the latest Hosted Monitoring schedule run."
         required: false
@@ -51,6 +55,24 @@ jobs:
       - name: Prepare artifact directory
         run: mkdir -p artifacts
 
+      - name: Resolve fallback deployment SHA
+        env:
+          INPUT_EXPECTED_DEPLOYMENT_SHA: ${{ github.event.inputs.expected_deployment_sha }}
+        run: |
+          set -euo pipefail
+          source="workflow_dispatch_input"
+          expected_sha="${INPUT_EXPECTED_DEPLOYMENT_SHA:-}"
+          if [ -z "${expected_sha}" ]; then
+            source="production-release"
+            expected_sha="$(git ls-remote --heads origin production-release | awk '{print $1}' || true)"
+          fi
+          if [ -z "${expected_sha}" ]; then
+            source="workflow_commit_sha"
+            expected_sha="${GITHUB_SHA}"
+          fi
+          echo "EXPECTED_DEPLOYMENT_SHA=${expected_sha}" >> "${GITHUB_ENV}"
+          echo "Expected fallback Hosted Monitoring deployment SHA (${source}): ${expected_sha}"
+
       - name: Hosted Monitoring schedule readiness
         run: |
           set -euo pipefail
@@ -75,6 +97,7 @@ jobs:
             const { owner, repo } = context.repo;
             const workflowId = "hosted-monitoring.yml";
             const expectedHeadSha = process.env.EXPECTED_HEAD_SHA;
+            const expectedDeploymentSha = process.env.EXPECTED_DEPLOYMENT_SHA || expectedHeadSha;
             const runUrl = [
               process.env.GITHUB_SERVER_URL,
               process.env.GITHUB_REPOSITORY,
@@ -97,7 +120,7 @@ jobs:
                 workflow_id: workflowId,
                 ref: "main",
                 inputs: {
-                  expected_deployment_sha: expectedHeadSha,
+                  expected_deployment_sha: expectedDeploymentSha,
                 },
               },
               notes: [
@@ -111,7 +134,7 @@ jobs:
               workflow_id: workflowId,
               ref: "main",
               inputs: {
-                expected_deployment_sha: expectedHeadSha,
+                expected_deployment_sha: expectedDeploymentSha,
               },
             });
             fs.writeFileSync(

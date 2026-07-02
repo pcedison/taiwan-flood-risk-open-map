@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       expected_deployment_sha:
-        description: "Expected /health deployment_sha. Defaults to the workflow commit SHA."
+        description: "Expected /health deployment_sha. Defaults to production-release branch HEAD."
         required: false
         type: string
       require_admin_source_freshness:
@@ -50,9 +50,18 @@ jobs:
           INPUT_EXPECTED_DEPLOYMENT_SHA: ${{ github.event.inputs.expected_deployment_sha }}
         run: |
           set -euo pipefail
-          expected_sha="${INPUT_EXPECTED_DEPLOYMENT_SHA:-${GITHUB_SHA}}"
+          source="workflow_dispatch_input"
+          expected_sha="${INPUT_EXPECTED_DEPLOYMENT_SHA:-}"
+          if [ -z "${expected_sha}" ]; then
+            source="production-release"
+            expected_sha="$(git ls-remote --heads origin production-release | awk '{print $1}' || true)"
+          fi
+          if [ -z "${expected_sha}" ]; then
+            source="workflow_commit_sha"
+            expected_sha="${GITHUB_SHA}"
+          fi
           echo "sha=${expected_sha}" >> "${GITHUB_OUTPUT}"
-          echo "Expected hosted deployment SHA: ${expected_sha}"
+          echo "Expected hosted deployment SHA (${source}): ${expected_sha}"
 
       - name: Prepare artifact directory
         run: mkdir -p artifacts
