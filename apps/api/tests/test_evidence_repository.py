@@ -246,6 +246,56 @@ def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
     assert 5000 in params
 
 
+def test_query_nearby_realtime_coverage_rows_falls_back_to_official_evidence_when_latest_empty() -> None:
+    observed_since = datetime(2026, 6, 29, 9, 0, tzinfo=UTC)
+    latest_connection = _FakeConnection(rows=[])
+    fallback_connection = _FakeConnection(
+        rows=[
+            {
+                "adapter_key": "official.cwa.rainfall",
+                "source_id": "cwa-rainfall:C0A520:2026-06-29T11:55:00Z",
+                "event_type": "rainfall",
+                "station_id": "cwa-rainfall:C0A520:2026-06-29T11:55:00Z",
+                "observed_at": datetime(2026, 6, 29, 11, 55, tzinfo=UTC),
+                "ingested_at": datetime(2026, 6, 29, 11, 56, tzinfo=UTC),
+                "distance_to_query_m": 1219.4,
+                "freshness_state": "fresh",
+            }
+        ]
+    )
+    connections = iter([latest_connection, fallback_connection])
+
+    rows = query_nearby_realtime_coverage_rows(
+        database_url="postgresql://example",
+        lat=23.01929,
+        lng=120.18726,
+        observed_since=observed_since,
+        connection_factory=lambda: next(connections),
+    )
+
+    assert len(rows) == 1
+    assert rows[0].adapter_key == "official.cwa.rainfall"
+    assert rows[0].event_type == "rainfall"
+    assert rows[0].station_id == "C0A520"
+    assert rows[0].distance_to_query_m == 1219.4
+    latest_sql, _latest_params = next(
+        item
+        for item in latest_connection.cursor_instance.executions
+        if "official_realtime_latest" in item[0]
+    )
+    fallback_sql, fallback_params = next(
+        item
+        for item in fallback_connection.cursor_instance.executions
+        if "FROM evidence e" in item[0]
+    )
+    assert "FROM official_realtime_latest latest" in latest_sql
+    assert "FROM evidence e" in fallback_sql
+    assert "JOIN data_sources ds" in fallback_sql
+    assert "e.source_type = 'official'" in fallback_sql
+    assert "e.event_type IN" in fallback_sql
+    assert observed_since in fallback_params
+
+
 def test_query_nearby_realtime_coverage_rows_falls_back_when_table_missing() -> None:
     connection = _FakeConnection(
         rows=[],
