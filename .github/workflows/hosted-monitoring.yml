@@ -37,10 +37,10 @@ jobs:
       FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS: ${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -153,7 +153,11 @@ jobs:
       - name: Skip admin freshness smoke without token
         if: ${{ env.ADMIN_BEARER_TOKEN == '' && env.REQUIRE_ADMIN_SOURCE_FRESHNESS != 'true' }}
         run: |
-          echo "::notice title=Hosted source freshness skipped::ADMIN_BEARER_TOKEN is not configured, so /admin/v1/sources freshness evidence was not collected."
+          {
+            echo "### Hosted private evidence skipped"
+            echo "- \`ADMIN_BEARER_TOKEN\` is not configured, so /admin/v1/sources freshness evidence was not collected."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Hosted source freshness skipped because ADMIN_BEARER_TOKEN is not configured."
 
       - name: Hosted worker private evidence
         if: ${{ env.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 != '' }}
@@ -169,7 +173,11 @@ jobs:
       - name: Skip hosted worker private evidence without manifest
         if: ${{ env.HOSTED_WORKER_EVIDENCE_MANIFEST_B64 == '' }}
         run: |
-          echo "::notice title=Hosted worker private evidence skipped::HOSTED_WORKER_EVIDENCE_MANIFEST_B64 is not configured, so hosted_worker_persisted_evidence was not collected."
+          {
+            echo "### Hosted private evidence skipped"
+            echo "- \`HOSTED_WORKER_EVIDENCE_MANIFEST_B64\` is not configured, so hosted_worker_persisted_evidence was not collected."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Hosted worker private evidence skipped because HOSTED_WORKER_EVIDENCE_MANIFEST_B64 is not configured."
 
       - name: Hosted worker policy private evidence
         if: ${{ env.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 != '' }}
@@ -185,7 +193,11 @@ jobs:
       - name: Skip hosted worker policy private evidence without manifest
         if: ${{ env.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 == '' }}
         run: |
-          echo "::notice title=Hosted worker policy private evidence skipped::HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 is not configured, so raw snapshot retention, scheduler cadence, and hosted egress policy evidence were not collected."
+          {
+            echo "### Hosted private evidence skipped"
+            echo "- \`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64\` is not configured, so raw snapshot retention, scheduler cadence, and hosted egress policy evidence were not collected."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Hosted worker policy private evidence skipped because HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 is not configured."
 
       - name: Hosted monitoring private evidence
         if: ${{ env.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 != '' }}
@@ -201,7 +213,11 @@ jobs:
       - name: Skip hosted monitoring private evidence without manifest
         if: ${{ env.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 == '' }}
         run: |
-          echo "::notice title=Hosted monitoring private evidence skipped::HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 is not configured, so production_monitoring_and_alerting evidence was not collected."
+          {
+            echo "### Hosted private evidence skipped"
+            echo "- \`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64\` is not configured, so production_monitoring_and_alerting evidence was not collected."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Hosted monitoring private evidence skipped because HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 is not configured."
 
       - name: Local source request dispatch follow-ups
         if: ${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 != '' }}
@@ -223,7 +239,11 @@ jobs:
       - name: Skip local source request dispatch follow-ups without manifest
         if: ${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 == '' }}
         run: |
-          echo "::notice title=Local source request dispatch follow-ups skipped::LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 is not configured, so official request dispatch follow-up evidence was not collected."
+          {
+            echo "### Hosted private evidence skipped"
+            echo "- \`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64\` is not configured, so official request dispatch follow-up evidence was not collected."
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "Local source request dispatch follow-ups skipped because LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 is not configured."
 
       - name: Hosted monitoring schedule evidence
         run: |
@@ -256,7 +276,7 @@ jobs:
 
       - name: Upload hosted monitoring artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: hosted-monitoring-${{ github.run_id }}
           path: |
@@ -266,7 +286,7 @@ jobs:
 
       - name: Route hosted monitoring failure issue
         if: ${{ failure() }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require("fs");
@@ -343,7 +363,7 @@ jobs:
 
       - name: Close resolved hosted monitoring failure issue
         if: ${{ success() }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const marker = "[hosted-monitoring-alert]";
