@@ -159,6 +159,44 @@ def test_check_risk_payload_requires_nearby_coverage_and_worker_evidence() -> No
     ) in failures
 
 
+def test_check_risk_payload_accepts_zero_radius_counts_without_nearest_sensor() -> None:
+    payload = _risk_payload()
+    coverage = payload["nearby_realtime_coverage"]
+    coverage["overall_level"] = "no_local_sensor"
+    for signal in coverage["signal_breakdown"]:
+        signal["coverage_level"] = "no_local_sensor"
+        signal["nearest_source_id"] = None
+        signal["nearest_distance_m"] = None
+        signal["nearest_observed_at"] = None
+        signal["counts_by_radius_m"] = {"500": 0, "1000": 0, "3000": 0, "5000": 0}
+        signal["fresh_count"] = 0
+        signal["missing_reason"] = "no nearby fixture"
+
+    failures = smoke.check_risk_payload(payload, radius_m=500)
+
+    assert (
+        "nearby_realtime_coverage did not include nearest sensor context or radius counts"
+        not in failures
+    )
+    assert failures == []
+
+
+def test_check_risk_payload_requires_counts_when_nearest_sensor_missing() -> None:
+    payload = _risk_payload()
+    coverage = payload["nearby_realtime_coverage"]
+    for signal in coverage["signal_breakdown"]:
+        signal["nearest_source_id"] = None
+        signal["nearest_distance_m"] = None
+        signal.pop("counts_by_radius_m", None)
+
+    failures = smoke.check_risk_payload(payload, radius_m=500)
+
+    assert (
+        "nearby_realtime_coverage did not include nearest sensor context or radius counts"
+        in failures
+    )
+
+
 def _risk_payload() -> dict:
     return {
         "assessment_id": "risk-1",

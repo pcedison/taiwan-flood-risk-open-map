@@ -349,7 +349,7 @@ def _signal_has_query_point_context(signal: Mapping[str, Any]) -> bool:
     counts = signal.get("counts_by_radius_m")
     if not isinstance(counts, Mapping):
         return False
-    return any(isinstance(value, int) and value > 0 for value in counts.values())
+    return bool(counts) and all(type(value) is int and value >= 0 for value in counts.values())
 
 
 def _nested_get(value: Mapping[str, Any], key: str, nested_key: str) -> Any:
