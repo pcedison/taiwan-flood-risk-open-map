@@ -18,9 +18,12 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     triggers = workflow["on"]
     assert triggers["schedule"][0]["cron"] == "7 16 * * *"
     assert triggers["workflow_dispatch"]["inputs"]["fail_on_dispatch_required"] == {
-        "description": "Fail and route an issue when local-source request dispatch is still required.",
+        "description": (
+            "Fail and route an issue when local-source request dispatch is still required. "
+            "Scheduled runs report only."
+        ),
         "required": "false",
-        "default": "true",
+        "default": "false",
         "type": "boolean",
     }
 
@@ -30,7 +33,7 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
         "issues": "write",
     }
     assert job["env"]["FAIL_ON_DISPATCH_REQUIRED"] == (
-        "${{ github.event.inputs.fail_on_dispatch_required || 'true' }}"
+        "${{ github.event.inputs.fail_on_dispatch_required || 'false' }}"
     )
 
     steps = job["steps"]

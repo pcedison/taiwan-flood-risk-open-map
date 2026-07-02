@@ -18,9 +18,12 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
     triggers = workflow["on"]
     assert triggers["schedule"][0]["cron"] == "23 16 * * *"
     assert triggers["workflow_dispatch"]["inputs"]["fail_on_completion_blockers"] == {
-        "description": "Fail and route an issue when required secret routes still block completion gates.",
+        "description": (
+            "Fail and route an issue when required secret routes still block completion gates. "
+            "Scheduled runs report only."
+        ),
         "required": "false",
-        "default": "true",
+        "default": "false",
         "type": "boolean",
     }
 
@@ -30,7 +33,7 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
         "issues": "write",
     }
     assert job["env"]["FAIL_ON_COMPLETION_BLOCKERS"] == (
-        "${{ github.event.inputs.fail_on_completion_blockers || 'true' }}"
+        "${{ github.event.inputs.fail_on_completion_blockers || 'false' }}"
     )
     assert job["env"]["ADMIN_BEARER_TOKEN_CONFIGURED"] == (
         "${{ secrets.ADMIN_BEARER_TOKEN != '' }}"
