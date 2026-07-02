@@ -293,6 +293,9 @@ def test_query_nearby_realtime_coverage_rows_falls_back_to_official_evidence_whe
     assert "JOIN data_sources ds" in fallback_sql
     assert "e.source_type = 'official'" in fallback_sql
     assert "e.event_type IN" in fallback_sql
+    assert "'rainfall'" in fallback_sql
+    assert "'water_level'" in fallback_sql
+    assert "'flood_sensor'" not in fallback_sql
     assert observed_since in fallback_params
 
 
