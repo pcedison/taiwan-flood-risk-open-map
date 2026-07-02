@@ -20,6 +20,17 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
 
     workflow_dispatch_inputs = triggers["workflow_dispatch"]["inputs"]
     assert workflow_dispatch_inputs["expected_head_sha"]["required"] == "false"
+    assert workflow_dispatch_inputs["expected_head_sha"]["description"] == (
+        "Expected Hosted Monitoring schedule run SHA. Defaults to this workflow SHA."
+    )
+    assert workflow_dispatch_inputs["expected_deployment_sha"] == {
+        "description": (
+            "Expected fallback Hosted Monitoring deployment SHA. Defaults to "
+            "production-release branch HEAD."
+        ),
+        "required": "false",
+        "type": "string",
+    }
     assert workflow_dispatch_inputs["max_age_minutes"] == {
         "description": "Maximum accepted age for the latest Hosted Monitoring schedule run.",
         "required": "false",
@@ -27,9 +38,12 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         "type": "number",
     }
     assert workflow_dispatch_inputs["fail_on_not_ready"] == {
-        "description": "Fail the watchdog run and route an issue when schedule readiness is not accepted.",
+        "description": (
+            "Fail the watchdog run when schedule readiness is not accepted. "
+            "Scheduled runs report and dispatch fallback by default."
+        ),
         "required": "false",
-        "default": "true",
+        "default": "false",
         "type": "boolean",
     }
     assert workflow_dispatch_inputs["dispatch_hosted_monitoring_on_failure"] == {
@@ -53,7 +67,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         "${{ github.event.inputs.max_age_minutes || '90' }}"
     )
     assert job["env"]["FAIL_ON_NOT_READY"] == (
-        "${{ github.event.inputs.fail_on_not_ready || 'true' }}"
+        "${{ github.event.inputs.fail_on_not_ready || 'false' }}"
     )
     assert job["env"]["DISPATCH_HOSTED_MONITORING_ON_FAILURE"] == (
         "${{ github.event.inputs.dispatch_hosted_monitoring_on_failure || 'true' }}"
@@ -63,10 +77,15 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     step_text = "\n".join(str(step) for step in steps)
     assert "actions/checkout@v4" in step_text
     assert "actions/setup-python@v5" in step_text
+    assert "Resolve fallback deployment SHA" in step_text
+    assert "git ls-remote --heads origin production-release" in step_text
+    assert "workflow_commit_sha" in step_text
     assert "scripts/hosted-monitoring-schedule-readiness.py" in step_text
     assert "--expected-head-sha \"${EXPECTED_HEAD_SHA}\"" in step_text
     assert "--max-age-minutes \"${MAX_AGE_MINUTES}\"" in step_text
     assert "--fail-on-not-ready" in step_text
+    assert "Read schedule readiness status" in step_text
+    assert "steps.readiness-status.outputs.status != 'passed'" in step_text
     assert "--output artifacts/hosted-monitoring-schedule-readiness.json" in step_text
     assert "--markdown-output artifacts/hosted-monitoring-schedule-readiness.md" in step_text
     assert (
@@ -77,7 +96,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert "hosted-monitoring-schedule-fallback-dispatch.json" in step_text
     assert "createWorkflowDispatch" in step_text
     assert "hosted-monitoring.yml" in step_text
-    assert "expected_deployment_sha: expectedHeadSha" in step_text
+    assert "expected_deployment_sha: expectedDeploymentSha" in step_text
     assert "actions/upload-artifact@v4" in step_text
 
     fallback_step = next(
@@ -86,7 +105,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         if step.get("name") == "Dispatch fallback Hosted Monitoring"
     )
     assert fallback_step["if"] == (
-        "${{ failure() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' }}"
+        "${{ always() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' && steps.readiness-status.outputs.status != 'passed' }}"
     )
     assert fallback_step["uses"] == "actions/github-script@v7"
 
@@ -95,7 +114,9 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         for step in steps
         if step.get("name") == "Route schedule watchdog failure issue"
     )
-    assert alert_routing_step["if"] == "${{ failure() }}"
+    assert alert_routing_step["if"] == (
+        "${{ always() && steps.readiness-status.outputs.status != 'passed' }}"
+    )
     assert alert_routing_step["uses"] == "actions/github-script@v7"
     alert_script = alert_routing_step["with"]["script"]
     assert 'const fs = require("fs");' in alert_script

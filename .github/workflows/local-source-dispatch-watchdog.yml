@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       fail_on_dispatch_required:
-        description: "Fail and route an issue when local-source request dispatch is still required."
+        description: "Fail and route an issue when local-source request dispatch is still required. Scheduled runs report only."
         required: false
-        default: true
+        default: false
         type: boolean
   schedule:
     - cron: "7 16 * * *"
@@ -19,7 +19,7 @@ jobs:
       contents: read
       issues: write
     env:
-      FAIL_ON_DISPATCH_REQUIRED: ${{ github.event.inputs.fail_on_dispatch_required || 'true' }}
+      FAIL_ON_DISPATCH_REQUIRED: ${{ github.event.inputs.fail_on_dispatch_required || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
