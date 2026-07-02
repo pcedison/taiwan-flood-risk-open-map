@@ -60,7 +60,7 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
     assert "--fail-on-completion-blockers" in step_text
     assert "--output artifacts/github-actions-secret-readiness.json" in step_text
     assert "--markdown-output artifacts/github-actions-secret-readiness.md" in step_text
-    assert "actions/upload-artifact@v4" in step_text
+    assert "actions/upload-artifact@v6" in step_text
 
     issue_step = next(
         step
@@ -68,7 +68,7 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
         if step.get("name") == "Route secret readiness watchdog issue"
     )
     assert issue_step["if"] == "${{ failure() }}"
-    assert issue_step["uses"] == "actions/github-script@v7"
+    assert issue_step["uses"] == "actions/github-script@v8"
     script = issue_step["with"]["script"]
     assert "secret-readiness-watchdog" in script
     assert "GitHub Actions required secrets missing" in script
@@ -91,7 +91,7 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
         if step.get("name") == "Close resolved secret readiness issue"
     )
     assert resolve_step["if"] == "${{ success() }}"
-    assert resolve_step["uses"] == "actions/github-script@v7"
+    assert resolve_step["uses"] == "actions/github-script@v8"
     resolve_script = resolve_step["with"]["script"]
     assert 'const fs = require("fs");' in resolve_script
     assert "artifacts/github-actions-secret-readiness.json" in resolve_script

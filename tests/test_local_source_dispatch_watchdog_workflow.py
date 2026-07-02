@@ -38,8 +38,8 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
 
     steps = job["steps"]
     step_text = "\n".join(str(step) for step in steps)
-    assert "actions/checkout@v4" in step_text
-    assert "actions/setup-python@v5" in step_text
+    assert "actions/checkout@v5" in step_text
+    assert "actions/setup-python@v6" in step_text
     assert "scripts/local-source-signal-gap-discovery-refresh.py" in step_text
     assert "--allow-fetch-failure" in step_text
     assert "scripts/local-source-signal-gap-dispatch-readiness.py" in step_text
@@ -54,7 +54,7 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     )
     assert "--output artifacts/local-source-dispatch-watchdog.json" in step_text
     assert "--markdown-output artifacts/local-source-dispatch-watchdog.md" in step_text
-    assert "actions/upload-artifact@v4" in step_text
+    assert "actions/upload-artifact@v6" in step_text
 
     issue_step = next(
         step
@@ -62,7 +62,7 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
         if step.get("name") == "Route local source dispatch watchdog issue"
     )
     assert issue_step["if"] == "${{ failure() }}"
-    assert issue_step["uses"] == "actions/github-script@v7"
+    assert issue_step["uses"] == "actions/github-script@v8"
     script = issue_step["with"]["script"]
     assert "local-source-dispatch-watchdog" in script
     assert "Local source dispatch required" in script
@@ -85,7 +85,7 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
         if step.get("name") == "Close resolved local source dispatch issue"
     )
     assert resolve_step["if"] == "${{ success() }}"
-    assert resolve_step["uses"] == "actions/github-script@v7"
+    assert resolve_step["uses"] == "actions/github-script@v8"
     resolve_script = resolve_step["with"]["script"]
     assert 'const fs = require("fs");' in resolve_script
     assert "artifacts/local-source-dispatch-watchdog.json" in resolve_script
