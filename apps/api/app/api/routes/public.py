@@ -246,6 +246,7 @@ def _nearby_realtime_coverage(
             lat=request.point.lat,
             lng=request.point.lng,
             observed_since=now - REALTIME_OFFICIAL_LOOKBACK,
+            statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
     except EvidenceRepositoryUnavailable:
         return _unavailable_nearby_realtime_coverage(request, now=now)

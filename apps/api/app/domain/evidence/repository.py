@@ -706,16 +706,7 @@ def _query_nearby_evidence_coverage_rows(
                 AND e.geom IS NOT NULL
                 AND e.event_type IN (
                     'rainfall',
-                    'water_level',
-                    'flood_report',
-                    'flood_warning',
-                    'flood_sensor',
-                    'river_water_level',
-                    'pond_water_level',
-                    'sewer_water_level',
-                    'pump_water_level',
-                    'gate_water_level',
-                    'status_only'
+                    'water_level'
                 )
                 {observed_filter}
                 AND e.geom && ST_Expand(qp.geom, qp.degree_radius)

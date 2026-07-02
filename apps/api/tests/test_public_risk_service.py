@@ -355,6 +355,7 @@ def test_nearby_realtime_coverage_queries_rows_with_official_lookback(
     assert captured["lat"] == request.point.lat
     assert captured["lng"] == request.point.lng
     assert captured["observed_since"] == now - public_routes.REALTIME_OFFICIAL_LOOKBACK
+    assert captured["statement_timeout_ms"] == public_routes.EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS
     assert coverage.query_radius_m == 500
     assert coverage.overall_level == "low"
 
