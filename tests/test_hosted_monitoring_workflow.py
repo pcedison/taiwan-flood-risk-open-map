@@ -80,7 +80,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/local-source-request-followups.py" in step_text
     assert "scripts/local-source-completion-audit.py" in step_text
     assert "--markdown-output artifacts/hosted-completion-audit.md" in step_text
-    assert "actions/upload-artifact@v4" in step_text
+    assert "actions/upload-artifact@v6" in step_text
 
     required_admin_step = next(
         step for step in steps if step.get("name") == "Require admin source freshness token"
@@ -130,7 +130,6 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert missing_token_step["if"] == (
         "${{ env.ADMIN_BEARER_TOKEN == '' && env.REQUIRE_ADMIN_SOURCE_FRESHNESS != 'true' }}"
     )
-    assert "::notice" in missing_token_step["run"]
 
     worker_evidence_step = next(
         step for step in steps if step.get("name") == "Hosted worker private evidence"
@@ -164,7 +163,6 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert missing_worker_policy_step["if"] == (
         "${{ env.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 == '' }}"
     )
-    assert "::notice" in missing_worker_policy_step["run"]
 
     monitoring_evidence_step = next(
         step for step in steps if step.get("name") == "Hosted monitoring private evidence"
@@ -201,7 +199,18 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert missing_dispatch_step["if"] == (
         "${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 == '' }}"
     )
-    assert "::notice" in missing_dispatch_step["run"]
+
+    optional_skip_step_names = [
+        "Skip admin freshness smoke without token",
+        "Skip hosted worker private evidence without manifest",
+        "Skip hosted worker policy private evidence without manifest",
+        "Skip hosted monitoring private evidence without manifest",
+        "Skip local source request dispatch follow-ups without manifest",
+    ]
+    for step_name in optional_skip_step_names:
+        step = next(step for step in steps if step.get("name") == step_name)
+        assert "::notice" not in step["run"]
+        assert "GITHUB_STEP_SUMMARY" in step["run"]
 
     signal_gap_discovery_step = next(
         step for step in steps if step.get("name") == "Local source signal-gap discovery refresh"
@@ -318,7 +327,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         if step.get("name") == "Route hosted monitoring failure issue"
     )
     assert alert_routing_step["if"] == "${{ failure() }}"
-    assert alert_routing_step["uses"] == "actions/github-script@v7"
+    assert alert_routing_step["uses"] == "actions/github-script@v8"
     assert "hosted-monitoring-alert" in alert_routing_step["with"]["script"]
     assert "Hosted Monitoring failure" in alert_routing_step["with"]["script"]
     assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
@@ -335,7 +344,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         if step.get("name") == "Close resolved hosted monitoring failure issue"
     )
     assert resolve_step["if"] == "${{ success() }}"
-    assert resolve_step["uses"] == "actions/github-script@v7"
+    assert resolve_step["uses"] == "actions/github-script@v8"
     resolve_script = resolve_step["with"]["script"]
     assert "hosted-monitoring-alert" in resolve_script
     assert "Hosted Monitoring failure" in resolve_script

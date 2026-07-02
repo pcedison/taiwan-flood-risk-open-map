@@ -22,10 +22,10 @@ jobs:
       FAIL_ON_DISPATCH_REQUIRED: ${{ github.event.inputs.fail_on_dispatch_required || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -80,7 +80,7 @@ jobs:
 
       - name: Upload local source dispatch artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: local-source-dispatch-watchdog-${{ github.run_id }}
           path: |
@@ -90,7 +90,7 @@ jobs:
 
       - name: Route local source dispatch watchdog issue
         if: ${{ failure() }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require("fs");
@@ -182,7 +182,7 @@ jobs:
 
       - name: Close resolved local source dispatch issue
         if: ${{ success() }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require("fs");
