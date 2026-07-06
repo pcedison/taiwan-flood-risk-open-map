@@ -37,6 +37,12 @@ from app.pipelines.validation import validate_evidence_for_promotion
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+# Shared with the API bridge (apps/api/app/domain/realtime/official.py) so both
+# parallel CWA/WRA parsers are exercised against the same raw upstream sample.
+# See tests/test_official_dual_parse_contract.py and ADR-0010.
+SHARED_UPSTREAM_FIXTURES_DIR = (
+    Path(__file__).resolve().parents[3] / "packages" / "contracts" / "fixtures" / "upstream"
+)
 FETCHED_AT = datetime(2026, 4, 28, 8, 10, tzinfo=timezone.utc)
 
 
@@ -68,7 +74,7 @@ def test_cwa_rainfall_api_adapter_fetches_and_normalizes_official_payload() -> N
     def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
         captured["url"] = url
         captured["timeout_seconds"] = timeout_seconds
-        return _load_mapping("cwa_rainfall_api_sample.json")
+        return _load_shared_mapping("cwa-rainfall.json")
 
     adapter = CwaRainfallApiAdapter(
         authorization="test-token",
@@ -531,4 +537,11 @@ def _load_mapping(name: str) -> dict[str, Any]:
     return cast(
         dict[str, Any],
         json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8")),
+    )
+
+
+def _load_shared_mapping(name: str) -> dict[str, Any]:
+    return cast(
+        dict[str, Any],
+        json.loads((SHARED_UPSTREAM_FIXTURES_DIR / name).read_text(encoding="utf-8")),
     )
