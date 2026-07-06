@@ -975,13 +975,16 @@ export function getProfileBasisText(input: {
   const reasons = input?.explanation?.main_reasons ?? [];
   const evidenceCount = input?.evidence?.length ?? 0;
   const evidenceReason =
-    reasons.find((reason) => reason.includes("歷史參考來自 profile")) ??
-    reasons.find((reason) => reason.includes("profile 彙整")) ??
+    reasons.find((reason) => reason.includes("歷史參考來自")) ??
+    reasons.find((reason) => reason.includes("彙整")) ??
     null;
+  // Backend-authored reasons may still spell out the internal "profile" term;
+  // swap it for the same plain-language phrasing used elsewhere on this page.
+  const plainEvidenceReason = evidenceReason?.replace(/\s*profile\s*/gi, "區域概略估計") ?? null;
 
   return {
     historicalNote:
-      evidenceReason ??
+      plainEvidenceReason ??
       (evidenceCount > 0
         ? `這次區域概略估計已提供 ${evidenceCount} 筆摘要證據。`
         : "這次區域概略估計還沒有逐筆列出的摘要證據。"),

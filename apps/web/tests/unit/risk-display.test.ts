@@ -264,6 +264,7 @@ test("profile basis text explains historical and confidence cards", () => {
   });
 
   assert.match(state.historicalNote ?? "", /3 筆公開資料/);
+  assert.doesNotMatch((state.historicalNote ?? "").toLowerCase(), /profile/);
   assert.match(state.confidenceNote ?? "", /來源類型/);
   assert.match(state.limitationLead ?? "", /不是系統錯誤/);
 
