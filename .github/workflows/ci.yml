@@ -20,11 +20,22 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Require backend dependency lockfiles
+        run: |
+          set -euo pipefail
+          for lock in apps/api/requirements.lock apps/api/requirements-dev.lock apps/workers/requirements.lock apps/workers/requirements-dev.lock; do
+            if [ ! -s "$lock" ]; then
+              echo "::error title=Missing backend lockfile::$lock is missing or empty. Regenerate with the uv command in the lockfile header. CI must not pass with unresolved dependency versions."
+              exit 1
+            fi
+          done
+
       - name: Install backend dev dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e "apps/api[dev]"
-          python -m pip install -e "apps/workers[dev]"
+          python -m pip install -r apps/api/requirements-dev.lock -r apps/workers/requirements-dev.lock
+          python -m pip install -e apps/api --no-deps
+          python -m pip install -e apps/workers --no-deps
 
       - name: Compile Python skeletons
         run: python -m compileall apps/api apps/workers
@@ -89,7 +100,8 @@ jobs:
       - name: Install E2E API dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e "apps/api[dev]"
+          python -m pip install -r apps/api/requirements-dev.lock
+          python -m pip install -e apps/api --no-deps
 
       - name: Frontend lint
         run: npm run lint --prefix apps/web
