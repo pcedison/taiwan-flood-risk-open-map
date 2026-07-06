@@ -16,7 +16,7 @@ from app.api.schemas import (
     RiskAssessmentResponse,
     RiskLevelBlock,
 )
-from app.api.services import public_evidence
+from app.api.services import public_evidence, public_freshness
 from app.core.config import Settings
 from app.domain.evidence.repository import NearbyCoverageRow
 from app.domain.geocoding import stable_uuid
@@ -27,9 +27,8 @@ from app.domain.realtime.nearby_coverage import build_nearby_realtime_coverage
 from app.domain.realtime import (
     OfficialRealtimeBundle,
     OfficialRealtimeObservation,
-    OfficialRealtimeSourceStatus,
 )
-from app.domain.risk import RiskEvidenceSignal, RiskScoringResult
+from app.domain.risk import RiskScoringResult, score_risk
 
 HistoricalRecordsWithDistance = tuple[tuple[HistoricalFloodRecord, float], ...]
 
@@ -113,17 +112,6 @@ class OnDemandPublicNewsLookup(Protocol):
     ) -> OnDemandNewsSearchResult: ...
 
 
-class HistoricalScoringDistance(Protocol):
-    def __call__(
-        self,
-        *,
-        record: HistoricalFloodRecord,
-        distance_to_query_m: float,
-        radius_m: int,
-        location_text: str | None,
-    ) -> float: ...
-
-
 class PersistOrBuildOnDemandEvidence(Protocol):
     def __call__(
         self, result: OnDemandNewsSearchResult, /, *, writeback_enabled: bool
@@ -138,12 +126,6 @@ class HistoricalDataFreshness(Protocol):
         db_evidence_items: tuple[Evidence, ...] | None,
         now: datetime,
     ) -> DataFreshness: ...
-
-
-class ScoreRisk(Protocol):
-    def __call__(
-        self, signals: tuple[RiskEvidenceSignal, ...], /, *, now: datetime
-    ) -> RiskScoringResult: ...
 
 
 class PersistedOfficialRealtimeDataFreshness(Protocol):
@@ -225,14 +207,11 @@ class RiskAssessmentDependencies:
     cache_risk_assessment_response: CacheRiskAssessmentResponse
     fallback_historical_records: Callable[[RiskAssessRequest], HistoricalRecordsWithDistance]
     use_local_historical_fallback: Callable[[str], bool]
-    should_attempt_public_news_lookup: HistoricalLookupGate
     on_demand_public_news_result: OnDemandPublicNewsLookup
-    historical_scoring_distance: HistoricalScoringDistance
     needs_historical_event_lookup: HistoricalLookupGate
     persist_or_build_on_demand_evidence: PersistOrBuildOnDemandEvidence
     historical_data_freshness: HistoricalDataFreshness
     display_evidence_items: Callable[[list[Evidence]], list[Evidence]]
-    score_risk: ScoreRisk
     cache_assessment_evidence: Callable[[str, list[Evidence]], None]
     persisted_official_realtime_data_freshness: PersistedOfficialRealtimeDataFreshness
     visible_source_limitations: Callable[
@@ -244,7 +223,6 @@ class RiskAssessmentDependencies:
         ],
         list[str],
     ]
-    freshness_from_status: Callable[[OfficialRealtimeSourceStatus], DataFreshness]
     official_flood_disaster_data_freshness: Callable[
         [OfficialFloodDisasterLookup], list[DataFreshness]
     ]
@@ -333,7 +311,7 @@ def assess_risk(
             else ()
         )
         historical_records = (*official_historical_records, *curated_historical_records)
-        if dependencies.should_attempt_public_news_lookup(
+        if public_freshness.should_attempt_public_news_lookup(
             historical_records=historical_records,
             db_evidence_items=None,
         ):
@@ -352,12 +330,7 @@ def assess_risk(
             *tuple(
                 public_evidence.signal_from_historical_record(
                     record,
-                    distance_to_query_m=dependencies.historical_scoring_distance(
-                        record=record,
-                        distance_to_query_m=distance_m,
-                        radius_m=risk_request.radius_m,
-                        location_text=risk_request.location_text,
-                    ),
+                    distance_to_query_m=distance_m,
                 )
                 for record, distance_m in historical_records
             ),
@@ -387,7 +360,7 @@ def assess_risk(
             else ()
         )
         if historical_records:
-            if dependencies.should_attempt_public_news_lookup(
+            if public_freshness.should_attempt_public_news_lookup(
                 historical_records=historical_records,
                 db_evidence_items=db_evidence_items,
             ):
@@ -413,12 +386,7 @@ def assess_risk(
                 *tuple(
                     public_evidence.signal_from_historical_record(
                         record,
-                        distance_to_query_m=dependencies.historical_scoring_distance(
-                            record=record,
-                            distance_to_query_m=distance_m,
-                            radius_m=risk_request.radius_m,
-                            location_text=risk_request.location_text,
-                        ),
+                        distance_to_query_m=distance_m,
                     )
                     for record, distance_m in historical_records
                 ),
@@ -458,7 +426,7 @@ def assess_risk(
         *historical_evidence_items,
     ]
     display_evidence_items = dependencies.display_evidence_items(evidence_items)
-    scoring = dependencies.score_risk(
+    scoring = score_risk(
         (
             *(
                 public_evidence.signal_from_official_realtime(observation)
@@ -486,7 +454,7 @@ def assess_risk(
     )
     realtime_data_freshness = _merge_realtime_data_freshness(
         [
-            dependencies.freshness_from_status(status)
+            public_freshness.freshness_from_status(status)
             for status in realtime_bundle.source_statuses
         ],
         persisted_realtime_freshness,

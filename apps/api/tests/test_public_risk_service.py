@@ -21,7 +21,6 @@ from app.api.routes import public as public_routes
 from app.api.services import public_risk
 from app.domain.evidence.repository import EvidenceRecord, NearbyCoverageRow
 from app.domain.realtime import OfficialRealtimeBundle, OfficialRealtimeObservation
-from app.domain.risk import score_risk
 
 
 def _risk_request() -> RiskAssessRequest:
@@ -160,18 +159,14 @@ def _dependencies(**overrides: Any) -> public_risk.RiskAssessmentDependencies:
         "cache_risk_assessment_response": fail,
         "fallback_historical_records": fail,
         "use_local_historical_fallback": fail,
-        "should_attempt_public_news_lookup": fail,
         "on_demand_public_news_result": fail,
-        "historical_scoring_distance": fail,
         "needs_historical_event_lookup": fail,
         "persist_or_build_on_demand_evidence": fail,
         "historical_data_freshness": fail,
         "display_evidence_items": fail,
-        "score_risk": fail,
         "cache_assessment_evidence": fail,
         "persisted_official_realtime_data_freshness": fail,
         "visible_source_limitations": fail,
-        "freshness_from_status": fail,
         "official_flood_disaster_data_freshness": fail,
         "on_demand_data_freshness": fail,
         "persist_assessment": fail,
@@ -259,7 +254,6 @@ def test_assess_risk_includes_nearby_realtime_coverage() -> None:
                 ingested_at=created_at,
             ),
             display_evidence_items=lambda items: items,
-            score_risk=score_risk,
             cache_assessment_evidence=lambda *_args, **_kwargs: None,
             persisted_official_realtime_data_freshness=lambda *_args, **_kwargs: [],
             visible_source_limitations=lambda *_args, **_kwargs: [],
@@ -312,11 +306,9 @@ def test_assess_risk_uses_realtime_bridge_for_nearby_coverage_when_repository_un
                 ingested_at=created_at,
             ),
             display_evidence_items=lambda items: items,
-            score_risk=score_risk,
             cache_assessment_evidence=lambda *_args, **_kwargs: None,
             persisted_official_realtime_data_freshness=lambda *_args, **_kwargs: [],
             visible_source_limitations=lambda *_args, **_kwargs: [],
-            freshness_from_status=public_routes._freshness_from_status,
             official_flood_disaster_data_freshness=lambda _lookup: [],
             on_demand_data_freshness=lambda *_args, **_kwargs: [],
             persist_assessment=lambda **kwargs: persisted.update(kwargs),
