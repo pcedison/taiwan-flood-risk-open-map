@@ -5,6 +5,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = REPO_ROOT / "Dockerfile"
+# The startup contract lives in the checked-in entrypoint (extracted from the
+# old Dockerfile printf heredoc so it is testable and shell-lintable).
+ENTRYPOINT = REPO_ROOT / "infra" / "docker" / "entrypoint.sh"
 ZEABUR_ENV_RUNBOOK = REPO_ROOT / "docs" / "runbooks" / "zeabur-single-service-env.md"
 
 EXPECTED_BACKBONE_ADAPTERS = (
@@ -21,14 +24,14 @@ EXPECTED_BACKBONE_ADAPTERS = (
 
 
 def test_zeabur_single_service_scheduler_defaults_to_realtime_backbone() -> None:
-    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
 
     for adapter_key in EXPECTED_BACKBONE_ADAPTERS:
-        assert adapter_key in dockerfile
+        assert adapter_key in entrypoint
 
 
 def test_zeabur_single_service_autostarts_backbone_when_database_is_attached() -> None:
-    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    dockerfile = ENTRYPOINT.read_text(encoding="utf-8")
 
     assert 'SINGLE_SERVICE_INGESTION_SCHEDULER_ENABLED:-auto' in dockerfile
     assert 'worker_database_url="${WORKER_DATABASE_URL:-${DATABASE_URL:-}}"' in dockerfile
@@ -40,22 +43,24 @@ def test_zeabur_single_service_autostarts_backbone_when_database_is_attached() -
 
 def test_zeabur_single_service_applies_migrations_before_startup() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
 
     assert "COPY infra/migrations /app/infra/migrations" in dockerfile
     assert "COPY infra/scripts/apply_migrations.py /app/infra/scripts/apply_migrations.py" in dockerfile
-    assert 'RUN_DATABASE_MIGRATIONS_ON_START:-true' in dockerfile
-    assert 'python /app/infra/scripts/apply_migrations.py --database-url "${worker_database_url}"' in dockerfile
+    assert "COPY infra/docker/entrypoint.sh /app/entrypoint.sh" in dockerfile
+    assert 'RUN_DATABASE_MIGRATIONS_ON_START:-true' in entrypoint
+    assert 'python /app/infra/scripts/apply_migrations.py --database-url "${worker_database_url}"' in entrypoint
 
 
 def test_zeabur_single_service_runs_initial_ingestion_before_scheduler_loop() -> None:
-    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    dockerfile = ENTRYPOINT.read_text(encoding="utf-8")
 
     assert 'python -m app.main --run-enabled-adapters --persist || echo "[start] initial official ingestion tick failed; scheduler will retry"' in dockerfile
     assert "python -m app.main --run-enabled-adapters --persist --scheduler &" in dockerfile
 
 
 def test_zeabur_single_service_sets_backbone_source_gates() -> None:
-    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    dockerfile = ENTRYPOINT.read_text(encoding="utf-8")
     expected_exports = (
         'export SOURCE_CWA_ENABLED="${SOURCE_CWA_ENABLED:-true}"',
         'export SOURCE_WRA_ENABLED="${SOURCE_WRA_ENABLED:-true}"',
@@ -85,3 +90,18 @@ def test_zeabur_single_service_runbook_lists_realtime_backbone() -> None:
 
     for adapter_key in EXPECTED_BACKBONE_ADAPTERS:
         assert adapter_key in runbook
+
+
+def test_image_runs_as_non_root_with_role_dispatch() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
+
+    assert "USER app" in dockerfile
+    assert 'CMD ["/app/entrypoint.sh"]' in dockerfile
+    for role_case in ("api)", "web)", "scheduler)", "all)"):
+        assert role_case in entrypoint
+    assert 'role="${SERVICE_ROLE:-all}"' in entrypoint
+    # Single-role paths must exec so signals reach the real process.
+    assert "exec python -m uvicorn app.main:app" in entrypoint
+    assert "exec node node_modules/next/dist/bin/next start" in entrypoint
+    assert "exec python -m app.main --run-enabled-adapters --persist --scheduler" in entrypoint
