@@ -7,6 +7,7 @@ import pytest
 from app.config import load_worker_settings
 from app.jobs.evidence_retention import (
     DEFAULT_EVIDENCE_REALTIME_RETENTION_HOURS,
+    DEFAULT_LOCATION_QUERY_RETENTION_HOURS,
     EvidenceRetentionUnavailable,
     PostgresEvidenceRetentionJob,
 )
@@ -93,6 +94,53 @@ def test_prune_realtime_wraps_database_errors() -> None:
 
     with pytest.raises(EvidenceRetentionUnavailable):
         job.prune_realtime(retention_hours=48)
+
+
+def test_prune_location_queries_deletes_rows_past_cutoff() -> None:
+    connection = _FakeConnection((11,))
+    now = datetime(2026, 7, 6, 12, 0, tzinfo=UTC)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_location_queries(retention_hours=720, now=now)
+
+    assert summary.rows_deleted == 11
+    assert summary.retention_hours == 720
+    assert summary.cutoff == now - timedelta(hours=720)
+    assert connection.commits == 1
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert "DELETE FROM location_queries" in sql
+    assert "created_at < %s::timestamptz" in sql
+    assert params == (now - timedelta(hours=720), 50_000)
+
+
+def test_prune_location_queries_rejects_non_positive_retention() -> None:
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: _FakeConnection((0,)))
+
+    with pytest.raises(ValueError):
+        job.prune_location_queries(retention_hours=0)
+
+
+def test_prune_location_queries_wraps_database_errors() -> None:
+    def boom() -> object:
+        raise RuntimeError("connection refused")
+
+    job = PostgresEvidenceRetentionJob(connection_factory=boom)
+
+    with pytest.raises(EvidenceRetentionUnavailable):
+        job.prune_location_queries(retention_hours=720)
+
+
+def test_location_queries_retention_hours_config_default_and_env() -> None:
+    assert load_worker_settings({}).location_queries_retention_hours == (
+        DEFAULT_LOCATION_QUERY_RETENTION_HOURS
+    )
+    assert (
+        load_worker_settings(
+            {"LOCATION_QUERIES_RETENTION_HOURS": "240"}
+        ).location_queries_retention_hours
+        == 240
+    )
 
 
 def test_evidence_retention_hours_config_default_and_env() -> None:

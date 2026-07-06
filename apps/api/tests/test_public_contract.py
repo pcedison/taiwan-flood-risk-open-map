@@ -1496,13 +1496,16 @@ def test_risk_assess_persists_before_query_heat_snapshot(monkeypatch) -> None:
     assert getattr(assessment, "lat") == 23.038818
     assert getattr(assessment, "lng") == 120.213493
     assert getattr(assessment, "radius_m") == 300
-    assert getattr(assessment, "location_text") == "Tainan Annan"
+    # ADR-0006: raw query text must not reach the persistence payload at all.
+    assert not hasattr(assessment, "location_text")
     assert getattr(assessment, "explanation")["summary"]
     assert getattr(assessment, "data_freshness")
+    # ADR-0006: the stored snapshot keeps only the ~1 km coarse location.
     assert getattr(assessment, "result_snapshot")["location"] == {
-        "lat": 23.038818,
-        "lng": 120.213493,
+        "lat": 23.04,
+        "lng": 120.21,
     }
+    assert getattr(assessment, "result_snapshot")["location_text"] is None
     assert getattr(assessment, "result_snapshot")["radius_m"] == 300
     assert getattr(assessment, "result_snapshot")["levels"]["historical"]
     assert payload["query_heat"]["query_count_bucket"] == "1-9"

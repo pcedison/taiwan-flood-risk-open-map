@@ -102,7 +102,6 @@ class RiskAssessmentPersistence:
     lat: float
     lng: float
     radius_m: int
-    location_text: str | None
     score_version: str
     realtime_score: float
     historical_score: float
@@ -203,13 +202,18 @@ def persist_risk_assessment(
         JOIN evidence ON evidence.id = ANY(%s::uuid[])
         ON CONFLICT (risk_assessment_id, evidence_id) DO NOTHING
     """
+    # ADR-0006: never store raw query text or precise user-selected
+    # coordinates. raw_input stays NULL and coordinates are coarsened to the
+    # same ~1 km bucket used for query heat before they touch the database.
     privacy_bucket = _privacy_bucket(assessment.lat, assessment.lng)
+    coarse_lat = _privacy_coordinate(assessment.lat)
+    coarse_lng = _privacy_coordinate(assessment.lng)
     params = (
-        assessment.location_text,
-        assessment.lat,
-        assessment.lng,
-        assessment.lng,
-        assessment.lat,
+        None,
+        coarse_lat,
+        coarse_lng,
+        coarse_lng,
+        coarse_lat,
         assessment.radius_m,
         privacy_bucket,
         privacy_bucket,
@@ -1196,6 +1200,11 @@ def _count_bucket(count: int) -> str:
 
 def _privacy_bucket(lat: float, lng: float) -> str:
     return f"{round(lat, 2):.2f},{round(lng, 2):.2f}"
+
+
+def _privacy_coordinate(value: float) -> float:
+    """Coarsen a coordinate to ~1 km so precise points never persist (ADR-0006)."""
+    return round(value, 2)
 
 
 def _storage_risk_level(level: str) -> str:
