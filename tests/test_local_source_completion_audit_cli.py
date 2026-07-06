@@ -11,11 +11,11 @@ API_APP = REPO_ROOT / "apps" / "api"
 SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
 sys.path.insert(0, str(API_APP))
 
-from app.domain.realtime.local_source_action_plan import (  # noqa: E402
+from app.ops.local_source.local_source_action_plan import (  # noqa: E402
     PRODUCTION_GATE_REQUIRED_REQUIREMENTS,
     build_local_source_action_plan,
 )
-from app.domain.realtime.local_source_coverage import (  # noqa: E402
+from app.ops.local_source.local_source_coverage import (  # noqa: E402
     list_local_source_coverage,
 )
 
