@@ -40,7 +40,6 @@ export function SearchForm({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={text.searchPlaceholder}
-          aria-label={text.searchPlaceholder}
         />
       </label>
 
@@ -65,8 +64,16 @@ export function SearchForm({
       <button className="primary-action" type="submit" disabled={isLoading}>
         {isLoading ? text.loading : text.assessRisk}
       </button>
-      {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
-      {geocodeNotice ? <p className="form-notice">{geocodeNotice}</p> : null}
+      {errorMessage ? (
+        <p className="form-error" role="alert">
+          {errorMessage}
+        </p>
+      ) : null}
+      {geocodeNotice ? (
+        <p className="form-notice" role="status">
+          {geocodeNotice}
+        </p>
+      ) : null}
     </form>
   );
 }

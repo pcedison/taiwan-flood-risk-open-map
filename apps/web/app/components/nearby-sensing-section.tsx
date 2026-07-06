@@ -23,7 +23,7 @@ export function NearbySensingSection({
     >
       <div className="section-heading">
         <span className="section-kicker">{text.nearbySensingKicker}</span>
-        <strong>{state.badge}</strong>
+        <h2>{state.badge}</h2>
       </div>
       <p className="section-question">{text.nearbySensingQuestion}</p>
       <p>{state.summary}</p>

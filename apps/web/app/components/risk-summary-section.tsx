@@ -6,7 +6,12 @@ import type {
   getProfilePreviewState,
   riskOverlayPresentation,
 } from "../lib/risk-display";
-import { normalizeRiskLevel, riskDecisionSummary, riskSummaryDecisionText } from "../lib/risk-display";
+import {
+  normalizeRiskLevel,
+  riskDecisionSummary,
+  riskLevelTextColor,
+  riskSummaryDecisionText,
+} from "../lib/risk-display";
 import { emergencyGuidance, riskMeterPosition, text } from "../lib/ui-text";
 
 type RiskSummarySectionProps = {
@@ -43,7 +48,7 @@ export function RiskSummarySection({
     <section className="panel-section risk-summary" data-testid="risk-summary">
       <div className="section-heading">
         <span className="section-kicker">{text.riskSummary}</span>
-        <strong>{riskSummaryHeading}</strong>
+        <h2>{riskSummaryHeading}</h2>
       </div>
       <p className="risk-emergency-notice" role="note">
         {emergencyGuidance.notice} {emergencyGuidance.callToAction}
@@ -72,15 +77,15 @@ export function RiskSummarySection({
         <dl className="risk-levels">
           <div>
             <dt>{text.realtime}</dt>
-            <dd>{realtimeLevel}</dd>
+            <dd style={{ color: riskLevelTextColor(realtimeLevel) }}>{realtimeLevel}</dd>
           </div>
           <div>
             <dt>{text.historical}</dt>
-            <dd>{historicalLevel}</dd>
+            <dd style={{ color: riskLevelTextColor(historicalLevel) }}>{historicalLevel}</dd>
           </div>
           <div className="risk-confidence-card">
             <dt>{text.confidence}</dt>
-            <dd>{confidenceLevel}</dd>
+            <dd style={{ color: riskLevelTextColor(confidenceLevel) }}>{confidenceLevel}</dd>
           </div>
         </dl>
       ) : null}

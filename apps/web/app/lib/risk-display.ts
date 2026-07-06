@@ -214,6 +214,12 @@ export type RiskOverlayPresentation = {
   lineColor: string;
   fillOpacity: number;
   colorName: string;
+  /**
+   * Optional MapLibre `line-dasharray` pattern. Distinguishes risk levels by
+   * line style (not just hue) so red/green colorblind users can still tell
+   * them apart on the map overlay. Undefined means a solid line.
+   */
+  lineDasharray?: number[];
 };
 
 const riskOverlayByLevel: Record<
@@ -234,16 +240,19 @@ const riskOverlayByLevel: Record<
     fillColor: "#d9b928",
     lineColor: "#a48314",
     colorName: "黃色",
+    lineDasharray: [6, 3],
   },
   高: {
     fillColor: "#cf4f35",
     lineColor: "#983825",
     colorName: "紅色",
+    lineDasharray: [2, 2],
   },
   極高: {
     fillColor: "#9f2f2f",
     lineColor: "#742222",
     colorName: "深紅色",
+    lineDasharray: [1, 2],
   },
 };
 
@@ -362,6 +371,17 @@ export function riskOverlayPresentation(
   };
 }
 
+/**
+ * Text color for a normalized risk level ("低"/"中"/"高"/"極高"), reusing the
+ * same palette as the map overlay so the two stay in sync. Returns undefined
+ * for unknown/no-data so callers fall back to the default foreground color.
+ */
+export function riskLevelTextColor(level?: string | null): string | undefined {
+  const normalized = normalizeRiskLevel(level);
+  if (normalized === UNKNOWN_RISK_LEVEL) return undefined;
+  return riskOverlayByLevel[normalized]?.lineColor;
+}
+
 export function formatCoordinate(value: number) {
   return value.toFixed(5);
 }
@@ -452,6 +472,7 @@ export function formatDateTime(value: string | null, options?: { timeZone?: stri
     hour: "2-digit",
     minute: "2-digit",
     month: "2-digit",
+    year: "numeric",
     timeZone: options?.timeZone,
   }).format(new Date(value));
 }
