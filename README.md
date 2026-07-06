@@ -10,6 +10,42 @@ The project follows a spec-first SDD workflow. The source of truth is:
 - [Project SDD](docs/PROJECT_SDD.md)
 - [Project Work Plan](docs/PROJECT_WORK_PLAN.md)
 
+## Quick Start (Local)
+
+Prerequisites: Docker with Compose v2. No `.env` file is required for a first
+boot — every Compose variable has a safe local default (copy `.env.example` to
+`.env` only when you want to customize).
+
+```bash
+git clone https://github.com/pcedison/taiwan-flood-risk-open-map.git
+cd taiwan-flood-risk-open-map
+
+# 1. Start the data services
+docker compose up -d postgres redis minio
+
+# 2. Apply database migrations (required before the API will work)
+docker compose --profile tools run --rm migrate
+
+# 3. Start the app services
+docker compose up -d api web worker scheduler
+```
+
+Then open:
+
+- Web UI: <http://localhost:3000>
+- API docs: <http://localhost:8000/docs>
+
+To run the test suites natively (Python 3.12+ and Node 22+):
+
+```bash
+python -m pytest apps/api/tests -q        # API tests
+python -m pytest apps/workers/tests -q    # worker tests
+npm ci --prefix apps/web && npm test --prefix apps/web   # web unit tests
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow,
+lint/typecheck commands, and contribution rules.
+
 ## Core Decisions
 
 - License: Apache-2.0 for software.
