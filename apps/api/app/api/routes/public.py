@@ -89,7 +89,7 @@ from app.domain.profiles import (
     enqueue_profile_refresh_job,
     fetch_best_profile_for_point,
 )
-from app.domain.risk import RiskScoringResult, score_risk
+from app.domain.risk import RiskScoringResult
 
 router = APIRouter(prefix="/v1", tags=["Public"])
 
@@ -593,28 +593,17 @@ def _risk_assessment_dependencies() -> public_risk.RiskAssessmentDependencies:
         cache_risk_assessment_response=_cache_risk_assessment_response,
         fallback_historical_records=_fallback_historical_records,
         use_local_historical_fallback=_use_local_historical_fallback,
-        should_attempt_public_news_lookup=_should_attempt_public_news_lookup,
         on_demand_public_news_result=_on_demand_public_news_result,
-        historical_record_evidence=_historical_record_evidence,
-        evidence_from_upsert=_evidence_from_upsert,
-        signal_from_historical_record=_signal_from_historical_record,
-        historical_scoring_distance=_historical_scoring_distance,
-        signal_from_evidence=_signal_from_evidence,
         needs_historical_event_lookup=_needs_historical_event_lookup,
         persist_or_build_on_demand_evidence=_persist_or_build_on_demand_evidence,
         historical_data_freshness=_historical_data_freshness,
-        official_realtime_evidence=_official_realtime_evidence,
         display_evidence_items=_display_evidence_items,
-        score_risk=score_risk,
-        signal_from_official_realtime=_signal_from_official_realtime,
         cache_assessment_evidence=_cache_assessment_evidence,
         persisted_official_realtime_data_freshness=_persisted_official_realtime_data_freshness,
         visible_source_limitations=_visible_source_limitations,
-        freshness_from_status=_freshness_from_status,
         official_flood_disaster_data_freshness=_official_flood_disaster_data_freshness,
         on_demand_data_freshness=_on_demand_data_freshness,
         persist_assessment=_persist_assessment,
-        evidence_preview=_evidence_preview,
         query_heat=_query_heat,
     )
 
