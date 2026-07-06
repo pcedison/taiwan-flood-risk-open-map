@@ -413,10 +413,27 @@ def test_query_substring_aliases_short_query_returns_empty() -> None:
     assert query_substring_aliases("北投") == ()
 
 
+def test_query_substring_aliases_preserve_late_match_in_long_query() -> None:
+    from app.domain.geocoding.providers import query_substring_aliases
+
+    # A stored alias appearing only past character 64 must still be covered;
+    # a fixed truncation would have dropped it.
+    aliases = query_substring_aliases(("台" * 80) + "信義區市府路")
+    assert "信義區市府路" in aliases
+
+
+def test_query_substring_aliases_bounded_for_pathological_query() -> None:
+    from app.domain.geocoding.providers import query_substring_aliases
+
+    # A very long query drops the expansion rather than exploding the array;
+    # the direct alias branch still applies at the call site.
+    huge = "".join(chr(0x4E00 + (i % 5000)) for i in range(600))
+    assert query_substring_aliases(huge) == ()
+
+
 def test_fetch_postgis_open_data_candidates_uses_single_sargable_predicate(
     monkeypatch,
 ) -> None:
-    from app.domain.geocoding import providers as providers_module
     from app.domain.geocoding.providers import fetch_postgis_open_data_candidates
 
     executed: list[tuple[str, dict]] = []

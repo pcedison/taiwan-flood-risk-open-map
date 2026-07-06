@@ -726,11 +726,15 @@ def postgis_query_aliases(query: str) -> tuple[str, ...]:
     )
 
 
-# Bounds for the substring expansion below: aliases shorter than 4 chars are
-# too ambiguous to match, and 64 normalized chars comfortably covers Taiwan
-# addresses while capping the parameter array at ~1.9k entries.
+# Bounds for the substring expansion below. Aliases shorter than 4 chars are
+# too ambiguous to match (the old clause's own minimum). Stored geocoder
+# aliases are bounded in length, so we only need query substrings up to
+# _SUBSTRING_MATCH_MAX_LENGTH — windows slide across the WHOLE query so a
+# match at any position is preserved (unlike a fixed truncation). A hard
+# entry cap guards a pathological long query from exploding the array.
 _SUBSTRING_MATCH_MIN_LENGTH = 4
-_SUBSTRING_MATCH_MAX_SOURCE_LENGTH = 64
+_SUBSTRING_MATCH_MAX_LENGTH = 40
+_SUBSTRING_MATCH_MAX_ENTRIES = 4096
 
 
 def query_substring_aliases(normalized_query: str) -> tuple[str, ...]:
@@ -738,18 +742,23 @@ def query_substring_aliases(normalized_query: str) -> tuple[str, ...]:
 
     Replaces the old non-sargable ``EXISTS(... position(alias IN query))``
     fallback with data the planner can serve from the GIN index on
-    ``normalized_aliases``: matching "some alias is contained in the query"
-    is equivalent to overlapping with the set of all query substrings of
-    length >= 4 (the old clause's own minimum).
+    ``normalized_aliases``: matching "some stored alias is contained in the
+    query" is equivalent to overlapping with the set of all query substrings
+    between the minimum alias length and the maximum stored alias length.
+    If the query is long enough to exceed the entry cap the expansion is
+    dropped (the direct alias branch still applies), degrading to fewer
+    matches rather than a sequential scan.
     """
-    source = normalized_query[:_SUBSTRING_MATCH_MAX_SOURCE_LENGTH]
-    length = len(source)
+    length = len(normalized_query)
     if length < _SUBSTRING_MATCH_MIN_LENGTH:
         return ()
     seen: dict[str, None] = {}
     for start in range(length - _SUBSTRING_MATCH_MIN_LENGTH + 1):
-        for end in range(start + _SUBSTRING_MATCH_MIN_LENGTH, length + 1):
-            seen[source[start:end]] = None
+        max_end = min(length, start + _SUBSTRING_MATCH_MAX_LENGTH)
+        for end in range(start + _SUBSTRING_MATCH_MIN_LENGTH, max_end + 1):
+            seen[normalized_query[start:end]] = None
+            if len(seen) > _SUBSTRING_MATCH_MAX_ENTRIES:
+                return ()
     return tuple(seen)
 
 
