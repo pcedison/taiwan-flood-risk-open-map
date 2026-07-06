@@ -5,7 +5,7 @@ description = "FastAPI backend skeleton for the Flood Risk project."
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
-  "psycopg[binary]>=3.2",
+  "psycopg[binary,pool]>=3.2",
   "redis>=5.0",
   "uvicorn[standard]>=0.30",
 ]

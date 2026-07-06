@@ -64,6 +64,8 @@ psycopg==3.3.4
     # via flood-risk-api (apps/api/pyproject.toml)
 psycopg-binary==3.3.4 ; implementation_name != 'pypy'
     # via psycopg
+psycopg-pool==3.3.1
+    # via psycopg
 pydantic==2.13.4
     # via fastapi
 pydantic-core==2.46.4
@@ -98,6 +100,7 @@ typing-extensions==4.16.0
     #   fastapi
     #   mypy
     #   psycopg
+    #   psycopg-pool
     #   pydantic
     #   pydantic-core
     #   referencing
