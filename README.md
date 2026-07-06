@@ -155,6 +155,15 @@ Ops runbooks and dry-run checks:
   `infra/scripts/validate_production_readiness_evidence.py` for validating the
   evidence record shape. This is a schema/tooling check, not proof that real
   Zeabur production env, secrets, alert routing, or on-call drill are complete.
+- [Infrastructure Rebuild Runbook](docs/runbooks/infrastructure-rebuild.md) for
+  rebuilding the production environment from zero: account registration
+  (Zeabur, CWA, Civil IoT, Cloudflare Turnstile), Zeabur project creation, data
+  restore, domain/DNS, and a post-rebuild verification checklist. See also
+  [SUCCESSION.md](SUCCESSION.md) for the single points of failure this runbook
+  addresses.
+- [GitHub Actions Secrets](docs/runbooks/github-actions-secrets.md) for the
+  current inventory of `secrets.*` referenced by the hosted-monitoring
+  workflows, what happens when they are unset, and where to configure them.
 - [Next Phase Runtime Readiness Queue](docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md)
   for the five acceptance standards around queue, reports, MVT, query heat, and
   tile cache readiness.
