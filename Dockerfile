@@ -63,6 +63,10 @@ ENV NEXT_PUBLIC_BASEMAP_RASTER_TILES=""
 ENV NEXT_PUBLIC_BASEMAP_ATTRIBUTION=""
 ENV INTERNAL_API_BASE_URL="http://127.0.0.1:8000"
 ENV APP_ENV=staging
+# Rate limiting must see the real client, not the Next.js proxy hop.
+# The app takes the right-most non-proxy entry of this header (spoof-safe);
+# see apps/api/app/api/services/client_signal.py.
+ENV PUBLIC_RATE_LIMIT_CLIENT_HEADER=X-Forwarded-For
 ENV REALTIME_OFFICIAL_ENABLED=true
 
 COPY --from=web-builder /usr/local/bin/node /usr/local/bin/node
@@ -124,7 +128,7 @@ RUN printf '%s\n' \
   'fi' \
   'cd /app/apps/api' \
   'echo "[start] launching api"' \
-  'python -m uvicorn app.main:app --host "${api_host}" --port "${api_port}" &' \
+  'python -m uvicorn app.main:app --host "${api_host}" --port "${api_port}" --proxy-headers --forwarded-allow-ips "127.0.0.1" &' \
   'api_pid=$!' \
   'cleanup() {' \
   '  local pid' \

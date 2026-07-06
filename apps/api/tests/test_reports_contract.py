@@ -35,6 +35,7 @@ def _settings(
         user_reports_rate_limit_max_requests=5,
         user_reports_rate_limit_window_seconds=60,
         user_reports_rate_limit_client_header=None,
+        public_rate_limit_trusted_proxy_cidrs=(),
         abuse_hash_salt="test-salt",
         user_reports_challenge_required=False,
         user_reports_challenge_provider="static",
