@@ -14,10 +14,21 @@ function contentSecurityPolicyOrigins() {
     process.env.NEXT_PUBLIC_BASEMAP_STYLE_URL,
     process.env.NEXT_PUBLIC_BASEMAP_PMTILES_URL,
     process.env.NEXT_PUBLIC_BASEMAP_RASTER_TILES,
+    // Runtime aliases served through /basemap-config (see
+    // app/lib/basemap-style.ts basemapEnvValue) must be allowlisted too.
+    process.env.BASEMAP_STYLE_URL,
+    process.env.BASEMAP_PMTILES_URL,
+    process.env.BASEMAP_RASTER_TILES,
     process.env.NEXT_PUBLIC_API_BASE_URL,
     process.env.CSP_EXTRA_ORIGINS,
   ];
-  const origins = new Set();
+  // Hosts baked into the app's own style builder (app/lib/basemap-style.ts):
+  // the Protomaps glyph host used by the built-in PMTiles label layers and
+  // the OSM raster tiles used as the local/dev fallback basemap.
+  const origins = new Set([
+    "https://protomaps.github.io",
+    "https://tile.openstreetmap.org",
+  ]);
   for (const value of values) {
     if (!value) continue;
     for (const raw of value.split(",")) {
