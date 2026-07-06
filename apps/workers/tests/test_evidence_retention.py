@@ -57,7 +57,11 @@ def test_prune_realtime_deletes_official_station_evidence_past_cutoff() -> None:
     summary = job.prune_realtime(retention_hours=48, now=now)
 
     assert summary.rows_deleted == 7
-    assert summary.event_types == ("rainfall", "water_level")
+    assert summary.event_types == (
+        "rainfall",
+        "water_level",
+        "flood_warning",
+    )
     assert summary.cutoff == now - timedelta(hours=48)
     assert connection.commits == 1
 
@@ -65,7 +69,49 @@ def test_prune_realtime_deletes_official_station_evidence_past_cutoff() -> None:
     assert "DELETE FROM evidence" in sql
     assert "source_type = 'official'" in sql
     assert "event_type = ANY(%s::text[])" in sql
-    assert params == (["rainfall", "water_level"], now - timedelta(hours=48), 50_000)
+    assert params == (
+        ["rainfall", "water_level", "flood_warning"],
+        now - timedelta(hours=48),
+        50_000,
+    )
+
+
+def test_prune_realtime_excludes_flood_report_to_protect_observed_history() -> None:
+    """flood_report must not be in the default prunable set.
+
+    profiles.py counts every flood_report (including official ones) as
+    observed history for historical_score, so pruning aged official flood
+    reports would erase real observed flood events. flood_warning is safe
+    (scoring treats it only as a realtime signal).
+    """
+    from app.jobs.evidence_retention import PRUNABLE_REALTIME_EVENT_TYPES
+
+    assert "flood_report" not in PRUNABLE_REALTIME_EVENT_TYPES
+    assert "flood_warning" in PRUNABLE_REALTIME_EVENT_TYPES
+
+
+def test_prune_realtime_scoped_to_official_source() -> None:
+    """The prune query filters source_type='official' as a hardcoded literal.
+
+    Even if a caller passes an event_type shared with non-official evidence,
+    the 'official' filter is baked into the SQL text (not a bind parameter),
+    so non-official rows can never be deleted.
+    """
+    connection = _FakeConnection((3,))
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    job.prune_realtime(
+        retention_hours=48,
+        event_types=("flood_warning",),
+        now=now,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    # 'official' is a literal baked into the SQL text, not a bind parameter --
+    # there is no way for a caller to widen the query to non-official rows.
+    assert "source_type = 'official'" in sql
+    assert params == (["flood_warning"], now - timedelta(hours=48), 50_000)
 
 
 def test_prune_realtime_skips_when_no_event_types() -> None:
