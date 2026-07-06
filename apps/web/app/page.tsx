@@ -13,6 +13,7 @@ import { INITIAL_COORDINATE, INITIAL_RADIUS, targetZoom } from "./lib/map-setup"
 import type {
   Coordinate,
   EvidenceListResponse,
+  GeocodeCandidate,
   GeocodeResponse,
   QueryMode,
   RiskAssessmentResponse,
@@ -49,6 +50,7 @@ const API_BASE_URL = apiBaseUrl;
 const IDLE_RISK_OVERLAY = riskOverlayPresentation(null, false);
 const USER_REPORTS_PUBLIC_ENABLED = process.env.NEXT_PUBLIC_USER_REPORTS_ENABLED === "true";
 const MIN_GEOCODE_CONFIDENCE = 0.65;
+const GEOCODE_CANDIDATE_LIMIT = 5;
 
 export default function HomePage() {
   const requestIdRef = useRef(0);
@@ -63,6 +65,7 @@ export default function HomePage() {
   const [queryMode, setQueryMode] = useState<QueryMode>("search");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [geocodeNotice, setGeocodeNotice] = useState<string | null>(null);
+  const [geocodeCandidates, setGeocodeCandidates] = useState<GeocodeCandidate[]>([]);
   const [locationLabel, setLocationLabel] = useState(text.taipeiMainStation);
   const [reportSummary, setReportSummary] = useState("");
   const [reportStatus, setReportStatus] = useState<UserReportSubmissionStatus>("idle");
@@ -151,6 +154,7 @@ export default function HomePage() {
       setIsLoading(false);
       setErrorMessage(null);
       setGeocodeNotice(null);
+      setGeocodeCandidates([]);
     },
   });
   const statusText = isMapReady ? text.mapStatusReady : text.mapStatusLoading;
@@ -162,6 +166,79 @@ export default function HomePage() {
     };
   }, []);
 
+  function applyGeocodeCandidate(candidate: GeocodeCandidate, normalizedQuery: string | null) {
+    const target: Coordinate = {
+      lat: candidate.point.lat,
+      lng: candidate.point.lng,
+      source: "search",
+    };
+    setCoordinate(target);
+    setLocationLabel(candidate.name);
+    setGeocodeNotice(
+      candidate.requires_confirmation
+        ? `${geocodeCandidateNotice(candidate)}。${text.geocodeNeedsConfirmation}`
+        : geocodeCandidateNotice(candidate),
+    );
+    mapRef.current?.resize();
+    mapRef.current?.flyTo({
+      center: [target.lng, target.lat],
+      duration: 900,
+      essential: true,
+      zoom: targetZoom(target, radius),
+    });
+
+    const resolvedLocationText =
+      normalizedQuery && normalizedQuery !== candidate.name
+        ? `${normalizedQuery}｜${candidate.name}`
+        : candidate.name;
+
+    return { resolvedLocationText, target };
+  }
+
+  async function runRiskAssessment({
+    requestController,
+    requestId,
+    resolvedLocationText,
+    target,
+  }: {
+    requestController: AbortController;
+    requestId: number;
+    resolvedLocationText: string | null;
+    target: Coordinate;
+  }) {
+    const risk = await postJson<RiskAssessmentResponse>(
+      "/v1/risk/assess",
+      buildRiskAssessmentPayload(target, radius, resolvedLocationText),
+      {
+        signal: requestController.signal,
+      },
+    );
+    if (requestIdRef.current !== requestId) return;
+    setAssessment(risk);
+    setEvidenceItems(risk.evidence);
+    setIsLoading(false);
+
+    if (shouldFetchEvidenceList(risk.assessment_id)) {
+      setEvidenceStatus("loading");
+      try {
+        const evidence = await getJson<EvidenceListResponse>(
+          `/v1/evidence/${encodeURIComponent(risk.assessment_id)}?page_size=100`,
+          {
+            signal: requestController.signal,
+          },
+        );
+        if (requestIdRef.current !== requestId) return;
+        setEvidenceItems(evidence.items);
+        setEvidenceStatus("ready");
+      } catch {
+        if (requestIdRef.current !== requestId) return;
+        setEvidenceStatus("error");
+      }
+    } else {
+      setEvidenceStatus("ready");
+    }
+  }
+
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     searchAbortRef.current?.abort();
@@ -172,6 +249,7 @@ export default function HomePage() {
     setIsLoading(true);
     setErrorMessage(null);
     setGeocodeNotice(null);
+    setGeocodeCandidates([]);
 
     const normalized = query.trim();
     const shouldResolveSearchQuery = queryMode === "search" && normalized.length > 0;
@@ -182,13 +260,15 @@ export default function HomePage() {
       if (shouldResolveSearchQuery) {
         const geocode = await postJson<GeocodeResponse>("/v1/geocode", {
           input_type: "address",
-          limit: 1,
+          limit: GEOCODE_CANDIDATE_LIMIT,
           query: normalized,
         }, {
           signal: requestController.signal,
         });
-        const candidate = geocode.candidates[0];
-        if (!candidate || candidate.confidence < MIN_GEOCODE_CONFIDENCE) {
+        const candidates = geocode.candidates ?? [];
+        const topCandidate = candidates[0];
+
+        if (!topCandidate) {
           setAssessment(null);
           setEvidenceItems([]);
           setEvidenceStatus("idle");
@@ -196,60 +276,60 @@ export default function HomePage() {
           return;
         }
 
-        target = {
-          lat: candidate.point.lat,
-          lng: candidate.point.lng,
-          source: "search",
-        };
-        setCoordinate(target);
-        setLocationLabel(candidate.name);
-        setGeocodeNotice(geocodeCandidateNotice(candidate));
-        resolvedLocationText =
-          normalized === candidate.name ? candidate.name : `${normalized}｜${candidate.name}`;
-        mapRef.current?.resize();
-        mapRef.current?.flyTo({
-          center: [target.lng, target.lat],
-          duration: 900,
-          essential: true,
-          zoom: targetZoom(target, radius),
-        });
-
-        if (candidate.requires_confirmation) {
-          setGeocodeNotice(`${geocodeCandidateNotice(candidate)}。${text.geocodeNeedsConfirmation}`);
+        if (topCandidate.confidence < MIN_GEOCODE_CONFIDENCE) {
+          setAssessment(null);
+          setEvidenceItems([]);
+          setEvidenceStatus("idle");
+          setGeocodeCandidates(candidates);
+          setErrorMessage(text.geocodeAmbiguous);
+          return;
         }
+
+        const applied = applyGeocodeCandidate(topCandidate, normalized);
+        target = applied.target;
+        resolvedLocationText = applied.resolvedLocationText;
       }
 
-      const risk = await postJson<RiskAssessmentResponse>(
-        "/v1/risk/assess",
-        buildRiskAssessmentPayload(target, radius, resolvedLocationText),
-        {
-          signal: requestController.signal,
-        },
-      );
-      if (requestIdRef.current !== requestId) return;
-      setAssessment(risk);
-      setEvidenceItems(risk.evidence);
-      setIsLoading(false);
-
-      if (shouldFetchEvidenceList(risk.assessment_id)) {
-        setEvidenceStatus("loading");
-        try {
-          const evidence = await getJson<EvidenceListResponse>(
-            `/v1/evidence/${encodeURIComponent(risk.assessment_id)}?page_size=100`,
-            {
-              signal: requestController.signal,
-            },
-          );
-          if (requestIdRef.current !== requestId) return;
-          setEvidenceItems(evidence.items);
-          setEvidenceStatus("ready");
-        } catch {
-          if (requestIdRef.current !== requestId) return;
-          setEvidenceStatus("error");
-        }
-      } else {
-        setEvidenceStatus("ready");
+      await runRiskAssessment({ requestController, requestId, resolvedLocationText, target });
+    } catch (error) {
+      if (!requestController.signal.aborted && requestIdRef.current === requestId) {
+        setErrorMessage(
+          publicApiErrorMessage(error, {
+            fallback: text.queryFailed,
+            notFoundMessage: text.noGeocodeResult,
+          }),
+        );
       }
+    } finally {
+      if (searchAbortRef.current === requestController) {
+        searchAbortRef.current = null;
+      }
+      if (requestIdRef.current === requestId) {
+        setIsLoading(false);
+      }
+    }
+  }
+
+  async function handleSelectGeocodeCandidate(candidate: GeocodeCandidate) {
+    searchAbortRef.current?.abort();
+    const requestController = new AbortController();
+    searchAbortRef.current = requestController;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    setIsLoading(true);
+    setErrorMessage(null);
+    setGeocodeCandidates([]);
+
+    const normalized = query.trim();
+    const applied = applyGeocodeCandidate(candidate, normalized || null);
+
+    try {
+      await runRiskAssessment({
+        requestController,
+        requestId,
+        resolvedLocationText: applied.resolvedLocationText,
+        target: applied.target,
+      });
     } catch (error) {
       if (!requestController.signal.aborted && requestIdRef.current === requestId) {
         setErrorMessage(
@@ -336,11 +416,14 @@ export default function HomePage() {
           isLoading={isLoading}
           errorMessage={errorMessage}
           geocodeNotice={geocodeNotice}
+          geocodeCandidates={geocodeCandidates}
           onQueryChange={(value) => {
             setQuery(value);
             setQueryMode("search");
+            setGeocodeCandidates([]);
           }}
           onRadiusChange={setRadius}
+          onSelectGeocodeCandidate={handleSelectGeocodeCandidate}
           onSubmit={handleSearch}
         />
 

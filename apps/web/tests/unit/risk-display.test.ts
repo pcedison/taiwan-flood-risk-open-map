@@ -235,7 +235,7 @@ test("profile preview state labels precomputed profile responses", () => {
   });
 
   assert.equal(state.isProfilePreview, true);
-  assert.equal(state.label, "區域 profile 初步結果");
+  assert.equal(state.label, "區域概略估計");
   assert.match(state.message ?? "", /risk_grid:h3:8/);
 
   assert.deepEqual(getProfilePreviewState({ data_freshness: [] }), {
@@ -264,6 +264,7 @@ test("profile basis text explains historical and confidence cards", () => {
   });
 
   assert.match(state.historicalNote ?? "", /3 筆公開資料/);
+  assert.doesNotMatch((state.historicalNote ?? "").toLowerCase(), /profile/);
   assert.match(state.confidenceNote ?? "", /來源類型/);
   assert.match(state.limitationLead ?? "", /不是系統錯誤/);
 
