@@ -34,9 +34,10 @@ def test_postgres_writer_upserts_raw_snapshot_and_inserts_staging_rows() -> None
     writer.write_batch(batch)
 
     assert connection.committed is True
-    assert len(connection.cursor_instance.executions) == 2
+    assert len(connection.cursor_instance.executions) == 1
+    assert len(connection.cursor_instance.executemany_calls) == 1
     raw_sql, raw_params = connection.cursor_instance.executions[0]
-    staging_sql, staging_params = connection.cursor_instance.executions[1]
+    staging_sql, staging_params_list = connection.cursor_instance.executemany_calls[0]
     assert "INSERT INTO raw_snapshots" in raw_sql
     assert "data_source_id" in raw_sql
     assert "SELECT id FROM data_sources WHERE adapter_key = %s" in raw_sql
@@ -46,12 +47,61 @@ def test_postgres_writer_upserts_raw_snapshot_and_inserts_staging_rows() -> None
     assert "INSERT INTO staging_evidence" in staging_sql
     assert "data_source_id" in staging_sql
     assert "SELECT id FROM data_sources WHERE adapter_key = %s" in staging_sql
+    assert len(staging_params_list) == 1
+    staging_params = staging_params_list[0]
     assert staging_params[0] == "raw-snapshot-id"
     assert staging_params[1] == "news.public_web.sample"
     assert staging_params[11] == "accepted"
     payload = json.loads(str(staging_params[13]))
     assert payload["evidence_id"].startswith("ev_")
     assert payload["adapter_key"] == "news.public_web.sample"
+
+
+def test_postgres_writer_batches_accepted_and_rejected_rows_in_one_executemany() -> None:
+    adapter = SamplePublicWebNewsAdapter(
+        [
+            {
+                "id": "sample-news-001",
+                "url": "https://example.test/news/flood-001",
+                "title": "Heavy rain reported near riverside district",
+                "summary": "Public report describes street flooding near the riverside district.",
+                "published_at": "2026-04-28T08:30:00+00:00",
+                "location_text": "Riverside District",
+                "confidence": 0.72,
+            },
+            {
+                "id": "sample-news-002",
+                "url": "https://example.test/news/flood-002",
+                "title": "Heavy rain reported near downtown district",
+                "summary": "Public report describes street flooding downtown.",
+                "published_at": "2026-04-28T09:00:00+00:00",
+                "location_text": "Downtown District",
+                # Out of the valid [0.0, 1.0] range so this item normalizes
+                # successfully but fails promotion validation, landing in
+                # batch.rejected (not batch.accepted).
+                "confidence": 1.5,
+            },
+        ],
+        fetched_at=FETCHED_AT,
+        raw_snapshot_key="raw/news-public-web/sample-2.json",
+    )
+    batch = build_staging_batch(adapter.run())
+    assert batch.accepted
+    assert batch.rejected
+    connection = _FakeConnection(raw_snapshot_id="raw-snapshot-id")
+    writer = PostgresStagingBatchWriter(connection_factory=lambda: connection)
+
+    writer.write_batch(batch)
+
+    assert connection.committed is True
+    # Exactly one executemany call covering every accepted + rejected row --
+    # no per-row execute() calls for staging_evidence inserts.
+    assert len(connection.cursor_instance.executemany_calls) == 1
+    _staging_sql, staging_params_list = connection.cursor_instance.executemany_calls[0]
+    assert len(staging_params_list) == len(batch.accepted) + len(batch.rejected)
+    validation_statuses = [params[11] for params in staging_params_list]
+    assert validation_statuses.count("accepted") == len(batch.accepted)
+    assert validation_statuses.count("rejected") == len(batch.rejected)
 
 
 def test_postgres_writer_requires_database_url_or_connection_factory() -> None:
@@ -85,6 +135,7 @@ class _FakeCursor:
     def __init__(self, *, raw_snapshot_id: str) -> None:
         self._raw_snapshot_id = raw_snapshot_id
         self.executions: list[tuple[str, tuple[object, ...]]] = []
+        self.executemany_calls: list[tuple[str, list[tuple[object, ...]]]] = []
 
     def __enter__(self) -> _FakeCursor:
         return self
@@ -94,6 +145,9 @@ class _FakeCursor:
 
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executions.append((sql, params))
+
+    def executemany(self, sql: str, params_list: list[tuple[object, ...]]) -> None:
+        self.executemany_calls.append((sql, list(params_list)))
 
     def fetchone(self) -> tuple[str]:
         return (self._raw_snapshot_id,)

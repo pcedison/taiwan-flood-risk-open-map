@@ -1,11 +1,15 @@
 """Retention pruning for high-volume realtime official station evidence.
 
-Live ingestion of CWA rainfall (~570 stations) plus WRA/Civil IoT water levels
-writes a new evidence row per station per cycle, so the ``evidence`` table grows
-fast. Those ``rainfall``/``water_level`` rows are only used inside the realtime
-scoring window (6 h) and the freshness panel, so they are pruned past a short
-retention window. Historical evidence (flood potential, news, observed flood
-reports) is intentionally NOT pruned here.
+Live ingestion of CWA rainfall (~570 stations), WRA/Civil IoT water levels,
+Civil IoT + county flood sensors (``flood_report``), and NCDR CAP alerts
+(``flood_warning``) each write a new ``evidence`` row per station/alert per
+cycle, so the ``evidence`` table grows fast. Those four event types are only
+used inside the realtime scoring window (6 h) and the freshness panel, so
+official-sourced rows for them are pruned past a short retention window.
+Historical evidence — e.g. news or public flood reports, which share the
+``flood_report`` event type but use a non-``official`` ``source_type`` — is
+intentionally NOT pruned here; the prune query only ever targets
+``source_type = 'official'`` rows.
 
 This keeps the table bounded so a 2-4 GB hosted node can run live ingestion
 without PostGIS bloat. All evidence foreign keys are ``ON DELETE CASCADE``, so a
@@ -24,7 +28,15 @@ from app.logging import log_event
 ConnectionFactory = Callable[[], Any]
 
 # Realtime station telemetry that is safe to prune past the retention window.
-PRUNABLE_REALTIME_EVENT_TYPES: tuple[str, ...] = ("rainfall", "water_level")
+# NOTE: the prune query below always restricts to source_type = 'official', so
+# non-official flood_report rows (e.g. news/public reports) are never touched
+# even though they share an event_type with this tuple.
+PRUNABLE_REALTIME_EVENT_TYPES: tuple[str, ...] = (
+    "rainfall",
+    "water_level",
+    "flood_report",
+    "flood_warning",
+)
 DEFAULT_EVIDENCE_REALTIME_RETENTION_HOURS = 48
 DEFAULT_EVIDENCE_PRUNE_BATCH_LIMIT = 50_000
 # ADR-0006: location_queries rows hold only coarse (~1 km) buckets, but even

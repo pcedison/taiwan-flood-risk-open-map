@@ -57,7 +57,12 @@ def test_prune_realtime_deletes_official_station_evidence_past_cutoff() -> None:
     summary = job.prune_realtime(retention_hours=48, now=now)
 
     assert summary.rows_deleted == 7
-    assert summary.event_types == ("rainfall", "water_level")
+    assert summary.event_types == (
+        "rainfall",
+        "water_level",
+        "flood_report",
+        "flood_warning",
+    )
     assert summary.cutoff == now - timedelta(hours=48)
     assert connection.commits == 1
 
@@ -65,7 +70,37 @@ def test_prune_realtime_deletes_official_station_evidence_past_cutoff() -> None:
     assert "DELETE FROM evidence" in sql
     assert "source_type = 'official'" in sql
     assert "event_type = ANY(%s::text[])" in sql
-    assert params == (["rainfall", "water_level"], now - timedelta(hours=48), 50_000)
+    assert params == (
+        ["rainfall", "water_level", "flood_report", "flood_warning"],
+        now - timedelta(hours=48),
+        50_000,
+    )
+
+
+def test_prune_realtime_flood_report_and_warning_scoped_to_official_source() -> None:
+    """flood_report/flood_warning are prunable, but only for source_type='official'.
+
+    Historical flood_report evidence (e.g. news or public reports) shares the
+    same event_type but uses a non-official source_type. The prune query must
+    filter on ``source_type = 'official'`` as a hardcoded SQL literal (not a
+    bind parameter), so those non-official rows can never be deleted no
+    matter what event_types/params are passed in.
+    """
+    connection = _FakeConnection((3,))
+    now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    job.prune_realtime(
+        retention_hours=48,
+        event_types=("flood_report", "flood_warning"),
+        now=now,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    # 'official' is a literal baked into the SQL text, not a bind parameter --
+    # there is no way for a caller to widen the query to non-official rows.
+    assert "source_type = 'official'" in sql
+    assert params == (["flood_report", "flood_warning"], now - timedelta(hours=48), 50_000)
 
 
 def test_prune_realtime_skips_when_no_event_types() -> None:
