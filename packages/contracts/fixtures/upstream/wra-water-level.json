@@ -1,0 +1,30 @@
+{
+  "water_level": [
+    {
+      "stationid": "1010H006",
+      "datetime": "2026-04-28T16:05:00+08:00",
+      "waterlevel": "3.21"
+    },
+    {
+      "stationid": "1010H001",
+      "datetime": "2026-04-28T16:05:00+08:00",
+      "waterlevel": "-99"
+    }
+  ],
+  "station_metadata": [
+    {
+      "basinidentifier": "1010H006",
+      "observationstatus": "現存",
+      "observatoryname": "新店溪橋",
+      "rivername": "新店溪",
+      "locationbytwd97_xy": "313411.44 2790930.63",
+      "alertlevel1": "4.50",
+      "alertlevel2": "5.00"
+    },
+    {
+      "basinidentifier": "1010H001",
+      "observationstatus": "已廢",
+      "locationbytwd97_xy": "310928.30 2790168.45"
+    }
+  ]
+}

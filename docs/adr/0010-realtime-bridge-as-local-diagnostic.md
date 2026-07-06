@@ -81,3 +81,28 @@ worker adapters until the bridge is retired; changes to upstream schemas must
 be applied in both places until then. The duplication is bounded to the
 bridge's lifetime, which is why a shared package was judged not worth its
 packaging and deployment cost.
+
+## 2026-07-06 addendum: dual-parse drift guardrail
+
+The architecture audit (`docs/reviews/audit-2026-07-06-architecture.md`, finding
+F2-A) flagged that "upstream schema changes must be applied in both places" was
+enforced only by a human remembering to do so. Rather than reopening the
+convergence decision above, a CI guardrail now makes drift fail loudly:
+
+- Shared raw upstream fixtures live at
+  `packages/contracts/fixtures/upstream/cwa-rainfall.json` and
+  `wra-water-level.json`.
+- `tests/test_official_dual_parse_contract.py` feeds each fixture into both
+  `app/domain/realtime/official.py` (`_fetch_cwa_rainfall_stations` /
+  `_fetch_wra_water_level_stations`) and the worker adapters
+  (`app/adapters/cwa/rainfall.py::parse_cwa_rainfall_api_payload`,
+  `app/adapters/wra/water_level.py::parse_wra_water_level_api_payload`), then
+  asserts station id, coordinates, observed value, and observed time agree.
+- `apps/workers/tests/test_official_adapters.py` and
+  `apps/workers/tests/test_runtime_queue.py` load the same
+  `cwa-rainfall.json` fixture (moved from the workers-only fixtures directory)
+  so there is exactly one raw CWA sample in the repository, not two drifting
+  copies.
+
+If an upstream field is renamed or moved and only one side is updated, this
+test turns red in CI instead of surfacing as a silent production discrepancy.

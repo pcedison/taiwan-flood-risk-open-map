@@ -41,7 +41,7 @@ jobs:
         run: python -m compileall apps/api apps/workers
 
       - name: Backend lint
-        run: python -m ruff check apps/api/app apps/api/tests apps/workers/app apps/workers/tests
+        run: python -m ruff check apps/api/app apps/api/tests apps/workers/app apps/workers/tests tests
 
       - name: Backend typecheck
         run: |
@@ -65,6 +65,12 @@ jobs:
 
           run_pytest_or_empty_suite apps/api
           run_pytest_or_empty_suite apps/workers
+
+      - name: Cross-app contract guardrails
+        # Repo-level tests that must run against BOTH apps in one job (e.g. the
+        # ADR-0010 CWA/WRA dual-parse drift guardrail). They import neither app
+        # directly — each parser runs in a cwd-isolated subprocess.
+        run: python -m pytest tests/test_official_dual_parse_contract.py -q
 
   frontend:
     name: Frontend checks
