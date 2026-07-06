@@ -13,6 +13,7 @@ const {
   evidencePublishedAt,
   evidenceSourceUrl,
   formatConfidence,
+  isSafeLinkUrl,
   formatCoordinate,
   formatDateTime,
   formatDistance,
@@ -140,6 +141,28 @@ test("evidence URL and published-at shaping prefer full-list fields", () => {
 
   assert.equal(evidenceSourceUrl(previewEvidence), "https://example.test/source");
   assert.equal(evidencePublishedAt(previewEvidence), "2026-04-30T01:00:00+08:00");
+});
+
+test("evidenceSourceUrl rejects unsafe href schemes so no anchor is rendered", () => {
+  const javascriptSchemeEvidence: EvidenceItem = {
+    ...fullEvidence,
+    id: "unsafe-1",
+    url: "javascript:alert(1)",
+  };
+  const dataSchemeEvidence: EvidenceItem = {
+    ...fullEvidence,
+    id: "unsafe-2",
+    url: "data:text/html,<script>alert(1)</script>",
+  };
+
+  assert.equal(evidenceSourceUrl(javascriptSchemeEvidence), null);
+  assert.equal(evidenceSourceUrl(dataSchemeEvidence), null);
+
+  assert.equal(isSafeLinkUrl("javascript:alert(1)"), false);
+  assert.equal(isSafeLinkUrl("data:text/html,evil"), false);
+  assert.equal(isSafeLinkUrl("https://example.test/safe"), true);
+  assert.equal(isSafeLinkUrl("http://example.test/safe"), true);
+  assert.equal(isSafeLinkUrl(null), false);
 });
 
 test("latestNewsEvidenceLinks returns newest linked news first", () => {

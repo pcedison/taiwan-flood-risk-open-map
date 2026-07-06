@@ -14,6 +14,8 @@ colorama==0.4.6 ; sys_platform == 'win32'
     # via
     #   click
     #   uvicorn
+defusedxml==0.7.1
+    # via flood-risk-api (apps/api/pyproject.toml)
 fastapi==0.139.0
     # via flood-risk-api (apps/api/pyproject.toml)
 h11==0.16.0

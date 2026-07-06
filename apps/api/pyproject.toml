@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "FastAPI backend skeleton for the Flood Risk project."
 requires-python = ">=3.12"
 dependencies = [
+  "defusedxml>=0.7.1",
   "fastapi>=0.115",
   "psycopg[binary,pool]>=3.2",
   "redis>=5.0",
@@ -18,6 +19,7 @@ dev = [
   "pytest>=8.3",
   "pyyaml>=6",
   "ruff>=0.6",
+  "types-defusedxml>=0.7",
 ]
 
 [tool.pytest.ini_options]

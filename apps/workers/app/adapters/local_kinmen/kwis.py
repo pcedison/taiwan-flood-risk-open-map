@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
+
+from defusedxml import ElementTree as ET
 
 from app.adapters._helpers import optional_float, optional_str, parse_datetime
 from app.adapters._helpers import stable_evidence_id, url_with_query
