@@ -1,159 +1,101 @@
 """Anti-drift guardrail for the ADR-0010 dual CWA/WRA realtime parsers.
 
-ADR-0010 (docs/adr/0010-realtime-bridge-as-local-diagnostic.md) deliberately keeps
-two parallel implementations that each parse the same upstream CWA/WRA responses:
+ADR-0010 (docs/adr/0010-realtime-bridge-as-local-diagnostic.md) deliberately
+keeps two parallel implementations that each parse the same upstream CWA/WRA
+responses:
 
 - The API bridge, used only as a local diagnostic tool:
   apps/api/app/domain/realtime/official.py
-  (``_fetch_cwa_rainfall_stations`` / ``_fetch_wra_water_level_stations``)
 - The workers adapters, the hosted runtime's source of truth:
-  apps/workers/app/adapters/cwa/rainfall.py (``parse_cwa_rainfall_api_payload``)
-  apps/workers/app/adapters/wra/water_level.py (``parse_wra_water_level_api_payload``)
+  apps/workers/app/adapters/cwa/rainfall.py, apps/workers/app/adapters/wra/water_level.py
 
-The ADR accepts this duplication for now (collapsing it into a shared package would
-break the editable-install layout both apps and CI rely on) but explicitly calls out
-that "upstream schema 改變必須同時改兩處" ("an upstream schema change must be applied
-in both places") is a rule that only lives in people's memory.
+The ADR accepts this duplication (collapsing it into a shared package would
+break the editable-install layout both apps and CI rely on) but calls out that
+"an upstream schema change must be applied in both places" only lives in
+people's memory. This test feeds the SAME raw upstream fixtures into both
+parsers and asserts station id, coordinates, observed value, and observed time
+line up, so single-sided drift goes red instead of silently reaching
+production.
 
-This test feeds the SAME raw upstream fixtures
-(packages/contracts/fixtures/upstream/cwa-rainfall.json and wra-water-level.json)
-into both parsers and asserts the station id, coordinates, observed value, and
-observed time line up. If an upstream field is ever renamed/moved and only one side
-is updated, this test goes red in CI instead of silently drifting until it's caught
-in production.
+The two apps are separate regular packages that both expose a top-level ``app``
+package, so they cannot be imported into one interpreter reliably. Each side's
+parser therefore runs in a subprocess whose cwd is that app's root (see
+tests/support/dual_parse_extract.py), and this test compares the JSON output.
 
-Known, deliberate parser differences that are NOT covered here (see
-docs/reviews/audit-2026-07-06-architecture.md, F2-A): the workers adapter keeps a
-rainfall station if ANY precipitation window (10m/1h/24h) is valid, while the API
-bridge requires the 1-hour window specifically. The shared CWA fixture's malformed
-station is rejected by both sides for independent reasons, so this difference does
-not need to be exercised here; it would only matter for a station whose only valid
-window is 10m or 24h.
+Known, deliberate parser differences NOT covered here (audit F2-A): the workers
+CWA adapter keeps a station if ANY precipitation window (10m/1h/24h) is valid
+while the bridge requires the 1-hour window; the bridge requires a WRA metadata
+row with observationstatus == "現存" while the worker does not. The shared
+fixtures' malformed stations are rejected by both sides regardless, so these
+differences are not exercised here.
 """
 
 from __future__ import annotations
 
 import json
-import math
-from datetime import datetime
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
-from app.adapters.wra import (
-    parse_wra_station_metadata_payload,
-    parse_wra_water_level_api_payload,
-)
-from app.adapters.cwa import parse_cwa_rainfall_api_payload
-from app.domain.realtime import official as official_realtime
-
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM_FIXTURES_DIR = REPO_ROOT / "packages" / "contracts" / "fixtures" / "upstream"
+EXTRACTOR = REPO_ROOT / "tests" / "support" / "dual_parse_extract.py"
+API_ROOT = REPO_ROOT / "apps" / "api"
+WORKERS_ROOT = REPO_ROOT / "apps" / "workers"
 
 
-def _load_json(name: str) -> Any:
-    return json.loads((UPSTREAM_FIXTURES_DIR / name).read_text(encoding="utf-8"))
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        raise AssertionError(f"expected a timezone-aware datetime, got {value!r}")
-    return value.astimezone(official_realtime.UTC)
-
-
-def test_cwa_rainfall_dual_parse_contract(monkeypatch) -> None:
-    """Bridge and worker CWA rainfall parsers must agree on the same upstream sample."""
-    payload = _load_json("cwa-rainfall.json")
-
-    # --- API bridge side: exercise the real fetch/parse path, network stubbed out. ---
-    monkeypatch.setattr(official_realtime, "_json_cache", {})
-
-    def fake_fetch_json(url: str) -> Any:
-        assert official_realtime.CWA_RAINFALL_URL in url
-        return payload
-
-    monkeypatch.setattr(official_realtime, "_fetch_json", fake_fetch_json)
-    bridge_stations = official_realtime._fetch_cwa_rainfall_stations("test-token")
-    bridge_by_id = {station.station_id: station for station in bridge_stations}
-
-    # --- Workers side: same raw payload through the real adapter parser. ---
-    worker_records = parse_cwa_rainfall_api_payload(
-        payload,
-        source_url="https://data.gov.tw/dataset/9177",
+def _extract(mode: str, app_root: Path, fixture: str) -> list[dict[str, Any]]:
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    result = subprocess.run(
+        [sys.executable, str(EXTRACTOR), mode, str(UPSTREAM_FIXTURES_DIR / fixture)],
+        cwd=str(app_root),
+        capture_output=True,
+        env=env,
     )
-    worker_by_id = {str(record["station_id"]): record for record in worker_records}
-
-    # The fixture's malformed station (sentinel rainfall, missing coordinates) must
-    # be rejected by both sides -- otherwise the two parsers disagree on what counts
-    # as a usable observation.
-    assert bridge_by_id.keys() == worker_by_id.keys()
-    assert bridge_by_id.keys() == {"C0A560"}
-
-    for station_id, bridge_station in bridge_by_id.items():
-        worker_record = worker_by_id[station_id]
-
-        assert bridge_station.station_name == worker_record["station_name"]
-
-        assert math.isclose(bridge_station.lat, worker_record["latitude"], abs_tol=1e-9)
-        assert math.isclose(bridge_station.lng, worker_record["longitude"], abs_tol=1e-9)
-
-        assert bridge_station.rainfall_1h == worker_record["rainfall_mm_1h"]
-        assert bridge_station.rainfall_10m == worker_record["rainfall_mm_10m"]
-        assert bridge_station.rainfall_24h == worker_record["rainfall_mm_24h"]
-
-        assert _as_utc(bridge_station.observed_at) == datetime.fromisoformat(
-            worker_record["observed_at"]
-        )
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    assert result.returncode == 0, f"{mode} extractor failed:\n{stderr}"
+    return json.loads(result.stdout.decode("utf-8"))
 
 
-def test_wra_water_level_dual_parse_contract(monkeypatch) -> None:
-    """Bridge and worker WRA water-level parsers must agree on the same upstream sample."""
-    fixture = _load_json("wra-water-level.json")
-    water_level_payload = fixture["water_level"]
-    station_metadata_payload = fixture["station_metadata"]
+def _by_id(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {record["station_id"]: record for record in records}
 
-    # --- API bridge side: exercise the real fetch/parse path, network stubbed out. ---
-    monkeypatch.setattr(official_realtime, "_json_cache", {})
 
-    def fake_fetch_json(url: str) -> Any:
-        if official_realtime.WRA_WATER_LEVEL_URL in url:
-            return water_level_payload
-        if official_realtime.WRA_STATION_URL in url:
-            return station_metadata_payload
-        raise AssertionError(f"unexpected upstream URL requested: {url}")
+def test_cwa_rainfall_dual_parse_contract() -> None:
+    """Bridge and worker CWA rainfall parsers must agree on the same sample."""
+    bridge = _by_id(_extract("cwa-bridge", API_ROOT, "cwa-rainfall.json"))
+    worker = _by_id(_extract("cwa-worker", WORKERS_ROOT, "cwa-rainfall.json"))
 
-    monkeypatch.setattr(official_realtime, "_fetch_json", fake_fetch_json)
-    bridge_stations = official_realtime._fetch_wra_water_level_stations()
-    bridge_by_id = {station.station_id: station for station in bridge_stations}
+    assert bridge.keys() == worker.keys()
+    assert bridge.keys() == {"C0A560"}
 
-    # --- Workers side: same raw payloads through the real adapter parsers. ---
-    worker_station_metadata = parse_wra_station_metadata_payload(station_metadata_payload)
-    worker_records = parse_wra_water_level_api_payload(
-        water_level_payload,
-        source_url="https://data.gov.tw/dataset/25768",
-        station_metadata=worker_station_metadata,
-    )
-    worker_by_id = {str(record["station_id"]): record for record in worker_records}
+    for station_id, b in bridge.items():
+        w = worker[station_id]
+        assert b["station_name"] == w["station_name"]
+        assert b["lat"] == w["lat"]
+        assert b["lng"] == w["lng"]
+        assert b["rainfall_1h"] == w["rainfall_1h"]
+        assert b["rainfall_10m"] == w["rainfall_10m"]
+        assert b["rainfall_24h"] == w["rainfall_24h"]
+        assert b["observed_at"] == w["observed_at"]
 
-    # The fixture's malformed station (sentinel water level, abolished metadata
-    # status) must be rejected by both sides.
-    assert bridge_by_id.keys() == worker_by_id.keys()
-    assert bridge_by_id.keys() == {"1010H006"}
 
-    for station_id, bridge_station in bridge_by_id.items():
-        worker_record = worker_by_id[station_id]
+def test_wra_water_level_dual_parse_contract() -> None:
+    """Bridge and worker WRA water-level parsers must agree on the same sample."""
+    bridge = _by_id(_extract("wra-bridge", API_ROOT, "wra-water-level.json"))
+    worker = _by_id(_extract("wra-worker", WORKERS_ROOT, "wra-water-level.json"))
 
-        assert bridge_station.station_name == worker_record["station_name"]
-        assert bridge_station.river_name == worker_record["river_name"]
+    assert bridge.keys() == worker.keys()
+    assert bridge.keys() == {"1010H006"}
 
-        assert math.isclose(bridge_station.lat, worker_record["latitude"], abs_tol=1e-9)
-        assert math.isclose(bridge_station.lng, worker_record["longitude"], abs_tol=1e-9)
-
-        assert bridge_station.water_level_m == worker_record["water_level_m"]
-
-        assert _as_utc(bridge_station.observed_at) == datetime.fromisoformat(
-            worker_record["observed_at"]
-        )
-
-        bridge_threshold = bridge_station.alert_level_2_m or bridge_station.alert_level_1_m
-        assert bridge_threshold == worker_record["warning_level_m"]
+    for station_id, b in bridge.items():
+        w = worker[station_id]
+        assert b["station_name"] == w["station_name"]
+        assert b["river_name"] == w["river_name"]
+        assert b["lat"] == w["lat"]
+        assert b["lng"] == w["lng"]
+        assert b["water_level_m"] == w["water_level_m"]
+        assert b["observed_at"] == w["observed_at"]
+        assert b["warning_level_m"] == w["warning_level_m"]
