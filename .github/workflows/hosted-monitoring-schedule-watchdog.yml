@@ -45,10 +45,10 @@ jobs:
       DISPATCH_HOSTED_MONITORING_ON_FAILURE: ${{ github.event.inputs.dispatch_hosted_monitoring_on_failure || 'true' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
@@ -109,7 +109,7 @@ jobs:
 
       - name: Dispatch fallback Hosted Monitoring
         if: ${{ always() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' && steps.readiness-status.outputs.status != 'passed' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const fs = require("fs");
@@ -163,7 +163,7 @@ jobs:
 
       - name: Upload schedule watchdog artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: hosted-schedule-watchdog-${{ github.run_id }}
           path: |
@@ -173,7 +173,7 @@ jobs:
 
       - name: Route schedule watchdog failure issue
         if: ${{ always() && steps.readiness-status.outputs.status != 'passed' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const fs = require("fs");
@@ -252,7 +252,7 @@ jobs:
 
       - name: Close resolved schedule watchdog issue
         if: ${{ success() }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const fs = require("fs");
