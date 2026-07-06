@@ -1,0 +1,4 @@
+# Default reviewers for all changes.
+# Add a second maintainer here as soon as one joins (see
+# docs/reviews/sustainability-master-plan-2026-07-06.md, P0-4 / bus-factor).
+* @pcedison
