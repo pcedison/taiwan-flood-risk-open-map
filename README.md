@@ -49,7 +49,10 @@ lint/typecheck commands, and contribution rules.
 ## Core Decisions
 
 - License: Apache-2.0 for software.
-- Data exports: layered licensing.
+- Data exports: layered licensing. Central sources (CWA/WRA/Civil IoT/geocoding)
+  are documented in `docs/data-sources/official/official-source-catalog.yaml`;
+  local government sources are inventoried, with per-source verification
+  status, in `docs/data-sources/local/LICENSE_TERMS.md`.
 - Deployment path: GitHub repository connected to Zeabur VPS.
 - Basemap launch path: MapLibre GL JS with PMTiles/Protomaps-compatible
   OpenStreetMap-derived data served from object storage/CDN.
