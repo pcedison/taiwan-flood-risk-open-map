@@ -125,6 +125,8 @@ dark mode（UX P2）、MapLibre 控制項在地化（UX P3）、`--muted` 對比
 
 ## 四、SUCCESSION.md 應涵蓋的傳承單點（待建）
 
+→ 已落地為 [SUCCESSION.md](../../SUCCESSION.md)（2026-07-06）
+
 以下每一項目前都只存在原作者一人手上，是「原作者明天消失，服務就斷」的單點。`SUCCESSION.md` 不放機密值，只放「這個東西是什麼、在哪裡、如何重新取得、誰有備援權限」：
 
 1. GitHub repo admin 權限（解法：org 化或第二 admin）
