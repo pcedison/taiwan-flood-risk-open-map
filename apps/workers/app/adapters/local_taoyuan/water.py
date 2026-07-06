@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree as ET
 
 from app.adapters._helpers import optional_float, optional_str, parse_datetime
 from app.adapters._helpers import stable_evidence_id
@@ -555,7 +557,7 @@ def _raw_items(
     )
 
 
-def _xml_rows(text: str) -> tuple[ET.Element, ...]:
+def _xml_rows(text: str) -> tuple[Element, ...]:
     try:
         root = ET.fromstring(text.lstrip("\ufeff").strip())
     except ET.ParseError as exc:
@@ -563,7 +565,7 @@ def _xml_rows(text: str) -> tuple[ET.Element, ...]:
     return tuple(element for element in root.iter() if element.tag.lower() == "data")
 
 
-def _child_text(element: ET.Element, name: str) -> str | None:
+def _child_text(element: Element, name: str) -> str | None:
     for child in element:
         if child.tag.lower() == name.lower():
             return optional_str(child.text)

@@ -477,8 +477,25 @@ export function formatDateTime(value: string | null, options?: { timeZone?: stri
   }).format(new Date(value));
 }
 
+const SAFE_LINK_SCHEMES = new Set(["http:", "https:"]);
+
+/**
+ * Guards against unsafe href schemes (e.g. `javascript:`, `data:`) before a
+ * value is used to render an anchor. Evidence source URLs originate from
+ * external feeds (news RSS, etc.) and must never be trusted blindly.
+ */
+export function isSafeLinkUrl(value: string | null | undefined): value is string {
+  if (!value) return false;
+  try {
+    return SAFE_LINK_SCHEMES.has(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
 export function evidenceSourceUrl(item: EvidencePreview) {
-  return item.url ?? item.source_url ?? null;
+  const candidate = item.url ?? item.source_url ?? null;
+  return isSafeLinkUrl(candidate) ? candidate : null;
 }
 
 export function evidencePublishedAt(item: EvidencePreview) {
