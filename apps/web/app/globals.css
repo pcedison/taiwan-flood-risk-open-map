@@ -5,7 +5,9 @@
   --surface: #ffffff;
   --surface-soft: #f6f8f2;
   --border: #cbd8d1;
-  --muted: #65736d;
+  /* Deepened from #65736d (~4.97:1, barely AA) so explanatory body text
+     clears ~6:1 on white and the soft surface for older/low-vision readers. */
+  --muted: #52605a;
   --accent: #147d64;
   --accent-strong: #0d5f4b;
   --warning: #c66a21;
@@ -239,7 +241,7 @@ button {
   border: 1px solid rgba(159, 93, 34, 0.28);
   border-radius: 8px;
   background: rgba(159, 93, 34, 0.08);
-  color: var(--ink);
+  color: var(--foreground);
   display: grid;
   padding: 12px 14px;
 }
