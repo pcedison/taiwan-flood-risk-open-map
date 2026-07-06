@@ -36,6 +36,7 @@ from app.api.services import (
     public_response_cache,
     public_risk,
 )
+from app.api.services.client_signal import resolve_client_signal
 from app.core.config import get_settings
 from app.domain.evidence import (
     EvidenceRecord,
@@ -530,21 +531,13 @@ def _public_rate_limit_client_key(
     settings: Any,
     namespace: str,
 ) -> str:
-    client_signal = _client_signal(request, settings.public_rate_limit_client_header)
+    client_signal = resolve_client_signal(
+        request,
+        settings.public_rate_limit_client_header,
+        settings.public_rate_limit_trusted_proxy_cidrs,
+    )
     salt = settings.abuse_hash_salt or f"{settings.service_id}:{settings.app_env}"
     return sha256(f"{namespace}:{salt}:{client_signal}".encode("utf-8")).hexdigest()
-
-
-def _client_signal(request: FastAPIRequest, configured_header: str | None) -> str:
-    if configured_header:
-        header_value = request.headers.get(configured_header)
-        if header_value:
-            configured_signal = header_value.split(",", 1)[0].strip()
-            if configured_signal:
-                return configured_signal
-    if request.client is None:
-        return "unknown-client"
-    return request.client.host
 
 
 @router.post("/geocode", response_model=GeocodeResponse)
