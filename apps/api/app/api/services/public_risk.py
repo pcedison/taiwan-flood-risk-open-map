@@ -645,9 +645,15 @@ def assessment_result_snapshot(
 ) -> dict[str, Any]:
     return {
         "assessment_id": assessment_id,
-        "location": request.point.model_dump(mode="json"),
+        # ADR-0006: the stored snapshot must not contain raw query text or
+        # precise coordinates; keep the keys for shape compatibility but
+        # coarsen to the ~1 km privacy bucket.
+        "location": {
+            "lat": round(request.point.lat, 2),
+            "lng": round(request.point.lng, 2),
+        },
         "radius_m": request.radius_m,
-        "location_text": request.location_text,
+        "location_text": None,
         "score_version": scoring.score_version,
         "scores": {
             "realtime": scoring.realtime_score,

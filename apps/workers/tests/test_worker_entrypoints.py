@@ -1242,6 +1242,9 @@ def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) 
     class _EvidenceRetentionSummary:
         rows_deleted = 6
 
+    class _LocationQueryRetentionSummary:
+        rows_deleted = 2
+
     class FakeEvidenceRetentionJob:
         def __init__(self, *, database_url: str) -> None:
             calls.append(("evidence.init", database_url))
@@ -1249,6 +1252,12 @@ def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) 
         def prune_realtime(self, *, retention_hours: int) -> _EvidenceRetentionSummary:
             calls.append(("evidence.retention", retention_hours))
             return _EvidenceRetentionSummary()
+
+        def prune_location_queries(
+            self, *, retention_hours: int
+        ) -> _LocationQueryRetentionSummary:
+            calls.append(("location_queries.retention", retention_hours))
+            return _LocationQueryRetentionSummary()
 
     monkeypatch.setattr(
         scheduler_module,
@@ -1274,12 +1283,14 @@ def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) 
 
     assert result.status == "succeeded"
     assert result.evidence_retention is not None
+    assert result.location_query_retention is not None
     assert calls == [
         ("query.init", "postgresql://worker:test@localhost/flood"),
         ("query.aggregate", ("P7D", "P1D")),
         ("query.retention", (("P7D", "P1D"), 14)),
         ("evidence.init", "postgresql://worker:test@localhost/flood"),
         ("evidence.retention", 48),
+        ("location_queries.retention", 720),
         ("tile.init", "postgresql://worker:test@localhost/flood"),
         ("tile.refresh", ("flood-potential", 25)),
         ("tile.prune", ("flood-potential", expired_before, 50)),

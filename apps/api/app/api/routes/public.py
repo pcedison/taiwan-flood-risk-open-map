@@ -698,11 +698,12 @@ def _enqueue_profile_refresh(profile: RiskProfileRecord, *, request: RiskAssessR
             profile_key=profile.profile_key,
             priority=10,
             reason="cold_lookup_profile_refresh",
+            # ADR-0006: job payloads persist in worker_runtime_jobs, so only
+            # coarse (~1 km) coordinates and no raw query text may enter them.
             payload={
-                "lat": request.point.lat,
-                "lng": request.point.lng,
+                "lat": round(request.point.lat, 2),
+                "lng": round(request.point.lng, 2),
                 "radius_m": request.radius_m,
-                "location_text": request.location_text,
             },
         )
     except RiskProfileRepositoryUnavailable:
@@ -914,7 +915,6 @@ def _persist_assessment(
                 lat=request.point.lat,
                 lng=request.point.lng,
                 radius_m=request.radius_m,
-                location_text=request.location_text,
                 score_version=scoring.score_version,
                 realtime_score=scoring.realtime_score,
                 historical_score=scoring.historical_score,

@@ -605,7 +605,6 @@ def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -
             lat=25.033,
             lng=121.5654,
             radius_m=500,
-            location_text="Taipei 101",
             score_version="risk-v0.1.0",
             realtime_score=12.5,
             historical_score=34.5,
@@ -636,12 +635,14 @@ def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -
     assert "result_snapshot" in sql
     assert "INSERT INTO risk_assessment_evidence" in sql
     assert "JOIN evidence ON evidence.id = ANY" in sql
+    # ADR-0006: raw query text must never be stored and coordinates must be
+    # coarsened to the ~1 km privacy bucket before hitting the database.
     assert params[0:9] == (
-        "Taipei 101",
-        25.033,
-        121.5654,
-        121.5654,
-        25.033,
+        None,
+        25.03,
+        121.57,
+        121.57,
+        25.03,
         500,
         "25.03,121.57",
         "25.03,121.57",

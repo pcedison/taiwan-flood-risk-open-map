@@ -13,6 +13,7 @@ from app.config import WorkerSettings, load_worker_settings
 from app.jobs.evidence_retention import (
     EvidenceRetentionSummary,
     EvidenceRetentionUnavailable,
+    LocationQueryRetentionSummary,
     PostgresEvidenceRetentionJob,
 )
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
@@ -81,6 +82,7 @@ class MaintenanceCycleResult:
     query_heat_summaries: tuple[QueryHeatAggregationSummary, ...] = ()
     query_heat_retention: QueryHeatRetentionSummary | None = None
     evidence_retention: EvidenceRetentionSummary | None = None
+    location_query_retention: LocationQueryRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
 
@@ -203,6 +205,7 @@ def run_maintenance_once(
     tile_prune_limit: int = DEFAULT_TILE_PRUNE_LIMIT,
     tile_expired_before: datetime | None = None,
     evidence_retention_hours: int | None = None,
+    location_query_retention_hours: int | None = None,
 ) -> MaintenanceCycleResult:
     resolved_settings = settings or load_worker_settings()
     resolved_periods = tuple(dict.fromkeys(periods))
@@ -210,6 +213,11 @@ def run_maintenance_once(
         evidence_retention_hours
         if evidence_retention_hours is not None
         else resolved_settings.evidence_realtime_retention_hours
+    )
+    resolved_location_query_retention_hours = (
+        location_query_retention_hours
+        if location_query_retention_hours is not None
+        else resolved_settings.location_queries_retention_hours
     )
     if not resolved_settings.database_url:
         log_event(
@@ -223,6 +231,7 @@ def run_maintenance_once(
     query_heat_summaries: tuple[QueryHeatAggregationSummary, ...] = ()
     query_heat_retention: QueryHeatRetentionSummary | None = None
     evidence_retention: EvidenceRetentionSummary | None = None
+    location_query_retention: LocationQueryRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
     expired_before = tile_expired_before or datetime.now(UTC)
@@ -237,9 +246,15 @@ def run_maintenance_once(
             retention_days=retention_days,
         )
 
-        evidence_retention = PostgresEvidenceRetentionJob(
+        retention_job = PostgresEvidenceRetentionJob(
             database_url=resolved_settings.database_url,
-        ).prune_realtime(retention_hours=resolved_retention_hours)
+        )
+        evidence_retention = retention_job.prune_realtime(
+            retention_hours=resolved_retention_hours
+        )
+        location_query_retention = retention_job.prune_location_queries(
+            retention_hours=resolved_location_query_retention_hours
+        )
 
         tile_cache_writer = PostgresTileCacheWriter(database_url=resolved_settings.database_url)
         tile_refresh = tile_cache_writer.refresh_layer_features(
@@ -270,6 +285,7 @@ def run_maintenance_once(
             query_heat_summaries=query_heat_summaries,
             query_heat_retention=query_heat_retention,
             evidence_retention=evidence_retention,
+            location_query_retention=location_query_retention,
             tile_refresh=tile_refresh,
             tile_prune=tile_prune,
         )
@@ -288,6 +304,10 @@ def run_maintenance_once(
         evidence_rows_pruned=(
             evidence_retention.rows_deleted if evidence_retention else 0
         ),
+        location_query_retention_hours=resolved_location_query_retention_hours,
+        location_query_rows_pruned=(
+            location_query_retention.rows_deleted if location_query_retention else 0
+        ),
         tile_layer_id=tile_refresh.layer_id if tile_refresh else tile_layer_id,
         tile_features_refreshed=tile_refresh.refreshed if tile_refresh else 0,
         tile_cache_deleted=tile_prune.tile_cache_deleted if tile_prune else 0,
@@ -298,6 +318,7 @@ def run_maintenance_once(
         query_heat_summaries=query_heat_summaries,
         query_heat_retention=query_heat_retention,
         evidence_retention=evidence_retention,
+        location_query_retention=location_query_retention,
         tile_refresh=tile_refresh,
         tile_prune=tile_prune,
     )
