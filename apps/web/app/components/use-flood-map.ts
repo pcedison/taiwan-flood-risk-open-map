@@ -109,6 +109,9 @@ export function useFloodMap({
               paint: {
                 "line-color": idleOverlay.lineColor,
                 "line-width": 2,
+                ...(idleOverlay.lineDasharray
+                  ? { "line-dasharray": idleOverlay.lineDasharray }
+                  : {}),
               },
             },
             beforeBasemapLabels,
@@ -176,6 +179,7 @@ export function useFloodMap({
     }
     if (map.getLayer("query-radius-line")) {
       map.setPaintProperty("query-radius-line", "line-color", riskOverlay.lineColor);
+      map.setPaintProperty("query-radius-line", "line-dasharray", riskOverlay.lineDasharray);
     }
   }, [isMapReady, riskOverlay]);
 

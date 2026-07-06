@@ -89,11 +89,11 @@ export function DiagnosticsSection({
           <section className="diagnostics-section coverage-detail-panel" aria-label={text.diagnosticsCoverageTitle}>
             <div className="section-heading">
               <span className="section-kicker">{text.nearbyCoverageKicker}</span>
-              <strong>
+              <h2>
                 {coverage
                   ? nearbyCoverageLevelLabel(coverage.overall_level)
                   : text.diagnosticsPending}
-              </strong>
+              </h2>
             </div>
             <p>{coverage ? coverage.summary : text.nearbyCoveragePending}</p>
             {coverage ? (
@@ -156,7 +156,7 @@ export function DiagnosticsSection({
           <section className="diagnostics-section layer-panel" aria-label={text.layers}>
             <div className="section-heading">
               <span className="section-kicker">{text.layers}</span>
-              <strong>
+              <h2>
                 {layerDisplayState.status === "ready"
                   ? text.layerReady
                   : layerDisplayState.status === "limited"
@@ -164,7 +164,7 @@ export function DiagnosticsSection({
                     : layerDisplayState.status === "empty"
                       ? text.layerEmpty
                       : text.layerPending}
-              </strong>
+              </h2>
             </div>
             <div className="layer-contract-status">
               {layerDisplayState.hasTileContract ? text.layerContract : text.layerFallback}

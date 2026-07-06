@@ -297,7 +297,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await page.getByText("重要提醒：本工具不是官方災害通報").click();
   await expect(page.getByText(/本服務整合公開資料與歷史/)).toBeVisible();
 
-  await page.getByLabel("輸入地標、地址或行政區").fill("台北火車站");
+  await page.getByLabel("搜尋地點").fill("台北火車站");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText("已定位：台北火車站").first()).toBeVisible();
@@ -484,7 +484,7 @@ test("structured API failures render localized public-safe messages", async ({ p
   });
 
   await page.goto("/");
-  await page.getByLabel("輸入地標、地址或行政區").fill("台北火車站");
+  await page.getByLabel("搜尋地點").fill("台北火車站");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText("資料服務暫時無法使用，請稍後再試。")).toBeVisible();
@@ -503,7 +503,7 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
 
   await page.goto("/");
 
-  await page.getByLabel("輸入地標、地址或行政區").fill("台南市安南區長溪路二段410巷16弄1號");
+  await page.getByLabel("搜尋地點").fill("台南市安南區長溪路二段410巷16弄1號");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText(/定位精度：門牌/)).toBeVisible();
@@ -511,7 +511,7 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
   await expect(page.getByText(/歷史與淹水潛勢參考為中/)).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => riskCalls).toBe(1);
 
-  await page.getByLabel("輸入地標、地址或行政區").fill("宜蘭縣礁溪鄉");
+  await page.getByLabel("搜尋地點").fill("宜蘭縣礁溪鄉");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText(/定位精度：行政區/)).toBeVisible();

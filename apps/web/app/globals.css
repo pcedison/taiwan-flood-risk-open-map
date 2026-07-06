@@ -47,6 +47,11 @@ button {
   cursor: pointer;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -338,6 +343,11 @@ button {
   background: rgba(20, 125, 100, 0.12);
 }
 
+.radius-options input:focus-visible + span {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
 .primary-action {
   width: 100%;
   border: 0;
@@ -509,6 +519,12 @@ button {
   gap: 4px;
 }
 
+.section-heading h2 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 700;
+}
+
 .section-question {
   width: fit-content;
   max-width: 100%;
@@ -544,7 +560,7 @@ button {
   border-left-color: rgba(101, 115, 109, 0.52);
 }
 
-.nearby-coverage .section-heading strong {
+.nearby-coverage .section-heading h2 {
   color: #10251e;
   font-size: 1.05rem;
   line-height: 1.25;
@@ -616,7 +632,7 @@ button {
   white-space: nowrap;
 }
 
-.risk-summary .section-heading strong {
+.risk-summary .section-heading h2 {
   color: #10251e;
   font-size: 1.45rem;
   line-height: 1.15;
@@ -924,7 +940,7 @@ button {
     #fbfcf8;
 }
 
-.nearby-sensing .section-heading strong {
+.nearby-sensing .section-heading h2 {
   color: #10251e;
   font-size: 1.08rem;
 }
