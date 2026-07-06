@@ -9,7 +9,6 @@ from app.api.schemas import (
     ConfidenceBlock,
     DataFreshness,
     Evidence,
-    EvidencePreview,
     Explanation,
     QueryHeat,
     NearbyRealtimeCoverage,
@@ -17,8 +16,8 @@ from app.api.schemas import (
     RiskAssessmentResponse,
     RiskLevelBlock,
 )
+from app.api.services import public_evidence
 from app.core.config import Settings
-from app.domain.evidence import EvidenceUpsert
 from app.domain.evidence.repository import NearbyCoverageRow
 from app.domain.geocoding import stable_uuid
 from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
@@ -112,18 +111,6 @@ class OnDemandPublicNewsLookup(Protocol):
     def __call__(
         self, request: RiskAssessRequest, /, *, now: datetime
     ) -> OnDemandNewsSearchResult: ...
-
-
-class HistoricalRecordEvidence(Protocol):
-    def __call__(
-        self, record: HistoricalFloodRecord, /, *, distance_to_query_m: float
-    ) -> Evidence: ...
-
-
-class SignalFromHistoricalRecord(Protocol):
-    def __call__(
-        self, record: HistoricalFloodRecord, /, *, distance_to_query_m: float
-    ) -> RiskEvidenceSignal: ...
 
 
 class HistoricalScoringDistance(Protocol):
@@ -240,18 +227,12 @@ class RiskAssessmentDependencies:
     use_local_historical_fallback: Callable[[str], bool]
     should_attempt_public_news_lookup: HistoricalLookupGate
     on_demand_public_news_result: OnDemandPublicNewsLookup
-    historical_record_evidence: HistoricalRecordEvidence
-    evidence_from_upsert: Callable[[EvidenceUpsert], Evidence]
-    signal_from_historical_record: SignalFromHistoricalRecord
     historical_scoring_distance: HistoricalScoringDistance
-    signal_from_evidence: Callable[[Evidence], RiskEvidenceSignal]
     needs_historical_event_lookup: HistoricalLookupGate
     persist_or_build_on_demand_evidence: PersistOrBuildOnDemandEvidence
     historical_data_freshness: HistoricalDataFreshness
-    official_realtime_evidence: Callable[[OfficialRealtimeObservation], Evidence]
     display_evidence_items: Callable[[list[Evidence]], list[Evidence]]
     score_risk: ScoreRisk
-    signal_from_official_realtime: Callable[[OfficialRealtimeObservation], RiskEvidenceSignal]
     cache_assessment_evidence: Callable[[str, list[Evidence]], None]
     persisted_official_realtime_data_freshness: PersistedOfficialRealtimeDataFreshness
     visible_source_limitations: Callable[
@@ -269,7 +250,6 @@ class RiskAssessmentDependencies:
     ]
     on_demand_data_freshness: OnDemandDataFreshness
     persist_assessment: PersistAssessment
-    evidence_preview: Callable[[Evidence], EvidencePreview]
     query_heat: QueryHeatLookup
 
 
@@ -362,15 +342,15 @@ def assess_risk(
                 now=created_at,
             )
         historical_evidence_items = [
-            dependencies.historical_record_evidence(record, distance_to_query_m=distance_m)
+            public_evidence.historical_record_evidence(record, distance_to_query_m=distance_m)
             for record, distance_m in historical_records
         ]
         historical_evidence_items.extend(
-            dependencies.evidence_from_upsert(record) for record in on_demand_news.records
+            public_evidence.evidence_from_upsert(record) for record in on_demand_news.records
         )
         historical_signals = (
             *tuple(
-                dependencies.signal_from_historical_record(
+                public_evidence.signal_from_historical_record(
                     record,
                     distance_to_query_m=dependencies.historical_scoring_distance(
                         record=record,
@@ -382,7 +362,7 @@ def assess_risk(
                 for record, distance_m in historical_records
             ),
             *tuple(
-                dependencies.signal_from_evidence(item)
+                public_evidence.signal_from_evidence(item)
                 for item in historical_evidence_items[len(historical_records) :]
             ),
         )
@@ -416,7 +396,7 @@ def assess_risk(
                     now=created_at,
                 )
             historical_record_evidence_items = [
-                dependencies.historical_record_evidence(record, distance_to_query_m=distance_m)
+                public_evidence.historical_record_evidence(record, distance_to_query_m=distance_m)
                 for record, distance_m in historical_records
             ]
             on_demand_evidence_items = dependencies.persist_or_build_on_demand_evidence(
@@ -429,9 +409,9 @@ def assess_risk(
                 *on_demand_evidence_items,
             ]
             historical_signals = (
-                *tuple(dependencies.signal_from_evidence(item) for item in db_evidence_items),
+                *tuple(public_evidence.signal_from_evidence(item) for item in db_evidence_items),
                 *tuple(
-                    dependencies.signal_from_historical_record(
+                    public_evidence.signal_from_historical_record(
                         record,
                         distance_to_query_m=dependencies.historical_scoring_distance(
                             record=record,
@@ -443,7 +423,7 @@ def assess_risk(
                     for record, distance_m in historical_records
                 ),
                 *tuple(
-                    dependencies.signal_from_evidence(item)
+                    public_evidence.signal_from_evidence(item)
                     for item in on_demand_evidence_items
                 ),
             )
@@ -462,7 +442,7 @@ def assess_risk(
             )
             historical_evidence_items = [*db_evidence_items, *on_demand_evidence_items]
             historical_signals = tuple(
-                dependencies.signal_from_evidence(item) for item in historical_evidence_items
+                public_evidence.signal_from_evidence(item) for item in historical_evidence_items
             )
             historical_freshness_db_items = tuple(historical_evidence_items)
     historical_freshness = dependencies.historical_data_freshness(
@@ -472,7 +452,7 @@ def assess_risk(
     )
     evidence_items = [
         *(
-            dependencies.official_realtime_evidence(observation)
+            public_evidence.official_realtime_evidence(observation)
             for observation in realtime_bundle.observations
         ),
         *historical_evidence_items,
@@ -481,7 +461,7 @@ def assess_risk(
     scoring = dependencies.score_risk(
         (
             *(
-                dependencies.signal_from_official_realtime(observation)
+                public_evidence.signal_from_official_realtime(observation)
                 for observation in realtime_bundle.observations
             ),
             *historical_signals,
@@ -547,7 +527,7 @@ def assess_risk(
         historical=RiskLevelBlock(level=scoring.historical_level),
         confidence=ConfidenceBlock(level=scoring.confidence_level),
         explanation=explanation,
-        evidence=[dependencies.evidence_preview(item) for item in display_evidence_items],
+        evidence=[public_evidence.evidence_preview(item) for item in display_evidence_items],
         data_freshness=data_freshness,
         query_heat=dependencies.query_heat(risk_request, now=created_at),
         nearby_realtime_coverage=nearby_coverage,
