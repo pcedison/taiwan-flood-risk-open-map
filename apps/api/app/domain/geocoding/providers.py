@@ -732,8 +732,7 @@ def fetch_postgis_open_data_candidates(
     *,
     query_aliases: tuple[str, ...],
 ) -> tuple[PlaceCandidate, ...]:
-    import psycopg
-    from psycopg.rows import dict_row
+    from app.core.db import pooled_connection
 
     normalized_query = compact_taiwan_query_key(request.query)
     sql = """
@@ -776,7 +775,7 @@ def fetch_postgis_open_data_candidates(
         LIMIT %(limit)s
     """
     candidates: list[PlaceCandidate] = []
-    with psycopg.connect(database_url, connect_timeout=2, row_factory=dict_row) as connection:
+    with pooled_connection(database_url) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
                 sql,

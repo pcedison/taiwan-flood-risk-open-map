@@ -8,8 +8,9 @@ import re
 from typing import Any, cast
 
 import psycopg
+
+from app.core.db import pooled_connection
 from psycopg.types.json import Jsonb
-from psycopg.rows import dict_row
 
 
 ConnectionFactory = Callable[[], Any]
@@ -1060,7 +1061,7 @@ def _fetch_records(
 def _connect(database_url: str, connection_factory: ConnectionFactory | None) -> Any:
     if connection_factory is not None:
         return connection_factory()
-    return psycopg.connect(database_url, connect_timeout=2, row_factory=dict_row)
+    return pooled_connection(database_url)
 
 
 def _apply_statement_timeout(cursor: Any, statement_timeout_ms: int) -> None:
