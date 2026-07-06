@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from app.domain.realtime.local_source_action_plan import build_local_source_action_plan
-from app.domain.realtime.local_source_contract_probe import (
+from app.ops.local_source.local_source_action_plan import build_local_source_action_plan
+from app.ops.local_source.local_source_contract_probe import (
     ProbeHttpResponse,
     build_public_api_contract_probe,
     classify_contract_probe_response,
 )
-from app.domain.realtime.local_source_coverage import list_local_source_coverage
+from app.ops.local_source.local_source_coverage import list_local_source_coverage
 
 
 def test_classifies_machine_readable_response_with_required_fields_as_live_candidate() -> None:

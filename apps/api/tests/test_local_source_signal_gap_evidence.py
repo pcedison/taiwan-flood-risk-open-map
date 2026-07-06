@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from app.domain.realtime.local_source_action_plan import build_local_source_action_plan
-from app.domain.realtime.local_source_coverage import list_local_source_coverage
-from app.domain.realtime.local_source_signal_gap_evidence import (
+from app.ops.local_source.local_source_action_plan import build_local_source_action_plan
+from app.ops.local_source.local_source_coverage import list_local_source_coverage
+from app.ops.local_source.local_source_signal_gap_evidence import (
     build_signal_gap_official_smoke_evidence,
 )
 
