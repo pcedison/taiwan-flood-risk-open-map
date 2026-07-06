@@ -13,10 +13,10 @@ export const text = {
   panelLabel: "風險查詢面板",
   searchPlace: "搜尋地點",
   searchPlaceholder: "輸入地標、地址或行政區",
-  betaLimitTitle: "Public beta 使用限制",
+  betaLimitTitle: "重要提醒：本工具不是官方災害通報",
   betaLimitAction: "查看限制",
   betaLimitMessage:
-    "本服務為公開資料與歷史/潛勢圖資整合的淹水風險查詢 beta。結果不可視為即時災害通報或購屋安全保證；地址定位可能因開放資料覆蓋不足而退回道路或行政區精度。",
+    "本服務整合公開資料與歷史/潛勢圖資，查詢結果僅供風險參考，不是即時災害通報，也不能作為購屋或居住安全的保證；地址如果定位不夠精準，會退回顯示道路或行政區的概略範圍。",
   radius: "分析半徑",
   assessRisk: "查詢風險",
   currentCoordinate: "目前座標",
@@ -114,6 +114,13 @@ export const text = {
   reportDisabledMessage: "此功能會等法律、隱私、審核與治理流程完成後再開放。",
   provided: "已提供",
   tileLabel: "圖磚",
+};
+
+export const emergencyGuidance = {
+  notice: "本工具不是官方災害通報，查詢結果僅供風險參考。",
+  callToAction: "如遇緊急淹水危險，請立即撥打 119；即時官方水情請查看",
+  officialLinkLabel: "水利署防災資訊網",
+  officialLinkUrl: "https://fhy.wra.gov.tw",
 };
 
 export const sourceLabels: Record<CoordinateSource, string> = {

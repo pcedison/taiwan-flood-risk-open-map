@@ -290,12 +290,12 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "台灣淹水風險開放地圖" })).toBeVisible();
   await expect(page.locator(".map-canvas")).toBeVisible();
-  await expect(page.getByText("Public beta 使用限制")).toBeVisible();
-  await expect(page.getByText(/本服務為公開資料與歷史/)).not.toBeVisible();
-  await page.getByText("Public beta 使用限制").click();
-  await expect(page.getByText(/本服務為公開資料與歷史/)).toBeVisible();
-  await page.getByText("Public beta 使用限制").click();
-  await expect(page.getByText(/本服務為公開資料與歷史/)).not.toBeVisible();
+  await expect(page.getByText("重要提醒：本工具不是官方災害通報")).toBeVisible();
+  await expect(page.getByText(/本服務整合公開資料與歷史/)).toBeVisible();
+  await page.getByText("重要提醒：本工具不是官方災害通報").click();
+  await expect(page.getByText(/本服務整合公開資料與歷史/)).not.toBeVisible();
+  await page.getByText("重要提醒：本工具不是官方災害通報").click();
+  await expect(page.getByText(/本服務整合公開資料與歷史/)).toBeVisible();
 
   await page.getByLabel("輸入地標、地址或行政區").fill("台北火車站");
   await page.getByRole("button", { name: "查詢風險" }).click();
@@ -303,6 +303,10 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("已定位：台北火車站").first()).toBeVisible();
   await expect(page.locator(".map-coordinate-card")).toContainText("25.04776, 121.51706");
   await expect(page.getByText("綜合風險：中")).toBeVisible();
+  await expect(page.getByTestId("risk-summary")).toContainText("本工具不是官方災害通報");
+  await expect(
+    page.getByTestId("risk-summary").getByRole("link", { name: "水利署防災資訊網" }),
+  ).toBeVisible();
   await expect(page.getByText("回答：目前要看哪個風險？為什麼採這個等級？")).toBeVisible();
   await expect(page.getByText("即時：低；歷史參考：中")).toBeVisible();
   await expect(page.getByText("主導：歷史參考")).toBeVisible();

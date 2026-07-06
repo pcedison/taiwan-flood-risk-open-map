@@ -749,6 +749,25 @@ button {
   text-wrap: pretty;
 }
 
+.risk-emergency-notice {
+  margin: 10px 0 0;
+  border-left: 4px solid rgba(198, 106, 33, 0.45);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--muted);
+  background: rgba(198, 106, 33, 0.07);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.risk-emergency-notice a {
+  color: var(--accent-strong);
+  font-weight: 800;
+  text-decoration: underline;
+}
+
 .risk-overlay-note {
   color: var(--muted);
 }
