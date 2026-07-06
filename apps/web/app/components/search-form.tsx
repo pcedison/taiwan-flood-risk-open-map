@@ -1,7 +1,8 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { radiusOptions, text } from "../lib/ui-text";
+import type { GeocodeCandidate } from "../lib/page-types";
+import { geocodePrecisionLabel, radiusOptions, text } from "../lib/ui-text";
 
 type SearchFormProps = {
   query: string;
@@ -9,8 +10,10 @@ type SearchFormProps = {
   isLoading: boolean;
   errorMessage: string | null;
   geocodeNotice: string | null;
+  geocodeCandidates: GeocodeCandidate[];
   onQueryChange: (value: string) => void;
   onRadiusChange: (value: number) => void;
+  onSelectGeocodeCandidate: (candidate: GeocodeCandidate) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
@@ -20,8 +23,10 @@ export function SearchForm({
   isLoading,
   errorMessage,
   geocodeNotice,
+  geocodeCandidates,
   onQueryChange,
   onRadiusChange,
+  onSelectGeocodeCandidate,
   onSubmit,
 }: SearchFormProps) {
   return (
@@ -64,6 +69,11 @@ export function SearchForm({
       <button className="primary-action" type="submit" disabled={isLoading}>
         {isLoading ? text.loading : text.assessRisk}
       </button>
+      {isLoading ? (
+        <p className="form-loading-hint" role="status">
+          {text.queryLoadingHint}
+        </p>
+      ) : null}
       {errorMessage ? (
         <p className="form-error" role="alert">
           {errorMessage}
@@ -73,6 +83,21 @@ export function SearchForm({
         <p className="form-notice" role="status">
           {geocodeNotice}
         </p>
+      ) : null}
+      {geocodeCandidates.length > 0 ? (
+        <div className="geocode-candidates" role="group" aria-label={text.geocodeCandidatesLabel}>
+          {geocodeCandidates.map((candidate, index) => (
+            <button
+              key={`${candidate.name}-${index}`}
+              type="button"
+              className="geocode-candidate"
+              onClick={() => onSelectGeocodeCandidate(candidate)}
+            >
+              <span>{candidate.name}</span>
+              <span>{geocodePrecisionLabel(candidate.precision)}</span>
+            </button>
+          ))}
+        </div>
       ) : null}
     </form>
   );

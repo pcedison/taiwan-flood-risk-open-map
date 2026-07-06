@@ -235,7 +235,7 @@ test("profile preview state labels precomputed profile responses", () => {
   });
 
   assert.equal(state.isProfilePreview, true);
-  assert.equal(state.label, "區域 profile 初步結果");
+  assert.equal(state.label, "區域概略估計");
   assert.match(state.message ?? "", /risk_grid:h3:8/);
 
   assert.deepEqual(getProfilePreviewState({ data_freshness: [] }), {

@@ -386,6 +386,46 @@ button {
   line-height: 1.45;
 }
 
+.form-loading-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.geocode-candidates {
+  display: grid;
+  gap: 8px;
+}
+
+.geocode-candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-soft);
+  color: var(--foreground);
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.geocode-candidate:hover {
+  border-color: rgba(20, 125, 100, 0.58);
+  background: rgba(20, 125, 100, 0.12);
+}
+
+.geocode-candidate span:last-child {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .user-report-panel {
   background: #fbfcf8;
 }
@@ -1645,8 +1685,20 @@ button {
   }
 
   .side-panel {
+    display: contents;
     min-height: auto;
     max-height: none;
+  }
+
+  /* F6: surface the search form above the map on the first screen instead of
+     leaving it buried below a full-height map with no discoverability hint. */
+  .query-panel {
+    order: -1;
+    background: var(--surface);
+  }
+
+  .evidence-panel {
+    background: var(--surface);
   }
 
   .top-bar {

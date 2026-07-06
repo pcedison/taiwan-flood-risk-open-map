@@ -318,7 +318,7 @@ export function riskSummaryDecisionText(input: {
           ? "目前由歷史事件或淹水潛勢參考主導。"
           : "即時與歷史參考落在相同等級。";
 
-  return `綜合風險取即時與歷史參考中的較高等級；資料信心（${confidenceLevel}）只描述證據可靠度，不會單獨拉高風險。${driver}`;
+  return `綜合風險取即時與歷史參考中較高的等級；資料信心（${confidenceLevel}）只是說明這次證據的可靠程度，不會單獨把風險等級拉高。${driver}`;
 }
 
 export function riskDecisionSummary(input: {
@@ -946,11 +946,11 @@ export function getProfilePreviewState(input: {
 
   return {
     isProfilePreview: true,
-    label: "區域 profile 初步結果",
+    label: "區域概略估計",
     message:
       profileFreshness.message ??
       input?.explanation?.summary ??
-      "本次結果先使用預先計算的區域風險 profile，精準半徑資料會由背景工作更新。",
+      "這是本區域的概略估計，系統稍後會自動補齊更精確範圍的資料。",
   };
 }
 
@@ -983,11 +983,11 @@ export function getProfileBasisText(input: {
     historicalNote:
       evidenceReason ??
       (evidenceCount > 0
-        ? `profile 已提供 ${evidenceCount} 筆摘要證據。`
-        : "profile 尚未列出逐筆摘要證據。"),
-    confidenceNote: "由 profile 的來源類型、資料筆數、時間新鮮度與覆蓋缺口推估。",
+        ? `這次區域概略估計已提供 ${evidenceCount} 筆摘要證據。`
+        : "這次區域概略估計還沒有逐筆列出的摘要證據。"),
+    confidenceNote: "依資料來源類型、資料筆數、時間新鮮度與覆蓋缺口推估而來。",
     limitationLead:
-      "這不是系統錯誤，而是本次 profile 未納入的資料來源；即時雨量或水位缺口會限制即時判斷。",
+      "這不是系統錯誤，而是這次區域概略估計還沒有涵蓋到的資料來源；即時雨量或水位資料不足時，會限制即時判斷的準確度。",
   };
 }
 
