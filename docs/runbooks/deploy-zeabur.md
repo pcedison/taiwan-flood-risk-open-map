@@ -303,11 +303,30 @@ Future or phase-specific variables:
 | `RAW_SNAPSHOT_RETENTION_DAYS` | worker | Future retention policy once raw snapshot cleanup exists |
 | `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_RAW`, `S3_BUCKET_PROCESSED` | api, worker | Do not use these names in Phase 1. Current config uses `MINIO_ENDPOINT` and `MINIO_BUCKET_RAW_SNAPSHOTS`; introduce S3 aliases only with matching runtime support and `.env.example` updates. |
 
+## Service Split With SERVICE_ROLE (available now)
+
+The production image is role-aware: the same Dockerfile deploys as one
+service (default) or as three services, one per runtime. Splitting isolates
+an OOM or restart in one runtime from taking down the other two — the main
+availability risk observed on small nodes.
+
+Create three Zeabur services from the same repo/Dockerfile and set one env
+var each:
+
+| Service | Env | Public | Notes |
+|---|---|---|---|
+| `api` | `SERVICE_ROLE=api` | yes (or internal-only behind web) | Listens on `$PORT`; applies migrations on start (`RUN_DATABASE_MIGRATIONS_ON_START`); set `UVICORN_FORWARDED_ALLOW_IPS` if the direct peer is the platform ingress. |
+| `web` | `SERVICE_ROLE=web` | yes | Set `INTERNAL_API_BASE_URL` to the api service URL so `/v1` rewrites reach it (the entrypoint warns if it still points at loopback). |
+| `scheduler` | `SERVICE_ROLE=scheduler` | no | Exactly one replica; expects migrations already applied by `api`; needs `WORKER_DATABASE_URL`/`DATABASE_URL`. |
+
+Deploy order on first split: `api` (migrations) → `web` → `scheduler`.
+The startup contract lives in `infra/docker/entrypoint.sh`.
+
 ## Future Service Split
 
 Use separate Zeabur services later so each runtime can scale and restart independently.
 
-The single-service mode above is not the final production topology. The split services below remain the target once database migrations, worker scheduling, and raw snapshot storage are actively operated.
+The single-service mode above is not the final production topology. The `SERVICE_ROLE` split above is the supported first step; the fuller split below remains the long-term target once database migrations, worker scheduling, and raw snapshot storage are actively operated.
 
 | Service | Root | Public | Purpose | Current command | Next target |
 |---|---|---|---|---|---|
