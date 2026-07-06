@@ -35,12 +35,12 @@ from app.api.schemas import (
     UserReportPrivacyRedactionResponse,
 )
 from app.core.config import get_settings
-from app.domain.realtime.local_source_coverage import (
+from app.ops.local_source.local_source_coverage import (
     LocalSourceCoverageRecord,
     list_local_source_coverage,
     local_source_coverage_generated_at,
 )
-from app.domain.realtime.local_source_action_plan import build_local_source_action_plan
+from app.ops.local_source.local_source_action_plan import build_local_source_action_plan
 from app.domain.reports import (
     UserReportModerationRecord,
     UserReportPrivacyRedactionRecord,
