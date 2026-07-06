@@ -60,7 +60,6 @@ def test_prune_realtime_deletes_official_station_evidence_past_cutoff() -> None:
     assert summary.event_types == (
         "rainfall",
         "water_level",
-        "flood_report",
         "flood_warning",
     )
     assert summary.cutoff == now - timedelta(hours=48)
@@ -71,20 +70,32 @@ def test_prune_realtime_deletes_official_station_evidence_past_cutoff() -> None:
     assert "source_type = 'official'" in sql
     assert "event_type = ANY(%s::text[])" in sql
     assert params == (
-        ["rainfall", "water_level", "flood_report", "flood_warning"],
+        ["rainfall", "water_level", "flood_warning"],
         now - timedelta(hours=48),
         50_000,
     )
 
 
-def test_prune_realtime_flood_report_and_warning_scoped_to_official_source() -> None:
-    """flood_report/flood_warning are prunable, but only for source_type='official'.
+def test_prune_realtime_excludes_flood_report_to_protect_observed_history() -> None:
+    """flood_report must not be in the default prunable set.
 
-    Historical flood_report evidence (e.g. news or public reports) shares the
-    same event_type but uses a non-official source_type. The prune query must
-    filter on ``source_type = 'official'`` as a hardcoded SQL literal (not a
-    bind parameter), so those non-official rows can never be deleted no
-    matter what event_types/params are passed in.
+    profiles.py counts every flood_report (including official ones) as
+    observed history for historical_score, so pruning aged official flood
+    reports would erase real observed flood events. flood_warning is safe
+    (scoring treats it only as a realtime signal).
+    """
+    from app.jobs.evidence_retention import PRUNABLE_REALTIME_EVENT_TYPES
+
+    assert "flood_report" not in PRUNABLE_REALTIME_EVENT_TYPES
+    assert "flood_warning" in PRUNABLE_REALTIME_EVENT_TYPES
+
+
+def test_prune_realtime_scoped_to_official_source() -> None:
+    """The prune query filters source_type='official' as a hardcoded literal.
+
+    Even if a caller passes an event_type shared with non-official evidence,
+    the 'official' filter is baked into the SQL text (not a bind parameter),
+    so non-official rows can never be deleted.
     """
     connection = _FakeConnection((3,))
     now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
@@ -92,7 +103,7 @@ def test_prune_realtime_flood_report_and_warning_scoped_to_official_source() -> 
 
     job.prune_realtime(
         retention_hours=48,
-        event_types=("flood_report", "flood_warning"),
+        event_types=("flood_warning",),
         now=now,
     )
 
@@ -100,7 +111,7 @@ def test_prune_realtime_flood_report_and_warning_scoped_to_official_source() -> 
     # 'official' is a literal baked into the SQL text, not a bind parameter --
     # there is no way for a caller to widen the query to non-official rows.
     assert "source_type = 'official'" in sql
-    assert params == (["flood_report", "flood_warning"], now - timedelta(hours=48), 50_000)
+    assert params == (["flood_warning"], now - timedelta(hours=48), 50_000)
 
 
 def test_prune_realtime_skips_when_no_event_types() -> None:
