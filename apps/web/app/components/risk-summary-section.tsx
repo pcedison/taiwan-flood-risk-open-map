@@ -7,7 +7,7 @@ import type {
   riskOverlayPresentation,
 } from "../lib/risk-display";
 import { normalizeRiskLevel, riskDecisionSummary, riskSummaryDecisionText } from "../lib/risk-display";
-import { riskMeterPosition, text } from "../lib/ui-text";
+import { emergencyGuidance, riskMeterPosition, text } from "../lib/ui-text";
 
 type RiskSummarySectionProps = {
   assessment: RiskAssessmentResponse | null;
@@ -45,6 +45,14 @@ export function RiskSummarySection({
         <span className="section-kicker">{text.riskSummary}</span>
         <strong>{riskSummaryHeading}</strong>
       </div>
+      <p className="risk-emergency-notice" role="note">
+        {emergencyGuidance.notice} {emergencyGuidance.callToAction}
+        {" "}
+        <a href={emergencyGuidance.officialLinkUrl} target="_blank" rel="noopener noreferrer">
+          {emergencyGuidance.officialLinkLabel}
+        </a>
+        。
+      </p>
       <p className="section-question">{text.riskQuestion}</p>
       <div className="risk-meter" aria-label={text.riskMeter}>
         <span style={{ left: riskMeterPosition(combinedRisk ?? undefined) }} />
