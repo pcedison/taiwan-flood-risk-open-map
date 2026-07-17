@@ -80,7 +80,10 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/local-source-request-followups.py" in step_text
     assert "scripts/local-source-completion-audit.py" in step_text
     assert "--markdown-output artifacts/hosted-completion-audit.md" in step_text
-    assert "actions/upload-artifact@v6" in step_text
+    assert (
+        "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+        in step_text
+    )
 
     required_admin_step = next(
         step for step in steps if step.get("name") == "Require admin source freshness token"
@@ -327,7 +330,10 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         if step.get("name") == "Route hosted monitoring failure issue"
     )
     assert alert_routing_step["if"] == "${{ failure() }}"
-    assert alert_routing_step["uses"] == "actions/github-script@v8"
+    assert alert_routing_step["uses"] == (
+        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
+    assert alert_routing_step["with"]["retries"] == "3"
     assert "hosted-monitoring-alert" in alert_routing_step["with"]["script"]
     assert "Hosted Monitoring failure" in alert_routing_step["with"]["script"]
     assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
@@ -344,7 +350,10 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         if step.get("name") == "Close resolved hosted monitoring failure issue"
     )
     assert resolve_step["if"] == "${{ success() }}"
-    assert resolve_step["uses"] == "actions/github-script@v8"
+    assert resolve_step["uses"] == (
+        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
+    assert resolve_step["with"]["retries"] == "3"
     resolve_script = resolve_step["with"]["script"]
     assert "hosted-monitoring-alert" in resolve_script
     assert "Hosted Monitoring failure" in resolve_script
