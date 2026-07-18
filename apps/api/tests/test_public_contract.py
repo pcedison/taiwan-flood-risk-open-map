@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import warnings
 from uuid import UUID
@@ -14,6 +14,7 @@ from app.api.schemas import (
     LatLng,
     NearbyCoverageSignal,
     NearbyRealtimeCoverage,
+    NearbySourceHealth,
     PlaceCandidate,
 )
 from app.api.routes import health as health_routes
@@ -25,7 +26,13 @@ from app.domain.evidence import (
     EvidenceUpsert,
     QueryHeatSnapshot,
 )
-from app.domain.evidence.repository import NearbyCoverageRow
+from app.domain.evidence.repository import (
+    NearbyCoverageRow,
+    RealtimeJurisdictionContext,
+    RealtimeJurisdictionSignalContract,
+    RealtimeJurisdictionSourceMapping,
+    RealtimeSourceHealthRow,
+)
 from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
 from app.domain.profiles import RiskProfileRecord
@@ -64,6 +71,7 @@ def fallback_to_local_historical_records(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(public_routes, "query_nearby_evidence", unavailable)
     monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", unavailable)
+    monkeypatch.setattr(public_routes, "query_realtime_jurisdiction_context", unavailable)
     monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
     monkeypatch.setattr(public_routes, "persist_risk_assessment", unavailable)
     monkeypatch.setattr(public_routes, "fetch_map_layers", layers_unavailable)
@@ -134,6 +142,87 @@ def test_ready_returns_503_when_dependency_fails(monkeypatch) -> None:
     assert payload["status"] == "down"
     assert payload["dependencies"]["redis"]["status"] == "failed"
     assert_openapi_schema(payload, "ReadyResponse")
+
+
+def test_required_schema_readiness_checks_latest_migration_and_relations() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCursor:
+        def execute(self, sql: str, params: tuple[object, ...]) -> None:
+            captured["sql"] = sql
+            captured["params"] = params
+
+        def fetchone(self) -> tuple[bool, ...]:
+            return (True, True, True, True, True, True, True)
+
+    health_routes._check_required_schema(FakeCursor())
+
+    assert "FROM schema_migrations" in str(captured["sql"])
+    assert "checksum = %s" in str(captured["sql"])
+    assert "MAX(version) = %s" in str(captured["sql"])
+    assert captured["params"] == (
+        36,
+        "0036_database_privacy_fence.sql",
+        "8384077000cdac131f7e20671a36ba31e7d45f5803dde81129a6a3f22d23bbac",
+        36,
+        "public.station_inventory_snapshots",
+        "public.realtime_jurisdiction_boundary_snapshots",
+        "public.realtime_jurisdiction_boundaries",
+        "public.realtime_jurisdiction_signal_contracts",
+        "public.realtime_source_jurisdictions",
+    )
+
+
+def test_required_schema_readiness_rejects_partial_migration() -> None:
+    class FakeCursor:
+        def execute(self, _sql: str, _params: tuple[object, ...]) -> None:
+            return None
+
+        def fetchone(self) -> tuple[bool, ...]:
+            return (True, True, True, True, False, True, True)
+
+    with pytest.raises(RuntimeError, match="required database schema migration 0036 is incomplete"):
+        health_routes._check_required_schema(FakeCursor())
+
+
+def test_database_readiness_does_not_expose_malformed_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psycopg
+
+    database_url = "postgresql://private-user:pa%ZZword@example.test/production"
+
+    def reject_dsn(*_args: object, **_kwargs: object) -> None:
+        raise psycopg.ProgrammingError(f"invalid percent-encoded DSN: {database_url}")
+
+    monkeypatch.setattr(psycopg, "connect", reject_dsn)
+
+    dependency = health_routes._check_database(database_url)
+
+    assert dependency.status == "failed"
+    assert dependency.message == health_routes.DATABASE_READINESS_FAILURE_MESSAGE
+    assert database_url not in dependency.model_dump_json()
+    assert "pa%ZZword" not in dependency.model_dump_json()
+
+
+def test_redis_readiness_does_not_expose_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import redis
+
+    redis_url = "redis://default:private-password@example.test/0"
+
+    def reject_url(*_args: object, **_kwargs: object) -> None:
+        raise ValueError(f"invalid Redis URL: {redis_url}")
+
+    monkeypatch.setattr(redis.Redis, "from_url", reject_url)
+
+    dependency = health_routes._check_redis(redis_url)
+
+    assert dependency.status == "failed"
+    assert dependency.message == health_routes.REDIS_READINESS_FAILURE_MESSAGE
+    assert redis_url not in dependency.model_dump_json()
+    assert "private-password" not in dependency.model_dump_json()
 
 
 def test_metrics_endpoint_exposes_prometheus_text() -> None:
@@ -213,6 +302,59 @@ def test_nearby_realtime_coverage_requires_top_level_contract_fields() -> None:
     assert pydantic_required == expected_required
     assert runtime_required == expected_required
     assert documented_required == expected_required
+
+
+def test_nearby_source_health_contract_is_public_safe_and_documented() -> None:
+    expected_fields = {
+        "source_id",
+        "name",
+        "signal_types",
+        "coverage_scope",
+        "health_status",
+        "reason_code",
+        "observed_at",
+        "checked_at",
+        "station_count",
+        "upstream_station_count",
+        "pages_fetched",
+        "pagination_complete",
+        "inventory_manifest_sha256",
+        "inventory_proof_status",
+        "inventory_complete",
+        "jurisdictions",
+        "required_for_absence",
+        "message",
+    }
+    forbidden_fields = {
+        "adapter_key",
+        "error_code",
+        "error_message",
+        "metadata",
+        "parameters",
+        "raw_ref",
+        "holder_id",
+        "database_url",
+    }
+    runtime_schema = client.get("/openapi.json").json()["components"]["schemas"]
+    documented_schema = OPENAPI_SPEC["components"]["schemas"]
+
+    assert set(NearbySourceHealth.model_json_schema()["properties"]) == expected_fields
+    assert set(runtime_schema["NearbySourceHealth"]["properties"]) == expected_fields
+    assert set(documented_schema["NearbySourceHealth"]["properties"]) == expected_fields
+    assert forbidden_fields.isdisjoint(expected_fields)
+    assert documented_schema["NearbySourceHealth"]["additionalProperties"] is False
+    assert set(documented_schema["NearbyCoverageSignal"]["properties"]["missing_cause"]["enum"]) == {
+        "none",
+        "no_station_in_range",
+        "inventory_unverified",
+        "stale_observation",
+        "source_degraded",
+        "source_failed",
+        "update_pipeline_stalled",
+        "source_not_configured",
+        "jurisdiction_unverified",
+        "health_unknown",
+    }
 
 
 def test_geocode_contract_and_limit() -> None:
@@ -590,7 +732,7 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert payload["query_heat"]["attention_level"] in RISK_LEVELS
     coverage = payload["nearby_realtime_coverage"]
     assert coverage["query_radius_m"] == 500
-    assert coverage["radius_buckets_m"] == [500, 1000, 3000, 5000]
+    assert coverage["radius_buckets_m"] == [500, 1000, 3000, 5000, 10000, 15000]
     assert coverage["overall_level"] in {
         "high",
         "medium",
@@ -602,6 +744,104 @@ def test_risk_assess_contract(monkeypatch) -> None:
         '縣市層級涵蓋只作背景參考，不代表查詢點附'
         '近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
     )
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_exposes_public_safe_realtime_source_health(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(public_routes, "nearest_public_news_location_text", lambda **_: None)
+    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", lambda **_: ())
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_jurisdiction_context",
+        lambda **_: RealtimeJurisdictionContext(
+            resolution_status="verified",
+            home_jurisdiction_code="63000000",
+            home_jurisdiction_name="臺北市",
+            considered_jurisdictions=(("63000000", "臺北市"),),
+            signal_contracts=tuple(
+                RealtimeJurisdictionSignalContract(
+                    jurisdiction_code="63000000",
+                    jurisdiction_name="臺北市",
+                    signal_type=signal_type,
+                    catalog_status="reviewed_complete",
+                    mapping_revision="contract-test-v1",
+                    mapping_proof_valid=True,
+                )
+                for signal_type in (
+                    "rainfall",
+                    "water_level",
+                    "flood_depth",
+                    "sewer_water_level",
+                )
+            ),
+            source_mappings=(
+                RealtimeJurisdictionSourceMapping(
+                    adapter_key="official.cwa.rainfall",
+                    signal_type="rainfall",
+                    coverage_scope="national",
+                    jurisdiction_code="TW",
+                    jurisdiction_name=None,
+                    requirement_role="required",
+                    mapping_revision="contract-test-v1",
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_source_health_rows",
+        lambda **_kwargs: (
+            RealtimeSourceHealthRow(
+                adapter_key="official.cwa.rainfall",
+                name="postgresql://private-user:private-token@db.internal/flood",
+                is_enabled=True,
+                configured_health_status="healthy",
+                last_success_at=now - timedelta(minutes=5),
+                last_failure_at=None,
+                latest_run_status="succeeded",
+                latest_run_at=now - timedelta(minutes=5),
+                latest_observed_at=now - timedelta(minutes=3),
+                latest_ingested_at=now - timedelta(minutes=2),
+                station_count=42,
+                inventory_complete=True,
+            ),
+        ),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 25.033, "lng": 121.5654},
+            "radius_m": 500,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    coverage = payload["nearby_realtime_coverage"]
+    rainfall = next(
+        item for item in coverage["signal_breakdown"] if item["signal_type"] == "rainfall"
+    )
+    source = coverage["source_health"][0]
+    assert coverage["source_health_checked"] is True
+    assert coverage["source_health_status"] == "healthy"
+    assert source["name"] == "中央氣象署雨量觀測"
+    assert source["health_status"] == "healthy"
+    assert source["reason_code"] == "operational"
+    assert source["station_count"] == 42
+    assert source["inventory_complete"] is True
+    assert rainfall["availability_state"] == "no_station"
+    assert rainfall["missing_cause"] == "no_station_in_range"
+    assert "private-token" not in response.text
+    assert "adapter_key" not in source
+    assert "error_message" not in source
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
@@ -1496,13 +1736,16 @@ def test_risk_assess_persists_before_query_heat_snapshot(monkeypatch) -> None:
     assert getattr(assessment, "lat") == 23.038818
     assert getattr(assessment, "lng") == 120.213493
     assert getattr(assessment, "radius_m") == 300
-    assert getattr(assessment, "location_text") == "Tainan Annan"
+    # ADR-0006: raw query text must not reach the persistence payload at all.
+    assert not hasattr(assessment, "location_text")
     assert getattr(assessment, "explanation")["summary"]
     assert getattr(assessment, "data_freshness")
+    # ADR-0006: the stored snapshot keeps only the ~1 km coarse location.
     assert getattr(assessment, "result_snapshot")["location"] == {
-        "lat": 23.038818,
-        "lng": 120.213493,
+        "lat": 23.04,
+        "lng": 120.21,
     }
+    assert getattr(assessment, "result_snapshot")["location_text"] is None
     assert getattr(assessment, "result_snapshot")["radius_m"] == 300
     assert getattr(assessment, "result_snapshot")["levels"]["historical"]
     assert payload["query_heat"]["query_count_bucket"] == "1-9"

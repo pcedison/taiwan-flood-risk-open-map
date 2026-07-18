@@ -43,6 +43,11 @@ from app.scheduler import enqueue_enabled_adapters_loop, run_enabled_adapters_lo
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+# Shared with the API bridge (apps/api/app/domain/realtime/official.py); see
+# tests/test_official_dual_parse_contract.py and ADR-0010.
+SHARED_UPSTREAM_FIXTURES = (
+    Path(__file__).resolve().parents[3] / "packages" / "contracts" / "fixtures" / "upstream"
+)
 
 
 def test_scheduler_lease_acquire_release_sql_supports_expired_lease() -> None:
@@ -1440,7 +1445,9 @@ def _promotion_candidate() -> PromotionCandidate:
 
 
 def _load_cwa_api_payload() -> dict[str, Any]:
-    return json.loads((FIXTURES / "cwa_rainfall_api_sample.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (SHARED_UPSTREAM_FIXTURES / "cwa-rainfall.json").read_text(encoding="utf-8")
+    )
 
 
 def _load_wra_api_payload() -> dict[str, Any]:

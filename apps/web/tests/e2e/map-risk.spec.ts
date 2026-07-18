@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.E2E_API_PORT ?? "8000"}`;
+const TILE_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGM4cffGfwAIawN9uqeRdwAAAABJRU5ErkJggg==";
 
 type MockCoverageOverrides = Partial<{
   county_level_note: string;
@@ -155,22 +157,46 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
           missing_signal_types: ["water_level"],
           overall_level: "medium",
           query_radius_m: 500,
-          radius_buckets_m: [500, 1000, 3000, 5000],
+          radius_buckets_m: [500, 1000, 3000, 5000, 10000, 15000],
           signal_breakdown: [
             {
+              availability_state: "fresh_nearby",
               counts_by_radius_m: { "500": 1, "1000": 1, "3000": 1, "5000": 1 },
               coverage_level: "medium",
+              degraded_count: 0,
+              failed_source_count: 0,
               fresh_count: 1,
               label: "雨量",
+              missing_cause: "none",
               missing_reason: null,
               nearest_distance_m: 260,
+              nearest_freshness_state: "fresh",
               nearest_observed_at: "2026-04-29T02:52:00Z",
               nearest_source_id: "cwa-rainfall",
               signal_type: "rainfall",
+              source_count: 1,
+              source_health_status: "healthy",
               stale_count: 0,
               status_only_count: 0,
             },
           ],
+          source_health: [
+            {
+              checked_at: "2026-04-29T02:57:00Z",
+              coverage_scope: "national",
+              health_status: "healthy",
+              message: "來源與站點觀測更新正常。",
+              name: "中央氣象署雨量觀測",
+              observed_at: "2026-04-29T02:52:00Z",
+              reason_code: "operational",
+              signal_types: ["rainfall"],
+              source_id: "internal-source-id-must-not-render",
+              station_count: 42,
+              inventory_complete: false,
+            },
+          ],
+          source_health_checked: true,
+          source_health_status: "healthy",
           summary: "查詢點 500 公尺內有即時雨量觀測，但缺附近水位觀測。",
         },
         query_heat: {
@@ -290,19 +316,23 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "台灣淹水風險開放地圖" })).toBeVisible();
   await expect(page.locator(".map-canvas")).toBeVisible();
-  await expect(page.getByText("Public beta 使用限制")).toBeVisible();
-  await expect(page.getByText(/本服務為公開資料與歷史/)).not.toBeVisible();
-  await page.getByText("Public beta 使用限制").click();
-  await expect(page.getByText(/本服務為公開資料與歷史/)).toBeVisible();
-  await page.getByText("Public beta 使用限制").click();
-  await expect(page.getByText(/本服務為公開資料與歷史/)).not.toBeVisible();
+  await expect(page.getByText("重要提醒：本工具不是官方災害通報")).toBeVisible();
+  await expect(page.getByText(/本服務整合公開資料與歷史/)).toBeVisible();
+  await page.getByText("重要提醒：本工具不是官方災害通報").click();
+  await expect(page.getByText(/本服務整合公開資料與歷史/)).not.toBeVisible();
+  await page.getByText("重要提醒：本工具不是官方災害通報").click();
+  await expect(page.getByText(/本服務整合公開資料與歷史/)).toBeVisible();
 
-  await page.getByLabel("輸入地標、地址或行政區").fill("台北火車站");
+  await page.getByLabel("搜尋地點").fill("台北火車站");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText("已定位：台北火車站").first()).toBeVisible();
   await expect(page.locator(".map-coordinate-card")).toContainText("25.04776, 121.51706");
   await expect(page.getByText("綜合風險：中")).toBeVisible();
+  await expect(page.getByTestId("risk-summary")).toContainText("本工具不是官方災害通報");
+  await expect(
+    page.getByTestId("risk-summary").getByRole("link", { name: "水利署防災資訊網" }),
+  ).toBeVisible();
   await expect(page.getByText("回答：目前要看哪個風險？為什麼採這個等級？")).toBeVisible();
   await expect(page.getByText("即時：低；歷史參考：中")).toBeVisible();
   await expect(page.getByText("主導：歷史參考")).toBeVisible();
@@ -377,6 +407,16 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("淹水潛勢示範圖層")).not.toBeVisible();
   await page.getByTestId("diagnostics-summary").click();
   await expect(page.getByText("來源摘要：部分受限")).toBeVisible();
+  await expect(page.getByText("逐來源公開診斷：正常")).toBeVisible();
+  await expect(page.getByText("中央氣象署雨量觀測：正常")).toBeVisible();
+  await expect(page.getByTestId("realtime-source-health")).toContainText("涵蓋範圍：全國");
+  await expect(page.getByTestId("realtime-source-health")).toContainText("已觀測站數：42");
+  await expect(page.getByTestId("realtime-source-health")).toContainText(
+    "站點清冊：完整性待驗證",
+  );
+  await expect(page.getByTestId("realtime-source-health")).not.toContainText(
+    "internal-source-id-must-not-render",
+  );
   await expect(page.locator(".source-health-summary .source-health-chip")).toHaveCount(4);
   await expect(page.getByText("圖層管線")).toBeVisible();
   await expect(page.getByText("部分可用", { exact: true }).first()).toBeVisible();
@@ -404,8 +444,20 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
 
 test("map click cancels a slow search and re-enables the query button", async ({ page }) => {
   let releaseGeocode: (() => void) | undefined;
+  let markGeocodeStarted: (() => void) | undefined;
+  const geocodeStarted = new Promise<void>((resolve) => {
+    markGeocodeStarted = resolve;
+  });
+
+  await page.route("https://basemap.example.test/**", async (route) => {
+    await route.fulfill({
+      body: Buffer.from(TILE_PNG_BASE64, "base64"),
+      contentType: "image/png",
+    });
+  });
 
   await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
+    markGeocodeStarted?.();
     await new Promise<void>((resolve) => {
       releaseGeocode = resolve;
     });
@@ -419,7 +471,8 @@ test("map click cancels a slow search and re-enables the query button", async ({
 
   try {
     await page.goto("/");
-    const canvas = page.locator(".map-canvas");
+    await page.getByLabel("地圖狀態").filter({ hasText: "互動地圖" }).waitFor();
+    const canvas = page.locator(".map-canvas canvas").first();
     await expect(canvas).toBeVisible();
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();
@@ -429,6 +482,7 @@ test("map click cancels a slow search and re-enables the query button", async ({
     await searchInput.fill("slow-address");
     await submitButton.click();
     await expect(submitButton).toBeDisabled();
+    await geocodeStarted;
 
     await canvas.click({
       position: { x: Math.round(box!.width / 2), y: Math.round(box!.height / 2) },
@@ -480,7 +534,7 @@ test("structured API failures render localized public-safe messages", async ({ p
   });
 
   await page.goto("/");
-  await page.getByLabel("輸入地標、地址或行政區").fill("台北火車站");
+  await page.getByLabel("搜尋地點").fill("台北火車站");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText("資料服務暫時無法使用，請稍後再試。")).toBeVisible();
@@ -499,7 +553,7 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
 
   await page.goto("/");
 
-  await page.getByLabel("輸入地標、地址或行政區").fill("台南市安南區長溪路二段410巷16弄1號");
+  await page.getByLabel("搜尋地點").fill("台南市安南區長溪路二段410巷16弄1號");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText(/定位精度：門牌/)).toBeVisible();
@@ -507,7 +561,7 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
   await expect(page.getByText(/歷史與淹水潛勢參考為中/)).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => riskCalls).toBe(1);
 
-  await page.getByLabel("輸入地標、地址或行政區").fill("宜蘭縣礁溪鄉");
+  await page.getByLabel("搜尋地點").fill("宜蘭縣礁溪鄉");
   await page.getByRole("button", { name: "查詢風險" }).click();
 
   await expect(page.getByText(/定位精度：行政區/)).toBeVisible();

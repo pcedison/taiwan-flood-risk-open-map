@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from app.api.errors import error_payload
 from app.api.schemas import UserReportCreateRequest, UserReportCreateResponse
+from app.api.services.client_signal import resolve_client_signal
 from app.core.config import Settings, get_settings
 from app.domain.reports import (
     UserReportChallengeFailed,
@@ -139,15 +140,11 @@ def _rate_limit_client_key(request: Request) -> str:
 
 
 def _client_signal(request: Request, configured_header: str | None) -> str:
-    if configured_header:
-        header_value = request.headers.get(configured_header)
-        if header_value:
-            configured_signal = header_value.split(",", 1)[0].strip()
-            if configured_signal:
-                return configured_signal
-    if request.client is None:
-        return "unknown-client"
-    return request.client.host
+    return resolve_client_signal(
+        request,
+        configured_header,
+        get_settings().public_rate_limit_trusted_proxy_cidrs,
+    )
 
 
 def _challenge_remote_ip(request: Request) -> str | None:

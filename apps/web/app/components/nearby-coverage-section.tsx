@@ -23,7 +23,7 @@ export function NearbyCoverageSection({
     >
       <div className="section-heading">
         <span className="section-kicker">{text.nearbyCoverageKicker}</span>
-        <strong>{summary.badge}</strong>
+        <h2>{summary.badge}</h2>
       </div>
       <p>{summary.summary}</p>
       {coverage?.county_level_note ? (

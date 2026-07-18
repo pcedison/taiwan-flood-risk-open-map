@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from app.adapters._helpers import parse_observed_at_utc
-from app.adapters.registry import enabled_adapter_keys
+from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import WorkerSettings
-from app.adapters.contracts import AdapterRunResult, DataSourceAdapter
+from app.adapters.contracts import AdapterRunResult, DataSourceAdapter, StationInventoryProof
 from app.logging import log_event
 from app.pipelines.staging import StagingBatchWriter, build_staging_batch, persist_staging_batch
 
@@ -31,6 +31,7 @@ class AdapterBatchRunSummary:
     error_message: str | None = None
     source_timestamp_min: datetime | None = None
     source_timestamp_max: datetime | None = None
+    station_inventory_proof: StationInventoryProof | None = None
 
     def log_fields(self) -> dict[str, object]:
         return {
@@ -44,6 +45,11 @@ class AdapterBatchRunSummary:
             "error_message": self.error_message,
             "source_timestamp_min": self.source_timestamp_min,
             "source_timestamp_max": self.source_timestamp_max,
+            "station_inventory_proof": (
+                self.station_inventory_proof.public_summary()
+                if self.station_inventory_proof is not None
+                else None
+            ),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }
@@ -58,6 +64,48 @@ class IngestionRunSummaryWriter(Protocol):
         parameters: dict[str, Any] | None = None,
     ) -> None:
         """Persist an operational audit row for an adapter batch run."""
+
+
+def record_runtime_selection(
+    run_writer: IngestionRunSummaryWriter | None,
+    *,
+    enabled_adapter_keys: tuple[str, ...],
+    known_adapter_keys: tuple[str, ...],
+) -> None:
+    if run_writer is None:
+        return
+    write_runtime_selection = getattr(run_writer, "write_runtime_selection", None)
+    if callable(write_runtime_selection):
+        write_runtime_selection(
+            enabled_adapter_keys=enabled_adapter_keys,
+            known_adapter_keys=known_adapter_keys,
+            checked_at=_now(),
+        )
+
+
+def record_pipeline_status(
+    run_writer: IngestionRunSummaryWriter | None,
+    *,
+    adapter_keys: tuple[str, ...],
+    status: Literal["succeeded", "failed"],
+    complete: bool,
+    run_at: datetime | None = None,
+) -> None:
+    if run_writer is None or not adapter_keys:
+        return
+    write_pipeline_status = getattr(run_writer, "write_pipeline_status", None)
+    if callable(write_pipeline_status):
+        checked_at = _now()
+        write_pipeline_status(
+            adapter_keys=adapter_keys,
+            status=status,
+            complete=complete,
+            checked_at=checked_at,
+            # Pre-fetch failures (for example adapter construction) have no
+            # ingestion summary.  Give them a generation timestamp anyway so
+            # an older overlapping cycle cannot later overwrite the fault.
+            run_at=run_at or checked_at,
+        )
 
 
 def run_adapter_batch(
@@ -101,6 +149,7 @@ def run_adapter_batch(
                 items_rejected=len(result.rejected),
                 error_code=exc.__class__.__name__,
                 error_message=str(exc),
+                station_inventory_proof=result.station_inventory_proof,
             )
 
     if run_writer is not None:
@@ -120,6 +169,7 @@ def run_adapter_batch(
                 error_message=f"run summary write failed: {exc}",
                 source_timestamp_min=summary.source_timestamp_min,
                 source_timestamp_max=summary.source_timestamp_max,
+                station_inventory_proof=summary.station_inventory_proof,
             )
 
     log_event("adapter.batch.completed", job_key=job_key, **summary.log_fields())
@@ -154,12 +204,26 @@ def run_enabled_adapter_batches(
     run_writer: IngestionRunSummaryWriter | None = None,
     job_key: str = "ingest.enabled_adapters",
     parameters: dict[str, Any] | None = None,
+    pipeline_run_at: datetime | None = None,
 ) -> tuple[AdapterBatchRunSummary, ...]:
     selected_keys = enabled_adapter_keys(settings)
     selected_adapters = tuple(
         adapter_by_key[key]
         for key in selected_keys
         if key in adapter_by_key
+    )
+    record_runtime_selection(
+        run_writer,
+        enabled_adapter_keys=selected_keys,
+        known_adapter_keys=tuple(ADAPTER_REGISTRY),
+    )
+    missing_adapter_keys = tuple(key for key in selected_keys if key not in adapter_by_key)
+    record_pipeline_status(
+        run_writer,
+        adapter_keys=missing_adapter_keys,
+        status="failed",
+        complete=False,
+        run_at=pipeline_run_at,
     )
     return run_adapter_batches(
         selected_adapters,
@@ -191,6 +255,7 @@ def _summary_from_result(
             items_rejected=len(result.rejected),
             error_code="empty_fetch",
             error_message="adapter returned no fetched raw items",
+            station_inventory_proof=result.station_inventory_proof,
         )
 
     batch = build_staging_batch(result)
@@ -217,6 +282,7 @@ def _summary_from_result(
         raw_ref=batch.raw_snapshot.raw_ref,
         source_timestamp_min=source_timestamp_min,
         source_timestamp_max=source_timestamp_max,
+        station_inventory_proof=result.station_inventory_proof,
     )
 
 

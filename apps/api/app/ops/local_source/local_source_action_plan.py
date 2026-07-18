@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Mapping
 
-from app.domain.realtime.local_source_coverage import LocalSourceCoverageRecord
+from app.ops.local_source.local_source_coverage import LocalSourceCoverageRecord
 
 
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"

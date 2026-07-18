@@ -112,7 +112,9 @@ export function publicApiErrorMessage(
   }
 
   if (error.code === "rate_limited" || error.status === 429) {
-    return RATE_LIMITED_API_ERROR_MESSAGE;
+    return error.retryAfterSeconds !== null && error.retryAfterSeconds > 0
+      ? `查詢太頻繁，請等 ${error.retryAfterSeconds} 秒後再試。`
+      : RATE_LIMITED_API_ERROR_MESSAGE;
   }
 
   if (error.code === "feature_disabled" || error.code === "layer_disabled") {

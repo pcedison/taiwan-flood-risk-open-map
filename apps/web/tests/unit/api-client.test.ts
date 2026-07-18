@@ -85,8 +85,40 @@ test("fetchJson preserves structured API error metadata for public-safe mapping"
         assert.equal(error.code, "rate_limited");
         assert.equal(error.retryAfterSeconds, 42);
         assert.equal(error.serverMessage, "Internal policy detail should not be rendered directly.");
-        assert.equal(publicApiErrorMessage(error), RATE_LIMITED_API_ERROR_MESSAGE);
+        assert.equal(publicApiErrorMessage(error), "查詢太頻繁，請等 42 秒後再試。");
         assert.equal(calls, 1);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("publicApiErrorMessage keeps the generic rate-limit copy when no retry delay is known", async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () =>
+    jsonResponse(
+      {
+        error: {
+          code: "rate_limited",
+          message: "Internal policy detail should not be rendered directly.",
+        },
+      },
+      429,
+    )) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      fetchJson("/v1/geocode", {
+        baseUrl: "",
+        timeoutMs: 10_000,
+      }),
+      (error) => {
+        assert.ok(error instanceof ApiRequestError);
+        assert.equal(error.retryAfterSeconds, null);
+        assert.equal(publicApiErrorMessage(error), RATE_LIMITED_API_ERROR_MESSAGE);
         return true;
       },
     );

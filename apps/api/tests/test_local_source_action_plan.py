@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from app.domain.realtime.local_source_action_plan import (
+from app.ops.local_source.local_source_action_plan import (
     PRODUCTION_GATE_REQUIRED_REQUIREMENTS,
     REQUIRED_REALTIME_READ_API_FIELDS,
     build_local_source_action_plan,
 )
-from app.domain.realtime.local_source_coverage import list_local_source_coverage
+from app.ops.local_source.local_source_coverage import list_local_source_coverage
 
 
 def test_local_source_action_plan_exposes_remaining_authorization_and_release_work() -> None:

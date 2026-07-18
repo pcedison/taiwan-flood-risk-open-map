@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 import json
 from typing import Any, Literal
 
@@ -9,6 +10,7 @@ from app.jobs.ingestion import AdapterBatchRunSummary
 
 ConnectionFactory = Callable[[], Any]
 IngestionJobStatus = Literal["succeeded", "failed", "skipped"]
+RuntimePipelineStatus = Literal["succeeded", "failed"]
 
 
 class PostgresIngestionRunWriter:
@@ -39,7 +41,89 @@ class PostgresIngestionRunWriter:
                     parameters=parameters or {},
                 )
                 _insert_adapter_run(cursor, summary, ingestion_job_id=job_id)
+                _insert_station_inventory_snapshot(
+                    cursor,
+                    summary,
+                    ingestion_job_id=job_id,
+                )
                 _update_data_source_health(cursor, summary)
+            connection.commit()
+
+    def write_runtime_selection(
+        self,
+        *,
+        enabled_adapter_keys: tuple[str, ...],
+        known_adapter_keys: tuple[str, ...],
+        checked_at: datetime | None = None,
+    ) -> None:
+        if not known_adapter_keys:
+            return
+        resolved_checked_at = checked_at or datetime.now(UTC)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE data_sources
+                    SET
+                        runtime_enabled = (adapter_key = ANY(%s::text[])),
+                        runtime_enabled_checked_at = %s,
+                        updated_at = now()
+                    WHERE adapter_key = ANY(%s::text[])
+                    """,
+                    (
+                        list(enabled_adapter_keys),
+                        resolved_checked_at,
+                        list(known_adapter_keys),
+                    ),
+                )
+            connection.commit()
+
+    def write_pipeline_status(
+        self,
+        *,
+        adapter_keys: tuple[str, ...],
+        status: RuntimePipelineStatus,
+        complete: bool,
+        checked_at: datetime | None = None,
+        run_at: datetime | None = None,
+    ) -> None:
+        if not adapter_keys:
+            return
+        resolved_checked_at = checked_at or datetime.now(UTC)
+        resolved_run_at = run_at or resolved_checked_at
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE data_sources
+                    SET
+                        runtime_pipeline_status = %s,
+                        runtime_pipeline_checked_at = %s,
+                        runtime_pipeline_complete = %s,
+                        runtime_pipeline_run_at = %s,
+                        updated_at = now()
+                    WHERE adapter_key = ANY(%s::text[])
+                        AND (
+                            runtime_pipeline_run_at IS NULL
+                            OR runtime_pipeline_run_at <= %s
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM ingestion_jobs jobs
+                            WHERE jobs.adapter_key = data_sources.adapter_key
+                                AND COALESCE(jobs.started_at, jobs.created_at) > %s
+                            )
+                    """,
+                    (
+                        status,
+                        resolved_checked_at,
+                        complete,
+                        resolved_run_at,
+                        list(adapter_keys),
+                        resolved_run_at,
+                        resolved_run_at,
+                    ),
+                )
             connection.commit()
 
     def _connect(self) -> Any:
@@ -144,7 +228,54 @@ def _insert_adapter_run(
             summary.error_message,
             summary.source_timestamp_min,
             summary.source_timestamp_max,
-            _json({"raw_ref": summary.raw_ref} if summary.raw_ref else {}),
+            _json(_adapter_run_metrics(summary)),
+        ),
+    )
+
+
+def _insert_station_inventory_snapshot(
+    cursor: Any,
+    summary: AdapterBatchRunSummary,
+    *,
+    ingestion_job_id: str,
+) -> None:
+    proof = summary.station_inventory_proof
+    if proof is None:
+        return
+
+    cursor.execute(
+        """
+        INSERT INTO station_inventory_snapshots (
+            ingestion_job_id,
+            adapter_key,
+            captured_at,
+            upstream_total,
+            pages_fetched,
+            pagination_complete,
+            source_items_seen,
+            station_ids_seen,
+            missing_station_id_count,
+            duplicate_station_id_count,
+            manifest_sha256,
+            station_ids,
+            inventory_complete
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+        """,
+        (
+            ingestion_job_id,
+            summary.adapter_key,
+            summary.finished_at,
+            proof.upstream_total,
+            proof.pages_fetched,
+            proof.pagination_complete,
+            proof.source_items_seen,
+            proof.station_ids_seen,
+            proof.missing_station_id_count,
+            proof.duplicate_station_id_count,
+            proof.manifest_sha256,
+            _json(list(proof.station_ids)),
+            proof.inventory_complete,
         ),
     )
 
@@ -169,10 +300,32 @@ def _update_data_source_health(cursor: Any, summary: AdapterBatchRunSummary) -> 
                 WHEN %s = 'skipped' THEN 'unknown'
                 ELSE health_status
             END,
+            runtime_pipeline_status = CASE
+                WHEN %s = 'failed' THEN 'failed'
+                ELSE runtime_pipeline_status
+            END,
+            runtime_pipeline_checked_at = CASE
+                WHEN %s = 'failed' THEN %s
+                ELSE runtime_pipeline_checked_at
+            END,
+            runtime_pipeline_complete = CASE
+                WHEN %s = 'failed' THEN false
+                ELSE runtime_pipeline_complete
+            END,
+            runtime_pipeline_run_at = CASE
+                WHEN %s = 'failed' THEN %s
+                ELSE runtime_pipeline_run_at
+            END,
             source_timestamp_min = COALESCE(%s, source_timestamp_min),
             source_timestamp_max = COALESCE(%s, source_timestamp_max),
             updated_at = now()
         WHERE adapter_key = %s
+            AND NOT EXISTS (
+                SELECT 1
+                FROM ingestion_jobs newer_job
+                WHERE newer_job.adapter_key = data_sources.adapter_key
+                    AND COALESCE(newer_job.started_at, newer_job.created_at) > %s
+            )
         """,
         (
             summary.status,
@@ -183,9 +336,16 @@ def _update_data_source_health(cursor: Any, summary: AdapterBatchRunSummary) -> 
             summary.status,
             summary.status,
             summary.status,
+            summary.status,
+            summary.status,
+            summary.finished_at,
+            summary.status,
+            summary.status,
+            summary.started_at,
             summary.source_timestamp_min,
             summary.source_timestamp_max,
             summary.adapter_key,
+            summary.started_at,
         ),
     )
 
@@ -202,5 +362,16 @@ def _adapter_run_status(summary: AdapterBatchRunSummary) -> Literal["succeeded",
     return summary.status
 
 
-def _json(value: dict[str, Any]) -> str:
+def _adapter_run_metrics(summary: AdapterBatchRunSummary) -> dict[str, Any]:
+    metrics: dict[str, Any] = {}
+    if summary.raw_ref:
+        metrics["raw_ref"] = summary.raw_ref
+    if summary.station_inventory_proof is not None:
+        metrics["station_inventory_proof"] = (
+            summary.station_inventory_proof.public_summary()
+        )
+    return metrics
+
+
+def _json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)

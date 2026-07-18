@@ -47,7 +47,7 @@ export function UserReportSection({
     <form className="panel-section user-report-panel" data-testid="user-report-panel" onSubmit={onSubmit}>
       <div className="section-heading">
         <span className="section-kicker">{text.publicReportKicker}</span>
-        <strong>{text.publicReportTitle}</strong>
+        <h2>{text.publicReportTitle}</h2>
       </div>
       <div className="report-location">
         <span>{text.reportLocation}</span>
@@ -66,7 +66,9 @@ export function UserReportSection({
         />
       </label>
       {!isReportValid && reportSummary.length > 0 ? (
-        <p className="form-error">{text.reportValidation}</p>
+        <p className="form-error" role="alert">
+          {text.reportValidation}
+        </p>
       ) : null}
       <button
         className="primary-action"

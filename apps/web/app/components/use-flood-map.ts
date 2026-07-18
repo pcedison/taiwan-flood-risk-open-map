@@ -24,6 +24,23 @@ import type { riskOverlayPresentation } from "../lib/risk-display";
 
 type RiskOverlay = ReturnType<typeof riskOverlayPresentation>;
 
+const NAVIGATION_CONTROL_LABELS: Record<string, string> = {
+  "maplibregl-ctrl-zoom-in": "放大",
+  "maplibregl-ctrl-zoom-out": "縮小",
+  "maplibregl-ctrl-compass": "重設方位",
+};
+
+function localizeNavigationControl(control: { _container?: HTMLElement }): void {
+  const container = control._container;
+  if (!container) return;
+  for (const [className, label] of Object.entries(NAVIGATION_CONTROL_LABELS)) {
+    const button = container.querySelector<HTMLButtonElement>(`.${className}`);
+    if (!button) continue;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  }
+}
+
 type UseFloodMapOptions = {
   coordinate: Coordinate;
   radius: number;
@@ -77,7 +94,11 @@ export function useFloodMap({
       });
 
       mapRef.current = map;
-      map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "top-left");
+      const navigationControl = new maplibregl.NavigationControl({ visualizePitch: false });
+      map.addControl(navigationControl, "top-left");
+      // MapLibre's built-in zoom buttons ship English title/aria-label text;
+      // localize them so the control matches the Traditional Chinese UI.
+      localizeNavigationControl(navigationControl);
       map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
       map.on("load", () => {
@@ -109,6 +130,9 @@ export function useFloodMap({
               paint: {
                 "line-color": idleOverlay.lineColor,
                 "line-width": 2,
+                ...(idleOverlay.lineDasharray
+                  ? { "line-dasharray": idleOverlay.lineDasharray }
+                  : {}),
               },
             },
             beforeBasemapLabels,
@@ -176,6 +200,7 @@ export function useFloodMap({
     }
     if (map.getLayer("query-radius-line")) {
       map.setPaintProperty("query-radius-line", "line-color", riskOverlay.lineColor);
+      map.setPaintProperty("query-radius-line", "line-dasharray", riskOverlay.lineDasharray);
     }
   }, [isMapReady, riskOverlay]);
 

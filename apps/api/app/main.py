@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.errors import error_payload
 from app.api.router import api_router
-from app.core.config import get_settings
+from app.core.config import _hosted_runtime, get_settings
 from app.domain.geocoding.postgis_bootstrap import start_postgis_geocoder_bootstrap
 
 
@@ -25,10 +25,14 @@ def create_app() -> FastAPI:
         )
         yield
 
+    hosted = _hosted_runtime(settings.app_env)
     application = FastAPI(
         title=settings.app_title,
         version=settings.app_version,
         lifespan=lifespan,
+        docs_url=None if hosted else "/docs",
+        redoc_url=None if hosted else "/redoc",
+        openapi_url=None if hosted else "/openapi.json",
     )
     application.add_middleware(
         CORSMiddleware,

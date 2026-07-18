@@ -390,3 +390,92 @@ def _spoken_admin_query(county: str, town: str | None) -> str:
         return county
     town_short = strip_admin_suffix(town)
     return f"{strip_admin_suffix(county)} {town_short if len(town_short) >= 2 else town}"
+
+
+def test_query_substring_aliases_cover_every_embedded_alias() -> None:
+    from app.domain.geocoding.providers import query_substring_aliases
+
+    substrings = query_substring_aliases("台北市信義區市府路45號")
+
+    # Any stored alias of length >= 4 embedded in the query must be present.
+    assert "信義區市府" in substrings
+    assert "市府路45號" in substrings
+    assert "台北市信義區市府路45號" in substrings
+    # The old clause's minimum length is preserved: nothing shorter than 4.
+    assert all(len(alias) >= 4 for alias in substrings)
+    # Deduplicated.
+    assert len(substrings) == len(set(substrings))
+
+
+def test_query_substring_aliases_short_query_returns_empty() -> None:
+    from app.domain.geocoding.providers import query_substring_aliases
+
+    assert query_substring_aliases("北投") == ()
+
+
+def test_query_substring_aliases_preserve_late_match_in_long_query() -> None:
+    from app.domain.geocoding.providers import query_substring_aliases
+
+    # A stored alias appearing only past character 64 must still be covered;
+    # a fixed truncation would have dropped it.
+    aliases = query_substring_aliases(("台" * 80) + "信義區市府路")
+    assert "信義區市府路" in aliases
+
+
+def test_query_substring_aliases_bounded_for_pathological_query() -> None:
+    from app.domain.geocoding.providers import query_substring_aliases
+
+    # A very long query drops the expansion rather than exploding the array;
+    # the direct alias branch still applies at the call site.
+    huge = "".join(chr(0x4E00 + (i % 5000)) for i in range(600))
+    assert query_substring_aliases(huge) == ()
+
+
+def test_fetch_postgis_open_data_candidates_uses_single_sargable_predicate(
+    monkeypatch,
+) -> None:
+    from app.domain.geocoding.providers import fetch_postgis_open_data_candidates
+
+    executed: list[tuple[str, dict]] = []
+
+    class _Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def execute(self, sql, params):
+            executed.append((sql, params))
+
+        def fetchall(self):
+            return []
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def cursor(self):
+            return _Cursor()
+
+    import app.core.db as db_module
+
+    monkeypatch.setattr(db_module, "pooled_connection", lambda _url: _Connection())
+
+    result = fetch_postgis_open_data_candidates(
+        "postgresql://example.test/flood",
+        GeocodeRequest(query="台北市信義區市府路45號", input_type="address", limit=5),
+        query_aliases=("台北市信義區市府路45號",),
+    )
+
+    assert result == ()
+    sql, params = executed[0]
+    # The non-sargable fallback is gone; one GIN-servable overlap remains.
+    assert "position(" not in sql
+    assert "unnest(" not in sql
+    assert "normalized_aliases && %(match_aliases)s::text[]" in sql
+    assert "信義區市府" in params["match_aliases"]
+    assert "台北市信義區市府路45號" in params["match_aliases"]

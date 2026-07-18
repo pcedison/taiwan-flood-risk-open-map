@@ -10,11 +10,13 @@ import json
 import re
 from time import monotonic
 from typing import Any, Literal
-from xml.etree import ElementTree
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
+from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree
 
 from app.domain.evidence import EvidenceUpsert
 from app.domain.geocoding import extract_taiwan_search_location
@@ -942,7 +944,7 @@ def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ..
     return tuple(articles)
 
 
-def _xml_child_text(item: ElementTree.Element, child_name: str) -> str:
+def _xml_child_text(item: Element, child_name: str) -> str:
     child = item.find(child_name)
     if child is None or child.text is None:
         return ""

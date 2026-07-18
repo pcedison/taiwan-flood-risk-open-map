@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Callable, Mapping
 
-from app.domain.realtime.local_source_action_plan import (
+from app.ops.local_source.local_source_action_plan import (
     REQUIRED_REALTIME_READ_API_FIELDS,
 )
 

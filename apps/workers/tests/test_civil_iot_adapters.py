@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
+from hashlib import sha256
+import json
 
 from app.adapters.civil_iot import (
     FLOOD_SENSOR_METADATA,
@@ -16,6 +19,7 @@ from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
+from app.pipelines.staging import build_staging_batch
 
 
 FETCHED_AT = datetime(2026, 6, 15, 3, 10, tzinfo=UTC)
@@ -32,6 +36,8 @@ def test_civil_iot_sta_defaults_use_colife_endpoint() -> None:
         getattr(sta_client, "STA_RAIN_SEWER_BASE", None)
         == "https://sta.colife.org.tw/STA_RainSewer/v1.0/"
     )
+    assert "$count=true" in (FLOOD_SENSOR_METADATA.resource_url or "")
+    assert "$count=true" in (RIVER_WATER_LEVEL_METADATA.resource_url or "")
 
 
 def test_fetch_sta_json_encodes_odata_url_before_request(monkeypatch) -> None:
@@ -302,6 +308,23 @@ def test_flood_sensor_api_adapter_keeps_zero_and_low_depth_readings_distinct() -
     assert "no_flooding_observed" not in low_depth_evidence.tags
 
 
+def test_civil_iot_inventory_never_infers_upstream_total_from_fetched_records() -> None:
+    adapter = FloodSensorStaApiAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: _flood_sensor_payload(),
+    )
+
+    result = adapter.run()
+
+    assert len(result.fetched) == 3
+    proof = result.station_inventory_proof
+    assert proof is not None
+    assert proof.source_items_seen == 3
+    assert proof.station_ids_seen == 3
+    assert proof.upstream_total is None
+    assert proof.inventory_complete is False
+
+
 def test_flood_sensor_api_adapter_preserves_fractional_low_depth_readings() -> None:
     payload = _flood_sensor_payload()
     payload["value"][1]["Datastreams"][0]["Observations"][0]["result"] = 0.4
@@ -358,8 +381,9 @@ def test_flood_sensor_fixture_adapter_matches_threshold_rule() -> None:
 
 def test_flood_sensor_api_adapter_fetches_paginated_sta_payload() -> None:
     page_by_url = {
-        "https://example.test/sta/flood?page=1": {
+        "https://example.test/sta/flood?page=1&$count=true": {
             "value": _flood_sensor_payload()["value"][:1],
+            "@iot.count": 3,
             "@iot.nextLink": "https://example.test/sta/flood?page=2",
         },
         "https://example.test/sta/flood?page=2": {
@@ -381,7 +405,7 @@ def test_flood_sensor_api_adapter_fetches_paginated_sta_payload() -> None:
     result = adapter.run()
 
     assert calls == [
-        ("https://example.test/sta/flood?page=1", 8),
+        ("https://example.test/sta/flood?page=1&$count=true", 8),
         ("https://example.test/sta/flood?page=2", 8),
     ]
     assert [item.payload["station_id"] for item in result.fetched] == [
@@ -394,6 +418,89 @@ def test_flood_sensor_api_adapter_fetches_paginated_sta_payload() -> None:
         "FS-002:2026-06-15T03:00:00+00:00",
         "FS-003:2026-06-15T03:00:00+00:00",
     ]
+    proof = result.station_inventory_proof
+    assert proof is not None
+    assert proof.upstream_total == 3
+    assert proof.pages_fetched == 2
+    assert proof.pagination_complete is True
+    assert proof.source_items_seen == 3
+    assert proof.station_ids == ("FS-001", "FS-002", "FS-003")
+    assert proof.inventory_complete is True
+    expected_manifest = json.dumps(
+        ["FS-001", "FS-002", "FS-003"],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert proof.manifest_sha256 == sha256(expected_manifest.encode("utf-8")).hexdigest()
+    assert proof.manifest_version == "station-id-json-v1"
+
+    staging = build_staging_batch(result)
+    assert staging.raw_snapshot.metadata["manifest_sha256"] == proof.manifest_sha256
+    assert staging.raw_snapshot.metadata["manifest_version"] == "station-id-json-v1"
+    assert staging.raw_snapshot.metadata["upstream_total"] == 3
+    assert staging.raw_snapshot.metadata["pages_fetched"] == 2
+    assert staging.raw_snapshot.metadata["pagination_complete"] is True
+    assert staging.raw_snapshot.metadata["inventory_complete"] is True
+    assert "station_ids" not in staging.raw_snapshot.metadata
+
+
+def test_flood_sensor_inventory_includes_things_without_usable_observations() -> None:
+    first_page_things = deepcopy(_flood_sensor_payload()["value"][:2])
+    first_page_things[1]["Datastreams"][0]["Observations"] = []
+    page_by_url = {
+        "https://example.test/sta/flood?$count=true": {
+            "@iot.count": 3,
+            "value": first_page_things,
+            "@iot.nextLink": "https://example.test/sta/flood?page=2",
+        },
+        "https://example.test/sta/flood?page=2": {
+            "value": _flood_sensor_payload()["value"][2:],
+        },
+    }
+    adapter = FloodSensorStaApiAdapter(
+        sta_url="https://example.test/sta/flood",
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: page_by_url[url],
+    )
+
+    result = adapter.run()
+
+    assert len(result.fetched) == 2
+    proof = result.station_inventory_proof
+    assert proof is not None
+    assert proof.source_items_seen == 3
+    assert proof.station_ids == ("FS-001", "FS-002", "FS-003")
+    assert proof.station_ids_seen == 3
+    assert proof.inventory_complete is True
+
+
+def test_flood_sensor_inventory_fails_closed_for_missing_and_duplicate_station_ids() -> None:
+    duplicate = deepcopy(_flood_sensor_payload()["value"][0])
+    duplicate["Datastreams"][0]["Observations"] = []
+    missing_id = {"properties": {}, "Datastreams": [], "Locations": []}
+    adapter = FloodSensorStaApiAdapter(
+        sta_url="https://example.test/sta/flood",
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: {
+            "@iot.count": 3,
+            "value": [
+                _flood_sensor_payload()["value"][0],
+                duplicate,
+                missing_id,
+            ],
+        },
+    )
+
+    result = adapter.run()
+
+    proof = result.station_inventory_proof
+    assert proof is not None
+    assert proof.upstream_total == 3
+    assert proof.source_items_seen == 3
+    assert proof.station_ids == ("FS-001",)
+    assert proof.missing_station_id_count == 1
+    assert proof.duplicate_station_id_count == 1
+    assert proof.inventory_complete is False
 
 
 def test_flood_sensor_api_adapter_raises_on_paginated_sta_loop() -> None:
@@ -429,6 +536,37 @@ def test_civil_iot_river_adapter_normalizes_and_drops_invalid() -> None:
     assert "4.21 公尺" in evidence.summary
 
 
+def test_civil_iot_river_adapter_uses_shared_paginated_inventory_fetch() -> None:
+    river_things = _river_payload()["value"]
+    page_by_url = {
+        "https://example.test/sta/river?$count=true": {
+            "@iot.count": 2,
+            "value": river_things[:1],
+            "@iot.nextLink": "https://example.test/sta/river?page=2",
+        },
+        "https://example.test/sta/river?page=2": {"value": river_things[1:]},
+    }
+    calls: list[str] = []
+    adapter = CivilIotRiverApiAdapter(
+        sta_url="https://example.test/sta/river",
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: calls.append(url) or page_by_url[url],
+    )
+
+    result = adapter.run()
+
+    assert calls == [
+        "https://example.test/sta/river?$count=true",
+        "https://example.test/sta/river?page=2",
+    ]
+    assert len(result.fetched) == 2
+    proof = result.station_inventory_proof
+    assert proof is not None
+    assert proof.station_ids == ("WL-7", "WL-8")
+    assert proof.pages_fetched == 2
+    assert proof.inventory_complete is True
+
+
 def test_civil_iot_river_fixture_adapter_normalizes() -> None:
     records = parse_sta_things_payload(
         _river_payload(), source_url="https://example.test/iow01"
@@ -439,6 +577,7 @@ def test_civil_iot_river_fixture_adapter_normalizes() -> None:
 
     assert len(result.normalized) == 1
     assert result.normalized[0].event_type is EventType.WATER_LEVEL
+    assert result.station_inventory_proof is None
 
 
 def test_new_adapters_registered_and_disabled_by_default() -> None:

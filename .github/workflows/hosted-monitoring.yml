@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       expected_deployment_sha:
-        description: "Expected /health deployment_sha. Defaults to production-release branch HEAD."
+        description: "Expected /health deployment_sha. Defaults to main branch HEAD."
         required: false
         type: string
       require_admin_source_freshness:
@@ -37,10 +37,10 @@ jobs:
       FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS: ${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
@@ -53,8 +53,8 @@ jobs:
           source="workflow_dispatch_input"
           expected_sha="${INPUT_EXPECTED_DEPLOYMENT_SHA:-}"
           if [ -z "${expected_sha}" ]; then
-            source="production-release"
-            expected_sha="$(git ls-remote --heads origin production-release | awk '{print $1}' || true)"
+            source="main"
+            expected_sha="$(git ls-remote --heads origin main | awk '{print $1}' || true)"
           fi
           if [ -z "${expected_sha}" ]; then
             source="workflow_commit_sha"
@@ -276,7 +276,7 @@ jobs:
 
       - name: Upload hosted monitoring artifacts
         if: ${{ always() }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: hosted-monitoring-${{ github.run_id }}
           path: |
@@ -286,8 +286,9 @@ jobs:
 
       - name: Route hosted monitoring failure issue
         if: ${{ failure() }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
+          retries: 3
           script: |
             const fs = require("fs");
             const marker = "[hosted-monitoring-alert]";
@@ -363,8 +364,9 @@ jobs:
 
       - name: Close resolved hosted monitoring failure issue
         if: ${{ success() }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
+          retries: 3
           script: |
             const marker = "[hosted-monitoring-alert]";
             const title = `${marker} Hosted Monitoring failure`;
