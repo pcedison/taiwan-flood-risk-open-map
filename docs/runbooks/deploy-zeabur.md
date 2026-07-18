@@ -91,7 +91,18 @@ forces this realtime backbone on when a database URL is present, so a legacy
 When a database URL is present, the start script applies unrecorded
 `infra/migrations/*.sql` files before launching API/Web; set
 `RUN_DATABASE_MIGRATIONS_ON_START=false` only if an operator is applying
-migrations separately.
+migrations separately. The startup runner takes a PostgreSQL session advisory
+lock so rolling replicas cannot migrate concurrently, verifies the recorded
+filename and checksum before skipping any version, and commits each migration
+in its own transaction. A drift, lock timeout, statement timeout, or failed SQL
+file aborts startup without logging the database URL; already committed earlier
+migrations remain available for a safe retry.
+
+Before a production migration that rewrites existing rows, verify a recent
+database backup has completed successfully and can be restored. An application
+deployment rollback does not restore the attached PostgreSQL volume. If no
+checkpoint can be created, stop the release unless the operator explicitly
+accepts a forward-only data migration after reviewing the affected rows.
 
 ### Health Check
 
@@ -150,6 +161,8 @@ Official ingestion scheduler for the single-service beta:
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Set `true` only as the explicit kill switch. |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional override that replaces old `WORKER_ENABLED_ADAPTER_KEYS` values during forced backbone startup. |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
+| `MIGRATION_LOCK_TIMEOUT_MS` | leave unset or `10000` | Maximum PostgreSQL lock wait per migration statement, including contention with another startup runner. Increase only for a reviewed maintenance window. |
+| `MIGRATION_STATEMENT_TIMEOUT_MS` | leave unset or `300000` | Maximum execution time for each migration statement. Each migration commits independently before the next file begins. |
 | `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor` | Selects the official realtime backbone plus the reviewed Tainan local flood-sensor fallback. |
 | `SOURCE_CWA_ENABLED` | `true` or leave unset | Enables the CWA adapter selection; `false` disables it. |
 | `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |

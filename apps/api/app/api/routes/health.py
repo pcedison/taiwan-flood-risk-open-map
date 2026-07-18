@@ -9,6 +9,19 @@ from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summar
 
 router = APIRouter(tags=["health"])
 
+REQUIRED_SCHEMA_VERSION = 36
+REQUIRED_SCHEMA_FILENAME = "0036_database_privacy_fence.sql"
+REQUIRED_SCHEMA_CHECKSUM = "8384077000cdac131f7e20671a36ba31e7d45f5803dde81129a6a3f22d23bbac"
+REQUIRED_SCHEMA_RELATIONS = (
+    "public.station_inventory_snapshots",
+    "public.realtime_jurisdiction_boundary_snapshots",
+    "public.realtime_jurisdiction_boundaries",
+    "public.realtime_jurisdiction_signal_contracts",
+    "public.realtime_source_jurisdictions",
+)
+DATABASE_READINESS_FAILURE_MESSAGE = "Database readiness check failed."
+REDIS_READINESS_FAILURE_MESSAGE = "Redis readiness check failed."
+
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
@@ -123,9 +136,46 @@ def _check_database(database_url: str) -> DependencyReadiness:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
-    except Exception as exc:
-        return DependencyReadiness(status="failed", checked_at=_now_utc(), message=str(exc))
+                _check_required_schema(cursor)
+    except Exception:
+        return DependencyReadiness(
+            status="failed",
+            checked_at=_now_utc(),
+            message=DATABASE_READINESS_FAILURE_MESSAGE,
+        )
     return DependencyReadiness(status="healthy", checked_at=_now_utc(), message=None)
+
+
+def _check_required_schema(cursor: object) -> None:
+    execute = getattr(cursor, "execute")
+    fetchone = getattr(cursor, "fetchone")
+    relation_checks = ", ".join("to_regclass(%s) IS NOT NULL" for _ in REQUIRED_SCHEMA_RELATIONS)
+    execute(
+        f"""
+        SELECT
+            EXISTS (
+                SELECT 1
+                FROM schema_migrations
+                WHERE version = %s
+                  AND filename = %s
+                  AND checksum = %s
+            ),
+            COALESCE((SELECT MAX(version) = %s FROM schema_migrations), false),
+            {relation_checks}
+        """,
+        (
+            REQUIRED_SCHEMA_VERSION,
+            REQUIRED_SCHEMA_FILENAME,
+            REQUIRED_SCHEMA_CHECKSUM,
+            REQUIRED_SCHEMA_VERSION,
+            *REQUIRED_SCHEMA_RELATIONS,
+        ),
+    )
+    row = fetchone()
+    if row is None or not all(bool(value) for value in row):
+        raise RuntimeError(
+            f"required database schema migration {REQUIRED_SCHEMA_VERSION:04d} is incomplete"
+        )
 
 
 def _check_redis(redis_url: str) -> DependencyReadiness:
@@ -135,6 +185,10 @@ def _check_redis(redis_url: str) -> DependencyReadiness:
         client = redis.Redis.from_url(redis_url, socket_connect_timeout=2, socket_timeout=2)
         client.ping()
         client.close()
-    except Exception as exc:
-        return DependencyReadiness(status="failed", checked_at=_now_utc(), message=str(exc))
+    except Exception:
+        return DependencyReadiness(
+            status="failed",
+            checked_at=_now_utc(),
+            message=REDIS_READINESS_FAILURE_MESSAGE,
+        )
     return DependencyReadiness(status="healthy", checked_at=_now_utc(), message=None)

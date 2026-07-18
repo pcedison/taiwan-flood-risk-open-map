@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       expected_deployment_sha:
-        description: "Expected /health deployment_sha. Defaults to production-release branch HEAD."
+        description: "Expected /health deployment_sha. Defaults to main branch HEAD."
         required: false
         type: string
       require_admin_source_freshness:
@@ -53,8 +53,8 @@ jobs:
           source="workflow_dispatch_input"
           expected_sha="${INPUT_EXPECTED_DEPLOYMENT_SHA:-}"
           if [ -z "${expected_sha}" ]; then
-            source="production-release"
-            expected_sha="$(git ls-remote --heads origin production-release | awk '{print $1}' || true)"
+            source="main"
+            expected_sha="$(git ls-remote --heads origin main | awk '{print $1}' || true)"
           fi
           if [ -z "${expected_sha}" ]; then
             source="workflow_commit_sha"

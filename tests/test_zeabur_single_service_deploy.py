@@ -37,7 +37,7 @@ def test_zeabur_single_service_autostarts_backbone_when_database_is_attached() -
     assert 'worker_database_url="${WORKER_DATABASE_URL:-${DATABASE_URL:-}}"' in dockerfile
     assert 'realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"' in dockerfile
     assert 'realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"' in dockerfile
-    assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level"' in dockerfile
+    assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor"' in dockerfile
     assert 'if [ -n "${worker_database_url}" ]; then' in dockerfile
 
 
@@ -52,10 +52,10 @@ def test_zeabur_single_service_applies_migrations_before_startup() -> None:
     assert 'python /app/infra/scripts/apply_migrations.py --database-url "${worker_database_url}"' in entrypoint
 
 
-def test_zeabur_single_service_runs_initial_ingestion_before_scheduler_loop() -> None:
+def test_zeabur_single_service_scheduler_loop_runs_the_initial_tick() -> None:
     dockerfile = ENTRYPOINT.read_text(encoding="utf-8")
 
-    assert 'python -m app.main --run-enabled-adapters --persist || echo "[start] initial official ingestion tick failed; scheduler will retry"' in dockerfile
+    assert "first tick runs immediately" in dockerfile
     assert "python -m app.main --run-enabled-adapters --persist --scheduler &" in dockerfile
 
 
@@ -77,12 +77,15 @@ def test_zeabur_single_service_sets_backbone_source_gates() -> None:
         'export SOURCE_CIVIL_IOT_PUMP_API_ENABLED="${SOURCE_CIVIL_IOT_PUMP_API_ENABLED:-true}"',
         'export SOURCE_CIVIL_IOT_GATE_ENABLED="${SOURCE_CIVIL_IOT_GATE_ENABLED:-true}"',
         'export SOURCE_CIVIL_IOT_GATE_API_ENABLED="${SOURCE_CIVIL_IOT_GATE_API_ENABLED:-true}"',
+        'export SOURCE_TAINAN_FLOOD_SENSOR_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_ENABLED:-true}"',
+        'export SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED:-true}"',
     )
 
     for expected in expected_exports:
         assert expected in dockerfile
 
-    assert 'export WORKER_ENABLED_ADAPTER_KEYS="${REALTIME_BACKBONE_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"' in dockerfile
+    assert 'required_adapter_keys="${REALTIME_BACKBONE_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"' in dockerfile
+    assert 'export WORKER_ENABLED_ADAPTER_KEYS="$(merge_adapter_keys "${required_adapter_keys}" "${configured_adapter_keys}")"' in dockerfile
 
 
 def test_zeabur_single_service_runbook_lists_realtime_backbone() -> None:

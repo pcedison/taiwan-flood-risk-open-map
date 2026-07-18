@@ -85,6 +85,8 @@ disable that source.
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | Leave unset or `false`; set `true` only as the explicit kill switch |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | Leave unset for the full backbone, or set the same full list below to override an old `WORKER_ENABLED_ADAPTER_KEYS` |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | Leave unset or `true`; use `false` only for an operator-managed migration window |
+| `MIGRATION_LOCK_TIMEOUT_MS` | Leave unset for the conservative `10000` ms PostgreSQL lock-wait limit |
+| `MIGRATION_STATEMENT_TIMEOUT_MS` | Leave unset for the conservative `300000` ms per-migration statement limit |
 | `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor` |
 | `SOURCE_CWA_ENABLED` | Leave unset or `true`; `false` disables CWA ingestion |
 | `SOURCE_CWA_API_ENABLED` | `true` |

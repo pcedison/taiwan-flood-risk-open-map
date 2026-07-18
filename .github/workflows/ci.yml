@@ -72,6 +72,17 @@ jobs:
         # directly — each parser runs in a cwd-isolated subprocess.
         run: python -m pytest tests/test_official_dual_parse_contract.py -q
 
+      - name: Migration runner unit tests
+        run: python -m pytest tests/test_apply_migrations_script.py -q
+
+      - name: Hosted deployment workflow contract tests
+        run: |
+          python -m pytest \
+            tests/test_hosted_monitoring_workflow.py \
+            tests/test_hosted_monitoring_schedule_watchdog_workflow.py \
+            tests/test_zeabur_single_service_deploy.py \
+            -q
+
   frontend:
     name: Frontend checks
     runs-on: ubuntu-latest
@@ -138,7 +149,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install contract validator dependencies
-        run: pip install --quiet "openapi-spec-validator>=0.7" "jsonschema>=4.21" "pyyaml>=6"
+        run: pip install --quiet "openapi-spec-validator>=0.7" "jsonschema>=4.21" "pyyaml>=6" "psycopg[binary]>=3.2"
 
       - name: Validate OpenAPI spec
         run: python infra/scripts/validate_openapi.py
@@ -174,3 +185,16 @@ jobs:
             echo "::error title=Migration smoke failed::Expected 17 core/runtime tables, got ${table_count}"
             exit 1
           fi
+
+      - name: Populated migration upgrade smoke from 0032 to 0036
+        env:
+          MIGRATION_UPGRADE_TEST_DATABASE_URL: postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk_upgrade_test
+        run: |
+          set -euo pipefail
+          test_database="flood_risk_upgrade_test"
+          cleanup() {
+            docker compose exec -T postgres dropdb --if-exists -U flood_risk "$test_database" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker compose exec -T postgres createdb -U flood_risk "$test_database"
+          python infra/scripts/verify_migration_upgrade_0032_to_0036.py
