@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 
+from app.adapters.registry import ADAPTER_REGISTRY
 from app.cli.persistence import build_demo_persistence_writers
 from app.config import WorkerSettings
 from app.jobs.official_demo import build_official_demo_adapters
@@ -11,8 +12,29 @@ from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
 from app.jobs.runtime import build_runtime_adapters
 from app.jobs.runtime_managed import run_managed_runtime_ingestion_cycle
 from app.logging import log_event
+from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.promotion import PromotionResult, promote_accepted_staging
 from app.scheduler import run_scheduled_ingestion_cycle
+
+
+def record_runtime_sources_disabled(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+) -> int:
+    resolved_database_url = database_url or settings.database_url
+    if not resolved_database_url:
+        log_event("worker.runtime.selection.disabled.failed", reason="no_database_url")
+        return 1
+    PostgresIngestionRunWriter(database_url=resolved_database_url).write_runtime_selection(
+        enabled_adapter_keys=(),
+        known_adapter_keys=tuple(ADAPTER_REGISTRY),
+    )
+    log_event(
+        "worker.runtime.selection.disabled.recorded",
+        source_count=len(ADAPTER_REGISTRY),
+    )
+    return 0
 
 
 def run_managed_enabled_adapters(

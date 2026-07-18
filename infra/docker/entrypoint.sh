@@ -21,6 +21,26 @@ truthy() {
   esac
 }
 
+merge_adapter_keys() {
+  local left="${1:-}"
+  local right="${2:-}"
+  local merged=""
+  local key
+  local items=()
+  IFS=',' read -r -a items <<< "${left},${right}"
+  for key in "${items[@]}"; do
+    key="${key//[[:space:]]/}"
+    if [ -z "${key}" ]; then
+      continue
+    fi
+    case ",${merged}," in
+      *",${key},"*) ;;
+      *) merged="${merged:+${merged},}${key}" ;;
+    esac
+  done
+  printf '%s' "${merged}"
+}
+
 role="${SERVICE_ROLE:-all}"
 api_host="${API_HOST:-127.0.0.1}"
 api_port="${API_PORT:-8000}"
@@ -30,11 +50,24 @@ worker_database_url="${WORKER_DATABASE_URL:-${DATABASE_URL:-}}"
 ingestion_enabled="${HOSTED_INGESTION_SCHEDULER_ENABLED:-${SINGLE_SERVICE_INGESTION_SCHEDULER_ENABLED:-auto}}"
 realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"
 realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"
-realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level"
+realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor"
 # Only the loopback hop (the co-located Next.js proxy) is trusted for
 # X-Forwarded-* by default; override for split topologies where the API's
 # direct peer is the platform ingress instead.
 uvicorn_forwarded_allow_ips="${UVICORN_FORWARDED_ALLOW_IPS:-127.0.0.1}"
+
+# In the unified service, API and worker must not silently point at different
+# databases.  Let DATABASE_URL inherit the worker URL when only the latter was
+# configured, and fail closed when both are configured differently.  Never
+# print either URL because it may contain credentials.
+if [ "${role}" = "all" ] && [ -n "${DATABASE_URL:-}" ] && [ -n "${WORKER_DATABASE_URL:-}" ] \
+  && [ "${DATABASE_URL}" != "${WORKER_DATABASE_URL}" ]; then
+  echo "[start] DATABASE_URL and WORKER_DATABASE_URL must match for SERVICE_ROLE=all"
+  exit 1
+fi
+if [ -z "${DATABASE_URL:-}" ] && [ -n "${worker_database_url}" ]; then
+  export DATABASE_URL="${worker_database_url}"
+fi
 
 if [ "${ingestion_enabled}" = "auto" ]; then
   if [ -n "${worker_database_url}" ]; then
@@ -58,13 +91,18 @@ apply_migrations() {
 }
 
 setup_ingestion_env() {
+  local configured_adapter_keys="${WORKER_ENABLED_ADAPTER_KEYS:-}"
+  local required_adapter_keys
   export WORKER_DATABASE_URL="${worker_database_url}"
   if [ -z "${WORKER_DATABASE_URL}" ]; then
     echo "[start] ingestion scheduler requested but WORKER_DATABASE_URL/DATABASE_URL is empty"
     exit 1
   fi
   if truthy "${realtime_backbone_force_ingestion}"; then
-    export WORKER_ENABLED_ADAPTER_KEYS="${REALTIME_BACKBONE_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"
+    required_adapter_keys="${REALTIME_BACKBONE_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"
+    # Force mode guarantees the reviewed baseline but must preserve explicitly
+    # configured local adapters instead of silently replacing them.
+    export WORKER_ENABLED_ADAPTER_KEYS="$(merge_adapter_keys "${required_adapter_keys}" "${configured_adapter_keys}")"
   else
     export WORKER_ENABLED_ADAPTER_KEYS="${WORKER_ENABLED_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"
   fi
@@ -85,6 +123,8 @@ setup_ingestion_env() {
   export SOURCE_CIVIL_IOT_PUMP_API_ENABLED="${SOURCE_CIVIL_IOT_PUMP_API_ENABLED:-true}"
   export SOURCE_CIVIL_IOT_GATE_ENABLED="${SOURCE_CIVIL_IOT_GATE_ENABLED:-true}"
   export SOURCE_CIVIL_IOT_GATE_API_ENABLED="${SOURCE_CIVIL_IOT_GATE_API_ENABLED:-true}"
+  export SOURCE_TAINAN_FLOOD_SENSOR_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_ENABLED:-true}"
+  export SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED:-true}"
   export SCHEDULER_INTERVAL_SECONDS="${SCHEDULER_INTERVAL_SECONDS:-300}"
   export SCHEDULER_LEASE_TTL_SECONDS="${SCHEDULER_LEASE_TTL_SECONDS:-600}"
   export WORKER_INSTANCE="${WORKER_INSTANCE:-zeabur-single-service-${HOSTNAME:-local}}"
@@ -111,9 +151,7 @@ case "${role}" in
     echo "[start] role=scheduler (expects migrations applied by the api service)"
     setup_ingestion_env
     cd /app/apps/workers
-    echo "[start] running initial official ingestion tick"
-    python -m app.main --run-enabled-adapters --persist || echo "[start] initial official ingestion tick failed; scheduler will retry"
-    echo "[start] launching official ingestion scheduler loop"
+    echo "[start] launching official ingestion scheduler loop (first tick runs immediately)"
     exec python -m app.main --run-enabled-adapters --persist --scheduler
     ;;
   all)
@@ -126,7 +164,17 @@ esac
 
 scheduler_pid=""
 echo "[start] api=${api_host}:${api_port} web=${web_host}:${web_port} ingestion=${ingestion_enabled}"
+if truthy "${ingestion_enabled}"; then
+  # Export the shared source gates before forking the API so public/admin
+  # diagnostics describe the same adapters the scheduler actually runs.
+  setup_ingestion_env
+fi
 apply_migrations
+if ! truthy "${ingestion_enabled}" && [ -n "${worker_database_url}" ]; then
+  echo "[start] recording intentionally disabled ingestion sources"
+  cd /app/apps/workers
+  python -m app.main --record-runtime-sources-disabled
+fi
 cd /app/apps/api
 echo "[start] launching api"
 python -m uvicorn app.main:app --host "${api_host}" --port "${api_port}" --proxy-headers --forwarded-allow-ips "${uvicorn_forwarded_allow_ips}" &
@@ -165,18 +213,22 @@ node node_modules/next/dist/bin/next start --hostname "${web_host}" --port "${we
 web_pid=$!
 if truthy "${ingestion_enabled}"; then
   echo "[start] launching official ingestion scheduler"
-  setup_ingestion_env
   cd /app/apps/workers
-  echo "[start] running initial official ingestion tick"
-  python -m app.main --run-enabled-adapters --persist || echo "[start] initial official ingestion tick failed; scheduler will retry"
-  echo "[start] launching official ingestion scheduler loop"
+  echo "[start] launching official ingestion scheduler loop (first tick runs immediately)"
   python -m app.main --run-enabled-adapters --persist --scheduler &
   scheduler_pid=$!
 else
   echo "[start] official ingestion scheduler disabled"
 fi
 set +e
-wait -n "${api_pid}" "${web_pid}"
+if [ -n "${scheduler_pid}" ]; then
+  # The public service must not remain green while ingestion has silently
+  # stopped.  Let the platform restart the container if any required runtime
+  # exits, including the co-located scheduler.
+  wait -n "${api_pid}" "${web_pid}" "${scheduler_pid}"
+else
+  wait -n "${api_pid}" "${web_pid}"
+fi
 exit_status=$?
 cleanup
 trap - EXIT INT TERM

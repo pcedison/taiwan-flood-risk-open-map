@@ -98,6 +98,7 @@ def run_scheduled_ingestion_cycle(
     job_key: str = "scheduler.ingest.enabled_adapters",
     writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
+    pipeline_run_at: datetime | None = None,
 ) -> ScheduledIngestionCycleResult:
     resolved_settings = settings or load_worker_settings()
     summaries = run_enabled_adapter_batches(
@@ -106,6 +107,7 @@ def run_scheduled_ingestion_cycle(
         writer=writer,
         run_writer=run_writer,
         job_key=job_key,
+        pipeline_run_at=pipeline_run_at,
     )
     freshness_checks = check_batch_freshness(
         summaries,

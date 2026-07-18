@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
+
+import pytest
 
 from app.adapters.contracts import (
     AdapterMetadata,
@@ -169,6 +172,88 @@ def test_managed_runtime_cycle_noops_without_adapters_when_writers_are_injected(
     assert run_writer.calls == []
 
 
+def test_managed_runtime_cycle_records_empty_runtime_selection() -> None:
+    run_writer = _MemoryRunWriter()
+    settings = replace(_settings("news.public_web.sample"), enabled_adapter_keys=())
+
+    result = run_managed_runtime_ingestion_cycle(
+        settings=settings,
+        run_writer=run_writer,
+    )
+
+    assert result.status == "skipped"
+    assert result.reason == "no_enabled_adapters"
+    assert run_writer.runtime_selections[0][0] == ()
+
+
+def test_managed_runtime_cycle_marks_missing_enabled_adapter_as_pipeline_failure() -> None:
+    run_writer = _MemoryRunWriter()
+
+    result = run_managed_runtime_ingestion_cycle(
+        {},
+        settings=_settings("official.wra.water_level"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "missing_enabled_adapters"
+    assert run_writer.runtime_selections[0][0] == ("official.wra.water_level",)
+    assert len(run_writer.pipeline_statuses) == 1
+    adapter_keys, status, complete, run_at = run_writer.pipeline_statuses[0]
+    assert adapter_keys == ("official.wra.water_level",)
+    assert status == "failed"
+    assert complete is False
+    assert isinstance(run_at, datetime)
+
+
+def test_managed_runtime_cycle_records_promotion_failure_in_public_pipeline_state() -> None:
+    adapter = _sample_adapter()
+    run_writer = _MemoryRunWriter()
+
+    result = run_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=_settings("news.public_web.sample"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_FailingPromotionWriter(),
+        promote=True,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "promotion_failed"
+    assert run_writer.pipeline_statuses[-1] == (
+        ("news.public_web.sample",),
+        "failed",
+        False,
+        result.summaries[0].started_at,
+    )
+
+
+def test_managed_runtime_cycle_records_builder_exception_as_pipeline_failure() -> None:
+    run_writer = _MemoryRunWriter()
+
+    def exploding_builder(settings: WorkerSettings) -> dict[str, SamplePublicWebNewsAdapter]:
+        del settings
+        raise RuntimeError("adapter initialization failed")
+
+    with pytest.raises(RuntimeError, match="adapter initialization failed"):
+        run_managed_runtime_ingestion_cycle(
+            settings=_settings("news.public_web.sample"),
+            staging_writer=_MemoryStagingWriter(),
+            run_writer=run_writer,
+            adapter_builder=exploding_builder,
+        )
+
+    assert run_writer.runtime_selections[0][0] == ("news.public_web.sample",)
+    assert len(run_writer.pipeline_statuses) == 1
+    adapter_keys, status, complete, run_at = run_writer.pipeline_statuses[0]
+    assert adapter_keys == ("news.public_web.sample",)
+    assert status == "failed"
+    assert complete is False
+    assert isinstance(run_at, datetime)
+
+
 def _settings(*adapter_keys: str) -> WorkerSettings:
     return load_worker_settings(
         {
@@ -231,6 +316,10 @@ class _MemoryStagingWriter:
 class _MemoryRunWriter:
     def __init__(self) -> None:
         self.calls: list[tuple[AdapterBatchRunSummary, str, dict[str, Any] | None]] = []
+        self.runtime_selections: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+        self.pipeline_statuses: list[
+            tuple[tuple[str, ...], str, bool, datetime | None]
+        ] = []
 
     def write_summary(
         self,
@@ -240,6 +329,28 @@ class _MemoryRunWriter:
         parameters: dict[str, Any] | None = None,
     ) -> None:
         self.calls.append((summary, job_key, parameters))
+
+    def write_runtime_selection(
+        self,
+        *,
+        enabled_adapter_keys: tuple[str, ...],
+        known_adapter_keys: tuple[str, ...],
+        checked_at: datetime,
+    ) -> None:
+        del checked_at
+        self.runtime_selections.append((enabled_adapter_keys, known_adapter_keys))
+
+    def write_pipeline_status(
+        self,
+        *,
+        adapter_keys: tuple[str, ...],
+        status: str,
+        complete: bool,
+        checked_at: datetime,
+        run_at: datetime | None,
+    ) -> None:
+        del checked_at
+        self.pipeline_statuses.append((adapter_keys, status, complete, run_at))
 
 
 class _MemoryPromotionWriter:
@@ -262,6 +373,21 @@ class _MemoryPromotionWriter:
     def write_evidence(self, payload: EvidencePromotionPayload) -> str:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
+
+
+class _FailingPromotionWriter:
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        del limit, adapter_keys
+        raise RuntimeError("promotion storage unavailable")
+
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+        del payload
+        raise AssertionError("write_evidence should not be reached")
 
 
 class _ExplodingAdapter:

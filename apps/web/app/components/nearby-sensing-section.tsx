@@ -15,6 +15,10 @@ export function NearbySensingSection({
   evidenceItems,
 }: NearbySensingSectionProps) {
   const state = nearbySensingState({ assessment, evidenceItems });
+  const coverage = assessment?.nearby_realtime_coverage;
+  const searchRadiusM = coverage
+    ? Math.max(...coverage.radius_buckets_m, coverage.query_radius_m)
+    : null;
 
   return (
     <section
@@ -26,6 +30,15 @@ export function NearbySensingSection({
         <h2>{state.badge}</h2>
       </div>
       <p className="section-question">{text.nearbySensingQuestion}</p>
+      {coverage && searchRadiusM !== null ? (
+        <p className="nearby-sensing-scope">
+          紅圈是 {Math.round(assessment.radius_m ?? coverage.query_radius_m)} 公尺風險分析範圍；感測站另搜尋至{" "}
+          {searchRadiusM >= 1000
+            ? `${Math.round(searchRadiusM / 1000)} 公里`
+            : `${Math.round(searchRadiusM)} 公尺`}
+          {searchRadiusM > 5000 ? "，5 公里外僅供區域參考。" : "。"}
+        </p>
+      ) : null}
       <p>{state.summary}</p>
       {state.gaps.length ? (
         <div className="nearby-sensing-gaps" aria-label={text.nearbySensingGaps}>

@@ -114,6 +114,16 @@ def build_raw_snapshot(result: AdapterRunResult, *, raw_ref: str | None = None) 
     source_timestamps = tuple(evidence.source_timestamp for evidence in result.normalized)
     fetched_at = max(item.fetched_at for item in result.fetched)
     source_family = _source_family_for_retention(result)
+    metadata: dict[str, Any] = {
+        "items_fetched": len(result.fetched),
+        "items_normalized": len(result.normalized),
+        "items_rejected": len(result.rejected),
+        "retention_source_family": source_family.value,
+    }
+    if result.station_inventory_proof is not None:
+        # Counts and the manifest checksum are public-safe diagnostics.  The
+        # full station-ID manifest belongs only in station_inventory_snapshots.
+        metadata.update(result.station_inventory_proof.public_summary())
 
     return RawSnapshotUpsert(
         adapter_key=result.adapter_key,
@@ -124,12 +134,7 @@ def build_raw_snapshot(result: AdapterRunResult, *, raw_ref: str | None = None) 
         source_timestamp_max=max(source_timestamps) if source_timestamps else None,
         retention_expires_at=fetched_at
         + timedelta(days=RETENTION_DAYS_BY_SOURCE_FAMILY[source_family]),
-        metadata={
-            "items_fetched": len(result.fetched),
-            "items_normalized": len(result.normalized),
-            "items_rejected": len(result.rejected),
-            "retention_source_family": source_family.value,
-        },
+        metadata=metadata,
     )
 
 

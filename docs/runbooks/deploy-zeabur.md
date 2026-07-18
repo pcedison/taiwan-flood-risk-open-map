@@ -150,7 +150,7 @@ Official ingestion scheduler for the single-service beta:
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Set `true` only as the explicit kill switch. |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional override that replaces old `WORKER_ENABLED_ADAPTER_KEYS` values during forced backbone startup. |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level` | Selects the official realtime backbone adapters. |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor` | Selects the official realtime backbone plus the reviewed Tainan local flood-sensor fallback. |
 | `SOURCE_CWA_ENABLED` | `true` or leave unset | Enables the CWA adapter selection; `false` disables it. |
 | `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |
 | `SOURCE_WRA_ENABLED` | `true` or leave unset | Enables the WRA adapter selection; `false` disables it. |
@@ -168,6 +168,8 @@ Official ingestion scheduler for the single-service beta:
 | `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `true` | Enables Civil IoT pump external water-level ingestion. |
 | `SOURCE_CIVIL_IOT_GATE_ENABLED` | `true` | Enables Civil IoT gate water-level adapter selection. |
 | `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` | Enables Civil IoT gate water-level ingestion. |
+| `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` | Enables the reviewed Tainan local flood-sensor fallback. |
+| `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` | Enables live Tainan flood-sensor ingestion. |
 | `WRA_STATION_API_URL` | leave blank | Optional override for the WRA station metadata endpoint used to add coordinates to realtime water-level rows. |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` | Five-minute beta cadence. |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` | Postgres scheduler lease TTL. |

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type {
+  NearbyRealtimeCoverage,
+  PublicRealtimeSourceHealth,
+} from "../../app/lib/page-types";
 import type { EvidenceItem, EvidencePreview } from "../../app/lib/risk-display";
+
+type CoverageSignalType =
+  NearbyRealtimeCoverage["signal_breakdown"][number]["signal_type"];
 
 const riskDisplayModulePath = "../../app/lib/risk-display.ts";
 const {
@@ -63,6 +70,90 @@ const fullEvidence: EvidenceItem = {
   source_id: "rain-gauge",
   url: "https://example.test/full",
 };
+
+function missingRainfallCoverage(input: {
+  availabilityState:
+    | "no_station"
+    | "source_unavailable"
+    | "source_status_unknown";
+  missingCause:
+    | "no_station_in_range"
+    | "source_degraded"
+    | "source_failed"
+    | "update_pipeline_stalled"
+    | "source_not_configured"
+    | "inventory_unverified"
+    | "health_unknown";
+  sourceHealth?: PublicRealtimeSourceHealth;
+  sourceHealthChecked?: boolean;
+  jurisdictionVerified?: boolean;
+}): NearbyRealtimeCoverage {
+  const jurisdictionVerified = input.jurisdictionVerified ?? true;
+  return {
+    county_level_note: "縣市資料源不代表近距觀測。",
+    evaluated_at: "2026-07-18T08:00:00Z",
+    limitations: [],
+    missing_signal_types: ["rainfall"],
+    overall_level: "no_local_sensor",
+    jurisdiction_status: jurisdictionVerified ? "verified" : "boundary_unverified",
+    jurisdiction_checked: jurisdictionVerified,
+    jurisdiction_catalog_complete: jurisdictionVerified,
+    home_jurisdiction: jurisdictionVerified ? "臺北市" : null,
+    considered_jurisdictions: jurisdictionVerified ? ["臺北市", "新北市"] : [],
+    jurisdiction_mapping_revisions: jurisdictionVerified
+      ? ["official-source-catalog-v1"]
+      : [],
+    jurisdiction_unverified_signal_types: jurisdictionVerified ? [] : ["rainfall"],
+    query_radius_m: 500,
+    radius_buckets_m: [500, 1000, 3000, 5000, 10000, 15000],
+    signal_breakdown: [
+      {
+        availability_state: input.availabilityState,
+        counts_by_radius_m: { "500": 0, "15000": 0 },
+        coverage_level: "no_local_sensor",
+        degraded_count: 0,
+        failed_source_count:
+          input.sourceHealth?.health_status === "failed" ? 1 : 0,
+        fresh_count: 0,
+        label: "雨量",
+        missing_cause: input.missingCause,
+        missing_reason: "公開安全的缺口說明。",
+        nearest_distance_m: null,
+        nearest_freshness_state: null,
+        nearest_observed_at: null,
+        nearest_source_id: null,
+        signal_type: "rainfall",
+        source_count: input.sourceHealth ? 1 : 0,
+        source_health_status: input.sourceHealth?.health_status ?? "unknown",
+        stale_count: 0,
+        status_only_count: 0,
+      },
+    ],
+    source_health: input.sourceHealth ? [input.sourceHealth] : [],
+    source_health_checked: input.sourceHealthChecked ?? true,
+    source_health_status: input.sourceHealth?.health_status ?? "unknown",
+    summary: "後端覆蓋摘要。",
+  };
+}
+
+function realtimeSourceHealth(
+  overrides: Partial<PublicRealtimeSourceHealth> = {},
+): PublicRealtimeSourceHealth {
+  return {
+    checked_at: "2026-07-18T08:00:00Z",
+    coverage_scope: "national",
+    health_status: "healthy",
+    message: "來源運作正常。",
+    name: "公開雨量來源",
+    observed_at: "2026-07-18T07:55:00Z",
+    reason_code: "operational",
+    signal_types: ["rainfall"],
+    source_id: "internal-source-id-must-not-render",
+    station_count: 42,
+    inventory_complete: true,
+    ...overrides,
+  };
+}
 
 test("buildRiskAssessmentPayload shapes the risk API request", () => {
   assert.deepEqual(
@@ -480,6 +571,460 @@ test("nearby sensing state prefers backend coverage and falls back to realtime e
   assert.match(fromEvidence.summary, /可用即時觀測/);
 });
 
+test("nearby sensing state never presents missing observations as low", () => {
+  const signal = (signal_type: "rainfall" | "water_level" | "flood_depth" | "sewer_water_level", label: string) => ({
+    availability_state: "no_station" as const,
+    counts_by_radius_m: { "500": 0, "5000": 0, "15000": 0 },
+    coverage_level: "no_local_sensor" as const,
+    degraded_count: 0,
+    fresh_count: 0,
+    label,
+    missing_reason: `15 公里內沒有${label}`,
+    nearest_distance_m: null,
+    nearest_freshness_state: null,
+    nearest_observed_at: null,
+    nearest_source_id: null,
+    signal_type,
+    stale_count: 0,
+    status_only_count: 0,
+  });
+  const state = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: {
+        county_level_note: "縣市資料源不代表近距觀測。",
+        evaluated_at: "2026-07-18T07:22:00Z",
+        limitations: [],
+        missing_signal_types: [
+          "rainfall",
+          "water_level",
+          "flood_depth",
+          "sewer_water_level",
+        ],
+        overall_level: "no_local_sensor",
+        query_radius_m: 500,
+        radius_buckets_m: [500, 1000, 3000, 5000, 10000, 15000],
+        signal_breakdown: [
+          signal("rainfall", "雨量"),
+          signal("water_level", "水位"),
+          signal("flood_depth", "淹水深度"),
+          signal("sewer_water_level", "下水道水位"),
+        ],
+        summary: "目前沒有可用的近距離即時感測資料。",
+      },
+    },
+    evidenceItems: [],
+  });
+
+  assert.equal(state.badge, "附近觀測：資料不足");
+  assert.doesNotMatch(state.badge, /低/);
+  assert.deepEqual(state.gaps, ["雨量", "水位", "淹水深度", "下水道水位"]);
+  assert.equal(state.items[0].detail, "15 公里內未取得觀測");
+});
+
+test("nearby sensing state prioritizes regional reference over stale observations", () => {
+  const state = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: {
+        county_level_note: "縣市資料源不代表近距觀測。",
+        evaluated_at: "2026-07-18T07:22:00Z",
+        limitations: [],
+        missing_signal_types: ["rainfall", "water_level"],
+        overall_level: "no_local_sensor",
+        query_radius_m: 500,
+        radius_buckets_m: [500, 1000, 3000, 5000, 10000, 15000],
+        signal_breakdown: [
+          {
+            availability_state: "regional_reference",
+            counts_by_radius_m: { "5000": 0, "10000": 1 },
+            coverage_level: "no_local_sensor",
+            degraded_count: 0,
+            fresh_count: 1,
+            label: "雨量",
+            missing_reason: "最近站僅供區域參考",
+            nearest_distance_m: 7200,
+            nearest_freshness_state: "fresh",
+            nearest_observed_at: "2026-07-18T07:20:00Z",
+            nearest_source_id: "cwa-rainfall:regional",
+            signal_type: "rainfall",
+            stale_count: 0,
+            status_only_count: 0,
+          },
+          {
+            availability_state: "stale_observation",
+            counts_by_radius_m: { "1000": 1 },
+            coverage_level: "no_local_sensor",
+            degraded_count: 0,
+            fresh_count: 0,
+            label: "水位",
+            missing_reason: "只有過期資料",
+            nearest_distance_m: 900,
+            nearest_freshness_state: "stale",
+            nearest_observed_at: "2026-07-17T07:20:00Z",
+            nearest_source_id: "wra-water-level:stale",
+            signal_type: "water_level",
+            stale_count: 1,
+            status_only_count: 0,
+          },
+        ],
+        summary: "5 公里內缺少直接水情觀測；15 公里內有較遠測站可作區域參考。",
+      },
+    },
+    evidenceItems: [],
+  });
+
+  assert.equal(state.badge, "附近觀測：僅區域參考");
+  assert.match(state.items[0].detail, /7.2 公里；僅供區域參考/);
+  assert.match(state.items[1].detail, /900 公尺；已過期/);
+});
+
+test("contradictory no-station payload is downgraded when complementary sources fail", () => {
+  const healthyNational = realtimeSourceHealth({
+    name: "中央氣象署即時雨量",
+  });
+  const coverage = missingRainfallCoverage({
+    availabilityState: "no_station",
+    missingCause: "no_station_in_range",
+    sourceHealth: healthyNational,
+  });
+  coverage.source_health = [
+    healthyNational,
+    realtimeSourceHealth({
+      health_status: "disabled",
+      name: "未啟用的全國備援來源",
+      reason_code: "disabled",
+      source_id: "disabled-national-source",
+      station_count: null,
+    }),
+    realtimeSourceHealth({
+      coverage_scope: "local",
+      health_status: "failed",
+      name: "地方實驗來源",
+      reason_code: "pipeline_unavailable",
+      source_id: "failed-local-source",
+      station_count: null,
+    }),
+  ];
+  coverage.source_health_status = "failed";
+
+  const state = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: coverage,
+    },
+    evidenceItems: [],
+  });
+
+  assert.equal(state.badge, "附近觀測：來源異常");
+  assert.equal(state.items[0].detail, "來源或更新管線異常，無法確認附近測站");
+  assert.match(state.summary, /無法確認附近是否真的沒有測站/);
+  assert.doesNotMatch(state.badge, /範圍內無站/);
+  assert.doesNotMatch(state.summary, /來源運作正常/);
+  assert.match(state.note, /不代表現地安全/);
+  assert.doesNotMatch(JSON.stringify(state), /internal-source-id-must-not-render/);
+
+  const observedCoverage: NearbyRealtimeCoverage = {
+    ...coverage,
+    missing_signal_types: [],
+    overall_level: "high",
+    signal_breakdown: [
+      {
+        ...coverage.signal_breakdown[0],
+        availability_state: "fresh_nearby",
+        counts_by_radius_m: { "500": 1 },
+        coverage_level: "high",
+        fresh_count: 1,
+        missing_cause: "none",
+        missing_reason: null,
+        nearest_distance_m: 280,
+        nearest_freshness_state: "fresh",
+        nearest_observed_at: "2026-07-18T07:58:00Z",
+      },
+    ],
+  };
+  const observedState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: observedCoverage },
+  });
+  assert.equal(observedState.badge, "附近觀測：部分來源異常");
+  assert.equal(observedState.tone, "warn");
+});
+
+test("partial required-signal contract cannot claim overall confirmed no-station", () => {
+  const coverage = missingRainfallCoverage({
+    availabilityState: "no_station",
+    missingCause: "no_station_in_range",
+    sourceHealth: realtimeSourceHealth(),
+  });
+
+  const state = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+
+  assert.equal(state.badge, "附近觀測：資料不足");
+  assert.doesNotMatch(state.badge, /範圍內無站/);
+  assert.doesNotMatch(state.summary, /來源運作正常/);
+});
+
+test("unverified jurisdiction contracts prevent a confirmed no-station badge", () => {
+  const coverage = missingRainfallCoverage({
+    availabilityState: "no_station",
+    jurisdictionVerified: false,
+    missingCause: "no_station_in_range",
+    sourceHealth: realtimeSourceHealth(),
+  });
+
+  const state = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+
+  assert.equal(state.badge, "附近觀測：管轄來源待驗證");
+  assert.doesNotMatch(state.badge, /範圍內無站/);
+  assert.match(state.summary, /縣市邊界或管轄來源清單尚未完成審核/);
+});
+
+test("a failed required depth source prevents a confirmed no-station badge", () => {
+  const healthyRainfall = realtimeSourceHealth({
+    health_status: "healthy",
+    reason_code: "operational",
+    signal_types: ["rainfall"],
+    station_count: 42,
+  });
+  const failedFloodDepth = realtimeSourceHealth({
+    health_status: "failed",
+    name: "水利署淹水深度觀測",
+    reason_code: "pipeline_unavailable",
+    signal_types: ["flood_depth"],
+    source_id: "failed-flood-depth-source",
+    station_count: null,
+  });
+  const coverage = missingRainfallCoverage({
+    availabilityState: "no_station",
+    missingCause: "no_station_in_range",
+    sourceHealth: healthyRainfall,
+  });
+  const noStationSignal = coverage.signal_breakdown[0];
+  coverage.signal_breakdown = [
+    noStationSignal,
+    { ...noStationSignal, label: "水位", signal_type: "water_level" },
+    {
+      ...noStationSignal,
+      availability_state: "source_unavailable",
+      failed_source_count: 1,
+      label: "淹水深度",
+      missing_cause: "source_failed",
+      missing_reason: "來源或更新管線目前異常。",
+      signal_type: "flood_depth",
+      source_health_status: "failed",
+    },
+    { ...noStationSignal, label: "下水道水位", signal_type: "sewer_water_level" },
+  ];
+  coverage.missing_signal_types = [
+    "rainfall",
+    "water_level",
+    "flood_depth",
+    "sewer_water_level",
+  ];
+  coverage.source_health = [healthyRainfall, failedFloodDepth];
+  coverage.source_health_status = "degraded";
+
+  const state = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+
+  assert.equal(state.badge, "附近觀測：來源異常");
+  assert.doesNotMatch(state.badge, /範圍內無站/);
+  assert.match(state.summary, /無法確認附近是否真的沒有測站/);
+});
+
+test("optional unavailable sources never displace the four required measurements", () => {
+  const coverage = missingRainfallCoverage({
+    availabilityState: "no_station",
+    missingCause: "no_station_in_range",
+    sourceHealth: realtimeSourceHealth(),
+  });
+  const requiredSignal = coverage.signal_breakdown[0];
+  const optionalUnavailable = (signalType: CoverageSignalType, label: string) => ({
+    ...requiredSignal,
+    availability_state: "source_unavailable" as const,
+    label,
+    missing_cause: "source_not_configured" as const,
+    signal_type: signalType,
+    source_health_status: "disabled" as const,
+  });
+  coverage.signal_breakdown = [
+    optionalUnavailable("pump_or_gate_status", "抽水站狀態"),
+    optionalUnavailable("flood_warning", "淹水警戒"),
+    optionalUnavailable("status_only", "狀態觀測"),
+    requiredSignal,
+    { ...requiredSignal, label: "水位", signal_type: "water_level" },
+    { ...requiredSignal, label: "淹水深度", signal_type: "flood_depth" },
+    { ...requiredSignal, label: "下水道水位", signal_type: "sewer_water_level" },
+  ];
+
+  const state = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+
+  assert.deepEqual(
+    state.items.map((item) => item.id),
+    ["rainfall", "water_level", "flood_depth", "sewer_water_level"],
+  );
+
+  const observedOptional = {
+    ...optionalUnavailable("pump_or_gate_status", "抽水站狀態"),
+    availability_state: "fresh_nearby" as const,
+    coverage_level: "high" as const,
+    fresh_count: 1,
+    missing_cause: "none" as const,
+    nearest_distance_m: 450,
+    nearest_freshness_state: "fresh" as const,
+    source_health_status: "healthy" as const,
+  };
+  const legacyCoverage = {
+    ...coverage,
+    signal_breakdown: [requiredSignal, observedOptional],
+  };
+  const legacyState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: legacyCoverage },
+  });
+  assert.deepEqual(
+    legacyState.items.map((item) => item.id),
+    ["rainfall", "pump_or_gate_status"],
+  );
+});
+
+test("nearby sensing state distinguishes source failure, stalled pipeline, and unknown health", () => {
+  const failed = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: missingRainfallCoverage({
+        availabilityState: "source_unavailable",
+        missingCause: "source_failed",
+        sourceHealth: realtimeSourceHealth({
+          health_status: "failed",
+          message: "來源或背景更新目前異常。",
+          reason_code: "pipeline_unavailable",
+          station_count: null,
+        }),
+      }),
+    },
+  });
+  assert.equal(failed.badge, "附近觀測：來源異常");
+  assert.equal(failed.items[0].detail, "來源或更新管線異常，無法確認附近測站");
+  assert.match(failed.summary, /無法確認附近是否真的沒有測站/);
+  assert.equal(failed.tone, "warn");
+
+  const stalled = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: missingRainfallCoverage({
+        availabilityState: "source_unavailable",
+        missingCause: "update_pipeline_stalled",
+        sourceHealth: realtimeSourceHealth({
+          health_status: "failed",
+          message: "背景更新近期沒有活動。",
+          reason_code: "pipeline_stalled",
+        }),
+      }),
+    },
+  });
+  assert.equal(stalled.badge, "附近觀測：更新管線停滯");
+  assert.equal(stalled.items[0].detail, "背景更新管線停滯，無法確認附近測站");
+  assert.match(stalled.note, /更新管線停滯/);
+
+  const unknown = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: missingRainfallCoverage({
+        availabilityState: "source_status_unknown",
+        missingCause: "health_unknown",
+        sourceHealthChecked: false,
+      }),
+    },
+  });
+  assert.equal(unknown.badge, "附近觀測：來源狀態不明");
+  assert.equal(unknown.items[0].detail, "來源健康狀態不明，無法確認附近測站");
+  assert.equal(unknown.tone, "muted");
+
+  const unverifiedInventory = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: missingRainfallCoverage({
+        availabilityState: "source_status_unknown",
+        missingCause: "inventory_unverified",
+        sourceHealth: realtimeSourceHealth({ inventory_complete: false }),
+      }),
+    },
+  });
+  assert.equal(unverifiedInventory.badge, "附近觀測：站點清冊待驗證");
+  assert.equal(
+    unverifiedInventory.items[0].detail,
+    "來源正常，但站點清冊完整性尚未驗證",
+  );
+  assert.match(unverifiedInventory.note, /不等於附近真的沒有測站/);
+  assert.equal(unverifiedInventory.tone, "muted");
+});
+
+test("nearby sensing state reports partial failure without hiding useful observations", () => {
+  const coverage = missingRainfallCoverage({
+    availabilityState: "source_unavailable",
+    missingCause: "source_failed",
+    sourceHealth: realtimeSourceHealth({
+      coverage_scope: "local",
+      health_status: "failed",
+      jurisdictions: ["臺北市"],
+      reason_code: "upstream_unavailable",
+      required_for_absence: true,
+      signal_types: ["rainfall"],
+    }),
+  });
+  coverage.missing_signal_types = [];
+  coverage.overall_level = "high";
+  coverage.signal_breakdown = [
+    {
+      availability_state: "fresh_nearby",
+      counts_by_radius_m: { "500": 1 },
+      coverage_level: "high",
+      degraded_count: 0,
+      failed_source_count: 0,
+      fresh_count: 1,
+      label: "雨量",
+      missing_cause: "none",
+      missing_reason: null,
+      nearest_distance_m: 320,
+      nearest_freshness_state: "fresh",
+      nearest_observed_at: "2026-07-18T07:58:00Z",
+      nearest_source_id: "public-evidence-id-not-used-as-source-health-id",
+      signal_type: "rainfall",
+      source_count: 1,
+      source_health_status: "healthy",
+      stale_count: 0,
+      status_only_count: 0,
+    },
+  ];
+
+  const state = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+
+  assert.equal(state.badge, "附近觀測：部分來源異常");
+  assert.match(state.summary, /部分即時觀測/);
+  assert.match(state.items[0].detail, /320 公尺；新鮮/);
+  assert.match(state.note, /不代表現地安全/);
+
+  coverage.source_health = coverage.source_health?.map((source) => ({
+    ...source,
+    required_for_absence: false,
+  }));
+  const redundantFailureState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+  assert.equal(redundantFailureState.badge, "附近觀測：高");
+
+  coverage.source_health = [];
+  coverage.source_health_checked = false;
+  coverage.source_health_status = "unknown";
+  const uncheckedState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+  assert.equal(uncheckedState.badge, "附近觀測：部分來源狀態不明");
+  assert.equal(uncheckedState.tone, "muted");
+});
+
 test("layer display state prefers explicit tile contract fields", () => {
   const state = buildLayerDisplayState({
     layers: [
@@ -747,7 +1292,7 @@ test("nearbyCoverageSummary distinguishes no local sensor from unavailable cover
       summary: "查詢點半徑內沒有新鮮在地感測資料；縣市或資料源仍可能有資料。",
     }),
     {
-      badge: "半徑內無新鮮在地感測",
+      badge: "附近即時資料不足",
       summary: "查詢點半徑內沒有新鮮在地感測資料；縣市或資料源仍可能有資料。",
       tone: "poor",
     },
@@ -762,7 +1307,7 @@ test("nearbyCoverageSummary distinguishes no local sensor from unavailable cover
 
 test("nearby coverage labels and distance formatting are explicit", () => {
   assert.equal(nearbyCoverageLevelLabel("high"), "附近即時感測充足");
-  assert.equal(nearbyCoverageLevelLabel("low"), "附近即時感測偏少");
+  assert.equal(nearbyCoverageLevelLabel("low"), "附近即時觀測有限");
   assert.equal(nearbyCoverageLevelLabel("unavailable"), "即時覆蓋暫時無法評估");
   assert.equal(formatDistanceMeters(230.4), "230 公尺");
   assert.equal(formatDistanceMeters(1234.4), "1.2 公里");

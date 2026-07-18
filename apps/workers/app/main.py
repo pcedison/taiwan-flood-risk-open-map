@@ -25,6 +25,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(adapter_key)
         return 0
 
+    if args.record_runtime_sources_disabled:
+        return runtime_cli.record_runtime_sources_disabled(
+            settings=settings,
+            database_url=args.database_url,
+        )
+
     if args.rehearse_gdelt_news_backfill:
         return gdelt.rehearse_gdelt_news_backfill(args=args, settings=settings)
 
