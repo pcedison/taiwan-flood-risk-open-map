@@ -144,6 +144,87 @@ def test_ready_returns_503_when_dependency_fails(monkeypatch) -> None:
     assert_openapi_schema(payload, "ReadyResponse")
 
 
+def test_required_schema_readiness_checks_latest_migration_and_relations() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCursor:
+        def execute(self, sql: str, params: tuple[object, ...]) -> None:
+            captured["sql"] = sql
+            captured["params"] = params
+
+        def fetchone(self) -> tuple[bool, ...]:
+            return (True, True, True, True, True, True, True)
+
+    health_routes._check_required_schema(FakeCursor())
+
+    assert "FROM schema_migrations" in str(captured["sql"])
+    assert "checksum = %s" in str(captured["sql"])
+    assert "MAX(version) = %s" in str(captured["sql"])
+    assert captured["params"] == (
+        36,
+        "0036_database_privacy_fence.sql",
+        "8384077000cdac131f7e20671a36ba31e7d45f5803dde81129a6a3f22d23bbac",
+        36,
+        "public.station_inventory_snapshots",
+        "public.realtime_jurisdiction_boundary_snapshots",
+        "public.realtime_jurisdiction_boundaries",
+        "public.realtime_jurisdiction_signal_contracts",
+        "public.realtime_source_jurisdictions",
+    )
+
+
+def test_required_schema_readiness_rejects_partial_migration() -> None:
+    class FakeCursor:
+        def execute(self, _sql: str, _params: tuple[object, ...]) -> None:
+            return None
+
+        def fetchone(self) -> tuple[bool, ...]:
+            return (True, True, True, True, False, True, True)
+
+    with pytest.raises(RuntimeError, match="required database schema migration 0036 is incomplete"):
+        health_routes._check_required_schema(FakeCursor())
+
+
+def test_database_readiness_does_not_expose_malformed_dsn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psycopg
+
+    database_url = "postgresql://private-user:pa%ZZword@example.test/production"
+
+    def reject_dsn(*_args: object, **_kwargs: object) -> None:
+        raise psycopg.ProgrammingError(f"invalid percent-encoded DSN: {database_url}")
+
+    monkeypatch.setattr(psycopg, "connect", reject_dsn)
+
+    dependency = health_routes._check_database(database_url)
+
+    assert dependency.status == "failed"
+    assert dependency.message == health_routes.DATABASE_READINESS_FAILURE_MESSAGE
+    assert database_url not in dependency.model_dump_json()
+    assert "pa%ZZword" not in dependency.model_dump_json()
+
+
+def test_redis_readiness_does_not_expose_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import redis
+
+    redis_url = "redis://default:private-password@example.test/0"
+
+    def reject_url(*_args: object, **_kwargs: object) -> None:
+        raise ValueError(f"invalid Redis URL: {redis_url}")
+
+    monkeypatch.setattr(redis.Redis, "from_url", reject_url)
+
+    dependency = health_routes._check_redis(redis_url)
+
+    assert dependency.status == "failed"
+    assert dependency.message == health_routes.REDIS_READINESS_FAILURE_MESSAGE
+    assert redis_url not in dependency.model_dump_json()
+    assert "private-password" not in dependency.model_dump_json()
+
+
 def test_metrics_endpoint_exposes_prometheus_text() -> None:
     response = client.get("/metrics")
 

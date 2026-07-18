@@ -17,7 +17,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     workflow_dispatch_inputs = triggers["workflow_dispatch"]["inputs"]
     assert workflow_dispatch_inputs["expected_deployment_sha"]["required"] == "false"
     assert workflow_dispatch_inputs["expected_deployment_sha"]["description"] == (
-        "Expected /health deployment_sha. Defaults to production-release branch HEAD."
+        "Expected /health deployment_sha. Defaults to main branch HEAD."
     )
     assert workflow_dispatch_inputs["require_admin_source_freshness"] == {
         "description": (
@@ -111,7 +111,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     expected_sha_step = next(
         step for step in steps if step.get("name") == "Resolve expected deployment SHA"
     )
-    assert "git ls-remote --heads origin production-release" in expected_sha_step["run"]
+    assert "git ls-remote --heads origin main" in expected_sha_step["run"]
     assert "workflow_commit_sha" in expected_sha_step["run"]
 
     contract_probe_step = next(
