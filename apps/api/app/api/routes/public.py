@@ -52,6 +52,8 @@ from app.domain.evidence import (
 from app.domain.evidence.repository import (
     query_nearby_latest_official,
     query_nearby_realtime_coverage_rows,
+    query_realtime_jurisdiction_context,
+    query_realtime_source_health_rows,
 )
 from app.domain.geocoding import build_open_data_geocoder
 from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
@@ -76,7 +78,12 @@ from app.domain.realtime import (
     OfficialRealtimeSourceStatus,  # noqa: F401  (re-exported for tests)
     fetch_official_realtime_bundle,
 )
-from app.domain.realtime.nearby_coverage import build_nearby_realtime_coverage
+from app.domain.realtime.nearby_coverage import (
+    REALTIME_SOURCE_ADAPTER_KEYS,
+    REQUIRED_SIGNAL_TYPES,
+    build_nearby_realtime_coverage,
+    build_nearby_source_health,
+)
 from app.domain.reports.abuse import (
     RateLimitBackend,
     RateLimitExceeded,
@@ -229,8 +236,16 @@ REALTIME_WATER_RELEVANCE_M = 3000
 REALTIME_FLOOD_DEPTH_RELEVANCE_M = 1000
 REALTIME_FLOOD_WARNING_RELEVANCE_M = 10000
 REALTIME_OFFICIAL_LOOKBACK = timedelta(hours=3)
+# Coverage is diagnostic rather than a scoring input.  Keep a longer window so
+# the response can say "last observation is stale" instead of incorrectly
+# claiming that no station exists.
+NEARBY_COVERAGE_LOOKBACK = timedelta(hours=24)
 EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS = 6000
+SOURCE_HEALTH_STATEMENT_TIMEOUT_MS = 1500
 ASSESSMENT_PERSIST_STATEMENT_TIMEOUT_MS = 1500
+NATIONAL_REALTIME_SOURCE_ADAPTER_KEYS = tuple(
+    key for key in REALTIME_SOURCE_ADAPTER_KEYS if key.startswith("official.")
+)
 
 
 def _nearby_realtime_coverage(
@@ -241,20 +256,131 @@ def _nearby_realtime_coverage(
     settings = get_settings()
     if not settings.evidence_repository_enabled:
         return _unavailable_nearby_realtime_coverage(request, now=now)
+    repository_unavailable = False
     try:
         rows = query_nearby_realtime_coverage_rows(
             database_url=settings.database_url,
             lat=request.point.lat,
             lng=request.point.lng,
-            observed_since=now - REALTIME_OFFICIAL_LOOKBACK,
+            observed_since=now - NEARBY_COVERAGE_LOOKBACK,
             statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
     except EvidenceRepositoryUnavailable:
-        return _unavailable_nearby_realtime_coverage(request, now=now)
+        rows = ()
+        repository_unavailable = True
+
+    jurisdiction_context = None
+    try:
+        jurisdiction_context = query_realtime_jurisdiction_context(
+            database_url=settings.database_url,
+            lat=request.point.lat,
+            lng=request.point.lng,
+            search_radius_m=15_000,
+            statement_timeout_ms=SOURCE_HEALTH_STATEMENT_TIMEOUT_MS,
+        )
+    except EvidenceRepositoryUnavailable:
+        pass
+
+    jurisdiction_checked = bool(
+        jurisdiction_context is not None
+        and jurisdiction_context.resolution_status == "verified"
+    )
+    if jurisdiction_checked and jurisdiction_context is not None:
+        adapter_keys = jurisdiction_context.adapter_keys
+        considered_codes = {
+            code for code, _name in jurisdiction_context.considered_jurisdictions
+        }
+        considered_names = tuple(
+            name for _code, name in jurisdiction_context.considered_jurisdictions
+        )
+        contracts = {
+            (contract.jurisdiction_code, contract.signal_type): contract
+            for contract in jurisdiction_context.signal_contracts
+        }
+        complete_signal_types = tuple(
+            signal_type
+            for signal_type in REQUIRED_SIGNAL_TYPES
+            if considered_codes
+            and all(
+                (contract := contracts.get((code, signal_type))) is not None
+                and contract.catalog_status == "reviewed_complete"
+                and contract.mapping_proof_valid
+                for code in considered_codes
+            )
+        )
+        required_adapter_keys = frozenset(
+            mapping.adapter_key
+            for mapping in jurisdiction_context.source_mappings
+            if mapping.requirement_role == "required"
+        )
+        jurisdictions_by_adapter: dict[str, tuple[str, ...]] = {}
+        for mapping in jurisdiction_context.source_mappings:
+            names = (
+                considered_names
+                if mapping.coverage_scope == "national"
+                else (
+                    (mapping.jurisdiction_name,)
+                    if mapping.jurisdiction_name is not None
+                    else ()
+                )
+            )
+            jurisdictions_by_adapter[mapping.adapter_key] = tuple(
+                sorted(
+                    {
+                        *jurisdictions_by_adapter.get(mapping.adapter_key, ()),
+                        *names,
+                    }
+                )
+            )
+    else:
+        adapter_keys = NATIONAL_REALTIME_SOURCE_ADAPTER_KEYS
+        considered_names = ()
+        complete_signal_types = ()
+        required_adapter_keys = frozenset(adapter_keys)
+        jurisdictions_by_adapter = {}
+
+    source_health_unavailable = False
+    try:
+        source_health_rows = query_realtime_source_health_rows(
+            database_url=settings.database_url,
+            adapter_keys=adapter_keys,
+            statement_timeout_ms=SOURCE_HEALTH_STATEMENT_TIMEOUT_MS,
+        )
+    except EvidenceRepositoryUnavailable:
+        source_health_rows = ()
+        source_health_unavailable = True
+    source_health = build_nearby_source_health(
+        source_health_rows,
+        evaluated_at=now,
+        jurisdictions_by_adapter=jurisdictions_by_adapter,
+        required_adapter_keys=required_adapter_keys,
+    )
     return build_nearby_realtime_coverage(
         rows=rows,
         query_radius_m=request.radius_m,
         evaluated_at=now,
+        repository_unavailable=repository_unavailable,
+        source_health=source_health,
+        source_health_unavailable=source_health_unavailable,
+        source_health_checked=not source_health_unavailable,
+        jurisdiction_status=(
+            jurisdiction_context.resolution_status
+            if jurisdiction_context is not None
+            else "unavailable"
+        ),
+        jurisdiction_checked=jurisdiction_checked,
+        jurisdiction_complete_signal_types=complete_signal_types,
+        home_jurisdiction=(
+            jurisdiction_context.home_jurisdiction_name
+            if jurisdiction_context is not None
+            else None
+        ),
+        considered_jurisdictions=considered_names,
+        jurisdiction_mapping_revisions=(
+            jurisdiction_context.mapping_revisions
+            if jurisdiction_context is not None
+            else ()
+        ),
     )
 
 
@@ -809,7 +935,7 @@ def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: An
             "time_context": request.time_context,
             "location_text": (request.location_text or "").strip(),
             "app_env": settings.app_env,
-            "cache_version": "realtime-evidence-v3-nearby-coverage",
+            "cache_version": "realtime-evidence-v5-source-health",
             "realtime_official_enabled": settings.realtime_official_enabled,
             "realtime_official_diagnostic_fallback_enabled": (
                 settings.realtime_official_diagnostic_fallback_enabled

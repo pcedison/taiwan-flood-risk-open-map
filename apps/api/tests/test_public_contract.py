@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import warnings
 from uuid import UUID
@@ -14,6 +14,7 @@ from app.api.schemas import (
     LatLng,
     NearbyCoverageSignal,
     NearbyRealtimeCoverage,
+    NearbySourceHealth,
     PlaceCandidate,
 )
 from app.api.routes import health as health_routes
@@ -25,7 +26,13 @@ from app.domain.evidence import (
     EvidenceUpsert,
     QueryHeatSnapshot,
 )
-from app.domain.evidence.repository import NearbyCoverageRow
+from app.domain.evidence.repository import (
+    NearbyCoverageRow,
+    RealtimeJurisdictionContext,
+    RealtimeJurisdictionSignalContract,
+    RealtimeJurisdictionSourceMapping,
+    RealtimeSourceHealthRow,
+)
 from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
 from app.domain.profiles import RiskProfileRecord
@@ -64,6 +71,7 @@ def fallback_to_local_historical_records(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(public_routes, "query_nearby_evidence", unavailable)
     monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", unavailable)
+    monkeypatch.setattr(public_routes, "query_realtime_jurisdiction_context", unavailable)
     monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
     monkeypatch.setattr(public_routes, "persist_risk_assessment", unavailable)
     monkeypatch.setattr(public_routes, "fetch_map_layers", layers_unavailable)
@@ -213,6 +221,59 @@ def test_nearby_realtime_coverage_requires_top_level_contract_fields() -> None:
     assert pydantic_required == expected_required
     assert runtime_required == expected_required
     assert documented_required == expected_required
+
+
+def test_nearby_source_health_contract_is_public_safe_and_documented() -> None:
+    expected_fields = {
+        "source_id",
+        "name",
+        "signal_types",
+        "coverage_scope",
+        "health_status",
+        "reason_code",
+        "observed_at",
+        "checked_at",
+        "station_count",
+        "upstream_station_count",
+        "pages_fetched",
+        "pagination_complete",
+        "inventory_manifest_sha256",
+        "inventory_proof_status",
+        "inventory_complete",
+        "jurisdictions",
+        "required_for_absence",
+        "message",
+    }
+    forbidden_fields = {
+        "adapter_key",
+        "error_code",
+        "error_message",
+        "metadata",
+        "parameters",
+        "raw_ref",
+        "holder_id",
+        "database_url",
+    }
+    runtime_schema = client.get("/openapi.json").json()["components"]["schemas"]
+    documented_schema = OPENAPI_SPEC["components"]["schemas"]
+
+    assert set(NearbySourceHealth.model_json_schema()["properties"]) == expected_fields
+    assert set(runtime_schema["NearbySourceHealth"]["properties"]) == expected_fields
+    assert set(documented_schema["NearbySourceHealth"]["properties"]) == expected_fields
+    assert forbidden_fields.isdisjoint(expected_fields)
+    assert documented_schema["NearbySourceHealth"]["additionalProperties"] is False
+    assert set(documented_schema["NearbyCoverageSignal"]["properties"]["missing_cause"]["enum"]) == {
+        "none",
+        "no_station_in_range",
+        "inventory_unverified",
+        "stale_observation",
+        "source_degraded",
+        "source_failed",
+        "update_pipeline_stalled",
+        "source_not_configured",
+        "jurisdiction_unverified",
+        "health_unknown",
+    }
 
 
 def test_geocode_contract_and_limit() -> None:
@@ -590,7 +651,7 @@ def test_risk_assess_contract(monkeypatch) -> None:
     assert payload["query_heat"]["attention_level"] in RISK_LEVELS
     coverage = payload["nearby_realtime_coverage"]
     assert coverage["query_radius_m"] == 500
-    assert coverage["radius_buckets_m"] == [500, 1000, 3000, 5000]
+    assert coverage["radius_buckets_m"] == [500, 1000, 3000, 5000, 10000, 15000]
     assert coverage["overall_level"] in {
         "high",
         "medium",
@@ -602,6 +663,104 @@ def test_risk_assess_contract(monkeypatch) -> None:
         '縣市層級涵蓋只作背景參考，不代表查詢點附'
         '近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
     )
+    assert_openapi_schema(payload, "RiskAssessmentResponse")
+
+
+def test_risk_assess_exposes_public_safe_realtime_source_health(monkeypatch) -> None:
+    now = datetime.now(UTC)
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_official_realtime_bundle",
+        lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(public_routes, "nearest_public_news_location_text", lambda **_: None)
+    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", lambda **_: ())
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_jurisdiction_context",
+        lambda **_: RealtimeJurisdictionContext(
+            resolution_status="verified",
+            home_jurisdiction_code="63000000",
+            home_jurisdiction_name="臺北市",
+            considered_jurisdictions=(("63000000", "臺北市"),),
+            signal_contracts=tuple(
+                RealtimeJurisdictionSignalContract(
+                    jurisdiction_code="63000000",
+                    jurisdiction_name="臺北市",
+                    signal_type=signal_type,
+                    catalog_status="reviewed_complete",
+                    mapping_revision="contract-test-v1",
+                    mapping_proof_valid=True,
+                )
+                for signal_type in (
+                    "rainfall",
+                    "water_level",
+                    "flood_depth",
+                    "sewer_water_level",
+                )
+            ),
+            source_mappings=(
+                RealtimeJurisdictionSourceMapping(
+                    adapter_key="official.cwa.rainfall",
+                    signal_type="rainfall",
+                    coverage_scope="national",
+                    jurisdiction_code="TW",
+                    jurisdiction_name=None,
+                    requirement_role="required",
+                    mapping_revision="contract-test-v1",
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_source_health_rows",
+        lambda **_kwargs: (
+            RealtimeSourceHealthRow(
+                adapter_key="official.cwa.rainfall",
+                name="postgresql://private-user:private-token@db.internal/flood",
+                is_enabled=True,
+                configured_health_status="healthy",
+                last_success_at=now - timedelta(minutes=5),
+                last_failure_at=None,
+                latest_run_status="succeeded",
+                latest_run_at=now - timedelta(minutes=5),
+                latest_observed_at=now - timedelta(minutes=3),
+                latest_ingested_at=now - timedelta(minutes=2),
+                station_count=42,
+                inventory_complete=True,
+            ),
+        ),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 25.033, "lng": 121.5654},
+            "radius_m": 500,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    coverage = payload["nearby_realtime_coverage"]
+    rainfall = next(
+        item for item in coverage["signal_breakdown"] if item["signal_type"] == "rainfall"
+    )
+    source = coverage["source_health"][0]
+    assert coverage["source_health_checked"] is True
+    assert coverage["source_health_status"] == "healthy"
+    assert source["name"] == "中央氣象署雨量觀測"
+    assert source["health_status"] == "healthy"
+    assert source["reason_code"] == "operational"
+    assert source["station_count"] == 42
+    assert source["inventory_complete"] is True
+    assert rainfall["availability_state"] == "no_station"
+    assert rainfall["missing_cause"] == "no_station_in_range"
+    assert "private-token" not in response.text
+    assert "adapter_key" not in source
+    assert "error_message" not in source
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 

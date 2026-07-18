@@ -124,6 +124,22 @@ Current placeholder boundaries:
   seconds, latest-row count, upstream adapter/job status, freshness state,
   `is_enabled`, and currently open source gates. Disabled sources are reported
   as disabled/stale diagnostics, not failed upstream ingestion.
+- Public risk responses now include a redacted per-source realtime health view
+  under `nearby_realtime_coverage.source_health`. A spatial no-station result is
+  only confirmed when every applicable national/local required network has a
+  healthy exact-run station inventory whose upstream total, terminal pagination,
+  station-ID manifest, reviewed checksum, and published station set all agree.
+  A reviewed immutable 22-county boundary and checksum-pinned county/signal
+  source catalog are also required, including every county within 15 km.
+  Observed station counts alone are not proof, and the migration starts with no
+  approved boundary, source manifest, or county/signal catalog. Source failure, partial updates,
+  stalled ingestion activity, disabled sources, unverified inventories, and
+  unknown health remain distinct public-safe data-gap states. Worker runtime
+  selection and final publication outcomes are persisted separately; final
+  outcomes are correlated to the exact ingestion attempt so an older overlapping
+  cycle cannot certify the latest run.
+  See `docs/runbooks/station-inventory-and-jurisdiction-review.md` before changing
+  any inventory, boundary, mapping, or redundancy approval field.
 - PTT, Dcard, and user report adapters are phase-delayed/pending
   implementation and must remain disabled until the required legal, privacy, and
   governance work lands.

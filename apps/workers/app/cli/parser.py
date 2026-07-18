@@ -27,6 +27,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run configured runtime adapters once, selected by WORKER_ENABLED_ADAPTER_KEYS/config gates.",
     )
     parser.add_argument(
+        "--record-runtime-sources-disabled",
+        action="store_true",
+        help=(
+            "Persist an authoritative empty runtime source selection and exit. "
+            "Used by hosted deployments when ingestion is intentionally disabled."
+        ),
+    )
+    parser.add_argument(
         "--rehearse-gdelt-news-backfill",
         action="store_true",
         help=(

@@ -23,7 +23,11 @@ from app.domain.geocoding import stable_uuid
 from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.history.news_enrichment import OnDemandNewsSearchResult
 from app.domain.profiles import RiskProfileRecord
-from app.domain.realtime.nearby_coverage import build_nearby_realtime_coverage
+from app.domain.realtime.nearby_coverage import (
+    RADIUS_BUCKETS_M,
+    REQUIRED_SIGNAL_TYPES,
+    build_nearby_realtime_coverage,
+)
 from app.domain.realtime import (
     OfficialRealtimeBundle,
     OfficialRealtimeObservation,
@@ -176,7 +180,7 @@ def build_placeholder_nearby_realtime_coverage(
         overall_level="unavailable",
         evaluated_at=evaluated_at,
         query_radius_m=query_radius_m,
-        radius_buckets_m=[500, 1000, 3000, 5000],
+        radius_buckets_m=list(RADIUS_BUCKETS_M),
         summary='目前僅提供縣市層級背景涵蓋資訊；查詢點附近涵蓋會依查詢點重新計算。',
         signal_breakdown=[],
         missing_signal_types=[
@@ -517,7 +521,18 @@ def _nearby_realtime_coverage_with_bridge_fallback(
     request: RiskAssessRequest,
     created_at: datetime,
 ) -> NearbyRealtimeCoverage:
-    if coverage.overall_level != "unavailable" or not realtime_bundle.observations:
+    # The realtime bundle and persisted coverage repository are separate paths.
+    # A healthy bridge observation must repair an empty repository result too;
+    # otherwise the same response can show a live station in evidence while the
+    # coverage panel incorrectly says that no sensor exists.
+    if not realtime_bundle.observations:
+        return coverage
+    if coverage.overall_level == "no_local_sensor" and _coverage_has_observations(coverage):
+        # The repository also includes local-government and status adapters that
+        # are absent from the central bridge.  Preserve those rows instead of
+        # replacing a sparse/stale/regional result with a narrower source set.
+        return coverage
+    if coverage.overall_level not in {"unavailable", "no_local_sensor"}:
         return coverage
     return build_nearby_realtime_coverage(
         rows=tuple(
@@ -526,6 +541,34 @@ def _nearby_realtime_coverage_with_bridge_fallback(
         ),
         query_radius_m=request.radius_m,
         evaluated_at=created_at,
+        source_health=tuple(coverage.source_health),
+        source_health_unavailable=(
+            not coverage.source_health_checked and not coverage.source_health
+        ),
+        source_health_checked=coverage.source_health_checked,
+        jurisdiction_status=coverage.jurisdiction_status,
+        jurisdiction_checked=coverage.jurisdiction_checked,
+        jurisdiction_complete_signal_types=tuple(
+            signal_type
+            for signal_type in REQUIRED_SIGNAL_TYPES
+            if signal_type not in coverage.jurisdiction_unverified_signal_types
+        ),
+        home_jurisdiction=coverage.home_jurisdiction,
+        considered_jurisdictions=tuple(coverage.considered_jurisdictions),
+        jurisdiction_mapping_revisions=tuple(
+            coverage.jurisdiction_mapping_revisions
+        ),
+    )
+
+
+def _coverage_has_observations(coverage: NearbyRealtimeCoverage) -> bool:
+    return any(
+        signal.nearest_distance_m is not None
+        or signal.fresh_count + signal.degraded_count + signal.stale_count
+        + signal.status_only_count
+        > 0
+        or any(signal.counts_by_radius_m.values())
+        for signal in coverage.signal_breakdown
     )
 
 
@@ -561,6 +604,8 @@ def _official_realtime_freshness_state(
 ) -> str:
     if observation.observed_at >= now - timedelta(minutes=10):
         return "fresh"
+    if observation.observed_at >= now - timedelta(minutes=30):
+        return "degraded"
     return "stale"
 
 

@@ -1,6 +1,10 @@
 "use client";
 
-import type { Coordinate, RiskAssessmentResponse } from "../lib/page-types";
+import type {
+  Coordinate,
+  PublicRealtimeSourceHealth,
+  RiskAssessmentResponse,
+} from "../lib/page-types";
 import type { buildLayerDisplayState } from "../lib/risk-display";
 import {
   formatCoordinate,
@@ -35,6 +39,7 @@ export function DiagnosticsSection({
   const visibleFreshness = assessment
     ? publicDataFreshnessItems(assessment.data_freshness)
     : [];
+  const realtimeSourceHealth = coverage?.source_health ?? [];
   const sourceSummary = sourceHealthSummaryState(layerDisplayState);
 
   return (
@@ -101,6 +106,76 @@ export function DiagnosticsSection({
                 <p className="coverage-boundary-note">
                   {coverage.county_level_note || text.diagnosticsCoverageLocalBoundary}
                 </p>
+                <p className="coverage-boundary-note" data-testid="jurisdiction-proof">
+                  {jurisdictionProofText(coverage)}
+                </p>
+                <section
+                  className="diagnostics-section realtime-source-health-panel"
+                  aria-label={text.diagnosticsSourceHealthKicker}
+                  data-testid="realtime-source-health"
+                >
+                  <div className="section-heading">
+                    <span className="section-kicker">
+                      {text.diagnosticsSourceHealthKicker}
+                    </span>
+                    <h3>
+                      {realtimeSourceHealth.length
+                        ? `${text.diagnosticsSourceHealthTitle}：${healthLabel(
+                            coverage.source_health_status ?? "unknown",
+                          )}`
+                        : text.diagnosticsSourceHealthTitle}
+                    </h3>
+                  </div>
+                  {realtimeSourceHealth.length ? (
+                    <ul className="freshness-list" data-testid="realtime-source-health-list">
+                      {realtimeSourceHealth.map((source, index) => (
+                        <li key={`${source.name}-${index}`}>
+                          <strong>{`${source.name}：${healthLabel(source.health_status)}`}</strong>
+                          {source.message ? <span>{source.message}</span> : null}
+                          <span>
+                            {`${text.diagnosticsSourceScope}：${
+                              source.coverage_scope === "national"
+                                ? text.diagnosticsSourceScopeNational
+                                : text.diagnosticsSourceScopeLocal
+                            } ・ ${text.diagnosticsSourceStationCount}：${
+                              source.station_count === null
+                                ? "--"
+                                : source.station_count.toLocaleString("zh-TW")
+                            } ・ ${text.diagnosticsSourceUpstreamCount}：${
+                              source.upstream_station_count == null
+                                ? "--"
+                                : source.upstream_station_count.toLocaleString("zh-TW")
+                            } ・ ${text.diagnosticsSourcePagination}：${formatPaginationProof(
+                              source.pages_fetched,
+                              source.pagination_complete,
+                            )} ・ ${text.diagnosticsSourceInventory}：${
+                              source.inventory_complete === true
+                                ? text.diagnosticsSourceInventoryComplete
+                                : text.diagnosticsSourceInventoryUnverified
+                            } ・ ${text.diagnosticsSourceManifest}：${inventoryProofLabel(
+                              source.inventory_proof_status,
+                              source.inventory_manifest_sha256,
+                            )} ・ ${text.diagnosticsSourceJurisdictions}：${
+                              source.jurisdictions?.length
+                                ? source.jurisdictions.join("、")
+                                : "--"
+                            } ・ ${text.diagnosticsSourceObservedAt}：${formatDateTime(
+                              source.observed_at,
+                            )} ・ ${text.diagnosticsSourceCheckedAt}：${formatDateTime(
+                              source.checked_at,
+                            )}`}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : coverage.source_health_checked === false ? (
+                    <p>{text.diagnosticsSourceHealthUnavailable}</p>
+                  ) : coverage.source_health_checked === true ? (
+                    <p>{text.diagnosticsSourceHealthEmpty}</p>
+                  ) : (
+                    <p>{text.diagnosticsSourceHealthLegacy}</p>
+                  )}
+                </section>
                 {coverage.signal_breakdown.length ? (
                   <ul className="coverage-detail-list">
                     {coverage.signal_breakdown.map((signal) => (
@@ -121,8 +196,8 @@ export function DiagnosticsSection({
                           <div>
                             <dt>{text.diagnosticsCoverageFreshness}</dt>
                             <dd>
-                              {signal.fresh_count} / {signal.stale_count} /{" "}
-                              {signal.status_only_count}
+                              {signal.fresh_count} / {signal.degraded_count ?? 0} /{" "}
+                              {signal.stale_count} / {signal.status_only_count}
                             </dd>
                           </div>
                           <div>
@@ -242,4 +317,50 @@ function formatCoverageBucketCounts(signal: CoverageSignal, buckets: number[]) {
       return `${label}: ${signal.counts_by_radius_m[String(bucket)] ?? 0}`;
     })
     .join(" / ");
+}
+
+function jurisdictionProofText(
+  coverage: RiskAssessmentResponse["nearby_realtime_coverage"],
+) {
+  const boundary =
+    coverage.jurisdiction_checked === true && coverage.jurisdiction_status === "verified"
+      ? text.diagnosticsJurisdictionVerified
+      : text.diagnosticsJurisdictionUnverified;
+  const home = coverage.home_jurisdiction ?? "未解析";
+  const considered = coverage.considered_jurisdictions?.length
+    ? coverage.considered_jurisdictions.join("、")
+    : "未提供";
+  const catalog =
+    coverage.jurisdiction_catalog_complete === true
+      ? "訊號來源目錄完整"
+      : "訊號來源目錄待審核";
+  const revisions = coverage.jurisdiction_mapping_revisions?.length
+    ? coverage.jurisdiction_mapping_revisions.join("、")
+    : "未提供";
+
+  return `${text.diagnosticsJurisdiction}：${boundary}；主要管轄：${home}；納入鄰接管轄：${considered}；${catalog}；對應版本：${revisions}`;
+}
+
+function formatPaginationProof(pages?: number | null, complete?: boolean | null) {
+  if (pages == null) return "--";
+  const status = complete === true ? "完成" : complete === false ? "未完成" : "終止狀態未提供";
+  return `${pages.toLocaleString("zh-TW")} 頁 / ${status}`;
+}
+
+function inventoryProofLabel(
+  status?: PublicRealtimeSourceHealth["inventory_proof_status"],
+  checksum?: string | null,
+) {
+  const labels = {
+    approved: "已核准",
+    awaiting_review: "待人工審核",
+    checksum_mismatch: "校驗碼不符",
+    incomplete: "上游擷取不完整",
+    missing: "未提供",
+  } satisfies Record<
+    NonNullable<PublicRealtimeSourceHealth["inventory_proof_status"]>,
+    string
+  >;
+  const checksumLabel = checksum ? ` / ${checksum.slice(0, 12)}…` : "";
+  return `${labels[status ?? "missing"]}${checksumLabel}`;
 }

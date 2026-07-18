@@ -88,6 +88,31 @@ def test_main_run_enabled_adapters_noops_without_runtime_fixtures() -> None:
     assert exit_code == 0
 
 
+def test_main_records_authoritative_disabled_runtime_selection(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_record_runtime_sources_disabled(*, settings, database_url):
+        captured["settings"] = settings
+        captured["database_url"] = database_url
+        return 0
+
+    monkeypatch.setattr(
+        "app.cli.runtime_cli.record_runtime_sources_disabled",
+        fake_record_runtime_sources_disabled,
+    )
+
+    exit_code = main(
+        [
+            "--record-runtime-sources-disabled",
+            "--database-url",
+            "postgresql://example.test/flood",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["database_url"] == "postgresql://example.test/flood"
+
+
 def test_main_gdelt_rehearsal_skips_without_all_gates_and_does_not_fetch(
     monkeypatch,
     capsys,

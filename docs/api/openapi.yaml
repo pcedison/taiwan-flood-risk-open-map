@@ -2195,6 +2195,123 @@ components:
           format: date-time
       additionalProperties: false
 
+    NearbySourceHealth:
+      type: object
+      required:
+        - source_id
+        - name
+        - signal_types
+        - coverage_scope
+        - health_status
+        - reason_code
+        - message
+      properties:
+        source_id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,119}$"
+        name:
+          type: string
+        signal_types:
+          type: array
+          items:
+            type: string
+            enum:
+              - rainfall
+              - water_level
+              - flood_depth
+              - sewer_water_level
+              - pump_or_gate_status
+              - flood_warning
+              - status_only
+        coverage_scope:
+          type: string
+          enum:
+            - national
+            - local
+        health_status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - failed
+            - disabled
+            - unknown
+        reason_code:
+          type: string
+          enum:
+            - operational
+            - delayed
+            - upstream_unavailable
+            - pipeline_unavailable
+            - pipeline_stalled
+            - disabled
+            - not_yet_observed
+        observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        checked_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        station_count:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          description: Count of stations with persisted observations; this alone does not prove the station inventory is complete.
+        upstream_station_count:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          description: Total station/Thing count declared by the upstream full-inventory response for the exact latest ingestion job.
+        pages_fetched:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          description: Number of upstream pages fetched for the exact latest station inventory.
+        pagination_complete:
+          type:
+            - boolean
+            - "null"
+          description: True only when pagination reached a terminal response without a next-link.
+        inventory_manifest_sha256:
+          type:
+            - string
+            - "null"
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 of the canonical sorted station-ID manifest; the full station IDs are not exposed publicly.
+        inventory_proof_status:
+          type: string
+          enum:
+            - missing
+            - incomplete
+            - awaiting_review
+            - checksum_mismatch
+            - approved
+          default: missing
+        inventory_complete:
+          type: boolean
+          default: false
+          description: True only when the exact latest run has a complete upstream total/pagination proof, its manifest matches the reviewed checksum, and every manifest station is present in the spatial latest read model.
+        jurisdictions:
+          type: array
+          items:
+            type: string
+          description: Audited counties/cities for which this source applies to the current spatial query.
+        required_for_absence:
+          type: boolean
+          default: true
+          description: Whether this applicable source must be healthy and inventory-complete before a no-station conclusion is allowed.
+        message:
+          type: string
+          description: Public-safe status text; never includes raw exceptions, hosts, credentials, or internal gates.
+      additionalProperties: false
+
     NearbyCoverageSignal:
       type: object
       required:
@@ -2226,6 +2343,16 @@ components:
             - low
             - no_local_sensor
             - unavailable
+        availability_state:
+          type: string
+          enum:
+            - fresh_nearby
+            - degraded_nearby
+            - regional_reference
+            - stale_observation
+            - source_unavailable
+            - source_status_unknown
+            - no_station
         nearest_distance_m:
           type:
             - number
@@ -2248,12 +2375,51 @@ components:
         fresh_count:
           type: integer
           minimum: 0
+        degraded_count:
+          type: integer
+          minimum: 0
         stale_count:
           type: integer
           minimum: 0
         status_only_count:
           type: integer
           minimum: 0
+        nearest_freshness_state:
+          type:
+            - string
+            - "null"
+          enum:
+            - fresh
+            - degraded
+            - stale
+            - null
+        source_health_status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - failed
+            - disabled
+            - unknown
+        source_count:
+          type: integer
+          minimum: 0
+        failed_source_count:
+          type: integer
+          minimum: 0
+        missing_cause:
+          type: string
+          enum:
+            - none
+            - no_station_in_range
+            - inventory_unverified
+            - stale_observation
+            - source_degraded
+            - source_failed
+            - update_pipeline_stalled
+            - source_not_configured
+            - jurisdiction_unverified
+            - health_unknown
         missing_reason:
           type:
             - string
@@ -2314,6 +2480,60 @@ components:
           type: array
           items:
             type: string
+        source_health:
+          type: array
+          items:
+            $ref: "#/components/schemas/NearbySourceHealth"
+        source_health_status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - failed
+            - disabled
+            - unknown
+        source_health_checked:
+          type: boolean
+        jurisdiction_status:
+          type: string
+          enum:
+            - verified
+            - boundary_unverified
+            - outside_coverage
+            - ambiguous
+            - unavailable
+        jurisdiction_checked:
+          type: boolean
+          description: True only when one checksum-verified 22-county boundary snapshot resolves a unique home jurisdiction.
+        jurisdiction_catalog_complete:
+          type: boolean
+          description: True only when every considered county/signal contract is reviewed and its current source-mapping count, checksum, revision, and redundancy parents match the approval.
+        home_jurisdiction:
+          type:
+            - string
+            - "null"
+        considered_jurisdictions:
+          type: array
+          items:
+            type: string
+          description: Home and adjacent counties/cities whose boundary lies within the 15 km station-search radius.
+        jurisdiction_mapping_revisions:
+          type: array
+          items:
+            type: string
+          description: Public review revisions for the exact source mappings applicable to this spatial query.
+        jurisdiction_unverified_signal_types:
+          type: array
+          items:
+            type: string
+            enum:
+              - rainfall
+              - water_level
+              - flood_depth
+              - sewer_water_level
+              - pump_or_gate_status
+              - flood_warning
+              - status_only
         county_level_note:
           type: string
           description: 縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。

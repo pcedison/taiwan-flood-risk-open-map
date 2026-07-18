@@ -31,6 +31,13 @@ FETCHED_AT = datetime(2026, 6, 15, 3, 10, tzinfo=UTC)
 def test_sewer_water_level_uses_rain_sewer_service_not_water_resource() -> None:
     assert "STA_RainSewer" in SEWER_WATER_LEVEL.sta_url
     assert "STA_WaterResource" not in SEWER_WATER_LEVEL.sta_url
+    for source in (
+        POND_WATER_LEVEL,
+        SEWER_WATER_LEVEL,
+        PUMP_WATER_LEVEL,
+        GATE_WATER_LEVEL,
+    ):
+        assert "$count=true" in source.sta_url
 
 
 def _water_level_payload(datastream_name: str, value: float) -> dict:
@@ -191,9 +198,13 @@ def test_water_level_api_adapter_fetches_paginated_sta_pages() -> None:
         calls.append(url)
         if len(calls) == 1:
             payload = _water_level_payload("下水道水位", 1.5)
+            payload["@iot.count"] = 2
             payload["@iot.nextLink"] = "https://example.test/next-page"
             return payload
-        return _water_level_payload("下水道水位", 1.7)
+        payload = _water_level_payload("下水道水位", 1.7)
+        payload["value"][0]["@iot.id"] = 3002
+        payload["value"][0]["properties"]["stationID"] = "WL-B"
+        return payload
 
     adapter = StaWaterLevelApiAdapter(
         SEWER_WATER_LEVEL,
@@ -206,6 +217,10 @@ def test_water_level_api_adapter_fetches_paginated_sta_pages() -> None:
     assert calls == [SEWER_WATER_LEVEL.sta_url, "https://example.test/next-page"]
     assert len(result.normalized) == 2
     assert [item.payload["water_level_m"] for item in result.fetched] == [1.5, 1.7]
+    proof = result.station_inventory_proof
+    assert proof is not None
+    assert proof.station_ids == ("WL-A", "WL-B")
+    assert proof.inventory_complete is True
 
 
 def test_river_water_level_adapter_exposes_water_level_metric_in_raw_payload() -> None:

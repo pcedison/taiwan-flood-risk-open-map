@@ -589,6 +589,36 @@ class QueryHeat(ContractModel):
 
 
 NearbyCoverageLevel = Literal["high", "medium", "low", "no_local_sensor", "unavailable"]
+NearbySignalAvailability = Literal[
+    "fresh_nearby",
+    "degraded_nearby",
+    "regional_reference",
+    "stale_observation",
+    "source_unavailable",
+    "source_status_unknown",
+    "no_station",
+]
+NearbySourceHealthReason = Literal[
+    "operational",
+    "delayed",
+    "upstream_unavailable",
+    "pipeline_unavailable",
+    "pipeline_stalled",
+    "disabled",
+    "not_yet_observed",
+]
+NearbyMissingCause = Literal[
+    "none",
+    "no_station_in_range",
+    "inventory_unverified",
+    "stale_observation",
+    "source_degraded",
+    "source_failed",
+    "update_pipeline_stalled",
+    "source_not_configured",
+    "jurisdiction_unverified",
+    "health_unknown",
+]
 NearbyCoverageSignalType = Literal[
     "rainfall",
     "water_level",
@@ -600,17 +630,54 @@ NearbyCoverageSignalType = Literal[
 ]
 
 
+class NearbySourceHealth(ContractModel):
+    source_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,119}$")
+    name: str
+    signal_types: list[NearbyCoverageSignalType]
+    coverage_scope: Literal["national", "local"]
+    health_status: HealthStatus
+    reason_code: NearbySourceHealthReason
+    observed_at: datetime | None = None
+    checked_at: datetime | None = None
+    station_count: int | None = Field(default=None, ge=0)
+    upstream_station_count: int | None = Field(default=None, ge=0)
+    pages_fetched: int | None = Field(default=None, ge=0)
+    pagination_complete: bool | None = None
+    inventory_manifest_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    inventory_proof_status: Literal[
+        "missing",
+        "incomplete",
+        "awaiting_review",
+        "checksum_mismatch",
+        "approved",
+    ] = "missing"
+    inventory_complete: bool = False
+    jurisdictions: list[str] = Field(default_factory=list)
+    required_for_absence: bool = True
+    message: str
+
+
 class NearbyCoverageSignal(ContractModel):
     signal_type: NearbyCoverageSignalType
     label: str
     coverage_level: NearbyCoverageLevel
+    availability_state: NearbySignalAvailability = "no_station"
     nearest_distance_m: float | None = Field(default=None, ge=0)
     nearest_source_id: str | None = None
     nearest_observed_at: datetime | None = None
     counts_by_radius_m: dict[str, int]
     fresh_count: int = Field(ge=0)
+    degraded_count: int = Field(default=0, ge=0)
     stale_count: int = Field(ge=0)
     status_only_count: int = Field(ge=0)
+    nearest_freshness_state: Literal["fresh", "degraded", "stale"] | None = None
+    source_health_status: HealthStatus = "unknown"
+    source_count: int = Field(default=0, ge=0)
+    failed_source_count: int = Field(default=0, ge=0)
+    missing_cause: NearbyMissingCause = "health_unknown"
     missing_reason: str | None = None
 
 
@@ -623,6 +690,33 @@ class NearbyRealtimeCoverage(ContractModel):
     signal_breakdown: list[NearbyCoverageSignal]
     missing_signal_types: list[NearbyCoverageSignalType]
     limitations: list[str]
+    source_health: list[NearbySourceHealth] = Field(default_factory=list)
+    source_health_status: HealthStatus = "unknown"
+    source_health_checked: bool = False
+    jurisdiction_status: Literal[
+        "verified",
+        "boundary_unverified",
+        "outside_coverage",
+        "ambiguous",
+        "unavailable",
+    ] = "unavailable"
+    jurisdiction_checked: bool = Field(
+        default=False,
+        description="True only when one checksum-verified 22-county boundary snapshot resolves a unique home jurisdiction.",
+    )
+    jurisdiction_catalog_complete: bool = Field(
+        default=False,
+        description="True only when every considered county/signal contract is reviewed and its current source-mapping count, checksum, revision, and redundancy parents match the approval.",
+    )
+    home_jurisdiction: str | None = None
+    considered_jurisdictions: list[str] = Field(default_factory=list)
+    jurisdiction_mapping_revisions: list[str] = Field(
+        default_factory=list,
+        description="Public review revisions for the exact source mappings applicable to this spatial query.",
+    )
+    jurisdiction_unverified_signal_types: list[NearbyCoverageSignalType] = Field(
+        default_factory=list
+    )
     county_level_note: str = Field(
         description='縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
     )

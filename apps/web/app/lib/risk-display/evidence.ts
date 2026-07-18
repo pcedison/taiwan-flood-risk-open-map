@@ -225,8 +225,10 @@ export function hiddenHistoricalNewsCount(
 export const realtimeEventLabels: Record<string, string> = {
   flood_depth: "淹水深度",
   flood_warning: "官方警戒",
+  pump_or_gate_status: "抽水站／水門狀態",
   rainfall: "雨量",
   sewer_water_level: "下水道水位",
+  status_only: "狀態線索",
   water_level: "水位",
 };
 
