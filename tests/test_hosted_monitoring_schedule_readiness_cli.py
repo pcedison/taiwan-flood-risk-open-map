@@ -26,7 +26,9 @@ def test_gh_schedule_runs_retries_transient_api_failures() -> None:
     failure = subprocess.CompletedProcess(
         args=[], returncode=1, stdout="", stderr="gh: unavailable (HTTP 503)"
     )
-    success = subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr="")
+    success = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout='{"workflow_runs": []}', stderr=""
+    )
 
     with patch.object(module.subprocess, "run", side_effect=[failure, success]) as run_mock:
         with patch.object(module.time, "sleep") as sleep_mock:
@@ -36,7 +38,64 @@ def test_gh_schedule_runs_retries_transient_api_failures() -> None:
             ) == []
 
     assert run_mock.call_count == 2
-    sleep_mock.assert_called_once_with(module.GH_RUN_LIST_RETRY_SECONDS)
+    command = run_mock.call_args.args[0]
+    assert command == [
+        "gh",
+        "api",
+        "repos/pcedison/taiwan-flood-risk-open-map/actions/runs?event=schedule&per_page=100",
+    ]
+    sleep_mock.assert_called_once_with(module.GH_API_RETRY_SECONDS)
+
+
+def test_gh_schedule_runs_filters_and_normalizes_repository_runs() -> None:
+    module = _load_script_module()
+    api_payload = {
+        "workflow_runs": [
+            {
+                "id": 29708919140,
+                "name": "Hosted Monitoring",
+                "event": "schedule",
+                "status": "completed",
+                "conclusion": "success",
+                "head_sha": "feecaca9dfe79c6f4203333dcf6d7a43e13d0495",
+                "created_at": "2026-07-20T00:04:19Z",
+                "updated_at": "2026-07-20T00:05:48Z",
+                "html_url": "https://github.com/example/actions/runs/29708919140",
+            },
+            {
+                "id": 29709246175,
+                "name": "Hosted Monitoring Schedule Watchdog",
+                "event": "schedule",
+                "status": "completed",
+                "conclusion": "failure",
+                "head_sha": "feecaca9dfe79c6f4203333dcf6d7a43e13d0495",
+                "created_at": "2026-07-20T00:15:45Z",
+                "updated_at": "2026-07-20T00:16:02Z",
+                "html_url": "https://github.com/example/actions/runs/29709246175",
+            },
+        ]
+    }
+    result = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=json.dumps(api_payload), stderr=""
+    )
+
+    with patch.object(module.subprocess, "run", Mock(return_value=result)):
+        assert module._gh_schedule_runs(
+            repository="pcedison/taiwan-flood-risk-open-map",
+            workflow_name="Hosted Monitoring",
+        ) == [
+            {
+                "databaseId": 29708919140,
+                "status": "completed",
+                "conclusion": "success",
+                "event": "schedule",
+                "headSha": "feecaca9dfe79c6f4203333dcf6d7a43e13d0495",
+                "createdAt": "2026-07-20T00:04:19Z",
+                "updatedAt": "2026-07-20T00:05:48Z",
+                "url": "https://github.com/example/actions/runs/29708919140",
+                "workflowName": "Hosted Monitoring",
+            }
+        ]
 
 
 def test_gh_schedule_runs_does_not_retry_authentication_failure() -> None:

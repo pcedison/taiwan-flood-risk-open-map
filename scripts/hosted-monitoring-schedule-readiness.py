@@ -21,8 +21,8 @@ EVIDENCE_SCHEMA_VERSION = "hosted-monitoring-schedule-readiness/v1"
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 DEFAULT_REPOSITORY = "pcedison/taiwan-flood-risk-open-map"
 DEFAULT_WORKFLOW_NAME = "Hosted Monitoring"
-GH_RUN_LIST_MAX_ATTEMPTS = 4
-GH_RUN_LIST_RETRY_SECONDS = 5
+GH_API_MAX_ATTEMPTS = 4
+GH_API_RETRY_SECONDS = 5
 MONITORING_GATE_KEY = "production_monitoring_and_alerting"
 SCHEDULED_FRESHNESS_REQUIREMENT = "scheduled_freshness_checks"
 
@@ -79,7 +79,7 @@ def main() -> int:
         source = {"mode": "provided_json", "event": "schedule"}
     else:
         runs = _gh_schedule_runs(repository=args.repo, workflow_name=args.workflow_name)
-        source = {"mode": "gh_cli", "event": "schedule"}
+        source = {"mode": "gh_api_repository_runs", "event": "schedule"}
 
     evidence = build_schedule_readiness(
         repository=args.repo,
@@ -359,20 +359,10 @@ def _load_runs(path: Path) -> list[Mapping[str, Any]]:
 def _gh_schedule_runs(*, repository: str, workflow_name: str) -> list[Mapping[str, Any]]:
     command = [
         "gh",
-        "run",
-        "list",
-        "--repo",
-        repository,
-        "--workflow",
-        workflow_name,
-        "--event",
-        "schedule",
-        "--limit",
-        "20",
-        "--json",
-        "databaseId,status,conclusion,event,headSha,createdAt,updatedAt,url,workflowName",
+        "api",
+        f"repos/{repository}/actions/runs?event=schedule&per_page=100",
     ]
-    for attempt in range(1, GH_RUN_LIST_MAX_ATTEMPTS + 1):
+    for attempt in range(1, GH_API_MAX_ATTEMPTS + 1):
         result = subprocess.run(
             command,
             capture_output=True,
@@ -382,20 +372,41 @@ def _gh_schedule_runs(*, repository: str, workflow_name: str) -> list[Mapping[st
         )
         if result.returncode == 0:
             break
-        error = result.stderr.strip() or "gh run list failed"
-        if attempt == GH_RUN_LIST_MAX_ATTEMPTS or not _is_retryable_gh_error(error):
+        error = result.stderr.strip() or "GitHub Actions runs API request failed"
+        if attempt == GH_API_MAX_ATTEMPTS or not _is_retryable_gh_error(error):
             raise SystemExit(error)
-        delay = GH_RUN_LIST_RETRY_SECONDS * attempt
+        delay = GH_API_RETRY_SECONDS * attempt
         print(
-            f"gh run list transient failure (attempt {attempt}/"
-            f"{GH_RUN_LIST_MAX_ATTEMPTS}); retrying in {delay}s: {error}",
+            f"GitHub Actions runs API transient failure (attempt {attempt}/"
+            f"{GH_API_MAX_ATTEMPTS}); retrying in {delay}s: {error}",
             file=sys.stderr,
         )
         time.sleep(delay)
-    payload = json.loads(result.stdout or "[]")
-    if not isinstance(payload, list):
-        raise SystemExit("gh run list returned non-list JSON")
-    return [row for row in payload if isinstance(row, Mapping)]
+    payload = json.loads(result.stdout or "{}")
+    if not isinstance(payload, Mapping):
+        raise SystemExit("GitHub Actions runs API returned non-object JSON")
+    workflow_runs = payload.get("workflow_runs")
+    if not isinstance(workflow_runs, list):
+        raise SystemExit("GitHub Actions runs API response is missing workflow_runs")
+    return [
+        _normalize_api_run(row)
+        for row in workflow_runs
+        if isinstance(row, Mapping) and str(row.get("name", "")) == workflow_name
+    ]
+
+
+def _normalize_api_run(run: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "databaseId": run.get("id"),
+        "status": run.get("status"),
+        "conclusion": run.get("conclusion"),
+        "event": run.get("event"),
+        "headSha": run.get("head_sha"),
+        "createdAt": run.get("created_at"),
+        "updatedAt": run.get("updated_at"),
+        "url": run.get("html_url"),
+        "workflowName": run.get("name"),
+    }
 
 
 def _is_retryable_gh_error(error: str) -> bool:
