@@ -111,6 +111,7 @@ jobs:
         if: ${{ always() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' && steps.readiness-status.outputs.status != 'passed' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
+          retries: 3
           script: |
             const fs = require("fs");
             const { owner, repo } = context.repo;
@@ -175,6 +176,7 @@ jobs:
         if: ${{ always() && steps.readiness-status.outputs.status != 'passed' }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
+          retries: 3
           script: |
             const fs = require("fs");
             const marker = "[hosted-schedule-watchdog]";
@@ -254,6 +256,7 @@ jobs:
         if: ${{ success() }}
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
+          retries: 3
           script: |
             const fs = require("fs");
             const marker = "[hosted-schedule-watchdog]";

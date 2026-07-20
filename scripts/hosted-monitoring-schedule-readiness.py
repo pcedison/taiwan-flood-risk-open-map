@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any, Mapping
 
 
@@ -20,6 +21,8 @@ EVIDENCE_SCHEMA_VERSION = "hosted-monitoring-schedule-readiness/v1"
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 DEFAULT_REPOSITORY = "pcedison/taiwan-flood-risk-open-map"
 DEFAULT_WORKFLOW_NAME = "Hosted Monitoring"
+GH_RUN_LIST_MAX_ATTEMPTS = 4
+GH_RUN_LIST_RETRY_SECONDS = 5
 MONITORING_GATE_KEY = "production_monitoring_and_alerting"
 SCHEDULED_FRESHNESS_REQUIREMENT = "scheduled_freshness_checks"
 
@@ -354,33 +357,63 @@ def _load_runs(path: Path) -> list[Mapping[str, Any]]:
 
 
 def _gh_schedule_runs(*, repository: str, workflow_name: str) -> list[Mapping[str, Any]]:
-    result = subprocess.run(
-        [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            repository,
-            "--workflow",
-            workflow_name,
-            "--event",
-            "schedule",
-            "--limit",
-            "20",
-            "--json",
-            "databaseId,status,conclusion,event,headSha,createdAt,updatedAt,url,workflowName",
-        ],
-        capture_output=True,
-        encoding="utf-8",
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise SystemExit(result.stderr.strip() or "gh run list failed")
+    command = [
+        "gh",
+        "run",
+        "list",
+        "--repo",
+        repository,
+        "--workflow",
+        workflow_name,
+        "--event",
+        "schedule",
+        "--limit",
+        "20",
+        "--json",
+        "databaseId,status,conclusion,event,headSha,createdAt,updatedAt,url,workflowName",
+    ]
+    for attempt in range(1, GH_RUN_LIST_MAX_ATTEMPTS + 1):
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            encoding="utf-8",
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            break
+        error = result.stderr.strip() or "gh run list failed"
+        if attempt == GH_RUN_LIST_MAX_ATTEMPTS or not _is_retryable_gh_error(error):
+            raise SystemExit(error)
+        delay = GH_RUN_LIST_RETRY_SECONDS * attempt
+        print(
+            f"gh run list transient failure (attempt {attempt}/"
+            f"{GH_RUN_LIST_MAX_ATTEMPTS}); retrying in {delay}s: {error}",
+            file=sys.stderr,
+        )
+        time.sleep(delay)
     payload = json.loads(result.stdout or "[]")
     if not isinstance(payload, list):
         raise SystemExit("gh run list returned non-list JSON")
     return [row for row in payload if isinstance(row, Mapping)]
+
+
+def _is_retryable_gh_error(error: str) -> bool:
+    normalized = error.lower()
+    return any(
+        marker in normalized
+        for marker in (
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "timed out",
+            "timeout",
+            "connection reset",
+            "temporary failure",
+        )
+    )
 
 
 def _parse_time(value: str) -> datetime:

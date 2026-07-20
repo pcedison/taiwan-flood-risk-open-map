@@ -111,6 +111,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         fallback_step["uses"]
         == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
     )
+    assert fallback_step["with"]["retries"] == "3"
 
     alert_routing_step = next(
         step
@@ -124,6 +125,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         alert_routing_step["uses"]
         == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
     )
+    assert alert_routing_step["with"]["retries"] == "3"
     alert_script = alert_routing_step["with"]["script"]
     assert 'const fs = require("fs");' in alert_script
     assert "artifacts/hosted-monitoring-schedule-readiness.json" in alert_script
@@ -147,6 +149,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         resolve_step["uses"]
         == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
     )
+    assert resolve_step["with"]["retries"] == "3"
     resolve_script = resolve_step["with"]["script"]
     assert 'const fs = require("fs");' in resolve_script
     assert "artifacts/hosted-monitoring-schedule-readiness.json" in resolve_script

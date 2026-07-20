@@ -1,14 +1,64 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "hosted-monitoring-schedule-readiness.py"
 AUDIT_SCRIPT = REPO_ROOT / "scripts" / "local-source-completion-audit.py"
+
+
+def _load_script_module():
+    spec = importlib.util.spec_from_file_location("schedule_readiness", SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_gh_schedule_runs_retries_transient_api_failures() -> None:
+    module = _load_script_module()
+    failure = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="", stderr="gh: unavailable (HTTP 503)"
+    )
+    success = subprocess.CompletedProcess(args=[], returncode=0, stdout="[]", stderr="")
+
+    with patch.object(module.subprocess, "run", side_effect=[failure, success]) as run_mock:
+        with patch.object(module.time, "sleep") as sleep_mock:
+            assert module._gh_schedule_runs(
+                repository="pcedison/taiwan-flood-risk-open-map",
+                workflow_name="Hosted Monitoring",
+            ) == []
+
+    assert run_mock.call_count == 2
+    sleep_mock.assert_called_once_with(module.GH_RUN_LIST_RETRY_SECONDS)
+
+
+def test_gh_schedule_runs_does_not_retry_authentication_failure() -> None:
+    module = _load_script_module()
+    failure = subprocess.CompletedProcess(
+        args=[], returncode=1, stdout="", stderr="gh: HTTP 401: Bad credentials"
+    )
+
+    with patch.object(module.subprocess, "run", Mock(return_value=failure)) as run_mock:
+        with patch.object(module.time, "sleep") as sleep_mock:
+            try:
+                module._gh_schedule_runs(
+                    repository="pcedison/taiwan-flood-risk-open-map",
+                    workflow_name="Hosted Monitoring",
+                )
+            except SystemExit as error:
+                assert "401" in str(error)
+            else:
+                raise AssertionError("authentication failure should exit")
+
+    run_mock.assert_called_once()
+    sleep_mock.assert_not_called()
 
 
 def test_hosted_monitoring_schedule_readiness_accepts_recent_successful_schedule(
