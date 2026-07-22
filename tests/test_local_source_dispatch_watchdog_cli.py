@@ -348,3 +348,85 @@ def test_local_source_dispatch_watchdog_cli_rejects_wrong_schema(
 
     assert result.returncode == 1
     assert "schema_version" in result.stderr
+
+
+def test_local_source_dispatch_watchdog_cli_reports_no_dispatch_required(
+    tmp_path: Path,
+) -> None:
+    signal_gap_path = tmp_path / "signal-gap-dispatch-readiness.json"
+    source_contract_path = tmp_path / "source-contract-dispatch-readiness.json"
+    request_queue_path = tmp_path / "request-dispatch-queue.json"
+    signal_gap_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-signal-gap-dispatch-readiness/v1",
+                "summary": {
+                    "signal_gap_group_count": 0,
+                    "dispatch_recommended_group_count": 0,
+                    "total_candidate_count": 0,
+                    "total_metadata_only_count": 0,
+                    "total_candidate_live_read_api_count": 0,
+                },
+                "groups": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source_contract_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-contract-dispatch-readiness/v1",
+                "summary": {
+                    "source_contract_item_count": 0,
+                    "dispatch_recommended_item_count": 0,
+                    "authorization_request_count": 0,
+                    "metadata_release_monitor_count": 0,
+                    "public_api_contract_review_count": 0,
+                },
+                "groups": [],
+                "items": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    request_queue_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-request-dispatch-queue/v1",
+                "summary": {
+                    "dispatch_queue_item_count": 0,
+                    "signal_gap_dispatch_queue_item_count": 0,
+                    "source_contract_dispatch_queue_item_count": 0,
+                },
+                "items": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--signal-gap-dispatch-readiness-json",
+            str(signal_gap_path),
+            "--source-contract-dispatch-readiness-json",
+            str(source_contract_path),
+            "--request-dispatch-queue-json",
+            str(request_queue_path),
+            "--captured-at",
+            "2026-07-22T03:05:00Z",
+            "--fail-on-dispatch-required",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "no_dispatch_required"
+    assert payload["summary"]["dispatch_required"] is False
+    assert payload["request_dispatch_queue_items"] == []

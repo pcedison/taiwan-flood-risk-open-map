@@ -94,3 +94,62 @@ def test_source_contract_dispatch_readiness_cli_writes_stdout_when_no_output() -
     payload = json.loads(result.stdout)
     assert payload["schema_version"] == "local-source-contract-dispatch-readiness/v1"
     assert payload["summary"]["source_contract_item_count"] == 6
+
+
+def test_source_contract_dispatch_readiness_cli_omits_accepted_target(
+    tmp_path: Path,
+) -> None:
+    completion_evidence = tmp_path / "completion-evidence.json"
+    private_ref = "private-ops://local-source/contracts/secret-ticket"
+    completion_evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-07-22T03:01:00Z",
+                "signal_family_gap_evidence": [],
+                "source_contract_evidence": [
+                    {
+                        "county": "金門縣",
+                        "gate": "authorization_request",
+                        "status": "authorized",
+                        "evidence_ref": private_ref,
+                        "reviewed_at": "2026-07-22T03:01:00Z",
+                    }
+                ],
+                "production_gate_evidence": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(completion_evidence),
+            "--captured-at",
+            "2026-07-22T03:02:00Z",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert private_ref not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {
+        "source_contract_item_count": 5,
+        "dispatch_recommended_item_count": 5,
+        "authorization_request_count": 1,
+        "metadata_release_monitor_count": 1,
+        "public_api_contract_review_count": 3,
+    }
+    assert not any(
+        item["county"] == "金門縣" and item["gate"] == "authorization_request"
+        for item in payload["items"]
+    )

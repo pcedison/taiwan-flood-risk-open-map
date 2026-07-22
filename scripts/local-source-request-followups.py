@@ -15,6 +15,16 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 
+ROOT = Path(__file__).resolve().parents[1]
+API_APP = ROOT / "apps" / "api"
+sys.path.insert(0, str(API_APP))
+
+from app.ops.local_source.local_source_action_plan import (  # noqa: E402
+    ACCEPTED_SIGNAL_EVIDENCE_STATUSES,
+    ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES,
+)
+
+
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 FOLLOWUPS_SCHEMA_VERSION = "local-source-request-followups/v1"
 DISPATCHED_STATUS = "request_dispatched"
@@ -183,13 +193,13 @@ def _build_sanitized_completion_evidence_overlay(
     source_contract_items: list[dict[str, str]] = []
     for overlay in overlays:
         signal_items.extend(
-            _sanitized_dispatch_items(
+            _sanitized_evidence_items(
                 overlay.get("signal_family_gap_evidence"),
                 section="signal_family_gap_evidence",
             )
         )
         source_contract_items.extend(
-            _sanitized_dispatch_items(
+            _sanitized_evidence_items(
                 overlay.get("source_contract_evidence"),
                 section="source_contract_evidence",
             )
@@ -203,33 +213,61 @@ def _build_sanitized_completion_evidence_overlay(
     }
 
 
-def _sanitized_dispatch_items(value: Any, *, section: str) -> list[dict[str, str]]:
+def _sanitized_evidence_items(value: Any, *, section: str) -> list[dict[str, str]]:
     if value is None:
         return []
     if not isinstance(value, list):
         raise SystemExit(f"{section}: completion evidence field must be an array")
     items: list[dict[str, str]] = []
+    accepted_statuses = (
+        ACCEPTED_SIGNAL_EVIDENCE_STATUSES
+        if section == "signal_family_gap_evidence"
+        else ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES
+    )
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise SystemExit(f"{section}[{index}] must be an object")
-        if item.get("status") != DISPATCHED_STATUS:
+        status = item.get("status")
+        if status != DISPATCHED_STATUS and status not in accepted_statuses:
             continue
 
         public_item = {
             "county": str(item.get("county", "")),
-            "status": DISPATCHED_STATUS,
+            "status": str(status),
             "evidence_ref": SANITIZED_DISPATCH_EVIDENCE_REF,
         }
         if section == "signal_family_gap_evidence":
             public_item["signal_type"] = str(item.get("signal_type", ""))
         if section == "source_contract_evidence":
             public_item["gate"] = str(item.get("gate", ""))
-        if isinstance(item.get("dispatched_at"), str):
-            public_item["dispatched_at"] = str(item["dispatched_at"])
-        if isinstance(item.get("follow_up_due_at"), str):
-            public_item["follow_up_due_at"] = str(item["follow_up_due_at"])
+        if status == DISPATCHED_STATUS:
+            if isinstance(item.get("dispatched_at"), str):
+                public_item["dispatched_at"] = str(item["dispatched_at"])
+            if isinstance(item.get("follow_up_due_at"), str):
+                public_item["follow_up_due_at"] = str(item["follow_up_due_at"])
+        else:
+            _validate_accepted_item(item, section=section, index=index)
+            public_item["reviewed_at"] = str(item["reviewed_at"]).strip()
         items.append(public_item)
     return items
+
+
+def _validate_accepted_item(
+    item: dict[str, Any],
+    *,
+    section: str,
+    index: int,
+) -> None:
+    required_fields = ["county", "evidence_ref", "reviewed_at"]
+    required_fields.append(
+        "signal_type" if section == "signal_family_gap_evidence" else "gate"
+    )
+    for field in required_fields:
+        value = item.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise SystemExit(f"{section}[{index}].{field} is required")
+        if value.strip().upper().startswith("REPLACE_WITH_"):
+            raise SystemExit(f"{section}[{index}].{field} must not be a placeholder")
 
 
 def _section_dispatch_items(value: Any, *, section: str) -> list[dict[str, Any]]:

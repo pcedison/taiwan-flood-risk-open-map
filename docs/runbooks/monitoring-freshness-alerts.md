@@ -408,12 +408,18 @@ manifests to pass their evidence CLIs before the completion audit can accept the
 gate.
 
 `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is also optional. It should contain
-a base64-encoded `local-source-completion-evidence/v1` dispatch overlay whose
-items are still `status: request_dispatched`. The workflow decodes it only into
-runner temp storage, writes `local-source-request-followups.json`, and writes a
-sanitized completion overlay with `evidence_ref` replaced by
-`private-ops://redacted/local-source-request-dispatch`. That sanitized overlay
-lets the aggregate audit show dispatch and overdue-follow-up counts without
+a reviewed, base64-encoded `local-source-completion-evidence/v1` overlay. Entries
+may remain `status: request_dispatched` while awaiting a reply, or use an
+accepted signal-family/source-contract status after review. Every accepted item
+must include a non-placeholder `evidence_ref` and `reviewed_at`. The workflow
+decodes the secret only into runner temp storage, writes
+`local-source-request-followups.json`, and writes a sanitized completion overlay
+with `evidence_ref` replaced by
+`private-ops://redacted/local-source-request-dispatch` and reviewer details
+omitted. Dispatch-only entries remain pending. Hosted Monitoring feeds the
+sanitized entries into its aggregate completion audit; the dedicated Local
+Source Dispatch Watchdog also feeds them into readiness and packet generation,
+where accepted entries remove only their matching request targets without
 uploading private correspondence refs.
 
 Signal-gap discovery refresh artifacts are public-safe and are uploaded on
@@ -767,9 +773,12 @@ official correspondence.
 The next steps point operators to review the request packet bundle, send
 signal-family and source-contract follow-up requests, then store reviewed
 dispatch progress in
-`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` only after private review. If a
-future run finds no dispatch is required, the workflow comments on and closes
-that same issue so the GitHub issue state follows the watchdog state.
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` only after private review. The
+workflow sanitizes that secret before rebuilding readiness and the request
+bundle. `request_dispatched` entries remain in the queue; reviewed accepted
+entries remove their matching county/signal or county/gate target. If all
+targets are removed, a future run reports `no_dispatch_required`, comments on,
+and closes that same issue so the GitHub issue state follows the watchdog state.
 
 This watchdog is not completion evidence. It is an operational reminder that
 `required_signal_families` and `official_authorization_and_contracts` still

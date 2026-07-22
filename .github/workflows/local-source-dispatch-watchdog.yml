@@ -20,6 +20,7 @@ jobs:
       issues: write
     env:
       FAIL_ON_DISPATCH_REQUIRED: ${{ github.event.inputs.fail_on_dispatch_required || 'false' }}
+      LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_CONFIGURED: ${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -32,6 +33,20 @@ jobs:
       - name: Prepare artifact directory
         run: mkdir -p artifacts/request-packet-bundle
 
+      - name: Sanitize reviewed local source completion evidence
+        if: ${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_CONFIGURED == 'true' }}
+        env:
+          LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64: ${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}
+        run: |
+          set -euo pipefail
+          private_manifest="${RUNNER_TEMP}/local-source-request-dispatch-evidence.json"
+          printf '%s' "${LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64}" | base64 --decode > "${private_manifest}"
+          python scripts/local-source-request-followups.py \
+            --completion-evidence-json "${private_manifest}" \
+            --as-of "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --output artifacts/local-source-request-followups.json \
+            --sanitized-completion-evidence-output artifacts/local-source-sanitized-completion-evidence.json
+
       - name: Local source signal-gap discovery refresh
         run: |
           set -euo pipefail
@@ -43,24 +58,39 @@ jobs:
       - name: Local source signal-gap dispatch readiness
         run: |
           set -euo pipefail
+          completion_args=()
+          if [ -f artifacts/local-source-sanitized-completion-evidence.json ]; then
+            completion_args+=(--completion-evidence-json artifacts/local-source-sanitized-completion-evidence.json)
+          fi
           python scripts/local-source-signal-gap-dispatch-readiness.py \
             --discovery-summary-json artifacts/signal-gap-discovery-refresh-summary.json \
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --output artifacts/local-source-signal-gap-dispatch-readiness.json
+            --output artifacts/local-source-signal-gap-dispatch-readiness.json \
+            "${completion_args[@]}"
 
       - name: Local source contract dispatch readiness
         run: |
           set -euo pipefail
+          completion_args=()
+          if [ -f artifacts/local-source-sanitized-completion-evidence.json ]; then
+            completion_args+=(--completion-evidence-json artifacts/local-source-sanitized-completion-evidence.json)
+          fi
           python scripts/local-source-contract-dispatch-readiness.py \
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --output artifacts/local-source-contract-dispatch-readiness.json
+            --output artifacts/local-source-contract-dispatch-readiness.json \
+            "${completion_args[@]}"
 
       - name: Local source request packet bundle
         run: |
           set -euo pipefail
+          completion_args=()
+          if [ -f artifacts/local-source-sanitized-completion-evidence.json ]; then
+            completion_args+=(--completion-evidence-json artifacts/local-source-sanitized-completion-evidence.json)
+          fi
           python scripts/local-source-request-packet-bundle.py \
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --output-dir artifacts/request-packet-bundle
+            --output-dir artifacts/request-packet-bundle \
+            "${completion_args[@]}"
 
       - name: Local source dispatch watchdog
         run: |

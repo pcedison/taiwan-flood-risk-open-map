@@ -216,3 +216,95 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
     assert "These templates are not completion evidence until placeholders are replaced" in (
         summary_markdown
     )
+
+
+def test_local_source_request_packet_bundle_cli_removes_all_accepted_targets(
+    tmp_path: Path,
+) -> None:
+    baseline_dir = tmp_path / "baseline"
+    baseline = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--captured-at",
+            "2026-07-22T03:00:00Z",
+            "--output-dir",
+            str(baseline_dir),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+    assert baseline.returncode == 0, baseline.stderr
+
+    draft = json.loads(
+        (
+            baseline_dir / "local-source-request-dispatch-evidence-draft.json"
+        ).read_text(encoding="utf-8")
+    )
+    private_ref = "private-ops://local-source/review/private-ticket"
+    for item in draft["signal_family_gap_evidence"]:
+        item["status"] = "official_unavailable"
+        item["evidence_ref"] = private_ref
+        item["reviewed_at"] = "2026-07-22T03:01:00Z"
+    for item in draft["source_contract_evidence"]:
+        item["status"] = "official_unavailable"
+        item["evidence_ref"] = private_ref
+        item["reviewed_at"] = "2026-07-22T03:01:00Z"
+    draft["captured_at"] = "2026-07-22T03:01:00Z"
+    completion_evidence = tmp_path / "completion-evidence.json"
+    completion_evidence.write_text(
+        json.dumps(draft, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    output_dir = tmp_path / "resolved"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--captured-at",
+            "2026-07-22T03:02:00Z",
+            "--completion-evidence-json",
+            str(completion_evidence),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    manifest_text = (
+        output_dir / "local-source-request-packet-bundle-manifest.json"
+    ).read_text(encoding="utf-8")
+    assert private_ref not in manifest_text
+    manifest = json.loads(manifest_text)
+    assert manifest["summary"] == {
+        "official_request_packet_count": 0,
+        "official_completion_target_count": 0,
+        "signal_gap_batch_count": 0,
+        "signal_gap_county_item_count": 0,
+        "source_contract_completion_target_count": 0,
+        "request_dispatch_evidence_draft_item_count": 0,
+        "dispatch_queue_item_count": 0,
+        "signal_gap_dispatch_queue_item_count": 0,
+        "source_contract_dispatch_queue_item_count": 0,
+    }
+    assert manifest["remaining_completion_gates"] == []
+    summary_markdown = (
+        output_dir / "local-source-request-packet-bundle.md"
+    ).read_text(encoding="utf-8")
+    assert "remaining_completion_gates: none" in summary_markdown
+    queue = json.loads(
+        (output_dir / "local-source-request-dispatch-queue.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert queue["summary"]["dispatch_queue_item_count"] == 0
+    assert queue["items"] == []

@@ -35,6 +35,9 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert job["env"]["FAIL_ON_DISPATCH_REQUIRED"] == (
         "${{ github.event.inputs.fail_on_dispatch_required || 'false' }}"
     )
+    assert job["env"]["LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_CONFIGURED"] == (
+        "${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 != '' }}"
+    )
 
     steps = job["steps"]
     step_text = "\n".join(str(step) for step in steps)
@@ -50,6 +53,29 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "scripts/local-source-signal-gap-dispatch-readiness.py" in step_text
     assert "scripts/local-source-contract-dispatch-readiness.py" in step_text
     assert "scripts/local-source-request-packet-bundle.py" in step_text
+    assert "scripts/local-source-request-followups.py" in step_text
+    assert "${RUNNER_TEMP}/local-source-request-dispatch-evidence.json" in step_text
+    assert "artifacts/local-source-sanitized-completion-evidence.json" in step_text
+    assert step_text.count("--completion-evidence-json") >= 4
+    assert "artifacts/private" not in step_text
+    sanitize_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Sanitize reviewed local source completion evidence"
+    )
+    assert sanitize_step["if"] == (
+        "${{ env.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_CONFIGURED == 'true' }}"
+    )
+    assert sanitize_step["env"] == {
+        "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64": (
+            "${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}"
+        )
+    }
+    assert all(
+        "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64" not in step.get("env", {})
+        for step in steps
+        if step is not sanitize_step
+    )
     assert "scripts/local-source-dispatch-watchdog.py" in step_text
     assert "--fail-on-dispatch-required" in step_text
     assert "--request-dispatch-queue-json" in step_text

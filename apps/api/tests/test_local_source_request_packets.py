@@ -8,6 +8,7 @@ from app.ops.local_source.local_source_coverage import list_local_source_coverag
 from app.ops.local_source.local_source_request_packets import (
     build_completion_evidence_template,
     build_official_request_packets,
+    build_signal_gap_request_batches,
     render_official_request_packets_markdown,
 )
 
@@ -290,6 +291,103 @@ def test_official_request_packets_expose_completion_evidence_targets() -> None:
             ),
         },
     ]
+
+
+def test_reviewed_signal_evidence_removes_only_matching_request_target() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+    completion_evidence = {
+        "schema_version": "local-source-completion-evidence/v1",
+        "captured_at": "2026-07-22T03:00:00Z",
+        "signal_family_gap_evidence": [
+            {
+                "county": "金門縣",
+                "signal_type": "pump_or_gate_status",
+                "status": "production_adapter",
+                "evidence_ref": "private-ops://local-source/review/kinmen-pump",
+                "reviewed_at": "2026-07-22T03:00:00Z",
+            }
+        ],
+        "source_contract_evidence": [],
+        "production_gate_evidence": [],
+    }
+
+    packets = build_official_request_packets(
+        plan,
+        completion_evidence=completion_evidence,
+    )
+    batches = build_signal_gap_request_batches(
+        plan,
+        completion_evidence=completion_evidence,
+    )
+
+    kinmen = next(packet for packet in packets if packet["county"] == "金門縣")
+    assert kinmen["target_signal_types"] == []
+    assert kinmen["completion_evidence_targets"] == [
+        {
+            "manifest_section": "source_contract_evidence",
+            "county": "金門縣",
+            "gate": "authorization_request",
+            "accepted_statuses": [
+                "accepted",
+                "authorized",
+                "contract_verified",
+                "official_unavailable",
+                "released",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/source-contract/"
+                "金門縣/authorization_request"
+            ),
+        }
+    ]
+    pump_batch = next(
+        batch
+        for batch in batches
+        if batch["target_signal_type"] == "pump_or_gate_status"
+    )
+    assert pump_batch["county_count"] == 12
+    assert "金門縣" not in pump_batch["counties"]
+    assert "--county 金門縣" not in pump_batch["packet_generator_command"]
+
+
+def test_dispatch_only_or_placeholder_evidence_does_not_remove_request_targets() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+    completion_evidence = {
+        "schema_version": "local-source-completion-evidence/v1",
+        "captured_at": "2026-07-22T03:00:00Z",
+        "signal_family_gap_evidence": [
+            {
+                "county": "金門縣",
+                "signal_type": "pump_or_gate_status",
+                "status": "request_dispatched",
+                "evidence_ref": "private-ops://local-source/dispatch/kinmen-pump",
+            },
+            {
+                "county": "嘉義市",
+                "signal_type": "pump_or_gate_status",
+                "status": "production_adapter",
+                "evidence_ref": "REPLACE_WITH_PRIVATE_EVIDENCE_REF",
+                "reviewed_at": "2026-07-22T03:00:00Z",
+            },
+        ],
+        "source_contract_evidence": [],
+        "production_gate_evidence": [],
+    }
+
+    batches = build_signal_gap_request_batches(
+        plan,
+        completion_evidence=completion_evidence,
+    )
+
+    pump_batch = next(
+        batch
+        for batch in batches
+        if batch["target_signal_type"] == "pump_or_gate_status"
+    )
+    assert pump_batch["county_count"] == 13
+    assert "金門縣" in pump_batch["counties"]
+    assert "嘉義市" in pump_batch["counties"]
 
 
 def test_completion_evidence_template_is_pending_draft_from_request_packets() -> None:

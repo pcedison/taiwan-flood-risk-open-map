@@ -23,6 +23,7 @@ def build_official_request_packets(
     *,
     counties: Iterable[str] | None = None,
     signal_types: Iterable[str] | None = None,
+    completion_evidence: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     packets: list[dict[str, Any]] = []
     priority_by_county = {
@@ -64,7 +65,10 @@ def build_official_request_packets(
         )
         for item in action_plan.get("sensor_signal_gap_reviews", [])
     )
-    ordered_packets = tuple(sorted(packets, key=_packet_sort_key))
+    ordered_packets = _remove_completed_packet_targets(
+        tuple(sorted(packets, key=_packet_sort_key)),
+        completion_evidence=completion_evidence,
+    )
     return _filter_packets(
         ordered_packets,
         counties=counties,
@@ -76,10 +80,17 @@ def build_signal_gap_request_batches(
     action_plan: Mapping[str, Any],
     *,
     signal_types: Iterable[str] | None = None,
+    completion_evidence: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     signal_filter = (
         {str(signal_type) for signal_type in signal_types} if signal_types else None
     )
+    accepted_signal_keys, _ = _accepted_completion_keys(completion_evidence)
+    priority_by_county = {
+        str(item["county"]): item
+        for item in action_plan.get("integration_priority_queue", [])
+        if isinstance(item, Mapping) and item.get("county")
+    }
     batches: list[dict[str, Any]] = []
     for group in action_plan.get("signal_gap_priority_groups", []):
         if not isinstance(group, Mapping):
@@ -113,8 +124,191 @@ def build_signal_gap_request_batches(
                 ],
             }
         )
+        if accepted_signal_keys:
+            remaining_targets = [
+                target
+                for target in batch["completion_evidence_targets"]
+                if (
+                    str(target.get("county", "")),
+                    str(target.get("signal_type", "")),
+                )
+                not in accepted_signal_keys
+            ]
+            if len(remaining_targets) == len(batch["completion_evidence_targets"]):
+                batches.append(batch)
+                continue
+            if not remaining_targets:
+                continue
+            remaining_counties = [
+                str(target["county"])
+                for target in remaining_targets
+                if target.get("county")
+            ]
+            remaining_items = [
+                priority_by_county[county]
+                for county in remaining_counties
+                if county in priority_by_county
+            ]
+            batch.update(
+                {
+                    "county_count": len(remaining_counties),
+                    "counties": remaining_counties,
+                    "requested_counterparties": list(
+                        dict.fromkeys(
+                            str(item["requested_counterparty"])
+                            for item in remaining_items
+                        )
+                    ),
+                    "tracking_statuses": list(
+                        dict.fromkeys(
+                            str(item["tracking_status"]) for item in remaining_items
+                        )
+                    ),
+                    "packet_generator_command": _signal_gap_packet_generator_command(
+                        target_signal_type,
+                        counties=remaining_counties,
+                    ),
+                    "completion_evidence_targets": remaining_targets,
+                }
+            )
         batches.append(batch)
     return tuple(batches)
+
+
+def _remove_completed_packet_targets(
+    packets: tuple[dict[str, Any], ...],
+    *,
+    completion_evidence: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], ...]:
+    accepted_signal_keys, accepted_source_contract_keys = _accepted_completion_keys(
+        completion_evidence
+    )
+    if not accepted_signal_keys and not accepted_source_contract_keys:
+        return packets
+
+    filtered: list[dict[str, Any]] = []
+    for packet in packets:
+        original_targets = [
+            target
+            for target in packet.get("completion_evidence_targets", [])
+            if isinstance(target, Mapping)
+        ]
+        if not original_targets:
+            filtered.append(packet)
+            continue
+        remaining_targets = [
+            dict(target)
+            for target in original_targets
+            if not _completion_target_is_accepted(
+                target,
+                accepted_signal_keys=accepted_signal_keys,
+                accepted_source_contract_keys=accepted_source_contract_keys,
+            )
+        ]
+        if len(remaining_targets) == len(original_targets):
+            filtered.append(packet)
+            continue
+        if not remaining_targets:
+            continue
+
+        updated = dict(packet)
+        updated["completion_evidence_targets"] = remaining_targets
+        if "target_signal_types" in updated:
+            remaining_signal_types = {
+                str(target.get("signal_type", ""))
+                for target in remaining_targets
+                if target.get("manifest_section") == "signal_family_gap_evidence"
+            }
+            updated["target_signal_types"] = [
+                str(signal_type)
+                for signal_type in packet.get("target_signal_types", [])
+                if str(signal_type) in remaining_signal_types
+            ]
+        filtered.append(updated)
+    return tuple(filtered)
+
+
+def _accepted_completion_keys(
+    completion_evidence: Mapping[str, Any] | None,
+) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+    signal_keys: set[tuple[str, str]] = set()
+    source_contract_keys: set[tuple[str, str]] = set()
+    if (
+        completion_evidence is None
+        or completion_evidence.get("schema_version")
+        != COMPLETION_EVIDENCE_SCHEMA_VERSION
+    ):
+        return signal_keys, source_contract_keys
+
+    signal_items = completion_evidence.get("signal_family_gap_evidence")
+    if isinstance(signal_items, list):
+        for item in signal_items:
+            if not isinstance(item, Mapping):
+                continue
+            if item.get("status") not in ACCEPTED_SIGNAL_EVIDENCE_STATUSES:
+                continue
+            county = _non_empty_text(item.get("county"))
+            signal_type = _non_empty_text(item.get("signal_type"))
+            evidence_ref = _reviewed_evidence_text(item.get("evidence_ref"))
+            reviewed_at = _reviewed_evidence_text(item.get("reviewed_at"))
+            if county and signal_type and evidence_ref and reviewed_at:
+                signal_keys.add((county, signal_type))
+
+    source_contract_items = completion_evidence.get("source_contract_evidence")
+    if isinstance(source_contract_items, list):
+        for item in source_contract_items:
+            if not isinstance(item, Mapping):
+                continue
+            if item.get("status") not in ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES:
+                continue
+            county = _non_empty_text(item.get("county"))
+            gate = _non_empty_text(item.get("gate"))
+            evidence_ref = _reviewed_evidence_text(item.get("evidence_ref"))
+            reviewed_at = _reviewed_evidence_text(item.get("reviewed_at"))
+            if county and gate and evidence_ref and reviewed_at:
+                source_contract_keys.add((county, gate))
+
+    return signal_keys, source_contract_keys
+
+
+def _completion_target_is_accepted(
+    target: Mapping[str, Any],
+    *,
+    accepted_signal_keys: set[tuple[str, str]],
+    accepted_source_contract_keys: set[tuple[str, str]],
+) -> bool:
+    section = str(target.get("manifest_section", ""))
+    county = str(target.get("county", "")).strip()
+    if section == "signal_family_gap_evidence":
+        return (county, str(target.get("signal_type", "")).strip()) in accepted_signal_keys
+    if section == "source_contract_evidence":
+        return (county, str(target.get("gate", "")).strip()) in accepted_source_contract_keys
+    return False
+
+
+def _signal_gap_packet_generator_command(
+    signal_type: str,
+    *,
+    counties: list[str],
+) -> str:
+    county_args = " ".join(f"--county {county}" for county in counties)
+    return (
+        "PYTHONPATH=apps/api python scripts/local-source-request-packets.py "
+        f"--format markdown --signal-type {signal_type} {county_args}"
+    )
+
+
+def _non_empty_text(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _reviewed_evidence_text(value: Any) -> str | None:
+    text = _non_empty_text(value)
+    if text is None or text.upper().startswith("REPLACE_WITH_"):
+        return None
+    return text
 
 
 def _filter_packets(
