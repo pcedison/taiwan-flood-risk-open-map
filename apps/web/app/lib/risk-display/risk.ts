@@ -118,12 +118,12 @@ export function riskSummaryDecisionText(input: {
     realtimeRank === 0 && historicalRank === 0
       ? "目前沒有足夠即時或歷史證據可判定。"
       : realtimeRank > historicalRank
-        ? "目前由即時雨量、水位或警戒訊號主導。"
+        ? "目前由即時訊號主導；即時可能包含近期雨量、水位、官方警戒、通報或區域即時 profile，不等於現在正在下雨。"
         : historicalRank > realtimeRank
           ? "目前由歷史事件或淹水潛勢參考主導。"
           : "即時與歷史參考落在相同等級。";
 
-  return `綜合風險取即時與歷史參考中較高的等級；資料信心（${confidenceLevel}）只是說明這次證據的可靠程度，不會單獨把風險等級拉高。${driver}`;
+  return `綜合風險取即時與歷史參考中較高的等級；資料可信度（${confidenceLevel}）只描述證據可靠度，不代表淹水機率，也不會單獨拉高風險。${driver}`;
 }
 
 export function riskDecisionSummary(input: {
@@ -148,13 +148,13 @@ export function riskDecisionSummary(input: {
     realtimeRank === 0 && historicalRank === 0
       ? "本次資料不足，暫不把即時或歷史參考推成結論。"
       : realtimeRank > historicalRank
-        ? `本次採即時風險，因即時（${realtimeLevel}）高於歷史參考（${historicalLevel}）。`
+        ? `本次採即時風險，因即時（${realtimeLevel}）高於歷史參考（${historicalLevel}）。即時不是只代表正在下雨，也可能來自水位、官方警戒、通報或區域即時 profile。`
         : historicalRank > realtimeRank
           ? `本次採歷史參考，因歷史參考（${historicalLevel}）高於即時（${realtimeLevel}）。`
           : `即時與歷史參考同為${realtimeLevel}，綜合維持${realtimeLevel}。`;
 
   return {
-    confidence: `信心：${confidenceLevel}`,
+    confidence: `資料可信度：${confidenceLevel}`,
     driver: `主導：${driver}`,
     method: "取即時/歷史較高",
     narrative,

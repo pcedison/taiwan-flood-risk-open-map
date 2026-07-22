@@ -30,6 +30,13 @@ EVENT_SCORE_CAPS = {
 FLOOD_POTENTIAL_CONTEXT_CAP_WITH_OBSERVED_HISTORY = 20.0
 OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM = 25.0
 REQUIRED_REALTIME_EVENTS = {"rainfall", "water_level"}
+REALTIME_REASON_LABELS = {
+    "rainfall": "雨量",
+    "water_level": "水位",
+    "flood_warning": "官方警戒",
+    "flood_report": "通報",
+    "road_closure": "道路封閉",
+}
 
 
 @dataclass(frozen=True)
@@ -84,7 +91,12 @@ def score_risk(signals: tuple[RiskEvidenceSignal, ...], *, now: datetime) -> Ris
         has_evidence=has_historical_evidence,
     )
     confidence_level = _confidence_level(confidence_score, has_evidence=bool(signals))
-    main_reasons = _main_reasons(signals, realtime_level, historical_level)
+    main_reasons = _main_reasons(
+        signals,
+        realtime_level,
+        historical_level,
+        now=now,
+    )
 
     return RiskScoringResult(
         score_version=SCORE_VERSION,
@@ -114,19 +126,15 @@ def _weighted_score(
         for signal in signals
     )
     for signal in signals:
-        weight = weights.get(signal.event_type, 0.0)
-        if weight == 0:
+        if not _is_weighted_signal_eligible(
+            signal,
+            weights,
+            now=now,
+            max_age=max_age,
+        ):
             continue
-        if now is not None and max_age is not None and not _is_recent(signal, now, max_age):
-            continue
-        contribution = (
-            weight
-            * _clamp(signal.confidence)
-            * _clamp(signal.freshness_score)
-            * _clamp(signal.risk_factor)
-            * _distance_factor(signal.distance_to_query_m)
-            * max(signal.source_weight, 0.0)
-        )
+        weight = weights[signal.event_type]
+        contribution = _weighted_signal_contribution(signal, weight)
         if (
             signal.event_type == "flood_report"
             and weight >= HISTORICAL_WEIGHTS["flood_report"]
@@ -164,9 +172,39 @@ def _has_weighted_evidence(
     max_age: timedelta | None = None,
 ) -> bool:
     return any(
-        weights.get(signal.event_type, 0.0) > 0
-        and (now is None or max_age is None or _is_recent(signal, now, max_age))
+        _is_weighted_signal_eligible(
+            signal,
+            weights,
+            now=now,
+            max_age=max_age,
+        )
         for signal in signals
+    )
+
+
+def _is_weighted_signal_eligible(
+    signal: RiskEvidenceSignal,
+    weights: dict[str, float],
+    *,
+    now: datetime | None = None,
+    max_age: timedelta | None = None,
+) -> bool:
+    if weights.get(signal.event_type, 0.0) <= 0:
+        return False
+    return now is None or max_age is None or _is_recent(signal, now, max_age)
+
+
+def _weighted_signal_contribution(
+    signal: RiskEvidenceSignal,
+    weight: float,
+) -> float:
+    return (
+        weight
+        * _clamp(signal.confidence)
+        * _clamp(signal.freshness_score)
+        * _clamp(signal.risk_factor)
+        * _distance_factor(signal.distance_to_query_m)
+        * max(signal.source_weight, 0.0)
     )
 
 
@@ -238,6 +276,8 @@ def _main_reasons(
     signals: tuple[RiskEvidenceSignal, ...],
     realtime_level: PublicRiskLevel,
     historical_level: PublicRiskLevel,
+    *,
+    now: datetime,
 ) -> tuple[str, ...]:
     if not signals:
         return ("目前缺少可採用的即時或歷史資料，尚不能判定風險高低。",)
@@ -248,7 +288,7 @@ def _main_reasons(
     flood_potential_count = sum(1 for signal in signals if signal.event_type == "flood_potential")
     reasons = []
     if realtime_level in {"高", "極高"}:
-        reasons.append("附近即時雨量或水位資料偏高。")
+        reasons.append(_realtime_main_reason(signals, now=now))
     if observed_history_count:
         reasons.append(
             f"查詢半徑內有 {observed_history_count} 筆官方災點、公開新聞或淹水事件紀錄。"
@@ -261,6 +301,37 @@ def _main_reasons(
     if not reasons:
         reasons.append("目前可用資料未形成強烈即時淹水訊號。")
     return tuple(reasons)
+
+
+def _realtime_main_reason(
+    signals: tuple[RiskEvidenceSignal, ...],
+    *,
+    now: datetime,
+) -> str:
+    max_age = timedelta(hours=6)
+    event_types = {
+        signal.event_type
+        for signal in signals
+        if _is_weighted_signal_eligible(
+            signal,
+            REALTIME_WEIGHTS,
+            now=now,
+            max_age=max_age,
+        )
+        and _weighted_signal_contribution(
+            signal,
+            REALTIME_WEIGHTS[signal.event_type],
+        )
+        > 0
+    }
+    labels = [
+        label
+        for event_type, label in REALTIME_REASON_LABELS.items()
+        if event_type in event_types
+    ]
+    if not labels:
+        return "附近即時訊號偏高；即時不只代表現地降雨。"
+    return f"附近即時訊號偏高，主要來自{'、'.join(labels)}；即時不只代表現地降雨。"
 
 
 def _summary(
@@ -277,9 +348,9 @@ def _summary(
     if realtime_level == "未知" and historical_level != "未知":
         return (
             f"即時資料不足，無法判定即時風險；"
-            f"歷史與淹水潛勢參考為{historical_level}，資料信心為{confidence_level}。"
+            f"歷史與淹水潛勢參考為{historical_level}，資料可信度為{confidence_level}。"
         )
-    return f"即時風險為{realtime_level}，歷史與淹水潛勢參考為{historical_level}，資料信心為{confidence_level}。"
+    return f"即時風險為{realtime_level}，歷史與淹水潛勢參考為{historical_level}，資料可信度為{confidence_level}。"
 
 
 def _clamp(value: float) -> float:

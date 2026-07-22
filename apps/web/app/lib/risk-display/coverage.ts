@@ -135,11 +135,11 @@ function nearbySensingCoverageSummary(
     .map((signal) => signal.nearest_distance_m)
     .filter((distance): distance is number => distance !== null);
   const nearestText = nearestDistances.length
-    ? `，最近 ${formatDistance(Math.min(...nearestDistances))}`
+    ? `；最近觀測距查詢點 ${formatDistance(Math.min(...nearestDistances))}`
     : "";
 
   if (coverage.overall_level === "unavailable") {
-    return "本次無法判讀附近即時感測覆蓋，請改看風險摘要與重點資料線索。";
+    return "本次無法判讀附近即時感測覆蓋，請改看風險摘要與判讀依據。";
   }
 
   if (diagnosis.sourceIssue) {
@@ -598,7 +598,7 @@ function signalDetail(
   const observedAt = signal.nearest_observed_at
     ? `；${formatDateTime(signal.nearest_observed_at)}`
     : "";
-  return `${formatDistanceMeters(signal.nearest_distance_m)}；${status}${sourceStatus}${observedAt}`;
+  return `距查詢點 ${formatDistanceMeters(signal.nearest_distance_m)}；${status}${sourceStatus}${observedAt}`;
 }
 
 function legacySourceAvailabilityNote(input: {
@@ -700,7 +700,7 @@ export function nearbySensingState(input: {
     badge: nearbyCoverageBadge(level),
     gaps,
     items: realtimeItems.slice(0, 4).map((item) => ({
-      detail: `${formatDistance(item.distance_to_query_m)}；${formatDateTime(item.observed_at)}`,
+      detail: `距查詢點 ${formatDistance(item.distance_to_query_m)}；觀測 ${formatDateTime(item.observed_at)}`,
       id: item.id,
       label: item.title || realtimeEventLabels[item.event_type] || "即時觀測",
     })),

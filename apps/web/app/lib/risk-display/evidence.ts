@@ -161,7 +161,7 @@ const officialEvidenceDisplayText: EvidenceDisplayText = {
 
 const derivedEvidenceDisplayText: EvidenceDisplayText = {
   purpose: "用途：整理後佐證",
-  summary: "系統整理後的公開資料線索，請搭配來源時間與信心分數判讀。",
+  summary: "系統整理後的公開資料線索，請搭配來源時間與來源可信度判讀。",
   title: "整理後資料線索",
 };
 

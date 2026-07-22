@@ -109,7 +109,7 @@ export function RiskSummarySection({
           <dl className="risk-method-list">
             <div>
               <dt>{text.realtime}</dt>
-              <dd>近 6 小時雨量、水位、警戒與通報訊號。</dd>
+              <dd>近 6 小時雨量、水位、官方警戒、通報或區域即時 profile；不是只看現在是否下雨。</dd>
             </div>
             <div>
               <dt>{text.historical}</dt>
@@ -117,7 +117,10 @@ export function RiskSummarySection({
             </div>
             <div>
               <dt>{text.confidence}</dt>
-              <dd>{profileBasisText.confidenceNote ?? "看來源可信度、資料筆數、時間新鮮度與覆蓋缺口。"}</dd>
+              <dd>
+                {profileBasisText.confidenceNote ??
+                  "看來源可信度、資料筆數、時間新鮮度與覆蓋缺口；不是淹水機率。"}
+              </dd>
             </div>
           </dl>
           {assessment.explanation.main_reasons.length ? (

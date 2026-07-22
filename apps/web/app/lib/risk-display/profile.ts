@@ -61,7 +61,8 @@ export function getProfileBasisText(input: {
       (evidenceCount > 0
         ? `這次區域概略估計已提供 ${evidenceCount} 筆摘要證據。`
         : "這次區域概略估計還沒有逐筆列出的摘要證據。"),
-    confidenceNote: "依資料來源類型、資料筆數、時間新鮮度與覆蓋缺口推估而來。",
+    confidenceNote:
+      "依資料來源類型、資料筆數、時間新鮮度與覆蓋缺口推估而來；描述的是證據可靠度，不代表淹水機率。",
     limitationLead:
       "這不是系統錯誤，而是這次區域概略估計還沒有涵蓋到的資料來源；即時雨量或水位資料不足時，會限制即時判斷的準確度。",
   };

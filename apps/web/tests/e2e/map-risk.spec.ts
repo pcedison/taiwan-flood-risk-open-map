@@ -146,7 +146,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
         explanation: {
           main_reasons: ["查詢半徑內與淹水潛勢圖資相交。"],
           missing_sources: ["尚未接入即時雨量資料。", "尚未接入即時水位資料。"],
-          summary: "即時風險為低，歷史參考風險為中，資料信心為中。",
+          summary: "即時風險為低，歷史參考風險為中，資料可信度為中。",
         },
         historical: { level: "medium" },
         location: { lat: 25.04776, lng: 121.51706 },
@@ -338,10 +338,12 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("主導：歷史參考")).toBeVisible();
   await expect(page.getByText("取即時/歷史較高")).toBeVisible();
   await expect(page.getByText("本次採歷史參考，因歷史參考（中）高於即時（低）。")).toBeVisible();
-  await expect(page.getByText("即時風險為低，歷史參考風險為中，資料信心為中。")).toBeVisible();
+  await expect(page.getByText("即時風險為低，歷史參考風險為中，資料可信度為中。")).toBeVisible();
   await expect(page.getByTestId("nearby-sensing")).toContainText("附近觀測：中");
   await expect(page.getByTestId("nearby-sensing")).toContainText("回答：附近感測器有沒有足夠覆蓋？");
-  await expect(page.getByTestId("nearby-sensing")).toContainText("附近有 雨量 1 類觀測，最近 260 公尺；仍缺 水位。");
+  await expect(page.getByTestId("nearby-sensing")).toContainText(
+    "附近有 雨量 1 類觀測；最近觀測距查詢點 260 公尺；仍缺 水位。",
+  );
   await expect(page.getByTestId("nearby-sensing")).toContainText("缺口");
   await expect(page.getByTestId("nearby-sensing")).toContainText("水位");
   await expect(page.getByText("資料限制")).toBeVisible();
@@ -349,7 +351,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await page.getByTestId("evidence-limitations").getByText("資料限制").click();
   await expect(page.getByText("尚未接入即時雨量資料。")).toBeVisible();
   const evidencePanel = page.getByTestId("evidence-panel");
-  await expect(evidencePanel).toContainText("回答：哪些資料支撐這次判讀？");
+  await expect(evidencePanel).toContainText("回答：哪些來源支撐這次判讀？");
+  await expect(evidencePanel).toContainText("來源可信度");
   await expect(evidencePanel).toContainText("淹水潛勢資料");
   await expect(evidencePanel).toContainText("官方淹水潛勢圖資與本次查詢範圍重疊，可作為地形與歷史條件參考。");
   await expect(evidencePanel).toContainText("用途：地形 / 歷史參考");
