@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 import psycopg
-from psycopg.rows import dict_row
+
+from app.core.db import pooled_connection
 
 
 ConnectionFactory = Callable[[], Any]
@@ -255,7 +256,7 @@ def build_mvt_sql(
 def _connect(database_url: str, connection_factory: ConnectionFactory | None) -> Any:
     if connection_factory is not None:
         return connection_factory()
-    return psycopg.connect(database_url, connect_timeout=2, row_factory=dict_row)
+    return pooled_connection(database_url)
 
 
 def _row_value(row: object, key: str) -> object:

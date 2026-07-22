@@ -150,6 +150,25 @@ def test_run_enabled_adapter_batches_uses_configured_adapter_allowlist() -> None
             ),
         }
     ]
+    assert run_writer.runtime_selections[0][0] == ("official.wra.water_level",)
+
+
+def test_run_enabled_adapter_batches_marks_enabled_but_missing_adapter_as_failed() -> None:
+    settings = load_worker_settings(
+        {"WORKER_ENABLED_ADAPTER_KEYS": "official.wra.water_level"}
+    )
+    run_writer = _MemoryRunWriter()
+
+    summaries = run_enabled_adapter_batches({}, settings=settings, run_writer=run_writer)
+
+    assert summaries == ()
+    assert run_writer.runtime_selections[0][0] == ("official.wra.water_level",)
+    assert len(run_writer.pipeline_statuses) == 1
+    adapter_keys, status, complete, run_at = run_writer.pipeline_statuses[0]
+    assert adapter_keys == ("official.wra.water_level",)
+    assert status == "failed"
+    assert complete is False
+    assert isinstance(run_at, datetime)
 
 
 class _MemoryWriter:
@@ -226,6 +245,10 @@ class _NamedEmptyAdapter:
 class _MemoryRunWriter:
     def __init__(self) -> None:
         self.parameters: list[dict[str, object] | None] = []
+        self.runtime_selections: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+        self.pipeline_statuses: list[
+            tuple[tuple[str, ...], str, bool, datetime | None]
+        ] = []
 
     def write_summary(
         self,
@@ -236,3 +259,25 @@ class _MemoryRunWriter:
     ) -> None:
         del summary, job_key
         self.parameters.append(parameters)
+
+    def write_runtime_selection(
+        self,
+        *,
+        enabled_adapter_keys: tuple[str, ...],
+        known_adapter_keys: tuple[str, ...],
+        checked_at: datetime,
+    ) -> None:
+        del checked_at
+        self.runtime_selections.append((enabled_adapter_keys, known_adapter_keys))
+
+    def write_pipeline_status(
+        self,
+        *,
+        adapter_keys: tuple[str, ...],
+        status: str,
+        complete: bool,
+        checked_at: datetime,
+        run_at: datetime | None,
+    ) -> None:
+        del checked_at
+        self.pipeline_statuses.append((adapter_keys, status, complete, run_at))

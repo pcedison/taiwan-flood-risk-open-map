@@ -1,4 +1,4 @@
-# Zeabur Deployment Runbook
+﻿# Zeabur Deployment Runbook
 
 ## Purpose
 
@@ -91,7 +91,18 @@ forces this realtime backbone on when a database URL is present, so a legacy
 When a database URL is present, the start script applies unrecorded
 `infra/migrations/*.sql` files before launching API/Web; set
 `RUN_DATABASE_MIGRATIONS_ON_START=false` only if an operator is applying
-migrations separately.
+migrations separately. The startup runner takes a PostgreSQL session advisory
+lock so rolling replicas cannot migrate concurrently, verifies the recorded
+filename and checksum before skipping any version, and commits each migration
+in its own transaction. A drift, lock timeout, statement timeout, or failed SQL
+file aborts startup without logging the database URL; already committed earlier
+migrations remain available for a safe retry.
+
+Before a production migration that rewrites existing rows, verify a recent
+database backup has completed successfully and can be restored. An application
+deployment rollback does not restore the attached PostgreSQL volume. If no
+checkpoint can be created, stop the release unless the operator explicitly
+accepts a forward-only data migration after reviewing the affected rows.
 
 ### Health Check
 
@@ -150,7 +161,9 @@ Official ingestion scheduler for the single-service beta:
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Set `true` only as the explicit kill switch. |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional override that replaces old `WORKER_ENABLED_ADAPTER_KEYS` values during forced backbone startup. |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level` | Selects the official realtime backbone adapters. |
+| `MIGRATION_LOCK_TIMEOUT_MS` | leave unset or `10000` | Maximum PostgreSQL lock wait per migration statement, including contention with another startup runner. Increase only for a reviewed maintenance window. |
+| `MIGRATION_STATEMENT_TIMEOUT_MS` | leave unset or `300000` | Maximum execution time for each migration statement. Each migration commits independently before the next file begins. |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor` | Selects the official realtime backbone plus the reviewed Tainan local flood-sensor fallback. |
 | `SOURCE_CWA_ENABLED` | `true` or leave unset | Enables the CWA adapter selection; `false` disables it. |
 | `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |
 | `SOURCE_WRA_ENABLED` | `true` or leave unset | Enables the WRA adapter selection; `false` disables it. |
@@ -168,6 +181,8 @@ Official ingestion scheduler for the single-service beta:
 | `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `true` | Enables Civil IoT pump external water-level ingestion. |
 | `SOURCE_CIVIL_IOT_GATE_ENABLED` | `true` | Enables Civil IoT gate water-level adapter selection. |
 | `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` | Enables Civil IoT gate water-level ingestion. |
+| `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` | Enables the reviewed Tainan local flood-sensor fallback. |
+| `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` | Enables live Tainan flood-sensor ingestion. |
 | `WRA_STATION_API_URL` | leave blank | Optional override for the WRA station metadata endpoint used to add coordinates to realtime water-level rows. |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` | Five-minute beta cadence. |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` | Postgres scheduler lease TTL. |
@@ -186,7 +201,7 @@ Do not fill these for the first single-service preview:
 
 ### TGOS Optional Provider Notes
 
-Do not use TGOS registration as the launch blocker for this公益 preview. If TGOS
+Do not use TGOS registration as the launch blocker for this?祉? preview. If TGOS
 is revisited later, submit the exact domain users will open and keep any TGOS
 credential in secret storage only after the runtime supports it. Until then,
 leave `TGOS_API_KEY` unset and prove the open basemap path through
@@ -253,8 +268,8 @@ Adapter and source variables:
 
 | Variable | Service | Notes |
 |---|---|---|
-| `SOURCE_CWA_ENABLED` | worker, scheduler | Optional override for `official.cwa.rainfall`; unset defaults to enabled, `false` disables it |
-| `SOURCE_CWA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker CWA rainfall runtime adapter; keep `false` until credentials, cadence, and operator ownership are ready |
+| `SOURCE_CWA_ENABLED` | worker, scheduler | Optional override for CWA official adapters (`official.cwa.rainfall`, `official.cwa.tide_level`); unset defaults to enabled, `false` disables them |
+| `SOURCE_CWA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker CWA rainfall and tide-level runtime adapters; keep `false` until credentials, cadence, and operator ownership are ready |
 | `SOURCE_WRA_ENABLED` | worker, scheduler | Optional override for `official.wra.water_level`; unset defaults to enabled, `false` disables it |
 | `SOURCE_WRA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker WRA water-level runtime adapter; keep `false` until cadence, egress, and operator ownership are ready |
 | `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Optional override for `official.flood_potential.geojson`; unset defaults to enabled, `false` disables it |
@@ -266,9 +281,9 @@ Adapter and source variables:
 | `SOURCE_DCARD_CANDIDATE_APPROVAL_ACK` | worker, scheduler | Allows only the no-network synthetic Dcard candidate fixture contract; not real ingestion approval |
 | `SOURCE_TERMS_REVIEW_ACK` | worker, scheduler | Required to enable adapters marked `terms_review_required`, including GDELT backfill and future forum sources |
 | `SOURCE_SAMPLE_DATA_ENABLED` | worker, scheduler | Enables sample fixture adapters for demos/tests only; keep `false` outside local experiments |
-| `CWA_API_AUTHORIZATION` | api, worker | CWA open-data token used by the API realtime bridge and, when `SOURCE_CWA_API_ENABLED=true`, by the worker CWA rainfall live adapter |
+| `CWA_API_AUTHORIZATION` | api, worker | CWA open-data token used by the API realtime bridge and, when `SOURCE_CWA_API_ENABLED=true`, by the worker CWA rainfall and tide-level live adapters |
 | `CWA_API_URL` | worker | Optional override for the worker CWA rainfall endpoint; leave blank for the default CWA O-A0002-001 datastore |
-| `CWA_API_TIMEOUT_SECONDS` | worker | Worker CWA rainfall request timeout; default `8` seconds |
+| `CWA_API_TIMEOUT_SECONDS` | worker | Worker CWA rainfall and tide-level request timeout; default `8` seconds |
 | `WRA_API_URL` | worker | Optional override for the worker WRA water-level endpoint; leave blank for the default WRA open-data v2 datastore |
 | `WRA_STATION_API_URL` | worker | Optional override for the worker WRA station metadata endpoint; leave blank for the default WRA open-data v2 station catalog |
 | `WRA_API_TOKEN` | worker | Optional WRA token if an upstream environment requires one; omitted by default and never written into `source_url` |
@@ -303,11 +318,30 @@ Future or phase-specific variables:
 | `RAW_SNAPSHOT_RETENTION_DAYS` | worker | Future retention policy once raw snapshot cleanup exists |
 | `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET_RAW`, `S3_BUCKET_PROCESSED` | api, worker | Do not use these names in Phase 1. Current config uses `MINIO_ENDPOINT` and `MINIO_BUCKET_RAW_SNAPSHOTS`; introduce S3 aliases only with matching runtime support and `.env.example` updates. |
 
+## Service Split With SERVICE_ROLE (available now)
+
+The production image is role-aware: the same Dockerfile deploys as one
+service (default) or as three services, one per runtime. Splitting isolates
+an OOM or restart in one runtime from taking down the other two — the main
+availability risk observed on small nodes.
+
+Create three Zeabur services from the same repo/Dockerfile and set one env
+var each:
+
+| Service | Env | Public | Notes |
+|---|---|---|---|
+| `api` | `SERVICE_ROLE=api` | yes (or internal-only behind web) | Listens on `$PORT`; applies migrations on start (`RUN_DATABASE_MIGRATIONS_ON_START`); set `UVICORN_FORWARDED_ALLOW_IPS` if the direct peer is the platform ingress. |
+| `web` | `SERVICE_ROLE=web` | yes | Set `INTERNAL_API_BASE_URL` to the api service URL so `/v1` rewrites reach it (the entrypoint warns if it still points at loopback). |
+| `scheduler` | `SERVICE_ROLE=scheduler` | no | Exactly one replica; expects migrations already applied by `api`; needs `WORKER_DATABASE_URL`/`DATABASE_URL`. |
+
+Deploy order on first split: `api` (migrations) → `web` → `scheduler`.
+The startup contract lives in `infra/docker/entrypoint.sh`.
+
 ## Future Service Split
 
 Use separate Zeabur services later so each runtime can scale and restart independently.
 
-The single-service mode above is not the final production topology. The split services below remain the target once database migrations, worker scheduling, and raw snapshot storage are actively operated.
+The single-service mode above is not the final production topology. The `SERVICE_ROLE` split above is the supported first step; the fuller split below remains the long-term target once database migrations, worker scheduling, and raw snapshot storage are actively operated.
 
 | Service | Root | Public | Purpose | Current command | Next target |
 |---|---|---|---|---|---|
@@ -447,7 +481,7 @@ Smoke checks after deploy:
 4. A mock or real risk query returns a valid risk level and `score_version`.
 5. Source health is visible for configured adapters.
 6. Taiwan-wide public smoke passes:
-   `python scripts\taiwan_wide_public_beta_smoke.py --base-url https://floodrisk.cc --include-town-samples`.
+   `python scripts\taiwan_wide_public_beta_smoke.py --base-url https://floodrisk.cc --include-town-samples --request-delay-seconds 2.2 --rate-limit-retries 8 --rate-limit-retry-delay-seconds 10`.
 7. Scheduler has exactly one running replica.
 8. Worker logs show no repeated startup or migration errors.
 

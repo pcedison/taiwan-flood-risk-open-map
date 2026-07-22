@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -147,12 +147,47 @@ def test_high_realtime_reason_names_the_signal_mix_without_implying_rain_only() 
                 risk_factor=1.0,
                 observed_at=observed_at,
             ),
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="rainfall",
+                confidence=1.0,
+                distance_to_query_m=80.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+                risk_factor=1.0,
+                observed_at=observed_at - timedelta(hours=7),
+            ),
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_report",
+                confidence=0.0,
+                distance_to_query_m=80.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+                risk_factor=1.0,
+                observed_at=observed_at,
+            ),
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="road_closure",
+                confidence=1.0,
+                distance_to_query_m=80.0,
+                freshness_score=1.0,
+                source_weight=0.0,
+                risk_factor=1.0,
+                observed_at=observed_at,
+            ),
         ),
         now=observed_at,
     )
 
     assert result.realtime_level == "極高"
-    assert any("水位" in reason and "官方警戒" in reason for reason in result.main_reasons)
+    reason_text = " ".join(result.main_reasons)
+    assert "水位" in reason_text
+    assert "官方警戒" in reason_text
+    assert "雨量" not in reason_text
+    assert "通報" not in reason_text
+    assert "道路封閉" not in reason_text
     assert all("雨量或水位" not in reason for reason in result.main_reasons)
 
 

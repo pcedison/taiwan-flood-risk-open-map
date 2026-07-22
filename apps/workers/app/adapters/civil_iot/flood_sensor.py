@@ -32,7 +32,7 @@ from app.adapters.civil_iot.sta_client import (
     DEFAULT_STA_TIMEOUT_SECONDS,
     STA_WATER_RESOURCE_BASE,
     StaFetchJson,
-    fetch_paginated_sta_things_records,
+    fetch_paginated_sta_things,
     fetch_sta_json,
 )
 from app.adapters.contracts import (
@@ -43,6 +43,7 @@ from app.adapters.contracts import (
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    StationInventoryProof,
 )
 
 # Default Civil IoT SensorThings query for the flood-sensor dataset. The exact
@@ -53,6 +54,7 @@ FLOOD_SENSOR_STA_URL = (
     "?$expand=Locations,Datastreams($expand=Observations($orderby=phenomenonTime desc;$top=1))"
     "&$filter=substringof('淹水',Datastreams/name)"
     "&$top=2000"
+    "&$count=true"
 )
 FLOOD_SENSOR_ATTRIBUTION = "Water Resources Agency / Civil IoT Taiwan"
 FLOOD_SENSOR_CIVIL_IOT_DATASET = "water_12"
@@ -108,10 +110,12 @@ class FloodSensorStaApiAdapter:
         self._fetched_at = fetched_at
         self._fetch_json = fetch_json or fetch_sta_json
         self._raw_snapshot_key = raw_snapshot_key
+        self._station_inventory_proof: StationInventoryProof | None = None
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
+        self._station_inventory_proof = None
         try:
-            records = fetch_paginated_sta_things_records(
+            fetch_result = fetch_paginated_sta_things(
                 self._sta_url,
                 timeout_seconds=self._timeout_seconds,
                 fetch_json=self._fetch_json,
@@ -122,6 +126,7 @@ class FloodSensorStaApiAdapter:
         except Exception as exc:  # pragma: no cover - defensive
             raise CivilIotStaFetchError(f"Flood sensor fetcher failed: {exc}") from exc
 
+        self._station_inventory_proof = fetch_result.station_inventory_proof
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
             RawSourceItem(
@@ -131,7 +136,7 @@ class FloodSensorStaApiAdapter:
                 payload=_normalize_raw_payload(record, source_url=str(record["source_url"])),
                 raw_snapshot_key=self._raw_snapshot_key,
             )
-            for record in records
+            for record in fetch_result.records
         )
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
@@ -254,6 +259,7 @@ def _run(adapter: FloodSensorStaApiAdapter | FloodSensorAdapter) -> AdapterRunRe
         fetched=fetched,
         normalized=tuple(normalized),
         rejected=tuple(rejected),
+        station_inventory_proof=getattr(adapter, "_station_inventory_proof", None),
     )
 
 

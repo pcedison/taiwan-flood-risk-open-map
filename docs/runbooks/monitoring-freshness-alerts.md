@@ -236,6 +236,323 @@ From the repository root:
   -MaxAgeMinutes 60
 ```
 
+For hosted release evidence against the admin source contract, use the Python
+smoke. It records only aggregate source diagnostics and reads the token from the
+named environment variable:
+
+```powershell
+python scripts\hosted_source_freshness_smoke.py `
+  --base-url "https://<api-domain>" `
+  --admin-token-env ADMIN_BEARER_TOKEN `
+  --evidence-output ".\tmp\hosted-source-freshness-smoke.json" `
+  --completion-evidence-output ".\tmp\hosted-source-freshness-completion-evidence.json"
+```
+
+This smoke can support completion evidence for the hosted worker-persisted
+freshness path, but it is not a scheduler monitor and does not prove alert
+routing, raw snapshot retention, hosted egress approval, or incident ownership.
+
+## Hosted GitHub Actions Monitor
+
+The repository also has a scheduled hosted monitoring workflow:
+
+```text
+.github/workflows/hosted-monitoring.yml
+```
+
+It runs twice per hour at `7,37 * * * *` and can also be started manually from
+GitHub Actions. The offset avoids the high-load top-of-hour and half-hour
+GitHub Actions schedule windows while preserving the 30-minute cadence. Each
+run executes:
+
+- `scripts/public-api-contract-probe.py` before hosted deployment smoke, so the
+  public API contract-review queue is refreshed even when the deployed SHA is
+  stale. Hosted Monitoring uses `--allow-insecure-tls` for this diagnostic probe
+  because the reviewed public government pages have certificate-chain issues;
+  the artifact records `tls_verification=disabled` and is not accepted
+  completion evidence.
+- `scripts/hosted_deployment_smoke.py` against `https://floodrisk.cc`.
+- `scripts/hosted_public_risk_evidence_smoke.py` against the hosted public
+  risk API.
+- `scripts/local-source-signal-gap-discovery-refresh.py` against the
+  data.gov.tw dataset export for every current signal-gap group.
+- `scripts/local-source-signal-gap-dispatch-readiness.py` to turn the latest
+  signal-gap discovery summary into a public-safe dispatch checklist.
+- `scripts/local-source-contract-dispatch-readiness.py` to publish a
+  public-safe checklist for authorization, metadata release, and public API
+  contract request dispatch.
+- `scripts/local-source-request-packet-bundle.py` to publish the generated
+  official request packets, signal-gap request batches, and placeholder
+  dispatch/completion templates operators need for the remaining official
+  request work, plus a single dispatch evidence draft and a public-safe grouped
+  dispatch queue.
+- `scripts/hosted_private_evidence_readiness.py` to publish which private
+  evidence/admin-token inputs are configured or missing without printing values.
+- `scripts/github-actions-secret-readiness.py` for an operator-side check of
+  required GitHub Actions secret names. It reads only `gh secret list` metadata
+  (`name` and `updatedAt`) and can write a public-safe JSON/Markdown artifact;
+  it never reads or prints secret contents.
+- `scripts/hosted_private_evidence_template_bundle.py` to publish public-safe
+  pending templates for the hosted worker, worker-policy split route, and
+  hosted monitoring private evidence manifests.
+- `scripts/hosted_monitoring_schedule_evidence.py` to publish public-safe
+  schedule-run evidence. On real `schedule` events it also emits partial
+  completion evidence for `scheduled_freshness_checks`; manual runs only write
+  a skipped evidence artifact. This step runs after the hosted deployment,
+  public risk, admin freshness, private evidence, and request follow-up checks,
+  so a later failing monitor cannot leave behind a misleading schedule
+  completion overlay.
+- `scripts/hosted-monitoring-schedule-readiness.py` for an operator-side
+  watchdog check of GitHub Actions schedule metadata. It can confirm whether
+  the latest Hosted Monitoring `schedule` run completed successfully on the
+  expected main SHA within the accepted freshness window, and it writes a
+  public-safe JSON/Markdown report without reading secrets.
+- `.github/workflows/hosted-monitoring-schedule-watchdog.yml` runs that same
+  schedule-readiness watchdog at `17,47 * * * *`, ten minutes after the main
+  Hosted Monitoring cron. It uploads public-safe JSON/Markdown artifacts and opens or
+  comments on `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`
+  when the latest real schedule run is missing, failed, stale, or on the wrong
+  SHA. When readiness fails, it can also dispatch Hosted Monitoring as a
+  fallback and upload
+  `hosted-monitoring-schedule-fallback-dispatch.json` so the hosted freshness
+  smoke still gets a remediation attempt. That fallback dispatch is operational
+  recovery evidence, not `scheduled_freshness_checks` completion evidence. On a
+  successful readiness run, the watchdog comments on and closes that stable
+  issue if it is still open. This catches the case where manual Hosted
+  Monitoring dispatches pass but the true GitHub `schedule` path still has not
+  recovered, while also clearing stale alerts after recovery.
+- `scripts/hosted_source_freshness_smoke.py` when the repository secret
+  `ADMIN_BEARER_TOKEN` is configured.
+- `scripts/hosted_worker_evidence.py` when the repository secret
+  `HOSTED_WORKER_EVIDENCE_MANIFEST_B64` is configured.
+- `scripts/hosted_worker_policy_evidence.py` when the repository secret
+  `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64` is configured.
+- `scripts/hosted_monitoring_evidence.py` when the repository secret
+  `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64` is configured.
+- `scripts/local-source-request-followups.py` when the repository secret
+  `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is configured.
+- `scripts/local-source-completion-audit.py` with every completion-evidence
+  overlay produced by the hosted smoke steps.
+
+The workflow uploads JSON and Markdown artifacts as the
+`hosted-monitoring-<run-id>` artifact, including
+`hosted-completion-audit.json` and `hosted-completion-audit.md`. These artifacts
+are useful evidence inputs for deployment, public-risk, and hosted
+source-freshness review. They do not, by themselves, complete the monitoring
+gate: `production_monitoring_and_alerting` still needs accepted alert routing
+ownership, scheduled source freshness evidence, and worker/scheduler alert
+ownership recorded through
+`scripts/hosted_monitoring_evidence.py`.
+
+When Hosted Monitoring fails, the workflow now routes a public-safe GitHub issue
+under the stable title `[hosted-monitoring-alert] Hosted Monitoring failure`.
+The route creates the issue once and adds comments on later failures, including
+only the run URL, workflow, event, SHA, and the public hosted deployment smoke
+summary when that artifact exists. The deployment summary includes the expected
+deployment SHA, the `/health` deployment SHA, the `/ready` deployment SHA, and
+the first bounded failure messages so a Zeabur lag is visible directly in the
+issue body. It intentionally omits secrets, private manifests, and private
+evidence refs. This gives operators a visible alert channel, but it is not
+enough by itself to satisfy
+`hosted_alert_routing`; accepted monitoring evidence still needs an owner,
+review timestamp, and evidence ref through the private hosted monitoring
+manifest.
+
+The schedule watchdog issue route is separate from the Hosted Monitoring
+failure route. Its issue title is
+`[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`; it includes
+only the watchdog run URL, workflow, event, SHA, schedule-readiness summary,
+and fallback dispatch status. It does not satisfy `scheduled_freshness_checks`
+on its own. It makes the missing/failing/stale schedule state visible and can
+kick a fallback Hosted Monitoring run until a real Hosted Monitoring `schedule`
+run succeeds on the expected main SHA and emits accepted completion evidence.
+When the watchdog later passes, it closes the stale issue automatically after
+adding a public-safe resolved comment.
+
+Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
+for the workflow commit SHA, or provide the exact deployed SHA while verifying a
+specific release. The hosted deployment smoke retries for a bounded window so
+scheduled runs do not fail simply because Zeabur is still catching up to a fresh
+main push. It also accepts `require_admin_source_freshness`; set that to `true`
+for release or completion-gate runs where `/admin/v1/sources` freshness evidence
+must be present. In strict mode, the workflow fails fast if the repository
+secret `ADMIN_BEARER_TOKEN` is missing. For routine scheduled monitoring, the
+default remains non-strict: if `ADMIN_BEARER_TOKEN` is not configured, the
+public smokes still run and the admin source freshness check is skipped with a
+notice rather than a leaked token or failed secret lookup.
+
+Manual dispatch also accepts `fail_on_overdue_local_source_followups`. Set it
+to `true` when a release/completion review should fail if the private
+local-source dispatch evidence contains overdue official follow-ups. Scheduled
+runs leave this non-strict by default so they can publish the public-safe
+follow-up report without turning a known external-response wait into a red
+build unless operators opt in.
+
+The three hosted evidence `*_MANIFEST_B64` secrets are optional base64-encoded
+JSON manifests validated by the evidence CLIs. Use them only for reviewed
+private ops refs and requirement statuses; do not store raw provider secrets,
+tokens, screenshots, or full incident transcripts in these GitHub secrets. When
+present, their generated completion overlays are folded into
+`hosted-completion-audit.json` alongside the public smoke evidence.
+
+`HOSTED_WORKER_EVIDENCE_MANIFEST_B64` is the all-in-one hosted worker route for
+`freshness_policy`, `raw_snapshot_retention_policy`,
+`monitored_scheduler_cadence`, `hosted_egress_review`, and
+`worker_persisted_evidence_path`. Operators can instead use the split route:
+`ADMIN_BEARER_TOKEN` supplies hosted source freshness evidence for
+`freshness_policy` and `worker_persisted_evidence_path`, while
+`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64` supplies
+`raw_snapshot_retention_policy`, `monitored_scheduler_cadence`, and
+`hosted_egress_review`. Either route still requires the decoded private
+manifests to pass their evidence CLIs before the completion audit can accept the
+gate.
+
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` is also optional. It should contain
+a base64-encoded `local-source-completion-evidence/v1` dispatch overlay whose
+items are still `status: request_dispatched`. The workflow decodes it only into
+runner temp storage, writes `local-source-request-followups.json`, and writes a
+sanitized completion overlay with `evidence_ref` replaced by
+`private-ops://redacted/local-source-request-dispatch`. That sanitized overlay
+lets the aggregate audit show dispatch and overdue-follow-up counts without
+uploading private correspondence refs.
+
+Signal-gap discovery refresh artifacts are public-safe and are uploaded on
+every hosted monitoring run:
+
+- `signal-gap-discovery-refresh-summary.json`
+- `signal-gap-discovery-refresh-pump-or-gate-status.json`
+- `signal-gap-discovery-refresh-flood-depth.json`
+- `signal-gap-discovery-refresh-sewer-water-level.json`
+- `signal-gap-dispatch-readiness.json`
+- `public-api-contract-probe.json`
+- `source-contract-dispatch-readiness.json`
+- `hosted-private-evidence-readiness.json`
+- `local-source-request-packet-bundle-manifest.json`
+- `local-source-request-packet-bundle.md`
+- `local-source-official-request-packets.json`
+- `local-source-official-request-packets.md`
+- `local-source-official-request-completion-template.json`
+- `local-source-signal-gap-request-batches.json`
+- `local-source-signal-gap-request-batches.md`
+- `local-source-signal-gap-dispatch-template.json`
+- `local-source-source-contract-dispatch-template.json`
+- `local-source-request-dispatch-evidence-draft.json`
+- `local-source-dispatch-coverage-checklist.json`
+- `local-source-request-dispatch-queue.json`
+- `hosted-monitoring-schedule-evidence.json`
+- `hosted-monitoring-schedule-completion-evidence.json` on scheduled runs only
+  after earlier non-`always()` monitoring checks pass
+- `hosted-private-evidence-template-bundle-manifest.json`
+- `hosted-private-evidence-template-bundle.md`
+- `hosted-worker-evidence-template.json`
+- `hosted-worker-policy-evidence-template.json`
+- `hosted-monitoring-evidence-template.json`
+
+These artifacts monitor whether official open-data catalogs have published new
+machine-readable candidates for the unresolved signal families. A
+`candidate_live_read_api_found` conclusion is not completion by itself; it is a
+triage signal to review the API contract, freshness fields, coordinates, and
+license before turning it into an accepted production adapter or source-contract
+evidence.
+
+`signal-gap-dispatch-readiness.json` is also public-safe. It does not include
+private dispatch evidence refs. It lists each unresolved signal family, the
+current discovery counts, whether official read API requests should still be
+sent, and the exact command operators can use to generate private dispatch
+evidence after sending those requests.
+
+If the live data.gov.tw export times out during hosted monitoring or the local
+source dispatch watchdog, `signal-gap-discovery-refresh-summary.json` is still
+written with `source_catalog_fetch_status: failed`. The downstream dispatch
+readiness and request packet bundle continue from the static local-source plan
+so operator handoff artifacts do not collapse to unknown counts.
+
+`source-contract-dispatch-readiness.json` provides the same public-safe dispatch
+checklist for the `official_authorization_and_contracts` gate. It lists the
+remaining authorization requests, metadata-release monitor, and public API
+contract reviews, but it does not prove requests were sent and does not satisfy
+the gate without accepted private source-contract evidence.
+
+The `local-source-request-packet-bundle-*` and related `local-source-*template`
+artifacts are the operator handoff for that same unfinished work. They collect
+the generated official request bodies, signal-family batches, placeholder
+dispatch/completion overlays, a single
+`local-source-request-dispatch-evidence-draft.json` shaped as
+`local-source-completion-evidence/v1`, a public-safe dispatch coverage
+checklist, and a 9-row grouped dispatch queue in one hosted artifact set. The
+draft is intended only as a private-ops starting point after official requests
+are actually sent and reviewed: replace placeholders, keep the filled file out
+of git/artifacts, then base64-encode it into
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`. The public bundle intentionally
+uses placeholder evidence refs or no evidence refs and is not folded into the
+completion audit as accepted evidence.
+
+`hosted-private-evidence-readiness.json` lists the configured/missing state for
+`ADMIN_BEARER_TOKEN`, `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
+`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`,
+`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`, and
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`. It never prints or decodes secret
+values. It also records the alternative hosted-worker completion routes, so a
+release review can tell whether the all-in-one worker manifest route or the
+split admin-freshness plus worker-policy route is currently unblocked.
+Configured secrets still do not satisfy completion gates unless their decoded
+private manifests produce accepted completion evidence.
+
+Use this local operator command when you need a GitHub-history-friendly snapshot
+of whether the repository Actions secrets are present before a release or
+completion review:
+
+```powershell
+python scripts\github-actions-secret-readiness.py `
+  --repo "pcedison/taiwan-flood-risk-open-map" `
+  --captured-at "$(Get-Date -Format o)" `
+  --output ".\docs\reviews\github-actions-secret-readiness-YYYY-MM-DD.json" `
+  --markdown-output ".\docs\reviews\github-actions-secret-readiness-YYYY-MM-DD.md"
+```
+
+This artifact is public-safe because GitHub exposes only secret names and update
+timestamps through `gh secret list`. It does not prove the underlying private
+evidence has been reviewed, and it does not replace the workflow-generated
+`hosted-private-evidence-readiness.json`.
+
+`hosted-monitoring-schedule-evidence.json` records whether the current hosted
+monitoring run came from the scheduled trigger. If and only if
+`GITHUB_EVENT_NAME` is `schedule` and the preceding hosted monitoring checks
+have not failed, the workflow also uploads
+`hosted-monitoring-schedule-completion-evidence.json`, which satisfies the
+`scheduled_freshness_checks` requirement of
+`production_monitoring_and_alerting`. It does not satisfy `hosted_alert_routing`
+or `worker_scheduler_alert_ownership`; those still require the reviewed private
+monitoring manifest.
+
+When the schedule itself needs an external readiness check, run:
+
+```powershell
+python scripts\hosted-monitoring-schedule-readiness.py `
+  --repo "pcedison/taiwan-flood-risk-open-map" `
+  --workflow-name "Hosted Monitoring" `
+  --captured-at "$(Get-Date -Format o)" `
+  --expected-head-sha "$(git rev-parse origin/main)" `
+  --max-age-minutes 90 `
+  --output ".\docs\reviews\hosted-monitoring-schedule-readiness-YYYY-MM-DD.json" `
+  --markdown-output ".\docs\reviews\hosted-monitoring-schedule-readiness-YYYY-MM-DD.md" `
+  --completion-evidence-output ".\tmp\hosted-monitoring-schedule-completion-evidence.json"
+```
+
+The completion-evidence output is written only when the latest GitHub
+`schedule` run is successful, recent, and on the expected SHA. It can supply
+only the `scheduled_freshness_checks` requirement; `hosted_alert_routing` and
+`worker_scheduler_alert_ownership` still require the private hosted monitoring
+manifest.
+
+The hosted private evidence template bundle is an operator handoff, not
+evidence. It publishes pending manifest templates and route mapping for
+`HOSTED_WORKER_EVIDENCE_MANIFEST_B64`,
+`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`, and
+`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`. Filled manifests must stay in
+private ops storage and be encoded into the matching GitHub secret only after
+review.
+
 盤點縣市級地方政府直連即時水情缺口時，使用 local-source coverage endpoint：
 
 ```powershell
@@ -278,6 +595,21 @@ CWA、WRA、NCDR、Civil IoT family 與 production adapter key。這些欄位不
 | `monitor_open_data_release` | Only static metadata exists. | Use `metadata_source_urls` to monitor source catalogs for live fields and use metadata only for station joins after a live source appears. |
 | `continue_official_discovery` | No conforming local source has been found. | Continue official-source discovery; keep central backbone as the realtime baseline. |
 | `operate_adapter` | A production local adapter exists. | Use `production_source_urls` while keeping source gates, freshness, county coverage, and duplicate handling healthy. |
+
+For `monitor_open_data_release`, run the data.gov.tw release monitor and inspect
+`summary.by_county.<county>.readiness_state`. The state is:
+
+- `live_candidate_found`: a machine-readable dataset with live-water keywords
+  appeared and needs API contract/freshness/geometry verification.
+- `metadata_only`: only static metadata or flood-prone-area catalog entries are
+  visible; keep the official release request open.
+- `no_candidate`: the monitored county has no matching data.gov.tw candidate in
+  the current export.
+
+`candidate_live_read_api_count_by_county`, `metadata_only_count_by_county`, and
+`target_counties_without_candidates` are intended for scheduler output,
+freshness jobs, or alert routing so a P0 release-monitor county such as
+連江縣 does not silently remain unreviewed.
 
 To export Prometheus textfile metrics while keeping the check non-blocking:
 
@@ -405,6 +737,75 @@ python -m app.main --export-runtime-queue-metrics --runtime-queue-metrics-path /
 The local Compose worker and scheduler services mount the shared collector
 directory, but these variables remain empty by default. Set them explicitly in
 `.env` or the shell when validating queue and scheduler dashboard panels.
+
+## Local Source Dispatch Watchdog
+
+`.github/workflows/local-source-dispatch-watchdog.yml` keeps the unresolved
+local-source request path visible outside private correspondence. It runs daily
+at `7 16 * * *` and can also be started manually. The workflow refreshes:
+
+- signal-gap discovery from the public data.gov.tw export,
+- signal-gap dispatch readiness,
+- source-contract dispatch readiness,
+- the public-safe request packet bundle and dispatch coverage checklist,
+- the grouped request dispatch queue,
+- `local-source-dispatch-watchdog/v1` JSON and Markdown summaries.
+
+By default the workflow fails when any signal-gap group or source-contract item
+still needs official dispatch. The failure route creates or comments on the
+single public-safe issue
+`[local-source-dispatch-watchdog] Local source dispatch required`. The issue
+body includes only run URL, SHA, aggregate counts, gate categories, and
+public-safe operator next steps plus the first grouped queue rows. Those queue
+rows include the request type, completion target count, required read API
+fields, accepted completion statuses, and public counterparty label when
+available. They do not include tokens, private evidence refs, manifests, or
+official correspondence.
+The next steps point operators to review the request packet bundle, send
+signal-family and source-contract follow-up requests, then store reviewed
+dispatch progress in
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` only after private review. If a
+future run finds no dispatch is required, the workflow comments on and closes
+that same issue so the GitHub issue state follows the watchdog state.
+
+This watchdog is not completion evidence. It is an operational reminder that
+`required_signal_families` and `official_authorization_and_contracts` still
+need accepted official reply, authorization-gated adapter,
+production-adapter, release, or official-unavailable evidence.
+
+## GitHub Actions Secret Readiness Watchdog
+
+`.github/workflows/github-actions-secret-readiness-watchdog.yml` keeps the
+hosted/private evidence secret path visible in GitHub. It runs daily at
+`23 16 * * *` and can also be started manually with
+`fail_on_completion_blockers`.
+
+The workflow uses GitHub expression booleans such as
+`${{ secrets.ADMIN_BEARER_TOKEN != '' }}` to generate a presence-only JSON file
+before calling `scripts/github-actions-secret-readiness.py`. It records only
+secret names and configured/not-configured state. It never reads, prints,
+decodes, or uploads secret values. Local operator runs can still use
+`gh secret list` metadata, but the scheduled workflow intentionally avoids that
+API because `GITHUB_TOKEN` cannot list Actions secrets.
+
+By default the workflow fails when required secret routes still block completion
+gates. The failure route creates or comments on the stable public-safe issue
+`[secret-readiness-watchdog] GitHub Actions required secrets missing`. The issue
+body includes only run URL, SHA, aggregate counts, blocked gate keys, missing
+secret names, and public route details for the requirements each route would
+satisfy plus the next operator action. If a future run has no
+completion-blocking missing secrets, the workflow comments on and closes that
+same issue. The close action does not prove the decoded private evidence
+manifests are valid; it only proves the secret-presence watchdog no longer sees
+missing required inputs.
+
+This watchdog is not completion evidence. It proves whether the required GitHub
+Actions inputs are configured enough to attempt the private evidence routes.
+`hosted_worker_persisted_evidence` still needs accepted hosted worker/admin
+freshness/policy evidence, and `production_monitoring_and_alerting` still needs
+accepted hosted monitoring evidence. Configured secrets are only inputs; their
+decoded manifests must still pass the relevant evidence CLIs and completion
+audit.
 
 ## Reading Alerts
 

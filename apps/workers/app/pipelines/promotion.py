@@ -612,6 +612,7 @@ def _should_upsert_official_realtime_latest(payload: EvidencePromotionPayload) -
         "water_level",
         "flood_report",
         "flood_warning",
+        "status_only",
     }:
         return False
     if payload.event_type == "flood_warning" and _is_expired_cap(payload.properties):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -19,9 +19,69 @@ from app.api.schemas import (
 )
 from app.api.routes import public as public_routes
 from app.api.services import public_risk
-from app.domain.evidence.repository import EvidenceRecord, NearbyCoverageRow
-from app.domain.realtime import OfficialRealtimeBundle
-from app.domain.risk import score_risk
+from app.domain.evidence.repository import (
+    EvidenceRecord,
+    NearbyCoverageRow,
+    RealtimeJurisdictionContext,
+    RealtimeJurisdictionSignalContract,
+    RealtimeJurisdictionSourceMapping,
+    RealtimeSourceHealthRow,
+)
+from app.domain.realtime import OfficialRealtimeBundle, OfficialRealtimeObservation
+
+
+@pytest.fixture(autouse=True)
+def _default_unverified_jurisdiction(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_jurisdiction_context",
+        lambda **_: RealtimeJurisdictionContext(
+            resolution_status="boundary_unverified",
+            home_jurisdiction_code=None,
+            home_jurisdiction_name=None,
+            considered_jurisdictions=(),
+            signal_contracts=(),
+            source_mappings=(),
+        ),
+    )
+
+
+def _verified_rainfall_jurisdiction(
+    *, mapping_proof_valid: bool = True
+) -> RealtimeJurisdictionContext:
+    return RealtimeJurisdictionContext(
+        resolution_status="verified",
+        home_jurisdiction_code="63000000",
+        home_jurisdiction_name="臺北市",
+        considered_jurisdictions=(("63000000", "臺北市"),),
+        signal_contracts=tuple(
+            RealtimeJurisdictionSignalContract(
+                jurisdiction_code="63000000",
+                jurisdiction_name="臺北市",
+                signal_type=signal_type,
+                catalog_status="reviewed_complete",
+                mapping_revision="test-review-v1",
+                mapping_proof_valid=mapping_proof_valid,
+            )
+            for signal_type in (
+                "rainfall",
+                "water_level",
+                "flood_depth",
+                "sewer_water_level",
+            )
+        ),
+        source_mappings=(
+            RealtimeJurisdictionSourceMapping(
+                adapter_key="official.cwa.rainfall",
+                signal_type="rainfall",
+                coverage_scope="national",
+                jurisdiction_code="TW",
+                jurisdiction_name=None,
+                requirement_role="required",
+                mapping_revision="test-review-v1",
+            ),
+        ),
+    )
 
 
 def _risk_request() -> RiskAssessRequest:
@@ -88,6 +148,47 @@ def _nearby_coverage(
     )
 
 
+def _unavailable_nearby_coverage(
+    *, evaluated_at: datetime, query_radius_m: int = 500
+) -> NearbyRealtimeCoverage:
+    return NearbyRealtimeCoverage(
+        overall_level="unavailable",
+        evaluated_at=evaluated_at,
+        query_radius_m=query_radius_m,
+        radius_buckets_m=[500, 1000, 3000, 5000],
+        summary="nearby realtime coverage repository unavailable",
+        signal_breakdown=[],
+        missing_signal_types=["rainfall", "water_level", "flood_depth", "sewer_water_level"],
+        limitations=["repository unavailable"],
+        county_level_note="county source coverage is not nearby sensor coverage",
+    )
+
+
+def _official_observation(
+    *,
+    event_type: Literal["rainfall", "water_level"] = "rainfall",
+    source_id: str = "cwa-rainfall:station-1",
+    distance_to_query_m: float = 230.0,
+    observed_at: datetime,
+) -> OfficialRealtimeObservation:
+    return OfficialRealtimeObservation(
+        source_id=source_id,
+        source_name="Realtime station",
+        event_type=event_type,
+        title="Realtime station",
+        summary="Realtime observation",
+        observed_at=observed_at,
+        ingested_at=observed_at,
+        lat=25.033,
+        lng=121.5654,
+        distance_to_query_m=distance_to_query_m,
+        confidence=0.92,
+        freshness_score=1.0,
+        source_weight=1.0,
+        risk_factor=0.0,
+    )
+
+
 def _settings() -> SimpleNamespace:
     return SimpleNamespace(
         app_env="test",
@@ -119,28 +220,17 @@ def _dependencies(**overrides: Any) -> public_risk.RiskAssessmentDependencies:
         "cache_risk_assessment_response": fail,
         "fallback_historical_records": fail,
         "use_local_historical_fallback": fail,
-        "should_attempt_public_news_lookup": fail,
         "on_demand_public_news_result": fail,
-        "historical_record_evidence": fail,
-        "evidence_from_upsert": fail,
-        "signal_from_historical_record": fail,
-        "historical_scoring_distance": fail,
-        "signal_from_evidence": fail,
         "needs_historical_event_lookup": fail,
         "persist_or_build_on_demand_evidence": fail,
         "historical_data_freshness": fail,
-        "official_realtime_evidence": fail,
         "display_evidence_items": fail,
-        "score_risk": fail,
-        "signal_from_official_realtime": fail,
         "cache_assessment_evidence": fail,
         "persisted_official_realtime_data_freshness": fail,
         "visible_source_limitations": fail,
-        "freshness_from_status": fail,
         "official_flood_disaster_data_freshness": fail,
         "on_demand_data_freshness": fail,
         "persist_assessment": fail,
-        "evidence_preview": fail,
         "query_heat": fail,
     }
     values.update(overrides)
@@ -225,7 +315,6 @@ def test_assess_risk_includes_nearby_realtime_coverage() -> None:
                 ingested_at=created_at,
             ),
             display_evidence_items=lambda items: items,
-            score_risk=score_risk,
             cache_assessment_evidence=lambda *_args, **_kwargs: None,
             persisted_official_realtime_data_freshness=lambda *_args, **_kwargs: [],
             visible_source_limitations=lambda *_args, **_kwargs: [],
@@ -245,6 +334,146 @@ def test_assess_risk_includes_nearby_realtime_coverage() -> None:
 
     assert response.nearby_realtime_coverage == coverage
     assert persisted["nearby_realtime_coverage"] == coverage
+
+
+def test_assess_risk_uses_realtime_bridge_for_nearby_coverage_when_repository_unavailable() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    coverage = _unavailable_nearby_coverage(evaluated_at=created_at)
+    observation = _official_observation(observed_at=created_at - timedelta(minutes=5))
+    persisted: dict[str, Any] = {}
+
+    response = public_risk.assess_risk(
+        request,
+        settings=_settings(),
+        created_at=created_at,
+        dependencies=_dependencies(
+            risk_assessment_response_cache_key=lambda *_args: "standard-cache-key",
+            cached_risk_assessment_response=lambda *_args, **_kwargs: None,
+            fetch_official_realtime_bundle=lambda **_kwargs: OfficialRealtimeBundle(
+                observations=(observation,),
+                source_statuses=(),
+            ),
+            nearby_realtime_coverage=lambda _request, *, now: coverage,
+            nearby_db_evidence=lambda _request: (),
+            official_flood_disaster_lookup=lambda *_args, **_kwargs: SimpleNamespace(records=()),
+            can_use_profile_fast_path=lambda _items: False,
+            needs_historical_event_lookup=lambda **_kwargs: False,
+            persist_or_build_on_demand_evidence=lambda *_args, **_kwargs: (),
+            historical_data_freshness=lambda **_kwargs: DataFreshness(
+                source_id="historical-flood-records",
+                name="historical records",
+                health_status="unknown",
+                ingested_at=created_at,
+            ),
+            display_evidence_items=lambda items: items,
+            cache_assessment_evidence=lambda *_args, **_kwargs: None,
+            persisted_official_realtime_data_freshness=lambda *_args, **_kwargs: [],
+            visible_source_limitations=lambda *_args, **_kwargs: [],
+            official_flood_disaster_data_freshness=lambda _lookup: [],
+            on_demand_data_freshness=lambda *_args, **_kwargs: [],
+            persist_assessment=lambda **kwargs: persisted.update(kwargs),
+            query_heat=lambda _request, *, now: QueryHeat(
+                period="P7D",
+                attention_level=public_routes.LOW_ATTENTION,
+                query_count_bucket=None,
+                unique_approx_count_bucket=None,
+                updated_at=now,
+            ),
+            cache_risk_assessment_response=lambda *_args, **_kwargs: None,
+        ),
+    )
+
+    assert response.nearby_realtime_coverage.overall_level != "unavailable"
+    rainfall = next(
+        item
+        for item in response.nearby_realtime_coverage.signal_breakdown
+        if item.signal_type == "rainfall"
+    )
+    assert rainfall.nearest_source_id == observation.source_id
+    assert rainfall.counts_by_radius_m["500"] == 1
+    assert persisted["nearby_realtime_coverage"] == response.nearby_realtime_coverage
+
+
+def test_assess_risk_repairs_empty_repository_coverage_with_realtime_observation() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    empty_coverage = public_risk.build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=request.radius_m,
+        evaluated_at=created_at,
+    )
+    observation = _official_observation(
+        observed_at=created_at - timedelta(minutes=16),
+        distance_to_query_m=2042.0,
+    )
+
+    repaired = public_risk._nearby_realtime_coverage_with_bridge_fallback(
+        empty_coverage,
+        OfficialRealtimeBundle(observations=(observation,), source_statuses=()),
+        request=request,
+        created_at=created_at,
+    )
+
+    rainfall = next(item for item in repaired.signal_breakdown if item.signal_type == "rainfall")
+    assert repaired.overall_level == "low"
+    assert rainfall.nearest_distance_m == 2042.0
+    assert rainfall.degraded_count == 1
+
+
+def test_bridge_fallback_preserves_existing_repository_observations() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    repository_coverage = public_risk.build_nearby_realtime_coverage(
+        rows=(
+            NearbyCoverageRow(
+                adapter_key="local.tainan.flood_sensor",
+                source_id="tainan-flood-sensor:station-1",
+                event_type="flood_report",
+                station_id="station-1",
+                observed_at=created_at - timedelta(hours=4),
+                ingested_at=created_at - timedelta(hours=4),
+                distance_to_query_m=900.0,
+                freshness_state="stale",
+            ),
+        ),
+        query_radius_m=request.radius_m,
+        evaluated_at=created_at,
+    )
+    bridge_observation = _official_observation(
+        observed_at=created_at - timedelta(minutes=5),
+        distance_to_query_m=230.0,
+    )
+
+    repaired = public_risk._nearby_realtime_coverage_with_bridge_fallback(
+        repository_coverage,
+        OfficialRealtimeBundle(observations=(bridge_observation,), source_statuses=()),
+        request=request,
+        created_at=created_at,
+    )
+
+    assert repaired == repository_coverage
+    flood_depth = next(
+        item for item in repaired.signal_breakdown if item.signal_type == "flood_depth"
+    )
+    assert flood_depth.nearest_source_id == "tainan-flood-sensor:station-1"
+    assert flood_depth.availability_state == "stale_observation"
+
+
+def test_bridge_freshness_uses_inclusive_ten_and_thirty_minute_boundaries() -> None:
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    exactly_ten = _official_observation(observed_at=now - timedelta(minutes=10))
+    exactly_thirty = _official_observation(observed_at=now - timedelta(minutes=30))
+    over_thirty = _official_observation(
+        observed_at=now - timedelta(minutes=30, microseconds=1)
+    )
+
+    assert public_risk._official_realtime_freshness_state(exactly_ten, now=now) == "fresh"
+    assert (
+        public_risk._official_realtime_freshness_state(exactly_thirty, now=now)
+        == "degraded"
+    )
+    assert public_risk._official_realtime_freshness_state(over_thirty, now=now) == "stale"
 
 
 def test_assess_risk_profile_fast_path_receives_nearby_realtime_coverage() -> None:
@@ -354,7 +583,8 @@ def test_nearby_realtime_coverage_queries_rows_with_official_lookback(
     assert captured["database_url"] == "postgresql://example.test/flood"
     assert captured["lat"] == request.point.lat
     assert captured["lng"] == request.point.lng
-    assert captured["observed_since"] == now - public_routes.REALTIME_OFFICIAL_LOOKBACK
+    assert captured["observed_since"] == now - public_routes.NEARBY_COVERAGE_LOOKBACK
+    assert captured["statement_timeout_ms"] == public_routes.EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS
     assert coverage.query_radius_m == 500
     assert coverage.overall_level == "low"
 
@@ -378,16 +608,201 @@ def test_nearby_realtime_coverage_returns_unavailable_when_repository_unavailabl
         raise public_routes.EvidenceRepositoryUnavailable("coverage table timeout")
 
     monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", unavailable)
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_source_health_rows",
+        lambda **_kwargs: (
+            RealtimeSourceHealthRow(
+                adapter_key="official.cwa.rainfall",
+                name="中央氣象署雨量觀測",
+                is_enabled=True,
+                configured_health_status="healthy",
+                last_success_at=now - timedelta(minutes=5),
+                last_failure_at=None,
+                latest_run_status="succeeded",
+                latest_run_at=now - timedelta(minutes=5),
+                latest_observed_at=now - timedelta(minutes=3),
+                latest_ingested_at=now - timedelta(minutes=2),
+                station_count=42,
+                inventory_complete=True,
+            ),
+        ),
+    )
 
     coverage = public_routes._nearby_realtime_coverage(request, now=now)
 
     assert coverage.overall_level == "unavailable"
+    assert coverage.source_health_checked is True
+    assert coverage.source_health_status == "healthy"
+    assert coverage.source_health[0].name == "中央氣象署雨量觀測"
     assert set(coverage.missing_signal_types) == {
         "rainfall",
         "water_level",
         "flood_depth",
         "sewer_water_level",
     }
+
+
+def test_nearby_realtime_coverage_exposes_public_safe_source_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+        ),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", lambda **_: ())
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_jurisdiction_context",
+        lambda **_: _verified_rainfall_jurisdiction(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_source_health_rows",
+        lambda **kwargs: captured.update(kwargs)
+        or (
+            RealtimeSourceHealthRow(
+                adapter_key="official.cwa.rainfall",
+                name="中央氣象署雨量觀測",
+                is_enabled=True,
+                configured_health_status="healthy",
+                last_success_at=now - timedelta(minutes=5),
+                last_failure_at=None,
+                latest_run_status="succeeded",
+                latest_run_at=now - timedelta(minutes=5),
+                latest_observed_at=now - timedelta(minutes=3),
+                latest_ingested_at=now - timedelta(minutes=2),
+                station_count=42,
+                inventory_complete=True,
+            ),
+        ),
+    )
+
+    coverage = public_routes._nearby_realtime_coverage(request, now=now)
+
+    rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
+    assert captured["database_url"] == "postgresql://example.test/flood"
+    assert captured["statement_timeout_ms"] == public_routes.SOURCE_HEALTH_STATEMENT_TIMEOUT_MS
+    assert captured["adapter_keys"] == ("official.cwa.rainfall",)
+    assert coverage.source_health_checked is True
+    assert coverage.jurisdiction_status == "verified"
+    assert coverage.jurisdiction_checked is True
+    assert coverage.jurisdiction_catalog_complete is True
+    assert coverage.home_jurisdiction == "臺北市"
+    assert coverage.considered_jurisdictions == ["臺北市"]
+    assert coverage.source_health_status == "healthy"
+    assert coverage.source_health[0].name == "中央氣象署雨量觀測"
+    assert coverage.source_health[0].reason_code == "operational"
+    assert rainfall.availability_state == "no_station"
+    assert rainfall.missing_cause == "no_station_in_range"
+    assert set(coverage.source_health[0].model_dump()) == {
+        "source_id",
+        "name",
+        "signal_types",
+        "coverage_scope",
+        "health_status",
+        "reason_code",
+        "observed_at",
+        "checked_at",
+        "station_count",
+        "upstream_station_count",
+        "pages_fetched",
+        "pagination_complete",
+        "inventory_manifest_sha256",
+        "inventory_proof_status",
+        "inventory_complete",
+        "jurisdictions",
+        "required_for_absence",
+        "message",
+    }
+
+
+def test_nearby_realtime_coverage_fails_soft_when_source_health_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+        ),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", lambda **_: ())
+
+    def unavailable(**_kwargs: object) -> tuple[RealtimeSourceHealthRow, ...]:
+        raise public_routes.EvidenceRepositoryUnavailable("private database detail")
+
+    monkeypatch.setattr(public_routes, "query_realtime_source_health_rows", unavailable)
+
+    coverage = public_routes._nearby_realtime_coverage(request, now=now)
+
+    rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
+    assert coverage.overall_level == "no_local_sensor"
+    assert coverage.source_health == []
+    assert coverage.source_health_checked is False
+    assert rainfall.availability_state == "source_status_unknown"
+    assert rainfall.missing_cause == "health_unknown"
+    serialized = coverage.model_dump_json()
+    assert "private database detail" not in serialized
+
+
+def test_nearby_realtime_coverage_rejects_stale_mapping_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _risk_request()
+    now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: SimpleNamespace(
+            evidence_repository_enabled=True,
+            database_url="postgresql://example.test/flood",
+        ),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", lambda **_: ())
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_jurisdiction_context",
+        lambda **_: _verified_rainfall_jurisdiction(mapping_proof_valid=False),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_realtime_source_health_rows",
+        lambda **_: (
+            RealtimeSourceHealthRow(
+                adapter_key="official.cwa.rainfall",
+                name="中央氣象署雨量觀測",
+                is_enabled=True,
+                configured_health_status="healthy",
+                last_success_at=now - timedelta(minutes=5),
+                last_failure_at=None,
+                latest_run_status="succeeded",
+                latest_run_at=now - timedelta(minutes=5),
+                latest_observed_at=now - timedelta(minutes=3),
+                latest_ingested_at=now - timedelta(minutes=2),
+                station_count=42,
+                inventory_complete=True,
+            ),
+        ),
+    )
+
+    coverage = public_routes._nearby_realtime_coverage(request, now=now)
+    rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
+
+    assert coverage.jurisdiction_checked is True
+    assert coverage.jurisdiction_catalog_complete is False
+    assert rainfall.availability_state == "source_status_unknown"
+    assert rainfall.missing_cause == "jurisdiction_unverified"
 
 
 def test_risk_assessment_response_cache_key_uses_nearby_coverage_version() -> None:
@@ -409,7 +824,7 @@ def test_risk_assessment_response_cache_key_uses_nearby_coverage_version() -> No
 
     cache_key = public_routes._risk_assessment_response_cache_key(_risk_request(), settings)
 
-    assert '"cache_version": "realtime-evidence-v3-nearby-coverage"' in cache_key
+    assert '"cache_version": "realtime-evidence-v5-source-health"' in cache_key
 
 
 def test_nearby_db_evidence_uses_latest_first_and_deduplicates(monkeypatch: pytest.MonkeyPatch) -> None:

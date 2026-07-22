@@ -26,8 +26,9 @@ class PostgresStagingBatchWriter:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 raw_snapshot_id = _upsert_raw_snapshot(cursor, batch)
-                for item in (*batch.accepted, *batch.rejected):
-                    _insert_staging_evidence(cursor, raw_snapshot_id, item)
+                items = (*batch.accepted, *batch.rejected)
+                if items:
+                    _insert_staging_evidence_batch(cursor, raw_snapshot_id, items)
             connection.commit()
 
     def _connect(self) -> Any:
@@ -94,68 +95,76 @@ def _upsert_raw_snapshot(cursor: Any, batch: AdapterStagingBatch) -> str:
     return str(row[0])
 
 
-def _insert_staging_evidence(
+_INSERT_STAGING_EVIDENCE_SQL = """
+    INSERT INTO staging_evidence (
+        raw_snapshot_id,
+        data_source_id,
+        source_id,
+        source_type,
+        event_type,
+        title,
+        summary,
+        url,
+        occurred_at,
+        observed_at,
+        confidence,
+        validation_status,
+        rejection_reason,
+        payload
+    )
+    VALUES (
+        %s,
+        (SELECT id FROM data_sources WHERE adapter_key = %s),
+        %s,
+        %s,
+        %s,
+        %s,
+        %s,
+        %s,
+        %s,
+        %s,
+        %s,
+        %s,
+        %s,
+        %s::jsonb
+    )
+    """
+
+
+def _insert_staging_evidence_batch(
     cursor: Any,
     raw_snapshot_id: str,
-    item: StagingEvidenceUpsert,
+    items: tuple[StagingEvidenceUpsert, ...],
 ) -> None:
-    cursor.execute(
-        """
-        INSERT INTO staging_evidence (
-            raw_snapshot_id,
-            data_source_id,
-            source_id,
-            source_type,
-            event_type,
-            title,
-            summary,
-            url,
-            occurred_at,
-            observed_at,
-            confidence,
-            validation_status,
-            rejection_reason,
-            payload
-        )
-        VALUES (
-            %s,
-            (SELECT id FROM data_sources WHERE adapter_key = %s),
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s,
-            %s::jsonb
-        )
-        """,
-        (
-            raw_snapshot_id,
-            item.adapter_key,
-            item.source_id,
-            item.source_type,
-            item.event_type,
-            item.title,
-            item.summary,
-            item.url,
-            item.occurred_at,
-            item.observed_at,
-            item.confidence,
-            item.validation_status,
-            item.rejection_reason,
-            _json(
-                {
-                    **item.payload,
-                    "evidence_id": item.evidence_id,
-                    "adapter_key": item.adapter_key,
-                    "raw_ref": item.raw_ref,
-                }
-            ),
+    params = [_staging_evidence_params(raw_snapshot_id, item) for item in items]
+    cursor.executemany(_INSERT_STAGING_EVIDENCE_SQL, params)
+
+
+def _staging_evidence_params(
+    raw_snapshot_id: str,
+    item: StagingEvidenceUpsert,
+) -> tuple[Any, ...]:
+    return (
+        raw_snapshot_id,
+        item.adapter_key,
+        item.source_id,
+        item.source_type,
+        item.event_type,
+        item.title,
+        item.summary,
+        item.url,
+        item.occurred_at,
+        item.observed_at,
+        item.confidence,
+        item.validation_status,
+        item.rejection_reason,
+        _json(
+            {
+                **item.payload,
+                "evidence_id": item.evidence_id,
+                "adapter_key": item.adapter_key,
+                "raw_ref": item.raw_ref,
+            }
         ),
     )
 

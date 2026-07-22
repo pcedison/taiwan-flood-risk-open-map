@@ -37,3 +37,17 @@ Analytics will be less precise than raw event logs.
 Abuse and debugging workflows may need separate short-lived operational logs.
 
 Public exports can include aggregated query heat only when thresholds and retention rules are satisfied.
+
+## Enforcement Note (2026-07-06)
+
+A sustainability audit found the implementation drifted from this decision:
+`location_queries` persisted `raw_input` plus precise coordinates
+indefinitely, `risk_assessments.result_snapshot` duplicated the precise
+location and raw query text, and profile-refresh job payloads carried both
+into `worker_runtime_jobs`. This was fixed by coarsening coordinates to the
+~1 km privacy bucket at write time, never persisting raw query text, a data
+migration (`infra/migrations/0033_location_queries_privacy.sql`) that
+coarsens pre-fix rows, and a scheduler retention job that prunes
+`location_queries` after `LOCATION_QUERIES_RETENTION_HOURS` (default 30
+days). Known tradeoff: evidence `distance_to_query_m` recomputed from stored
+query geometry (the post-cache fallback path) now carries up to ~1 km error.

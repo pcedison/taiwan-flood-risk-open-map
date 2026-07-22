@@ -5,9 +5,11 @@ volumes. It now covers the Phase 2 runtime-demo readiness path: API/Web, risk
 query, query heat, worker queue ops CLI surface, queue metrics export surface,
 live-gate no-network boundaries, durable worker queue with DLQ-equivalent
 list/requeue visibility and replay audit IDs, official adapter fixture
-dry-run, managed runtime fixture persistence for WRA official plus the gated
-L2 public-web sample evidence adapter, user reports gates, MVT tiles, and the
-documented query-heat materialization plus tile feature/cache smoke path.
+dry-run, managed runtime fixture persistence for CWA, WRA, Civil IoT official
+fixture adapters plus the gated L2 public-web sample evidence adapter,
+worker-persisted latest rows in
+`official_realtime_latest`, user reports gates, MVT tiles, and the documented
+query-heat materialization plus tile feature/cache smoke path.
 
 The smoke is intentionally local. A passing run means the Compose services,
 migrations, fixture-backed worker paths, managed persistence writers, queue
@@ -16,6 +18,11 @@ prove production source credentials, real upstream official worker ingestion,
 production news ingestion, source egress, hosted monitoring, scheduler
 cadence, DLQ/replay operations, tile hosting, or public report launch
 readiness.
+
+The normal runtime smoke keeps
+`REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false`. A hosted or
+production-readiness claim must use worker-persisted evidence; do not treat the
+API realtime bridge fallback as production evidence.
 
 ## Requirements
 
@@ -55,18 +62,30 @@ The script performs these checks:
 13. Runs `python -m app.main --run-enabled-adapters --persist` in a one-off
     `worker` container with `WORKER_RUNTIME_FIXTURES_ENABLED=true`,
     `SOURCE_SAMPLE_DATA_ENABLED=true`, and only
-    `official.wra.water_level,news.public_web.sample` selected:
+    `official.cwa.rainfall`, `official.wra.water_level`,
+    `official.civil_iot.flood_sensor`,
+    `official.civil_iot.sewer_water_level`,
+    `official.civil_iot.pump_water_level`,
+    `official.civil_iot.gate_water_level`,
+    `official.civil_iot.pond_water_level`, and
+    `news.public_web.sample` selected:
     - uses the Compose database and fixture adapter data only
     - keeps all live source API gates disabled
     - verifies the managed runtime CLI path wrote raw snapshot, accepted
       staging evidence, ingestion job, adapter run, and promoted evidence rows
-      for both the WRA official fixture and L2 public-web sample fixture
-    - deletes rows tied to `raw/official-demo/wra-water-level.json` and
-      `raw/news-public-web/sample.json` after the verification, and restores
-      the pre-smoke `data_sources` health/timestamp fields for both adapters
+      for the CWA, WRA, Civil IoT official fixtures and the L2 public-web
+      sample fixture
+    - verifies worker-persisted latest rows in `official_realtime_latest` for
+      `official.cwa.rainfall`, `official.wra.water_level`, and the Civil IoT
+      flood, sewer, pump, gate, and pond water-level adapters, including fresh
+      `ingested_at`, non-null `observed_at`, and the adapter's expected metric
+      column (`rainfall_mm_1h`, `water_level_m`, or `flood_depth_cm`)
+    - deletes rows tied to the official-demo and public-web sample raw refs
+      after verification, and restores the pre-smoke `data_sources`
+      health/timestamp fields for all selected adapters
     - accepts Phase 2 L2 public evidence fixture/persistence only; it does not
-      prove CWA/WRA/flood-potential production source readiness or production
-      news ingestion
+      prove production source credentials, source egress, upstream availability,
+      or production news ingestion
 14. Runs a queue ops CLI surface smoke in a one-off `worker` container:
     - executes `python -m app.main --help`
     - verifies the enqueue, consume, queue metrics export, queue summary/list,

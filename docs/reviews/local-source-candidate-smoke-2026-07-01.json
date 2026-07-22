@@ -1,0 +1,585 @@
+{
+  "captured_at": "2026-07-01T02:45:00+08:00",
+  "result": {
+    "source_count": 21,
+    "sources": [
+      {
+        "county": "臺北市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6",
+            "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6"
+          ],
+          "content_type": "application/json; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://wic.gov.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6"
+        },
+        "key": "taipei_evacuate_gate",
+        "missing_required_fields": [
+          "measurement_value"
+        ],
+        "name": "臺北市疏散門即時監測",
+        "next_action": "find_depth_api_or_official_field_contract",
+        "observed_capabilities": [
+          "longitude_latitude_or_joinable_station_metadata",
+          "observed_at",
+          "station_or_device_id"
+        ],
+        "status": "needs_measurement_value",
+        "url": "https://wic.heo.taipei/OpenData/API/Evacuate/Get?stationNo=&loginId=watergate&dataKey=44D76DA6"
+      },
+      {
+        "county": "臺北市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://data.taipei/dataset/detail?id=fa1e8012-ebb4-473b-888e-97f9a9ce365e"
+          ],
+          "content_type": "text/html;charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://data.taipei/dataset/detail?id=fa1e8012-ebb4-473b-888e-97f9a9ce365e"
+        },
+        "key": "taipei_flood_depth_simulation_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "臺北市降雨積水模擬圖",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://data.taipei/dataset/detail?id=fa1e8012-ebb4-473b-888e-97f9a9ce365e"
+      },
+      {
+        "county": "新北市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296"
+        },
+        "key": "new_taipei_pump_station_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "新北市各抽水站資訊",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [
+          "station_or_device_id"
+        ],
+        "status": "needs_observed_time",
+        "url": "https://data.ntpc.gov.tw/datasets/3cdc5b9c-ce48-4dd6-8079-b9b3fa4b7296"
+      },
+      {
+        "county": "新北市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://data.ntpc.gov.tw/datasets/bf784279-31aa-44bc-a210-33151d03e7ab"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://data.ntpc.gov.tw/datasets/bf784279-31aa-44bc-a210-33151d03e7ab"
+        },
+        "key": "new_taipei_water_gate_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "新北市水門資料",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [
+          "station_or_device_id"
+        ],
+        "status": "needs_observed_time",
+        "url": "https://data.ntpc.gov.tw/datasets/bf784279-31aa-44bc-a210-33151d03e7ab"
+      },
+      {
+        "county": "桃園市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://opendata.tycg.gov.tw/api/dataset/1232b08a-121f-4505-ab39-14f40b12aa19/resource/8fe03219-d637-47d2-a771-0ce8635e55fa/download"
+          ],
+          "content_type": "text/csv;charset=UTF-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://opendata.tycg.gov.tw/api/dataset/1232b08a-121f-4505-ab39-14f40b12aa19/resource/8fe03219-d637-47d2-a771-0ce8635e55fa/download"
+        },
+        "key": "taoyuan_water_gate_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "桃園市政府水務局管理水門資訊",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://opendata.tycg.gov.tw/api/dataset/1232b08a-121f-4505-ab39-14f40b12aa19/resource/8fe03219-d637-47d2-a771-0ce8635e55fa/download"
+      },
+      {
+        "county": "桃園市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://opendata.tycg.gov.tw/api/dataset/328dc013-6d8a-41be-bacf-706d6c61a9de/resource/260e3099-8e5f-47e0-ace6-f7653d9ea0de/download"
+          ],
+          "content_type": "text/csv;charset=UTF-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://opendata.tycg.gov.tw/api/dataset/328dc013-6d8a-41be-bacf-706d6c61a9de/resource/260e3099-8e5f-47e0-ace6-f7653d9ea0de/download"
+        },
+        "key": "taoyuan_pump_inventory",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "桃園市政府水務局抽水機",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://opendata.tycg.gov.tw/api/dataset/328dc013-6d8a-41be-bacf-706d6c61a9de/resource/260e3099-8e5f-47e0-ace6-f7653d9ea0de/download"
+      },
+      {
+        "county": "臺中市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=87e89521-27f4-4beb-8aea-fa07be55e609"
+          ],
+          "content_type": "application/octet-stream",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=87e89521-27f4-4beb-8aea-fa07be55e609"
+        },
+        "key": "taichung_pump_station_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "臺中市各抽水站資訊",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=87e89521-27f4-4beb-8aea-fa07be55e609"
+      },
+      {
+        "county": "臺中市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=7c597e67-ae3d-419f-bf93-d27fd5238d82"
+          ],
+          "content_type": "application/octet-stream",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=7c597e67-ae3d-419f-bf93-d27fd5238d82"
+        },
+        "key": "taichung_gate_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "臺中市市管水門",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://newdatacenter.taichung.gov.tw/api/v1/no-auth/resource.download?rid=7c597e67-ae3d-419f-bf93-d27fd5238d82"
+      },
+      {
+        "county": "苗栗縣",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560"
+        },
+        "key": "miaoli_sewer_monitoring",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "苗栗縣雨水下水道即時水情監測",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://www.miaoli.gov.tw/economic_affairs/News_Content.aspx?n=563&s=922337&sms=9560"
+      },
+      {
+        "county": "雲林縣",
+        "existing_adapter_key": "local.yunlin.water_level",
+        "fetch": {
+          "attempted_urls": [
+            "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
+          ],
+          "content_type": "application/json; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
+        },
+        "key": "yunlin_flood_sensor_depth",
+        "missing_required_fields": [
+          "measurement_value"
+        ],
+        "name": "雲林 iflood 淹水感測深度",
+        "next_action": "present_as_status_only_and_find_depth_contract",
+        "observed_capabilities": [
+          "longitude_latitude_or_joinable_station_metadata",
+          "observed_at",
+          "station_or_device_id",
+          "status_only"
+        ],
+        "status": "status_only_ready",
+        "url": "https://yliflood.yunlin.gov.tw/api/v1/IfloodStation/StationTypes/Areas/Stations?context=5"
+      },
+      {
+        "county": "嘉義縣",
+        "existing_adapter_key": "local.chiayi_county.flood_sensor",
+        "fetch": {
+          "attempted_urls": [
+            "https://www.cyhg.gov.tw/News_Content.aspx?n=16&s=249470"
+          ],
+          "content_type": null,
+          "error": "[SSL: DH_KEY_TOO_SMALL] dh key too small (_ssl.c:1028)",
+          "status_code": null,
+          "timeout_seconds": null,
+          "url": "https://www.cyhg.gov.tw/News_Content.aspx?n=16&s=249470"
+        },
+        "key": "chiayi_county_management_api",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "嘉義縣智慧防汛管理型 API",
+        "next_action": "retry_live_smoke_or_manual_review",
+        "observed_capabilities": [],
+        "status": "blocked_fetch_error",
+        "url": "https://www.cyhg.gov.tw/News_Content.aspx?n=16&s=249470"
+      },
+      {
+        "county": "高雄市",
+        "existing_adapter_key": "local.kaohsiung.rainfall",
+        "fetch": {
+          "attempted_urls": [
+            "https://wrbswi.kcg.gov.tw/SFC/api/rain/rt"
+          ],
+          "content_type": "application/json; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://wrbswi.kcg.gov.tw/SFC/api/rain/rt"
+        },
+        "key": "kaohsiung_rainfall",
+        "missing_required_fields": [],
+        "name": "高雄智慧水利雨量候選",
+        "next_action": "operate_existing_adapter",
+        "observed_capabilities": [
+          "longitude_latitude_or_joinable_station_metadata",
+          "measurement_value",
+          "observed_at",
+          "station_or_device_id",
+          "status_only"
+        ],
+        "status": "promotion_ready",
+        "url": "https://wrbswi.kcg.gov.tw/SFC/api/rain/rt"
+      },
+      {
+        "county": "臺南市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3"
+          ],
+          "content_type": "application/json; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3"
+        },
+        "key": "tainan_pump_station_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "measurement_value"
+        ],
+        "name": "臺南市抽水站基本資料",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [
+          "longitude_latitude_or_joinable_station_metadata",
+          "station_or_device_id"
+        ],
+        "status": "needs_observed_time",
+        "url": "https://soa.tainan.gov.tw/Api/Service/Get/d9311994-b4c3-4952-8493-b7e49d17fbd3"
+      },
+      {
+        "county": "臺南市",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291"
+          ],
+          "content_type": "application/json; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291"
+        },
+        "key": "tainan_water_gate_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "臺南市水門基本資料",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [
+          "station_or_device_id"
+        ],
+        "status": "needs_observed_time",
+        "url": "https://soa.tainan.gov.tw/Api/Service/Get/3be620b5-4381-4195-bc2f-2eff62a46291"
+      },
+      {
+        "county": "屏東縣",
+        "existing_adapter_key": "local.pingtung.flood_sensor",
+        "fetch": {
+          "attempted_urls": [
+            "https://pteoc.pthg.gov.tw/RainStation"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://pteoc.pthg.gov.tw/RainStation"
+        },
+        "key": "pingtung_pteoc_rain_station",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "屏東防災資訊整合平台雨量站",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [
+          "measurement_value"
+        ],
+        "status": "needs_observed_time",
+        "url": "https://pteoc.pthg.gov.tw/RainStation"
+      },
+      {
+        "county": "臺東縣",
+        "existing_adapter_key": "local.taitung.flood_sensor",
+        "fetch": {
+          "attempted_urls": [
+            "https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652"
+        },
+        "key": "taitung_flood_warning",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "臺東洪水與淹水預警系統",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://www.taitung.gov.tw/News_Content.aspx?n=13370&s=131527&sms=12652"
+      },
+      {
+        "county": "澎湖縣",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://data.gov.tw/dataset/156926"
+          ],
+          "content_type": "text/html;charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://data.gov.tw/dataset/156926"
+        },
+        "key": "penghu_drainage_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "澎湖縣區域排水疏濬工程",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [
+          "station_or_device_id"
+        ],
+        "status": "needs_observed_time",
+        "url": "https://data.gov.tw/dataset/156926"
+      },
+      {
+        "county": "花蓮縣",
+        "existing_adapter_key": "local.hualien.flood_sensor",
+        "fetch": {
+          "attempted_urls": [
+            "https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index"
+        },
+        "key": "hualien_senslink_login",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "花蓮行動水情登入型儀表板",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://gov.senslink.net/Dashboard/Hualien/WebApp/Home/Index"
+      },
+      {
+        "county": "金門縣",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL"
+          ],
+          "content_type": "text/xml; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL"
+        },
+        "key": "kinmen_kwis_token_gated_api",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "金門水情系統 KWIS SOAP/ASMX",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL"
+      },
+      {
+        "county": "連江縣",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5"
+        },
+        "key": "lienchiang_flood_prone_metadata",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "連江縣大潮、豪雨易淹水地區",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5"
+      },
+      {
+        "county": "連江縣",
+        "existing_adapter_key": null,
+        "fetch": {
+          "attempted_urls": [
+            "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx"
+          ],
+          "content_type": "text/html; charset=utf-8",
+          "error": null,
+          "status_code": 200,
+          "timeout_seconds": null,
+          "url": "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx"
+        },
+        "key": "lienchiang_erbwater_non_qualifying",
+        "missing_required_fields": [
+          "observed_at",
+          "station_or_device_id",
+          "measurement_value",
+          "longitude_latitude_or_joinable_station_metadata"
+        ],
+        "name": "連江縣資訊公開查詢系統即時監測值",
+        "next_action": "find_observed_time_field_or_contract",
+        "observed_capabilities": [],
+        "status": "needs_observed_time",
+        "url": "http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx"
+      }
+    ],
+    "status_counts": {
+      "blocked_fetch_error": 1,
+      "needs_measurement_value": 1,
+      "needs_observed_time": 17,
+      "promotion_ready": 1,
+      "status_only_ready": 1
+    }
+  },
+  "schema_version": "local-source-candidate-smoke/v1",
+  "summary": {
+    "promotion_ready_count": 1,
+    "source_count": 21,
+    "status_counts": {
+      "blocked_fetch_error": 1,
+      "needs_measurement_value": 1,
+      "needs_observed_time": 17,
+      "promotion_ready": 1,
+      "status_only_ready": 1
+    },
+    "tls_verification": "disabled"
+  }
+}

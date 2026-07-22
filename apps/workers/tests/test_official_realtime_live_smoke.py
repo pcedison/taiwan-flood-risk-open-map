@@ -100,6 +100,8 @@ def test_run_smoke_sources_skips_required_env_and_counts_offshore_backbone() -> 
     assert sewer.fetched_count == 4
     assert sewer.kinmen_count == 2
     assert sewer.lienchiang_count == 1
+    assert sewer.county_counts_by_county == {"金門縣": 2, "連江縣": 1}
+    assert sewer.to_dict()["county_counts_by_county"] == {"金門縣": 2, "連江縣": 1}
 
 
 def test_run_smoke_sources_marks_low_volume_source_failed() -> None:

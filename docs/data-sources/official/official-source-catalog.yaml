@@ -21,6 +21,24 @@ sources:
     limitations:
       - "Station values can be missing or invalid during outages."
       - "Use WGS84 coordinates when present and keep freshness visible."
+  - key: official.cwa.tide_level
+    need: realtime_coastal_tide_level
+    status: primary
+    data_gov_dataset_id: "O-B0075-001"
+    data_gov_url: "https://opendata.cwa.gov.tw/dataset/observation/O-B0075-001"
+    title: "Sea surface observations from buoy and tide stations"
+    provider: "Central Weather Administration"
+    resource_url: "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-B0075-001"
+    station_metadata_url: "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/O-B0076-001"
+    station_metadata_dataset_id: "O-B0076-001"
+    resource_format: "JSON API"
+    update_frequency: "hourly observations; station metadata daily"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Use as coastal tide-level hydrologic context, especially for offshore counties such as Lienchiang."
+    limitations:
+      - "coastal tide level is not an inland river, sewer, flood-depth, or pump-station reading."
+      - "Offshore tide stations such as Matsu use local mean sea level and are not tied back to Taiwan island TWVD2001."
+      - "Live observations must be joined with O-B0076-001 station metadata for station name, county, town, and WGS84 coordinates."
   - key: official.wra.water_level
     need: realtime_water_level
     status: primary

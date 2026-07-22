@@ -6,9 +6,12 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree
 
 from app.adapters._helpers import optional_str, parse_observed_at_utc, stable_evidence_id
+from app.adapters._taiwan_gov_tls import taiwan_gov_open_data_ssl_context
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -300,7 +303,7 @@ def _parse_xml_payload(xml_text: str, *, source_url: str) -> tuple[Mapping[str, 
     return tuple(parsed)
 
 
-def _parse_xml_entry(entry: ElementTree.Element, *, source_url: str) -> Mapping[str, Any] | None:
+def _parse_xml_entry(entry: Element, *, source_url: str) -> Mapping[str, Any] | None:
     embedded_alert = next(
         (element for element in entry.iter() if element is not entry and _local_name(element.tag) == "alert"),
         None,
@@ -331,7 +334,7 @@ def _parse_xml_entry(entry: ElementTree.Element, *, source_url: str) -> Mapping[
     )
 
 
-def _parse_xml_alert(alert: ElementTree.Element, *, source_url: str) -> Mapping[str, Any] | None:
+def _parse_xml_alert(alert: Element, *, source_url: str) -> Mapping[str, Any] | None:
     info = next((child for child in alert if _local_name(child.tag) == "info"), None)
     area = None
     if info is not None:
@@ -598,7 +601,7 @@ def _parse_json_geocodes(area: Mapping[str, Any]) -> tuple[Mapping[str, str], ..
     return tuple(parsed)
 
 
-def _parse_xml_geocodes(element: ElementTree.Element | None) -> tuple[Mapping[str, str], ...]:
+def _parse_xml_geocodes(element: Element | None) -> tuple[Mapping[str, str], ...]:
     if element is None:
         return ()
     parsed: list[Mapping[str, str]] = []
@@ -612,7 +615,7 @@ def _parse_xml_geocodes(element: ElementTree.Element | None) -> tuple[Mapping[st
     return tuple(parsed)
 
 
-def _first_xml_text(element: ElementTree.Element | None, local_name: str) -> str | None:
+def _first_xml_text(element: Element | None, local_name: str) -> str | None:
     if element is None:
         return None
     for child in element.iter():
@@ -647,7 +650,11 @@ def _fetch_text(url: str, timeout_seconds: int) -> str:
         method="GET",
     )
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with urlopen(
+            request,
+            timeout=timeout_seconds,
+            context=taiwan_gov_open_data_ssl_context(),
+        ) as response:
             body = response.read()
     except HTTPError as exc:
         raise NcdrCapAlertFetchError(f"NCDR CAP returned HTTP {exc.code}") from exc

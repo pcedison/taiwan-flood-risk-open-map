@@ -14,6 +14,34 @@ STARTED_AT = datetime(2026, 4, 29, 8, 0, tzinfo=UTC)
 FINISHED_AT = datetime(2026, 4, 29, 8, 1, tzinfo=UTC)
 
 
+def _civil_iot_inventory_payload(*, with_observation: bool = True) -> dict:
+    observations = (
+        [{"phenomenonTime": "2026-04-29T08:00:00Z", "result": 0.0}]
+        if with_observation
+        else []
+    )
+    return {
+        "@iot.count": 1,
+        "value": [
+            {
+                "@iot.id": 101,
+                "name": "Inventory station",
+                "properties": {"stationID": "FS-INVENTORY-1"},
+                "Locations": [
+                    {"location": {"type": "Point", "coordinates": [120.2, 23.0]}}
+                ],
+                "Datastreams": [
+                    {
+                        "name": "淹水深度",
+                        "unitOfMeasurement": {"symbol": "cm"},
+                        "Observations": observations,
+                    }
+                ],
+            }
+        ],
+    }
+
+
 def test_postgres_ingestion_run_writer_inserts_job_run_and_updates_source() -> None:
     summary = AdapterBatchRunSummary(
         adapter_key="news.public_web.sample",
@@ -44,7 +72,8 @@ def test_postgres_ingestion_run_writer_inserts_job_run_and_updates_source() -> N
     assert run_params[4] == "succeeded"
     assert json.loads(str(run_params[13])) == {"raw_ref": "raw/news/sample.json"}
     assert "UPDATE data_sources" in source_sql
-    assert source_params[-1] == "news.public_web.sample"
+    assert source_params[-2] == "news.public_web.sample"
+    assert source_params[-1] == STARTED_AT
 
 
 def test_postgres_ingestion_run_writer_maps_partial_to_succeeded_job() -> None:
@@ -100,6 +129,73 @@ def test_postgres_ingestion_run_writer_requires_database_url_or_connection_facto
         raise AssertionError("expected ValueError")
 
 
+def test_postgres_ingestion_run_writer_persists_runtime_selection_snapshot() -> None:
+    connection = _FakeConnection(job_id="unused")
+    writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    writer.write_runtime_selection(
+        enabled_adapter_keys=("official.cwa.rainfall",),
+        known_adapter_keys=("official.cwa.rainfall", "official.wra.water_level"),
+        checked_at=FINISHED_AT,
+    )
+
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 1
+    sql, params = connection.cursor_instance.executions[0]
+    assert "runtime_enabled = (adapter_key = ANY" in sql
+    assert params == (
+        ["official.cwa.rainfall"],
+        FINISHED_AT,
+        ["official.cwa.rainfall", "official.wra.water_level"],
+    )
+
+
+def test_postgres_ingestion_run_writer_persists_final_pipeline_status() -> None:
+    connection = _FakeConnection(job_id="unused")
+    writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    writer.write_pipeline_status(
+        adapter_keys=("official.wra.water_level",),
+        status="failed",
+        complete=False,
+        checked_at=FINISHED_AT,
+        run_at=STARTED_AT,
+    )
+
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 1
+    sql, params = connection.cursor_instance.executions[0]
+    assert "runtime_pipeline_status = %s" in sql
+    assert "runtime_pipeline_complete = %s" in sql
+    assert "runtime_pipeline_run_at <= %s" in sql
+    assert "COALESCE(jobs.started_at, jobs.created_at) > %s" in sql
+    assert params == (
+        "failed",
+        FINISHED_AT,
+        False,
+        STARTED_AT,
+        ["official.wra.water_level"],
+        STARTED_AT,
+        STARTED_AT,
+    )
+
+
+def test_pipeline_failure_without_ingestion_summary_gets_ordered_generation() -> None:
+    connection = _FakeConnection(job_id="unused")
+    writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    writer.write_pipeline_status(
+        adapter_keys=("official.wra.water_level",),
+        status="failed",
+        complete=False,
+        checked_at=FINISHED_AT,
+    )
+
+    _, params = connection.cursor_instance.executions[0]
+    assert params[3] == FINISHED_AT
+    assert params[-2:] == (FINISHED_AT, FINISHED_AT)
+
+
 def test_run_adapter_batch_can_write_operational_summary() -> None:
     adapter = SamplePublicWebNewsAdapter(
         [
@@ -126,6 +222,93 @@ def test_run_adapter_batch_can_write_operational_summary() -> None:
 
     assert summary.status == "succeeded"
     assert run_writer.calls == [(summary, "ingest.news", {"source": "sample"})]
+
+
+def test_civil_iot_inventory_proof_flows_to_run_snapshot_and_safe_metrics() -> None:
+    adapter = FloodSensorStaApiAdapter(
+        fetched_at=STARTED_AT,
+        fetch_json=lambda url, timeout: _civil_iot_inventory_payload(),
+    )
+    connection = _FakeConnection(job_id="job-id")
+    run_writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    summary = run_adapter_batch(
+        adapter,
+        writer=_MemoryWriter(),
+        run_writer=run_writer,
+        job_key="ingest.official.civil_iot.flood_sensor",
+    )
+
+    assert summary.status == "succeeded"
+    proof = summary.station_inventory_proof
+    assert proof is not None
+    assert proof.inventory_complete is True
+    snapshot_sql, snapshot_params = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "INSERT INTO station_inventory_snapshots" in execution[0]
+    )
+    assert "station_ids" in snapshot_sql
+    assert snapshot_params[:10] == (
+        "job-id",
+        "official.civil_iot.flood_sensor",
+        summary.finished_at,
+        1,
+        1,
+        True,
+        1,
+        1,
+        0,
+        0,
+    )
+    assert snapshot_params[10] == proof.manifest_sha256
+    assert json.loads(str(snapshot_params[11])) == ["FS-INVENTORY-1"]
+    assert snapshot_params[12] is True
+
+    run_sql, run_params = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "INSERT INTO adapter_runs" in execution[0]
+    )
+    assert "INSERT INTO adapter_runs" in run_sql
+    metrics = json.loads(str(run_params[13]))
+    assert metrics["station_inventory_proof"]["manifest_sha256"] == proof.manifest_sha256
+    assert metrics["station_inventory_proof"]["manifest_version"] == "station-id-json-v1"
+    assert "station_ids" not in metrics["station_inventory_proof"]
+
+
+def test_empty_civil_iot_observations_stay_skipped_but_preserve_inventory_proof() -> None:
+    adapter = FloodSensorStaApiAdapter(
+        fetched_at=STARTED_AT,
+        fetch_json=lambda url, timeout: _civil_iot_inventory_payload(
+            with_observation=False
+        ),
+    )
+    connection = _FakeConnection(job_id="job-id")
+    run_writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    summary = run_adapter_batch(
+        adapter,
+        run_writer=run_writer,
+        job_key="ingest.official.civil_iot.flood_sensor",
+    )
+
+    assert summary.status == "skipped"
+    assert summary.items_fetched == 0
+    assert summary.station_inventory_proof is not None
+    assert summary.station_inventory_proof.inventory_complete is True
+    assert not any(
+        "INSERT INTO adapter_runs" in sql
+        for sql, _params in connection.cursor_instance.executions
+    )
+    snapshot_sql, snapshot_params = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "INSERT INTO station_inventory_snapshots" in execution[0]
+    )
+    assert "INSERT INTO station_inventory_snapshots" in snapshot_sql
+    assert json.loads(str(snapshot_params[11])) == ["FS-INVENTORY-1"]
+    assert snapshot_params[12] is True
 
 
 def test_run_adapter_batch_surfaces_operational_summary_write_failure() -> None:
@@ -159,7 +342,8 @@ def test_civil_iot_flood_sensor_upstream_failure_marks_failed_summary_and_source
     source_sql, source_params = connection.cursor_instance.executions[-1]
     assert "UPDATE data_sources" in source_sql
     assert source_params[6] == "failed"
-    assert source_params[-1] == "official.civil_iot.flood_sensor"
+    assert source_params[-2] == "official.civil_iot.flood_sensor"
+    assert source_params[-1] == summary.started_at
 
 
 class _MemoryRunWriter:

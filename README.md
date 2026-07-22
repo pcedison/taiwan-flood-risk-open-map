@@ -10,10 +10,49 @@ The project follows a spec-first SDD workflow. The source of truth is:
 - [Project SDD](docs/PROJECT_SDD.md)
 - [Project Work Plan](docs/PROJECT_WORK_PLAN.md)
 
+## Quick Start (Local)
+
+Prerequisites: Docker with Compose v2. No `.env` file is required for a first
+boot — every Compose variable has a safe local default (copy `.env.example` to
+`.env` only when you want to customize).
+
+```bash
+git clone https://github.com/pcedison/taiwan-flood-risk-open-map.git
+cd taiwan-flood-risk-open-map
+
+# 1. Start the data services
+docker compose up -d postgres redis minio
+
+# 2. Apply database migrations (required before the API will work)
+docker compose --profile tools run --rm migrate
+
+# 3. Start the app services
+docker compose up -d api web worker scheduler
+```
+
+Then open:
+
+- Web UI: <http://localhost:3000>
+- API docs: <http://localhost:8000/docs>
+
+To run the test suites natively (Python 3.12+ and Node 22+):
+
+```bash
+python -m pytest apps/api/tests -q        # API tests
+python -m pytest apps/workers/tests -q    # worker tests
+npm ci --prefix apps/web && npm test --prefix apps/web   # web unit tests
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development workflow,
+lint/typecheck commands, and contribution rules.
+
 ## Core Decisions
 
 - License: Apache-2.0 for software.
-- Data exports: layered licensing.
+- Data exports: layered licensing. Central sources (CWA/WRA/Civil IoT/geocoding)
+  are documented in `docs/data-sources/official/official-source-catalog.yaml`;
+  local government sources are inventoried, with per-source verification
+  status, in `docs/data-sources/local/LICENSE_TERMS.md`.
 - Deployment path: GitHub repository connected to Zeabur VPS.
 - Basemap launch path: MapLibre GL JS with PMTiles/Protomaps-compatible
   OpenStreetMap-derived data served from object storage/CDN.
@@ -85,6 +124,22 @@ Current placeholder boundaries:
   seconds, latest-row count, upstream adapter/job status, freshness state,
   `is_enabled`, and currently open source gates. Disabled sources are reported
   as disabled/stale diagnostics, not failed upstream ingestion.
+- Public risk responses now include a redacted per-source realtime health view
+  under `nearby_realtime_coverage.source_health`. A spatial no-station result is
+  only confirmed when every applicable national/local required network has a
+  healthy exact-run station inventory whose upstream total, terminal pagination,
+  station-ID manifest, reviewed checksum, and published station set all agree.
+  A reviewed immutable 22-county boundary and checksum-pinned county/signal
+  source catalog are also required, including every county within 15 km.
+  Observed station counts alone are not proof, and the migration starts with no
+  approved boundary, source manifest, or county/signal catalog. Source failure, partial updates,
+  stalled ingestion activity, disabled sources, unverified inventories, and
+  unknown health remain distinct public-safe data-gap states. Worker runtime
+  selection and final publication outcomes are persisted separately; final
+  outcomes are correlated to the exact ingestion attempt so an older overlapping
+  cycle cannot certify the latest run.
+  See `docs/runbooks/station-inventory-and-jurisdiction-review.md` before changing
+  any inventory, boundary, mapping, or redundancy approval field.
 - PTT, Dcard, and user report adapters are phase-delayed/pending
   implementation and must remain disabled until the required legal, privacy, and
   governance work lands.
@@ -119,6 +174,15 @@ Ops runbooks and dry-run checks:
   `infra/scripts/validate_production_readiness_evidence.py` for validating the
   evidence record shape. This is a schema/tooling check, not proof that real
   Zeabur production env, secrets, alert routing, or on-call drill are complete.
+- [Infrastructure Rebuild Runbook](docs/runbooks/infrastructure-rebuild.md) for
+  rebuilding the production environment from zero: account registration
+  (Zeabur, CWA, Civil IoT, Cloudflare Turnstile), Zeabur project creation, data
+  restore, domain/DNS, and a post-rebuild verification checklist. See also
+  [SUCCESSION.md](SUCCESSION.md) for the single points of failure this runbook
+  addresses.
+- [GitHub Actions Secrets](docs/runbooks/github-actions-secrets.md) for the
+  current inventory of `secrets.*` referenced by the hosted-monitoring
+  workflows, what happens when they are unset, and where to configure them.
 - [Next Phase Runtime Readiness Queue](docs/reviews/phase-next-runtime-queue-heat-tiles-reports-2026-04-30.md)
   for the five acceptance standards around queue, reports, MVT, query heat, and
   tile cache readiness.

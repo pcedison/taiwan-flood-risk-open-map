@@ -128,18 +128,17 @@ def parse_yunlin_water_level_payload(
     for item in _station_items(payload):
         if not isinstance(item, Mapping):
             continue
-        if _first_text(item, "stationType") != "水位":
+        station_type = _first_text(item, "stationType")
+        if station_type not in {"水位", "淹水感測"}:
             continue
         station_id = _first_text(item, "id", "stationId", "stationNo")
         station_name = _first_text(item, "stationName", "displayName")
         observed_at = _parse_observed_at(_first_value(item, "latestUpdateTime"))
-        water_level_m = optional_float(_first_value(item, "levelHeight"))
         coordinate = _coordinate(_first_value(item, "longitude"), _first_value(item, "latitude"))
         if (
             station_id is None
             or station_name is None
             or observed_at is None
-            or water_level_m is None
             or coordinate is None
         ):
             continue
@@ -149,7 +148,7 @@ def parse_yunlin_water_level_payload(
             "station_id": station_id,
             "station_name": station_name,
             "observed_at": observed_at.isoformat(),
-            "water_level_m": water_level_m,
+            "station_type": station_type,
             "source_url": source_url,
             "resource_url": resource_url,
             "location_text": _location_text(item, station_name),
@@ -164,6 +163,17 @@ def parse_yunlin_water_level_payload(
             "confidence": 0.84,
             "quality_flags": _quality_flags(observed_at, fetched_at=fetched_at),
         }
+        if station_type == "淹水感測":
+            record["status_only"] = True
+            record["confidence"] = 0.32
+            record["source_weight"] = 0.05
+            records.append(record)
+            continue
+
+        water_level_m = optional_float(_first_value(item, "levelHeight"))
+        if water_level_m is None:
+            continue
+        record["water_level_m"] = water_level_m
         thresholds = item.get("alertThreshold")
         if isinstance(thresholds, Mapping):
             _assign_float(record, "warning_level_m", thresholds.get("level2"))
@@ -189,6 +199,9 @@ def _normalize_water_level_record(
     raw_item: RawSourceItem,
 ) -> NormalizedEvidence | None:
     payload = raw_item.payload
+    if payload.get("status_only") is True:
+        return _normalize_status_only_record(metadata, raw_item)
+
     station_name = optional_str(payload.get("station_name"))
     observed_at = parse_datetime(payload.get("observed_at"))
     water_level_m = optional_float(payload.get("water_level_m"))
@@ -211,6 +224,34 @@ def _normalize_water_level_record(
         metadata,
         raw_item,
         event_type=EventType.WATER_LEVEL,
+        station_name=station_name,
+        observed_at=observed_at,
+        summary=summary,
+        tags=tuple(tags),
+    )
+
+
+def _normalize_status_only_record(
+    metadata: AdapterMetadata,
+    raw_item: RawSourceItem,
+) -> NormalizedEvidence | None:
+    payload = raw_item.payload
+    station_name = optional_str(payload.get("station_name"))
+    observed_at = parse_datetime(payload.get("observed_at"))
+    alarm_state = optional_str(payload.get("alarm_state"))
+    if station_name is None or observed_at is None or alarm_state is None:
+        return None
+    if _has_blocking_quality_flag(payload):
+        return None
+
+    tags = ["official", "local_yunlin", "status_only", "flood_sensor_status", "not_flood_depth"]
+    if alarm_state != "正常":
+        tags.append("local_alarm_state")
+    summary = f"雲林 iflood 淹水感測狀態：{alarm_state}（{station_name}）"
+    return _evidence(
+        metadata,
+        raw_item,
+        event_type=EventType.STATUS_ONLY,
         station_name=station_name,
         observed_at=observed_at,
         summary=summary,

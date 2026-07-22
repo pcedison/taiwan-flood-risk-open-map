@@ -3,13 +3,15 @@ from __future__ import annotations
 import html
 import json
 import re
-import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import Request, urlopen
+from xml.etree.ElementTree import Element
+
+from defusedxml import ElementTree as ET
 
 from app.adapters._helpers import optional_float, optional_str, parse_datetime, stable_evidence_id
 from app.adapters.contracts import (
@@ -240,14 +242,14 @@ def _raw_items(
     )
 
 
-def _find_text(element: ET.Element, path: str) -> str | None:
+def _find_text(element: Element, path: str) -> str | None:
     found = element.find(path)
     if found is None:
         return None
     return found.text
 
 
-def _placemark_coordinate(placemark: ET.Element) -> tuple[float, float] | None:
+def _placemark_coordinate(placemark: Element) -> tuple[float, float] | None:
     coordinates = optional_str(_find_text(placemark, ".//{*}coordinates"))
     if coordinates is None:
         return None

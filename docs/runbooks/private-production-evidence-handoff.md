@@ -148,6 +148,395 @@ replay evidence.
 7. Record the go/no-go decision, accepted risks, owner handoff, and next drill
    date in the private ops bundle.
 
+## Local-Source Completion Audit Evidence
+
+Nationwide local-source completion is audited by:
+
+```powershell
+python scripts\local-source-completion-audit.py `
+  --completion-evidence-json docs\reviews\hosted-deployment-completion-evidence-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-json docs\reviews\hosted-public-risk-completion-evidence-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-json <private-source-contract-evidence.json> `
+  --completion-evidence-json <private-hosted-worker-evidence.json> `
+  --completion-evidence-json <private-monitoring-evidence.json> `
+  --fail-on-incomplete
+```
+
+Repeat `--completion-evidence-json` for each independent evidence bundle. The
+CLI merges signal-family, source-contract, and production-gate evidence before
+running the audit, so public smoke artifacts and private official replies do
+not need to be hand-merged into one JSON file.
+
+The command still prints only aggregate evidence counts and gate status. It
+does not echo `evidence_ref` values, and it must remain incomplete until every
+required signal family, official contract/authorization item, hosted worker
+requirement, monitoring requirement, and public-risk requirement has accepted
+evidence.
+Accepted production-gate evidence must include both `satisfied_requirements`
+and matching `requirement_evidence` entries. Each requirement-level entry needs
+its own `evidence_ref` plus `observed_at` for runtime observations or
+`reviewed_at` for policy and ownership approvals.
+
+For public/local evidence refs such as
+`docs/reviews/hosted-public-risk-evidence-smoke-YYYY-MM-DD-<sha>.json#/risk_assessment/worker_evidence`,
+the audit CLI resolves the JSON file, requires `status: passed` when the
+artifact has a status field, and verifies the JSON pointer exists. Private refs
+such as `private-ops://...` remain opaque indexes to private ops storage and
+are not read by the public CLI.
+
+Before asking operators to fill private refs, regenerate the public request
+artifacts that describe the remaining official local-source gaps:
+
+```powershell
+python scripts\local-source-request-packets.py `
+  --format signal-gap-batches-json `
+  --output docs\data-sources\local\generated-signal-gap-request-batches.json
+
+python scripts\local-source-request-packets.py `
+  --format signal-gap-batches-markdown `
+  --output docs\data-sources\local\generated-signal-gap-request-batches.md
+```
+
+These generated batch files group unresolved `pump_or_gate_status`,
+`flood_depth`, and `sewer_water_level` requirements by signal family. Each
+batch starts with `dispatch_status: not_sent` and a `private-ops://` evidence
+hint. The public files are safe to commit because they contain only request
+metadata, not official replies, tokens, contact transcripts, or screenshots.
+
+After an operator sends a batch request or receives an official answer, record
+the real dispatch status, reply reference, and county-level decision in the
+private completion evidence bundle. The public audit is accepted only when the
+private bundle turns every listed `completion_evidence_targets` entry into an
+accepted `signal_family_gap_evidence` item or an accepted official-unavailable
+record.
+
+When a batch has been sent but the official reply has not yet been accepted,
+generate a private dispatch overlay instead of marking the signal gap complete:
+
+```powershell
+python scripts\local-source-request-packets.py `
+  --format signal-gap-dispatch-evidence `
+  --signal-type flood_depth `
+  --dispatch-evidence-ref private-ops://local-source/dispatch/flood-depth-YYYY-MM-DD `
+  --dispatched-at 2026-06-30T15:20:00+08:00 `
+  --follow-up-due-at 2026-07-07T09:00:00+08:00 `
+  --output <private-signal-gap-dispatch-evidence.json>
+```
+
+The audit will report `request_dispatched` as dispatch progress, but it will
+keep `required_signal_families` incomplete until each county/signal entry is
+replaced with `accepted`, `authorization_gated_adapter`,
+`production_adapter`, or `official_unavailable` evidence. Do not commit a
+filled dispatch overlay; keep it with the private official correspondence or
+ticketing record. `--follow-up-due-at` is optional, but including it lets the
+audit expose the number of dispatch items with scheduled follow-up and the next
+follow-up timestamp without treating the request as accepted evidence.
+
+After official replies, authorization-gated adapter evidence, production
+adapter evidence, or official-unavailable decisions are accepted, normalize the
+private signal-family manifest into a completion overlay:
+
+```powershell
+python scripts\signal_family_evidence.py `
+  --template-output <private-signal-family-manifest-template.json> `
+  --captured-at 2026-07-01T09:00:00+08:00
+
+python scripts\signal_family_evidence.py `
+  --manifest-json <private-signal-family-manifest.json> `
+  --evidence-output <private-signal-family-evidence.json> `
+  --completion-evidence-output <private-signal-family-completion-evidence.json>
+```
+
+The checked-in
+`docs/data-sources/local/generated-signal-family-evidence-template.json` file is
+a public-safe starting template for the current signal-family backlog. It keeps
+all entries at `pending`, so it is useful for private ops handoff but is not
+completion evidence.
+
+The manifest schema is `signal-family-evidence-input/v1`. Each
+`signal_family_gap_evidence` entry must include `county`, `signal_type`,
+accepted `status`, `evidence_ref`, and `reviewed_at`. Accepted completion
+statuses are `accepted`, `authorization_gated_adapter`, `production_adapter`,
+and `official_unavailable`. `request_dispatched` is intentionally rejected by
+this CLI because it is progress evidence, not completion evidence. The CLI
+compares the manifest against the current `signal_gap_priority_groups` and
+fails closed if any required county/signal entry is missing, pending,
+duplicated, or no longer required.
+
+For the `official_authorization_and_contracts` gate, fill a private source
+contract manifest with accepted evidence for every current
+`authorization_request`, `metadata_release_monitor`, and
+`public_api_contract_review` item:
+
+```powershell
+python scripts\source_contract_evidence.py `
+  --template-output <private-source-contract-manifest-template.json> `
+  --captured-at 2026-07-01T09:00:00+08:00
+```
+
+The checked-in
+`docs/data-sources/local/generated-source-contract-evidence-template.json` file
+is a public-safe starting template for the current authorization, metadata
+release, and public API contract backlog. It also remains `pending` by default
+and must not be treated as accepted evidence.
+
+When authorization or contract requests have been sent but the official reply
+has not yet been accepted, generate a private source-contract dispatch overlay
+instead of marking the gate complete:
+
+```powershell
+python scripts\local-source-request-packets.py `
+  --format source-contract-dispatch-evidence `
+  --dispatch-evidence-ref private-ops://local-source/source-contract-dispatch/YYYY-MM-DD `
+  --dispatched-at 2026-06-30T18:10:00+08:00 `
+  --follow-up-due-at 2026-07-07T09:00:00+08:00 `
+  --output <private-source-contract-dispatch-evidence.json>
+```
+
+The audit will report `request_dispatched` as source-contract dispatch
+progress, but it will keep `official_authorization_and_contracts` incomplete
+until each current county/gate item is replaced with `accepted`, `authorized`,
+`contract_verified`, `released`, or `official_unavailable` evidence. Do not
+commit a filled dispatch overlay; keep it with the private official
+correspondence or ticketing record. `--follow-up-due-at` has the same
+non-completion meaning here: it only schedules follow-up visibility in the
+audit overlay.
+
+To check whether dispatched official requests are due or overdue for follow-up
+without printing private evidence refs, run:
+
+```powershell
+python scripts\local-source-request-followups.py `
+  --completion-evidence-json <private-signal-gap-dispatch-evidence.json> `
+  --completion-evidence-json <private-source-contract-dispatch-evidence.json> `
+  --as-of 2026-07-08T00:00:00+08:00 `
+  --fail-on-overdue `
+  --output <private-followup-report.json>
+```
+
+The report contains only public-safe fields such as county, signal type or
+source-contract gate, follow-up due timestamp, aggregate pending/overdue
+counts, and the next follow-up due timestamp. It intentionally omits
+`evidence_ref` so operators can use it in ticket checks or CI-style monitors
+without leaking private correspondence indexes.
+
+To let the scheduled Hosted Monitoring workflow report official-request
+follow-up state, store a reviewed dispatch overlay as a base64 GitHub secret:
+
+```powershell
+$encoded = [Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes(
+    (Get-Content -Raw <private-local-source-dispatch-evidence.json>)
+  )
+)
+$encoded | gh secret set LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 `
+  --repo pcedison/taiwan-flood-risk-open-map `
+  --body-file -
+```
+
+This secret must contain only dispatch progress evidence, not official reply
+content, provider credentials, personal contact details, screenshots, or access
+tokens. The workflow decodes it into runner temp storage, writes
+`local-source-request-followups.json`, and emits a sanitized
+`local-source-request-dispatch-completion-evidence.json` where every
+`evidence_ref` is replaced by
+`private-ops://redacted/local-source-request-dispatch`. That sanitized overlay
+is safe to upload as an artifact and lets the aggregate completion audit count
+`request_dispatched` progress without treating it as accepted completion.
+
+For release/completion reviews, manually dispatch Hosted Monitoring with
+`fail_on_overdue_local_source_followups=true` if overdue official follow-ups
+should fail the run. Scheduled monitoring defaults to non-strict mode so it can
+continue publishing follow-up evidence while official responses are pending.
+
+When generating the aggregate completion audit for a dated review, pass the
+same timestamp to `local-source-completion-audit.py` so the public-safe audit
+also exposes overdue follow-up counts:
+
+```powershell
+python scripts\local-source-completion-audit.py `
+  --completion-evidence-json <private-signal-gap-dispatch-evidence.json> `
+  --completion-evidence-json <private-source-contract-dispatch-evidence.json> `
+  --as-of 2026-07-08T00:00:00+08:00 `
+  --markdown-output <private-completion-audit.md>
+```
+
+`--as-of` only counts overdue dispatch follow-ups in the audit overlay and gate
+evidence text. It does not print private evidence refs and does not convert a
+`request_dispatched` item into accepted signal-family or source-contract
+completion evidence.
+
+```powershell
+python scripts\source_contract_evidence.py `
+  --manifest-json <private-source-contract-manifest.json> `
+  --evidence-output <private-source-contract-evidence.json> `
+  --completion-evidence-output <private-source-contract-completion-evidence.json>
+```
+
+The manifest schema is `source-contract-evidence-input/v1`. Each
+`source_contract_evidence` entry must include `county`, `gate`, accepted
+`status`, `evidence_ref`, and `reviewed_at`. Accepted statuses are
+`accepted`, `authorized`, `contract_verified`, `official_unavailable`, and
+`released`. The CLI compares the manifest against the current action plan and
+fails closed if any required county/gate is missing, pending, duplicated, or no
+longer required. Keep filled manifests and normalized outputs private if they
+contain official reply refs, contract links, reviewer names, or ticket IDs.
+
+For the `hosted_worker_persisted_evidence` gate, fill a private hosted worker
+manifest with verified evidence for all five required requirements:
+
+- `freshness_policy`: verified max-lag policy, evidence ref, and `observed_at`.
+- `raw_snapshot_retention_policy`: verified raw snapshot retention days,
+  evidence ref, and `reviewed_at`.
+- `monitored_scheduler_cadence`: verified scheduler cadence, evidence ref, and
+  `observed_at`.
+- `hosted_egress_review`: verified hosted egress review, reviewer, evidence
+  ref, and `reviewed_at`.
+- `worker_persisted_evidence_path`: verified worker-persisted evidence path,
+  adapter keys, evidence ref, and `observed_at`.
+
+Then validate and normalize that private manifest into a completion overlay:
+
+```powershell
+python scripts\hosted_worker_evidence.py `
+  --template-output <private-hosted-worker-manifest-template.json> `
+  --captured-at 2026-07-01T09:30:00+08:00
+
+python scripts\hosted_worker_evidence.py `
+  --manifest-json <private-hosted-worker-manifest.json> `
+  --evidence-output <private-hosted-worker-evidence.json> `
+  --completion-evidence-output <private-hosted-worker-completion-evidence.json>
+```
+
+To let the scheduled Hosted Monitoring workflow include this private gate in
+its aggregate completion audit, store the reviewed manifest as a base64 GitHub
+secret. The workflow decodes it only on the GitHub runner and writes normalized
+public-safe artifacts under `hosted-monitoring-<run-id>`:
+
+```powershell
+$encoded = [Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes(
+    (Get-Content -Raw <private-hosted-worker-manifest.json>)
+  )
+)
+$encoded | gh secret set HOSTED_WORKER_EVIDENCE_MANIFEST_B64 `
+  --repo pcedison/taiwan-flood-risk-open-map `
+  --body-file -
+```
+
+The manifest should contain reviewed private evidence refs and statuses only.
+Do not place upstream credentials, admin bearer tokens, raw snapshots, full
+incident transcripts, or screenshots in the GitHub secret.
+
+The checked-in
+`docs/data-sources/local/generated-hosted-worker-evidence-template.json` file
+is a public-safe starting template for the current hosted worker persisted
+evidence gate. It keeps every requirement at `pending`, so it is useful for
+private ops handoff but is not completion evidence.
+
+The CLI fails closed: `hosted_worker_persisted_evidence` is accepted only when
+`freshness_policy`, `raw_snapshot_retention_policy`,
+`monitored_scheduler_cadence`, `hosted_egress_review`, and
+`worker_persisted_evidence_path` all have verified status plus requirement
+level evidence. The admin-only `hosted_source_freshness_smoke.py` can prove
+`freshness_policy` and `worker_persisted_evidence_path`; the private hosted
+worker manifest remains the place to record raw snapshot retention, scheduler
+cadence, hosted egress review, and any private storage/adapter evidence.
+The public-safe smoke defaults to the full hosted realtime backbone
+(`official.cwa.rainfall`, `official.cwa.tide_level`, `official.wra.water_level`,
+`official.ncdr.cap`, `official.wra_iow.flood_depth`,
+`official.civil_iot.flood_sensor`, `official.civil_iot.sewer_water_level`,
+`official.civil_iot.pump_water_level`, and
+`official.civil_iot.gate_water_level`). Use repeated `--required-adapter-key`
+arguments only for a documented, narrower incident or staged rollout check; do
+not use a narrowed run as completion evidence for the full hosted worker path.
+The local completion audit enforces this for public-safe local
+`hosted-source-freshness-smoke/v1` artifacts by rejecting evidence whose
+`required_adapter_keys` or `checked_sources` omit any hosted realtime backbone
+adapter.
+
+If `hosted_source_freshness_smoke.py` is used for the public-safe admin
+freshness and worker-persisted path requirements, operators can keep the
+remaining private policy/ops proof in a smaller
+`hosted-worker-policy-evidence-input/v1` manifest:
+
+```powershell
+python scripts\hosted_worker_policy_evidence.py `
+  --template-output <private-hosted-worker-policy-manifest-template.json> `
+  --captured-at 2026-07-01T09:30:00+08:00
+
+python scripts\hosted_worker_policy_evidence.py `
+  --manifest-json <private-hosted-worker-policy-manifest.json> `
+  --evidence-output <private-hosted-worker-policy-evidence.json> `
+  --completion-evidence-output <private-hosted-worker-policy-completion-evidence.json>
+```
+
+The checked-in
+`docs/data-sources/local/generated-hosted-worker-policy-evidence-template.json`
+file is a public-safe starting template for the smaller private policy/ops
+manifest. It also remains `pending` by default and must not be treated as
+accepted evidence.
+
+This policy manifest covers only `raw_snapshot_retention_policy`,
+`monitored_scheduler_cadence`, and `hosted_egress_review`. Merge its completion
+overlay with the hosted source-freshness overlay in
+`local-source-completion-audit.py`; the hosted worker gate is satisfied only
+when all five requirement-level evidence entries are present across the merged
+overlays.
+
+For the `production_monitoring_and_alerting` gate, fill a private monitoring
+manifest with one reviewed evidence block per required requirement:
+
+- `hosted_alert_routing`: verified alert route, owner, evidence ref, and
+  `reviewed_at`.
+- `scheduled_freshness_checks`: verified hosted freshness monitor or scheduled
+  job, cadence, evidence ref, and `observed_at`.
+- `worker_scheduler_alert_ownership`: verified worker/scheduler owner, evidence
+  ref, and `reviewed_at`.
+
+Then validate and normalize that private manifest into a completion overlay:
+
+```powershell
+python scripts\hosted_monitoring_evidence.py `
+  --template-output <private-monitoring-manifest-template.json> `
+  --captured-at 2026-07-01T09:30:00+08:00
+
+python scripts\hosted_monitoring_evidence.py `
+  --manifest-json <private-monitoring-manifest.json> `
+  --evidence-output <private-hosted-monitoring-evidence.json> `
+  --completion-evidence-output <private-monitoring-evidence.json>
+```
+
+To include this private monitoring gate in the scheduled Hosted Monitoring
+aggregate audit, store the reviewed manifest as a base64 GitHub secret:
+
+```powershell
+$encoded = [Convert]::ToBase64String(
+  [Text.Encoding]::UTF8.GetBytes(
+    (Get-Content -Raw <private-monitoring-manifest.json>)
+  )
+)
+$encoded | gh secret set HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 `
+  --repo pcedison/taiwan-flood-risk-open-map `
+  --body-file -
+```
+
+Keep the manifest limited to reviewed owner/cadence/evidence-ref fields. Do not
+store alert-channel secrets, notification payloads, credentials, or full
+incident transcripts in the GitHub secret.
+
+The checked-in
+`docs/data-sources/local/generated-hosted-monitoring-evidence-template.json`
+file is a public-safe starting template for the hosted monitoring and alerting
+gate. It remains `pending` by default and must not be treated as accepted
+evidence.
+
+The CLI fails closed: `production_monitoring_and_alerting` is accepted only
+when `hosted_alert_routing`, `scheduled_freshness_checks`, and
+`worker_scheduler_alert_ownership` all have verified status plus requirement
+level evidence. Keep the filled outputs private if they contain routing names,
+ticket links, incident channels, or on-call ownership.
+
 ## Acceptance Mapping
 
 `P1-04` can move from `In Progress` to `Accepted` only when:

@@ -1,0 +1,29 @@
+{
+  "schema_version": "local-source-completion-evidence/v1",
+  "captured_at": "2026-07-01T05:04:51+00:00",
+  "signal_family_gap_evidence": [],
+  "source_contract_evidence": [],
+  "production_gate_evidence": [
+    {
+      "gate_key": "production_deployment_evidence",
+      "status": "accepted",
+      "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-07-01-e717fde.json",
+      "satisfied_requirements": [
+        "main_branch_deployed_sha",
+        "ready_dependency_smoke"
+      ],
+      "requirement_evidence": [
+        {
+          "requirement": "main_branch_deployed_sha",
+          "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-07-01-e717fde.json#/health/deployment_sha",
+          "observed_at": "2026-07-01T05:04:51+00:00"
+        },
+        {
+          "requirement": "ready_dependency_smoke",
+          "evidence_ref": "docs\\reviews\\hosted-deployment-smoke-2026-07-01-e717fde.json#/ready/dependencies",
+          "observed_at": "2026-07-01T05:04:51+00:00"
+        }
+      ]
+    }
+  ]
+}

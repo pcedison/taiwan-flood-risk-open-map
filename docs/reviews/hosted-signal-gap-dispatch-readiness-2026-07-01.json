@@ -1,0 +1,175 @@
+{
+  "captured_at": "2026-07-01T11:35:00+08:00",
+  "discovery_summary": {
+    "captured_at": "2026-07-01T11:25:00+08:00",
+    "schema_version": "local-source-signal-gap-discovery-refresh/v1",
+    "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json"
+  },
+  "groups": [
+    {
+      "batch_id": "signal-gap-batch/pump_or_gate_status",
+      "completion_evidence_target_count": 13,
+      "completion_gate": "Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for pump_or_gate_status, plus production ops evidence.",
+      "county_count": 13,
+      "discovery": {
+        "artifact_name": "signal-gap-discovery-refresh-pump-or-gate-status.json",
+        "candidate_count": 9,
+        "candidate_live_read_api_count": 0,
+        "counties_without_candidates": [
+          "連江縣",
+          "金門縣",
+          "臺東縣",
+          "苗栗縣",
+          "澎湖縣",
+          "南投縣",
+          "嘉義市",
+          "基隆市",
+          "宜蘭縣",
+          "新竹縣"
+        ],
+        "metadata_only_count": 9,
+        "metadata_only_counties": [
+          "新北市",
+          "桃園市",
+          "臺中市"
+        ]
+      },
+      "dispatch_command": "python scripts/local-source-request-packets.py --format signal-gap-dispatch-evidence --signal-type pump_or_gate_status --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "no_live_read_api_candidate",
+        "metadata_only_candidates_require_contract_followup"
+      ],
+      "dispatch_recommended": true,
+      "next_step": "send_official_read_api_requests",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format signal-gap-batches-markdown --signal-type pump_or_gate_status",
+      "production_operational_requirements": [
+        "freshness_policy",
+        "raw_snapshot_retention_policy",
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+        "worker_persisted_evidence_path"
+      ],
+      "requested_counterparty_count": 13,
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_type": "pump_or_gate_status",
+      "tracking_statuses": [
+        "monitoring_open_data_release",
+        "needs_authorization_request",
+        "needs_public_read_api_contract",
+        "needs_signal_gap_review"
+      ]
+    },
+    {
+      "batch_id": "signal-gap-batch/flood_depth",
+      "completion_evidence_target_count": 3,
+      "completion_gate": "Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for flood_depth, plus production ops evidence.",
+      "county_count": 3,
+      "discovery": {
+        "artifact_name": "signal-gap-discovery-refresh-flood-depth.json",
+        "candidate_count": 2,
+        "candidate_live_read_api_count": 0,
+        "counties_without_candidates": [
+          "連江縣",
+          "澎湖縣"
+        ],
+        "metadata_only_count": 2,
+        "metadata_only_counties": [
+          "臺北市"
+        ]
+      },
+      "dispatch_command": "python scripts/local-source-request-packets.py --format signal-gap-dispatch-evidence --signal-type flood_depth --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "no_live_read_api_candidate",
+        "metadata_only_candidates_require_contract_followup"
+      ],
+      "dispatch_recommended": true,
+      "next_step": "send_official_read_api_requests",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format signal-gap-batches-markdown --signal-type flood_depth",
+      "production_operational_requirements": [
+        "freshness_policy",
+        "raw_snapshot_retention_policy",
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+        "worker_persisted_evidence_path"
+      ],
+      "requested_counterparty_count": 3,
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_type": "flood_depth",
+      "tracking_statuses": [
+        "monitoring_open_data_release",
+        "needs_signal_gap_review"
+      ]
+    },
+    {
+      "batch_id": "signal-gap-batch/sewer_water_level",
+      "completion_evidence_target_count": 1,
+      "completion_gate": "Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for sewer_water_level, plus production ops evidence.",
+      "county_count": 1,
+      "discovery": {
+        "artifact_name": "signal-gap-discovery-refresh-sewer-water-level.json",
+        "candidate_count": 0,
+        "candidate_live_read_api_count": 0,
+        "counties_without_candidates": [
+          "連江縣"
+        ],
+        "metadata_only_count": 0,
+        "metadata_only_counties": []
+      },
+      "dispatch_command": "python scripts/local-source-request-packets.py --format signal-gap-dispatch-evidence --signal-type sewer_water_level --dispatch-evidence-ref REPLACE_WITH_PRIVATE_DISPATCH_EVIDENCE_REF --dispatched-at REPLACE_WITH_DISPATCHED_AT --follow-up-due-at REPLACE_WITH_FOLLOW_UP_DUE_AT",
+      "dispatch_reasons": [
+        "no_live_read_api_candidate",
+        "no_public_candidate_found"
+      ],
+      "dispatch_recommended": true,
+      "next_step": "send_official_read_api_requests",
+      "packet_review_command": "python scripts/local-source-request-packets.py --format signal-gap-batches-markdown --signal-type sewer_water_level",
+      "production_operational_requirements": [
+        "freshness_policy",
+        "raw_snapshot_retention_policy",
+        "monitored_scheduler_cadence",
+        "hosted_egress_review",
+        "worker_persisted_evidence_path"
+      ],
+      "requested_counterparty_count": 1,
+      "required_read_api_fields": [
+        "observed_at",
+        "station_or_device_id",
+        "measurement_value",
+        "measurement_unit_or_type",
+        "longitude_latitude_or_joinable_station_metadata",
+        "official_source_url_and_license"
+      ],
+      "target_signal_type": "sewer_water_level",
+      "tracking_statuses": [
+        "monitoring_open_data_release"
+      ]
+    }
+  ],
+  "notes": [
+    "This public artifact is a dispatch checklist, not proof that requests were sent.",
+    "Filled private dispatch evidence refs must stay in repository or workflow secrets.",
+    "A group remains incomplete until official reply, production adapter, authorization-gated adapter, or official-unavailable evidence is accepted."
+  ],
+  "schema_version": "local-source-signal-gap-dispatch-readiness/v1",
+  "summary": {
+    "dispatch_recommended_group_count": 3,
+    "signal_gap_group_count": 3,
+    "total_candidate_count": 11,
+    "total_candidate_live_read_api_count": 0,
+    "total_metadata_only_count": 11
+  }
+}

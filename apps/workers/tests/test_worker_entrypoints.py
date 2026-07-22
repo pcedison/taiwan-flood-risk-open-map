@@ -4,6 +4,7 @@ import gzip
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 from app import scheduler as scheduler_module
@@ -42,8 +43,14 @@ def test_official_demo_builder_covers_default_official_adapter_keys() -> None:
 
     assert set(adapters) == {
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.flood_potential.geojson",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
     }
 
 
@@ -59,8 +66,10 @@ def test_scheduler_official_demo_cycle_runs_ingestion_and_freshness() -> None:
         "succeeded",
         "succeeded",
         "succeeded",
+        "succeeded",
     ]
     assert [check.status for check in result.freshness_checks] == [
+        "fresh",
         "fresh",
         "fresh",
         "fresh",
@@ -78,6 +87,31 @@ def test_main_run_enabled_adapters_noops_without_runtime_fixtures() -> None:
     exit_code = main(["--run-enabled-adapters"])
 
     assert exit_code == 0
+
+
+def test_main_records_authoritative_disabled_runtime_selection(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_record_runtime_sources_disabled(*, settings, database_url):
+        captured["settings"] = settings
+        captured["database_url"] = database_url
+        return 0
+
+    monkeypatch.setattr(
+        "app.cli.runtime_cli.record_runtime_sources_disabled",
+        fake_record_runtime_sources_disabled,
+    )
+
+    exit_code = main(
+        [
+            "--record-runtime-sources-disabled",
+            "--database-url",
+            "postgresql://example.test/flood",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["database_url"] == "postgresql://example.test/flood"
 
 
 def test_main_gdelt_rehearsal_skips_without_all_gates_and_does_not_fetch(
@@ -1234,6 +1268,9 @@ def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) 
     class _EvidenceRetentionSummary:
         rows_deleted = 6
 
+    class _LocationQueryRetentionSummary:
+        rows_deleted = 2
+
     class FakeEvidenceRetentionJob:
         def __init__(self, *, database_url: str) -> None:
             calls.append(("evidence.init", database_url))
@@ -1241,6 +1278,12 @@ def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) 
         def prune_realtime(self, *, retention_hours: int) -> _EvidenceRetentionSummary:
             calls.append(("evidence.retention", retention_hours))
             return _EvidenceRetentionSummary()
+
+        def prune_location_queries(
+            self, *, retention_hours: int
+        ) -> _LocationQueryRetentionSummary:
+            calls.append(("location_queries.retention", retention_hours))
+            return _LocationQueryRetentionSummary()
 
     monkeypatch.setattr(
         scheduler_module,
@@ -1266,12 +1309,14 @@ def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) 
 
     assert result.status == "succeeded"
     assert result.evidence_retention is not None
+    assert result.location_query_retention is not None
     assert calls == [
         ("query.init", "postgresql://worker:test@localhost/flood"),
         ("query.aggregate", ("P7D", "P1D")),
         ("query.retention", (("P7D", "P1D"), 14)),
         ("evidence.init", "postgresql://worker:test@localhost/flood"),
         ("evidence.retention", 48),
+        ("location_queries.retention", 720),
         ("tile.init", "postgresql://worker:test@localhost/flood"),
         ("tile.refresh", ("flood-potential", 25)),
         ("tile.prune", ("flood-potential", expired_before, 50)),
@@ -1411,6 +1456,12 @@ def test_runtime_adapters_fixture_mode_supplies_official_adapters() -> None:
 
     assert set(build_runtime_adapters(settings)) == {
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.sewer_water_level",
         "official.wra.water_level",
         "official.flood_potential.geojson",
     }
@@ -1447,6 +1498,12 @@ def test_runtime_adapters_fixture_mode_requires_explicit_public_web_sample() -> 
     assert "news.public_web.sample" not in adapters
     assert set(adapters) == {
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.sewer_water_level",
         "official.wra.water_level",
         "official.flood_potential.geojson",
     }
@@ -1610,8 +1667,14 @@ def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeyp
     assert writer.database_url == "postgresql://worker:test@localhost/flood"
     assert captured["promotion_adapter_keys"] == (
         "official.cwa.rainfall",
+        "official.cwa.tide_level",
         "official.wra.water_level",
         "official.flood_potential.geojson",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
     )
 
 
@@ -1648,7 +1711,7 @@ def test_main_run_enabled_adapters_persist_uses_managed_runtime(monkeypatch) -> 
 
 
 def test_main_run_enabled_adapters_persist_scheduler_uses_lease(monkeypatch) -> None:
-    captured: dict[str, object] = {"cycles": 0, "sleep": []}
+    captured: dict[str, object] = {"acquire_count": 0, "cycles": 0, "sleep": []}
 
     class FakeRuntimeQueue:
         def __init__(self, *, database_url: str) -> None:
@@ -1664,6 +1727,7 @@ def test_main_run_enabled_adapters_persist_scheduler_uses_lease(monkeypatch) -> 
             captured["lease_key"] = lease_key
             captured["holder_id"] = holder_id
             captured["ttl_seconds"] = ttl_seconds
+            captured["acquire_count"] = int(captured["acquire_count"]) + 1
             return True
 
         def release_scheduler_lease(self, *, lease_key: str, holder_id: str) -> bool:
@@ -1710,10 +1774,11 @@ def test_main_run_enabled_adapters_persist_scheduler_uses_lease(monkeypatch) -> 
     assert exit_code == 0
     assert captured["database_url"] == "postgresql://worker:test@localhost/flood"
     assert captured["lease_key"] == "scheduler.enabled-adapters"
-    assert captured["holder_id"] == "test-scheduler"
+    assert str(captured["holder_id"]).startswith("test-scheduler:")
     assert captured["ttl_seconds"] == 14
+    assert captured["acquire_count"] == 3
+    assert captured["released_holder_id"] == captured["holder_id"]
     assert captured["released_lease_key"] == "scheduler.enabled-adapters"
-    assert captured["released_holder_id"] == "test-scheduler"
     assert captured["cycles"] == 2
     assert captured["sleep"] == [7]
     last_cycle = captured["last_cycle"]
@@ -1723,10 +1788,10 @@ def test_main_run_enabled_adapters_persist_scheduler_uses_lease(monkeypatch) -> 
     assert last_cycle["job_key"] == "worker.runtime.managed_scheduler"
 
 
-def test_main_run_enabled_adapters_persist_scheduler_skips_when_lease_held(
+def test_main_run_enabled_adapters_persist_scheduler_waits_when_lease_held(
     monkeypatch,
 ) -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, object] = {"acquire_count": 0, "cycles": 0, "sleep": []}
 
     class FakeRuntimeQueue:
         def __init__(self, *, database_url: str) -> None:
@@ -1742,18 +1807,34 @@ def test_main_run_enabled_adapters_persist_scheduler_skips_when_lease_held(
             captured["lease_key"] = lease_key
             captured["holder_id"] = holder_id
             captured["ttl_seconds"] = ttl_seconds
-            return False
+            captured["acquire_count"] = int(captured["acquire_count"]) + 1
+            return int(captured["acquire_count"]) >= 2
 
         def release_scheduler_lease(self, *, lease_key: str, holder_id: str) -> bool:
-            raise AssertionError("lease should not be released when acquisition failed")
+            captured["released_lease_key"] = lease_key
+            captured["released_holder_id"] = holder_id
+            return True
 
-    def fail_managed_cycle(*args: object, **kwargs: object) -> object:
+    def fake_managed_cycle(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        raise AssertionError("managed cycle should not run without a lease")
+        captured["cycles"] = int(captured["cycles"]) + 1
+        return _ManagedRuntimeResult(
+            status="succeeded",
+            reason=None,
+            promoted=1,
+            evidence_ids=("evidence-1",),
+        )
+
+    def fake_sleep(seconds: int) -> None:
+        sleeps = captured["sleep"]
+        assert isinstance(sleeps, list)
+        sleeps.append(seconds)
 
     monkeypatch.setenv("WORKER_INSTANCE", "test-scheduler")
+    monkeypatch.setenv("SCHEDULER_INTERVAL_SECONDS", "7")
     monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fail_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli.time.sleep", fake_sleep)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = main(
@@ -1761,6 +1842,8 @@ def test_main_run_enabled_adapters_persist_scheduler_skips_when_lease_held(
             "--run-enabled-adapters",
             "--persist",
             "--scheduler",
+            "--max-ticks",
+            "1",
             "--database-url",
             "postgresql://worker:test@localhost/flood",
         ]
@@ -1769,7 +1852,139 @@ def test_main_run_enabled_adapters_persist_scheduler_skips_when_lease_held(
     assert exit_code == 0
     assert captured["database_url"] == "postgresql://worker:test@localhost/flood"
     assert captured["lease_key"] == "scheduler.enabled-adapters"
-    assert captured["holder_id"] == "test-scheduler"
+    assert str(captured["holder_id"]).startswith("test-scheduler:")
+    assert captured["acquire_count"] == 2
+    assert captured["cycles"] == 1
+    assert captured["sleep"] == [7]
+    assert captured["released_lease_key"] == "scheduler.enabled-adapters"
+    assert captured["released_holder_id"] == captured["holder_id"]
+
+
+def test_main_run_enabled_adapters_heartbeats_during_a_long_cycle(monkeypatch) -> None:
+    renewed = Event()
+    captured: dict[str, object] = {"acquire_count": 0}
+
+    class FakeRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def acquire_scheduler_lease(
+            self,
+            *,
+            lease_key: str,
+            holder_id: str,
+            ttl_seconds: int,
+        ) -> bool:
+            captured["lease_key"] = lease_key
+            captured["holder_id"] = holder_id
+            captured["ttl_seconds"] = ttl_seconds
+            captured["acquire_count"] = int(captured["acquire_count"]) + 1
+            if int(captured["acquire_count"]) >= 2:
+                renewed.set()
+            return True
+
+        def release_scheduler_lease(self, *, lease_key: str, holder_id: str) -> bool:
+            captured["released_lease_key"] = lease_key
+            captured["released_holder_id"] = holder_id
+            return True
+
+    def long_managed_cycle(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        assert renewed.wait(timeout=2), "lease heartbeat did not renew during the cycle"
+        return _ManagedRuntimeResult(
+            status="succeeded",
+            reason=None,
+            promoted=1,
+            evidence_ids=("evidence-1",),
+        )
+
+    monkeypatch.setenv("WORKER_INSTANCE", "configured-name")
+    monkeypatch.setenv("SCHEDULER_LEASE_TTL_SECONDS", "1")
+    monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
+    monkeypatch.setattr(
+        "app.cli.runtime_cli.run_managed_runtime_ingestion_cycle",
+        long_managed_cycle,
+    )
+    monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
+
+    exit_code = main(
+        [
+            "--run-enabled-adapters",
+            "--persist",
+            "--scheduler",
+            "--max-ticks",
+            "1",
+            "--database-url",
+            "postgresql://worker:test@localhost/flood",
+        ]
+    )
+
+    assert exit_code == 0
+    assert int(captured["acquire_count"]) >= 2
+    assert str(captured["holder_id"]).startswith("configured-name:")
+    assert captured["released_holder_id"] == captured["holder_id"]
+
+
+def test_managed_scheduler_does_not_log_runtime_queue_exception_details(monkeypatch) -> None:
+    secret_token = "private-password%ZZ"
+    events: list[tuple[object, ...]] = []
+
+    class FailingRuntimeQueue:
+        def __init__(self, *, database_url: str) -> None:
+            del database_url
+            self.attempts = 0
+
+        def acquire_scheduler_lease(self, **kwargs: object) -> bool:
+            del kwargs
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeQueueUnavailable(
+                    f'invalid percent-encoded token: "{secret_token}"'
+                )
+            return True
+
+        def release_scheduler_lease(self, **kwargs: object) -> None:
+            del kwargs
+
+    def fake_managed_cycle(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        return _ManagedRuntimeResult(
+            status="succeeded",
+            reason=None,
+            promoted=0,
+            evidence_ids=(),
+        )
+
+    def capture_event(event: str, **fields: object) -> None:
+        events.append((event, fields))
+
+    monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FailingRuntimeQueue)
+    monkeypatch.setattr(
+        "app.cli.runtime_cli.run_managed_runtime_ingestion_cycle",
+        fake_managed_cycle,
+    )
+    monkeypatch.setattr("app.cli.runtime_cli.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("app.cli.runtime_cli.log_event", capture_event)
+
+    exit_code = main(
+        [
+            "--run-enabled-adapters",
+            "--persist",
+            "--scheduler",
+            "--max-ticks",
+            "1",
+            "--database-url",
+            "postgresql://worker:test@localhost/flood",
+        ]
+    )
+
+    assert exit_code == 0
+    assert secret_token not in repr(events)
+    assert any(
+        event == "worker.runtime.managed_scheduler.lease_unavailable"
+        and fields == {"reason": "runtime_queue_unavailable"}
+        for event, fields in events
+    )
 
 
 def test_main_aggregate_query_heat_uses_configured_periods(monkeypatch) -> None:

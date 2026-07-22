@@ -59,6 +59,7 @@ class Settings:
     public_rate_limit_enabled: bool
     public_rate_limit_backend: RateLimitBackend
     public_rate_limit_client_header: str | None
+    public_rate_limit_trusted_proxy_cidrs: tuple[str, ...]
     geocode_rate_limit_max_requests: int
     risk_assessment_rate_limit_max_requests: int
     public_rate_limit_window_seconds: int
@@ -203,6 +204,9 @@ def get_settings() -> Settings:
         ),
         public_rate_limit_client_header=_env_str_or_none(
             "PUBLIC_RATE_LIMIT_CLIENT_HEADER"
+        ),
+        public_rate_limit_trusted_proxy_cidrs=_env_csv(
+            "PUBLIC_RATE_LIMIT_TRUSTED_PROXY_CIDRS"
         ),
         geocode_rate_limit_max_requests=_env_int(
             "GEOCODE_RATE_LIMIT_MAX_REQUESTS",

@@ -343,6 +343,7 @@ def test_forum_adapters_remain_disabled_by_default() -> None:
     assert "news.public_web.sample" not in enabled_adapter_keys(settings)
     assert "news.public_web.gdelt_backfill" not in enabled_adapter_keys(settings)
     assert "official.cwa.rainfall" in enabled_adapter_keys(settings)
+    assert "official.cwa.tide_level" in enabled_adapter_keys(settings)
     assert "official.wra.water_level" in enabled_adapter_keys(settings)
     assert "official.flood_potential.geojson" in enabled_adapter_keys(settings)
     assert ADAPTER_REGISTRY["ptt"].enabled_by_default is False

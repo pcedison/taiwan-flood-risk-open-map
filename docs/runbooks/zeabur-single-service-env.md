@@ -1,4 +1,4 @@
-# Zeabur Single-Service Environment Checklist
+﻿# Zeabur Single-Service Environment Checklist
 
 Use this checklist when filling Zeabur environment variables for the current single Dockerfile service.
 
@@ -85,7 +85,9 @@ disable that source.
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | Leave unset or `false`; set `true` only as the explicit kill switch |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | Leave unset for the full backbone, or set the same full list below to override an old `WORKER_ENABLED_ADAPTER_KEYS` |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | Leave unset or `true`; use `false` only for an operator-managed migration window |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level` |
+| `MIGRATION_LOCK_TIMEOUT_MS` | Leave unset for the conservative `10000` ms PostgreSQL lock-wait limit |
+| `MIGRATION_STATEMENT_TIMEOUT_MS` | Leave unset for the conservative `300000` ms per-migration statement limit |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor` |
 | `SOURCE_CWA_ENABLED` | Leave unset or `true`; `false` disables CWA ingestion |
 | `SOURCE_CWA_API_ENABLED` | `true` |
 | `CWA_API_AUTHORIZATION` | Your CWA API authorization token |
@@ -104,6 +106,8 @@ disable that source.
 | `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `true` |
 | `SOURCE_CIVIL_IOT_GATE_ENABLED` | `true` |
 | `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` |
+| `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` |
+| `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` |
 | `WRA_STATION_API_URL` | Leave blank unless overriding the WRA station metadata endpoint |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` for a 5-minute beta cadence |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` |

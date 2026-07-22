@@ -1,0 +1,100 @@
+{
+  "captured_at": "2026-07-01T11:25:00+08:00",
+  "conclusion": "no_candidate_live_read_api_found",
+  "discovery": {
+    "candidate_count": 2,
+    "candidates": [
+      {
+        "county": "臺北市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "121550",
+        "dataset_url": null,
+        "field_description": "GRIDCODE;depth;case;year;AGENCYCODE",
+        "matched_keywords": [
+          "淹水",
+          "圖資"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "KML;KML;KML"
+        ],
+        "resource_urls": [
+          "https://data.taipei/api/dataset/fa1e8012-ebb4-473b-888e-97f9a9ce365e/resource/173adcbe-0f2e-4941-b2bc-127c09db0391/download;https://data.taipei/api/dataset/fa1e8012-ebb4-473b-888e-97f9a9ce365e/resource/4b14c3a0-fcf2-48d4-9c93-e27784cae29d/download;https://data.taipei/api/dataset/fa1e8012-ebb4-473b-888e-97f9a9ce365e/resource/2954e8d4-cb67-40c9-8ab8-019ad10b758e/download"
+        ],
+        "signal_types": [
+          "flood_depth"
+        ],
+        "title": "臺北市降雨積水模擬圖（112年更新版）",
+        "update_frequency": "每5年"
+      },
+      {
+        "county": "臺北市",
+        "data_provision_type": "檔案資料",
+        "dataset_id": "140032",
+        "dataset_url": null,
+        "field_description": "水患自主防災社區推動年度;行政區;行政區碼;里別;主辦機關代碼",
+        "matched_keywords": [
+          "淹水",
+          "地區"
+        ],
+        "readiness": "metadata_only",
+        "resource_formats": [
+          "CSV"
+        ],
+        "resource_urls": [
+          "https://data.taipei/api/dataset/1c5c526a-878a-4805-8b15-41abeeeb0082/resource/9099673f-1d90-4036-a4c0-dd8ff137bbfb/download"
+        ],
+        "signal_types": [
+          "flood_depth"
+        ],
+        "title": "臺北市水患自主防災韌性社區一覽",
+        "update_frequency": "每1年"
+      }
+    ],
+    "required_signal_types": [
+      "flood_depth"
+    ],
+    "summary": {
+      "by_county": {
+        "澎湖縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        },
+        "臺北市": {
+          "candidate_count": 2,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 2,
+          "readiness_state": "metadata_only",
+          "signal_types": [
+            "flood_depth"
+          ]
+        },
+        "連江縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        }
+      },
+      "candidate_live_read_api_count_by_county": {},
+      "metadata_only_count_by_county": {
+        "臺北市": 2
+      },
+      "target_counties_without_candidates": [
+        "連江縣",
+        "澎湖縣"
+      ]
+    },
+    "target_counties": [
+      "連江縣",
+      "澎湖縣",
+      "臺北市"
+    ]
+  },
+  "schema_version": "local-source-discovery-refresh/v1",
+  "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json"
+}

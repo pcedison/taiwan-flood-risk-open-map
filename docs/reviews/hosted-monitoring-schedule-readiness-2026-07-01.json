@@ -1,0 +1,53 @@
+{
+  "captured_at": "2026-07-01T06:17:26Z",
+  "completion_evidence_targets": [],
+  "expected_head_sha": "2d86ca32718ae4ef65a8e30c59c84028b0000a1b",
+  "failures": [
+    {
+      "code": "latest_schedule_run_failed",
+      "message": "Latest Hosted Monitoring schedule run did not conclude successfully."
+    },
+    {
+      "code": "latest_schedule_run_wrong_head_sha",
+      "message": "Latest Hosted Monitoring schedule run did not execute on the expected main SHA."
+    },
+    {
+      "code": "latest_schedule_run_stale",
+      "message": "Latest Hosted Monitoring schedule run is older than the accepted freshness window."
+    }
+  ],
+  "latest_schedule_run": {
+    "conclusion": "failure",
+    "created_at": "2026-07-01T04:26:34Z",
+    "database_id": "28493475510",
+    "event": "schedule",
+    "head_sha": "9d671d2a4a63ec30ff8a79204b7346304404f15f",
+    "status": "completed",
+    "updated_at": "2026-07-01T04:26:42Z",
+    "url": "https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/28493475510",
+    "workflow_name": "Hosted Monitoring"
+  },
+  "notes": [
+    "This artifact uses only GitHub Actions run metadata.",
+    "It does not read GitHub secrets or private monitoring manifests.",
+    "A passed status can supply only the scheduled_freshness_checks requirement; alert routing and worker/scheduler ownership still require private monitoring evidence."
+  ],
+  "repository": "pcedison/taiwan-flood-risk-open-map",
+  "schema_version": "hosted-monitoring-schedule-readiness/v1",
+  "source": {
+    "event": "schedule",
+    "mode": "gh_cli"
+  },
+  "status": "failed",
+  "summary": {
+    "age_minutes": 110,
+    "completion_evidence_ready": false,
+    "expected_head_sha_matched": false,
+    "failure_count": 3,
+    "latest_schedule_run_conclusion": "failure",
+    "latest_schedule_run_status": "completed",
+    "max_age_minutes": 90,
+    "schedule_run_found": true
+  },
+  "workflow_name": "Hosted Monitoring"
+}

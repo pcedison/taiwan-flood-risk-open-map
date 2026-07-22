@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from app.adapters.civil_iot import (
     GATE_WATER_LEVEL,
@@ -16,7 +16,7 @@ from app.adapters.civil_iot import (
     StaWaterLevelApiAdapter,
 )
 from app.adapters.contracts import DataSourceAdapter
-from app.adapters.cwa import CwaRainfallApiAdapter, FetchJson
+from app.adapters.cwa import CwaRainfallApiAdapter, CwaTideLevelApiAdapter, FetchJson, TideFetchJson
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
 from app.adapters.local_chiayi_city import ChiayiCityRainfallApiAdapter, ChiayiCityWaterLevelApiAdapter
@@ -45,6 +45,8 @@ from app.adapters.local_kaohsiung import (
     KaohsiungRainfallApiAdapter,
     KaohsiungSewerWaterLevelApiAdapter,
 )
+from app.adapters.local_kinmen import FetchText as KinmenKwisFetchText
+from app.adapters.local_kinmen import KinmenKwisPumpStationApiAdapter
 from app.adapters.local_keelung import FetchJson as KeelungFetchJson
 from app.adapters.local_keelung import (
     KeelungFloodSensorApiAdapter,
@@ -87,7 +89,7 @@ from app.adapters.local_yunlin import FetchJson as YunlinFetchJson
 from app.adapters.local_yunlin import YunlinWaterLevelApiAdapter
 from app.adapters.ncdr import FetchText as NcdrFetchText
 from app.adapters.ncdr import NcdrCapAlertAdapter
-from app.adapters.registry import enabled_adapter_keys
+from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import WraWaterLevelApiAdapter
 from app.adapters.wra_iow import FetchJson as WraIowFetchJson
@@ -98,6 +100,8 @@ from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.ingestion import (
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
+    record_pipeline_status,
+    record_runtime_selection,
     run_adapter_batch,
 )
 from app.jobs.official_demo import build_official_demo_adapters
@@ -160,11 +164,34 @@ class RuntimeQueueProducerResult:
         return len(self.deduped_job_ids)
 
 
+def _combined_cwa_tide_fetcher(
+    *,
+    tide_fetch_json: TideFetchJson | None,
+    station_fetch_json: TideFetchJson | None,
+) -> TideFetchJson | None:
+    if tide_fetch_json is None and station_fetch_json is None:
+        return None
+
+    def fetch_json(url: str, timeout_seconds: int) -> Mapping[str, Any]:
+        station_endpoint = "O-B0076" in url or "/opendataapi/" in url or "stations" in url
+        fetcher = (
+            (station_fetch_json or tide_fetch_json)
+            if station_endpoint
+            else (tide_fetch_json or station_fetch_json)
+        )
+        assert fetcher is not None
+        return fetcher(url, timeout_seconds)
+
+    return fetch_json
+
+
 def build_runtime_adapters(
     settings: WorkerSettings,
     *,
     fetched_at: datetime | None = None,
     cwa_fetch_json: FetchJson | None = None,
+    cwa_tide_fetch_json: TideFetchJson | None = None,
+    cwa_tide_station_fetch_json: TideFetchJson | None = None,
     wra_fetch_json: WraFetchJson | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
@@ -199,6 +226,7 @@ def build_runtime_adapters(
     yilan_flood_sensor_fetch_json: YilanFetchJson | None = None,
     yilan_water_level_fetch_json: YilanFetchJson | None = None,
     penghu_water_level_fetch_json: PenghuFetchJson | None = None,
+    kinmen_kwis_pump_station_fetch_text: KinmenKwisFetchText | None = None,
     fhy_flood_sensor_fetch_json: FhyFloodSensorFetchJson | None = None,
     wra_iow_flood_depth_fetch_json: WraIowFetchJson | None = None,
     civil_iot_river_fetch_json: StaFetchJson | None = None,
@@ -243,6 +271,18 @@ def build_runtime_adapters(
             fetch_json=cwa_fetch_json,
         )
         live_adapters[cwa_adapter.metadata.key] = cwa_adapter
+
+    if settings.source_cwa_api_enabled and "official.cwa.tide_level" in enabled_keys:
+        cwa_tide_adapter = CwaTideLevelApiAdapter(
+            authorization=settings.cwa_api_authorization,
+            timeout_seconds=settings.cwa_api_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=_combined_cwa_tide_fetcher(
+                tide_fetch_json=cwa_tide_fetch_json,
+                station_fetch_json=cwa_tide_station_fetch_json,
+            ),
+        )
+        live_adapters[cwa_tide_adapter.metadata.key] = cwa_tide_adapter
 
     if settings.source_wra_api_enabled and "official.wra.water_level" in enabled_keys:
         wra_adapter = WraWaterLevelApiAdapter(
@@ -661,6 +701,27 @@ def build_runtime_adapters(
         )
         live_adapters[penghu_water_level_adapter.metadata.key] = penghu_water_level_adapter
 
+    if (
+        settings.source_kinmen_kwis_pump_station_api_enabled
+        and "local.kinmen.kwis_pump_station" in enabled_keys
+    ):
+        if settings.kinmen_kwis_api_token:
+            kinmen_kwis_adapter = KinmenKwisPumpStationApiAdapter(
+                api_url=settings.kinmen_kwis_pump_station_api_url,
+                api_token=settings.kinmen_kwis_api_token,
+                timeout_seconds=settings.local_water_timeout_seconds,
+                fetched_at=fetched_at,
+                fetch_text=kinmen_kwis_pump_station_fetch_text,
+            )
+            live_adapters[kinmen_kwis_adapter.metadata.key] = kinmen_kwis_adapter
+        else:
+            log_event(
+                "runtime.adapters.gated",
+                adapter_key="local.kinmen.kwis_pump_station",
+                gate="KINMEN_KWIS_API_TOKEN",
+                source_intent="kinmen_kwis_token_gated_read_api",
+            )
+
     fhy_api_gates = {
         HSINCHU_COUNTY_FHY_FLOOD_SENSOR.metadata.key: (
             settings.source_hsinchu_county_fhy_flood_sensor_api_enabled
@@ -747,6 +808,9 @@ def build_runtime_adapters(
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,
             flood_sensor_use_live=settings.source_flood_sensor_use_live,
             tainan_flood_sensor_api_enabled=settings.source_tainan_flood_sensor_api_enabled,
+            kinmen_kwis_pump_station_api_enabled=(
+                settings.source_kinmen_kwis_pump_station_api_enabled
+            ),
             civil_iot_river_api_enabled=settings.source_civil_iot_river_api_enabled,
             civil_iot_gate_api_enabled=settings.source_civil_iot_gate_api_enabled,
         )
@@ -780,9 +844,38 @@ def produce_enabled_runtime_adapter_jobs(
     job_key: str = "runtime.adapter.ingest",
     queue_name: str = "runtime-adapters",
 ) -> RuntimeQueueProducerResult:
-    runnable_adapters = build_runtime_adapters(settings)
+    attempt_started_at = datetime.now(UTC)
     enabled_keys = enabled_adapter_keys(settings)
+    runtime_status_writer = (
+        PostgresIngestionRunWriter(database_url=settings.database_url)
+        if settings.database_url and queue is None
+        else None
+    )
+    record_runtime_selection(
+        runtime_status_writer,
+        enabled_adapter_keys=enabled_keys,
+        known_adapter_keys=tuple(ADAPTER_REGISTRY),
+    )
+    try:
+        runnable_adapters = build_runtime_adapters(settings)
+    except Exception:
+        record_pipeline_status(
+            runtime_status_writer,
+            adapter_keys=enabled_keys,
+            status="failed",
+            complete=False,
+            run_at=attempt_started_at,
+        )
+        raise
     adapter_keys = tuple(key for key in enabled_keys if key in runnable_adapters)
+    missing_adapter_keys = tuple(key for key in enabled_keys if key not in runnable_adapters)
+    record_pipeline_status(
+        runtime_status_writer,
+        adapter_keys=missing_adapter_keys,
+        status="failed",
+        complete=False,
+        run_at=attempt_started_at,
+    )
     if not adapter_keys:
         reason = "no_enabled_adapters" if not enabled_keys else "no_runnable_adapters"
         log_event(
@@ -1011,6 +1104,7 @@ def work_runtime_queue_once(
         )
         return RuntimeQueueWorkerResult(status="skipped", reason="no_job")
 
+    attempt_started_at = datetime.now(UTC)
     adapter_key = _job_adapter_key(job)
     if adapter_key is None:
         return _fail_runtime_queue_job(
@@ -1021,8 +1115,13 @@ def work_runtime_queue_once(
             adapter_key=None,
             error="runtime queue job is missing adapter_key",
             retry_delay_seconds=retry_delay_seconds,
+            attempt_started_at=attempt_started_at,
+            run_writer=run_writer,
         )
 
+    summary: AdapterBatchRunSummary | None = None
+    freshness_checks: tuple[FreshnessCheck, ...] = ()
+    promotion = PromotionResult(promoted=0, evidence_ids=())
     try:
         adapters = (
             adapter_by_key
@@ -1039,6 +1138,8 @@ def work_runtime_queue_once(
                 adapter_key=adapter_key,
                 error=f"unknown runtime adapter_key: {adapter_key}",
                 retry_delay_seconds=retry_delay_seconds,
+                attempt_started_at=attempt_started_at,
+                run_writer=run_writer,
             )
 
         summary = run_adapter_batch(
@@ -1066,10 +1167,11 @@ def work_runtime_queue_once(
                 adapter_key=adapter_key,
                 error=failure_reason,
                 retry_delay_seconds=retry_delay_seconds,
+                attempt_started_at=attempt_started_at,
                 summary=summary,
                 freshness_checks=freshness_checks,
+                run_writer=run_writer,
             )
-        promotion = PromotionResult(promoted=0, evidence_ids=())
         if promote:
             promotion = promote_accepted_staging(
                 _runtime_promotion_writer(promotion_writer),
@@ -1084,8 +1186,13 @@ def work_runtime_queue_once(
             adapter_key=adapter_key,
             error=f"{exc.__class__.__name__}: {exc}",
             retry_delay_seconds=retry_delay_seconds,
+            attempt_started_at=attempt_started_at,
+            summary=summary,
+            freshness_checks=freshness_checks,
+            run_writer=run_writer,
         )
 
+    assert summary is not None
     updated = mark_runtime_adapter_job_succeeded(
         resolved_settings,
         job_id=job.id,
@@ -1093,6 +1200,13 @@ def work_runtime_queue_once(
         worker_id=resolved_worker_id,
     )
     if not updated:
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status="failed",
+            complete=False,
+            run_at=summary.started_at,
+        )
         log_event(
             "runtime.queue.worker.completion_not_updated",
             job_id=job.id,
@@ -1109,6 +1223,14 @@ def work_runtime_queue_once(
             freshness_checks=freshness_checks,
             promoted=promotion.promoted,
             evidence_ids=promotion.evidence_ids,
+        )
+    if promote:
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status="succeeded",
+            complete=True,
+            run_at=summary.started_at,
         )
     log_event(
         "runtime.queue.worker.completed",
@@ -1187,9 +1309,19 @@ def _fail_runtime_queue_job(
     adapter_key: str | None,
     error: str,
     retry_delay_seconds: int,
+    attempt_started_at: datetime,
     summary: AdapterBatchRunSummary | None = None,
     freshness_checks: tuple[FreshnessCheck, ...] = (),
+    run_writer: IngestionRunSummaryWriter | None = None,
 ) -> RuntimeQueueWorkerResult:
+    if adapter_key is not None:
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status="failed",
+            complete=False,
+            run_at=summary.started_at if summary is not None else attempt_started_at,
+        )
     updated = mark_runtime_adapter_job_failed(
         settings,
         job_id=job.id,

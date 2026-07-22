@@ -141,11 +141,17 @@ class LocalSourceCoverage(ContractModel):
     missing_signal_types: list[str] = Field(default_factory=list)
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    candidate_contract_findings: list[str] = Field(default_factory=list)
+    candidate_contract_missing_fields: list[str] = Field(default_factory=list)
+    candidate_contract_non_measurement_notes: list[str] = Field(default_factory=list)
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
     status_only_source_names: list[str] = Field(default_factory=list)
     status_only_source_urls: list[str] = Field(default_factory=list)
     status_only_signal_types: list[str] = Field(default_factory=list)
+    non_qualifying_source_names: list[str] = Field(default_factory=list)
+    non_qualifying_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_reasons: list[str] = Field(default_factory=list)
     application_urls: list[str] = Field(default_factory=list)
     requires_application: bool = False
     application_note: str | None = None
@@ -189,6 +195,8 @@ class LocalSourceAuthorizationRequest(ContractModel):
     reason: str | None = None
     application_urls: list[str] = Field(default_factory=list)
     application_note: str | None = None
+    production_adapter_keys: list[str] = Field(default_factory=list)
+    authorization_gated_adapter_keys: list[str] = Field(default_factory=list)
     requested_counterparty: str
     tracking_status: str
     last_followed_up_at: datetime | None = None
@@ -196,16 +204,102 @@ class LocalSourceAuthorizationRequest(ContractModel):
     request_focus: str
 
 
+class LocalSourceOpenDataReleaseMonitor(ContractModel):
+    target_county: str
+    source_catalog: str
+    source_catalog_url: str
+    expected_current_state: str
+    escalate_on_state: str
+    candidate_readiness_field: str
+    command: str
+
+
+class LocalSourceSignalGapDiscoveryMonitor(ContractModel):
+    target_signal_type: str
+    source_catalog: str
+    source_catalog_url: str
+    candidate_readiness_field: str
+    county_count: int = Field(ge=0)
+    command: str
+
+
+class LocalSourceSignalGapOfficialRequestBatch(ContractModel):
+    target_signal_type: str
+    packet_type: str
+    county_count: int = Field(ge=0)
+    counties: list[str] = Field(default_factory=list)
+    requested_counterparties: list[str] = Field(default_factory=list)
+    tracking_statuses: list[str] = Field(default_factory=list)
+    required_read_api_fields: list[str] = Field(default_factory=list)
+    production_operational_requirements: list[str] = Field(default_factory=list)
+    next_step: str
+    packet_generator_command: str
+    completion_gate: str
+
+
+class LocalSourceCompletionAuditSummary(ContractModel):
+    total_counties: int = Field(ge=0)
+    local_direct_remaining_count: int = Field(ge=0)
+    central_backbone_remaining_count: int = Field(ge=0)
+    unresolved_priority_item_count: int = Field(ge=0)
+    signal_gap_group_count: int = Field(ge=0)
+    signal_gap_county_item_count: int = Field(ge=0)
+    authorization_request_count: int = Field(ge=0)
+    metadata_release_monitor_count: int = Field(ge=0)
+    public_api_contract_review_count: int = Field(ge=0)
+    live_smoke_review_count: int = Field(ge=0)
+
+
+class LocalSourceCompletionAuditGate(ContractModel):
+    gate_key: str
+    status: str
+    evidence: str
+    blocking_items: list[str] = Field(default_factory=list)
+    next_workstream: str | None = None
+
+
+class LocalSourceCompletionEvidenceOverlay(ContractModel):
+    schema_version: str | None = None
+    captured_at: str | None = None
+    follow_up_as_of: str | None = None
+    signal_family_gap_evidence_count: int = Field(ge=0)
+    signal_family_gap_dispatch_count: int = Field(ge=0)
+    signal_family_gap_dispatch_follow_up_count: int = Field(ge=0)
+    signal_family_gap_dispatch_overdue_count: int = Field(ge=0)
+    signal_family_gap_next_follow_up_due_at: str | None = None
+    source_contract_evidence_count: int = Field(ge=0)
+    source_contract_dispatch_count: int = Field(ge=0)
+    source_contract_dispatch_follow_up_count: int = Field(ge=0)
+    source_contract_dispatch_overdue_count: int = Field(ge=0)
+    source_contract_next_follow_up_due_at: str | None = None
+    production_gate_evidence_count: int = Field(ge=0)
+    production_gate_requirement_evidence_count: int = Field(ge=0)
+    validation_errors: list[str] = Field(default_factory=list)
+
+
+class LocalSourceCompletionAudit(ContractModel):
+    overall_status: str
+    summary: LocalSourceCompletionAuditSummary
+    evidence_overlay: LocalSourceCompletionEvidenceOverlay
+    gates: list[LocalSourceCompletionAuditGate] = Field(default_factory=list)
+    next_priority_workstreams: list[str] = Field(default_factory=list)
+
+
 class LocalSourceMetadataReleaseMonitor(ContractModel):
     county: str
     reason: str | None = None
     metadata_source_names: list[str] = Field(default_factory=list)
     metadata_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_names: list[str] = Field(default_factory=list)
+    non_qualifying_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_reasons: list[str] = Field(default_factory=list)
     central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    missing_signal_types: list[str] = Field(default_factory=list)
     requested_counterparty: str
     tracking_status: str
     last_followed_up_at: datetime | None = None
     required_read_api_fields: list[str] = Field(default_factory=list)
+    open_data_release_monitor: LocalSourceOpenDataReleaseMonitor | None = None
     request_focus: str
 
 
@@ -214,6 +308,9 @@ class LocalSourcePublicApiContractReview(ContractModel):
     reason: str | None = None
     candidate_source_names: list[str] = Field(default_factory=list)
     candidate_source_urls: list[str] = Field(default_factory=list)
+    candidate_contract_findings: list[str] = Field(default_factory=list)
+    candidate_contract_missing_fields: list[str] = Field(default_factory=list)
+    candidate_contract_non_measurement_notes: list[str] = Field(default_factory=list)
     requested_counterparty: str
     tracking_status: str
     last_followed_up_at: datetime | None = None
@@ -232,12 +329,59 @@ class LocalSourceLiveSmokeReview(ContractModel):
     required_read_api_fields: list[str] = Field(default_factory=list)
 
 
+class LocalSourceIntegrationPriorityItem(ContractModel):
+    rank: int = Field(ge=1)
+    priority_tier: str
+    county: str
+    workstream: str
+    next_action_code: str
+    tracking_status: str
+    requested_counterparty: str
+    blocking_reason: str | None = None
+    why_now: str
+    completion_gate: str
+    missing_signal_types: list[str] = Field(default_factory=list)
+    central_backbone_missing_signal_types: list[str] = Field(default_factory=list)
+    production_adapter_keys: list[str] = Field(default_factory=list)
+    authorization_gated_adapter_keys: list[str] = Field(default_factory=list)
+    metadata_source_names: list[str] = Field(default_factory=list)
+    metadata_source_urls: list[str] = Field(default_factory=list)
+    candidate_source_names: list[str] = Field(default_factory=list)
+    candidate_source_urls: list[str] = Field(default_factory=list)
+    candidate_contract_findings: list[str] = Field(default_factory=list)
+    candidate_contract_missing_fields: list[str] = Field(default_factory=list)
+    candidate_contract_non_measurement_notes: list[str] = Field(default_factory=list)
+    status_only_source_names: list[str] = Field(default_factory=list)
+    status_only_source_urls: list[str] = Field(default_factory=list)
+    status_only_signal_types: list[str] = Field(default_factory=list)
+    non_qualifying_source_names: list[str] = Field(default_factory=list)
+    non_qualifying_source_urls: list[str] = Field(default_factory=list)
+    non_qualifying_source_reasons: list[str] = Field(default_factory=list)
+    application_urls: list[str] = Field(default_factory=list)
+    required_read_api_fields: list[str] = Field(default_factory=list)
+    open_data_release_monitor: LocalSourceOpenDataReleaseMonitor | None = None
+
+
+class LocalSourceSignalGapPriorityGroup(ContractModel):
+    rank: int = Field(ge=1)
+    signal_type: str
+    county_count: int = Field(ge=0)
+    counties: list[str] = Field(default_factory=list)
+    highest_priority_tier: str
+    recommended_workstream: str
+    tracking_statuses: dict[str, int] = Field(default_factory=dict)
+    discovery_monitor: LocalSourceSignalGapDiscoveryMonitor
+    official_request_batch: LocalSourceSignalGapOfficialRequestBatch
+    completion_gate: str
+
+
 class LocalSourceActionPlan(ContractModel):
     total_counties: int = Field(ge=0)
     local_direct_complete_count: int = Field(ge=0)
     local_direct_remaining_count: int = Field(ge=0)
     central_backbone_minimum_complete_count: int = Field(ge=0)
     central_backbone_remaining_count: int = Field(ge=0)
+    completion_audit: LocalSourceCompletionAudit
     authorization_requests: list[LocalSourceAuthorizationRequest] = Field(
         default_factory=list
     )
@@ -248,6 +392,15 @@ class LocalSourceActionPlan(ContractModel):
         default_factory=list
     )
     live_smoke_reviews: list[LocalSourceLiveSmokeReview] = Field(default_factory=list)
+    sensor_signal_gap_reviews: list[LocalSourceIntegrationPriorityItem] = Field(
+        default_factory=list
+    )
+    integration_priority_queue: list[LocalSourceIntegrationPriorityItem] = Field(
+        default_factory=list
+    )
+    signal_gap_priority_groups: list[LocalSourceSignalGapPriorityGroup] = Field(
+        default_factory=list
+    )
 
 
 class AdminLocalSourceActionPlanResponse(ContractModel):
@@ -403,6 +556,7 @@ class EvidencePreview(ContractModel):
         "flood_warning",
         "flood_potential",
         "flood_report",
+        "status_only",
         "road_closure",
         "discussion",
     ]
@@ -435,6 +589,36 @@ class QueryHeat(ContractModel):
 
 
 NearbyCoverageLevel = Literal["high", "medium", "low", "no_local_sensor", "unavailable"]
+NearbySignalAvailability = Literal[
+    "fresh_nearby",
+    "degraded_nearby",
+    "regional_reference",
+    "stale_observation",
+    "source_unavailable",
+    "source_status_unknown",
+    "no_station",
+]
+NearbySourceHealthReason = Literal[
+    "operational",
+    "delayed",
+    "upstream_unavailable",
+    "pipeline_unavailable",
+    "pipeline_stalled",
+    "disabled",
+    "not_yet_observed",
+]
+NearbyMissingCause = Literal[
+    "none",
+    "no_station_in_range",
+    "inventory_unverified",
+    "stale_observation",
+    "source_degraded",
+    "source_failed",
+    "update_pipeline_stalled",
+    "source_not_configured",
+    "jurisdiction_unverified",
+    "health_unknown",
+]
 NearbyCoverageSignalType = Literal[
     "rainfall",
     "water_level",
@@ -446,17 +630,54 @@ NearbyCoverageSignalType = Literal[
 ]
 
 
+class NearbySourceHealth(ContractModel):
+    source_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,119}$")
+    name: str
+    signal_types: list[NearbyCoverageSignalType]
+    coverage_scope: Literal["national", "local"]
+    health_status: HealthStatus
+    reason_code: NearbySourceHealthReason
+    observed_at: datetime | None = None
+    checked_at: datetime | None = None
+    station_count: int | None = Field(default=None, ge=0)
+    upstream_station_count: int | None = Field(default=None, ge=0)
+    pages_fetched: int | None = Field(default=None, ge=0)
+    pagination_complete: bool | None = None
+    inventory_manifest_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    inventory_proof_status: Literal[
+        "missing",
+        "incomplete",
+        "awaiting_review",
+        "checksum_mismatch",
+        "approved",
+    ] = "missing"
+    inventory_complete: bool = False
+    jurisdictions: list[str] = Field(default_factory=list)
+    required_for_absence: bool = True
+    message: str
+
+
 class NearbyCoverageSignal(ContractModel):
     signal_type: NearbyCoverageSignalType
     label: str
     coverage_level: NearbyCoverageLevel
+    availability_state: NearbySignalAvailability = "no_station"
     nearest_distance_m: float | None = Field(default=None, ge=0)
     nearest_source_id: str | None = None
     nearest_observed_at: datetime | None = None
     counts_by_radius_m: dict[str, int]
     fresh_count: int = Field(ge=0)
+    degraded_count: int = Field(default=0, ge=0)
     stale_count: int = Field(ge=0)
     status_only_count: int = Field(ge=0)
+    nearest_freshness_state: Literal["fresh", "degraded", "stale"] | None = None
+    source_health_status: HealthStatus = "unknown"
+    source_count: int = Field(default=0, ge=0)
+    failed_source_count: int = Field(default=0, ge=0)
+    missing_cause: NearbyMissingCause = "health_unknown"
     missing_reason: str | None = None
 
 
@@ -469,6 +690,33 @@ class NearbyRealtimeCoverage(ContractModel):
     signal_breakdown: list[NearbyCoverageSignal]
     missing_signal_types: list[NearbyCoverageSignalType]
     limitations: list[str]
+    source_health: list[NearbySourceHealth] = Field(default_factory=list)
+    source_health_status: HealthStatus = "unknown"
+    source_health_checked: bool = False
+    jurisdiction_status: Literal[
+        "verified",
+        "boundary_unverified",
+        "outside_coverage",
+        "ambiguous",
+        "unavailable",
+    ] = "unavailable"
+    jurisdiction_checked: bool = Field(
+        default=False,
+        description="True only when one checksum-verified 22-county boundary snapshot resolves a unique home jurisdiction.",
+    )
+    jurisdiction_catalog_complete: bool = Field(
+        default=False,
+        description="True only when every considered county/signal contract is reviewed and its current source-mapping count, checksum, revision, and redundancy parents match the approval.",
+    )
+    home_jurisdiction: str | None = None
+    considered_jurisdictions: list[str] = Field(default_factory=list)
+    jurisdiction_mapping_revisions: list[str] = Field(
+        default_factory=list,
+        description="Public review revisions for the exact source mappings applicable to this spatial query.",
+    )
+    jurisdiction_unverified_signal_types: list[NearbyCoverageSignalType] = Field(
+        default_factory=list
+    )
     county_level_note: str = Field(
         description='縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
     )

@@ -258,14 +258,22 @@ address. Before and after every public beta redeploy, run the hosted smoke
 against the public domain:
 
 ```powershell
-python scripts\taiwan_wide_public_beta_smoke.py --base-url https://floodrisk.cc --include-town-samples
+python scripts\taiwan_wide_public_beta_smoke.py `
+  --base-url https://floodrisk.cc `
+  --include-town-samples `
+  --request-delay-seconds 2.2 `
+  --rate-limit-retries 8 `
+  --rate-limit-retry-delay-seconds 10 `
+  --evidence-output docs\reviews\production-public-beta-smoke-YYYY-MM-DD-<sha>.json
 ```
 
 The default mode checks all 22 county/city queries. `--include-town-samples`
 adds one representative township/district per county/city so the deploy gate
 covers 44 admin-area geocode and risk-assessment requests without relying on
-external geocoding. Use `--all-towns` only for a heavier audit because it
-assesses every bundled Taiwan township/district.
+external geocoding. Hosted public rate limits are enabled by default, so use
+the delay/retry options above for production or staging domains. Use
+`--all-towns` only for a heavier audit because it assesses every bundled
+Taiwan township/district.
 
 This smoke proves the public API can geocode and assess all Taiwan admin areas.
 It does not claim production-complete national doorplate precision. The

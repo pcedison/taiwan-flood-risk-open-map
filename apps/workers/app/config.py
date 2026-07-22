@@ -81,6 +81,8 @@ class WorkerSettings:
     source_yilan_water_level_api_enabled: bool
     source_penghu_water_level_enabled: bool | None
     source_penghu_water_level_api_enabled: bool
+    source_kinmen_kwis_pump_station_enabled: bool | None
+    source_kinmen_kwis_pump_station_api_enabled: bool
     source_hsinchu_county_fhy_flood_sensor_enabled: bool | None
     source_hsinchu_county_fhy_flood_sensor_api_enabled: bool
     source_miaoli_fhy_flood_sensor_enabled: bool | None
@@ -117,6 +119,7 @@ class WorkerSettings:
     scheduler_max_ticks: int | None
     scheduler_lease_ttl_seconds: int
     evidence_realtime_retention_hours: int
+    location_queries_retention_hours: int
     freshness_max_age_seconds: int
     runtime_fixtures_enabled: bool
     runtime_job_lease_seconds: int
@@ -173,6 +176,8 @@ class WorkerSettings:
     yilan_flood_sensor_layer_url: str | None
     yilan_water_level_layer_url: str | None
     penghu_water_level_layer_url: str | None
+    kinmen_kwis_pump_station_api_url: str | None
+    kinmen_kwis_api_token: str | None
     fhy_flood_sensor_station_api_url: str | None
     fhy_flood_sensor_realtime_api_url: str | None
     local_water_timeout_seconds: int
@@ -437,6 +442,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "SOURCE_PENGHU_WATER_LEVEL_API_ENABLED",
         ),
+        source_kinmen_kwis_pump_station_enabled=env_bool(
+            values,
+            "SOURCE_KINMEN_KWIS_PUMP_STATION_ENABLED",
+        ),
+        source_kinmen_kwis_pump_station_api_enabled=env_flag(
+            values,
+            "SOURCE_KINMEN_KWIS_PUMP_STATION_API_ENABLED",
+        ),
         source_hsinchu_county_fhy_flood_sensor_enabled=env_bool(
             values,
             "SOURCE_HSINCHU_COUNTY_FHY_FLOOD_SENSOR_ENABLED",
@@ -537,6 +550,11 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "EVIDENCE_REALTIME_RETENTION_HOURS",
             default=48,
+        ),
+        location_queries_retention_hours=env_int(
+            values,
+            "LOCATION_QUERIES_RETENTION_HOURS",
+            default=720,
         ),
         freshness_max_age_seconds=env_int(
             values,
@@ -685,6 +703,11 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "PENGHU_WATER_LEVEL_LAYER_URL",
         ),
+        kinmen_kwis_pump_station_api_url=env_str(
+            values,
+            "KINMEN_KWIS_PUMP_STATION_API_URL",
+        ),
+        kinmen_kwis_api_token=env_str(values, "KINMEN_KWIS_API_TOKEN"),
         fhy_flood_sensor_station_api_url=env_str(
             values,
             "FHY_FLOOD_SENSOR_STATION_API_URL",

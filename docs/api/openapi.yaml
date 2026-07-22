@@ -746,10 +746,9 @@ paths:
                       local_direct_incomplete_counties:
                         - 金門縣
                         - 連江縣
-                      central_backbone_minimum_complete_count: 21
-                      central_backbone_minimum_incomplete_count: 1
-                      counties_missing_hydrologic_backbone:
-                        - 連江縣
+                      central_backbone_minimum_complete_count: 22
+                      central_backbone_minimum_incomplete_count: 0
+                      counties_missing_hydrologic_backbone: []
                       central_backbone_required_families:
                         - CWA
                         - WRA
@@ -759,22 +758,30 @@ paths:
                       central_backbone_family_complete: true
                       central_backbone_required_adapter_keys:
                         - official.cwa.rainfall
+                        - official.cwa.tide_level
                         - official.wra.water_level
                         - official.ncdr.cap
                         - official.wra_iow.flood_depth
                         - official.civil_iot.flood_sensor
                         - official.civil_iot.sewer_water_level
+                        - official.civil_iot.pump_water_level
+                        - official.civil_iot.gate_water_level
                       central_backbone_missing_adapter_keys: []
-                      request_official_authorization_count: 1
+                      request_official_authorization_count: 2
                       verify_live_smoke_count: 0
-                      verify_public_api_contract_count: 0
+                      verify_public_api_contract_count: 3
                       counties_requiring_official_authorization:
+                        - 花蓮縣
                         - 金門縣
                       counties_requiring_live_smoke: []
-                      counties_requiring_public_api_contract: []
+                      counties_requiring_public_api_contract:
+                        - 苗栗縣
+                        - 屏東縣
+                        - 臺東縣
                       counties_requiring_metadata_release_monitoring:
                         - 連江縣
-                      counties_requiring_official_discovery: []
+                      counties_requiring_official_discovery:
+                        - 連江縣
                     counties:
                       - county: 臺南市
                         local_direct_statuses:
@@ -814,8 +821,14 @@ paths:
                           - pump_or_gate_status
                         candidate_source_names: []
                         candidate_source_urls: []
+                        candidate_contract_findings: []
+                        candidate_contract_missing_fields: []
+                        candidate_contract_non_measurement_notes: []
                         metadata_source_names: []
                         metadata_source_urls: []
+                        non_qualifying_source_names: []
+                        non_qualifying_source_urls: []
+                        non_qualifying_source_reasons: []
                         status_only_source_names: []
                         status_only_source_urls: []
                         status_only_signal_types: []
@@ -864,14 +877,143 @@ paths:
                       total_counties: 22
                       local_direct_complete_count: 20
                       local_direct_remaining_count: 2
-                      central_backbone_minimum_complete_count: 21
-                      central_backbone_remaining_count: 1
+                      central_backbone_minimum_complete_count: 22
+                      central_backbone_remaining_count: 0
+                      completion_audit:
+                        overall_status: incomplete
+                        summary:
+                          total_counties: 22
+                          local_direct_remaining_count: 2
+                          central_backbone_remaining_count: 0
+                          unresolved_priority_item_count: 16
+                          signal_gap_group_count: 3
+                          signal_gap_county_item_count: 17
+                          authorization_request_count: 2
+                          metadata_release_monitor_count: 1
+                          public_api_contract_review_count: 3
+                          live_smoke_review_count: 0
+                        evidence_overlay:
+                          schema_version: null
+                          captured_at: null
+                          follow_up_as_of: null
+                          signal_family_gap_evidence_count: 0
+                          signal_family_gap_dispatch_count: 0
+                          signal_family_gap_dispatch_follow_up_count: 0
+                          signal_family_gap_dispatch_overdue_count: 0
+                          signal_family_gap_next_follow_up_due_at: null
+                          source_contract_evidence_count: 0
+                          source_contract_dispatch_count: 0
+                          source_contract_dispatch_follow_up_count: 0
+                          source_contract_dispatch_overdue_count: 0
+                          source_contract_next_follow_up_due_at: null
+                          production_gate_evidence_count: 0
+                          production_gate_requirement_evidence_count: 0
+                          validation_errors: []
+                        gates:
+                          - gate_key: central_backbone_minimum_coverage
+                            status: satisfied
+                            evidence: central_backbone_remaining_count=0
+                            blocking_items: []
+                            next_workstream: null
+                          - gate_key: required_signal_families
+                            status: incomplete
+                            evidence: 3 signal families remain in signal_gap_priority_groups.
+                            blocking_items:
+                              - pump_or_gate_status:13
+                              - flood_depth:3
+                              - sewer_water_level:1
+                            next_workstream: send_official_read_api_requests
+                          - gate_key: hosted_worker_persisted_evidence
+                            status: incomplete
+                            evidence: Hosted/production must prove worker-persisted evidence before completion.
+                            blocking_items:
+                              - freshness_policy
+                              - raw_snapshot_retention_policy
+                              - monitored_scheduler_cadence
+                              - hosted_egress_review
+                              - worker_persisted_evidence_path
+                            next_workstream: hosted_persistence_and_scheduler_proof
+                          - gate_key: production_deployment_evidence
+                            status: incomplete
+                            evidence: Hosted /health and /ready must return the accepted main merge SHA with healthy readiness dependencies.
+                            blocking_items:
+                              - main_branch_deployed_sha
+                              - ready_dependency_smoke
+                            next_workstream: verify_main_branch_deployment
+                        next_priority_workstreams:
+                          - send_official_read_api_requests
+                          - resolve_authorization_gated_adapters
+                          - hosted_persistence_and_scheduler_proof
+                          - monitoring_and_alerting_proof
+                          - hosted_risk_response_smoke
+                      signal_gap_priority_groups:
+                        - rank: 1
+                          signal_type: pump_or_gate_status
+                          county_count: 14
+                          counties:
+                            - 連江縣
+                            - 金門縣
+                            - 臺東縣
+                            - 苗栗縣
+                          highest_priority_tier: P0
+                          recommended_workstream: bulk_signal_gap_discovery
+                          tracking_statuses:
+                            monitoring_open_data_release: 1
+                            needs_authorization_request: 1
+                            needs_public_read_api_contract: 2
+                            needs_signal_gap_review: 10
+                          discovery_monitor:
+                            target_signal_type: pump_or_gate_status
+                            source_catalog: data.gov.tw dataset export
+                            source_catalog_url: https://data.gov.tw/api/front/dataset/export?format=json
+                            candidate_readiness_field: candidate_live_read_api
+                            county_count: 14
+                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --fail-on-candidate --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣 --county 嘉義市 --county 桃園市 --county 澎湖縣 --county 臺中市 --county 臺南市 --county 南投縣 --county 基隆市 --county 宜蘭縣 --county 新北市 --county 新竹縣
+                          official_request_batch:
+                            target_signal_type: pump_or_gate_status
+                            packet_type: signal_gap_batch_request
+                            county_count: 14
+                            counties:
+                              - 連江縣
+                              - 金門縣
+                              - 臺東縣
+                              - 苗栗縣
+                            requested_counterparties:
+                              - county water-resource authority
+                            tracking_statuses:
+                              - monitoring_open_data_release
+                              - needs_authorization_request
+                              - needs_public_read_api_contract
+                              - needs_signal_gap_review
+                            required_read_api_fields:
+                              - observed_at
+                              - station_or_device_id
+                              - measurement_value
+                              - measurement_unit_or_type
+                              - longitude_latitude_or_joinable_station_metadata
+                              - official_source_url_and_license
+                            production_operational_requirements:
+                              - freshness_policy
+                              - raw_snapshot_retention_policy
+                              - monitored_scheduler_cadence
+                              - hosted_egress_review
+                              - worker_persisted_evidence_path
+                            next_step: send_official_read_api_requests
+                            packet_generator_command: PYTHONPATH=apps/api python scripts/local-source-request-packets.py --format markdown --signal-type pump_or_gate_status --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣
+                            completion_gate: Each county must provide a latest-observation read API, an authorization-gated adapter path, or an official unavailable-source record for pump_or_gate_status, plus production ops evidence.
+                          completion_gate: For every listed county, add a production adapter, an authorization-gated adapter, or an official unavailable/blocked-source record for pump_or_gate_status.
                       authorization_requests:
                         - county: 金門縣
-                          reason: "KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。"
+                          reason: "KWIS SOAP/ASMX exposes token-gated read methods, but production read access still requires county authorization."
                           application_urls:
                             - https://kwis.kinmen.gov.tw/
-                          application_note: "KWIS SOAP/ASMX 介接需要縣府審核帳密/key/token，且目前文件用途是第三方設備上傳，不是公開 read API。"
+                            - https://docs.google.com/forms/d/e/1FAIpQLSdjBEvTNQyORMrkNdsJfs4KV5RUulRZF4hp2V3QhF5rGLUJYA/viewform
+                            - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx
+                            - https://kwis.kinmen.gov.tw/KWIS_IOT_Data/KWIS_IOT_Data_Service.asmx?WSDL
+                          application_note: "KWIS ASMX/WSDL lists token-gated read methods; blank-token smoke returns ErrMsg (7) with Data: []."
+                          production_adapter_keys: []
+                          authorization_gated_adapter_keys:
+                            - local.kinmen.kwis_pump_station
                           requested_counterparty: "金門縣政府 / KWIS 維運窗口"
                           tracking_status: needs_authorization_request
                           last_followed_up_at: null
@@ -887,8 +1029,20 @@ paths:
                             - 連江縣大潮、豪雨易淹水地區 ODS
                           metadata_source_urls:
                             - https://eip.matsu.gov.tw/matsuopendata/chhtml/dataquery/5
-                          central_backbone_missing_signal_types:
-                            - hydrologic_observation
+                          non_qualifying_source_names:
+                            - 連江自來水廠水庫水位月報
+                            - 連江縣資訊公開查詢系統即時監測值
+                          non_qualifying_source_urls:
+                            - https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page
+                            - http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx
+                          non_qualifying_source_reasons:
+                            - Public reservoir water level is monthly PDF only, without observed_at/station_id/measurement_value realtime API fields.
+                            - Public realtime page is environmental discharge CEMS, not flood, water-level, sewer, pump, or gate observation.
+                          central_backbone_missing_signal_types: []
+                          missing_signal_types:
+                            - flood_depth
+                            - sewer_water_level
+                            - pump_or_gate_status
                           requested_counterparty: "連江縣政府公開資料或防災水利窗口"
                           tracking_status: monitoring_open_data_release
                           last_followed_up_at: null
@@ -896,9 +1050,108 @@ paths:
                             - observed_at
                             - station_or_device_id
                             - measurement_value
-                          request_focus: "請官方釋出即時水文觀測 read API。"
+                          open_data_release_monitor:
+                            target_county: 連江縣
+                            source_catalog: data.gov.tw dataset export
+                            source_catalog_url: https://data.gov.tw/api/front/dataset/export?format=json
+                            expected_current_state: metadata_only
+                            escalate_on_state: live_candidate_found
+                            candidate_readiness_field: candidate_live_read_api
+                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --county 連江縣 --fail-on-candidate
+                          request_focus: "請官方釋出即時水文觀測 read API，至少包含水位、淹水深度、雨水下水道、抽水站或水門任一類觀測資料。"
                       public_api_contract_reviews: []
                       live_smoke_reviews: []
+                      sensor_signal_gap_reviews:
+                        - rank: 1
+                          priority_tier: P2
+                          county: 嘉義市
+                          workstream: fill_sensor_signal_gap
+                          next_action_code: operate_adapter
+                          tracking_status: needs_signal_gap_review
+                          requested_counterparty: 嘉義市政府公開資料或水利防災維運窗口
+                          blocking_reason: null
+                          why_now: existing adapters do not cover every required water signal family
+                          completion_gate: "補齊缺少的 signal families，或以官方證據記錄為無法取得；可用資料必須含 observed_at、station_or_device_id、measurement_value、measurement_unit_or_type 與座標。"
+                          missing_signal_types:
+                            - flood_depth
+                            - sewer_water_level
+                            - pump_or_gate_status
+                          central_backbone_missing_signal_types: []
+                          production_adapter_keys:
+                            - local.chiayi_city.water_level
+                            - local.chiayi_city.rainfall
+                          authorization_gated_adapter_keys: []
+                          metadata_source_names: []
+                          metadata_source_urls: []
+                          candidate_source_names: []
+                          candidate_source_urls: []
+                          candidate_contract_findings: []
+                          candidate_contract_missing_fields: []
+                          candidate_contract_non_measurement_notes: []
+                          non_qualifying_source_names: []
+                          non_qualifying_source_urls: []
+                          non_qualifying_source_reasons: []
+                          status_only_source_names: []
+                          status_only_source_urls: []
+                          status_only_signal_types: []
+                          application_urls: []
+                          required_read_api_fields:
+                            - observed_at
+                            - station_or_device_id
+                            - measurement_value
+                          open_data_release_monitor: null
+                      integration_priority_queue:
+                        - rank: 1
+                          priority_tier: P0
+                          county: 連江縣
+                          workstream: monitor_open_data_release
+                          next_action_code: monitor_open_data_release
+                          tracking_status: monitoring_open_data_release
+                          requested_counterparty: 連江縣政府公開資料或防災水利窗口
+                          blocking_reason: "目前只有靜態清冊、站點、抽水站、水門或易淹區 metadata，尚無即時觀測欄位。"
+                          why_now: local_direct_source is not complete
+                          completion_gate: "完成地方直出 production adapter，或留下含 required_read_api_fields 的官方授權/釋出請求並可追蹤 follow-up 狀態。"
+                          missing_signal_types:
+                            - flood_depth
+                            - sewer_water_level
+                            - pump_or_gate_status
+                          central_backbone_missing_signal_types: []
+                          production_adapter_keys: []
+                          authorization_gated_adapter_keys: []
+                          metadata_source_names:
+                            - 連江縣大潮、豪雨易淹水地區 ODS
+                          metadata_source_urls:
+                            - https://www.matsu.gov.tw/upload/f-20230922134042.ods
+                          candidate_source_names: []
+                          candidate_source_urls: []
+                          candidate_contract_findings: []
+                          candidate_contract_missing_fields: []
+                          candidate_contract_non_measurement_notes: []
+                          non_qualifying_source_names:
+                            - 連江自來水廠水庫水位月報
+                            - 連江縣資訊公開查詢系統即時監測值
+                          non_qualifying_source_urls:
+                            - https://www.matsuwater.gov.tw/load_page/reservoir_water_level_page
+                            - http://erbwater.matsu.gov.tw/PUBLIC/RealTime/Get_AVGR.aspx
+                          non_qualifying_source_reasons:
+                            - Public reservoir water level is monthly PDF only, without observed_at/station_id/measurement_value realtime API fields.
+                            - Public realtime page is environmental discharge CEMS, not flood, water-level, sewer, pump, or gate observation.
+                          status_only_source_names: []
+                          status_only_source_urls: []
+                          status_only_signal_types: []
+                          application_urls: []
+                          required_read_api_fields:
+                            - observed_at
+                            - station_or_device_id
+                            - measurement_value
+                          open_data_release_monitor:
+                            target_county: 連江縣
+                            source_catalog: data.gov.tw dataset export
+                            source_catalog_url: https://data.gov.tw/api/front/dataset/export?format=json
+                            expected_current_state: metadata_only
+                            escalate_on_state: live_candidate_found
+                            candidate_readiness_field: candidate_live_read_api
+                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --county 連江縣 --fail-on-candidate
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1872,6 +2125,7 @@ components:
         - flood_warning
         - flood_potential
         - flood_report
+        - status_only
         - road_closure
         - discussion
 
@@ -1941,6 +2195,123 @@ components:
           format: date-time
       additionalProperties: false
 
+    NearbySourceHealth:
+      type: object
+      required:
+        - source_id
+        - name
+        - signal_types
+        - coverage_scope
+        - health_status
+        - reason_code
+        - message
+      properties:
+        source_id:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9-]{0,119}$"
+        name:
+          type: string
+        signal_types:
+          type: array
+          items:
+            type: string
+            enum:
+              - rainfall
+              - water_level
+              - flood_depth
+              - sewer_water_level
+              - pump_or_gate_status
+              - flood_warning
+              - status_only
+        coverage_scope:
+          type: string
+          enum:
+            - national
+            - local
+        health_status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - failed
+            - disabled
+            - unknown
+        reason_code:
+          type: string
+          enum:
+            - operational
+            - delayed
+            - upstream_unavailable
+            - pipeline_unavailable
+            - pipeline_stalled
+            - disabled
+            - not_yet_observed
+        observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        checked_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        station_count:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          description: Count of stations with persisted observations; this alone does not prove the station inventory is complete.
+        upstream_station_count:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          description: Total station/Thing count declared by the upstream full-inventory response for the exact latest ingestion job.
+        pages_fetched:
+          type:
+            - integer
+            - "null"
+          minimum: 0
+          description: Number of upstream pages fetched for the exact latest station inventory.
+        pagination_complete:
+          type:
+            - boolean
+            - "null"
+          description: True only when pagination reached a terminal response without a next-link.
+        inventory_manifest_sha256:
+          type:
+            - string
+            - "null"
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 of the canonical sorted station-ID manifest; the full station IDs are not exposed publicly.
+        inventory_proof_status:
+          type: string
+          enum:
+            - missing
+            - incomplete
+            - awaiting_review
+            - checksum_mismatch
+            - approved
+          default: missing
+        inventory_complete:
+          type: boolean
+          default: false
+          description: True only when the exact latest run has a complete upstream total/pagination proof, its manifest matches the reviewed checksum, and every manifest station is present in the spatial latest read model.
+        jurisdictions:
+          type: array
+          items:
+            type: string
+          description: Audited counties/cities for which this source applies to the current spatial query.
+        required_for_absence:
+          type: boolean
+          default: true
+          description: Whether this applicable source must be healthy and inventory-complete before a no-station conclusion is allowed.
+        message:
+          type: string
+          description: Public-safe status text; never includes raw exceptions, hosts, credentials, or internal gates.
+      additionalProperties: false
+
     NearbyCoverageSignal:
       type: object
       required:
@@ -1972,6 +2343,16 @@ components:
             - low
             - no_local_sensor
             - unavailable
+        availability_state:
+          type: string
+          enum:
+            - fresh_nearby
+            - degraded_nearby
+            - regional_reference
+            - stale_observation
+            - source_unavailable
+            - source_status_unknown
+            - no_station
         nearest_distance_m:
           type:
             - number
@@ -1994,12 +2375,51 @@ components:
         fresh_count:
           type: integer
           minimum: 0
+        degraded_count:
+          type: integer
+          minimum: 0
         stale_count:
           type: integer
           minimum: 0
         status_only_count:
           type: integer
           minimum: 0
+        nearest_freshness_state:
+          type:
+            - string
+            - "null"
+          enum:
+            - fresh
+            - degraded
+            - stale
+            - null
+        source_health_status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - failed
+            - disabled
+            - unknown
+        source_count:
+          type: integer
+          minimum: 0
+        failed_source_count:
+          type: integer
+          minimum: 0
+        missing_cause:
+          type: string
+          enum:
+            - none
+            - no_station_in_range
+            - inventory_unverified
+            - stale_observation
+            - source_degraded
+            - source_failed
+            - update_pipeline_stalled
+            - source_not_configured
+            - jurisdiction_unverified
+            - health_unknown
         missing_reason:
           type:
             - string
@@ -2060,6 +2480,60 @@ components:
           type: array
           items:
             type: string
+        source_health:
+          type: array
+          items:
+            $ref: "#/components/schemas/NearbySourceHealth"
+        source_health_status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - failed
+            - disabled
+            - unknown
+        source_health_checked:
+          type: boolean
+        jurisdiction_status:
+          type: string
+          enum:
+            - verified
+            - boundary_unverified
+            - outside_coverage
+            - ambiguous
+            - unavailable
+        jurisdiction_checked:
+          type: boolean
+          description: True only when one checksum-verified 22-county boundary snapshot resolves a unique home jurisdiction.
+        jurisdiction_catalog_complete:
+          type: boolean
+          description: True only when every considered county/signal contract is reviewed and its current source-mapping count, checksum, revision, and redundancy parents match the approval.
+        home_jurisdiction:
+          type:
+            - string
+            - "null"
+        considered_jurisdictions:
+          type: array
+          items:
+            type: string
+          description: Home and adjacent counties/cities whose boundary lies within the 15 km station-search radius.
+        jurisdiction_mapping_revisions:
+          type: array
+          items:
+            type: string
+          description: Public review revisions for the exact source mappings applicable to this spatial query.
+        jurisdiction_unverified_signal_types:
+          type: array
+          items:
+            type: string
+            enum:
+              - rainfall
+              - water_level
+              - flood_depth
+              - sewer_water_level
+              - pump_or_gate_status
+              - flood_warning
+              - status_only
         county_level_note:
           type: string
           description: 縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。
@@ -2372,10 +2846,14 @@ components:
         - local_direct_remaining_count
         - central_backbone_minimum_complete_count
         - central_backbone_remaining_count
+        - completion_audit
         - authorization_requests
         - metadata_release_monitors
         - public_api_contract_reviews
         - live_smoke_reviews
+        - sensor_signal_gap_reviews
+        - integration_priority_queue
+        - signal_gap_priority_groups
       properties:
         total_counties:
           type: integer
@@ -2392,6 +2870,8 @@ components:
         central_backbone_remaining_count:
           type: integer
           minimum: 0
+        completion_audit:
+          $ref: "#/components/schemas/LocalSourceCompletionAudit"
         authorization_requests:
           type: array
           items:
@@ -2408,6 +2888,196 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LocalSourceLiveSmokeReview"
+        sensor_signal_gap_reviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceIntegrationPriorityItem"
+        integration_priority_queue:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceIntegrationPriorityItem"
+        signal_gap_priority_groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceSignalGapPriorityGroup"
+      additionalProperties: false
+
+    LocalSourceCompletionAuditSummary:
+      type: object
+      required:
+        - total_counties
+        - local_direct_remaining_count
+        - central_backbone_remaining_count
+        - unresolved_priority_item_count
+        - signal_gap_group_count
+        - signal_gap_county_item_count
+        - authorization_request_count
+        - metadata_release_monitor_count
+        - public_api_contract_review_count
+        - live_smoke_review_count
+      properties:
+        total_counties:
+          type: integer
+          minimum: 0
+        local_direct_remaining_count:
+          type: integer
+          minimum: 0
+        central_backbone_remaining_count:
+          type: integer
+          minimum: 0
+        unresolved_priority_item_count:
+          type: integer
+          minimum: 0
+        signal_gap_group_count:
+          type: integer
+          minimum: 0
+        signal_gap_county_item_count:
+          type: integer
+          minimum: 0
+        authorization_request_count:
+          type: integer
+          minimum: 0
+        metadata_release_monitor_count:
+          type: integer
+          minimum: 0
+        public_api_contract_review_count:
+          type: integer
+          minimum: 0
+        live_smoke_review_count:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+
+    LocalSourceCompletionAuditGate:
+      type: object
+      required:
+        - gate_key
+        - status
+        - evidence
+        - blocking_items
+        - next_workstream
+      properties:
+        gate_key:
+          type: string
+        status:
+          type: string
+          enum:
+            - satisfied
+            - incomplete
+        evidence:
+          type: string
+        blocking_items:
+          type: array
+          items:
+            type: string
+        next_workstream:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    LocalSourceCompletionEvidenceOverlay:
+      type: object
+      required:
+        - schema_version
+        - captured_at
+        - follow_up_as_of
+        - signal_family_gap_evidence_count
+        - signal_family_gap_dispatch_count
+        - signal_family_gap_dispatch_follow_up_count
+        - signal_family_gap_dispatch_overdue_count
+        - signal_family_gap_next_follow_up_due_at
+        - source_contract_evidence_count
+        - source_contract_dispatch_count
+        - source_contract_dispatch_follow_up_count
+        - source_contract_dispatch_overdue_count
+        - source_contract_next_follow_up_due_at
+        - production_gate_evidence_count
+        - production_gate_requirement_evidence_count
+        - validation_errors
+      properties:
+        schema_version:
+          type:
+            - string
+            - "null"
+        captured_at:
+          type:
+            - string
+            - "null"
+        follow_up_as_of:
+          type:
+            - string
+            - "null"
+        signal_family_gap_evidence_count:
+          type: integer
+          minimum: 0
+        signal_family_gap_dispatch_count:
+          type: integer
+          minimum: 0
+        signal_family_gap_dispatch_follow_up_count:
+          type: integer
+          minimum: 0
+        signal_family_gap_dispatch_overdue_count:
+          type: integer
+          minimum: 0
+        signal_family_gap_next_follow_up_due_at:
+          type:
+            - string
+            - "null"
+        source_contract_evidence_count:
+          type: integer
+          minimum: 0
+        source_contract_dispatch_count:
+          type: integer
+          minimum: 0
+        source_contract_dispatch_follow_up_count:
+          type: integer
+          minimum: 0
+        source_contract_dispatch_overdue_count:
+          type: integer
+          minimum: 0
+        source_contract_next_follow_up_due_at:
+          type:
+            - string
+            - "null"
+        production_gate_evidence_count:
+          type: integer
+          minimum: 0
+        production_gate_requirement_evidence_count:
+          type: integer
+          minimum: 0
+        validation_errors:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+
+    LocalSourceCompletionAudit:
+      type: object
+      required:
+        - overall_status
+        - summary
+        - evidence_overlay
+        - gates
+        - next_priority_workstreams
+      properties:
+        overall_status:
+          type: string
+          enum:
+            - satisfied
+            - incomplete
+        summary:
+          $ref: "#/components/schemas/LocalSourceCompletionAuditSummary"
+        evidence_overlay:
+          $ref: "#/components/schemas/LocalSourceCompletionEvidenceOverlay"
+        gates:
+          type: array
+          items:
+            $ref: "#/components/schemas/LocalSourceCompletionAuditGate"
+        next_priority_workstreams:
+          type: array
+          items:
+            type: string
       additionalProperties: false
 
     LocalSourceAuthorizationRequest:
@@ -2417,6 +3087,8 @@ components:
         - reason
         - application_urls
         - application_note
+        - production_adapter_keys
+        - authorization_gated_adapter_keys
         - requested_counterparty
         - tracking_status
         - last_followed_up_at
@@ -2438,6 +3110,14 @@ components:
           type:
             - string
             - "null"
+        production_adapter_keys:
+          type: array
+          items:
+            type: string
+        authorization_gated_adapter_keys:
+          type: array
+          items:
+            type: string
         requested_counterparty:
           type: string
         tracking_status:
@@ -2455,6 +3135,41 @@ components:
           type: string
       additionalProperties: false
 
+    LocalSourceOpenDataReleaseMonitor:
+      type: object
+      required:
+        - target_county
+        - source_catalog
+        - source_catalog_url
+        - expected_current_state
+        - escalate_on_state
+        - candidate_readiness_field
+        - command
+      properties:
+        target_county:
+          type: string
+        source_catalog:
+          type: string
+        source_catalog_url:
+          type: string
+          format: uri
+        expected_current_state:
+          type: string
+          enum:
+            - metadata_only
+            - no_candidate
+        escalate_on_state:
+          type: string
+          enum:
+            - live_candidate_found
+        candidate_readiness_field:
+          type: string
+          enum:
+            - candidate_live_read_api
+        command:
+          type: string
+      additionalProperties: false
+
     LocalSourceMetadataReleaseMonitor:
       type: object
       required:
@@ -2462,11 +3177,16 @@ components:
         - reason
         - metadata_source_names
         - metadata_source_urls
+        - non_qualifying_source_names
+        - non_qualifying_source_urls
+        - non_qualifying_source_reasons
         - central_backbone_missing_signal_types
+        - missing_signal_types
         - requested_counterparty
         - tracking_status
         - last_followed_up_at
         - required_read_api_fields
+        - open_data_release_monitor
         - request_focus
       properties:
         county:
@@ -2484,7 +3204,24 @@ components:
           items:
             type: string
             format: uri
+        non_qualifying_source_names:
+          type: array
+          items:
+            type: string
+        non_qualifying_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        non_qualifying_source_reasons:
+          type: array
+          items:
+            type: string
         central_backbone_missing_signal_types:
+          type: array
+          items:
+            type: string
+        missing_signal_types:
           type: array
           items:
             type: string
@@ -2501,6 +3238,10 @@ components:
           type: array
           items:
             type: string
+        open_data_release_monitor:
+          anyOf:
+            - $ref: "#/components/schemas/LocalSourceOpenDataReleaseMonitor"
+            - type: "null"
         request_focus:
           type: string
       additionalProperties: false
@@ -2512,6 +3253,9 @@ components:
         - reason
         - candidate_source_names
         - candidate_source_urls
+        - candidate_contract_findings
+        - candidate_contract_missing_fields
+        - candidate_contract_non_measurement_notes
         - requested_counterparty
         - tracking_status
         - last_followed_up_at
@@ -2532,6 +3276,18 @@ components:
           items:
             type: string
             format: uri
+        candidate_contract_findings:
+          type: array
+          items:
+            type: string
+        candidate_contract_missing_fields:
+          type: array
+          items:
+            type: string
+        candidate_contract_non_measurement_notes:
+          type: array
+          items:
+            type: string
         requested_counterparty:
           type: string
         tracking_status:
@@ -2592,6 +3348,278 @@ components:
           type: array
           items:
             type: string
+      additionalProperties: false
+
+    LocalSourceIntegrationPriorityItem:
+      type: object
+      required:
+        - rank
+        - priority_tier
+        - county
+        - workstream
+        - next_action_code
+        - tracking_status
+        - requested_counterparty
+        - blocking_reason
+        - why_now
+        - completion_gate
+        - missing_signal_types
+        - central_backbone_missing_signal_types
+        - production_adapter_keys
+        - authorization_gated_adapter_keys
+        - metadata_source_names
+        - metadata_source_urls
+        - candidate_source_names
+        - candidate_source_urls
+        - candidate_contract_findings
+        - candidate_contract_missing_fields
+        - candidate_contract_non_measurement_notes
+        - status_only_source_names
+        - status_only_source_urls
+        - status_only_signal_types
+        - non_qualifying_source_names
+        - non_qualifying_source_urls
+        - non_qualifying_source_reasons
+        - application_urls
+        - required_read_api_fields
+        - open_data_release_monitor
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        priority_tier:
+          type: string
+          description: Operator priority bucket such as P0, P1, P2, or P3.
+        county:
+          type: string
+        workstream:
+          type: string
+        next_action_code:
+          type: string
+        tracking_status:
+          type: string
+        requested_counterparty:
+          type: string
+        blocking_reason:
+          type:
+            - string
+            - "null"
+        why_now:
+          type: string
+        completion_gate:
+          type: string
+        missing_signal_types:
+          type: array
+          items:
+            type: string
+        central_backbone_missing_signal_types:
+          type: array
+          items:
+            type: string
+        production_adapter_keys:
+          type: array
+          items:
+            type: string
+        authorization_gated_adapter_keys:
+          type: array
+          items:
+            type: string
+        metadata_source_names:
+          type: array
+          items:
+            type: string
+        metadata_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        candidate_source_names:
+          type: array
+          items:
+            type: string
+        candidate_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        candidate_contract_findings:
+          type: array
+          items:
+            type: string
+        candidate_contract_missing_fields:
+          type: array
+          items:
+            type: string
+        candidate_contract_non_measurement_notes:
+          type: array
+          items:
+            type: string
+        status_only_source_names:
+          type: array
+          items:
+            type: string
+        status_only_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        status_only_signal_types:
+          type: array
+          items:
+            type: string
+        non_qualifying_source_names:
+          type: array
+          items:
+            type: string
+        non_qualifying_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        non_qualifying_source_reasons:
+          type: array
+          items:
+            type: string
+        application_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
+        open_data_release_monitor:
+          anyOf:
+            - $ref: "#/components/schemas/LocalSourceOpenDataReleaseMonitor"
+            - type: "null"
+      additionalProperties: false
+
+    LocalSourceSignalGapDiscoveryMonitor:
+      type: object
+      required:
+        - target_signal_type
+        - source_catalog
+        - source_catalog_url
+        - candidate_readiness_field
+        - county_count
+        - command
+      properties:
+        target_signal_type:
+          type: string
+        source_catalog:
+          type: string
+        source_catalog_url:
+          type: string
+          format: uri
+        candidate_readiness_field:
+          type: string
+          enum:
+            - candidate_live_read_api
+        county_count:
+          type: integer
+          minimum: 0
+        command:
+          type: string
+      additionalProperties: false
+
+    LocalSourceSignalGapOfficialRequestBatch:
+      type: object
+      required:
+        - target_signal_type
+        - packet_type
+        - county_count
+        - counties
+        - requested_counterparties
+        - tracking_statuses
+        - required_read_api_fields
+        - production_operational_requirements
+        - next_step
+        - packet_generator_command
+        - completion_gate
+      properties:
+        target_signal_type:
+          type: string
+        packet_type:
+          type: string
+          enum:
+            - signal_gap_batch_request
+        county_count:
+          type: integer
+          minimum: 0
+        counties:
+          type: array
+          items:
+            type: string
+        requested_counterparties:
+          type: array
+          items:
+            type: string
+        tracking_statuses:
+          type: array
+          items:
+            type: string
+        required_read_api_fields:
+          type: array
+          items:
+            type: string
+        production_operational_requirements:
+          type: array
+          items:
+            type: string
+        next_step:
+          type: string
+          enum:
+            - send_official_read_api_requests
+        packet_generator_command:
+          type: string
+        completion_gate:
+          type: string
+      additionalProperties: false
+
+    LocalSourceSignalGapPriorityGroup:
+      type: object
+      required:
+        - rank
+        - signal_type
+        - county_count
+        - counties
+        - highest_priority_tier
+        - recommended_workstream
+        - tracking_statuses
+        - discovery_monitor
+        - official_request_batch
+        - completion_gate
+      properties:
+        rank:
+          type: integer
+          minimum: 1
+        signal_type:
+          type: string
+        county_count:
+          type: integer
+          minimum: 0
+        counties:
+          type: array
+          items:
+            type: string
+        highest_priority_tier:
+          type: string
+        recommended_workstream:
+          type: string
+          enum:
+            - bulk_signal_gap_discovery
+        tracking_statuses:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        discovery_monitor:
+          $ref: "#/components/schemas/LocalSourceSignalGapDiscoveryMonitor"
+        official_request_batch:
+          $ref: "#/components/schemas/LocalSourceSignalGapOfficialRequestBatch"
+        completion_gate:
+          type: string
       additionalProperties: false
 
     LocalSourceCoverageSummary:
@@ -2714,11 +3742,17 @@ components:
         - missing_signal_types
         - candidate_source_names
         - candidate_source_urls
+        - candidate_contract_findings
+        - candidate_contract_missing_fields
+        - candidate_contract_non_measurement_notes
         - metadata_source_names
         - metadata_source_urls
         - status_only_source_names
         - status_only_source_urls
         - status_only_signal_types
+        - non_qualifying_source_names
+        - non_qualifying_source_urls
+        - non_qualifying_source_reasons
         - application_urls
         - requires_application
         - application_note
@@ -2811,6 +3845,21 @@ components:
             type: string
             format: uri
           description: Official candidate pages, API contracts, or system URLs that need contract/live-smoke verification before adapter work.
+        candidate_contract_findings:
+          type: array
+          items:
+            type: string
+          description: Reviewed facts from official candidate pages that still do not prove a production read API.
+        candidate_contract_missing_fields:
+          type: array
+          items:
+            type: string
+          description: Production read API fields missing from the reviewed candidate source.
+        candidate_contract_non_measurement_notes:
+          type: array
+          items:
+            type: string
+          description: Candidate pages that expose status, warning thresholds, images, or other non-measurement evidence.
         metadata_source_names:
           type: array
           items:
@@ -2838,6 +3887,22 @@ components:
           items:
             type: string
           description: Low-confidence status-only signal categories that must not be treated as depth, water level, or rainfall.
+        non_qualifying_source_names:
+          type: array
+          items:
+            type: string
+          description: Official sources that were reviewed but must not satisfy realtime water-signal coverage.
+        non_qualifying_source_urls:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: URLs for reviewed official sources that do not qualify as realtime water-signal evidence.
+        non_qualifying_source_reasons:
+          type: array
+          items:
+            type: string
+          description: Why each reviewed official source is excluded from realtime risk evidence.
         application_urls:
           type: array
           items:

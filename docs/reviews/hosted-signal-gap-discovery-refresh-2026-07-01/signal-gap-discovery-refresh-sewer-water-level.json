@@ -1,0 +1,32 @@
+{
+  "captured_at": "2026-07-01T11:25:00+08:00",
+  "conclusion": "no_candidate_live_read_api_found",
+  "discovery": {
+    "candidate_count": 0,
+    "candidates": [],
+    "required_signal_types": [
+      "sewer_water_level"
+    ],
+    "summary": {
+      "by_county": {
+        "連江縣": {
+          "candidate_count": 0,
+          "candidate_live_read_api_count": 0,
+          "metadata_only_count": 0,
+          "readiness_state": "no_candidate",
+          "signal_types": []
+        }
+      },
+      "candidate_live_read_api_count_by_county": {},
+      "metadata_only_count_by_county": {},
+      "target_counties_without_candidates": [
+        "連江縣"
+      ]
+    },
+    "target_counties": [
+      "連江縣"
+    ]
+  },
+  "schema_version": "local-source-discovery-refresh/v1",
+  "source_catalog_url": "https://data.gov.tw/api/front/dataset/export?format=json"
+}

@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any, Callable
-from urllib.parse import quote
 from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qsl, quote, urlsplit
 from urllib.request import Request, urlopen
 
 from app.adapters._helpers import optional_float, optional_str, parse_observed_at_utc
+from app.adapters.contracts import StationInventoryProof
 
 StaFetchJson = Callable[[str, int], Any]
 
@@ -79,6 +81,12 @@ class CivilIotStaPayloadError(CivilIotStaError):
     """Raised when a SensorThings payload cannot be parsed."""
 
 
+@dataclass(frozen=True)
+class StaThingsFetchResult:
+    records: tuple[Mapping[str, Any], ...]
+    station_inventory_proof: StationInventoryProof
+
+
 def parse_sta_things_payload(
     payload: object,
     *,
@@ -98,7 +106,20 @@ def parse_sta_things_payload(
     a usable observation is used.
     """
 
-    things = _things_items(payload)
+    things = tuple(_things_items(payload))
+    return _parse_sta_things_items(
+        things,
+        source_url=source_url,
+        datastream_name_contains=datastream_name_contains,
+    )
+
+
+def _parse_sta_things_items(
+    things: tuple[Any, ...],
+    *,
+    source_url: str,
+    datastream_name_contains: str | tuple[str, ...] | None,
+) -> tuple[Mapping[str, Any], ...]:
     records: list[Mapping[str, Any]] = []
     for thing in things:
         if not isinstance(thing, Mapping):
@@ -113,6 +134,87 @@ def parse_sta_things_payload(
     return tuple(records)
 
 
+def fetch_paginated_sta_things(
+    start_url: str,
+    *,
+    timeout_seconds: int,
+    fetch_json: StaFetchJson,
+    source_url: str,
+    datastream_name_contains: str | tuple[str, ...] | None = None,
+) -> StaThingsFetchResult:
+    """Fetch all STA Things pages plus a fail-closed station manifest proof."""
+
+    next_url: str | None = _with_count_query(start_url)
+    seen_urls: set[str] = set()
+    records: list[Mapping[str, Any]] = []
+    station_ids: set[str] = set()
+    source_items_seen = 0
+    missing_station_id_count = 0
+    duplicate_station_id_count = 0
+    pages_fetched = 0
+    pagination_complete = False
+    upstream_totals: set[int] = set()
+    upstream_count_invalid = False
+
+    while next_url is not None:
+        pagination_key = _with_count_query(next_url)
+        if pagination_key in seen_urls:
+            raise CivilIotStaPayloadError(
+                f"Civil IoT SensorThings payload repeated @iot.nextLink: {next_url}"
+            )
+        seen_urls.add(pagination_key)
+        payload = fetch_json(next_url, timeout_seconds)
+        pages_fetched += 1
+
+        count_present, upstream_total = _sta_upstream_total(payload)
+        if count_present:
+            if upstream_total is None:
+                upstream_count_invalid = True
+            else:
+                upstream_totals.add(upstream_total)
+
+        things = tuple(_things_items(payload))
+        for thing in things:
+            source_items_seen += 1
+            station_id = _thing_station_id(thing) if isinstance(thing, Mapping) else None
+            if station_id is None:
+                missing_station_id_count += 1
+            elif station_id in station_ids:
+                duplicate_station_id_count += 1
+            else:
+                station_ids.add(station_id)
+
+        records.extend(
+            _parse_sta_things_items(
+                things,
+                source_url=source_url,
+                datastream_name_contains=datastream_name_contains,
+            )
+        )
+        next_url = _sta_next_link(payload)
+        if next_url is None:
+            pagination_complete = True
+
+    resolved_upstream_total = (
+        next(iter(upstream_totals))
+        if not upstream_count_invalid and len(upstream_totals) == 1
+        else None
+    )
+    proof = StationInventoryProof(
+        upstream_total=resolved_upstream_total,
+        pages_fetched=pages_fetched,
+        pagination_complete=pagination_complete,
+        source_items_seen=source_items_seen,
+        missing_station_id_count=missing_station_id_count,
+        duplicate_station_id_count=duplicate_station_id_count,
+        station_ids=tuple(sorted(station_ids)),
+    )
+    return StaThingsFetchResult(
+        records=tuple(records),
+        station_inventory_proof=proof,
+    )
+
+
 def fetch_paginated_sta_things_records(
     start_url: str,
     *,
@@ -121,27 +223,15 @@ def fetch_paginated_sta_things_records(
     source_url: str,
     datastream_name_contains: str | tuple[str, ...] | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
-    """Fetch a paginated STA Things collection and flatten all pages."""
+    """Compatibility wrapper returning only flattened observation records."""
 
-    next_url: str | None = start_url
-    seen_urls: set[str] = set()
-    records: list[Mapping[str, Any]] = []
-    while next_url is not None:
-        if next_url in seen_urls:
-            raise CivilIotStaPayloadError(
-                f"Civil IoT SensorThings payload repeated @iot.nextLink: {next_url}"
-            )
-        seen_urls.add(next_url)
-        payload = fetch_json(next_url, timeout_seconds)
-        records.extend(
-            parse_sta_things_payload(
-                payload,
-                source_url=source_url,
-                datastream_name_contains=datastream_name_contains,
-            )
-        )
-        next_url = _sta_next_link(payload)
-    return tuple(records)
+    return fetch_paginated_sta_things(
+        start_url,
+        timeout_seconds=timeout_seconds,
+        fetch_json=fetch_json,
+        source_url=source_url,
+        datastream_name_contains=datastream_name_contains,
+    ).records
 
 
 def _things_items(payload: object) -> Iterable[Any]:
@@ -164,6 +254,29 @@ def _sta_next_link(payload: object) -> str | None:
     return next_link or None
 
 
+def _sta_upstream_total(payload: object) -> tuple[bool, int | None]:
+    if not isinstance(payload, Mapping) or "@iot.count" not in payload:
+        return False, None
+    value = payload.get("@iot.count")
+    if isinstance(value, bool):
+        return True, None
+    if isinstance(value, int):
+        return True, value if value >= 0 else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.isdigit():
+            return True, int(stripped)
+    return True, None
+
+
+def _with_count_query(url: str) -> str:
+    query_keys = {key.lower() for key, _value in parse_qsl(urlsplit(url).query)}
+    if "$count" in query_keys:
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}$count=true"
+
+
 def _parse_thing(
     thing: Mapping[str, Any],
     *,
@@ -173,15 +286,7 @@ def _parse_thing(
     properties = thing.get("properties")
     properties = properties if isinstance(properties, Mapping) else {}
 
-    station_id = _first_text(
-        properties,
-        "stationID",
-        "stationId",
-        "station_id",
-        "stationNo",
-        "ID",
-        "id",
-    ) or _first_text(thing, "@iot.id", "name")
+    station_id = _thing_station_id(thing) or _first_text(thing, "name")
     if station_id is None:
         return None
 
@@ -295,6 +400,20 @@ def _parse_thing(
         record["geometry"] = {"type": "Point", "coordinates": [lng, lat]}
 
     return record
+
+
+def _thing_station_id(thing: Mapping[str, Any]) -> str | None:
+    properties = thing.get("properties")
+    properties = properties if isinstance(properties, Mapping) else {}
+    return _first_text(
+        properties,
+        "stationID",
+        "stationId",
+        "station_id",
+        "stationNo",
+        "ID",
+        "id",
+    ) or _first_text(thing, "@iot.id")
 
 
 def _datastreams(thing: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:

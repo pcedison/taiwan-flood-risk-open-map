@@ -45,6 +45,7 @@ adapter key must be in `WORKER_ENABLED_ADAPTER_KEYS` (or that var unset).
 | Source | Adapter key | Gate flag | Live flag | Extra |
 |---|---|---|---|---|
 | CWA rainfall (full network) | `official.cwa.rainfall` | `SOURCE_CWA_ENABLED=true` | `SOURCE_CWA_API_ENABLED=true` | `CWA_API_AUTHORIZATION=CWA-...` |
+| CWA coastal tide level | `official.cwa.tide_level` | `SOURCE_CWA_ENABLED=true` | `SOURCE_CWA_API_ENABLED=true` | `CWA_API_AUTHORIZATION=CWA-...`; coastal context only |
 | WRA water level (opendata) | `official.wra.water_level` | `SOURCE_WRA_ENABLED=true` | `SOURCE_WRA_API_ENABLED=true` | — |
 | Flood sensors | `official.civil_iot.flood_sensor` | `SOURCE_FLOOD_SENSOR_ENABLED=true` | `SOURCE_FLOOD_SENSOR_API_ENABLED=true` | optional `CIVIL_IOT_FLOOD_SENSOR_URL` |
 | River level (STA) | `official.civil_iot.river_water_level` | `SOURCE_CIVIL_IOT_RIVER_ENABLED=true` | `SOURCE_CIVIL_IOT_RIVER_API_ENABLED=true` | overlaps WRA water level — pick one |
@@ -60,7 +61,32 @@ Optional URL overrides:
   The old `sta.ci.taiwan.gov.tw` host is not the default.
 
 Recommended enablement order (highest realtime-water value first, lightest load
-first): CWA rainfall → flood sensors → river level → sewer → pond → pump.
+first): CWA rainfall/tide-level → flood sensors → river level → sewer → pond → pump.
+
+### Kinmen KWIS Local Read Adapter
+
+Kinmen KWIS is not a public no-token source. The ASMX/WSDL exposes
+`KWIS_Get_Pump_Basic_Unit_Data`, but blank-token smoke returns HTTP 200 with
+`ErrMsg: (7) invalid Token` and `Data: []`. Treat it as authorization-gated until
+Kinmen County / the KWIS maintainer grants a read-side Token and confirms the
+response schema, license, rate limit, freshness policy, and production use.
+
+After authorization, enable it explicitly:
+
+```env
+WORKER_ENABLED_ADAPTER_KEYS=local.kinmen.kwis_pump_station
+SOURCE_KINMEN_KWIS_PUMP_STATION_ENABLED=true
+SOURCE_KINMEN_KWIS_PUMP_STATION_API_ENABLED=true
+KINMEN_KWIS_API_TOKEN=<private read-side token>
+```
+
+Leave `KINMEN_KWIS_PUMP_STATION_API_URL` empty unless the official ASMX method
+moves. The worker uses the Taiwan government TLS compatibility context that
+keeps CA and hostname verification and only clears `VERIFY_X509_STRICT`.
+
+Do not use KWIS upload-only credentials or blank-token smoke output as proof of
+production readiness. Kinmen remains incomplete until an authorized hosted
+worker-persisted evidence smoke normalizes real rows.
 
 ## Procedure (repeat per source)
 
@@ -93,6 +119,29 @@ and Civil IoT flood/sewer/pump/gate water-level sources. It marks CWA as
 or process environment; use `--fail-on-skipped` in CI or hosted readiness checks
 when all credentials must be loaded.
 
+WRA open-data and NCDR CAP endpoints have been observed to fail under Python /
+OpenSSL contexts that enable `VERIFY_X509_STRICT` because their certificate
+chain omits a Subject Key Identifier. The worker fetchers for those official
+endpoints use a Taiwan government open-data TLS compatibility context that
+removes only that strict-chain flag while keeping CA verification and hostname
+verification enabled. Treat any remaining certificate error as a hosted egress
+or upstream certificate incident, not as permission to disable TLS verification.
+
+After each official live smoke, compare the observed county distribution with
+the unresolved local-source signal gaps:
+
+```bash
+PYTHONPATH=apps/api python scripts/local-source-signal-gap-evidence.py \
+  --official-live-smoke-json docs/reviews/official-realtime-live-smoke-YYYY-MM-DD.json \
+  --output docs/reviews/local-source-signal-gap-evidence-YYYY-MM-DD.json
+```
+
+Use `--fail-on-unresolved` only in a completion rehearsal where every remaining
+signal-gap item is expected to be covered. The output is diagnostic evidence:
+`official_smoke_observed` means a source should be reviewed for catalog,
+adapter, source-contract, and production-evidence work; it does not satisfy the
+completion gate by itself.
+
 For a broader gate that also scans unresolved local-source discovery for 金門縣
 and 連江縣, run:
 
@@ -104,6 +153,24 @@ Use `--fail-on-skipped-smoke` in hosted readiness checks when CWA credentials
 must be loaded, and `--fail-on-live-candidate` when a newly published data.gov.tw
 candidate should stop the pipeline until it is reviewed and either implemented
 or documented as unsuitable.
+
+The gate output also includes `production_readiness`. Treat
+`production_readiness.readiness_state: not_production_complete` as the expected
+state until all required gates have private evidence: credential review, source
+license review, raw snapshot retention policy, hosted scheduler cadence, hosted
+egress review, alert routing ownership, and worker-persisted evidence smoke.
+Green official live smoke proves current upstream reachability only; it does not
+prove the hosted production evidence set is complete.
+
+For hosted readiness rehearsals, pass a private evidence JSON and fail closed
+when any gate is missing:
+
+```bash
+PYTHONPATH=apps/workers python scripts/realtime-source-gate.py \
+  --env-file .env \
+  --production-gate-evidence-json private-production-gates.json \
+  --fail-on-missing-production-gates
+```
 
 1. **Ingestion ran**: worker logs show
    `scheduler.ingestion_cycle.completed` and the adapter's batch summary with

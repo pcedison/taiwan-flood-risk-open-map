@@ -1,0 +1,410 @@
+{
+  "schema_version": "taiwan-wide-public-beta-smoke/v1",
+  "base_url": "https://floodrisk.cc",
+  "status": "passed",
+  "health": {
+    "status_code": 200,
+    "version": "public-beta-mvp-2026-05-04",
+    "deployment_sha": "f08c6346c2e01375d8c63d44191cb3bfcca76ab5"
+  },
+  "sample_count": 44,
+  "failures": [],
+  "samples": [
+    {
+      "level": "county",
+      "name": "南投縣",
+      "county": "南投縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "台中市",
+      "county": "台中市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "county",
+      "name": "台北市",
+      "county": "台北市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "county",
+      "name": "台南市",
+      "county": "台南市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "中",
+      "risk_historical_level": "高"
+    },
+    {
+      "level": "county",
+      "name": "台東縣",
+      "county": "台東縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "嘉義市",
+      "county": "嘉義市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "高"
+    },
+    {
+      "level": "county",
+      "name": "嘉義縣",
+      "county": "嘉義縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "county",
+      "name": "基隆市",
+      "county": "基隆市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "county",
+      "name": "宜蘭縣",
+      "county": "宜蘭縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "中",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "屏東縣",
+      "county": "屏東縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "彰化縣",
+      "county": "彰化縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "中",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "新北市",
+      "county": "新北市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "county",
+      "name": "新竹市",
+      "county": "新竹市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "county",
+      "name": "新竹縣",
+      "county": "新竹縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "桃園市",
+      "county": "桃園市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "county",
+      "name": "澎湖縣",
+      "county": "澎湖縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "county",
+      "name": "花蓮縣",
+      "county": "花蓮縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "苗栗縣",
+      "county": "苗栗縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "county",
+      "name": "連江縣",
+      "county": "連江縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "未知",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "county",
+      "name": "金門縣",
+      "county": "金門縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "中",
+      "risk_historical_level": "中"
+    },
+    {
+      "level": "county",
+      "name": "雲林縣",
+      "county": "雲林縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "高",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "county",
+      "name": "高雄市",
+      "county": "高雄市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "town",
+      "name": "南投縣中寮鄉",
+      "county": "南投縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "台中市中區",
+      "county": "台中市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "台北市中山區",
+      "county": "台北市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "中"
+    },
+    {
+      "level": "town",
+      "name": "台南市七股區",
+      "county": "台南市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "town",
+      "name": "台東縣卑南鄉",
+      "county": "台東縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "嘉義市東區",
+      "county": "嘉義市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "嘉義縣中埔鄉",
+      "county": "嘉義縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "基隆市七堵區",
+      "county": "基隆市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "宜蘭縣三星鄉",
+      "county": "宜蘭縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "中",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "屏東縣三地門鄉",
+      "county": "屏東縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "彰化縣二林鎮",
+      "county": "彰化縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "新北市三峽區",
+      "county": "新北市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "新竹市北區",
+      "county": "新竹市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "town",
+      "name": "新竹縣五峰鄉",
+      "county": "新竹縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "桃園市中壢區",
+      "county": "桃園市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "中",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "town",
+      "name": "澎湖縣七美鄉",
+      "county": "澎湖縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "花蓮縣光復鄉",
+      "county": "花蓮縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "高",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "苗栗縣三灣鄉",
+      "county": "苗栗縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "連江縣北竿鄉",
+      "county": "連江縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    },
+    {
+      "level": "town",
+      "name": "金門縣烈嶼鄉",
+      "county": "金門縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "低"
+    },
+    {
+      "level": "town",
+      "name": "雲林縣二崙鄉",
+      "county": "雲林縣",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "極高",
+      "risk_historical_level": "極高"
+    },
+    {
+      "level": "town",
+      "name": "高雄市三民區",
+      "county": "高雄市",
+      "source": "local-taiwan-admin-centroid",
+      "precision": "admin_area",
+      "risk_realtime_level": "低",
+      "risk_historical_level": "未知"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞通報 Security vulnerability
+    url: https://github.com/pcedison/taiwan-flood-risk-open-map/security/advisories/new
+    about: 請勿用公開 issue 通報安全漏洞，改用私密通報管道（詳見 SECURITY.md）。

@@ -41,3 +41,111 @@ in hosted runtime by default.
   current `observed_at` timestamps.
 - Confirm API responses include healthy `cwa-rainfall` or `wra-water-level`
   freshness before describing realtime official data as available.
+- Confirm unresolved local official signal families are tracked through the
+  generated request batches before calling nationwide nearby sensor coverage
+  complete:
+
+  ```powershell
+  python scripts\local-source-request-packets.py `
+    --format signal-gap-batches-json `
+    --output docs\data-sources\local\generated-signal-gap-request-batches.json
+
+  python scripts\local-source-request-packets.py `
+    --format signal-gap-batches-markdown `
+    --output docs\data-sources\local\generated-signal-gap-request-batches.md
+  ```
+
+  The generated batches currently cover `pump_or_gate_status`, `flood_depth`,
+  and `sewer_water_level`. A batch remains incomplete until every listed county
+  has an official read API, an authorization-gated adapter path, a production
+  adapter, or an accepted official-unavailable-source record in private
+  completion evidence.
+
+## Hosted Public-Risk Smoke
+
+After each merge to `main`, first run the hosted deployment smoke to prove the
+public service is serving the intended merge SHA from both `/health` and
+`/ready`:
+
+```powershell
+python scripts\hosted_deployment_smoke.py `
+  --base-url https://floodrisk.cc `
+  --expected-deployment-sha <main-merge-sha> `
+  --evidence-output docs\reviews\hosted-deployment-smoke-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-output docs\reviews\hosted-deployment-completion-evidence-YYYY-MM-DD-<sha>.json
+```
+
+An accepted artifact may satisfy only the `production_deployment_evidence`
+requirements: `main_branch_deployed_sha` and `ready_dependency_smoke`. It does
+not prove worker raw snapshots, scheduler cadence, source egress, or
+monitoring ownership.
+The generated completion overlay must include one `requirement_evidence` item
+per satisfied requirement, pointing to the JSON section that proves that
+requirement.
+When these refs point at local `docs/reviews/*.json` artifacts, the completion
+audit CLI verifies that the artifact exists, has `status: passed` when present,
+and that the JSON pointer exists.
+
+After each production deploy, run the hosted public-risk evidence smoke to prove
+that the public `/v1/risk/assess` response exposes both worker-style official
+evidence and query-point nearby coverage:
+
+```powershell
+python scripts\hosted_public_risk_evidence_smoke.py `
+  --base-url https://floodrisk.cc `
+  --lat 23.01929 `
+  --lng 120.18726 `
+  --radius-m 500 `
+  --location-text "Tainan hosted public risk evidence smoke" `
+  --evidence-output docs\reviews\hosted-public-risk-evidence-smoke-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-output docs\reviews\hosted-public-risk-completion-evidence-YYYY-MM-DD-<sha>.json
+```
+
+This smoke checks the public contract only: `data_freshness` for CWA/WRA
+official realtime sources, `official` rainfall or water-level evidence with
+`observed_at` and `ingested_at`, and a populated
+`nearby_realtime_coverage` block. It can satisfy the
+`public_risk_worker_evidence_path` completion requirements when the artifact is
+accepted, but it does not prove raw snapshot retention, scheduler cadence,
+hosted egress approval, or alert routing.
+The generated completion overlay must include one `requirement_evidence` item
+per satisfied requirement, pointing to the worker-evidence and nearby-coverage
+sections in the smoke artifact.
+Those local JSON refs are resolved by the completion audit CLI, so a failed
+smoke artifact or missing JSON pointer cannot satisfy the gate.
+
+## Hosted Source-Freshness Smoke
+
+When an admin token is available, run the hosted source-freshness smoke after a
+production deploy to prove that `/admin/v1/sources` exposes enabled hosted
+realtime backbone diagnostics with fresh or degraded-but-usable
+worker-persisted rows:
+
+```powershell
+python scripts\hosted_source_freshness_smoke.py `
+  --base-url https://floodrisk.cc `
+  --admin-token-env ADMIN_BEARER_TOKEN `
+  --evidence-output docs\reviews\hosted-source-freshness-smoke-YYYY-MM-DD-<sha>.json `
+  --completion-evidence-output docs\reviews\hosted-source-freshness-completion-evidence-YYYY-MM-DD-<sha>.json
+```
+
+The smoke reads the admin token from the named environment variable and never
+writes the token into the artifact. By default it requires the full hosted
+realtime backbone: CWA rainfall/tide, WRA water level, NCDR CAP, WRA IoW flood
+depth, and Civil IoT flood/sewer/pump/gate water-level adapters. It checks that
+each required source is enabled, has `healthy` or `degraded` source health, has
+`fresh` or `degraded` freshness, includes latest observed and ingested
+timestamps, has a positive `row_count`, has non-negative `lag_seconds`, and
+reports the `data_sources.is_enabled` gate.
+
+An accepted artifact may satisfy only these
+`hosted_worker_persisted_evidence` requirements:
+
+- `freshness_policy`
+- `worker_persisted_evidence_path`
+
+It does not prove raw snapshot retention, monitored scheduler cadence, hosted
+egress review, alert routing, or worker scheduler ownership.
+Any accepted completion overlay for this gate must include one
+`requirement_evidence` item per satisfied requirement, with `observed_at` for
+runtime smoke evidence or `reviewed_at` for policy/approval evidence.
