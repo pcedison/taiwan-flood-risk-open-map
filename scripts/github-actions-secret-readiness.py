@@ -237,6 +237,7 @@ def build_secret_readiness_artifact(
         "notes": [
             "This artifact is based only on GitHub Actions secret names and presence/update metadata.",
             "It never reads, decodes, hashes, or previews secret data.",
+            "Completion gate blocker count is route-aware and is the authoritative presence-only gate signal; unused alternative route inputs may remain missing.",
             "Configured secrets still need their private evidence manifests to pass validation before completion gates can be accepted.",
         ],
     }
@@ -253,6 +254,7 @@ def render_markdown(artifact: Mapping[str, Any]) -> str:
         f"- Configured tracked secrets: {summary['configured_tracked_secret_count']}/{summary['tracked_secret_count']}",
         f"- Missing required-for-completion secrets: {summary['missing_required_for_completion_count']}",
         f"- Completion gate blockers: {summary['completion_gate_blocker_count']}",
+        "- Gate decision: use the route-aware blocker count; unused alternative route inputs may remain missing.",
         "",
         "## Tracked Secrets",
         "",
