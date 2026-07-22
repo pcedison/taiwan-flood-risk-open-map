@@ -73,6 +73,13 @@
 - 手動觸發（`workflow_dispatch`）時可以把它設為 `true`，此時若有 completion-blocking 的 secret 缺席，`scripts/github-actions-secret-readiness.py` 會回傳非零結束碼，workflow 視為失敗，並開一則 `[secret-readiness-watchdog]` 的 issue。
 - 排程觸發（`schedule`）時，這個輸入沒有被設定，會 fallback 成 `'false'`（見 workflow 的 `env.FAIL_ON_COMPLETION_BLOCKERS` 運算式），對應到 `scripts/github-actions-secret-readiness.py` 的 `main()`：只有 `args.fail_on_completion_blockers` 為真且有 completion gate blocker 時才回傳 `1`；預設情況下一律回傳 `0`。也就是說，**每天的排程執行本身不會因為 secrets 缺席而失敗，只會報告**，`failure()` 觸發的「開 issue」步驟不會被啟動。
 
+issue 的關閉判定只看 route-aware 的 `completion_gate_blocker_count` 是否為 0：
+`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64` 必須存在，worker 部分則可選擇
+`HOSTED_WORKER_EVIDENCE_MANIFEST_B64` 單一路徑，或
+`ADMIN_BEARER_TOKEN` 加上 `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64` 的拆分路徑。
+未採用路徑上的個別 secret 可以維持未設定；
+`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` 仍是 optional，不影響關閉判定。
+
 ### `local-source-dispatch-watchdog.yml`（Local Source Dispatch Watchdog，排程 `7 16 * * *`，每天一次）
 
 引用的 secrets：**無**。整份 workflow 檔案中沒有任何 `secrets.*` 引用；它只呼叫本地 Python 腳本（`local-source-signal-gap-discovery-refresh.py` 等）分析地方政府資料來源缺口，並用 `actions/github-script` 內建的預設 `GITHUB_TOKEN` 開/關 issue。
@@ -97,11 +104,12 @@
 ## 接手者如何啟用
 
 1. 先確認已具備 repo admin 或至少 Secrets 管理權限（見 [SUCCESSION.md](../../SUCCESSION.md) 第 1 項）。
-2. 前往 repo 的 **Settings → Secrets and variables → Actions**，逐一新增以下 secret（名稱需完全一致）：
-   - `ADMIN_BEARER_TOKEN`：與 Zeabur 環境變數 `ADMIN_BEARER_TOKEN` 使用同一組隨機長字串（見
-     [docs/runbooks/zeabur-single-service-env.md](zeabur-single-service-env.md)），讓 CI 可以用同一把 token 呼叫 `/admin/v1/sources`。
-   - `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`、`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`、`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`、`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`：這四個是「私有證據 manifest」的 base64 編碼，manifest 本身的欄位結構由對應的 `scripts/hosted_*_evidence.py` / `scripts/local-source-request-followups.py` 定義，需要先在私有 ops 環境準備好未編碼的 JSON manifest，審核過內容不含機密洩漏後再 base64 編碼貼入 GitHub Secrets。
-3. 設定完成後，手動觸發一次 `Hosted Monitoring` workflow（`workflow_dispatch`），確認 `GITHUB_STEP_SUMMARY` 不再出現「因為 X 未設定所以跳過」的訊息，且對應的 `*-completion-evidence.json` 產物有正確產生。
+2. 前往 repo 的 **Settings → Secrets and variables → Actions**，依合法 completion route 設定名稱完全一致的 secret：
+   - worker 路徑二選一：設定 `HOSTED_WORKER_EVIDENCE_MANIFEST_B64`；或同時設定 `ADMIN_BEARER_TOKEN` 與 `HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`。`ADMIN_BEARER_TOKEN` 應與 Zeabur 環境變數使用同一組隨機長字串（見 [docs/runbooks/zeabur-single-service-env.md](zeabur-single-service-env.md)），讓 CI 可以用同一把 token 呼叫 `/admin/v1/sources`。
+   - monitoring 路徑：設定 `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`。
+   - `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` 只在已有經私下審核的地方來源派工追蹤證據時設定；它是 optional，不是 completion blocker。
+   - 三種 `*_MANIFEST_B64` secret 都是私有證據 manifest 的 base64 編碼，欄位結構由對應的 `scripts/hosted_*_evidence.py` / `scripts/local-source-request-followups.py` 定義。先在私有 ops 環境準備未編碼 JSON，確認內容已審核且不會洩漏機密，再編碼並貼入 GitHub Secrets。
+3. 設定完成後，手動觸發一次 `Hosted Monitoring` workflow（`workflow_dispatch`），確認所選 worker route 與 monitoring route 的步驟都有執行，且對應的 `*-completion-evidence.json` 產物有正確產生。未採用 worker route 或 optional local-source route 的「未設定所以跳過」訊息可以保留。
 4. 同步手動觸發一次 `GitHub Actions Secret Readiness Watchdog` 並帶入 `fail_on_completion_blockers=true`，確認回報「0 個 completion gate blocker」。
 5. 不要把任何 secret 的明文值寫進本 repo 的任何檔案（包含這份 runbook、issue、commit message）。
 

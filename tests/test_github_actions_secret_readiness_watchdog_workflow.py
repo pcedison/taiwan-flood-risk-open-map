@@ -60,7 +60,10 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
     assert "--fail-on-completion-blockers" in step_text
     assert "--output artifacts/github-actions-secret-readiness.json" in step_text
     assert "--markdown-output artifacts/github-actions-secret-readiness.md" in step_text
-    assert "actions/upload-artifact@v6" in step_text
+    assert (
+        "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+        in step_text
+    )
 
     issue_step = next(
         step
@@ -68,7 +71,9 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
         if step.get("name") == "Route secret readiness watchdog issue"
     )
     assert issue_step["if"] == "${{ failure() }}"
-    assert issue_step["uses"] == "actions/github-script@v8"
+    assert issue_step["uses"] == (
+        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
     script = issue_step["with"]["script"]
     assert "secret-readiness-watchdog" in script
     assert "GitHub Actions required secrets missing" in script
@@ -91,12 +96,17 @@ def test_github_actions_secret_readiness_watchdog_routes_missing_required_secret
         if step.get("name") == "Close resolved secret readiness issue"
     )
     assert resolve_step["if"] == "${{ success() }}"
-    assert resolve_step["uses"] == "actions/github-script@v8"
+    assert resolve_step["uses"] == (
+        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
     resolve_script = resolve_step["with"]["script"]
     assert 'const fs = require("fs");' in resolve_script
     assert "artifacts/github-actions-secret-readiness.json" in resolve_script
     assert "summary.completion_gate_blocker_count !== 0" in resolve_script
-    assert "summary.missing_required_for_completion_count !== 0" in resolve_script
+    assert "summary.missing_required_for_completion_count !== 0" not in resolve_script
+    assert "completion gate blockers are the route-aware close condition" in (
+        resolve_script
+    )
     assert "secret-readiness-watchdog" in resolve_script
     assert "GitHub Actions required secrets missing" in resolve_script
     assert "github.rest.issues.createComment" in resolve_script

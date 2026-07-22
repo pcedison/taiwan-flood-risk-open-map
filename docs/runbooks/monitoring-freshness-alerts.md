@@ -751,8 +751,11 @@ at `7 16 * * *` and can also be started manually. The workflow refreshes:
 - the grouped request dispatch queue,
 - `local-source-dispatch-watchdog/v1` JSON and Markdown summaries.
 
-By default the workflow fails when any signal-gap group or source-contract item
-still needs official dispatch. The failure route creates or comments on the
+Scheduled runs and manual runs with the default input are report-only: pending
+signal-gap groups or source-contract items are written to the artifacts without
+failing the job or invoking the issue route. To make those pending items a
+strict operational gate, manually dispatch the workflow with
+`fail_on_dispatch_required: true`. A strict failure creates or comments on the
 single public-safe issue
 `[local-source-dispatch-watchdog] Local source dispatch required`. The issue
 body includes only run URL, SHA, aggregate counts, gate categories, and
@@ -788,16 +791,23 @@ decodes, or uploads secret values. Local operator runs can still use
 `gh secret list` metadata, but the scheduled workflow intentionally avoids that
 API because `GITHUB_TOKEN` cannot list Actions secrets.
 
-By default the workflow fails when required secret routes still block completion
-gates. The failure route creates or comments on the stable public-safe issue
+Scheduled runs and manual runs with the default input are report-only: missing
+secret routes are written to the artifacts without failing the job or invoking
+the issue route. To make readiness a strict release/completion check, manually
+dispatch the workflow with `fail_on_completion_blockers: true`. A strict
+failure creates or comments on the stable public-safe issue
 `[secret-readiness-watchdog] GitHub Actions required secrets missing`. The issue
 body includes only run URL, SHA, aggregate counts, blocked gate keys, missing
 secret names, and public route details for the requirements each route would
 satisfy plus the next operator action. If a future run has no
-completion-blocking missing secrets, the workflow comments on and closes that
-same issue. The close action does not prove the decoded private evidence
+completion gate blockers, the workflow comments on and closes that same issue.
+The close condition is route-aware: it requires the hosted monitoring manifest
+and either the all-in-one hosted worker manifest or the split admin freshness
+plus worker-policy route. Inputs belonging only to the unused worker route may
+remain missing, and `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` remains
+optional. The close action does not prove the decoded private evidence
 manifests are valid; it only proves the secret-presence watchdog no longer sees
-missing required inputs.
+missing inputs on every legal route for a completion gate.
 
 This watchdog is not completion evidence. It proves whether the required GitHub
 Actions inputs are configured enough to attempt the private evidence routes.
