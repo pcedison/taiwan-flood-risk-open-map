@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 
 from app.adapters.contracts import DataSourceAdapter
-from app.adapters.registry import enabled_adapter_keys
+from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck
-from app.jobs.ingestion import AdapterBatchRunSummary, IngestionRunSummaryWriter
+from app.jobs.ingestion import (
+    AdapterBatchRunSummary,
+    IngestionRunSummaryWriter,
+    record_pipeline_status,
+    record_runtime_selection,
+)
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.postgres_writer import PostgresStagingBatchWriter
@@ -67,9 +73,20 @@ def run_managed_runtime_ingestion_cycle(
     promotion_adapter_keys: tuple[str, ...] | None = None,
     job_key: str = "runtime.managed.ingest.enabled_adapters",
 ) -> ManagedRuntimeIngestionResult:
+    cycle_started_at = datetime.now(UTC)
     resolved_settings = settings or load_worker_settings()
     selected_adapter_keys = enabled_adapter_keys(resolved_settings)
+    runtime_status_writer = _resolve_runtime_status_writer(
+        resolved_settings,
+        database_url=database_url,
+        run_writer=run_writer,
+    )
     if not selected_adapter_keys:
+        record_runtime_selection(
+            runtime_status_writer,
+            enabled_adapter_keys=(),
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
         log_event("runtime.managed.ingestion.noop", reason="no_enabled_adapters")
         return ManagedRuntimeIngestionResult(status="skipped", reason="no_enabled_adapters")
 
@@ -77,11 +94,16 @@ def run_managed_runtime_ingestion_cycle(
         resolved_settings,
         database_url=database_url,
         staging_writer=staging_writer,
-        run_writer=run_writer,
+        run_writer=runtime_status_writer,
         promotion_writer=promotion_writer,
         promote=promote,
     )
     if persistence is None:
+        record_runtime_selection(
+            runtime_status_writer,
+            enabled_adapter_keys=selected_adapter_keys,
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
         log_event(
             "runtime.managed.ingestion.noop",
             reason="no_database_url",
@@ -90,12 +112,38 @@ def run_managed_runtime_ingestion_cycle(
         )
         return ManagedRuntimeIngestionResult(status="skipped", reason="no_database_url")
 
-    adapters = _resolve_adapters(
-        adapter_by_key,
-        settings=resolved_settings,
-        adapter_builder=adapter_builder,
+    record_runtime_selection(
+        persistence.run_writer,
+        enabled_adapter_keys=selected_adapter_keys,
+        known_adapter_keys=tuple(ADAPTER_REGISTRY),
     )
+    try:
+        adapters = _resolve_adapters(
+            adapter_by_key,
+            settings=resolved_settings,
+            adapter_builder=adapter_builder,
+        )
+    except Exception as exc:
+        record_pipeline_status(
+            persistence.run_writer,
+            adapter_keys=selected_adapter_keys,
+            status="failed",
+            complete=False,
+            run_at=cycle_started_at,
+        )
+        log_event(
+            "runtime.managed.adapter_initialization.failed",
+            error_code=exc.__class__.__name__,
+        )
+        raise
     if adapters is None:
+        record_pipeline_status(
+            persistence.run_writer,
+            adapter_keys=selected_adapter_keys,
+            status="failed",
+            complete=False,
+            run_at=cycle_started_at,
+        )
         log_event(
             "runtime.managed.ingestion.noop",
             reason="no_adapters",
@@ -117,6 +165,7 @@ def run_managed_runtime_ingestion_cycle(
         job_key=job_key,
         writer=persistence.staging_writer,
         run_writer=persistence.run_writer,
+        pipeline_run_at=cycle_started_at,
     )
     status = _status_from_cycle(
         summaries=cycle.summaries,
@@ -126,16 +175,26 @@ def run_managed_runtime_ingestion_cycle(
         summaries=cycle.summaries,
         missing_adapter_keys=missing_adapter_keys,
     )
+    if missing_adapter_keys:
+        status = "failed"
 
     promotion = PromotionResult(promoted=0, evidence_ids=())
     if promote and cycle.summaries:
+        target_adapter_keys = promotion_adapter_keys or _promotion_adapter_keys(cycle.summaries)
         try:
             promotion = promote_accepted_staging(
                 _promotion_writer(persistence),
                 limit=promotion_limit,
-                adapter_keys=promotion_adapter_keys or _promotion_adapter_keys(cycle.summaries),
+                adapter_keys=target_adapter_keys,
             )
         except Exception as exc:
+            _record_pipeline_status_for_adapter_keys(
+                persistence.run_writer,
+                adapter_keys=target_adapter_keys,
+                summaries=cycle.summaries,
+                status="failed",
+                complete=False,
+            )
             log_event(
                 "runtime.managed.promotion.failed",
                 error_code=exc.__class__.__name__,
@@ -149,6 +208,13 @@ def run_managed_runtime_ingestion_cycle(
                 error_code=exc.__class__.__name__,
                 error_message=str(exc),
             )
+        _record_pipeline_status_for_adapter_keys(
+            persistence.run_writer,
+            adapter_keys=target_adapter_keys,
+            summaries=cycle.summaries,
+            status="succeeded",
+            complete=promotion_limit is None,
+        )
 
     log_event(
         "runtime.managed.ingestion.completed",
@@ -212,6 +278,20 @@ def _resolve_persistence_writers(
     )
 
 
+def _resolve_runtime_status_writer(
+    settings: WorkerSettings,
+    *,
+    database_url: str | None,
+    run_writer: IngestionRunSummaryWriter | None,
+) -> IngestionRunSummaryWriter | None:
+    if run_writer is not None:
+        return run_writer
+    resolved_database_url = database_url or settings.database_url
+    if not resolved_database_url:
+        return None
+    return PostgresIngestionRunWriter(database_url=resolved_database_url)
+
+
 def _resolve_adapters(
     adapter_by_key: Mapping[str, DataSourceAdapter] | None,
     *,
@@ -237,6 +317,26 @@ def _promotion_adapter_keys(
     return tuple(dict.fromkeys(summary.adapter_key for summary in summaries))
 
 
+def _record_pipeline_status_for_adapter_keys(
+    run_writer: IngestionRunSummaryWriter,
+    *,
+    adapter_keys: tuple[str, ...],
+    summaries: tuple[AdapterBatchRunSummary, ...],
+    status: Literal["succeeded", "failed"],
+    complete: bool,
+) -> None:
+    summary_by_key = {summary.adapter_key: summary for summary in summaries}
+    for adapter_key in adapter_keys:
+        summary = summary_by_key.get(adapter_key)
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status=status,
+            complete=complete,
+            run_at=summary.started_at if summary is not None else None,
+        )
+
+
 def _status_from_cycle(
     *,
     summaries: tuple[AdapterBatchRunSummary, ...],
@@ -258,8 +358,8 @@ def _reason_from_cycle(
     summaries: tuple[AdapterBatchRunSummary, ...],
     missing_adapter_keys: tuple[str, ...],
 ) -> str | None:
-    if not summaries:
-        return "no_matching_adapters"
     if missing_adapter_keys:
         return "missing_enabled_adapters"
+    if not summaries:
+        return "no_matching_adapters"
     return None

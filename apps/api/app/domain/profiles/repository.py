@@ -7,7 +7,8 @@ import json
 from typing import Any, cast
 
 import psycopg
-from psycopg.rows import dict_row
+
+from app.core.db import pooled_connection
 from psycopg.types.json import Jsonb
 
 
@@ -234,7 +235,7 @@ def enqueue_profile_refresh_job(
 def _connect(database_url: str, connection_factory: ConnectionFactory | None) -> Any:
     if connection_factory is not None:
         return connection_factory()
-    return psycopg.connect(database_url, connect_timeout=2, row_factory=dict_row)
+    return pooled_connection(database_url)
 
 
 def _commit(connection: Any) -> None:

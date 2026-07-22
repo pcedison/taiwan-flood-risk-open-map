@@ -29,7 +29,7 @@ from app.adapters.civil_iot.sta_client import (
     STA_RAIN_SEWER_BASE,
     STA_WATER_RESOURCE_BASE,
     StaFetchJson,
-    fetch_paginated_sta_things_records,
+    fetch_paginated_sta_things,
     fetch_sta_json,
 )
 from app.adapters.contracts import (
@@ -40,6 +40,7 @@ from app.adapters.contracts import (
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    StationInventoryProof,
 )
 
 # Sentinel returned by some stations when an instrument is offline.
@@ -64,6 +65,7 @@ def _build_sta_url(*, filter_expr: str, top: int = 2000) -> str:
         "$orderby=phenomenonTime desc;$top=1))"
         f"&$filter={filter_expr}"
         f"&$top={top}"
+        "&$count=true"
     )
 
 
@@ -73,6 +75,7 @@ def _build_rain_sewer_url(*, top: int = 2000) -> str:
         "?$expand=Locations,Datastreams($expand=Observations("
         "$orderby=phenomenonTime desc;$top=1))"
         f"&$top={top}"
+        "&$count=true"
     )
 
 
@@ -190,10 +193,12 @@ class StaWaterLevelApiAdapter:
         self._fetched_at = fetched_at
         self._fetch_json = fetch_json or fetch_sta_json
         self._raw_snapshot_key = raw_snapshot_key
+        self._station_inventory_proof: StationInventoryProof | None = None
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
+        self._station_inventory_proof = None
         try:
-            records = fetch_paginated_sta_things_records(
+            fetch_result = fetch_paginated_sta_things(
                 self._sta_url,
                 timeout_seconds=self._timeout_seconds,
                 fetch_json=self._fetch_json,
@@ -206,6 +211,7 @@ class StaWaterLevelApiAdapter:
             raise CivilIotStaFetchError(
                 f"{self.metadata.display_name} fetcher failed: {exc}"
             ) from exc
+        self._station_inventory_proof = fetch_result.station_inventory_proof
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
             RawSourceItem(
@@ -215,7 +221,7 @@ class StaWaterLevelApiAdapter:
                 payload=_raw_payload_with_water_level_metric(record),
                 raw_snapshot_key=self._raw_snapshot_key,
             )
-            for record in records
+            for record in fetch_result.records
         )
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
@@ -334,4 +340,5 @@ def _run(adapter: StaWaterLevelApiAdapter | StaWaterLevelAdapter) -> AdapterRunR
         fetched=fetched,
         normalized=tuple(normalized),
         rejected=tuple(rejected),
+        station_inventory_proof=getattr(adapter, "_station_inventory_proof", None),
     )

@@ -28,8 +28,8 @@ from app.adapters.civil_iot.sta_client import (
     DEFAULT_STA_TIMEOUT_SECONDS,
     STA_WATER_RESOURCE_BASE,
     StaFetchJson,
+    fetch_paginated_sta_things,
     fetch_sta_json,
-    parse_sta_things_payload,
 )
 from app.adapters.contracts import (
     AdapterMetadata,
@@ -39,6 +39,7 @@ from app.adapters.contracts import (
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    StationInventoryProof,
 )
 
 RIVER_WATER_LEVEL_STA_URL = (
@@ -46,6 +47,7 @@ RIVER_WATER_LEVEL_STA_URL = (
     "?$expand=Locations,Datastreams($expand=Observations($orderby=phenomenonTime desc;$top=1))"
     "&$filter=substringof('水位',Datastreams/name)"
     "&$top=2000"
+    "&$count=true"
 )
 RIVER_WATER_LEVEL_ATTRIBUTION = "Water Resources Agency / Civil IoT Taiwan"
 RIVER_WATER_LEVEL_CIVIL_IOT_DATASET = "iow01"
@@ -94,19 +96,23 @@ class CivilIotRiverApiAdapter:
         self._fetched_at = fetched_at
         self._fetch_json = fetch_json or fetch_sta_json
         self._raw_snapshot_key = raw_snapshot_key
+        self._station_inventory_proof: StationInventoryProof | None = None
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
+        self._station_inventory_proof = None
         try:
-            payload = self._fetch_json(self._sta_url, self._timeout_seconds)
+            fetch_result = fetch_paginated_sta_things(
+                self._sta_url,
+                timeout_seconds=self._timeout_seconds,
+                fetch_json=self._fetch_json,
+                source_url=RIVER_WATER_LEVEL_CIVIL_IOT_URL,
+            )
         except CivilIotStaError:
             raise
         except Exception as exc:  # pragma: no cover - defensive
             raise CivilIotStaFetchError(f"River water level fetcher failed: {exc}") from exc
 
-        records = parse_sta_things_payload(
-            payload,
-            source_url=RIVER_WATER_LEVEL_CIVIL_IOT_URL,
-        )
+        self._station_inventory_proof = fetch_result.station_inventory_proof
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
             RawSourceItem(
@@ -116,7 +122,7 @@ class CivilIotRiverApiAdapter:
                 payload=_raw_payload_with_water_level_metric(record),
                 raw_snapshot_key=self._raw_snapshot_key,
             )
-            for record in records
+            for record in fetch_result.records
         )
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
@@ -234,4 +240,5 @@ def _run(adapter: CivilIotRiverApiAdapter | CivilIotRiverAdapter) -> AdapterRunR
         fetched=fetched,
         normalized=tuple(normalized),
         rejected=tuple(rejected),
+        station_inventory_proof=getattr(adapter, "_station_inventory_proof", None),
     )

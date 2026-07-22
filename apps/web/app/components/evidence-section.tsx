@@ -82,7 +82,7 @@ export function EvidenceSection({
                             className="evidence-card-link"
                             href={sourceUrl}
                             target="_blank"
-                            rel="noreferrer"
+                            rel="noopener noreferrer"
                           >
                             {text.evidenceOpenSource}
                           </a>

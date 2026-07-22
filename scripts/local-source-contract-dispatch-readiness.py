@@ -21,13 +21,13 @@ ROOT = Path(__file__).resolve().parents[1]
 API_APP = ROOT / "apps" / "api"
 sys.path.insert(0, str(API_APP))
 
-from app.domain.realtime.local_source_action_plan import (  # noqa: E402
+from app.ops.local_source.local_source_action_plan import (  # noqa: E402
     build_local_source_action_plan,
 )
-from app.domain.realtime.local_source_coverage import (  # noqa: E402
+from app.ops.local_source.local_source_coverage import (  # noqa: E402
     list_local_source_coverage,
 )
-from app.domain.realtime.local_source_request_packets import (  # noqa: E402
+from app.ops.local_source.local_source_request_packets import (  # noqa: E402
     build_official_request_packets,
 )
 

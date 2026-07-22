@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 import json
+import secrets
 from types import TracebackType
 from typing import Literal, Protocol, Self, cast
 from urllib.parse import urlencode
@@ -55,7 +56,7 @@ class StaticUserReportChallengeVerifier:
         del remote_ip
         if not self.expected_token:
             raise UserReportChallengeUnavailable("static challenge token is not configured")
-        if token != self.expected_token:
+        if not secrets.compare_digest(token, self.expected_token):
             raise UserReportChallengeFailed(error_codes=("invalid-input-response",))
 
 

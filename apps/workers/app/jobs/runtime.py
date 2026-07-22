@@ -89,7 +89,7 @@ from app.adapters.local_yunlin import FetchJson as YunlinFetchJson
 from app.adapters.local_yunlin import YunlinWaterLevelApiAdapter
 from app.adapters.ncdr import FetchText as NcdrFetchText
 from app.adapters.ncdr import NcdrCapAlertAdapter
-from app.adapters.registry import enabled_adapter_keys
+from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import WraWaterLevelApiAdapter
 from app.adapters.wra_iow import FetchJson as WraIowFetchJson
@@ -100,6 +100,8 @@ from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.ingestion import (
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
+    record_pipeline_status,
+    record_runtime_selection,
     run_adapter_batch,
 )
 from app.jobs.official_demo import build_official_demo_adapters
@@ -842,9 +844,38 @@ def produce_enabled_runtime_adapter_jobs(
     job_key: str = "runtime.adapter.ingest",
     queue_name: str = "runtime-adapters",
 ) -> RuntimeQueueProducerResult:
-    runnable_adapters = build_runtime_adapters(settings)
+    attempt_started_at = datetime.now(UTC)
     enabled_keys = enabled_adapter_keys(settings)
+    runtime_status_writer = (
+        PostgresIngestionRunWriter(database_url=settings.database_url)
+        if settings.database_url and queue is None
+        else None
+    )
+    record_runtime_selection(
+        runtime_status_writer,
+        enabled_adapter_keys=enabled_keys,
+        known_adapter_keys=tuple(ADAPTER_REGISTRY),
+    )
+    try:
+        runnable_adapters = build_runtime_adapters(settings)
+    except Exception:
+        record_pipeline_status(
+            runtime_status_writer,
+            adapter_keys=enabled_keys,
+            status="failed",
+            complete=False,
+            run_at=attempt_started_at,
+        )
+        raise
     adapter_keys = tuple(key for key in enabled_keys if key in runnable_adapters)
+    missing_adapter_keys = tuple(key for key in enabled_keys if key not in runnable_adapters)
+    record_pipeline_status(
+        runtime_status_writer,
+        adapter_keys=missing_adapter_keys,
+        status="failed",
+        complete=False,
+        run_at=attempt_started_at,
+    )
     if not adapter_keys:
         reason = "no_enabled_adapters" if not enabled_keys else "no_runnable_adapters"
         log_event(
@@ -1073,6 +1104,7 @@ def work_runtime_queue_once(
         )
         return RuntimeQueueWorkerResult(status="skipped", reason="no_job")
 
+    attempt_started_at = datetime.now(UTC)
     adapter_key = _job_adapter_key(job)
     if adapter_key is None:
         return _fail_runtime_queue_job(
@@ -1083,8 +1115,13 @@ def work_runtime_queue_once(
             adapter_key=None,
             error="runtime queue job is missing adapter_key",
             retry_delay_seconds=retry_delay_seconds,
+            attempt_started_at=attempt_started_at,
+            run_writer=run_writer,
         )
 
+    summary: AdapterBatchRunSummary | None = None
+    freshness_checks: tuple[FreshnessCheck, ...] = ()
+    promotion = PromotionResult(promoted=0, evidence_ids=())
     try:
         adapters = (
             adapter_by_key
@@ -1101,6 +1138,8 @@ def work_runtime_queue_once(
                 adapter_key=adapter_key,
                 error=f"unknown runtime adapter_key: {adapter_key}",
                 retry_delay_seconds=retry_delay_seconds,
+                attempt_started_at=attempt_started_at,
+                run_writer=run_writer,
             )
 
         summary = run_adapter_batch(
@@ -1128,10 +1167,11 @@ def work_runtime_queue_once(
                 adapter_key=adapter_key,
                 error=failure_reason,
                 retry_delay_seconds=retry_delay_seconds,
+                attempt_started_at=attempt_started_at,
                 summary=summary,
                 freshness_checks=freshness_checks,
+                run_writer=run_writer,
             )
-        promotion = PromotionResult(promoted=0, evidence_ids=())
         if promote:
             promotion = promote_accepted_staging(
                 _runtime_promotion_writer(promotion_writer),
@@ -1146,8 +1186,13 @@ def work_runtime_queue_once(
             adapter_key=adapter_key,
             error=f"{exc.__class__.__name__}: {exc}",
             retry_delay_seconds=retry_delay_seconds,
+            attempt_started_at=attempt_started_at,
+            summary=summary,
+            freshness_checks=freshness_checks,
+            run_writer=run_writer,
         )
 
+    assert summary is not None
     updated = mark_runtime_adapter_job_succeeded(
         resolved_settings,
         job_id=job.id,
@@ -1155,6 +1200,13 @@ def work_runtime_queue_once(
         worker_id=resolved_worker_id,
     )
     if not updated:
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status="failed",
+            complete=False,
+            run_at=summary.started_at,
+        )
         log_event(
             "runtime.queue.worker.completion_not_updated",
             job_id=job.id,
@@ -1171,6 +1223,14 @@ def work_runtime_queue_once(
             freshness_checks=freshness_checks,
             promoted=promotion.promoted,
             evidence_ids=promotion.evidence_ids,
+        )
+    if promote:
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status="succeeded",
+            complete=True,
+            run_at=summary.started_at,
         )
     log_event(
         "runtime.queue.worker.completed",
@@ -1249,9 +1309,19 @@ def _fail_runtime_queue_job(
     adapter_key: str | None,
     error: str,
     retry_delay_seconds: int,
+    attempt_started_at: datetime,
     summary: AdapterBatchRunSummary | None = None,
     freshness_checks: tuple[FreshnessCheck, ...] = (),
+    run_writer: IngestionRunSummaryWriter | None = None,
 ) -> RuntimeQueueWorkerResult:
+    if adapter_key is not None:
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status="failed",
+            complete=False,
+            run_at=summary.started_at if summary is not None else attempt_started_at,
+        )
     updated = mark_runtime_adapter_job_failed(
         settings,
         job_id=job.id,

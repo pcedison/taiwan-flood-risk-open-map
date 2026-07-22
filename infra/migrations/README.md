@@ -86,3 +86,32 @@ candidates for the official realtime read model rollout:
 - `official.civil_iot.gate_water_level`
 - `official.ncdr.cap`
 - `local.tainan.flood_sensor`
+
+`0034_public_realtime_source_health.sql` adds the bounded latest-ingestion-job
+lookup index used by the public source-health read model and registers the
+authorization-gated `local.kinmen.kwis_pump_station` adapter as disabled by
+default. It also adds conservative station-inventory review gates. No source is
+marked complete by this migration: an operator must first review a full-snapshot
+contract and set a positive minimum station baseline. Public-safe runtime
+selection and final pipeline outcome fields let the API distinguish an explicit
+disable from a stalled worker and a promotion failure from fetch success. It
+also stores the ingestion-attempt timestamp for each final outcome, preventing
+an older overlapping cycle from certifying a newer run. The minimum baseline is
+only an anomaly floor: approval still requires declared-total/pagination and a
+versioned station-ID manifest plus jurisdiction/redundancy review. It does not
+store an API token or enable the source.
+
+`0035_station_inventory_and_jurisdiction_proofs.sql` adds per-ingestion station
+inventory snapshots, the fixed `station-id-json-v1` manifest/checksum contract,
+reviewed 22-county boundary snapshot tables, and per-county/per-signal source
+catalog mappings. The migration seeds canonical county codes and candidate
+source mappings only. It does not import official boundary geometry, activate a
+boundary snapshot, approve a station manifest, or certify any source catalog;
+all 22 × 4 jurisdiction signal contracts start as `unreviewed`. Until every
+applicable proof and review gate is complete, the public API must fail closed
+and must not emit `no_station_in_range`. Reviewed boundaries are immutable and
+revalidated against their EWKB manifest; each reviewed county/signal catalog is
+also pinned to the exact applicable source-mapping count and checksum, so later
+mapping drift revokes the proof automatically. See the
+[station inventory and jurisdiction review runbook](../../docs/runbooks/station-inventory-and-jurisdiction-review.md)
+before changing any review or approval field.

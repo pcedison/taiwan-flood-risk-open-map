@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any, Mapping
 
-from app.domain.realtime.local_source_action_plan import (
+from app.ops.local_source.local_source_action_plan import (
     ACCEPTED_SIGNAL_EVIDENCE_STATUSES,
     ACCEPTED_SOURCE_CONTRACT_EVIDENCE_STATUSES,
     COMPLETION_EVIDENCE_SCHEMA_VERSION,

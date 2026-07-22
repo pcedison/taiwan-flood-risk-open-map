@@ -26,7 +26,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert workflow_dispatch_inputs["expected_deployment_sha"] == {
         "description": (
             "Expected fallback Hosted Monitoring deployment SHA. Defaults to "
-            "production-release branch HEAD."
+            "main branch HEAD."
         ),
         "required": "false",
         "type": "string",
@@ -75,10 +75,10 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
 
     steps = job["steps"]
     step_text = "\n".join(str(step) for step in steps)
-    assert "actions/checkout@v5" in step_text
-    assert "actions/setup-python@v6" in step_text
+    assert "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd" in step_text
+    assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1" in step_text
     assert "Resolve fallback deployment SHA" in step_text
-    assert "git ls-remote --heads origin production-release" in step_text
+    assert "git ls-remote --heads origin main" in step_text
     assert "workflow_commit_sha" in step_text
     assert "scripts/hosted-monitoring-schedule-readiness.py" in step_text
     assert "--expected-head-sha \"${EXPECTED_HEAD_SHA}\"" in step_text
@@ -97,7 +97,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert "createWorkflowDispatch" in step_text
     assert "hosted-monitoring.yml" in step_text
     assert "expected_deployment_sha: expectedDeploymentSha" in step_text
-    assert "actions/upload-artifact@v6" in step_text
+    assert "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f" in step_text
 
     fallback_step = next(
         step
@@ -107,7 +107,11 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert fallback_step["if"] == (
         "${{ always() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' && steps.readiness-status.outputs.status != 'passed' }}"
     )
-    assert fallback_step["uses"] == "actions/github-script@v8"
+    assert (
+        fallback_step["uses"]
+        == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
+    assert fallback_step["with"]["retries"] == "3"
 
     alert_routing_step = next(
         step
@@ -117,7 +121,11 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert alert_routing_step["if"] == (
         "${{ always() && steps.readiness-status.outputs.status != 'passed' }}"
     )
-    assert alert_routing_step["uses"] == "actions/github-script@v8"
+    assert (
+        alert_routing_step["uses"]
+        == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
+    assert alert_routing_step["with"]["retries"] == "3"
     alert_script = alert_routing_step["with"]["script"]
     assert 'const fs = require("fs");' in alert_script
     assert "artifacts/hosted-monitoring-schedule-readiness.json" in alert_script
@@ -137,7 +145,11 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         if step.get("name") == "Close resolved schedule watchdog issue"
     )
     assert resolve_step["if"] == "${{ success() }}"
-    assert resolve_step["uses"] == "actions/github-script@v8"
+    assert (
+        resolve_step["uses"]
+        == "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
+    assert resolve_step["with"]["retries"] == "3"
     resolve_script = resolve_step["with"]["script"]
     assert 'const fs = require("fs");' in resolve_script
     assert "artifacts/hosted-monitoring-schedule-readiness.json" in resolve_script
