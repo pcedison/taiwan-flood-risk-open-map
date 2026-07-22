@@ -19,6 +19,7 @@ API_APP = ROOT / "apps" / "api"
 sys.path.insert(0, str(API_APP))
 
 from app.ops.local_source.local_source_action_plan import (  # noqa: E402
+    COMPLETION_EVIDENCE_SCHEMA_VERSION as ACTION_PLAN_COMPLETION_SCHEMA_VERSION,
     build_local_source_action_plan,
 )
 from app.ops.local_source.local_source_coverage import (  # noqa: E402
@@ -62,14 +63,36 @@ def main() -> int:
         required=True,
         help="Directory where the bundle artifacts should be written.",
     )
+    parser.add_argument(
+        "--completion-evidence-json",
+        help=(
+            "Optional sanitized local-source-completion-evidence/v1 overlay. "
+            "Accepted entries are omitted from the remaining request bundle; "
+            "request_dispatched entries remain pending."
+        ),
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    plan = build_local_source_action_plan(list_local_source_coverage())
-    packets = build_official_request_packets(plan)
-    batches = build_signal_gap_request_batches(plan)
+    completion_evidence = (
+        _load_completion_evidence(Path(args.completion_evidence_json))
+        if args.completion_evidence_json
+        else None
+    )
+    plan = build_local_source_action_plan(
+        list_local_source_coverage(),
+        completion_evidence=completion_evidence,
+    )
+    packets = build_official_request_packets(
+        plan,
+        completion_evidence=completion_evidence,
+    )
+    batches = build_signal_gap_request_batches(
+        plan,
+        completion_evidence=completion_evidence,
+    )
     official_template = build_completion_evidence_template(packets)
     signal_dispatch_template = build_signal_gap_dispatch_evidence_template(
         batches,
@@ -168,6 +191,21 @@ def _json(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
 
 
+def _load_completion_evidence(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"{path}: completion evidence JSON is invalid") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{path}: completion evidence JSON must be an object")
+    if payload.get("schema_version") != ACTION_PLAN_COMPLETION_SCHEMA_VERSION:
+        raise SystemExit(
+            f"{path}: schema_version must be "
+            f"{ACTION_PLAN_COMPLETION_SCHEMA_VERSION!r}"
+        )
+    return payload
+
+
 def _summary(
     packets: tuple[dict[str, Any], ...],
     batches: tuple[dict[str, Any], ...],
@@ -244,10 +282,7 @@ def _manifest(
         "schema_version": SCHEMA_VERSION,
         "captured_at": captured_at,
         "summary": summary,
-        "remaining_completion_gates": [
-            "required_signal_families",
-            "official_authorization_and_contracts",
-        ],
+        "remaining_completion_gates": _remaining_completion_gates(summary),
         "files": [
             {
                 "path": name,
@@ -502,11 +537,17 @@ def _summary_markdown(
     summary: dict[str, int],
     file_names: tuple[str, ...],
 ) -> str:
+    remaining_completion_gates = _remaining_completion_gates(summary)
+    remaining_completion_gates_text = (
+        ", ".join(remaining_completion_gates)
+        if remaining_completion_gates
+        else "none"
+    )
     lines = [
         "# Local Source Request Packet Bundle",
         "",
         f"- captured_at: {captured_at}",
-        "- remaining_completion_gates: required_signal_families, official_authorization_and_contracts",
+        f"- remaining_completion_gates: {remaining_completion_gates_text}",
         "",
         "## Summary",
         "",
@@ -532,6 +573,15 @@ def _summary_markdown(
         ]
     )
     return "\n".join(lines)
+
+
+def _remaining_completion_gates(summary: dict[str, int]) -> list[str]:
+    gates: list[str] = []
+    if summary["signal_gap_county_item_count"]:
+        gates.append("required_signal_families")
+    if summary["source_contract_completion_target_count"]:
+        gates.append("official_authorization_and_contracts")
+    return gates
 
 
 def _file_purpose(name: str) -> str:

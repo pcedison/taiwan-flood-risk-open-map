@@ -20,6 +20,7 @@ API_APP = ROOT / "apps" / "api"
 sys.path.insert(0, str(API_APP))
 
 from app.ops.local_source.local_source_action_plan import (  # noqa: E402
+    COMPLETION_EVIDENCE_SCHEMA_VERSION,
     build_local_source_action_plan,
 )
 from app.ops.local_source.local_source_coverage import (  # noqa: E402
@@ -52,14 +53,33 @@ def main() -> int:
         help="ISO-8601 timestamp for this readiness summary.",
     )
     parser.add_argument(
+        "--completion-evidence-json",
+        help=(
+            "Optional sanitized local-source-completion-evidence/v1 overlay. "
+            "Accepted entries remove completed signal targets; "
+            "request_dispatched entries remain pending."
+        ),
+    )
+    parser.add_argument(
         "--output",
         help="Optional output path. When omitted, content is written to stdout.",
     )
     args = parser.parse_args()
 
     discovery_summary = _load_discovery_summary(Path(args.discovery_summary_json))
-    plan = build_local_source_action_plan(list_local_source_coverage())
-    batches = build_signal_gap_request_batches(plan)
+    completion_evidence = (
+        _load_completion_evidence(Path(args.completion_evidence_json))
+        if args.completion_evidence_json
+        else None
+    )
+    plan = build_local_source_action_plan(
+        list_local_source_coverage(),
+        completion_evidence=completion_evidence,
+    )
+    batches = build_signal_gap_request_batches(
+        plan,
+        completion_evidence=completion_evidence,
+    )
     readiness = build_dispatch_readiness(
         batches,
         discovery_summary=discovery_summary,
@@ -85,6 +105,21 @@ def _load_discovery_summary(path: Path) -> dict[str, Any]:
     if payload.get("schema_version") != DISCOVERY_SUMMARY_SCHEMA_VERSION:
         raise SystemExit(
             f"{path}: schema_version must be {DISCOVERY_SUMMARY_SCHEMA_VERSION!r}"
+        )
+    return payload
+
+
+def _load_completion_evidence(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"{path}: completion evidence JSON is invalid") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{path}: completion evidence JSON must be an object")
+    if payload.get("schema_version") != COMPLETION_EVIDENCE_SCHEMA_VERSION:
+        raise SystemExit(
+            f"{path}: schema_version must be "
+            f"{COMPLETION_EVIDENCE_SCHEMA_VERSION!r}"
         )
     return payload
 

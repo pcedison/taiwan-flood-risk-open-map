@@ -334,15 +334,20 @@ $encoded | gh secret set LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 `
   --body-file -
 ```
 
-This secret must contain only dispatch progress evidence, not official reply
+This secret may contain reviewed dispatch progress and reviewed accepted
+signal-family/source-contract entries, but it must not contain official reply
 content, provider credentials, personal contact details, screenshots, or access
-tokens. The workflow decodes it into runner temp storage, writes
-`local-source-request-followups.json`, and emits a sanitized
-`local-source-request-dispatch-completion-evidence.json` where every
-`evidence_ref` is replaced by
-`private-ops://redacted/local-source-request-dispatch`. That sanitized overlay
-is safe to upload as an artifact and lets the aggregate completion audit count
-`request_dispatched` progress without treating it as accepted completion.
+tokens. Accepted entries require a real, non-placeholder `evidence_ref` and
+`reviewed_at`. The workflow decodes the secret into runner temp storage, writes
+`local-source-request-followups.json`, and emits a sanitized completion overlay
+where every `evidence_ref` is replaced by
+`private-ops://redacted/local-source-request-dispatch` and reviewer details are
+omitted. That sanitized overlay is safe to upload as an artifact. Hosted
+Monitoring uses it in the aggregate completion audit; the dedicated Local
+Source Dispatch Watchdog also uses it when rebuilding readiness and request
+packets. `request_dispatched` remains follow-up progress, while reviewed
+accepted entries can remove their exact county/signal or county/gate target
+from the remaining dispatch queue.
 
 For release/completion reviews, manually dispatch Hosted Monitoring with
 `fail_on_overdue_local_source_followups=true` if overdue official follow-ups

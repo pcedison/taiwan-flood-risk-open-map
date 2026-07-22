@@ -276,3 +276,180 @@ def test_local_source_request_followups_cli_writes_sanitized_completion_overlay(
     audit_payload = json.loads(audit.stdout)
     assert audit_payload["evidence_overlay"]["signal_family_gap_dispatch_count"] == 1
     assert audit_payload["evidence_overlay"]["source_contract_dispatch_count"] == 1
+
+
+def test_local_source_request_followups_cli_sanitizes_accepted_completion(
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "accepted-evidence.json"
+    sanitized_output_path = tmp_path / "sanitized-completion-evidence.json"
+    private_ref = "private-ops://local-source/review/private-ticket"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-07-22T03:00:00Z",
+                "signal_family_gap_evidence": [
+                    {
+                        "county": "連江縣",
+                        "signal_type": "sewer_water_level",
+                        "status": "official_unavailable",
+                        "evidence_ref": private_ref,
+                        "reviewed_at": "2026-07-22T03:00:00Z",
+                        "reviewer": "private-ops-team",
+                    }
+                ],
+                "source_contract_evidence": [
+                    {
+                        "county": "金門縣",
+                        "gate": "authorization_request",
+                        "status": "authorized",
+                        "evidence_ref": private_ref,
+                        "reviewed_at": "2026-07-22T03:00:00Z",
+                        "reviewer": "private-ops-team",
+                    }
+                ],
+                "production_gate_evidence": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+            "--as-of",
+            "2026-07-22T03:01:00Z",
+            "--sanitized-completion-evidence-output",
+            str(sanitized_output_path),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    sanitized_text = sanitized_output_path.read_text(encoding="utf-8")
+    assert private_ref not in result.stdout
+    assert private_ref not in sanitized_text
+    assert "private-ops-team" not in sanitized_text
+    sanitized = json.loads(sanitized_text)
+    assert sanitized["signal_family_gap_evidence"] == [
+        {
+            "county": "連江縣",
+            "signal_type": "sewer_water_level",
+            "status": "official_unavailable",
+            "evidence_ref": "private-ops://redacted/local-source-request-dispatch",
+            "reviewed_at": "2026-07-22T03:00:00Z",
+        }
+    ]
+    assert sanitized["source_contract_evidence"] == [
+        {
+            "county": "金門縣",
+            "gate": "authorization_request",
+            "status": "authorized",
+            "evidence_ref": "private-ops://redacted/local-source-request-dispatch",
+            "reviewed_at": "2026-07-22T03:00:00Z",
+        }
+    ]
+
+
+def test_local_source_request_followups_cli_rejects_unreviewed_accepted_item(
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "unreviewed-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-07-22T03:00:00Z",
+                "signal_family_gap_evidence": [
+                    {
+                        "county": "連江縣",
+                        "signal_type": "sewer_water_level",
+                        "status": "official_unavailable",
+                        "evidence_ref": "private-ops://local-source/review/ticket",
+                    }
+                ],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+            "--as-of",
+            "2026-07-22T03:01:00Z",
+            "--sanitized-completion-evidence-output",
+            str(tmp_path / "sanitized.json"),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "reviewed_at is required" in result.stderr
+
+
+def test_local_source_request_followups_cli_rejects_placeholder_accepted_item(
+    tmp_path: Path,
+) -> None:
+    evidence_path = tmp_path / "placeholder-evidence.json"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "local-source-completion-evidence/v1",
+                "captured_at": "2026-07-22T03:00:00Z",
+                "signal_family_gap_evidence": [
+                    {
+                        "county": "連江縣",
+                        "signal_type": "sewer_water_level",
+                        "status": "official_unavailable",
+                        "evidence_ref": "REPLACE_WITH_PRIVATE_EVIDENCE_REF",
+                        "reviewed_at": "2026-07-22T03:00:00Z",
+                    }
+                ],
+                "source_contract_evidence": [],
+                "production_gate_evidence": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--completion-evidence-json",
+            str(evidence_path),
+            "--as-of",
+            "2026-07-22T03:01:00Z",
+            "--sanitized-completion-evidence-output",
+            str(tmp_path / "sanitized.json"),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        encoding="utf-8",
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "evidence_ref must not be a placeholder" in result.stderr
