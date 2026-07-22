@@ -205,6 +205,9 @@ def _remove_completed_packet_targets(
                 accepted_source_contract_keys=accepted_source_contract_keys,
             )
         ]
+        if len(remaining_targets) == len(original_targets):
+            filtered.append(packet)
+            continue
         if not remaining_targets:
             continue
 
