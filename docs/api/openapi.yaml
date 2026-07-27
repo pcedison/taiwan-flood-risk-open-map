@@ -885,9 +885,9 @@ paths:
                           total_counties: 22
                           local_direct_remaining_count: 2
                           central_backbone_remaining_count: 0
-                          unresolved_priority_item_count: 16
+                          unresolved_priority_item_count: 14
                           signal_gap_group_count: 3
-                          signal_gap_county_item_count: 17
+                          signal_gap_county_item_count: 15
                           authorization_request_count: 2
                           metadata_release_monitor_count: 1
                           public_api_contract_review_count: 3
@@ -919,7 +919,7 @@ paths:
                             status: incomplete
                             evidence: 3 signal families remain in signal_gap_priority_groups.
                             blocking_items:
-                              - pump_or_gate_status:13
+                              - pump_or_gate_status:11
                               - flood_depth:3
                               - sewer_water_level:1
                             next_workstream: send_official_read_api_requests
@@ -949,7 +949,7 @@ paths:
                       signal_gap_priority_groups:
                         - rank: 1
                           signal_type: pump_or_gate_status
-                          county_count: 14
+                          county_count: 11
                           counties:
                             - 連江縣
                             - 金門縣
@@ -961,18 +961,18 @@ paths:
                             monitoring_open_data_release: 1
                             needs_authorization_request: 1
                             needs_public_read_api_contract: 2
-                            needs_signal_gap_review: 10
+                            needs_signal_gap_review: 7
                           discovery_monitor:
                             target_signal_type: pump_or_gate_status
                             source_catalog: data.gov.tw dataset export
                             source_catalog_url: https://data.gov.tw/api/front/dataset/export?format=json
                             candidate_readiness_field: candidate_live_read_api
-                            county_count: 14
-                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --fail-on-candidate --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣 --county 嘉義市 --county 桃園市 --county 澎湖縣 --county 臺中市 --county 臺南市 --county 南投縣 --county 基隆市 --county 宜蘭縣 --county 新北市 --county 新竹縣
+                            county_count: 11
+                            command: PYTHONPATH=apps/workers python scripts/local-source-discovery-monitor.py --signal-type pump_or_gate_status --fail-on-candidate --county 連江縣 --county 金門縣 --county 臺東縣 --county 苗栗縣 --county 澎湖縣 --county 南投縣 --county 嘉義市 --county 基隆市 --county 新北市 --county 新竹縣 --county 臺中市
                           official_request_batch:
                             target_signal_type: pump_or_gate_status
                             packet_type: signal_gap_batch_request
-                            county_count: 14
+                            county_count: 11
                             counties:
                               - 連江縣
                               - 金門縣

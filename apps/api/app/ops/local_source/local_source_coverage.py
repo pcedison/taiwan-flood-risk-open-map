@@ -88,6 +88,7 @@ LOCAL_SIGNAL_TYPES_BY_ADAPTER_KEY = {
     "local.pingtung.flood_sensor": "flood_depth",
     "local.yilan.flood_sensor": "flood_depth",
     "local.yilan.water_level": "water_level",
+    "local.yilan.mobile_pump_status": "pump_or_gate_status",
     "local.hualien.flood_sensor": "flood_depth",
     "local.taitung.flood_sensor": "flood_depth",
     "local.penghu.water_level": "water_level",
@@ -370,12 +371,13 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
             *NATIONAL_BASELINE_BACKBONE_KEYS,
             "official.civil_iot.flood_sensor",
             "official.civil_iot.sewer_water_level",
+            "official.civil_iot.gate_water_level",
         ),
         notes=(
             "2026-06-30 Civil IoT live distribution smoke: "
-            "official.civil_iot.sewer_water_level fetched 66 Taoyuan records; "
-            "no pump/gate Civil IoT records were observed for Taoyuan, so "
-            "pump_or_gate_status remains missing.",
+            "official.civil_iot.sewer_water_level fetched 66 Taoyuan records. "
+            "2026-07-02 Civil IoT gate_water_level smoke fetched 3 Taoyuan "
+            "records after normalizing legacy authority city glyphs.",
         ),
     ),
     LocalSourceCoverageRecord(
@@ -736,9 +738,11 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         production_adapter_keys=(
             "local.yilan.flood_sensor",
             "local.yilan.water_level",
+            "local.yilan.mobile_pump_status",
         ),
         production_source_urls=(
             "https://wragis.e-land.gov.tw/arcgis/rest/services/HDST/%E9%98%B2%E6%B1%9B%E5%84%80%E8%A1%A8%E6%9D%BF/MapServer/0/query?where=1%3D1&outFields=*&f=json",
+            "https://wragis.e-land.gov.tw/arcgis/rest/services/HDST/%E9%98%B2%E6%B1%9B%E5%84%80%E8%A1%A8%E6%9D%BF/MapServer/1/query?where=1%3D1&outFields=*&f=json&returnGeometry=true&outSR=4326",
             "https://wragis.e-land.gov.tw/arcgis/rest/services/HDST/%E9%98%B2%E6%B1%9B%E5%84%80%E8%A1%A8%E6%9D%BF/MapServer/2/query?where=1%3D1&outFields=*&f=json",
         ),
         central_backbone_adapter_keys=(
@@ -748,7 +752,10 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
         ),
         notes=(
             "2026-06-28 smoke：宜蘭防汛儀表板 ArcGIS layer 0 回傳 85 筆淹水感測，"
-            "layer 2 回傳 154 筆水位計；write_date 為 epoch milliseconds。",
+            "layer 2 回傳 154 筆水位計；write_date 為台灣本地時鐘編碼的 "
+            "epoch milliseconds，adapter 會減 8 小時還原 UTC。"
+            "2026-07-02 layer 1 live smoke 回傳 42 筆移動式抽水機狀態；"
+            "LogDate 使用相同本地時鐘編碼。",
         ),
     ),
     LocalSourceCoverageRecord(

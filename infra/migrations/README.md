@@ -115,3 +115,9 @@ also pinned to the exact applicable source-mapping count and checksum, so later
 mapping drift revokes the proof automatically. See the
 [station inventory and jurisdiction review runbook](../../docs/runbooks/station-inventory-and-jurisdiction-review.md)
 before changing any review or approval field.
+
+`0037_yilan_mobile_pump_status_source.sql` registers the disabled-by-default
+`local.yilan.mobile_pump_status` source and its required Yilan County
+`pump_or_gate_status` jurisdiction mapping. The migration does not enable the
+adapter or approve station-inventory evidence; operators must still enable both
+runtime gates and complete the existing fail-closed source review.

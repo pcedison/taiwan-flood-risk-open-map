@@ -23,6 +23,7 @@ from infra.scripts.apply_migrations import apply_migrations  # noqa: E402
 MIGRATIONS_DIR = REPO_ROOT / "infra" / "migrations"
 EXPECTED_PRE_UPGRADE_VERSION = 32
 EXPECTED_POST_UPGRADE_VERSION = 36
+EXPECTED_CHECKED_IN_VERSION = 37
 EXPECTED_JURISDICTION_COUNT = 22
 EXPECTED_SIGNAL_CONTRACT_COUNT = 88
 EXPECTED_SOURCE_MAPPING_COUNT = 46
@@ -194,7 +195,7 @@ def _migration_manifests() -> Iterator[tuple[Path, Path, Path]]:
     _expect_equal(
         "checked-in migration versions",
         versions,
-        tuple(range(1, EXPECTED_POST_UPGRADE_VERSION + 1)),
+        tuple(range(1, EXPECTED_CHECKED_IN_VERSION + 1)),
     )
     with TemporaryDirectory(prefix="flood-risk-migration-upgrade-") as temporary:
         temporary_path = Path(temporary)
@@ -205,10 +206,12 @@ def _migration_manifests() -> Iterator[tuple[Path, Path, Path]]:
         through_0035.mkdir()
         through_0036.mkdir()
         for migration in migration_paths:
-            shutil.copy2(migration, through_0036 / migration.name)
-            if int(migration.name[:4]) <= 35:
+            version = int(migration.name[:4])
+            if version <= EXPECTED_POST_UPGRADE_VERSION:
+                shutil.copy2(migration, through_0036 / migration.name)
+            if version <= 35:
                 shutil.copy2(migration, through_0035 / migration.name)
-            if int(migration.name[:4]) <= EXPECTED_PRE_UPGRADE_VERSION:
+            if version <= EXPECTED_PRE_UPGRADE_VERSION:
                 shutil.copy2(migration, through_0032 / migration.name)
         yield through_0032, through_0035, through_0036
 

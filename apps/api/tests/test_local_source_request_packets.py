@@ -209,7 +209,7 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
 
     assert top_gap["signal_type"] == "pump_or_gate_status"
     assert [packet["county"] for packet in packets] == top_gap["counties"]
-    assert len(packets) == top_gap["county_count"] == 13
+    assert len(packets) == top_gap["county_count"] == 11
     assert all(
         top_gap["signal_type"] in packet["target_signal_types"]
         for packet in packets
@@ -218,6 +218,8 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
     kinmen = next(packet for packet in packets if packet["county"] == "\u91d1\u9580\u7e23")
     assert kinmen["packet_type"] == "authorization_request"
     assert kinmen["target_signal_types"] == ["pump_or_gate_status"]
+    assert all(packet["county"] != "宜蘭縣" for packet in packets)
+    assert all(packet["county"] != "桃園市" for packet in packets)
 
 
 def test_official_request_packets_expose_completion_evidence_targets() -> None:
@@ -346,7 +348,7 @@ def test_reviewed_signal_evidence_removes_only_matching_request_target() -> None
         for batch in batches
         if batch["target_signal_type"] == "pump_or_gate_status"
     )
-    assert pump_batch["county_count"] == 12
+    assert pump_batch["county_count"] == 10
     assert "金門縣" not in pump_batch["counties"]
     assert "--county 金門縣" not in pump_batch["packet_generator_command"]
 
@@ -385,7 +387,7 @@ def test_dispatch_only_or_placeholder_evidence_does_not_remove_request_targets()
         for batch in batches
         if batch["target_signal_type"] == "pump_or_gate_status"
     )
-    assert pump_batch["county_count"] == 13
+    assert pump_batch["county_count"] == 11
     assert "金門縣" in pump_batch["counties"]
     assert "嘉義市" in pump_batch["counties"]
 
@@ -403,7 +405,7 @@ def test_completion_evidence_template_is_pending_draft_from_request_packets() ->
     assert template["captured_at"] == "2026-06-30T12:00:00+08:00"
     assert template["production_gate_evidence"] == []
     assert len(template["source_contract_evidence"]) == 6
-    assert len(template["signal_family_gap_evidence"]) == 17
+    assert len(template["signal_family_gap_evidence"]) == 15
 
     kinmen = next(
         item

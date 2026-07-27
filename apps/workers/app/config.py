@@ -79,6 +79,8 @@ class WorkerSettings:
     source_yilan_flood_sensor_api_enabled: bool
     source_yilan_water_level_enabled: bool | None
     source_yilan_water_level_api_enabled: bool
+    source_yilan_mobile_pump_status_enabled: bool | None
+    source_yilan_mobile_pump_status_api_enabled: bool
     source_penghu_water_level_enabled: bool | None
     source_penghu_water_level_api_enabled: bool
     source_kinmen_kwis_pump_station_enabled: bool | None
@@ -175,6 +177,7 @@ class WorkerSettings:
     yunlin_stations_api_url: str | None
     yilan_flood_sensor_layer_url: str | None
     yilan_water_level_layer_url: str | None
+    yilan_mobile_pump_layer_url: str | None
     penghu_water_level_layer_url: str | None
     kinmen_kwis_pump_station_api_url: str | None
     kinmen_kwis_api_token: str | None
@@ -433,6 +436,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_yilan_water_level_api_enabled=env_flag(
             values,
             "SOURCE_YILAN_WATER_LEVEL_API_ENABLED",
+        ),
+        source_yilan_mobile_pump_status_enabled=env_bool(
+            values,
+            "SOURCE_YILAN_MOBILE_PUMP_STATUS_ENABLED",
+        ),
+        source_yilan_mobile_pump_status_api_enabled=env_flag(
+            values,
+            "SOURCE_YILAN_MOBILE_PUMP_STATUS_API_ENABLED",
         ),
         source_penghu_water_level_enabled=env_bool(
             values,
@@ -698,6 +709,10 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         yilan_water_level_layer_url=env_str(
             values,
             "YILAN_WATER_LEVEL_LAYER_URL",
+        ),
+        yilan_mobile_pump_layer_url=env_str(
+            values,
+            "YILAN_MOBILE_PUMP_LAYER_URL",
         ),
         penghu_water_level_layer_url=env_str(
             values,

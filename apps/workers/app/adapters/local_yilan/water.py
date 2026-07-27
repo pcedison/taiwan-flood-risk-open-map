@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -22,6 +22,7 @@ from app.adapters.contracts import (
 FetchJson = Callable[[str, int], Any]
 
 DEFAULT_YILAN_WATER_TIMEOUT_SECONDS = 8
+YILAN_ARCGIS_LOCAL_EPOCH_OFFSET_HOURS = 8
 YILAN_ATTRIBUTION = "宜蘭縣政府 / 宜蘭縣防汛儀表板 ArcGIS REST"
 YILAN_USER_AGENT = "FloodRiskTaiwan/0.1 worker-local-yilan-water"
 YILAN_ARCGIS_SERVICE_URL = (
@@ -34,6 +35,10 @@ YILAN_FLOOD_SENSOR_LAYER_URL = (
 YILAN_WATER_LEVEL_LAYER_URL = (
     f"{YILAN_ARCGIS_SERVICE_URL}/2/query?where=1%3D1&outFields=*&f=json"
 )
+YILAN_MOBILE_PUMP_LAYER_URL = (
+    f"{YILAN_ARCGIS_SERVICE_URL}/1/query?"
+    "where=1%3D1&outFields=*&f=json&returnGeometry=true&outSR=4326"
+)
 YILAN_DATA_URL = "https://wra.e-land.gov.tw/IlanHsdsMap/"
 
 YILAN_FLOOD_SENSOR_METADATA = AdapterMetadata(
@@ -43,11 +48,16 @@ YILAN_FLOOD_SENSOR_METADATA = AdapterMetadata(
     display_name="Yilan flood sensor ArcGIS adapter",
     data_gov_url=YILAN_DATA_URL,
     resource_url=YILAN_FLOOD_SENSOR_LAYER_URL,
-    update_frequency="Yilan ArcGIS layer carries write_date epoch-millisecond timestamps",
+    update_frequency=(
+        "Yilan ArcGIS layer carries write_date epoch-millisecond timestamps encoded "
+        "as Taiwan local wall-clock time"
+    ),
     license="Government Open Data License, version 1.0",
     limitations=(
         "Supplemental local-government flood-depth source for Yilan County.",
         "Layer 0 water_inner is interpreted as flood depth in centimeters.",
+        "write_date decodes 8 hours ahead of the real UTC observation time; the "
+        "adapter subtracts 8 hours before normalization.",
     ),
 )
 
@@ -58,11 +68,37 @@ YILAN_WATER_LEVEL_METADATA = AdapterMetadata(
     display_name="Yilan water-level ArcGIS adapter",
     data_gov_url=YILAN_DATA_URL,
     resource_url=YILAN_WATER_LEVEL_LAYER_URL,
-    update_frequency="Yilan ArcGIS layer carries write_date epoch-millisecond timestamps",
+    update_frequency=(
+        "Yilan ArcGIS layer carries write_date epoch-millisecond timestamps encoded "
+        "as Taiwan local wall-clock time"
+    ),
     license="Government Open Data License, version 1.0",
     limitations=(
         "Supplemental local-government water-level source for Yilan County.",
         "Layer 2 water_inner is interpreted as water level in meters.",
+        "write_date decodes 8 hours ahead of the real UTC observation time; the "
+        "adapter subtracts 8 hours before normalization.",
+    ),
+)
+
+YILAN_MOBILE_PUMP_STATUS_METADATA = AdapterMetadata(
+    key="local.yilan.mobile_pump_status",
+    family=SourceFamily.OFFICIAL,
+    enabled_by_default=False,
+    display_name="Yilan mobile pump status ArcGIS adapter",
+    data_gov_url=YILAN_DATA_URL,
+    resource_url=YILAN_MOBILE_PUMP_LAYER_URL,
+    update_frequency=(
+        "Yilan ArcGIS layer carries LogDate epoch-millisecond timestamps encoded "
+        "as Taiwan local wall-clock time"
+    ),
+    license="Government Open Data License, version 1.0",
+    limitations=(
+        "Supplemental local-government pump status source for Yilan County.",
+        "Rows are normalized as status-only pump_or_gate_status evidence; "
+        "they are not interpreted as water level or flood-depth measurements.",
+        "LogDate decodes 8 hours ahead of the real UTC observation time; the "
+        "adapter subtracts 8 hours before normalization.",
     ),
 )
 
@@ -158,6 +194,52 @@ class YilanWaterLevelArcgisAdapter:
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         return _normalize_water_level_record(self.metadata, raw_item)
+
+    def run(self) -> AdapterRunResult:
+        return _run(self)
+
+
+class YilanMobilePumpStatusArcgisAdapter:
+    metadata = YILAN_MOBILE_PUMP_STATUS_METADATA
+
+    def __init__(
+        self,
+        *,
+        api_url: str | None = None,
+        timeout_seconds: int = DEFAULT_YILAN_WATER_TIMEOUT_SECONDS,
+        fetched_at: datetime | None = None,
+        fetch_json: FetchJson | None = None,
+        raw_snapshot_key: str | None = None,
+    ) -> None:
+        self._api_url = (api_url or YILAN_MOBILE_PUMP_LAYER_URL).strip()
+        self._timeout_seconds = max(1, timeout_seconds)
+        self._fetched_at = fetched_at
+        self._fetch_json = fetch_json or fetch_yilan_json
+        self._raw_snapshot_key = raw_snapshot_key
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        try:
+            payload = self._fetch_json(self._api_url, self._timeout_seconds)
+        except YilanWaterAdapterError:
+            raise
+        except Exception as exc:
+            raise YilanWaterFetchError(
+                f"{self.metadata.display_name} fetcher failed: {exc}"
+            ) from exc
+        records = parse_yilan_mobile_pump_status_layer(
+            payload,
+            source_url=YILAN_DATA_URL,
+            resource_url=self._api_url,
+        )
+        fetched_at = self._fetched_at or datetime.now(UTC)
+        return _raw_items(
+            records,
+            fetched_at=fetched_at,
+            raw_snapshot_key=self._raw_snapshot_key,
+        )
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        return _normalize_mobile_pump_status_record(self.metadata, raw_item)
 
     def run(self) -> AdapterRunResult:
         return _run(self)
@@ -269,6 +351,63 @@ def parse_yilan_water_level_layer(
     return tuple(records)
 
 
+def parse_yilan_mobile_pump_status_layer(
+    payload: object,
+    *,
+    source_url: str,
+    resource_url: str | None = None,
+) -> tuple[Mapping[str, Any], ...]:
+    records: list[Mapping[str, Any]] = []
+    for attributes in _feature_attributes(payload):
+        station_id = _first_text(attributes, "id", "PID")
+        observed_at = _parse_epoch_millis(_first_value(attributes, "LogDate"))
+        pump_status = _first_text(attributes, "status")
+        coordinate = _coordinate(
+            _first_value(attributes, "lon"),
+            _first_value(attributes, "lat"),
+        )
+        if (
+            station_id is None
+            or observed_at is None
+            or pump_status is None
+            or coordinate is None
+        ):
+            continue
+        longitude, latitude = coordinate
+        record: dict[str, Any] = {
+            "station_id": station_id,
+            "station_name": station_id,
+            "observed_at": observed_at.isoformat(),
+            "pump_status": pump_status,
+            "source_url": source_url,
+            "resource_url": resource_url,
+            "location_text": " ".join(
+                part
+                for part in (
+                    _first_text(attributes, "city"),
+                    _first_text(attributes, "town"),
+                    _first_text(attributes, "village"),
+                    _first_text(attributes, "road"),
+                )
+                if part
+            ),
+            "city": _first_text(attributes, "city"),
+            "town": _first_text(attributes, "town"),
+            "village": _first_text(attributes, "village"),
+            "road": _first_text(attributes, "road"),
+            "last_operated_at": _first_text(attributes, "operateat"),
+            "authority": "宜蘭縣政府",
+            "longitude": longitude,
+            "latitude": latitude,
+            "geometry": {"type": "Point", "coordinates": [longitude, latitude]},
+            "attribution": YILAN_ATTRIBUTION,
+            "confidence": 0.76,
+        }
+        _assign_float(record, "voltage", _first_value(attributes, "voltage"))
+        records.append(record)
+    return tuple(records)
+
+
 def _normalize_flood_sensor_record(
     metadata: AdapterMetadata,
     raw_item: RawSourceItem,
@@ -325,6 +464,33 @@ def _normalize_water_level_record(
         observed_at=observed_at,
         summary=summary,
         tags=tuple(tags),
+    )
+
+
+def _normalize_mobile_pump_status_record(
+    metadata: AdapterMetadata,
+    raw_item: RawSourceItem,
+) -> NormalizedEvidence | None:
+    payload = raw_item.payload
+    station_name = optional_str(payload.get("station_name"))
+    observed_at = parse_datetime(payload.get("observed_at"))
+    pump_status = optional_str(payload.get("pump_status"))
+    if station_name is None or observed_at is None or pump_status is None:
+        return None
+    return _evidence(
+        metadata,
+        raw_item,
+        event_type=EventType.STATUS_ONLY,
+        station_name=station_name,
+        observed_at=observed_at,
+        summary=f"宜蘭移動式抽水機狀態：{pump_status}（{station_name}）",
+        tags=(
+            "official",
+            "local_yilan",
+            "mobile_pump",
+            "pump_or_gate_status",
+            "status_only",
+        ),
     )
 
 
@@ -415,9 +581,10 @@ def _parse_epoch_millis(value: object) -> datetime | None:
     if millis is None:
         return None
     try:
-        return datetime.fromtimestamp(millis / 1000, UTC)
+        encoded_local_time = datetime.fromtimestamp(millis / 1000, UTC)
     except (OSError, ValueError):
         return None
+    return encoded_local_time - timedelta(hours=YILAN_ARCGIS_LOCAL_EPOCH_OFFSET_HOURS)
 
 
 def _coordinate(lon: object, lat: object) -> tuple[float, float] | None:

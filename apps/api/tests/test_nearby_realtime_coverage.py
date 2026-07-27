@@ -325,6 +325,14 @@ def test_public_source_names_distinguish_multiple_water_networks() -> None:
     assert kinmen.name == "金門縣抽水站/水門狀態觀測"
     assert kinmen.coverage_scope == "local"
 
+    yilan = build_nearby_source_health(
+        (_health_row(adapter_key="local.yilan.mobile_pump_status"),),
+        evaluated_at=NOW,
+    )[0]
+    assert yilan.name == "宜蘭縣抽水站/水門狀態觀測"
+    assert yilan.signal_types == ["pump_or_gate_status"]
+    assert yilan.coverage_scope == "local"
+
 
 def test_source_observation_freshness_boundaries_are_inclusive() -> None:
     cases = (
@@ -1136,6 +1144,31 @@ def test_nearby_coverage_status_only_does_not_count_as_flood_depth() -> None:
     assert "pump_or_gate_status" not in coverage.missing_signal_types
     assert "flood_warning" not in coverage.missing_signal_types
     assert "status_only" not in coverage.missing_signal_types
+
+
+def test_yilan_mobile_pump_status_remains_status_only_risk_context() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="local.yilan.mobile_pump_status",
+                source_id="yilan-mobile-pump:1",
+                event_type="status_only",
+                distance_to_query_m=150.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    status_only = next(
+        item for item in coverage.signal_breakdown if item.signal_type == "status_only"
+    )
+    assert coverage_signal_type(
+        "status_only", "local.yilan.mobile_pump_status"
+    ) == "status_only"
+    assert status_only.status_only_count == 1
+    assert status_only.fresh_count == 1
+    assert coverage.overall_level == "no_local_sensor"
 
 
 def test_nearby_coverage_does_not_present_stale_status_as_current_context() -> None:

@@ -92,10 +92,12 @@ def test_local_source_request_packets_cli_filters_by_signal_type() -> None:
     payload = json.loads(result.stdout)
     counties = [packet["county"] for packet in payload]
 
-    assert len(payload) == 13
+    assert len(payload) == 11
     assert "\u91d1\u9580\u7e23" in counties
     assert "\u96f2\u6797\u7e23" not in counties
     assert "\u81fa\u5357\u5e02" not in counties
+    assert "\u5b9c\u862d\u7e23" not in counties
+    assert "\u6843\u5712\u5e02" not in counties
     assert all(
         "pump_or_gate_status" in packet["target_signal_types"]
         for packet in payload
@@ -131,7 +133,7 @@ def test_local_source_request_packets_cli_emits_signal_gap_batches_json() -> Non
     assert pump_batch["sent_at"] is None
     assert pump_batch["follow_up_due_at"] is None
     assert pump_batch["official_reply_ref"] is None
-    assert pump_batch["county_count"] == 13
+    assert pump_batch["county_count"] == 11
     assert "\u91d1\u9580\u7e23" in pump_batch["counties"]
     assert pump_batch["private_evidence_ref_hint"] == (
         "private-ops://local-source/signal-gap-batch/pump_or_gate_status"
@@ -152,7 +154,7 @@ def test_local_source_request_packets_cli_emits_signal_gap_batches_json() -> Non
             "\u9023\u6c5f\u7e23/pump_or_gate_status"
         ),
     }
-    assert len(pump_batch["completion_evidence_targets"]) == 13
+    assert len(pump_batch["completion_evidence_targets"]) == 11
 
 
 def test_local_source_request_packets_cli_emits_signal_gap_batches_markdown() -> None:
