@@ -563,6 +563,13 @@ def _raw_items(
 def _feature_attributes(payload: object) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(payload, Mapping):
         return ()
+    error = payload.get("error")
+    if isinstance(error, Mapping):
+        code = optional_str(error.get("code"))
+        message = optional_str(error.get("message"))
+        summary = " ".join(part for part in (code, message) if part)
+        suffix = f": {summary[:300]}" if summary else ""
+        raise YilanWaterFetchError(f"Yilan ArcGIS returned an error response{suffix}")
     features = payload.get("features")
     if not isinstance(features, list):
         return ()

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.local_kaohsiung import (
     KAOHSIUNG_FLOOD_SENSOR_API_URL,
@@ -19,6 +21,7 @@ from app.adapters.local_yilan import (
     YILAN_WATER_LEVEL_LAYER_URL,
     YilanFloodSensorArcgisAdapter,
     YilanMobilePumpStatusArcgisAdapter,
+    YilanWaterFetchError,
     YilanWaterLevelArcgisAdapter,
 )
 from app.config import load_worker_settings
@@ -367,6 +370,24 @@ def test_yilan_mobile_pump_layer_outputs_status_only_pump_signal() -> None:
     assert "local_yilan" in evidence.tags
     assert "mobile_pump" in evidence.tags
     assert "pump_or_gate_status" in evidence.tags
+
+
+def test_yilan_arcgis_error_envelope_fails_the_adapter_run() -> None:
+    adapter = YilanMobilePumpStatusArcgisAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: {
+            "error": {
+                "code": 400,
+                "message": "Unable to complete operation.",
+            }
+        },
+    )
+
+    with pytest.raises(
+        YilanWaterFetchError,
+        match=r"Yilan ArcGIS returned an error response: 400 Unable to complete operation",
+    ):
+        adapter.run()
 
 
 def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are_on() -> None:
