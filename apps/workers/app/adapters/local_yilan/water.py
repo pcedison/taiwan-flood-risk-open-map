@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from app.adapters._helpers import optional_float, optional_str, parse_datetime, stable_evidence_id
+from app.adapters._taiwan_gov_tls import taiwan_gov_open_data_ssl_context
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -251,7 +252,11 @@ def fetch_yilan_json(url: str, timeout_seconds: int) -> Any:
         headers={"Accept": "application/json", "User-Agent": YILAN_USER_AGENT},
     )
     try:
-        with urlopen(request, timeout=timeout_seconds) as response:
+        with urlopen(
+            request,
+            timeout=timeout_seconds,
+            context=taiwan_gov_open_data_ssl_context(),
+        ) as response:
             return json.loads(response.read().decode("utf-8-sig"))
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise YilanWaterFetchError(f"Failed to fetch Yilan ArcGIS JSON {url}: {exc}") from exc
