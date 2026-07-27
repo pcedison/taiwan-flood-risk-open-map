@@ -29,7 +29,7 @@ def test_signal_gap_dispatch_readiness_cli_merges_discovery_with_batches(
                     {
                         "artifact_name": "signal-gap-discovery-refresh-pump-or-gate-status.json",
                         "signal_type": "pump_or_gate_status",
-                        "county_count": 13,
+                            "county_count": 11,
                         "candidate_count": 9,
                         "metadata_only_count": 9,
                         "candidate_live_read_api_count": 0,
@@ -100,7 +100,7 @@ def test_signal_gap_dispatch_readiness_cli_merges_discovery_with_batches(
         "no_live_read_api_candidate",
         "metadata_only_candidates_require_contract_followup",
     ]
-    assert pump_group["county_count"] == 13
+    assert pump_group["county_count"] == 11
     assert pump_group["discovery"]["candidate_count"] == 9
     assert pump_group["discovery"]["metadata_only_count"] == 9
     assert pump_group["discovery"]["candidate_live_read_api_count"] == 0
@@ -206,5 +206,5 @@ def test_signal_gap_dispatch_readiness_cli_omits_accepted_target(
         for group in payload["groups"]
         if group["target_signal_type"] == "pump_or_gate_status"
     )
-    assert pump_group["county_count"] == 12
-    assert pump_group["completion_evidence_target_count"] == 12
+    assert pump_group["county_count"] == 10
+    assert pump_group["completion_evidence_target_count"] == 10

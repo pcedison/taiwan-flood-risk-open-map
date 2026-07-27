@@ -89,25 +89,25 @@ production 對外服務」的人，**必須**先完成第 2 節的查證步驟�
 
 ## 4. 總覽：本次盤點涵蓋的來源數量
 
-程式碼中共有 **35 個** `local.*` adapter key（34 個 production + 1 個尚未
+程式碼中共有 **36 個** `local.*` adapter key（35 個 production + 1 個尚未
 啟用的候選 `local.kinmen.kwis_pump_station`），對應來源矩陣「已實測可進
-第一批實作的地方來源」表格中的地方政府項目。矩陣該表格本身是 35 列，但其中
+第一批實作的地方來源」表格中的地方政府項目。矩陣該表格本身是 36 列，但其中
 5 列是中央主幹訊號（WRA IoW、Civil IoT STA_RainSewer/抽水站/閘門、NCDR
 CAP），1 列是 FHY Broker 的彙總描述（依 CityCode 展開為 6 個縣市的獨立
 adapter key；另有新竹市 flood_sensor 也走同一 broker，見 §5.8，故 FHY 這組
-授權風險實際涵蓋 7 個 adapter）。本文件以程式碼實際存在的 35 個 `local.*`
+授權風險實際涵蓋 7 個 adapter）。本文件以程式碼實際存在的 36 個 `local.*`
 adapter key 為準逐一列出，比矩陣原始列數在「地方政府項目」的顆粒度上更細，
 因此本文件的地方來源列數與矩陣列數不會逐行對應，差異原因即在此；金門 KWIS 雖不在矩陣 51–87 行的「第一批」表格內（該表格只收錄已升級為
 `ready_implemented` 的來源），但因為程式碼已有候選 adapter、且稽核 F4 明確
 點名「金門 KWIS」，故一併納入。
 
-授權現況分布（35 筆）：
+授權現況分布（36 筆）：
 
 | 分類 | 筆數 | adapter |
 | --- | --- | --- |
 | 已查證·政府資料開放授權條款 | 9 | 臺北市 3、桃園市 3、嘉義市 2、臺南市 1 |
 | 平臺聲明存在，端點未逐筆核對 | 1 | 臺中市 1 |
-| 推定，待查證 | 8 | 基隆市 3、新竹市 1（sewer）、雲林縣 1、嘉義縣 1、宜蘭縣 2 |
+| 推定，待查證 | 9 | 基隆市 3、新竹市 1（sewer）、雲林縣 1、嘉義縣 1、宜蘭縣 3 |
 | 與官方聲明衝突 | 11 | 南投縣 1、FHY 廣播來源 7（新竹縣/苗栗/彰化/屏東/花蓮/臺東 flood_sensor＋新竹市 flood_sensor）、高雄市 3 |
 | 官方誠實標示未定位（程式碼已誠實） | 5 | 新北市 4、澎湖縣 1 |
 | 需機關授權（已知） | 1 | 金門縣 KWIS（候選，未啟用） |
@@ -122,8 +122,8 @@ adapter key 為準逐一列出，比矩陣原始列數在「地方政府項目�
 本表決定「哪些 adapter 需法律審查後才可啟用」的人，務必把新竹市 flood_sensor
 納入 FHY 這一組。
 
-不重複總數：已查證 9＋平臺聲明未核對 1＋推定待查證 8＋與官方聲明衝突 11＋
-誠實標示未定位 5＋需機關授權 1＝**35**。
+不重複總數：已查證 9＋平臺聲明未核對 1＋推定待查證 9＋與官方聲明衝突 11＋
+誠實標示未定位 5＋需機關授權 1＝**36**。
 
 ## 5. 逐項盤點
 
@@ -247,12 +247,13 @@ license not separately located"`。本次瀏覽 `https://newtaipei.wavegis.com.t
 | `local.kaohsiung.flood_sensor` | `wrbswi.kcg.gov.tw/SFC/api/khfloodinfo/...` | 同上 | 同上 | 同上 |
 | `local.kaohsiung.rainfall` | `wrbswi.kcg.gov.tw/SFC/api/rain/rt` + `rain/base` | 同上 | 同上 | 同上 |
 
-### 5.14 宜蘭縣（2 個 adapter）
+### 5.14 宜蘭縣（3 個 adapter）
 
 | adapter key | 資料集/端點 | 授權條款現況 | 再散布/快取權利 | 審查狀態 |
 | --- | --- | --- | --- | --- |
 | `local.yilan.flood_sensor` | 宜蘭縣防汛儀表板 ArcGIS REST layer 0 `wragis.e-land.gov.tw` | 推定，待查證：程式碼標政府資料開放授權條款 v1.0，2026-07-07 瀏覽 `https://wra.e-land.gov.tw/IlanHsdsMap/` 首頁未見授權文字 | 待查證 | 待查證，未經法律審閱 |
 | `local.yilan.water_level` | 同平台 layer 2 | 同上 | 同上 | 同上 |
+| `local.yilan.mobile_pump_status` | 同平台 layer 1 | 同上；2026-07-22 新增的端點同樣未找到逐端點授權聲明 | 同上 | 同上；保持預設停用，完成授權查證前不得啟用 production 快取或對外轉發 |
 
 ### 5.15 澎湖縣（1 個 adapter）
 

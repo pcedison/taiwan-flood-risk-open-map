@@ -113,6 +113,7 @@ REALTIME_ADAPTER_KEYS = frozenset(
         "local.yunlin.water_level",
         "local.yilan.flood_sensor",
         "local.yilan.water_level",
+        "local.yilan.mobile_pump_status",
         "local.tainan.flood_sensor",
     }
 )
@@ -242,6 +243,10 @@ SOURCE_GATE_NAMES = {
     "local.yilan.water_level": (
         "SOURCE_YILAN_WATER_LEVEL_ENABLED",
         "SOURCE_YILAN_WATER_LEVEL_API_ENABLED",
+    ),
+    "local.yilan.mobile_pump_status": (
+        "SOURCE_YILAN_MOBILE_PUMP_STATUS_ENABLED",
+        "SOURCE_YILAN_MOBILE_PUMP_STATUS_API_ENABLED",
     ),
     "local.tainan.flood_sensor": (
         "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED",

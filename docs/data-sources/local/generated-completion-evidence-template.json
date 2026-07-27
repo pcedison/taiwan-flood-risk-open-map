@@ -140,18 +140,6 @@
       "evidence_ref": "private-ops://local-source/signal-gap/基隆市/pump_or_gate_status"
     },
     {
-      "county": "宜蘭縣",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/宜蘭縣/pump_or_gate_status"
-    },
-    {
       "county": "新北市",
       "signal_type": "pump_or_gate_status",
       "status": "pending",
@@ -174,18 +162,6 @@
         "production_adapter"
       ],
       "evidence_ref": "private-ops://local-source/signal-gap/新竹縣/pump_or_gate_status"
-    },
-    {
-      "county": "桃園市",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status"
     },
     {
       "county": "臺中市",

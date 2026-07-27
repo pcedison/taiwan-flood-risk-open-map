@@ -108,6 +108,7 @@ _ADAPTER_SIGNAL_TYPES: dict[str, NearbyCoverageSignalType] = {
     "local.pingtung.flood_sensor": "flood_depth",
     "local.yilan.flood_sensor": "flood_depth",
     "local.yilan.water_level": "water_level",
+    "local.yilan.mobile_pump_status": "pump_or_gate_status",
     "local.hualien.flood_sensor": "flood_depth",
     "local.taitung.flood_sensor": "flood_depth",
     "local.penghu.water_level": "water_level",

@@ -267,6 +267,41 @@ def test_parse_sta_things_payload_infers_county_from_local_authority() -> None:
     assert "town" not in records[0]
 
 
+def test_parse_sta_things_payload_infers_taoyuan_county_from_legacy_city_glyph() -> None:
+    payload = {
+        "value": [
+            {
+                "@iot.id": 5001,
+                "name": "gate-uuid-only",
+                "properties": {
+                    "stationID": "TY-GATE-1",
+                    "authority": "桃園巿政府水務局(智慧防汛b)",
+                },
+                "Locations": [
+                    {"location": {"type": "Point", "coordinates": [121.21, 24.94]}}
+                ],
+                "Datastreams": [
+                    {
+                        "name": "閘門外水位",
+                        "unitOfMeasurement": {"symbol": "m"},
+                        "Observations": [
+                            {
+                                "phenomenonTime": "2026-07-02T01:00:00.000Z",
+                                "result": 0.28,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    records = parse_sta_things_payload(payload, source_url="https://example.test/sta")
+
+    assert len(records) == 1
+    assert records[0]["county"] == "桃園市"
+
+
 def test_flood_sensor_api_adapter_keeps_zero_and_low_depth_readings_distinct() -> None:
     adapter = FloodSensorStaApiAdapter(
         fetched_at=FETCHED_AT,

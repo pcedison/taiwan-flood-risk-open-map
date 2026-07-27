@@ -53,9 +53,9 @@ def test_signal_gap_evidence_compares_live_smoke_to_remaining_groups() -> None:
         "2026-06-30T19:45:00+08:00"
     )
     assert evidence["summary"]["signal_group_count"] == 3
-    assert evidence["summary"]["target_signal_gap_item_count"] == 17
+    assert evidence["summary"]["target_signal_gap_item_count"] == 15
     assert evidence["summary"]["official_smoke_observed_item_count"] == 0
-    assert evidence["summary"]["unresolved_after_official_smoke_item_count"] == 17
+    assert evidence["summary"]["unresolved_after_official_smoke_item_count"] == 15
     assert evidence["completion_effect"] == "diagnostic_only"
 
     groups = {group["signal_type"]: group for group in evidence["signal_gap_groups"]}

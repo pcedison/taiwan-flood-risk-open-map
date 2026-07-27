@@ -285,7 +285,7 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
     ]
     pump_or_gate = groups[0]
     assert pump_or_gate["rank"] == 1
-    assert pump_or_gate["county_count"] == 13
+    assert pump_or_gate["county_count"] == 11
     assert pump_or_gate["recommended_workstream"] == "bulk_signal_gap_discovery"
     assert pump_or_gate["completion_gate"] == (
         "For every listed county, add a production adapter, an authorization-gated "
@@ -310,14 +310,14 @@ def test_local_source_action_plan_groups_signal_gap_priorities() -> None:
     ]
     assert "嘉義市" in pump_or_gate["counties"]
     assert pump_or_gate["highest_priority_tier"] == "P0"
-    assert pump_or_gate["tracking_statuses"]["needs_signal_gap_review"] == 9
+    assert pump_or_gate["tracking_statuses"]["needs_signal_gap_review"] == 7
     assert pump_or_gate["tracking_statuses"]["needs_public_read_api_contract"] == 2
     assert pump_or_gate["tracking_statuses"]["needs_authorization_request"] == 1
     assert pump_or_gate["tracking_statuses"]["monitoring_open_data_release"] == 1
     request_batch = pump_or_gate["official_request_batch"]
     assert request_batch["target_signal_type"] == "pump_or_gate_status"
     assert request_batch["packet_type"] == "signal_gap_batch_request"
-    assert request_batch["county_count"] == 13
+    assert request_batch["county_count"] == 11
     assert request_batch["counties"] == pump_or_gate["counties"]
     assert request_batch["required_read_api_fields"] == list(
         REQUIRED_REALTIME_READ_API_FIELDS
@@ -353,7 +353,8 @@ def test_local_source_coverage_applies_verified_civil_iot_signal_distribution() 
 
     taoyuan = records["\u6843\u5712\u5e02"]
     assert "official.civil_iot.sewer_water_level" in taoyuan.central_backbone_adapter_keys
-    assert taoyuan.missing_signal_types == ("pump_or_gate_status",)
+    assert "official.civil_iot.gate_water_level" in taoyuan.central_backbone_adapter_keys
+    assert taoyuan.missing_signal_types == ()
 
     taichung = records["\u81fa\u4e2d\u5e02"]
     assert "official.civil_iot.sewer_water_level" in taichung.central_backbone_adapter_keys
@@ -368,6 +369,10 @@ def test_local_source_coverage_applies_verified_civil_iot_signal_distribution() 
     assert "official.civil_iot.flood_sensor" in yunlin.central_backbone_adapter_keys
     assert yunlin.missing_signal_types == ()
 
+    yilan = records["\u5b9c\u862d\u7e23"]
+    assert "local.yilan.mobile_pump_status" in yilan.production_adapter_keys
+    assert yilan.missing_signal_types == ()
+
 
 def test_local_source_action_plan_audits_completion_gates() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
@@ -379,9 +384,9 @@ def test_local_source_action_plan_audits_completion_gates() -> None:
         "total_counties": 22,
         "local_direct_remaining_count": 2,
         "central_backbone_remaining_count": 0,
-        "unresolved_priority_item_count": 16,
+        "unresolved_priority_item_count": 14,
         "signal_gap_group_count": 3,
-        "signal_gap_county_item_count": 17,
+        "signal_gap_county_item_count": 15,
         "authorization_request_count": 2,
         "metadata_release_monitor_count": 1,
         "public_api_contract_review_count": 3,
@@ -395,7 +400,7 @@ def test_local_source_action_plan_audits_completion_gates() -> None:
     signal_gate = gates["required_signal_families"]
     assert signal_gate["status"] == "incomplete"
     assert signal_gate["blocking_items"] == [
-        "pump_or_gate_status:13",
+        "pump_or_gate_status:11",
         "flood_depth:3",
         "sewer_water_level:1",
     ]
@@ -436,7 +441,7 @@ def test_local_source_action_plan_applies_completion_evidence_overlay() -> None:
         "schema_version": "local-source-completion-evidence/v1",
         "captured_at": "2026-06-30T12:00:00+08:00",
         "follow_up_as_of": None,
-        "signal_family_gap_evidence_count": 17,
+        "signal_family_gap_evidence_count": 15,
         "signal_family_gap_dispatch_count": 0,
         "signal_family_gap_dispatch_follow_up_count": 0,
         "signal_family_gap_dispatch_overdue_count": 0,
@@ -541,7 +546,7 @@ def test_local_source_action_plan_tracks_signal_gap_dispatch_follow_up_due_dates
         == "2026-07-05T09:00:00+08:00"
     )
     assert gates["required_signal_families"]["status"] == "incomplete"
-    assert "Dispatch evidence supplied for 2/17" in gates[
+    assert "Dispatch evidence supplied for 2/15" in gates[
         "required_signal_families"
     ]["evidence"]
     assert "next follow-up 2026-07-05T09:00:00+08:00" in gates[

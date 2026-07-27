@@ -45,7 +45,7 @@ def test_local_source_completion_audit_cli_reports_incomplete_by_default() -> No
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert payload["overall_status"] == "incomplete"
-    assert payload["summary"]["signal_gap_county_item_count"] == 17
+    assert payload["summary"]["signal_gap_county_item_count"] == 15
 
 
 def test_local_source_completion_audit_cli_accepts_completion_evidence(
@@ -238,11 +238,11 @@ def test_local_source_completion_audit_cli_tracks_dispatched_signal_gap_without_
     assert payload["evidence_overlay"]["signal_family_gap_dispatch_count"] == 1
     assert gates["required_signal_families"]["status"] == "incomplete"
     assert gates["required_signal_families"]["blocking_items"] == [
-        "pump_or_gate_status:13",
+        "pump_or_gate_status:11",
         "flood_depth:3",
         "sewer_water_level:1",
     ]
-    assert "Dispatch evidence supplied for 1/17" in gates[
+    assert "Dispatch evidence supplied for 1/15" in gates[
         "required_signal_families"
     ]["evidence"]
 
@@ -379,7 +379,7 @@ def test_local_source_completion_audit_cli_writes_output_artifact(
 
     assert output_payload == stdout_payload
     assert output_payload["overall_status"] == "incomplete"
-    assert output_payload["summary"]["signal_gap_county_item_count"] == 17
+    assert output_payload["summary"]["signal_gap_county_item_count"] == 15
 
 
 def test_local_source_completion_audit_cli_writes_markdown_report(
@@ -412,7 +412,7 @@ def test_local_source_completion_audit_cli_writes_markdown_report(
     assert "# Local Source Completion Audit" in markdown
     assert "- Overall status: `incomplete`" in markdown
     assert "| `required_signal_families` | `incomplete` |" in markdown
-    assert "`pump_or_gate_status:13`, `flood_depth:3`, `sewer_water_level:1`" in markdown
+    assert "`pump_or_gate_status:11`, `flood_depth:3`, `sewer_water_level:1`" in markdown
     assert "`send_official_read_api_requests`" in markdown
     assert "`production_deployment_evidence` | `incomplete`" in markdown
 

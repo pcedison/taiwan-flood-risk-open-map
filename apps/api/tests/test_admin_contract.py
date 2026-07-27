@@ -347,6 +347,7 @@ def test_admin_enabled_gates_include_flood_sensor_live_gate(
         "local.keelung.rainfall",
         "local.kaohsiung.rainfall",
         "local.yunlin.water_level",
+        "local.yilan.mobile_pump_status",
         "official.civil_iot.gate_water_level",
     ],
 )
@@ -487,6 +488,13 @@ def test_admin_freshness_uses_realtime_cadence_for_new_backbone_sources(
             (
                 "SOURCE_YUNLIN_WATER_LEVEL_ENABLED",
                 "SOURCE_YUNLIN_WATER_LEVEL_API_ENABLED",
+            ),
+        ),
+        (
+            "local.yilan.mobile_pump_status",
+            (
+                "SOURCE_YILAN_MOBILE_PUMP_STATUS_ENABLED",
+                "SOURCE_YILAN_MOBILE_PUMP_STATUS_API_ENABLED",
             ),
         ),
         (
@@ -1122,7 +1130,10 @@ def test_admin_local_source_coverage_contract(monkeypatch: pytest.MonkeyPatch) -
     assert counties["宜蘭縣"]["production_adapter_keys"] == [
         "local.yilan.flood_sensor",
         "local.yilan.water_level",
+        "local.yilan.mobile_pump_status",
     ]
+    assert counties["宜蘭縣"]["pump_or_gate_status_available"] is True
+    assert counties["桃園市"]["pump_or_gate_status_available"] is True
     assert counties["宜蘭縣"]["next_action_code"] == "operate_adapter"
     assert counties["澎湖縣"]["local_direct_statuses"] == ["ready_implemented"]
     assert counties["澎湖縣"]["production_adapter_keys"] == [
@@ -1209,7 +1220,7 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert plan["central_backbone_minimum_complete_count"] == 22
     assert plan["central_backbone_remaining_count"] == 0
     assert plan["completion_audit"]["overall_status"] == "incomplete"
-    assert plan["completion_audit"]["summary"]["signal_gap_county_item_count"] == 17
+    assert plan["completion_audit"]["summary"]["signal_gap_county_item_count"] == 15
     assert plan["completion_audit"]["evidence_overlay"] == {
         "schema_version": None,
         "captured_at": None,
@@ -1235,13 +1246,13 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert audit_gates["required_signal_families"]["status"] == "incomplete"
     assert audit_gates["hosted_worker_persisted_evidence"]["status"] == "incomplete"
     assert plan["signal_gap_priority_groups"][0]["signal_type"] == "pump_or_gate_status"
-    assert plan["signal_gap_priority_groups"][0]["county_count"] == 13
+    assert plan["signal_gap_priority_groups"][0]["county_count"] == 11
     assert plan["signal_gap_priority_groups"][0]["highest_priority_tier"] == "P0"
     assert plan["signal_gap_priority_groups"][0]["tracking_statuses"] == {
         "monitoring_open_data_release": 1,
         "needs_authorization_request": 1,
         "needs_public_read_api_contract": 2,
-        "needs_signal_gap_review": 9,
+        "needs_signal_gap_review": 7,
     }
     assert "--signal-type pump_or_gate_status" in plan["signal_gap_priority_groups"][0][
         "discovery_monitor"
@@ -1249,7 +1260,7 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     request_batch = plan["signal_gap_priority_groups"][0]["official_request_batch"]
     assert request_batch["target_signal_type"] == "pump_or_gate_status"
     assert request_batch["packet_type"] == "signal_gap_batch_request"
-    assert request_batch["county_count"] == 13
+    assert request_batch["county_count"] == 11
     assert request_batch["next_step"] == "send_official_read_api_requests"
     assert "worker_persisted_evidence_path" in request_batch[
         "production_operational_requirements"
@@ -1314,6 +1325,8 @@ def test_admin_local_source_action_plan_contract(monkeypatch: pytest.MonkeyPatch
     assert "嘉義市" in signal_gaps
     assert signal_gaps["嘉義市"]["tracking_status"] == "needs_signal_gap_review"
     assert signal_gaps["嘉義市"]["missing_signal_types"] == ["pump_or_gate_status"]
+    assert "宜蘭縣" not in signal_gaps
+    assert "桃園市" not in signal_gaps
     assert "雲林縣" not in signal_gaps
     assert "高雄市" not in signal_gaps
     hualien = plan["authorization_requests"][0]

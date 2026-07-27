@@ -633,6 +633,25 @@ def test_station_inventory_and_jurisdiction_migration_is_fail_closed() -> None:
         assert county_name in migration
 
 
+def test_yilan_mobile_pump_migration_registers_source_and_jurisdiction() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    migration = (
+        repository_root
+        / "infra"
+        / "migrations"
+        / "0037_yilan_mobile_pump_status_source.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "'local.yilan.mobile_pump_status'" in migration
+    assert "'pump_or_gate_status'" in migration
+    assert "'10002000'" in migration
+    assert "'2026-07-22-v1'" in migration
+    assert "false" in migration
+    assert "ON CONFLICT (adapter_key) DO UPDATE" in migration
+    assert "ON CONFLICT (adapter_key, signal_type, jurisdiction_code)" in migration
+    assert "SOURCE_YILAN_MOBILE_PUMP_STATUS" not in migration
+
+
 def test_query_realtime_source_health_rows_keeps_newer_skipped_job_authoritative() -> None:
     connection = _FakeConnection(
         rows=[

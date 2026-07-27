@@ -58,12 +58,12 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
     assert manifest["schema_version"] == "local-source-request-packet-bundle/v1"
     assert manifest["captured_at"] == "2026-07-01T15:40:00+08:00"
     assert manifest["summary"] == {
-        "official_request_packet_count": 16,
-        "official_completion_target_count": 23,
+            "official_request_packet_count": 14,
+            "official_completion_target_count": 21,
         "signal_gap_batch_count": 3,
-        "signal_gap_county_item_count": 17,
+            "signal_gap_county_item_count": 15,
         "source_contract_completion_target_count": 6,
-        "request_dispatch_evidence_draft_item_count": 23,
+            "request_dispatch_evidence_draft_item_count": 21,
         "dispatch_queue_item_count": 9,
         "signal_gap_dispatch_queue_item_count": 3,
         "source_contract_dispatch_queue_item_count": 6,
@@ -80,7 +80,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         )
     )
     assert signal_dispatch_template["captured_at"] == "REPLACE_WITH_DISPATCHED_AT"
-    assert len(signal_dispatch_template["signal_family_gap_evidence"]) == 17
+    assert len(signal_dispatch_template["signal_family_gap_evidence"]) == 15
     assert {
         item["evidence_ref"]
         for item in signal_dispatch_template["signal_family_gap_evidence"]
@@ -107,7 +107,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         == "local-source-completion-evidence/v1"
     )
     assert dispatch_evidence_draft["captured_at"] == "REPLACE_WITH_DISPATCHED_AT"
-    assert len(dispatch_evidence_draft["signal_family_gap_evidence"]) == 17
+    assert len(dispatch_evidence_draft["signal_family_gap_evidence"]) == 15
     assert len(dispatch_evidence_draft["source_contract_evidence"]) == 6
     assert dispatch_evidence_draft["production_gate_evidence"] == []
     assert {
@@ -140,8 +140,8 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         "LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64"
     )
     assert dispatch_checklist["summary"] == {
-        "total_dispatch_item_count": 23,
-        "signal_family_gap_dispatch_item_count": 17,
+        "total_dispatch_item_count": 21,
+        "signal_family_gap_dispatch_item_count": 15,
         "source_contract_dispatch_item_count": 6,
     }
     assert {
@@ -174,7 +174,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         "dispatch_queue_item_count": 9,
         "signal_gap_dispatch_queue_item_count": 3,
         "source_contract_dispatch_queue_item_count": 6,
-        "signal_gap_completion_target_count": 17,
+        "signal_gap_completion_target_count": 15,
         "source_contract_completion_target_count": 6,
     }
     assert [item["queue_id"] for item in dispatch_queue["items"][:3]] == [
@@ -186,7 +186,7 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
     assert first_signal_item["request_type"] == "signal_gap_batch_request"
     assert first_signal_item["completion_gate"] == "required_signal_families"
     assert first_signal_item["target_signal_type"] == "pump_or_gate_status"
-    assert first_signal_item["completion_target_count"] == 13
+    assert first_signal_item["completion_target_count"] == 11
     assert first_signal_item["status"] == "needs_dispatch"
     assert first_signal_item["private_dispatch_manifest_section"] == (
         "signal_family_gap_evidence"
@@ -211,8 +211,8 @@ def test_local_source_request_packet_bundle_cli_writes_operator_bundle(
         output_dir / "local-source-request-packet-bundle.md"
     ).read_text(encoding="utf-8")
     assert "# Local Source Request Packet Bundle" in summary_markdown
-    assert "official_request_packet_count: 16" in summary_markdown
-    assert "signal_gap_county_item_count: 17" in summary_markdown
+    assert "official_request_packet_count: 14" in summary_markdown
+    assert "signal_gap_county_item_count: 15" in summary_markdown
     assert "These templates are not completion evidence until placeholders are replaced" in (
         summary_markdown
     )

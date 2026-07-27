@@ -84,7 +84,11 @@ from app.adapters.local_taoyuan import (
     TaoyuanWaterLevelApiAdapter,
 )
 from app.adapters.local_yilan import FetchJson as YilanFetchJson
-from app.adapters.local_yilan import YilanFloodSensorArcgisAdapter, YilanWaterLevelArcgisAdapter
+from app.adapters.local_yilan import (
+    YilanFloodSensorArcgisAdapter,
+    YilanMobilePumpStatusArcgisAdapter,
+    YilanWaterLevelArcgisAdapter,
+)
 from app.adapters.local_yunlin import FetchJson as YunlinFetchJson
 from app.adapters.local_yunlin import YunlinWaterLevelApiAdapter
 from app.adapters.ncdr import FetchText as NcdrFetchText
@@ -225,6 +229,7 @@ def build_runtime_adapters(
     yunlin_water_level_fetch_json: YunlinFetchJson | None = None,
     yilan_flood_sensor_fetch_json: YilanFetchJson | None = None,
     yilan_water_level_fetch_json: YilanFetchJson | None = None,
+    yilan_mobile_pump_status_fetch_json: YilanFetchJson | None = None,
     penghu_water_level_fetch_json: PenghuFetchJson | None = None,
     kinmen_kwis_pump_station_fetch_text: KinmenKwisFetchText | None = None,
     fhy_flood_sensor_fetch_json: FhyFloodSensorFetchJson | None = None,
@@ -688,6 +693,18 @@ def build_runtime_adapters(
             fetch_json=yilan_water_level_fetch_json,
         )
         live_adapters[yilan_water_level_adapter.metadata.key] = yilan_water_level_adapter
+
+    if (
+        settings.source_yilan_mobile_pump_status_api_enabled
+        and "local.yilan.mobile_pump_status" in enabled_keys
+    ):
+        yilan_mobile_pump_adapter = YilanMobilePumpStatusArcgisAdapter(
+            api_url=settings.yilan_mobile_pump_layer_url,
+            timeout_seconds=settings.local_water_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=yilan_mobile_pump_status_fetch_json,
+        )
+        live_adapters[yilan_mobile_pump_adapter.metadata.key] = yilan_mobile_pump_adapter
 
     if (
         settings.source_penghu_water_level_api_enabled

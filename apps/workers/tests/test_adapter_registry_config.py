@@ -486,6 +486,11 @@ def test_explicit_adapter_allowlist_does_not_bypass_sample_data_gate() -> None:
             {"SOURCE_YILAN_WATER_LEVEL_API_ENABLED": "true"},
         ),
         (
+            "local.yilan.mobile_pump_status",
+            "SOURCE_YILAN_MOBILE_PUMP_STATUS_ENABLED",
+            {"SOURCE_YILAN_MOBILE_PUMP_STATUS_API_ENABLED": "true"},
+        ),
+        (
             "local.penghu.water_level",
             "SOURCE_PENGHU_WATER_LEVEL_ENABLED",
             {"SOURCE_PENGHU_WATER_LEVEL_API_ENABLED": "true"},

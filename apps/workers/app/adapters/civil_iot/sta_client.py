@@ -40,6 +40,7 @@ DEFAULT_THINGS_EXPAND = (
 )
 
 TAIWAN_COUNTY_ALIASES: tuple[tuple[str, str], ...] = (
+    ("桃園巿", "桃園市"),
     ("臺北市", "臺北市"),
     ("台北市", "臺北市"),
     ("新北市", "新北市"),

@@ -60,7 +60,11 @@ from app.adapters.ptt import METADATA as PTT_METADATA
 from app.adapters.wra import WRA_WATER_LEVEL_METADATA
 from app.adapters.wra_iow import WRA_IOW_FLOOD_DEPTH_METADATA
 from app.adapters.local_yunlin import YUNLIN_WATER_LEVEL_METADATA
-from app.adapters.local_yilan import YILAN_FLOOD_SENSOR_METADATA, YILAN_WATER_LEVEL_METADATA
+from app.adapters.local_yilan import (
+    YILAN_FLOOD_SENSOR_METADATA,
+    YILAN_MOBILE_PUMP_STATUS_METADATA,
+    YILAN_WATER_LEVEL_METADATA,
+)
 from app.config import WorkerSettings, load_worker_settings
 
 
@@ -118,6 +122,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         YUNLIN_WATER_LEVEL_METADATA.key: YUNLIN_WATER_LEVEL_METADATA,
         YILAN_FLOOD_SENSOR_METADATA.key: YILAN_FLOOD_SENSOR_METADATA,
         YILAN_WATER_LEVEL_METADATA.key: YILAN_WATER_LEVEL_METADATA,
+        YILAN_MOBILE_PUMP_STATUS_METADATA.key: YILAN_MOBILE_PUMP_STATUS_METADATA,
         PENGHU_WATER_LEVEL_METADATA.key: PENGHU_WATER_LEVEL_METADATA,
         KINMEN_KWIS_PUMP_STATION_METADATA.key: KINMEN_KWIS_PUMP_STATION_METADATA,
         **{
@@ -313,6 +318,11 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
             metadata.enabled_by_default,
             settings.source_yilan_water_level_enabled,
         )
+    if metadata.key == "local.yilan.mobile_pump_status":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_yilan_mobile_pump_status_enabled,
+        )
     if metadata.key == "local.penghu.water_level":
         return _with_optional_override(
             metadata.enabled_by_default,
@@ -472,6 +482,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_yilan_flood_sensor_enabled is True
     if metadata.key == "local.yilan.water_level":
         return settings.source_yilan_water_level_enabled is True
+    if metadata.key == "local.yilan.mobile_pump_status":
+        return settings.source_yilan_mobile_pump_status_enabled is True
     if metadata.key == "local.penghu.water_level":
         return settings.source_penghu_water_level_enabled is True
     if metadata.key == "local.kinmen.kwis_pump_station":

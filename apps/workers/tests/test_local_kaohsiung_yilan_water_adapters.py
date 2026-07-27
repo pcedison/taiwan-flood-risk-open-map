@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
+
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.local_kaohsiung import (
     KAOHSIUNG_FLOOD_SENSOR_API_URL,
@@ -15,8 +17,11 @@ from app.adapters.local_kaohsiung import (
 )
 from app.adapters.local_yilan import (
     YILAN_FLOOD_SENSOR_LAYER_URL,
+    YILAN_MOBILE_PUMP_LAYER_URL,
     YILAN_WATER_LEVEL_LAYER_URL,
     YilanFloodSensorArcgisAdapter,
+    YilanMobilePumpStatusArcgisAdapter,
+    YilanWaterFetchError,
     YilanWaterLevelArcgisAdapter,
 )
 from app.config import load_worker_settings
@@ -170,6 +175,29 @@ def _yilan_water_level_layer_payload() -> dict[str, Any]:
     }
 
 
+def _yilan_mobile_pump_layer_payload() -> dict[str, Any]:
+    return {
+        "features": [
+            {
+                "attributes": {
+                    "PID": 1,
+                    "city": "宜蘭縣",
+                    "id": "五結鄉-01",
+                    "lat": 24.702987,
+                    "lon": 121.829037,
+                    "road": "溪濱路一段",
+                    "status": "離線",
+                    "town": "五結鄉",
+                    "village": "錦眾村",
+                    "voltage": "3.6",
+                    "operateat": "2026-06-28 16:35:00",
+                    "LogDate": 1782635760000,
+                }
+            }
+        ]
+    }
+
+
 def test_kaohsiung_sewer_json_outputs_water_level_warning_metrics() -> None:
     adapter = KaohsiungSewerWaterLevelApiAdapter(
         fetched_at=FETCHED_AT,
@@ -275,7 +303,7 @@ def test_yilan_arcgis_flood_layer_outputs_flood_depth() -> None:
     raw_payload = result.fetched[0].payload
     assert raw_payload["station_id"] == "000060flood00001"
     assert raw_payload["station_name"] == "冬山鄉九分二路"
-    assert raw_payload["observed_at"] == "2026-06-28T06:57:00+00:00"
+    assert raw_payload["observed_at"] == "2026-06-27T22:57:00+00:00"
     assert raw_payload["flood_depth_cm"] == 6.0
     assert raw_payload["town"] == "冬山鄉"
     assert raw_payload["warning_level_cm"] == 10.0
@@ -303,7 +331,7 @@ def test_yilan_arcgis_water_level_layer_outputs_water_level() -> None:
     raw_payload = result.fetched[0].payload
     assert raw_payload["station_id"] == "WG_R_W_00040"
     assert raw_payload["station_name"] == "大坑罟防潮閘門內水位"
-    assert raw_payload["observed_at"] == "2026-06-28T08:36:00+00:00"
+    assert raw_payload["observed_at"] == "2026-06-28T00:36:00+00:00"
     assert raw_payload["water_level_m"] == 0.424
     assert raw_payload["warning_level_m"] == 2.689
     assert raw_payload["geometry"] == {
@@ -316,13 +344,60 @@ def test_yilan_arcgis_water_level_layer_outputs_water_level() -> None:
     assert "local_yilan" in evidence.tags
 
 
+def test_yilan_mobile_pump_layer_outputs_status_only_pump_signal() -> None:
+    adapter = YilanMobilePumpStatusArcgisAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: _yilan_mobile_pump_layer_payload(),
+    )
+
+    result = adapter.run()
+
+    assert result.adapter_key == "local.yilan.mobile_pump_status"
+    assert len(result.normalized) == 1
+    raw_payload = result.fetched[0].payload
+    assert raw_payload["station_id"] == "五結鄉-01"
+    assert raw_payload["station_name"] == "五結鄉-01"
+    assert raw_payload["observed_at"] == "2026-06-28T00:36:00+00:00"
+    assert raw_payload["pump_status"] == "離線"
+    assert raw_payload["last_operated_at"] == "2026-06-28 16:35:00"
+    assert raw_payload["voltage"] == 3.6
+    assert raw_payload["geometry"] == {
+        "type": "Point",
+        "coordinates": [121.829037, 24.702987],
+    }
+    evidence = result.normalized[0]
+    assert evidence.event_type is EventType.STATUS_ONLY
+    assert "local_yilan" in evidence.tags
+    assert "mobile_pump" in evidence.tags
+    assert "pump_or_gate_status" in evidence.tags
+
+
+def test_yilan_arcgis_error_envelope_fails_the_adapter_run() -> None:
+    adapter = YilanMobilePumpStatusArcgisAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda url, timeout: {
+            "error": {
+                "code": 400,
+                "message": "Unable to complete operation.",
+            }
+        },
+    )
+
+    with pytest.raises(
+        YilanWaterFetchError,
+        match=r"Yilan ArcGIS returned an error response: 400 Unable to complete operation",
+    ):
+        adapter.run()
+
+
 def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are_on() -> None:
     settings = load_worker_settings(
         {
             "WORKER_ENABLED_ADAPTER_KEYS": (
                 "local.kaohsiung.sewer_water_level,local.kaohsiung.flood_sensor,"
                 "local.kaohsiung.rainfall,"
-                "local.yilan.flood_sensor,local.yilan.water_level"
+                "local.yilan.flood_sensor,local.yilan.water_level,"
+                "local.yilan.mobile_pump_status"
             ),
             "SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_ENABLED": "true",
             "SOURCE_KAOHSIUNG_SEWER_WATER_LEVEL_API_ENABLED": "true",
@@ -334,6 +409,8 @@ def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are
             "SOURCE_YILAN_FLOOD_SENSOR_API_ENABLED": "true",
             "SOURCE_YILAN_WATER_LEVEL_ENABLED": "true",
             "SOURCE_YILAN_WATER_LEVEL_API_ENABLED": "true",
+            "SOURCE_YILAN_MOBILE_PUMP_STATUS_ENABLED": "true",
+            "SOURCE_YILAN_MOBILE_PUMP_STATUS_API_ENABLED": "true",
             "LOCAL_WATER_TIMEOUT_SECONDS": "5",
         }
     )
@@ -350,6 +427,9 @@ def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are
         ),
         yilan_flood_sensor_fetch_json=lambda url, timeout: _yilan_flood_layer_payload(),
         yilan_water_level_fetch_json=lambda url, timeout: _yilan_water_level_layer_payload(),
+        yilan_mobile_pump_status_fetch_json=(
+            lambda url, timeout: _yilan_mobile_pump_layer_payload()
+        ),
     )
 
     assert tuple(adapters) == (
@@ -358,15 +438,18 @@ def test_build_runtime_adapters_wires_kaohsiung_and_yilan_sources_when_gates_are
         "local.kaohsiung.rainfall",
         "local.yilan.flood_sensor",
         "local.yilan.water_level",
+        "local.yilan.mobile_pump_status",
     )
     assert len(adapters["local.kaohsiung.sewer_water_level"].run().normalized) == 1
     assert len(adapters["local.kaohsiung.flood_sensor"].run().normalized) == 1
     assert len(adapters["local.kaohsiung.rainfall"].run().normalized) == 1
     assert len(adapters["local.yilan.flood_sensor"].run().normalized) == 1
     assert len(adapters["local.yilan.water_level"].run().normalized) == 1
+    assert len(adapters["local.yilan.mobile_pump_status"].run().normalized) == 1
     assert KAOHSIUNG_SEWER_WATER_LEVEL_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
     assert KAOHSIUNG_FLOOD_SENSOR_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
     assert KAOHSIUNG_RAINFALL_RT_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
     assert KAOHSIUNG_RAINFALL_BASE_API_URL.startswith("https://wrbswi.kcg.gov.tw/")
     assert YILAN_FLOOD_SENSOR_LAYER_URL.startswith("https://wragis.e-land.gov.tw/")
     assert YILAN_WATER_LEVEL_LAYER_URL.startswith("https://wragis.e-land.gov.tw/")
+    assert YILAN_MOBILE_PUMP_LAYER_URL.startswith("https://wragis.e-land.gov.tw/")

@@ -1,6 +1,6 @@
 {
   "schema_version": "signal-family-evidence-input/v1",
-  "captured_at": "2026-07-01T00:30:00+08:00",
+  "captured_at": "2026-07-22T04:27:52+00:00",
   "template_status": "pending_official_evidence",
   "notes": [
     "Fill this template only after official reply, production adapter smoke, authorization-gated adapter evidence, or official-unavailable evidence is accepted.",
@@ -121,20 +121,6 @@
       "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
     },
     {
-      "county": "宜蘭縣",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/宜蘭縣/pump_or_gate_status",
-      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
-      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
-    },
-    {
       "county": "新北市",
       "signal_type": "pump_or_gate_status",
       "status": "pending",
@@ -159,20 +145,6 @@
         "production_adapter"
       ],
       "evidence_ref": "private-ops://local-source/signal-gap/新竹縣/pump_or_gate_status",
-      "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
-      "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
-    },
-    {
-      "county": "桃園市",
-      "signal_type": "pump_or_gate_status",
-      "status": "pending",
-      "accepted_statuses": [
-        "accepted",
-        "authorization_gated_adapter",
-        "official_unavailable",
-        "production_adapter"
-      ],
-      "evidence_ref": "private-ops://local-source/signal-gap/桃園市/pump_or_gate_status",
       "reviewed_at": "REPLACE_WITH_REVIEWED_AT",
       "reviewer": "REPLACE_WITH_REVIEWER_OR_TEAM"
     },

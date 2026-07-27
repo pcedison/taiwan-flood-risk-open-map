@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 import warnings
 from uuid import UUID
@@ -161,10 +162,10 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        36,
-        "0036_database_privacy_fence.sql",
-        "8384077000cdac131f7e20671a36ba31e7d45f5803dde81129a6a3f22d23bbac",
-        36,
+        37,
+        "0037_yilan_mobile_pump_status_source.sql",
+        "4a5215f6d32f83a7710a5782bdbd8168811affb306740c5acfb0cf45d0eb9447",
+        37,
         "public.station_inventory_snapshots",
         "public.realtime_jurisdiction_boundary_snapshots",
         "public.realtime_jurisdiction_boundaries",
@@ -181,8 +182,20 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
         def fetchone(self) -> tuple[bool, ...]:
             return (True, True, True, True, False, True, True)
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0036 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0037 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
+
+
+def test_required_schema_checksum_matches_migration_loader_algorithm() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    migration = (
+        repository_root / "infra" / "migrations" / health_routes.REQUIRED_SCHEMA_FILENAME
+    )
+    normalized_sql = migration.read_text(encoding="utf-8").strip()
+
+    assert sha256(normalized_sql.encode("utf-8")).hexdigest() == (
+        health_routes.REQUIRED_SCHEMA_CHECKSUM
+    )
 
 
 def test_database_readiness_does_not_expose_malformed_dsn(
