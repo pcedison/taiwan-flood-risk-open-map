@@ -24,11 +24,41 @@ from app.adapters.local_yilan import (
     YilanWaterFetchError,
     YilanWaterLevelArcgisAdapter,
 )
+from app.adapters.local_yilan import water as yilan_water
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
 
 
 FETCHED_AT = datetime(2026, 6, 28, 8, 45, tzinfo=UTC)
+
+
+def test_yilan_fetch_uses_verified_taiwan_government_tls_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class Response:
+        def __enter__(self) -> Response:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"features":[]}'
+
+    def fake_urlopen(request: object, **kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(yilan_water, "urlopen", fake_urlopen)
+
+    assert yilan_water.fetch_yilan_json("https://example.test/yilan", 8) == {
+        "features": []
+    }
+    context = captured["context"]
+    assert context.check_hostname is True
+    assert context.verify_mode.name == "CERT_REQUIRED"
 
 
 def _kaohsiung_sewer_payload() -> list[dict[str, Any]]:
