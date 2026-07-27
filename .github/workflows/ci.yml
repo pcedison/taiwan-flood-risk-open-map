@@ -114,6 +114,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix apps/web
 
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high --prefix apps/web
+
       - name: Install E2E API dependencies
         run: |
           python -m pip install --upgrade pip
