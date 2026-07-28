@@ -108,10 +108,10 @@ def _redis_store_candidates(
     if client is None:
         return
     try:
-        client.setex(
+        client.set(
             _REDIS_KEY_PREFIX + cache_key,
-            ttl_seconds,
             _CANDIDATES_ADAPTER.dump_json(candidates),
+            ex=ttl_seconds,
         )
     except redis.RedisError:
         _REDIS_CLIENTS.mark_unavailable()
