@@ -93,10 +93,10 @@ def _redis_store_evidence(
     if client is None:
         return
     try:
-        client.setex(
+        client.set(
             _REDIS_KEY_PREFIX + assessment_id,
-            ttl_seconds,
             _EVIDENCE_LIST_ADAPTER.dump_json(evidence_items),
+            ex=ttl_seconds,
         )
     except redis.RedisError:
         _REDIS_CLIENTS.mark_unavailable()

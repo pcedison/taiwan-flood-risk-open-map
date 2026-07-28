@@ -12,7 +12,7 @@ class _FakeRedis:
         self.store: dict[str, bytes] = {}
         self.fail = fail
         self.get_calls = 0
-        self.setex_calls: list[tuple[str, int]] = []
+        self.set_calls: list[tuple[str, int]] = []
 
     def get(self, key: str) -> bytes | None:
         self.get_calls += 1
@@ -20,10 +20,10 @@ class _FakeRedis:
             raise redis.RedisError("redis down")
         return self.store.get(key)
 
-    def setex(self, key: str, ttl: int, value: bytes) -> None:
+    def set(self, key: str, value: bytes, *, ex: int) -> None:
         if self.fail:
             raise redis.RedisError("redis down")
-        self.setex_calls.append((key, ttl))
+        self.set_calls.append((key, ex))
         self.store[key] = value
 
 
@@ -74,8 +74,8 @@ def test_empty_results_get_short_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
         redis_url="redis://example.test:6379/0",
     )
 
-    assert len(fake_redis.setex_calls) == 1
-    _, stored_ttl = fake_redis.setex_calls[0]
+    assert len(fake_redis.set_calls) == 1
+    _, stored_ttl = fake_redis.set_calls[0]
     assert stored_ttl == 300
 
     cached = geocode_cache.cached_candidates("key-a")
@@ -106,7 +106,7 @@ def test_redis_backend_stores_and_reads_serialized_candidates(
         redis_url="redis://example.test:6379/0",
     )
 
-    stored_key, stored_ttl = fake_redis.setex_calls[0]
+    stored_key, stored_ttl = fake_redis.set_calls[0]
     assert stored_key == "flood-risk:geocode:key-a"
     assert stored_ttl == 86400
 

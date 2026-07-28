@@ -119,7 +119,7 @@ def _redis_store_response(
     if client is None:
         return
     try:
-        client.setex(_redis_key(cache_key), ttl_seconds, response.model_dump_json())
+        client.set(_redis_key(cache_key), response.model_dump_json(), ex=ttl_seconds)
     except redis.RedisError:
         _REDIS_CLIENTS.mark_unavailable()
 
