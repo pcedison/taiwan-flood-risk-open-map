@@ -62,7 +62,9 @@ export function useFloodMap({
   const onMapClickRef = useRef(onMapClick);
   const [isMapReady, setIsMapReady] = useState(false);
 
-  onMapClickRef.current = onMapClick;
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
 
   useEffect(() => {
     let disposed = false;
