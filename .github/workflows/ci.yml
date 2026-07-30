@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - "codex/**"
 
 jobs:
   backend:
@@ -78,6 +77,7 @@ jobs:
       - name: Hosted deployment workflow contract tests
         run: |
           python -m pytest \
+            tests/test_ci_workflow.py \
             tests/test_hosted_monitoring_workflow.py \
             tests/test_hosted_monitoring_schedule_watchdog_workflow.py \
             tests/test_zeabur_single_service_deploy.py \
