@@ -282,7 +282,7 @@ def _warning_origin_rank(item: EvidenceRecord) -> tuple[int, float]:
     authority_rank = {
         "official.cwa.heavy_rain_warning": 0,
         "official.ncdr.cap": 1,
-    }.get(item.adapter_key, 2)
+    }.get(item.adapter_key or "", 2)
     observed_rank = -(item.observed_at.timestamp() if item.observed_at else 0.0)
     return authority_rank, observed_rank
 
