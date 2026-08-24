@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import redis
+from pydantic import ValidationError
 
 import app.api.services.public_response_cache as response_cache
 from app.api.services.public_risk import build_placeholder_nearby_realtime_coverage
@@ -45,25 +46,27 @@ def isolated_cache_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(response_cache, "_REDIS_CLIENTS", FailOpenRedisClients())
 
 
-def _response(assessment_id: str = "assessment-1") -> RiskAssessmentResponse:
-    return RiskAssessmentResponse(
-        assessment_id=assessment_id,
-        location=LatLng(lat=25.033, lng=121.5654),
-        radius_m=500,
-        score_version="risk-v0.1.0",
-        created_at=NOW,
-        expires_at=NOW + timedelta(hours=6),
-        realtime=RiskLevelBlock(level="低"),
-        historical=RiskLevelBlock(level="中"),
-        confidence=ConfidenceBlock(level="中"),
-        explanation=Explanation(summary="測試用評估摘要"),
-        evidence=[],
-        data_freshness=[],
-        query_heat=QueryHeat(period="weekly", attention_level="未知", updated_at=NOW),
-        nearby_realtime_coverage=build_placeholder_nearby_realtime_coverage(
+def _response(assessment_id: str = "assessment-1", **overrides: object) -> RiskAssessmentResponse:
+    payload: dict[str, object] = {
+        "assessment_id": assessment_id,
+        "location": LatLng(lat=25.033, lng=121.5654),
+        "radius_m": 500,
+        "score_version": "risk-v0.1.0",
+        "created_at": NOW,
+        "expires_at": NOW + timedelta(hours=6),
+        "realtime": RiskLevelBlock(level="低"),
+        "historical": RiskLevelBlock(level="中"),
+        "confidence": ConfidenceBlock(level="中"),
+        "explanation": Explanation(summary="測試用評估摘要"),
+        "evidence": [],
+        "data_freshness": [],
+        "query_heat": QueryHeat(period="weekly", attention_level="未知", updated_at=NOW),
+        "nearby_realtime_coverage": build_placeholder_nearby_realtime_coverage(
             evaluated_at=NOW, query_radius_m=500
         ),
-    )
+    }
+    payload.update(overrides)
+    return RiskAssessmentResponse.model_validate(payload)
 
 
 def test_legacy_constructor_gets_safe_additive_defaults() -> None:
@@ -73,6 +76,36 @@ def test_legacy_constructor_gets_safe_additive_defaults() -> None:
     assert payload["community"]["state"] == "none"
     assert payload["overall"]["level"] in {"低", "中", "高", "極高", "未知"}
     assert payload["data_status"] == {"sources": [], "missing": []}
+
+
+def test_omitted_mode_derives_legacy_fallback() -> None:
+    response = _response()
+
+    assert response.dominant_mode == "realtime"
+    assert response.overall is not None
+    assert response.overall.level == "低"
+
+
+def test_matching_explicit_mode_without_overall_is_accepted() -> None:
+    response = _response(dominant_mode="realtime")
+
+    assert response.dominant_mode == "realtime"
+    assert response.overall is not None
+    assert response.overall.level == "低"
+
+
+def test_conflicting_explicit_mode_without_overall_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="dominant_mode"):
+        _response(dominant_mode="community_warning")
+
+
+def test_explicit_overall_and_mode_pair_is_preserved() -> None:
+    overall = RiskLevelBlock(level="極高", confidence="高", reasons=["社群警示已驗證。"])
+
+    response = _response(overall=overall, dominant_mode="community_warning")
+
+    assert response.dominant_mode == "community_warning"
+    assert response.overall == overall
 
 
 def test_memory_backend_roundtrip_and_ttl_expiry() -> None:

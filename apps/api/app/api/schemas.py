@@ -796,22 +796,31 @@ class RiskAssessmentResponse(ContractModel):
             self.as_of = self.created_at
         if self.overall is None:
             if self.realtime.level != "未知":
-                self.overall = RiskLevelBlock(
+                compatibility_overall = RiskLevelBlock(
                     level=self.realtime.level,
                     confidence=self.confidence.level,
                     reasons=list(self.explanation.main_reasons),
                 )
-                self.dominant_mode = "realtime"
+                compatibility_mode: DominantMode = "realtime"
             elif self.historical.level != "未知":
-                self.overall = RiskLevelBlock(
+                compatibility_overall = RiskLevelBlock(
                     level=self.historical.level,
                     confidence=self.confidence.level,
                     reasons=["此相容結果只代表歷史背景風險。"],
                 )
-                self.dominant_mode = "historical_context"
+                compatibility_mode = "historical_context"
             else:
-                self.overall = RiskLevelBlock(level="未知")
-                self.dominant_mode = "unknown"
+                compatibility_overall = RiskLevelBlock(level="未知")
+                compatibility_mode = "unknown"
+            if (
+                "dominant_mode" in self.model_fields_set
+                and self.dominant_mode != compatibility_mode
+            ):
+                raise ValueError(
+                    "explicit dominant_mode conflicts with compatibility-derived mode"
+                )
+            self.overall = compatibility_overall
+            self.dominant_mode = compatibility_mode
         return self
 
 
