@@ -1426,9 +1426,23 @@ def test_external_tile_predicate_rejects_canonicalized_local_product_references(
         "https://tiles.official.gov.tw/proxy?url=//127.0.0.1/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/catalog.json#source=%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/proxy?url=ftp://unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw;@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%3B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%26@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%25253B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%252526@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Ftiles.official.gov.tw%253B@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//",
     ],
 )
-def test_external_tile_predicate_rejects_nested_unreviewed_authorities(
+def test_external_tile_predicate_rejects_every_nested_network_reference(
     unsafe_nested_tile_url: str,
 ) -> None:
     assert not public_layer_service.is_external_tile_url(
@@ -1442,12 +1456,10 @@ def test_external_tile_predicate_rejects_nested_unreviewed_authorities(
     [
         "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?note=station-127.0.0.1",
         "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?ratio=1//2",
-        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf&style=rainfall",
-        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
-        "https://tiles.official.gov.tw/proxy?url=//tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?note=https-colon-slash-slash",
     ],
 )
-def test_external_tile_predicate_preserves_non_authority_values_and_reviewed_nested_urls(
+def test_external_tile_predicate_preserves_ordinary_non_authority_values(
     safe_tile_url: str,
 ) -> None:
     assert public_layer_service.is_external_tile_url(
@@ -1467,9 +1479,20 @@ def test_external_tile_predicate_preserves_non_authority_values_and_reviewed_nes
         "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/proxy?url=//127.0.0.1/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/catalog.json#source=%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw;@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%3B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%26@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%25253B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%252526@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Ftiles.official.gov.tw%253B@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
     ],
 )
-def test_layers_and_tilejson_fail_closed_for_nested_unreviewed_tile_authorities(
+def test_layers_and_tilejson_fail_closed_for_every_nested_network_reference(
     monkeypatch: pytest.MonkeyPatch,
     unsafe_nested_tile_url: str,
 ) -> None:
@@ -1556,6 +1579,16 @@ def test_layers_require_original_tiles_to_be_a_nonempty_all_string_list(
         "https://tiles.official.gov.tw/proxy?url=http://127.0.0.1/private-tilejson.json",
         "https://tiles.official.gov.tw/proxy?url=http://user:secret@unreviewed.gov/private-tilejson.json",
         "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw;@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%3B@127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw&@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%26@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%252526@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Ftiles.official.gov.tw%253B@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private-tilejson.json",
     ],
 )
 def test_layers_fail_closed_before_serializing_unsafe_tilejson_url(
@@ -1682,7 +1715,7 @@ def test_layers_serialize_only_explicitly_reviewed_external_tile_metadata(
     assert tilejson_response.json()["tiles"] == [tile_url]
 
 
-def test_layers_preserve_nested_urls_when_every_authority_is_reviewed(
+def test_layers_reject_nested_urls_even_when_every_authority_is_reviewed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     tile_url = (
@@ -1715,9 +1748,11 @@ def test_layers_preserve_nested_urls_when_every_authority_is_reviewed(
     layers_response = client.get("/v1/layers")
     tilejson_response = client.get("/v1/layers/official-flood/tilejson")
 
-    assert layers_response.json()["layers"][0]["tilejson_url"] == external_tilejson_url
-    assert tilejson_response.status_code == 200
-    assert tilejson_response.json()["tiles"] == [tile_url]
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert external_tilejson_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+    assert tile_url not in tilejson_response.text
 
 
 def test_static_openapi_hides_frozen_layer_products() -> None:
