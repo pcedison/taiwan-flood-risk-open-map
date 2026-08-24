@@ -577,10 +577,10 @@ def query_nearby_latest_official(
     if observed_since is not None:
         observed_since_filter = """
             AND (
-                candidate.event_type NOT IN (
+                latest.event_type NOT IN (
                     'rainfall', 'water_level', 'flood_report', 'flood_depth'
                 )
-                OR candidate.observed_at >= %s::timestamptz
+                OR latest.observed_at >= %s::timestamptz
             )
         """
         observed_since_params = (observed_since,)
@@ -629,6 +629,10 @@ def query_nearby_latest_official(
                 latest.observed_at,
                 latest.ingested_at,
                 COALESCE(e.geom, latest.geom) AS evidence_geom,
+                ST_Distance(
+                    COALESCE(e.geom, latest.geom)::geography,
+                    qp.geog
+                ) AS distance_to_query_m,
                 COALESCE(latest.confidence, e.confidence, 0.9) AS confidence,
                 COALESCE(latest.freshness_score, e.freshness_score, 0.8)
                     AS freshness_score,
@@ -692,80 +696,93 @@ def query_nearby_latest_official(
                 ON data_sources.adapter_key = latest.adapter_key
                 AND data_sources.is_enabled = true
             JOIN evidence e ON e.id = latest.evidence_id
-            WHERE e.properties->>'evidence_scope' = 'current'
-        ),
-        eligible_latest AS (
-            SELECT
-                candidate.*,
-                ST_Distance(candidate.evidence_geom::geography, qp.geog)
-                    AS distance_to_query_m
-            FROM parsed_latest candidate
             CROSS JOIN query_point qp
-            WHERE candidate.evidence_geom IS NOT NULL
-                AND NOT ST_IsEmpty(candidate.evidence_geom)
-                AND ST_IsValid(candidate.evidence_geom)
+            WHERE latest.event_type IN (
+                    'rainfall',
+                    'water_level',
+                    'flood_report',
+                    'flood_depth',
+                    'flood_warning'
+                )
+                AND e.properties->>'evidence_scope' = 'current'
+                AND COALESCE(e.geom, latest.geom) IS NOT NULL
+                AND NOT ST_IsEmpty(COALESCE(e.geom, latest.geom))
+                AND ST_IsValid(COALESCE(e.geom, latest.geom))
                 {observed_since_filter}
-                AND candidate.evidence_geom
+                AND COALESCE(e.geom, latest.geom)
                     && ST_Expand(qp.geom, qp.radius_degree)
                 AND ST_DWithin(
-                    candidate.evidence_geom::geography,
+                    COALESCE(e.geom, latest.geom)::geography,
                     qp.geog,
                     qp.radius_m
                 )
-                AND (
-                    candidate.event_type IN (
-                        'rainfall',
-                        'water_level',
-                        'flood_report',
-                        'flood_depth'
-                    )
-                    OR (
-                        candidate.event_type = 'flood_warning'
-                        AND candidate.cap_status = 'Actual'
-                        AND candidate.cap_message_type IN ('Alert', 'Update')
-                        AND candidate.safe_active_from IS NOT NULL
-                        AND candidate.safe_active_until IS NOT NULL
-                        AND candidate.safe_active_from <= qp.as_of
-                        AND qp.as_of < candidate.safe_active_until
-                        AND length(candidate.cap_sender) BETWEEN 1 AND 512
-                        AND length(candidate.cap_identifier) BETWEEN 1 AND 512
-                        AND candidate.safe_cap_sent IS NOT NULL
-                        AND candidate.admin_code ~ '^[0-9]{{8}}$'
-                        AND candidate.safe_generation_started_at IS NOT NULL
-                        AND NOT EXISTS (
-                            SELECT 1
-                            FROM ingestion_jobs retired
-                            WHERE retired.adapter_key = candidate.adapter_key
-                                AND retired.status = 'succeeded'
-                                AND retired.error_code = 'no_active_event'
-                                AND retired.started_at
-                                    >= candidate.safe_generation_started_at
-                        )
+        ),
+        eligible_latest AS (
+            SELECT candidate.*
+            FROM parsed_latest candidate
+            CROSS JOIN query_point qp
+            WHERE (
+                candidate.event_type IN (
+                    'rainfall',
+                    'water_level',
+                    'flood_report',
+                    'flood_depth'
+                )
+                OR (
+                    candidate.event_type = 'flood_warning'
+                    AND candidate.cap_status = 'Actual'
+                    AND candidate.cap_message_type IN ('Alert', 'Update')
+                    AND candidate.safe_active_from IS NOT NULL
+                    AND candidate.safe_active_until IS NOT NULL
+                    AND candidate.safe_active_from <= qp.as_of
+                    AND qp.as_of < candidate.safe_active_until
+                    AND length(candidate.cap_sender) BETWEEN 1 AND 512
+                    AND length(candidate.cap_identifier) BETWEEN 1 AND 512
+                    AND candidate.safe_cap_sent IS NOT NULL
+                    AND candidate.admin_code ~ '^[0-9]{{8}}$'
+                    AND candidate.safe_generation_started_at IS NOT NULL
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM ingestion_jobs retired
+                        WHERE retired.adapter_key = candidate.adapter_key
+                            AND retired.status = 'succeeded'
+                            AND retired.error_code = 'no_active_event'
+                            AND retired.started_at
+                                >= candidate.safe_generation_started_at
                     )
                 )
+            )
         ),
-        ranked_latest AS (
+        ranked_warnings AS (
             SELECT
-                eligible.*,
-                CASE WHEN eligible.event_type = 'flood_warning' THEN
-                    ROW_NUMBER() OVER (
-                        PARTITION BY
-                            eligible.cap_sender,
-                            eligible.cap_identifier,
-                            eligible.safe_cap_sent,
-                            eligible.admin_code
-                        ORDER BY
-                            CASE eligible.adapter_key
-                                WHEN 'official.cwa.heavy_rain_warning' THEN 0
-                                WHEN 'official.ncdr.cap' THEN 1
-                                ELSE 2
-                            END,
-                            eligible.observed_at DESC NULLS LAST,
-                            eligible.updated_at DESC,
-                            eligible.id
-                    )
-                END AS warning_origin_rank
-            FROM eligible_latest eligible
+                warning.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        warning.cap_sender,
+                        warning.cap_identifier,
+                        warning.safe_cap_sent,
+                        warning.admin_code
+                    ORDER BY
+                        CASE warning.adapter_key
+                            WHEN 'official.cwa.heavy_rain_warning' THEN 0
+                            WHEN 'official.ncdr.cap' THEN 1
+                            ELSE 2
+                        END,
+                        warning.observed_at DESC NULLS LAST,
+                        warning.updated_at DESC,
+                        warning.id
+                ) AS warning_origin_rank
+            FROM eligible_latest warning
+            WHERE warning.event_type = 'flood_warning'
+        ),
+        deduplicated_latest AS (
+            SELECT non_warning.*, NULL::bigint AS warning_origin_rank
+            FROM eligible_latest non_warning
+            WHERE non_warning.event_type <> 'flood_warning'
+            UNION ALL
+            SELECT warning.*
+            FROM ranked_warnings warning
+            WHERE warning.warning_origin_rank = 1
         )
         SELECT
             ranked.id,
@@ -801,9 +818,7 @@ def query_nearby_latest_official(
             ranked.cap_identifier,
             ranked.safe_cap_sent AS cap_sent,
             ranked.admin_code
-        FROM ranked_latest ranked
-        WHERE ranked.event_type <> 'flood_warning'
-            OR ranked.warning_origin_rank = 1
+        FROM deduplicated_latest ranked
         ORDER BY
             ranked.distance_to_query_m ASC,
             ranked.observed_at DESC,

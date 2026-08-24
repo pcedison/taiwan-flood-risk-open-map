@@ -840,9 +840,9 @@ def test_query_nearby_latest_official_filters_rows_by_observed_since() -> None:
 
     sql, params = connection.cursor_instance.executions[0]
     assert records == ()
-    assert "candidate.event_type NOT IN (" in sql
+    assert "latest.event_type NOT IN (" in sql
     assert "'flood_depth'" in sql
-    assert "candidate.observed_at >= %s::timestamptz" in sql
+    assert "latest.observed_at >= %s::timestamptz" in sql
     assert params == (
         121.5654,
         25.033,
@@ -1016,6 +1016,35 @@ def test_latest_reader_parses_cap_timestamps_once_before_comparison() -> None:
     assert "safe_generation_started_at" in sql
     assert "safe_active_from <= qp.as_of" in sql
     assert "qp.as_of < candidate.safe_active_until" in sql
+
+
+def test_latest_materialized_candidate_pushes_down_scale_sensitive_filters() -> None:
+    connection = _FakeConnection(rows=[])
+    query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        radius_m=500,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
+        observed_since=datetime(2026, 8, 24, 2, tzinfo=UTC),
+        connection_factory=lambda: connection,
+    )
+    sql = connection.cursor_instance.executions[0][0]
+    candidate_sql = sql[
+        sql.index("parsed_latest AS MATERIALIZED (") : sql.index(
+            "eligible_latest AS ("
+        )
+    ]
+
+    assert "latest.event_type IN (" in candidate_sql
+    assert "JOIN evidence e ON e.id = latest.evidence_id" in candidate_sql
+    assert "e.properties->>'evidence_scope' = 'current'" in candidate_sql
+    assert "COALESCE(e.geom, latest.geom) IS NOT NULL" in candidate_sql
+    assert "NOT ST_IsEmpty(COALESCE(e.geom, latest.geom))" in candidate_sql
+    assert "ST_IsValid(COALESCE(e.geom, latest.geom))" in candidate_sql
+    assert "ST_Expand(qp.geom, qp.radius_degree)" in candidate_sql
+    assert "ST_DWithin(" in candidate_sql
+    assert "latest.observed_at >= %s::timestamptz" in candidate_sql
 
 
 def test_latest_reader_deduplicates_canonical_warning_origin_before_limit() -> None:

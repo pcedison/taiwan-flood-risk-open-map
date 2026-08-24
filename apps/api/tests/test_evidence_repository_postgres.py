@@ -368,8 +368,8 @@ def test_jurisdiction_proof_requires_every_considered_county_in_real_sql() -> No
                             convert_to(
                                 jsonb_build_array(
                                     jsonb_build_array(
-                                        %s, %s, 'national', 'TW',
-                                        'required', NULL, %s
+                                        %s::text, %s::text, 'national', 'TW',
+                                        'required', NULL, %s::text
                                     )
                                 )::text,
                                 'UTF8'
@@ -739,6 +739,63 @@ def test_canonical_warning_dedupe_precedes_limit_and_prefers_cwa() -> None:
         )
         assert {record.id for record in records} == {str(cwa_id), str(other_id)}
         assert str(ncdr_duplicate_id) not in {record.id for record in records}
+
+
+def test_cap_shaped_non_warning_cannot_take_warning_rank() -> None:
+    database_url = _database_url()
+    now = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
+    generation = now - timedelta(minutes=10)
+    with _isolated_schema(database_url) as isolated_url:
+        _prepare_latest_schema(isolated_url)
+        adapter_key = "official.cwa.heavy_rain_warning"
+        warning_id, rainfall_id = uuid4(), uuid4()
+        shared_properties = _warning_properties(
+            now=now,
+            identifier="shared-cross-event-origin",
+            generation=generation,
+        )
+        with psycopg.connect(isolated_url) as connection:
+            _insert_latest_source(connection, adapter_key)
+            for station_id, event_type, evidence_id, observed_at, polygon in (
+                ("active-warning", "flood_warning", warning_id, now, True),
+                (
+                    "newer-rainfall",
+                    "rainfall",
+                    rainfall_id,
+                    now + timedelta(minutes=1),
+                    False,
+                ),
+            ):
+                _insert_evidence(
+                    connection,
+                    evidence_id=evidence_id,
+                    station_id=station_id,
+                    event_type=event_type,
+                    observed_at=observed_at,
+                    properties=shared_properties,
+                    polygon=polygon,
+                )
+                _insert_latest_row(
+                    connection,
+                    adapter_key=adapter_key,
+                    station_id=station_id,
+                    event_type=event_type,
+                    observed_at=observed_at,
+                    evidence_id=evidence_id,
+                )
+
+        records = query_nearby_latest_official(
+            database_url=isolated_url,
+            lat=23.0,
+            lng=120.0,
+            radius_m=500,
+            as_of=now + timedelta(minutes=2),
+            connection_factory=lambda: _unpooled_connection(isolated_url),
+        )
+        assert {record.id for record in records} == {
+            str(warning_id),
+            str(rainfall_id),
+        }
 
 
 def test_generic_history_uses_exact_geography_radius_polygon_and_kill_switch() -> None:
