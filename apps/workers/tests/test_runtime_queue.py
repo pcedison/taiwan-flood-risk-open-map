@@ -40,8 +40,8 @@ from app.jobs.runtime import (
 from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
 from app.pipelines.staging import AdapterStagingBatch
 from app.scheduler import (
-    _legacy_enqueue_enabled_adapters_loop,
-    _legacy_run_enabled_adapters_loop,
+    _execute_enabled_adapters_loop,
+    _execute_enqueue_enabled_adapters_loop,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -1129,7 +1129,7 @@ def test_scheduler_loop_falls_back_when_database_lease_is_unavailable(monkeypatc
 
     monkeypatch.setattr("app.scheduler.PostgresRuntimeQueue", _UnavailableQueue)
 
-    results = _legacy_run_enabled_adapters_loop(settings=settings, max_ticks=1)
+    results = _execute_enabled_adapters_loop(settings=settings, max_ticks=1)
 
     assert len(results) == 1
 
@@ -1146,7 +1146,7 @@ def test_scheduler_enqueue_loop_skips_when_database_lease_is_held(monkeypatch) -
 
     monkeypatch.setattr("app.scheduler.PostgresRuntimeQueue", _LeaseHeldQueue)
 
-    results = _legacy_enqueue_enabled_adapters_loop(
+    results = _execute_enqueue_enabled_adapters_loop(
         settings=settings, queue=queue, max_ticks=1
     )
 

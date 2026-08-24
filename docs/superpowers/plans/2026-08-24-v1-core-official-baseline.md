@@ -2501,9 +2501,19 @@ managed-cycle tests use a test-local `monkeypatch` fixture that adds only the
 synthetic CWA warning, NCDR warning, and historical-flood builders/metadata to
 `ADAPTER_REGISTRY` and restores it after each test. Do not register unfinished
 production adapters in Task 9 or make `enabled_adapter_keys()` accept unknown
-keys globally.
+keys globally. Import `run_v1_baseline_adapter_cycle` from
+`app.jobs.runtime_managed`; every synthetic managed helper passes exactly one
+allowlisted key as both the sole mapping key and the sole
+`settings.enabled_adapter_keys` value; warning helpers use only the exact CWA
+or NCDR warning key, and the historical helper uses only its exact historical
+key. The generic
+`run_managed_runtime_ingestion_cycle` facade remains frozen and is never used by
+Task 9 tests or production code.
 
 ```python
+from app.jobs.runtime_managed import run_v1_baseline_adapter_cycle
+
+
 def test_valid_empty_warning_poll_is_success_not_skipped() -> None:
     summary = run_adapter_batch(EmptyWarningAdapter(no_active_event=True))
     assert summary.status == "succeeded"
@@ -2579,7 +2589,7 @@ def test_historical_flood_uses_background_fetch_freshness_not_event_age() -> Non
 
 
 def test_managed_no_active_poll_retires_only_its_warning_latest_rows() -> None:
-    result = run_managed_runtime_ingestion_cycle(
+    result = run_v1_baseline_adapter_cycle(
         {"official.cwa.heavy_rain_warning": EMPTY_CWA_ADAPTER},
         settings=CWA_ONLY_SETTINGS,
         promotion_writer=writer,
@@ -2668,13 +2678,15 @@ Alert/Update/Cancel promotion. Under that lock, delete only that adapter's
 `quality_flags.ingestion_generation_started_at <= generation_started_at`; a
 missing/malformed row generation fails closed and is not bulk-deleted. Commit
 once and never delete linked `evidence`. In
-`run_managed_runtime_ingestion_cycle`, call it only after the successful run
-summary with `error_code='no_active_event'` has been persisted and only when
-`promote=True`; a retirement exception returns a failed managed result without
-affecting later Task 14 sources. Never invoke it for an empty failure/skipped
-run or a station adapter. The generation is the cycle's captured `started_at`,
-not completion time, so an older slow poll cannot erase a newer Alert that
-committed first. Every warning latest upsert mirrors that same cycle generation.
+`_execute_managed_runtime_ingestion_cycle`, reached by Task 9 only through the
+validated `run_v1_baseline_adapter_cycle` seam, call it only after the
+successful run summary with `error_code='no_active_event'` has been persisted
+and only when `promote=True`; a retirement exception returns a failed managed
+result without affecting later Task 14 sources. Never invoke it for an empty
+failure/skipped run or a station adapter. The generation is the cycle's captured
+`started_at`, not completion time, so an older slow poll cannot erase a newer
+Alert that committed first. Every warning latest upsert mirrors that same cycle
+generation.
 Under the same lifecycle lock, Alert/Update promotion must query the persisted
 maximum successful `no_active_event` `ingestion_jobs.started_at` for its adapter.
 When `candidate.ingestion_generation_started_at <= max_empty_generation`, retain
@@ -3319,23 +3331,13 @@ from app.jobs.ingestion import (
 from app.jobs.runtime_managed import (
     ManagedRuntimeIngestionResult,
     RuntimeAdapterBuilder,
-    run_managed_runtime_ingestion_cycle,
+    V1_BASELINE_ADAPTER_KEYS,
+    run_v1_baseline_adapter_cycle,
 )
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.promotion import EvidencePromotionWriter
 from app.pipelines.staging import StagingBatchWriter
-
-V1_BASELINE_ADAPTER_KEYS: tuple[str, ...] = (
-    "official.cwa.rainfall",
-    "official.cwa.heavy_rain_warning",
-    "official.wra.water_level",
-    "official.wra_iow.flood_depth",
-    "official.wra.historical_flood",
-    "official.ncdr.cap",
-    "official.flood_potential.geojson",
-    "local.tainan.flood_sensor",
-)
 
 V1_API_GATE_ATTR_BY_KEY = {
     "official.cwa.rainfall": "source_cwa_api_enabled",
@@ -3420,7 +3422,7 @@ def run_v1_baseline_cycle(
                 )
                 results.append(missing_adapter_result(key))
                 continue
-            result = run_managed_runtime_ingestion_cycle(
+            result = run_v1_baseline_adapter_cycle(
                 {key: adapter},
                 settings=scoped_settings,
                 database_url=database_url,
@@ -3497,19 +3499,24 @@ continues to the next selected key.
 refer to a nonexistent public `build_ingestion_run_writer`. It returns the
 injected writer, otherwise the normal `PostgresIngestionRunWriter` for the
 resolved database URL, otherwise `None`.
-Add the defaulted keyword-only
+`V1_BASELINE_ADAPTER_KEYS` has one production owner in
+`app.jobs.runtime_managed`; this wrapper, migration tests, and activation proof
+import it rather than redeclaring it. Add the defaulted keyword-only
 `record_runtime_selection_state: bool = True` to
-`run_managed_runtime_ingestion_cycle` and propagate it through
-`run_scheduled_ingestion_cycle` to a same-named defaulted keyword on
-`run_enabled_adapter_batches`. Guard every `record_runtime_selection(...)` in
-all three layers with that value; guarding only the outer managed call is
-insufficient because the current scheduler→ingestion chain writes another
-singleton selection. Generic legacy callers retain `True`. The v1 wrapper
-records the **complete** selected set exactly once before per-source work, then
-passes `False` through every scoped managed call and its nested scheduler/batch
-call. Do not change pipeline-status, staging, run-summary, freshness, or
-promotion behavior. A one-key scoped settings object must never rewrite every
-other selected source to `runtime_enabled=false`.
+`run_v1_baseline_adapter_cycle` and `_execute_managed_runtime_ingestion_cycle`,
+then propagate it through `_execute_scheduled_ingestion_cycle` to a same-named
+defaulted keyword on `run_enabled_adapter_batches`. The scoped seam validates
+its sole mapping key and sole `settings.enabled_adapter_keys` value before the
+internal engine can construct a writer or adapter, then passes the flag through.
+Guard every `record_runtime_selection(...)` in all three execution layers with
+that value; guarding only the outer managed engine is insufficient because the
+current scheduler→ingestion chain writes another singleton selection. The
+generic public managed/scheduler facades remain unchanged frozen JSON/exit-2
+surfaces. The v1 wrapper records the **complete** selected set exactly once
+before per-source work, then passes `False` through every scoped adapter call
+and its nested scheduler/batch call. Do not change pipeline-status, staging,
+run-summary, freshness, or promotion behavior. A one-key scoped settings object
+must never rewrite every other selected source to `runtime_enabled=false`.
 
 - [ ] **Step 1: Write RED isolation and continuation tests**
 
@@ -3567,7 +3574,9 @@ reimplement staging, run recording, or promotion.
 Add one `--v1-baseline` dispatch in `app/cli/parser.py` and `app/main.py`, and the
 same bounded-cycle selection in `app/scheduler.py`; both delegate to
 `v1_baseline_cli`/`run_v1_baseline_cycle`. They must not bypass the Task 7 frozen
-writer guards or call `run_managed_runtime_ingestion_cycle` directly.
+writer guards, call a generic managed/scheduler facade, or import an `_execute_*`
+engine directly. Only `run_v1_baseline_adapter_cycle` may enter the reviewed
+per-source managed engine.
 
 - [ ] **Step 3: Write migration 0038 tests before SQL**
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Final, Literal
 
 from app.adapters.contracts import DataSourceAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
@@ -26,10 +26,20 @@ from app.pipelines.promotion import (
     promote_accepted_staging,
 )
 from app.pipelines.staging import StagingBatchWriter
-from app.scheduler import _legacy_run_scheduled_ingestion_cycle
+from app.scheduler import _execute_scheduled_ingestion_cycle
 
 ManagedRuntimeStatus = Literal["succeeded", "partial", "failed", "skipped"]
 RuntimeAdapterBuilder = Callable[[WorkerSettings], Mapping[str, DataSourceAdapter]]
+V1_BASELINE_ADAPTER_KEYS: Final[tuple[str, ...]] = (
+    "official.cwa.rainfall",
+    "official.cwa.heavy_rain_warning",
+    "official.wra.water_level",
+    "official.wra_iow.flood_depth",
+    "official.wra.historical_flood",
+    "official.ncdr.cap",
+    "official.flood_potential.geojson",
+    "local.tainan.flood_sensor",
+)
 
 
 @dataclass(frozen=True)
@@ -89,7 +99,53 @@ def run_managed_runtime_ingestion_cycle(
     return report_frozen_legacy()
 
 
-def _legacy_run_managed_runtime_ingestion_cycle(
+def run_v1_baseline_adapter_cycle(
+    adapter_by_key: Mapping[str, DataSourceAdapter],
+    *,
+    settings: WorkerSettings,
+    database_url: str | None = None,
+    staging_writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
+    promotion_writer: EvidencePromotionWriter | None = None,
+    promote: bool = False,
+    promotion_limit: int | None = None,
+    promotion_adapter_keys: tuple[str, ...] | None = None,
+    job_key: str = "runtime.v1_baseline.ingest.adapter",
+) -> ManagedRuntimeIngestionResult:
+    adapter_keys = tuple(adapter_by_key)
+    if len(adapter_keys) != 1:
+        return _invalid_v1_baseline_scope_result()
+    adapter_key = adapter_keys[0]
+    if (
+        adapter_key not in V1_BASELINE_ADAPTER_KEYS
+        or settings.enabled_adapter_keys != (adapter_key,)
+        or adapter_by_key[adapter_key].metadata.key != adapter_key
+        or promotion_adapter_keys not in {None, (adapter_key,)}
+    ):
+        return _invalid_v1_baseline_scope_result()
+    return _execute_managed_runtime_ingestion_cycle(
+        adapter_by_key,
+        settings=settings,
+        database_url=database_url,
+        staging_writer=staging_writer,
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+        promote=promote,
+        promotion_limit=promotion_limit,
+        promotion_adapter_keys=promotion_adapter_keys,
+        job_key=job_key,
+    )
+
+
+def _invalid_v1_baseline_scope_result() -> ManagedRuntimeIngestionResult:
+    return ManagedRuntimeIngestionResult(
+        status="failed",
+        reason="invalid_v1_baseline_scope",
+        error_code="invalid_v1_baseline_scope",
+    )
+
+
+def _execute_managed_runtime_ingestion_cycle(
     adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
     *,
     settings: WorkerSettings | None = None,
@@ -189,7 +245,7 @@ def _legacy_run_managed_runtime_ingestion_cycle(
             available_adapter_keys=tuple(adapters),
         )
 
-    cycle = _legacy_run_scheduled_ingestion_cycle(
+    cycle = _execute_scheduled_ingestion_cycle(
         adapters,
         settings=resolved_settings,
         job_key=job_key,

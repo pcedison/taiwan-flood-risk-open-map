@@ -4,6 +4,7 @@ import re
 from datetime import datetime
 from ipaddress import ip_address
 from typing import Any, Protocol, cast
+from unicodedata import normalize
 from urllib.parse import SplitResult, unquote, urlsplit
 
 from app.api.schemas import MapLayer, TileJson, TileJsonVectorLayer
@@ -224,9 +225,11 @@ def tile_templates_for_layer(
     allow_local_tile_fallback: bool,
 ) -> tuple[list[str], str]:
     del allow_local_tile_fallback
-    metadata_tiles = _string_list(record.metadata.get("tiles"), fallback=[])
+    metadata_tiles = _validated_raw_tile_templates(record.metadata)
+    if metadata_tiles is None:
+        raise LayerTileJsonDisabled(record.id)
     reviewed_hosts = reviewed_external_tile_hosts(record.metadata)
-    if metadata_tiles and all(
+    if all(
         is_external_tile_url(tile, reviewed_hosts=reviewed_hosts)
         for tile in metadata_tiles
     ):
@@ -240,11 +243,20 @@ def is_public_external_tile_layer(record: LayerRecord) -> bool:
     reviewed_hosts = reviewed_external_tile_hosts(record.metadata)
     if not reviewed_hosts or public_tilejson_url(record) is None:
         return False
-    metadata_tiles = _string_list(record.metadata.get("tiles"), fallback=[])
-    return bool(metadata_tiles) and all(
+    metadata_tiles = _validated_raw_tile_templates(record.metadata)
+    return metadata_tiles is not None and all(
         is_external_tile_url(tile, reviewed_hosts=reviewed_hosts)
         for tile in metadata_tiles
     )
+
+
+def _validated_raw_tile_templates(metadata: dict[str, Any]) -> list[str] | None:
+    raw_tiles = metadata.get("tiles")
+    if not isinstance(raw_tiles, list) or not raw_tiles:
+        return None
+    if any(not isinstance(tile, str) or not tile for tile in raw_tiles):
+        return None
+    return raw_tiles
 
 
 def public_tilejson_url(record: LayerRecord) -> str | None:
@@ -333,19 +345,21 @@ def _fully_percent_decoded_url(value: str) -> str | None:
     if not current or current != value:
         return None
     for _pass in range(MAX_PERCENT_DECODE_PASSES):
-        if re.search(r"%(?![0-9a-fA-F]{2})", current):
+        canonical = normalize("NFKC", current)
+        if re.search(r"%(?![0-9a-fA-F]{2})", canonical):
             return None
         try:
-            decoded = unquote(current, errors="strict")
+            decoded = unquote(canonical, errors="strict")
         except UnicodeDecodeError:
             return None
         if decoded == current:
             return None if _has_unsafe_url_characters(current) else current
         current = decoded
-    if re.search(r"%(?![0-9a-fA-F]{2})", current):
+    canonical = normalize("NFKC", current)
+    if re.search(r"%(?![0-9a-fA-F]{2})", canonical):
         return None
     try:
-        if unquote(current, errors="strict") != current:
+        if unquote(canonical, errors="strict") != current:
             return None
         return None if _has_unsafe_url_characters(current) else current
     except UnicodeDecodeError:
@@ -370,12 +384,9 @@ def _has_safe_product_path(parsed: SplitResult) -> bool:
     path_segments = [segment.casefold() for segment in parsed.path.split("/") if segment]
     if any(segment in {".", ".."} for segment in path_segments):
         return False
-    if any(
-        path_segments[index : index + 2] == ["v1", "tiles"]
-        for index in range(max(0, len(path_segments) - 1))
-    ):
+    product_components = f"{parsed.path}?{parsed.query}#{parsed.fragment}".casefold()
+    if re.search(r"(?<![a-z0-9])v1[^a-z0-9]+tiles(?![a-z0-9])", product_components):
         return False
-    product_components = f"{parsed.path}?{parsed.query}?{parsed.fragment}".casefold()
     return "pmtiles" not in product_components
 
 
@@ -465,14 +476,6 @@ def _optional_int(value: object) -> int | None:
         return int(cast(Any, value))
     except (TypeError, ValueError):
         return None
-
-
-def _string_list(value: object, *, fallback: list[str]) -> list[str]:
-    if isinstance(value, list):
-        items = [str(item) for item in value if item]
-        if items:
-            return items
-    return fallback
 
 
 def _number_list(value: object, *, expected_length: int) -> list[float] | None:

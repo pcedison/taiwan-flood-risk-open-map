@@ -98,7 +98,7 @@ def run_scheduled_ingestion_cycle(
     return report_frozen_legacy()
 
 
-def _legacy_run_scheduled_ingestion_cycle(
+def _execute_scheduled_ingestion_cycle(
     adapter_by_key: Mapping[str, DataSourceAdapter],
     *,
     settings=None,
@@ -144,7 +144,7 @@ def run_enabled_adapters_once(
     return report_frozen_legacy()
 
 
-def _legacy_run_enabled_adapters_once(
+def _execute_enabled_adapters_once(
     *,
     settings: WorkerSettings | None = None,
     adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
@@ -165,7 +165,7 @@ def _legacy_run_enabled_adapters_once(
             available_adapter_keys=tuple(adapters),
         )
 
-    result = _legacy_run_scheduled_ingestion_cycle(
+    result = _execute_scheduled_ingestion_cycle(
         adapters,
         settings=resolved_settings,
         job_key=job_key,
@@ -190,7 +190,7 @@ def run_enabled_adapters_loop(
     return report_frozen_legacy()
 
 
-def _legacy_run_enabled_adapters_loop(
+def _execute_enabled_adapters_loop(
     *,
     settings: WorkerSettings | None = None,
     max_ticks: int | None = None,
@@ -212,7 +212,7 @@ def _legacy_run_enabled_adapters_loop(
 
     try:
         while tick_limit is None or tick < tick_limit:
-            result = _legacy_run_enabled_adapters_once(settings=resolved_settings)
+            result = _execute_enabled_adapters_once(settings=resolved_settings)
             results.append(result)
             _write_scheduler_heartbeat(settings=resolved_settings, result=result)
             tick += 1
@@ -368,7 +368,7 @@ def enqueue_enabled_adapters_once(
     return report_frozen_legacy()
 
 
-def _legacy_enqueue_enabled_adapters_once(
+def _execute_enqueue_enabled_adapters_once(
     *,
     settings: WorkerSettings | None = None,
     queue: RuntimeQueue | None = None,
@@ -401,7 +401,7 @@ def enqueue_enabled_adapters_loop(
     return report_frozen_legacy()
 
 
-def _legacy_enqueue_enabled_adapters_loop(
+def _execute_enqueue_enabled_adapters_loop(
     *,
     settings: WorkerSettings | None = None,
     queue: RuntimeQueue | None = None,
@@ -424,7 +424,7 @@ def _legacy_enqueue_enabled_adapters_loop(
 
     try:
         while tick_limit is None or tick < tick_limit:
-            result = _legacy_enqueue_enabled_adapters_once(
+            result = _execute_enqueue_enabled_adapters_once(
                 settings=resolved_settings,
                 queue=queue,
             )

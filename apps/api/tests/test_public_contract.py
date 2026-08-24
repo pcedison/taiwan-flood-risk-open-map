@@ -23,6 +23,7 @@ from app.api.schemas import (
     PlaceCandidate,
     RiskAssessmentResponse,
 )
+from app.api.services import public_layers as public_layer_service
 from app.api.services.assessment import AssessmentService
 from app.core.config import get_settings
 from app.domain.assessment import AssessmentData, AssessmentSourceState
@@ -1326,6 +1327,10 @@ def test_public_layers_hide_query_heat_and_local_tile_products(monkeypatch) -> N
         "https://tiles.official.gov.tw/archive%252epmtiles/metadata/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?source=archive%252epmtiles",
         "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf#archive%2epmtiles",
+        "https://tiles.official.gov.tw/proxy?url=/v1/tiles/query-heat/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/catalog.json#source=%2576%2531%252ftiles/query-heat",
+        "https://tiles.official.gov.tw/proxy?source=v1%3atiles%2fquery-heat",
+        "https://tiles.official.gov.tw/catalog.json#source=%EF%BD%96%EF%BC%91%EF%BC%8F%EF%BD%94%EF%BD%89%EF%BD%8C%EF%BD%85%EF%BD%93/query-heat",
         "https://user:secret@tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf",
         "https://127.0.0.1/vector/{z}/{x}/{y}.pbf",
         "https://127.1/vector/{z}/{x}/{y}.pbf",
@@ -1385,6 +1390,65 @@ def test_layers_and_tilejson_fail_closed_for_unsafe_tile_templates(
     assert unsafe_tile_url not in layers_response.text
     assert tilejson_response.status_code == 404
     assert unsafe_tile_url not in tilejson_response.text
+
+
+@pytest.mark.parametrize(
+    "unsafe_tile_url",
+    [
+        "https://tiles.official.gov.tw/v1/tiles/query-heat/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/proxy?url=/v1/tiles/query-heat/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/catalog.json#source=/v1/tiles/query-heat",
+        "https://tiles.official.gov.tw/proxy?url=v1%255ctiles%255cquery-heat",
+        "https://tiles.official.gov.tw/proxy?url=%2576%2531%252ftiles/query-heat",
+        "https://tiles.official.gov.tw/proxy?source=v1%3atiles%2fquery-heat",
+        "https://tiles.official.gov.tw/catalog.json#source=v1%EF%BC%8Ftiles/query-heat",
+        "https://tiles.official.gov.tw/catalog.json#source=%EF%BD%96%EF%BC%91%EF%BC%8F%EF%BD%94%EF%BD%89%EF%BD%8C%EF%BD%85%EF%BD%93/query-heat",
+    ],
+)
+def test_external_tile_predicate_rejects_canonicalized_local_product_references(
+    unsafe_tile_url: str,
+) -> None:
+    assert not public_layer_service.is_external_tile_url(
+        unsafe_tile_url,
+        reviewed_hosts=frozenset({REVIEWED_TILE_HOST}),
+    )
+
+
+@pytest.mark.parametrize(
+    "raw_tiles",
+    [
+        [],
+        "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf",
+        ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf", None],
+        ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf", ""],
+        ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf", 7],
+    ],
+)
+def test_layers_require_original_tiles_to_be_a_nonempty_all_string_list(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_tiles: object,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": raw_tiles,
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    assert client.get("/v1/layers").json()["layers"] == []
+    assert client.get("/v1/layers/official-flood/tilejson").status_code == 404
 
 
 @pytest.mark.parametrize(

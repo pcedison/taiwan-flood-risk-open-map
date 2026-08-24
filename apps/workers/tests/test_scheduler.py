@@ -158,6 +158,22 @@ def test_public_managed_runtime_facade_freezes_before_writer_construction(
     }
 
 
+def test_executable_generic_engines_use_private_nonlegacy_names() -> None:
+    assert not hasattr(
+        runtime_managed_jobs, "_legacy_run_managed_runtime_ingestion_cycle"
+    )
+    assert hasattr(runtime_managed_jobs, "_execute_managed_runtime_ingestion_cycle")
+    for surface in (
+        "run_scheduled_ingestion_cycle",
+        "run_enabled_adapters_once",
+        "run_enabled_adapters_loop",
+        "enqueue_enabled_adapters_once",
+        "enqueue_enabled_adapters_loop",
+    ):
+        assert not hasattr(scheduler, f"_legacy_{surface}")
+        assert hasattr(scheduler, f"_execute_{surface.removeprefix('run_')}")
+
+
 @pytest.mark.parametrize(
     "argv",
     [

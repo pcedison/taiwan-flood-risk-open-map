@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,12 +18,165 @@ from app.adapters.contracts import (
 )
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.config import WorkerSettings, load_worker_settings
+from app.jobs import runtime_managed as runtime_managed_jobs
 from app.jobs.ingestion import AdapterBatchRunSummary
-from app.jobs.runtime_managed import _legacy_run_managed_runtime_ingestion_cycle
+from app.jobs.runtime_managed import _execute_managed_runtime_ingestion_cycle
 from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
 from app.pipelines.staging import AdapterStagingBatch
 
 FETCHED_AT = datetime.now(UTC)
+EXPECTED_V1_BASELINE_ADAPTER_KEYS = (
+    "official.cwa.rainfall",
+    "official.cwa.heavy_rain_warning",
+    "official.wra.water_level",
+    "official.wra_iow.flood_depth",
+    "official.wra.historical_flood",
+    "official.ncdr.cap",
+    "official.flood_potential.geojson",
+    "local.tainan.flood_sensor",
+)
+
+
+@pytest.mark.parametrize(
+    "mapping_keys,settings_keys,adapter_metadata_keys",
+    [
+        (("community.unreviewed",), ("community.unreviewed",), ("community.unreviewed",)),
+        (
+            ("official.cwa.rainfall", "official.wra.water_level"),
+            ("official.cwa.rainfall",),
+            ("official.cwa.rainfall", "official.wra.water_level"),
+        ),
+        (
+            ("official.cwa.rainfall",),
+            ("official.wra.water_level",),
+            ("official.cwa.rainfall",),
+        ),
+        (
+            ("official.cwa.rainfall",),
+            ("official.cwa.rainfall", "official.wra.water_level"),
+            ("official.cwa.rainfall",),
+        ),
+        (
+            ("official.cwa.rainfall",),
+            ("official.cwa.rainfall",),
+            ("official.wra.water_level",),
+        ),
+    ],
+)
+def test_v1_baseline_adapter_cycle_rejects_scope_before_engine_or_writer_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    mapping_keys: tuple[str, ...],
+    settings_keys: tuple[str, ...],
+    adapter_metadata_keys: tuple[str, ...],
+) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("v1 scope rejection reached an engine or writer constructor")
+
+    monkeypatch.setattr(
+        runtime_managed_jobs,
+        "_execute_managed_runtime_ingestion_cycle",
+        forbidden,
+        raising=False,
+    )
+    monkeypatch.setattr(runtime_managed_jobs, "PostgresIngestionRunWriter", forbidden)
+    monkeypatch.setattr(runtime_managed_jobs, "PostgresStagingBatchWriter", forbidden)
+    monkeypatch.setattr(runtime_managed_jobs, "PostgresEvidencePromotionWriter", forbidden)
+    adapters = {
+        key: SimpleNamespace(metadata=SimpleNamespace(key=metadata_key))
+        for key, metadata_key in zip(mapping_keys, adapter_metadata_keys, strict=True)
+    }
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=settings_keys,
+        database_url="postgresql://worker:test@localhost/flood",
+    )
+
+    result = runtime_managed_jobs.run_v1_baseline_adapter_cycle(
+        adapters,  # type: ignore[arg-type]
+        settings=settings,
+        promote=True,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "invalid_v1_baseline_scope"
+    assert result.error_code == "invalid_v1_baseline_scope"
+
+
+def test_each_exact_v1_baseline_key_can_enter_the_scoped_injected_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[dict[str, object], dict[str, object]]] = []
+
+    def execute(
+        adapter_by_key: dict[str, object],
+        **kwargs: object,
+    ) -> runtime_managed_jobs.ManagedRuntimeIngestionResult:
+        calls.append((adapter_by_key, kwargs))
+        return runtime_managed_jobs.ManagedRuntimeIngestionResult(status="succeeded")
+
+    monkeypatch.setattr(
+        runtime_managed_jobs,
+        "_execute_managed_runtime_ingestion_cycle",
+        execute,
+        raising=False,
+    )
+
+    assert runtime_managed_jobs.V1_BASELINE_ADAPTER_KEYS == (
+        EXPECTED_V1_BASELINE_ADAPTER_KEYS
+    )
+    for key in EXPECTED_V1_BASELINE_ADAPTER_KEYS:
+        adapter = SimpleNamespace(metadata=SimpleNamespace(key=key))
+        settings = replace(load_worker_settings({}), enabled_adapter_keys=(key,))
+
+        result = runtime_managed_jobs.run_v1_baseline_adapter_cycle(
+            {key: adapter},  # type: ignore[arg-type]
+            settings=settings,
+            database_url="postgresql://worker:test@localhost/flood",
+            staging_writer=object(),  # type: ignore[arg-type]
+            run_writer=object(),  # type: ignore[arg-type]
+            promotion_writer=object(),  # type: ignore[arg-type]
+            promote=True,
+            promotion_limit=5,
+            promotion_adapter_keys=(key,),
+            job_key=f"worker.v1_baseline.{key}",
+        )
+
+        assert result.status == "succeeded"
+
+    assert [tuple(mapping) for mapping, _kwargs in calls] == [
+        (key,) for key in EXPECTED_V1_BASELINE_ADAPTER_KEYS
+    ]
+    for key, (_mapping, kwargs) in zip(
+        EXPECTED_V1_BASELINE_ADAPTER_KEYS, calls, strict=True
+    ):
+        assert kwargs["settings"].enabled_adapter_keys == (key,)  # type: ignore[union-attr]
+        assert kwargs["promotion_adapter_keys"] == (key,)
+        assert kwargs["job_key"] == f"worker.v1_baseline.{key}"
+
+
+def test_v1_baseline_adapter_cycle_rejects_cross_key_promotion_before_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("cross-key promotion reached the managed engine")
+
+    monkeypatch.setattr(
+        runtime_managed_jobs,
+        "_execute_managed_runtime_ingestion_cycle",
+        forbidden,
+    )
+    key = "official.cwa.rainfall"
+    adapter = SimpleNamespace(metadata=SimpleNamespace(key=key))
+    settings = replace(load_worker_settings({}), enabled_adapter_keys=(key,))
+
+    result = runtime_managed_jobs.run_v1_baseline_adapter_cycle(
+        {key: adapter},  # type: ignore[arg-type]
+        settings=settings,
+        promotion_adapter_keys=("official.wra.water_level",),
+    )
+
+    assert result.status == "failed"
+    assert result.error_code == "invalid_v1_baseline_scope"
 
 
 def test_managed_runtime_cycle_persists_enabled_adapters_and_promotes() -> None:
@@ -31,7 +185,7 @@ def test_managed_runtime_cycle_persists_enabled_adapters_and_promotes() -> None:
     run_writer = _MemoryRunWriter()
     promotion_writer = _MemoryPromotionWriter([_candidate()])
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         {
             adapter.metadata.key: adapter,
             "official.wra.water_level": _ExplodingAdapter("official.wra.water_level"),
@@ -82,7 +236,7 @@ def test_managed_runtime_cycle_uses_injected_adapter_builder() -> None:
         adapter = _sample_adapter(source_id="builder-news-001")
         return {adapter.metadata.key: adapter}
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         settings=settings,
         adapter_builder=adapter_builder,
         staging_writer=staging_writer,
@@ -106,7 +260,7 @@ def test_managed_runtime_cycle_promotes_adapter_keys_from_ran_summaries() -> Non
     )
     sample_adapter = _sample_adapter()
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         {
             official_adapter.metadata.key: official_adapter,
             sample_adapter.metadata.key: sample_adapter,
@@ -144,7 +298,7 @@ def test_managed_runtime_cycle_noops_without_database_url_before_building_adapte
         called = True
         raise AssertionError("adapter builder should not run without persistence")
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         settings=_settings("news.public_web.sample"),
         adapter_builder=adapter_builder,
         promote=True,
@@ -159,7 +313,7 @@ def test_managed_runtime_cycle_noops_without_adapters_when_writers_are_injected(
     staging_writer = _MemoryStagingWriter()
     run_writer = _MemoryRunWriter()
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         settings=_settings("news.public_web.sample"),
         staging_writer=staging_writer,
         run_writer=run_writer,
@@ -175,7 +329,7 @@ def test_managed_runtime_cycle_records_empty_runtime_selection() -> None:
     run_writer = _MemoryRunWriter()
     settings = replace(_settings("news.public_web.sample"), enabled_adapter_keys=())
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         settings=settings,
         run_writer=run_writer,
     )
@@ -188,7 +342,7 @@ def test_managed_runtime_cycle_records_empty_runtime_selection() -> None:
 def test_managed_runtime_cycle_marks_missing_enabled_adapter_as_pipeline_failure() -> None:
     run_writer = _MemoryRunWriter()
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         {},
         settings=_settings("official.wra.water_level"),
         staging_writer=_MemoryStagingWriter(),
@@ -210,7 +364,7 @@ def test_managed_runtime_cycle_records_promotion_failure_in_public_pipeline_stat
     adapter = _sample_adapter()
     run_writer = _MemoryRunWriter()
 
-    result = _legacy_run_managed_runtime_ingestion_cycle(
+    result = _execute_managed_runtime_ingestion_cycle(
         {adapter.metadata.key: adapter},
         settings=_settings("news.public_web.sample"),
         staging_writer=_MemoryStagingWriter(),
@@ -237,7 +391,7 @@ def test_managed_runtime_cycle_records_builder_exception_as_pipeline_failure() -
         raise RuntimeError("adapter initialization failed")
 
     with pytest.raises(RuntimeError, match="adapter initialization failed"):
-        _legacy_run_managed_runtime_ingestion_cycle(
+        _execute_managed_runtime_ingestion_cycle(
             settings=_settings("news.public_web.sample"),
             staging_writer=_MemoryStagingWriter(),
             run_writer=run_writer,
