@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone
 import json
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import psycopg
@@ -840,8 +840,9 @@ def test_query_nearby_latest_official_filters_rows_by_observed_since() -> None:
 
     sql, params = connection.cursor_instance.executions[0]
     assert records == ()
-    assert "latest.event_type IN ('rainfall', 'water_level', 'flood_report')" in sql
-    assert "latest.observed_at >= %s::timestamptz" in sql
+    assert "candidate.event_type NOT IN (" in sql
+    assert "'flood_depth'" in sql
+    assert "candidate.observed_at >= %s::timestamptz" in sql
     assert params == (
         121.5654,
         25.033,
@@ -962,6 +963,79 @@ def test_cap_origin_encoding_has_no_delimiter_collision() -> None:
     ) != _official_event_origin_key(
         sender="a", identifier="b|c", sent=sent, admin_code="67000000"
     )
+
+
+def test_cap_origin_rejects_unicode_admin_digits() -> None:
+    fixture = (
+        Path(__file__).parents[3] / "tests" / "fixtures" / "cap_identity_vectors.json"
+    )
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    case = payload["invalid_cases"][0]
+    with pytest.raises(ValueError, match="admin_code"):
+        _official_event_origin_key(
+            sender=case["sender"],
+            identifier=case["identifier"],
+            sent=datetime.fromisoformat(case["sent"].replace("Z", "+00:00")),
+            admin_code=case["admin_code"],
+        )
+
+
+def test_latest_reader_enforces_persisted_current_scope_and_flood_depth_lookback() -> None:
+    connection = _FakeConnection(rows=[])
+    query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        radius_m=500,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
+        observed_since=datetime(2026, 8, 24, 2, tzinfo=UTC),
+        connection_factory=lambda: connection,
+    )
+    sql = connection.cursor_instance.executions[0][0]
+
+    assert "e.properties->>'evidence_scope' = 'current'" in sql
+    assert "'current' AS evidence_scope" not in sql
+    assert "'flood_depth'" in sql
+
+
+def test_latest_reader_parses_cap_timestamps_once_before_comparison() -> None:
+    connection = _FakeConnection(rows=[])
+    query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        radius_m=500,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
+        connection_factory=lambda: connection,
+    )
+    sql = connection.cursor_instance.executions[0][0]
+
+    assert "safe_active_from" in sql
+    assert "safe_active_until" in sql
+    assert "safe_cap_sent" in sql
+    assert "safe_generation_started_at" in sql
+    assert "safe_active_from <= qp.as_of" in sql
+    assert "qp.as_of < candidate.safe_active_until" in sql
+
+
+def test_latest_reader_deduplicates_canonical_warning_origin_before_limit() -> None:
+    connection = _FakeConnection(rows=[])
+    query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        radius_m=500,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
+        limit=2,
+        connection_factory=lambda: connection,
+    )
+    sql = connection.cursor_instance.executions[0][0]
+
+    rank_position = sql.index("ROW_NUMBER()")
+    limit_position = sql.rindex("LIMIT %s")
+    assert rank_position < limit_position
+    assert "official.cwa.heavy_rain_warning" in sql
+    assert "official.ncdr.cap" in sql
 
 
 def test_latest_and_coverage_queries_apply_catalog_kill_switch() -> None:

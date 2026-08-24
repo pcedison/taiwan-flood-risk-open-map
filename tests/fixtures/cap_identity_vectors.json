@@ -25,5 +25,14 @@
       "message_digest": "0b003b2031a7e713eb2e84b2d350f31cc51d0036a781e506d9f0846e9ed5c79d",
       "origin_digest": "460a3ac34b78fb98e9d02e373b80db1e1c68f538c7ce8e4263ebd3cd2b824ba4"
     }
+  ],
+  "invalid_cases": [
+    {
+      "sender": "sender@example.tw",
+      "identifier": "alert-1",
+      "sent": "2026-08-24T03:04:05.000000Z",
+      "admin_code": "６７００００００",
+      "reason": "admin_code_must_be_ascii"
+    }
   ]
 }

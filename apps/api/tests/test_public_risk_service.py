@@ -543,7 +543,6 @@ def test_nearby_realtime_coverage_returns_unavailable_when_repository_disabled(
         "rainfall",
         "water_level",
         "flood_depth",
-        "sewer_water_level",
     }
 
 
@@ -639,7 +638,6 @@ def test_nearby_realtime_coverage_returns_unavailable_when_repository_unavailabl
         "rainfall",
         "water_level",
         "flood_depth",
-        "sewer_water_level",
     }
 
 

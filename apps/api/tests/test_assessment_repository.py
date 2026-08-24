@@ -7,6 +7,7 @@ import pytest
 
 from app.domain.assessment.repository import (
     PostgresAssessmentRepository,
+    _complete_signal_types,
     _historical_only,
     _official_current,
 )
@@ -17,7 +18,9 @@ from app.domain.evidence import (
     RealtimeJurisdictionSignalContract,
     RealtimeJurisdictionSourceMapping,
     RealtimeSourceHealthRow,
+    RiskAssessmentPersistence,
 )
+from app.domain.evidence.repository import _official_event_origin_key
 
 NOW = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
 POINT = {"lat": 22.9997, "lng": 120.2270, "radius_m": 750, "as_of": NOW}
@@ -230,33 +233,56 @@ def test_historical_or_context_scope_never_enters_current_even_if_latest_is_dirt
 
 
 def test_same_cap_republished_by_ncdr_is_scored_once() -> None:
+    origin = _official_event_origin_key(
+        sender="sender@example.tw",
+        identifier="same-cap",
+        sent=NOW,
+        admin_code="67000000",
+    )
     cwa = _record(
         "cwa-cap",
         adapter_key="official.cwa.heavy_rain_warning",
         event_type="flood_warning",
-        origin="same-origin",
+        origin=origin,
     )
     ncdr = _record(
         "ncdr-cap",
         adapter_key="official.ncdr.cap",
         event_type="flood_warning",
-        origin="same-origin",
+        origin=origin,
         observed_at=NOW + timedelta(minutes=1),
     )
     assert _official_current((ncdr, cwa)) == (cwa,)
 
 
 def test_cap_origin_requires_exact_sender_identifier_sent_and_admin() -> None:
+    components = (
+        ("sender@example.tw", "alert-1", NOW, "67000000"),
+        ("other@example.tw", "alert-1", NOW, "67000000"),
+        ("sender@example.tw", "alert-2", NOW, "67000000"),
+        ("sender@example.tw", "alert-1", NOW + timedelta(seconds=1), "67000000"),
+        ("sender@example.tw", "alert-1", NOW, "64000000"),
+    )
+    origins = tuple(
+        _official_event_origin_key(
+            sender=sender,
+            identifier=identifier,
+            sent=sent,
+            admin_code=admin_code,
+        )
+        for sender, identifier, sent, admin_code in components
+    )
     records = tuple(
         _record(
             f"cap-{index}",
             adapter_key="official.ncdr.cap",
             event_type="flood_warning",
-            origin=f"distinct-{index}",
+            origin=origin,
         )
-        for index in range(4)
+        for index, origin in enumerate(origins)
     )
-    assert len(_official_current(records)) == 4
+    assert len(set(origins)) == 5
+    assert len(_official_current(records)) == 5
 
 
 def test_enabled_but_unmapped_legacy_source_cannot_score_or_satisfy_coverage(
@@ -341,6 +367,93 @@ def test_tainan_gap_clears_only_for_fresh_or_degraded_mapped_source(
         query_realtime_source_health_rows=lambda **_: (health,),
     ).load(**POINT)
     assert data.local_machine_feed_missing == ()
+
+
+def test_completeness_requires_every_considered_jurisdiction_per_required_signal() -> None:
+    contracts = tuple(
+        RealtimeJurisdictionSignalContract(
+            jurisdiction_code=code,
+            jurisdiction_name=name,
+            signal_type=signal_type,
+            catalog_status=(
+                "reviewed_complete"
+                if not (code == "64000000" and signal_type == "water_level")
+                else "unreviewed"
+            ),
+            mapping_revision="2026-08-24-v1-baseline",
+            mapping_proof_valid=not (
+                code == "64000000" and signal_type == "water_level"
+            ),
+        )
+        for code, name in (("67000000", "臺南市"), ("64000000", "高雄市"))
+        for signal_type in ("rainfall", "water_level", "flood_depth")
+    )
+    context = RealtimeJurisdictionContext(
+        resolution_status="verified",
+        home_jurisdiction_code="67000000",
+        home_jurisdiction_name="臺南市",
+        considered_jurisdictions=(("67000000", "臺南市"), ("64000000", "高雄市")),
+        signal_contracts=contracts,
+        source_mappings=(),
+    )
+
+    assert _complete_signal_types(context) == ("flood_depth", "rainfall")
+
+
+def _persistence_record() -> RiskAssessmentPersistence:
+    return RiskAssessmentPersistence(
+        assessment_id="d315d0e6-9c1e-475a-9118-f299d12d5c62",
+        lat=22.9997,
+        lng=120.227,
+        radius_m=750,
+        score_version="risk-v1",
+        realtime_score=12.0,
+        historical_score=23.0,
+        confidence_score=0.8,
+        realtime_level="中",
+        historical_level="中",
+        explanation={"summary": "persist boundary"},
+        data_freshness=[],
+        result_snapshot={"assessment_id": "d315d0e6-9c1e-475a-9118-f299d12d5c62"},
+        evidence_ids=(),
+        created_at=NOW,
+        expires_at=NOW + timedelta(minutes=10),
+    )
+
+
+def test_persist_delegates_to_existing_evidence_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.domain.assessment.repository as module
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        module,
+        "persist_risk_assessment",
+        lambda **kwargs: captured.update(kwargs),
+    )
+    assessment = _persistence_record()
+
+    PostgresAssessmentRepository("postgresql://example.test/flood").persist(assessment)
+
+    assert captured == {
+        "database_url": "postgresql://example.test/flood",
+        "assessment": assessment,
+    }
+
+
+def test_disabled_repository_persist_is_a_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.domain.assessment.repository as module
+
+    monkeypatch.setattr(
+        module,
+        "persist_risk_assessment",
+        lambda **_: pytest.fail("disabled repository must not persist"),
+    )
+
+    PostgresAssessmentRepository(
+        "postgresql://example.test/flood", enabled=False
+    ).persist(_persistence_record())
 
 
 def test_disabled_repository_reports_every_read_unavailable(

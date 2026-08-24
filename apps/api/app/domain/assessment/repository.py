@@ -346,16 +346,22 @@ def _unavailable_jurisdiction() -> RealtimeJurisdictionContext:
 
 
 def _complete_signal_types(jurisdiction: RealtimeJurisdictionContext) -> tuple:
-    return tuple(
-        sorted(
-            {
-                contract.signal_type
-                for contract in jurisdiction.signal_contracts
-                if contract.mapping_proof_valid
-                and contract.mapping_revision == "2026-08-24-v1-baseline"
-            }
-        )
-    )
+    considered_codes = {code for code, _ in jurisdiction.considered_jurisdictions}
+    if not considered_codes:
+        return ()
+    complete: list[str] = []
+    for signal_type in ("rainfall", "water_level", "flood_depth"):
+        valid_codes = {
+            contract.jurisdiction_code
+            for contract in jurisdiction.signal_contracts
+            if contract.signal_type == signal_type
+            and contract.catalog_status == "reviewed_complete"
+            and contract.mapping_proof_valid
+            and contract.mapping_revision == "2026-08-24-v1-baseline"
+        }
+        if considered_codes <= valid_codes:
+            complete.append(signal_type)
+    return tuple(sorted(complete))
 
 
 def _jurisdictions_by_adapter(

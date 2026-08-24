@@ -542,7 +542,7 @@ def _official_event_origin_key(
 ) -> str:
     if not 1 <= len(sender) <= 512 or not 1 <= len(identifier) <= 512:
         raise ValueError("CAP sender and identifier must be bounded")
-    if re.fullmatch(r"\d{8}", admin_code) is None:
+    if re.fullmatch(r"[0-9]{8}", admin_code) is None:
         raise ValueError("CAP admin_code must be canonical")
     if sent.tzinfo is None or sent.utcoffset() is None:
         raise ValueError("CAP sent must be timezone-aware")
@@ -577,8 +577,10 @@ def query_nearby_latest_official(
     if observed_since is not None:
         observed_since_filter = """
             AND (
-                latest.event_type NOT IN ('rainfall', 'water_level', 'flood_report')
-                OR latest.observed_at >= %s::timestamptz
+                candidate.event_type NOT IN (
+                    'rainfall', 'water_level', 'flood_report', 'flood_depth'
+                )
+                OR candidate.observed_at >= %s::timestamptz
             )
         """
         observed_since_params = (observed_since,)
@@ -593,167 +595,219 @@ def query_nearby_latest_official(
         query_point AS (
             SELECT *, (radius_m / 90000.0) AS radius_degree
             FROM query_point_base
+        ),
+        parsed_latest AS MATERIALIZED (
+            SELECT
+                e.id::text AS id,
+                latest.source_id,
+                'official' AS source_type,
+                latest.event_type,
+                COALESCE(
+                    e.title,
+                    CASE latest.event_type
+                        WHEN 'rainfall' THEN '官方最新雨量站觀測'
+                        WHEN 'water_level' THEN '官方最新水位站觀測'
+                        WHEN 'flood_report' THEN '官方最新淹水觀測'
+                        WHEN 'flood_depth' THEN '官方最新淹水觀測'
+                        WHEN 'flood_warning' THEN '官方最新淹水警戒'
+                        ELSE '官方最新即時觀測'
+                    END
+                ) AS title,
+                COALESCE(
+                    e.summary,
+                    CASE latest.event_type
+                        WHEN 'rainfall' THEN '官方最新雨量站觀測值。'
+                        WHEN 'water_level' THEN '官方最新水位站觀測值。'
+                        WHEN 'flood_report' THEN '官方最新淹水感測觀測值。'
+                        WHEN 'flood_depth' THEN '官方最新淹水感測觀測值。'
+                        WHEN 'flood_warning' THEN '官方最新淹水警戒。'
+                        ELSE '官方最新即時觀測值。'
+                    END
+                ) AS summary,
+                COALESCE(e.url, latest.source_url) AS url,
+                e.occurred_at,
+                latest.observed_at,
+                latest.ingested_at,
+                COALESCE(e.geom, latest.geom) AS evidence_geom,
+                COALESCE(latest.confidence, e.confidence, 0.9) AS confidence,
+                COALESCE(latest.freshness_score, e.freshness_score, 0.8)
+                    AS freshness_score,
+                COALESCE(latest.source_weight, e.source_weight, 1.0) AS source_weight,
+                CONCAT(
+                    'official-realtime-latest:',
+                    latest.adapter_key,
+                    ':',
+                    latest.event_type,
+                    ':',
+                    latest.station_id
+                ) AS raw_ref,
+                latest.rainfall_mm_1h,
+                latest.water_level_m,
+                latest.warning_level_m,
+                latest.flood_depth_cm,
+                latest.risk_factor AS realtime_risk_factor,
+                e.properties->>'evidence_scope' AS evidence_scope,
+                latest.adapter_key,
+                e.properties->>'cap_status' AS cap_status,
+                e.properties->>'cap_message_type' AS cap_message_type,
+                e.properties->>'cap_sender' AS cap_sender,
+                e.properties->>'cap_identifier' AS cap_identifier,
+                e.properties->>'admin_code' AS admin_code,
+                CASE
+                    WHEN e.properties->>'active_from'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'active_from', 'timestamptz'
+                        )
+                    THEN (e.properties->>'active_from')::timestamptz
+                END AS safe_active_from,
+                CASE
+                    WHEN e.properties->>'active_until'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'active_until', 'timestamptz'
+                        )
+                    THEN (e.properties->>'active_until')::timestamptz
+                END AS safe_active_until,
+                CASE
+                    WHEN e.properties->>'cap_sent'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'cap_sent', 'timestamptz'
+                        )
+                    THEN (e.properties->>'cap_sent')::timestamptz
+                END AS safe_cap_sent,
+                CASE
+                    WHEN e.properties->>'ingestion_generation_started_at'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'ingestion_generation_started_at',
+                            'timestamptz'
+                        )
+                    THEN (e.properties->>'ingestion_generation_started_at')::timestamptz
+                END AS safe_generation_started_at,
+                latest.updated_at
+            FROM official_realtime_latest latest
+            JOIN data_sources
+                ON data_sources.adapter_key = latest.adapter_key
+                AND data_sources.is_enabled = true
+            JOIN evidence e ON e.id = latest.evidence_id
+            WHERE e.properties->>'evidence_scope' = 'current'
+        ),
+        eligible_latest AS (
+            SELECT
+                candidate.*,
+                ST_Distance(candidate.evidence_geom::geography, qp.geog)
+                    AS distance_to_query_m
+            FROM parsed_latest candidate
+            CROSS JOIN query_point qp
+            WHERE candidate.evidence_geom IS NOT NULL
+                AND NOT ST_IsEmpty(candidate.evidence_geom)
+                AND ST_IsValid(candidate.evidence_geom)
+                {observed_since_filter}
+                AND candidate.evidence_geom
+                    && ST_Expand(qp.geom, qp.radius_degree)
+                AND ST_DWithin(
+                    candidate.evidence_geom::geography,
+                    qp.geog,
+                    qp.radius_m
+                )
+                AND (
+                    candidate.event_type IN (
+                        'rainfall',
+                        'water_level',
+                        'flood_report',
+                        'flood_depth'
+                    )
+                    OR (
+                        candidate.event_type = 'flood_warning'
+                        AND candidate.cap_status = 'Actual'
+                        AND candidate.cap_message_type IN ('Alert', 'Update')
+                        AND candidate.safe_active_from IS NOT NULL
+                        AND candidate.safe_active_until IS NOT NULL
+                        AND candidate.safe_active_from <= qp.as_of
+                        AND qp.as_of < candidate.safe_active_until
+                        AND length(candidate.cap_sender) BETWEEN 1 AND 512
+                        AND length(candidate.cap_identifier) BETWEEN 1 AND 512
+                        AND candidate.safe_cap_sent IS NOT NULL
+                        AND candidate.admin_code ~ '^[0-9]{{8}}$'
+                        AND candidate.safe_generation_started_at IS NOT NULL
+                        AND NOT EXISTS (
+                            SELECT 1
+                            FROM ingestion_jobs retired
+                            WHERE retired.adapter_key = candidate.adapter_key
+                                AND retired.status = 'succeeded'
+                                AND retired.error_code = 'no_active_event'
+                                AND retired.started_at
+                                    >= candidate.safe_generation_started_at
+                        )
+                    )
+                )
+        ),
+        ranked_latest AS (
+            SELECT
+                eligible.*,
+                CASE WHEN eligible.event_type = 'flood_warning' THEN
+                    ROW_NUMBER() OVER (
+                        PARTITION BY
+                            eligible.cap_sender,
+                            eligible.cap_identifier,
+                            eligible.safe_cap_sent,
+                            eligible.admin_code
+                        ORDER BY
+                            CASE eligible.adapter_key
+                                WHEN 'official.cwa.heavy_rain_warning' THEN 0
+                                WHEN 'official.ncdr.cap' THEN 1
+                                ELSE 2
+                            END,
+                            eligible.observed_at DESC NULLS LAST,
+                            eligible.updated_at DESC,
+                            eligible.id
+                    )
+                END AS warning_origin_rank
+            FROM eligible_latest eligible
         )
         SELECT
-            COALESCE(e.id::text, latest.source_id) AS id,
-            latest.source_id,
-            'official' AS source_type,
-            latest.event_type,
-            COALESCE(
-                e.title,
-                CASE latest.event_type
-                    WHEN 'rainfall' THEN '官方最新雨量站觀測'
-                    WHEN 'water_level' THEN '官方最新水位站觀測'
-                    WHEN 'flood_report' THEN '官方最新淹水觀測'
-                    WHEN 'flood_warning' THEN '官方最新淹水警戒'
-                    ELSE '官方最新即時觀測'
-                END
-            ) AS title,
-            COALESCE(
-                e.summary,
-                CASE latest.event_type
-                    WHEN 'rainfall' THEN '官方最新雨量站觀測值。'
-                    WHEN 'water_level' THEN '官方最新水位站觀測值。'
-                    WHEN 'flood_report' THEN '官方最新淹水感測觀測值。'
-                    WHEN 'flood_warning' THEN '官方最新淹水警戒。'
-                    ELSE '官方最新即時觀測值。'
-                END
-            ) AS summary,
-            COALESCE(e.url, latest.source_url) AS url,
-            e.occurred_at,
-            latest.observed_at,
-            latest.ingested_at,
-            ST_Y(ST_PointOnSurface(COALESCE(e.geom, latest.geom)::geometry)) AS lat,
-            ST_X(ST_PointOnSurface(COALESCE(e.geom, latest.geom)::geometry)) AS lng,
-            ST_AsGeoJSON(COALESCE(e.geom, latest.geom)) AS geometry,
-            ST_Distance(COALESCE(e.geom, latest.geom)::geography, qp.geog)
-                AS distance_to_query_m,
-            COALESCE(latest.confidence, e.confidence, 0.9) AS confidence,
-            COALESCE(latest.freshness_score, e.freshness_score, 0.8) AS freshness_score,
-            COALESCE(latest.source_weight, e.source_weight, 1.0) AS source_weight,
+            ranked.id,
+            ranked.source_id,
+            ranked.source_type,
+            ranked.event_type,
+            ranked.title,
+            ranked.summary,
+            ranked.url,
+            ranked.occurred_at,
+            ranked.observed_at,
+            ranked.ingested_at,
+            ST_Y(ST_PointOnSurface(ranked.evidence_geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(ranked.evidence_geom::geometry)) AS lng,
+            ST_AsGeoJSON(ranked.evidence_geom) AS geometry,
+            ranked.distance_to_query_m,
+            ranked.confidence,
+            ranked.freshness_score,
+            ranked.source_weight,
             'public' AS privacy_level,
-            CONCAT(
-                'official-realtime-latest:',
-                latest.adapter_key,
-                ':',
-                latest.event_type,
-                ':',
-                latest.station_id
-            ) AS raw_ref,
-            latest.rainfall_mm_1h,
-            latest.water_level_m,
-            latest.warning_level_m,
-            latest.flood_depth_cm,
-            latest.risk_factor AS realtime_risk_factor,
-            'current' AS evidence_scope,
-            latest.adapter_key,
+            ranked.raw_ref,
+            ranked.rainfall_mm_1h,
+            ranked.water_level_m,
+            ranked.warning_level_m,
+            ranked.flood_depth_cm,
+            ranked.realtime_risk_factor,
+            ranked.evidence_scope,
+            ranked.adapter_key,
             NULL::text AS official_event_origin_key,
-            CASE WHEN latest.event_type = 'flood_warning'
-                THEN CASE WHEN e.properties->>'active_from'
-                    ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                    AND pg_input_is_valid(
-                        e.properties->>'active_from', 'timestamptz'
-                    )
-                    THEN (e.properties->>'active_from')::timestamptz END
-            END AS active_from,
-            CASE WHEN latest.event_type = 'flood_warning'
-                THEN CASE WHEN e.properties->>'active_until'
-                    ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                    AND pg_input_is_valid(
-                        e.properties->>'active_until', 'timestamptz'
-                    )
-                    THEN (e.properties->>'active_until')::timestamptz END
-            END AS active_until,
-            e.properties->>'cap_sender' AS cap_sender,
-            e.properties->>'cap_identifier' AS cap_identifier,
-            CASE WHEN e.properties->>'cap_sent'
-                ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                AND pg_input_is_valid(e.properties->>'cap_sent', 'timestamptz')
-                THEN (e.properties->>'cap_sent')::timestamptz
-            END AS cap_sent,
-            e.properties->>'admin_code' AS admin_code
-        FROM official_realtime_latest latest
-        CROSS JOIN query_point qp
-        JOIN data_sources ON data_sources.adapter_key = latest.adapter_key
-            AND data_sources.is_enabled = true
-        LEFT JOIN evidence e ON e.id = latest.evidence_id
-        WHERE COALESCE(e.geom, latest.geom) IS NOT NULL
-            AND NOT ST_IsEmpty(COALESCE(e.geom, latest.geom))
-            AND ST_IsValid(COALESCE(e.geom, latest.geom))
-            {observed_since_filter}
-            AND (
-                (
-                    latest.event_type IN ('rainfall', 'water_level', 'flood_report')
-                    AND COALESCE(e.geom, latest.geom) && ST_Expand(qp.geom, qp.radius_degree)
-                    AND ST_DWithin(
-                        COALESCE(e.geom, latest.geom)::geography,
-                        qp.geog,
-                        qp.radius_m
-                    )
-                )
-                OR (
-                    latest.event_type = 'flood_warning'
-                    AND e.id IS NOT NULL
-                    AND e.properties->>'cap_status' = 'Actual'
-                    AND e.properties->>'cap_message_type' IN ('Alert', 'Update')
-                    AND e.properties->>'active_from'
-                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                    AND pg_input_is_valid(
-                        e.properties->>'active_from', 'timestamptz'
-                    )
-                    AND e.properties->>'active_until'
-                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                    AND pg_input_is_valid(
-                        e.properties->>'active_until', 'timestamptz'
-                    )
-                    AND CASE WHEN e.properties->>'active_from'
-                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                        THEN (e.properties->>'active_from')::timestamptz
-                    END <= qp.as_of
-                    AND qp.as_of < CASE WHEN e.properties->>'active_until'
-                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                        THEN (e.properties->>'active_until')::timestamptz
-                    END
-                    AND length(e.properties->>'cap_sender') BETWEEN 1 AND 512
-                    AND length(e.properties->>'cap_identifier') BETWEEN 1 AND 512
-                    AND e.properties->>'cap_sent'
-                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                    AND pg_input_is_valid(e.properties->>'cap_sent', 'timestamptz')
-                    AND e.properties->>'admin_code' ~ '^\\d{{8}}$'
-                    AND e.properties->>'ingestion_generation_started_at'
-                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                    AND pg_input_is_valid(
-                        e.properties->>'ingestion_generation_started_at',
-                        'timestamptz'
-                    )
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM ingestion_jobs retired
-                        WHERE retired.adapter_key = latest.adapter_key
-                            AND retired.status = 'succeeded'
-                            AND retired.error_code = 'no_active_event'
-                            AND retired.started_at >= CASE
-                                WHEN e.properties->>'ingestion_generation_started_at'
-                                    ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
-                                    AND pg_input_is_valid(
-                                        e.properties->>'ingestion_generation_started_at',
-                                        'timestamptz'
-                                    )
-                                THEN (e.properties->>'ingestion_generation_started_at')::timestamptz
-                            END
-                    )
-                    AND COALESCE(e.geom, latest.geom) && ST_Expand(qp.geom, qp.radius_degree)
-                    AND ST_DWithin(
-                        COALESCE(e.geom, latest.geom)::geography,
-                        qp.geog,
-                        qp.radius_m
-                    )
-                )
-            )
+            ranked.safe_active_from AS active_from,
+            ranked.safe_active_until AS active_until,
+            ranked.cap_sender,
+            ranked.cap_identifier,
+            ranked.safe_cap_sent AS cap_sent,
+            ranked.admin_code
+        FROM ranked_latest ranked
+        WHERE ranked.event_type <> 'flood_warning'
+            OR ranked.warning_origin_rank = 1
         ORDER BY
-            distance_to_query_m ASC,
-            latest.observed_at DESC,
-            latest.updated_at DESC
+            ranked.distance_to_query_m ASC,
+            ranked.observed_at DESC,
+            ranked.updated_at DESC
         LIMIT %s
     """
     try:
