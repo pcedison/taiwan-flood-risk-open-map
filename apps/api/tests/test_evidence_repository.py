@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Self
 
 import psycopg
 import pytest
@@ -27,7 +28,7 @@ from app.domain.layers import fetch_map_layer, fetch_map_layers
 
 
 def test_fetch_map_layers_reads_layer_metadata() -> None:
-    updated_at = datetime(2026, 4, 30, 3, 0, tzinfo=timezone.utc)
+    updated_at = datetime(2026, 4, 30, 3, 0, tzinfo=UTC)
     connection = _FakeConnection(
         rows=[
             {
@@ -101,7 +102,7 @@ def test_fetch_query_heat_snapshot_buckets_nearby_location_queries() -> None:
         row={
             "query_count": 17,
             "unique_approx_count": 6,
-            "updated_at": datetime(2026, 4, 30, 3, 0, tzinfo=timezone.utc),
+            "updated_at": datetime(2026, 4, 30, 3, 0, tzinfo=UTC),
         }
     )
 
@@ -181,7 +182,7 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
 
 def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
     connection = _FakeConnection(rows=[])
-    realtime_since = datetime(2026, 6, 16, 5, 0, tzinfo=timezone.utc)
+    realtime_since = datetime(2026, 6, 16, 5, 0, tzinfo=UTC)
 
     query_nearby_evidence(
         database_url="postgresql://example.test/flood",
@@ -810,6 +811,9 @@ def test_query_nearby_latest_official_uses_selected_radius() -> None:
     assert "event_type = 'flood_warning'" in sql
     assert "radius_degree" in sql
     assert "COALESCE(e.geom, latest.geom)" in sql
+    assert "e.properties->>'location_precision'" in sql
+    assert "latest.quality_flags->>'location_precision'" in sql
+    assert "THEN e.properties->>'location_precision'" in sql
     assert "JOIN data_sources" in sql
     assert "data_sources.is_enabled = true" in sql
     assert "cap_status" in sql
@@ -831,7 +835,7 @@ def test_query_nearby_latest_official_uses_selected_radius() -> None:
 
 def test_query_nearby_latest_official_filters_rows_by_observed_since() -> None:
     connection = _FakeConnection(rows=[])
-    observed_since = datetime(2026, 6, 16, 2, 0, tzinfo=timezone.utc)
+    observed_since = datetime(2026, 6, 16, 2, 0, tzinfo=UTC)
 
     records = query_nearby_latest_official(
         database_url="postgresql://example.test/flood",
@@ -896,7 +900,7 @@ def test_query_nearby_latest_official_raises_when_other_relation_missing() -> No
 
 
 def test_query_nearby_latest_official_decodes_latest_row_metrics() -> None:
-    observed_at = datetime(2026, 6, 16, 5, 0, tzinfo=timezone.utc)
+    observed_at = datetime(2026, 6, 16, 5, 0, tzinfo=UTC)
     connection = _FakeConnection(
         rows=[
             {
@@ -956,7 +960,7 @@ def test_cap_origin_vectors_match_canonical_json_contract() -> None:
         assert _official_event_origin_key(
             sender=case["sender"],
             identifier=case["identifier"],
-            sent=datetime.fromisoformat(case["sent"].replace("Z", "+00:00")),
+            sent=datetime.fromisoformat(case["sent"]),
             admin_code=case["admin_code"],
         ) == case["origin_digest"]
 
@@ -980,7 +984,7 @@ def test_cap_origin_rejects_unicode_admin_digits() -> None:
         _official_event_origin_key(
             sender=case["sender"],
             identifier=case["identifier"],
-            sent=datetime.fromisoformat(case["sent"].replace("Z", "+00:00")),
+            sent=datetime.fromisoformat(case["sent"]),
             admin_code=case["admin_code"],
         )
 
@@ -1110,7 +1114,7 @@ def test_jurisdiction_source_mapping_json_requires_valid_reviewed_proof() -> Non
 
 
 def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
-    ingested_at = datetime(2026, 5, 12, 2, 0, tzinfo=timezone.utc)
+    ingested_at = datetime(2026, 5, 12, 2, 0, tzinfo=UTC)
     connection = _FakeConnection(
         rows=[
             {
@@ -1186,7 +1190,7 @@ def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
 
 
 def test_upsert_public_evidence_writes_point_geometry_and_metadata() -> None:
-    ingested_at = datetime(2026, 5, 4, 3, 0, tzinfo=timezone.utc)
+    ingested_at = datetime(2026, 5, 4, 3, 0, tzinfo=UTC)
     connection = _FakeConnection(
         row={
             "id": "f442ec3f-f013-58d2-8fcb-93f62db8d51c",
@@ -1254,8 +1258,8 @@ def test_upsert_public_evidence_writes_point_geometry_and_metadata() -> None:
 
 def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -> None:
     connection = _FakeConnection()
-    created_at = datetime(2026, 4, 30, 3, 0, tzinfo=timezone.utc)
-    expires_at = datetime(2026, 4, 30, 3, 10, tzinfo=timezone.utc)
+    created_at = datetime(2026, 4, 30, 3, 0, tzinfo=UTC)
+    expires_at = datetime(2026, 4, 30, 3, 10, tzinfo=UTC)
 
     persist_risk_assessment(
         database_url="postgresql://example.test/flood",
@@ -1396,13 +1400,13 @@ class _FakeConnection:
             execute_side_effects=execute_side_effects,
         )
 
-    def __enter__(self) -> _FakeConnection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         return None
 
-    def cursor(self) -> "_FakeCursor":
+    def cursor(self) -> _FakeCursor:
         return self.cursor_instance
 
 
@@ -1419,7 +1423,7 @@ class _FakeCursor:
         self._execute_side_effects = list(execute_side_effects or [])
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> "_FakeCursor":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

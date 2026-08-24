@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from typing import Self
 
 from app.adapters.civil_iot import (
     GATE_WATER_LEVEL,
@@ -23,7 +25,6 @@ from app.pipelines.promotion import (
     build_evidence_promotion_payload,
 )
 from app.pipelines.staging import build_staging_batch
-
 
 FETCHED_AT = datetime(2026, 6, 15, 3, 10, tzinfo=UTC)
 
@@ -236,7 +237,7 @@ def test_river_water_level_adapter_exposes_water_level_metric_in_raw_payload() -
     assert result.fetched[0].payload["water_level_m"] == 4.21
 
 
-def test_water_level_staging_and_promotion_latest_keep_metrics_for_risk_factor() -> None:
+def test_civil_iot_water_level_promotion_is_audit_only_with_metrics_retained() -> None:
     records = tuple(
         {
             **record,
@@ -266,16 +267,19 @@ def test_water_level_staging_and_promotion_latest_keep_metrics_for_risk_factor()
 
     writer.write_evidence(promotion_payload)
 
-    latest_sql, latest_params = next(
+    evidence_sql, evidence_params = next(
         execution
         for execution in connection.cursor_instance.executions
-        if "INSERT INTO official_realtime_latest" in execution[0]
+        if "INSERT INTO evidence" in execution[0]
     )
-    assert "INSERT INTO official_realtime_latest" in latest_sql
-    assert latest_params[11] == 3.2
-    assert latest_params[13] == 4.0
-    assert latest_params[16] is None
-    assert latest_params[17] == 0.8
+    assert "INSERT INTO evidence" in evidence_sql
+    properties = json.loads(str(evidence_params[14]))
+    assert properties["water_level_m"] == 3.2
+    assert properties["warning_level_m"] == 4.0
+    assert not any(
+        "INSERT INTO official_realtime_latest" in statement
+        for statement, _ in connection.cursor_instance.executions
+    )
 
 
 def test_pump_adapter_prefers_external_water_level_and_falls_back_to_generic_water_level() -> None:
@@ -389,13 +393,13 @@ class _FakePromotionConnection:
         self.cursor_instance = _FakePromotionCursor(evidence_id=evidence_id)
         self.committed = False
 
-    def __enter__(self) -> "_FakePromotionConnection":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         return None
 
-    def cursor(self) -> "_FakePromotionCursor":
+    def cursor(self) -> _FakePromotionCursor:
         return self.cursor_instance
 
     def commit(self) -> None:
@@ -407,7 +411,7 @@ class _FakePromotionCursor:
         self._evidence_id = evidence_id
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> "_FakePromotionCursor":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+import pytest
 
 from app.adapters.civil_iot.flood_sensor import FloodSensorAdapter
+from app.adapters.contracts import (
+    AdapterRunResult,
+    EventType,
+    NormalizedEvidence,
+    RawSourceItem,
+    SourceFamily,
+)
 from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.pipelines.staging import AdapterStagingBatch, build_staging_batch, persist_staging_batch
 
-
-FETCHED_AT = datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc)
+FETCHED_AT = datetime(2026, 4, 28, 10, 0, tzinfo=UTC)
 
 
 def test_build_staging_batch_maps_adapter_result_to_raw_snapshot_and_accepted_rows() -> None:
@@ -79,8 +87,8 @@ def test_build_staging_batch_keeps_validation_rejections_separate_from_raw_rejec
 
 
 def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:
-    source_ts = datetime(2026, 6, 27, 10, 0, tzinfo=timezone.utc)
-    fetched_at = datetime(2026, 6, 27, 10, 5, tzinfo=timezone.utc)
+    source_ts = datetime(2026, 6, 27, 10, 0, tzinfo=UTC)
+    fetched_at = datetime(2026, 6, 27, 10, 5, tzinfo=UTC)
     adapter = FloodSensorAdapter(
         (
             {
@@ -115,7 +123,7 @@ def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:
     assert batch.accepted[0].payload["area_code"] == "67000270"
 
 
-def test_build_staging_batch_preserves_cap_fields_needed_for_promotion() -> None:
+def test_legacy_ncdr_cap_shape_fails_closed_until_task_12_wires_contract() -> None:
     adapter = NcdrCapAlertAdapter(
         payload={
             "alerts": [
@@ -149,23 +157,246 @@ def test_build_staging_batch_preserves_cap_fields_needed_for_promotion() -> None
                 }
             ]
         },
-        fetched_at=datetime(2026, 6, 15, 3, 10, tzinfo=timezone.utc),
+        fetched_at=datetime(2026, 6, 15, 3, 10, tzinfo=UTC),
     )
 
     batch = build_staging_batch(adapter.run())
 
-    staged_payload = batch.accepted[0].payload
-    assert staged_payload["station_id"] == "67000"
-    assert staged_payload["areaDesc"] == "臺南市"
-    assert staged_payload["identifier"] == "NCDR-CAP-001"
-    assert staged_payload["quality_flags"] == {"location_inferred": True}
-    assert staged_payload["expired"] is False
-    assert staged_payload["cap_status"] == "Actual"
-    assert staged_payload["effective"] == "2026-06-15T02:30:00+08:00"
-    assert staged_payload["expires"] == "2026-06-15T15:00:00+08:00"
-    assert staged_payload["severity"] == "Severe"
-    assert staged_payload["certainty"] == "Likely"
-    assert staged_payload["urgency"] == "Immediate"
+    assert batch.accepted == ()
+    assert len(batch.rejected) == 1
+    assert "CAP lifecycle requires an ingestion generation" in (
+        batch.rejected[0].rejection_reason or ""
+    )
+    assert "cap_sender" not in batch.rejected[0].payload
+
+
+def test_build_staging_batch_preserves_only_reviewed_metadata_fields() -> None:
+    raw = RawSourceItem(
+        source_id="reviewed-1",
+        source_url="https://example.test/source",
+        fetched_at=FETCHED_AT,
+        payload={
+            "evidence_scope": "historical",
+            "location_precision": "polygon",
+            "limitations": [" Public limitation ", "Public limitation"],
+            "admin_code": "67000000",
+            "dataset_revision": " 2026-08-v1 ",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [120.2, 22.99],
+            },
+            "private_note": "never publish",
+            "quality_flags": {"internal_probe": "never publish"},
+        },
+    )
+    normalized = NormalizedEvidence(
+        evidence_id="ev-reviewed-1",
+        adapter_key="official.test.history",
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_REPORT,
+        source_id=raw.source_id,
+        source_url=raw.source_url,
+        source_title="Reviewed metadata",
+        source_timestamp=FETCHED_AT,
+        fetched_at=FETCHED_AT,
+        summary="Reviewed metadata staging contract.",
+        location_text="臺南市",
+        confidence=0.9,
+    )
+
+    staged = build_staging_batch(
+        AdapterRunResult(
+            adapter_key=normalized.adapter_key,
+            fetched=(raw,),
+            normalized=(normalized,),
+        )
+    ).accepted[0]
+
+    assert staged.payload["evidence_scope"] == "historical"
+    assert staged.payload["location_precision"] == "polygon"
+    assert staged.payload["limitations"] == ["Public limitation"]
+    assert staged.payload["admin_code"] == "67000000"
+    assert staged.payload["dataset_revision"] == "2026-08-v1"
+    assert staged.payload["location_payload"]["geometry"] == raw.payload["geometry"]
+    assert "private_note" not in staged.payload
+    assert "quality_flags" not in staged.payload
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("evidence_scope", "unspecified"),
+        ("location_precision", "exact_address"),
+        ("admin_code", "67000"),
+        ("admin_code", 67000000),
+        ("limitations", [f"limitation-{index}" for index in range(17)]),
+        ("limitations", ["x" * 257]),
+        ("dataset_revision", "x" * 257),
+    ],
+)
+def test_build_staging_batch_rejects_invalid_reviewed_metadata(
+    field: str, value: object
+) -> None:
+    raw = RawSourceItem(
+        source_id="invalid-metadata",
+        source_url="https://example.test/source",
+        fetched_at=FETCHED_AT,
+        payload={field: value},
+    )
+    normalized = NormalizedEvidence(
+        evidence_id="ev-invalid-metadata",
+        adapter_key="official.test.history",
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_REPORT,
+        source_id=raw.source_id,
+        source_url=raw.source_url,
+        source_title="Invalid metadata",
+        source_timestamp=FETCHED_AT,
+        fetched_at=FETCHED_AT,
+        summary="Invalid metadata staging contract.",
+        location_text=None,
+        confidence=0.9,
+    )
+
+    batch = build_staging_batch(
+        AdapterRunResult(
+            adapter_key=normalized.adapter_key,
+            fetched=(raw,),
+            normalized=(normalized,),
+        )
+    )
+
+    assert batch.accepted == ()
+    assert batch.rejected[0].validation_status == "rejected"
+    assert "invalid staging metadata" in (batch.rejected[0].rejection_reason or "")
+
+
+def test_build_staging_batch_preserves_validated_cap_lifecycle_fields() -> None:
+    generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+    result = _cap_result()
+
+    staged = build_staging_batch(
+        result,
+        ingestion_generation_started_at=generation,
+    ).accepted[0]
+
+    assert staged.payload["cap_sender"] == "sender@example.test"
+    assert staged.payload["cap_identifier"] == "alert-1"
+    assert staged.payload["cap_sent"] == "2026-08-24T01:00:00+00:00"
+    assert staged.payload["cap_references"] == []
+    assert staged.payload["cap_status"] == "Actual"
+    assert staged.payload["cap_message_type"] == "Alert"
+    assert staged.payload["active_from"] == "2026-08-24T01:00:00+00:00"
+    assert staged.payload["active_until"] == "2026-08-24T03:00:00+00:00"
+    assert staged.payload["ingestion_generation_started_at"] == generation.isoformat()
+    assert "xml_body" not in staged.payload
+
+
+def test_non_warning_status_is_not_reinterpreted_as_cap_lifecycle_metadata() -> None:
+    raw = RawSourceItem(
+        source_id="ordinary-status",
+        source_url="https://example.test/source",
+        fetched_at=FETCHED_AT,
+        payload={"status": "online", "evidence_scope": "context"},
+    )
+    normalized = NormalizedEvidence(
+        evidence_id="ev-ordinary-status",
+        adapter_key="official.test.context",
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_REPORT,
+        source_id=raw.source_id,
+        source_url=raw.source_url,
+        source_title="Ordinary source status",
+        source_timestamp=FETCHED_AT,
+        fetched_at=FETCHED_AT,
+        summary="Non-CAP metadata must not cross the lifecycle boundary.",
+        location_text=None,
+        confidence=0.9,
+    )
+
+    staged = build_staging_batch(
+        AdapterRunResult(
+            adapter_key=normalized.adapter_key,
+            fetched=(raw,),
+            normalized=(normalized,),
+        )
+    ).accepted[0]
+
+    assert "cap_status" not in staged.payload
+
+
+def test_cap_staging_without_worker_generation_fails_closed() -> None:
+    batch = build_staging_batch(_cap_result())
+
+    assert batch.accepted == ()
+    assert "CAP lifecycle requires an ingestion generation" in (
+        batch.rejected[0].rejection_reason or ""
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"cap_sender": "x" * 513}, "cap_sender"),
+        ({"cap_status": "Test"}, "cap_status"),
+        ({"cap_sent": "2026-08-24T01:00:00"}, "cap_sent"),
+        ({"cap_message_type": "Update", "cap_references": []}, "earlier reference"),
+        (
+            {
+                "cap_references": [
+                    {
+                        "sender": "sender@example.test",
+                        "identifier": f"alert-{index}",
+                        "sent": "2026-08-24T00:00:00+00:00",
+                    }
+                    for index in range(65)
+                ]
+            },
+            "at most 64",
+        ),
+    ],
+)
+def test_invalid_cap_lifecycle_metadata_is_rejected(
+    overrides: dict[str, object], reason: str
+) -> None:
+    generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+
+    batch = build_staging_batch(
+        _cap_result(**overrides),
+        ingestion_generation_started_at=generation,
+    )
+
+    assert batch.accepted == ()
+    assert reason in (batch.rejected[0].rejection_reason or "")
+
+
+def test_cap_reference_duplicates_collapse_by_canonical_utc_triple() -> None:
+    generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+    references = [
+        {
+            "sender": " sender@example.test ",
+            "identifier": " alert-0 ",
+            "sent": "2026-08-24T08:00:00+08:00",
+        },
+        {
+            "sender": "sender@example.test",
+            "identifier": "alert-0",
+            "sent": "2026-08-24T00:00:00+00:00",
+        },
+    ]
+
+    staged = build_staging_batch(
+        _cap_result(cap_message_type="Update", cap_references=references),
+        ingestion_generation_started_at=generation,
+    ).accepted[0]
+
+    assert staged.payload["cap_references"] == [
+        {
+            "sender": "sender@example.test",
+            "identifier": "alert-0",
+            "sent": "2026-08-24T00:00:00+00:00",
+        }
+    ]
 
 
 def test_persist_staging_batch_uses_writer_protocol() -> None:
@@ -196,3 +427,46 @@ class _MemoryWriter:
 
     def write_batch(self, batch: AdapterStagingBatch) -> None:
         self.batches.append(batch)
+
+
+def _cap_result(**overrides: object) -> AdapterRunResult:
+    payload: dict[str, object] = {
+        "evidence_scope": "current",
+        "location_precision": "admin_area",
+        "admin_code": "67000000",
+        "cap_sender": "sender@example.test",
+        "cap_identifier": "alert-1",
+        "cap_sent": "2026-08-24T01:00:00+00:00",
+        "cap_references": [],
+        "cap_status": "Actual",
+        "cap_message_type": "Alert",
+        "active_from": "2026-08-24T01:00:00+00:00",
+        "active_until": "2026-08-24T03:00:00+00:00",
+        "xml_body": "<alert>private raw body</alert>",
+    }
+    payload.update(overrides)
+    raw = RawSourceItem(
+        source_id="cap-source-1",
+        source_url="https://example.test/cap",
+        fetched_at=FETCHED_AT,
+        payload=payload,
+    )
+    normalized = NormalizedEvidence(
+        evidence_id="ev-cap-source-1",
+        adapter_key="official.cwa.heavy_rain_warning",
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_WARNING,
+        source_id=raw.source_id,
+        source_url=raw.source_url,
+        source_title="CAP warning",
+        source_timestamp=datetime(2026, 8, 24, 1, 0, tzinfo=UTC),
+        fetched_at=FETCHED_AT,
+        summary="CAP lifecycle staging fixture.",
+        location_text="臺南市",
+        confidence=0.9,
+    )
+    return AdapterRunResult(
+        adapter_key=normalized.adapter_key,
+        fetched=(raw,),
+        normalized=(normalized,),
+    )

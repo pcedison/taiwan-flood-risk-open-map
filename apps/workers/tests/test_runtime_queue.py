@@ -1410,7 +1410,7 @@ class _MemoryPromotionWriter:
         self.requested_adapter_keys = adapter_keys
         return self._candidates
 
-    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
 

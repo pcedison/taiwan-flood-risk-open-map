@@ -19,7 +19,6 @@ from app.adapters.contracts import (
     SourceFamily,
 )
 
-
 FetchJson = Callable[[str, int], Any]
 
 TAINAN_FLOOD_SENSOR_DATA_GOV_URL = (
@@ -49,15 +48,23 @@ TAINAN_FLOOD_SENSOR_METADATA = AdapterMetadata(
     ),
     license="Government Open Data License, version 1.0",
     limitations=(
-        "Supplemental local-government source for Tainan only; it must not "
-        "replace the Civil IoT L1 flood-sensor backbone.",
-        "Only the documented Tainan open-data API resources are used; WMap or "
-        "other undocumented map internals are not production sources.",
-        "Station coordinates come from the paired station metadata resource. "
-        "Records without a metadata point keep quality flags and are not "
-        "eligible for latest point upsert.",
-        "InfoTime values are timezone-naive in the API and are interpreted as "
-        "Asia/Taipei local time before UTC normalization.",
+        (
+            "Supplemental local-government source for Tainan only; it must not "
+            "replace the Civil IoT L1 flood-sensor backbone."
+        ),
+        (
+            "Only the documented Tainan open-data API resources are used; WMap or "
+            "other undocumented map internals are not production sources."
+        ),
+        (
+            "Station coordinates come from the paired station metadata resource. "
+            "Records without a metadata point keep quality flags and are not "
+            "eligible for latest point upsert."
+        ),
+        (
+            "InfoTime values are timezone-naive in the API and are interpreted as "
+            "Asia/Taipei local time before UTC normalization."
+        ),
     ),
 )
 
@@ -121,7 +128,7 @@ class TainanFloodSensorApiAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in records

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
+    EventType,
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
@@ -13,7 +14,6 @@ from app.adapters.news import SamplePublicWebNewsAdapter
 from app.config import load_worker_settings
 from app.jobs.ingestion import run_adapter_batch, run_adapter_batches, run_enabled_adapter_batches
 from app.pipelines.staging import AdapterStagingBatch
-
 
 FETCHED_AT = datetime(2026, 4, 29, 8, 0, tzinfo=UTC)
 
@@ -46,6 +46,22 @@ def test_run_adapter_batch_builds_and_persists_staging_batch() -> None:
     assert summary.raw_ref == "raw/news-public-web/sample.json"
     assert len(writer.batches) == 1
     assert writer.batches[0].accepted[0].source_id == "sample-news-001"
+
+
+def test_managed_generation_replaces_forged_adapter_generation(monkeypatch) -> None:
+    started_at = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
+    finished_at = datetime(2026, 8, 24, 1, 0, 1, tzinfo=UTC)
+    instants = iter((started_at, finished_at))
+    monkeypatch.setattr("app.jobs.ingestion._now", lambda: next(instants))
+    writer = _MemoryWriter()
+
+    summary = run_adapter_batch(_ForgedGenerationAdapter(), writer=writer)
+
+    assert summary.started_at == started_at
+    assert (
+        writer.batches[0].accepted[0].payload["ingestion_generation_started_at"]
+        == started_at.isoformat()
+    )
 
 
 def test_run_adapter_batch_marks_validation_rejections_as_partial() -> None:
@@ -240,6 +256,51 @@ class _NamedEmptyAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         return None
+
+
+class _ForgedGenerationAdapter:
+    metadata = AdapterMetadata(
+        key="official.test.generation",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="Generation ownership fixture",
+    )
+
+    def run(self) -> AdapterRunResult:
+        raw = RawSourceItem(
+            source_id="generation-1",
+            source_url="https://example.test/generation",
+            fetched_at=FETCHED_AT,
+            payload={
+                "ingestion_generation_started_at": "1999-01-01T00:00:00+00:00"
+            },
+        )
+        normalized = NormalizedEvidence(
+            evidence_id="ev-generation-1",
+            adapter_key=self.metadata.key,
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_REPORT,
+            source_id=raw.source_id,
+            source_url=raw.source_url,
+            source_title="Generation fixture",
+            source_timestamp=FETCHED_AT,
+            fetched_at=FETCHED_AT,
+            summary="Managed worker owns the ingestion generation.",
+            location_text=None,
+            confidence=0.9,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw,),
+            normalized=(normalized,),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return self.run().normalized[0]
 
 
 class _MemoryRunWriter:

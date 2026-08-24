@@ -25,7 +25,6 @@ from app.adapters.contracts import (
     SourceFamily,
 )
 
-
 FetchJson = Callable[[str, int], Mapping[str, Any]]
 
 CWA_RAINFALL_API_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001"
@@ -115,7 +114,7 @@ class CwaRainfallApiAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in records
@@ -164,7 +163,7 @@ class CwaRainfallAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=self._fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in self._records

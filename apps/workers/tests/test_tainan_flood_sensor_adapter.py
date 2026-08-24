@@ -17,7 +17,6 @@ from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
 from app.pipelines.staging import build_staging_batch
 
-
 FETCHED_AT = datetime(2026, 6, 27, 4, 0, tzinfo=UTC)
 
 
@@ -138,6 +137,8 @@ def test_tainan_api_adapter_outputs_local_flood_report_evidence() -> None:
     assert "supplemental_civil_iot" in evidence.tags
     assert result.fetched[0].source_url == TAINAN_FLOOD_SENSOR_DATA_GOV_URL
     assert result.fetched[0].payload["resource_url"] == TAINAN_FLOOD_SENSOR_API_URL
+    assert result.fetched[0].payload["evidence_scope"] == "current"
+    assert build_staging_batch(result).accepted[0].payload["evidence_scope"] == "current"
 
 
 def test_tainan_records_missing_coordinates_keep_quality_flag_and_are_not_normalized() -> None:

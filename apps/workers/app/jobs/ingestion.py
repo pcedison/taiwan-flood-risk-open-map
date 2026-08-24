@@ -6,12 +6,11 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from app.adapters._helpers import parse_observed_at_utc
+from app.adapters.contracts import AdapterRunResult, DataSourceAdapter, StationInventoryProof
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import WorkerSettings
-from app.adapters.contracts import AdapterRunResult, DataSourceAdapter, StationInventoryProof
 from app.logging import log_event
 from app.pipelines.staging import StagingBatchWriter, build_staging_batch, persist_staging_batch
-
 
 AdapterBatchStatus = Literal["succeeded", "partial", "failed", "skipped"]
 NCDR_CAP_ADAPTER_KEY = "official.ncdr.cap"
@@ -119,7 +118,7 @@ def run_adapter_batch(
     started_at = _now()
     try:
         result = adapter.run()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - adapter boundary records arbitrary failures
         summary = AdapterBatchRunSummary(
             adapter_key=adapter.metadata.key,
             status="failed",
@@ -138,7 +137,7 @@ def run_adapter_batch(
                 started_at=started_at,
                 writer=writer,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - staging boundary records arbitrary failures
             summary = AdapterBatchRunSummary(
                 adapter_key=result.adapter_key,
                 status="failed",
@@ -155,7 +154,7 @@ def run_adapter_batch(
     if run_writer is not None:
         try:
             run_writer.write_summary(summary, job_key=job_key, parameters=parameters)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - audit boundary records arbitrary failures
             summary = AdapterBatchRunSummary(
                 adapter_key=summary.adapter_key,
                 status="failed",
@@ -258,7 +257,10 @@ def _summary_from_result(
             station_inventory_proof=result.station_inventory_proof,
         )
 
-    batch = build_staging_batch(result)
+    batch = build_staging_batch(
+        result,
+        ingestion_generation_started_at=started_at,
+    )
     if writer is not None:
         persist_staging_batch(batch, writer)
 

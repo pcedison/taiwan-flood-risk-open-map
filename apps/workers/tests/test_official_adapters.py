@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import ssl
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, Self, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -17,24 +17,24 @@ from app.adapters.cwa import (
     CwaRainfallPayloadError,
     parse_cwa_rainfall_api_payload,
 )
-from app.adapters.flood_potential import FloodPotentialGeoJsonAdapter
 from app.adapters.flood_potential import (
+    FloodPotentialGeoJsonAdapter,
     FloodPotentialGeoJsonApiAdapter,
     FloodPotentialGeoJsonFetchError,
     FloodPotentialGeoJsonPayloadError,
     parse_flood_potential_geojson_payload,
 )
-from app.adapters.wra import WraWaterLevelAdapter
-from app.adapters.wra import water_level as wra_water_level_module
 from app.adapters.wra import (
+    WraWaterLevelAdapter,
     WraWaterLevelApiAdapter,
     WraWaterLevelFetchError,
     WraWaterLevelPayloadError,
     parse_wra_station_metadata_payload,
     parse_wra_water_level_api_payload,
 )
+from app.adapters.wra import water_level as wra_water_level_module
+from app.pipelines.staging import build_staging_batch
 from app.pipelines.validation import validate_evidence_for_promotion
-
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # Shared with the API bridge (apps/api/app/domain/realtime/official.py) so both
@@ -43,7 +43,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 SHARED_UPSTREAM_FIXTURES_DIR = (
     Path(__file__).resolve().parents[3] / "packages" / "contracts" / "fixtures" / "upstream"
 )
-FETCHED_AT = datetime(2026, 4, 28, 8, 10, tzinfo=timezone.utc)
+FETCHED_AT = datetime(2026, 4, 28, 8, 10, tzinfo=UTC)
 
 
 def test_cwa_rainfall_adapter_normalizes_fixture_records() -> None:
@@ -107,13 +107,15 @@ def test_cwa_rainfall_api_adapter_fetches_and_normalizes_official_payload() -> N
     assert raw.payload["resource_url"] == "https://example.test/cwa/rainfall?station=all&format=JSON"
     assert "test-token" not in raw.source_url
     assert raw.payload["rainfall_mm_10m"] == 7.5
+    assert raw.payload["evidence_scope"] == "current"
+    assert build_staging_batch(result).accepted[0].payload["evidence_scope"] == "current"
     assert raw.payload["geometry"] == {
         "type": "Point",
         "coordinates": [121.514, 25.0375],
     }
 
     evidence = result.normalized[0]
-    assert evidence.source_timestamp == datetime(2026, 4, 28, 8, 0, tzinfo=timezone.utc)
+    assert evidence.source_timestamp == datetime(2026, 4, 28, 8, 0, tzinfo=UTC)
     assert evidence.location_text == "Taipei City Zhongzheng District Taipei Station"
     assert "42.5 mm in 1 hour" in evidence.summary
     assert "156.0 mm in 24 hours" in evidence.summary
@@ -216,13 +218,15 @@ def test_wra_water_level_api_adapter_fetches_and_normalizes_official_payload() -
         "https://example.test/wra/water-level?county=taipei&format=JSON"
     )
     assert raw.payload["water_level_m"] == 7.82
+    assert raw.payload["evidence_scope"] == "current"
+    assert build_staging_batch(result).accepted[0].payload["evidence_scope"] == "current"
     assert raw.payload["geometry"] == {
         "type": "Point",
         "coordinates": [121.482, 25.032],
     }
 
     evidence = result.normalized[0]
-    assert evidence.source_timestamp == datetime(2026, 4, 28, 8, 5, tzinfo=timezone.utc)
+    assert evidence.source_timestamp == datetime(2026, 4, 28, 8, 5, tzinfo=UTC)
     assert evidence.location_text == "Dahan River Dahan Bridge"
     assert "0.68 m below warning level" in evidence.summary
 
@@ -354,9 +358,9 @@ def test_wra_water_level_fetch_uses_taiwan_gov_tls_context(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     class FakeResponse:
-        headers: dict[str, str] = {}
+        headers: ClassVar[dict[str, str]] = {}
 
-        def __enter__(self) -> "FakeResponse":
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, *args: object) -> None:

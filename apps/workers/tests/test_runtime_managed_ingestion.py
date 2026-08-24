@@ -523,7 +523,7 @@ class _MemoryPromotionWriter:
         self.requested_adapter_keys = adapter_keys
         return self._candidates
 
-    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
 
@@ -538,7 +538,7 @@ class _FailingPromotionWriter:
         del limit, adapter_keys
         raise RuntimeError("promotion storage unavailable")
 
-    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         del payload
         raise AssertionError("write_evidence should not be reached")
 
