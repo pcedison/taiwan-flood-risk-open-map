@@ -100,6 +100,7 @@ def _prepare_latest_schema(database_url: str) -> None:
                 risk_factor numeric(6,3),
                 evidence_id uuid,
                 source_url text,
+                quality_flags jsonb NOT NULL DEFAULT '{}'::jsonb,
                 updated_at timestamptz NOT NULL DEFAULT now(),
                 PRIMARY KEY (adapter_key, event_type, station_id)
             );
@@ -491,6 +492,74 @@ def test_latest_reader_rejects_dirty_or_missing_scope_and_honors_depth_lookback(
         assert {record.id for record in records} == set(expected_ids)
         depth = next(record for record in records if record.event_type == "flood_depth")
         assert depth.evidence_scope == "current"
+
+
+def test_latest_reader_preserves_reviewed_precision_and_limitations() -> None:
+    database_url = _database_url()
+    now = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
+    with _isolated_schema(database_url) as isolated_url:
+        _prepare_latest_schema(isolated_url)
+        adapter_key = "test.task5.precision"
+        cases = (
+            ("absent", None, "point"),
+            ("allowed", "road_or_lane", "road_or_lane"),
+            ("exact", "exact_address", "unknown"),
+            ("unknown", "unknown", "unknown"),
+        )
+        with psycopg.connect(isolated_url) as connection:
+            _insert_latest_source(connection, adapter_key)
+            for station_id, stored_precision, _expected_precision in cases:
+                evidence_id = uuid4()
+                _insert_evidence(
+                    connection,
+                    evidence_id=evidence_id,
+                    station_id=station_id,
+                    event_type="rainfall",
+                    observed_at=now,
+                    properties={
+                        "evidence_scope": "current",
+                        "limitations": [f"{station_id} public limitation"],
+                    },
+                )
+                _insert_latest_row(
+                    connection,
+                    adapter_key=adapter_key,
+                    station_id=station_id,
+                    event_type="rainfall",
+                    observed_at=now,
+                    evidence_id=evidence_id,
+                )
+                if stored_precision is not None:
+                    connection.execute(
+                        """
+                        UPDATE official_realtime_latest
+                        SET quality_flags = %s::jsonb
+                        WHERE adapter_key = %s
+                            AND event_type = 'rainfall'
+                            AND station_id = %s
+                        """,
+                        (
+                            Jsonb({"location_precision": stored_precision}),
+                            adapter_key,
+                            station_id,
+                        ),
+                    )
+
+        records = query_nearby_latest_official(
+            database_url=isolated_url,
+            lat=23.0,
+            lng=120.0,
+            radius_m=500,
+            as_of=now,
+            connection_factory=lambda: _unpooled_connection(isolated_url),
+        )
+        by_station = {record.source_id.removeprefix("source:"): record for record in records}
+        assert set(by_station) == {station_id for station_id, _, _ in cases}
+        for station_id, _stored_precision, expected_precision in cases:
+            assert by_station[station_id].location_precision == expected_precision
+            assert by_station[station_id].limitations == (
+                f"{station_id} public limitation",
+            )
 
 
 def test_latest_reader_excludes_regex_shaped_invalid_cap_fields_per_row() -> None:
