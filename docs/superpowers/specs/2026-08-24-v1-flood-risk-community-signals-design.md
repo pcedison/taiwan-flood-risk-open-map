@@ -1,7 +1,7 @@
 # Flood Risk v1 核心重構與社群混合訊號設計
 
 日期：2026-08-24
-狀態：設計已核准；待規格審閱後進入 implementation planning
+狀態：設計與規格已核准；implementation plans 已完成
 
 ## 摘要
 
@@ -26,8 +26,9 @@ Flood Risk v1 只解決一個清楚的使用者問題：使用者輸入地址、
 本文件是第一版產品範圍的主設計。它縮限而不抹除既有研究：
 
 - `2026-06-27-taiwan-realtime-source-backbone-design.md` 保留作來源研究與欄位參考，
-  但第一版不保留多層 raw snapshot、staging、promotion 與 public query fallback
-  的全部複雜度。
+  第一版可重用既有 staging／promotion 作受測的內部 ingestion 邊界，但凍結 legacy
+  raw/profile/query-heat/tile/public fallback writers 與 generic runtime dispatch；公開
+  查詢只走新的 repository／`AssessmentService` 路徑。
 - `2026-06-27-taiwan-local-realtime-water-sources-design.md` 與
   `2026-06-29-local-source-blocker-resolution-design.md` 保留作地方來源清冊；第一版
   不以 22 縣市地方直連完成為上線前提。
@@ -119,9 +120,24 @@ Production ingestion 只允許以下存取方式：
 來源類型。YouTube 與 X 在完成各自政策、成本、保存與刪除同步設計後再個別啟用；
 Dcard 未取得書面同意前不自動化；PTT 只在 Atom 或其他正式路徑獲得核准後試點。
 
-Threads live mode 仍需正式 App、權限、App Review 與 token。未取得任一條件時，
-adapter 保持 disabled，只允許 sanitized fixture／contract tests；這不阻塞全臺
-官方基線與使用者回報功能上線，也不得以 browser scraping 代替缺少的核准。
+Threads live mode 使用目前官方未版本化的
+`https://graph.threads.net/keyword_search`，並同時需要正式 App、keyword permission、
+App Review、token、`THREADS_API_CONTRACT_VERIFIED=true`，以及 30 天內、endpoint／
+fields／schema digest 全部吻合的 metadata-only real-App 驗證 artifact。布林值或
+fixture 都不能單獨開啟 egress。未取得任一條件時，adapter 保持 disabled，只允許
+sanitized fixture／contract tests；這不阻塞全臺官方基線與使用者回報功能上線，
+也不得以 browser scraping 代替缺少的核准。
+
+兩個 keyed 社群來源另需相同的 operator key ID 與 secret SHA-256 catalog binding。
+只要 ID／fingerprint 不符，Threads 每頁 egress 與新使用者回報 promotion 都 fail
+closed。Secret 在任何衍生資料仍被保留期間不可原地輪替；bootstrap／rotation 必須
+先以獨立 operator transaction 停用兩個 catalog row，再於 shared mutation lock 下
+執行 drain。v1 不提供 force：只要存在未到期或永久 Threads suppression，rotation
+必須在刪除前拒絕並維持兩來源停用與舊 binding／suppression 不變。只有在 active
+suppression 為零時，才可清空舊 key 的 signals、links、clusters、assessment
+associations、requests、private report links 與已到期 suppressions，證明衍生資料為零
+後寫入新 ID/fingerprint、部署新 secret，最後逐來源另行審核重新啟用。若無法證明
+suppression continuity，就保持停用；舊／新 key origin 不得共存。
 
 ### 受監督的瀏覽器 Agent
 
@@ -175,7 +191,12 @@ adapter，個別事件則必須通過相同匹配、去重與佐證規則。
 - 將 query request 排入一個有 TTL、去重且不保存使用者身分的最小工作清單。
 
 第一版不建立通用 runtime queue。背景工作清單只保存 normalized query key、縣市、
-道路或地點、半徑、優先度、請求時間與到期時間；相同 query key 在 TTL 內合併。
+公開 gazetteer UUIDv5 anchor、道路或地點、半徑、優先度、請求時間與到期時間。
+Key 是含欄位名稱、anchor、explicit-null slots 與 bounded radius 的 canonical JSON
+做 SHA-256，worker/API 共用固定 vectors；
+相同 key 在 TTL 內只提高優先度。Expired exact-key row 必須先刪除再建立 fresh
+pending row；claim 的 `(key, requested_at, expires_at)` 是 complete/release generation
+token，舊 worker 不得刪除或釋放重用同 key 的新一代工作。
 
 ### `EvidenceRepository`
 
@@ -227,9 +248,11 @@ dependency bag，也不在 request time 直連官方或社群上游。
 - WRA／NCDR 淹水或河川高水位警戒。
 - 已核准淹水深度、水位或雨量來源超過各來源既有警戒條件。
 
-所有啟動條件解除後，受影響區域保留兩小時 cooldown 再回到平時模式。每個
-adapter 仍受自己的 API quota、rate limit 與退避策略限制；事件模式不能繞過
-平台限制。
+所有啟動條件解除後，近兩小時內每一個可證明已解除事件的受影響區域與相鄰區域
+都進入 bounded、去重且固定排序的 cooldown；不得只保留最新一個事件。事件與
+cooldown 的 5 分鐘查詢只包含這些區域，即使 normal contexts 非空也不得混入全臺
+平時輪巡。解除滿兩小時後才回到 30 分鐘平時模式。每個 adapter 仍受自己的 API
+quota、rate limit 與退避策略限制；事件模式不能繞過平台限制。
 
 ## 關鍵字與地點匹配
 
@@ -240,6 +263,10 @@ Query planner 使用受控詞彙，不做任意生成式擴張：
 - 地點詞：查詢點縣市、行政區、道路全名、常見道路別名、地標與相鄰行政區。
 - 候選文章必須同時符合淹水語意與可接受的地點匹配。
 - 道路匹配必須有相容行政區脈絡，避免同名道路跨縣市誤判。
+- 使用者 priority context 必須是 server-resolved admin 下、位於選定半徑內的公開
+  gazetteer geometry；同縣同名且同精度的多筆候選無法唯一決定時 fail closed 為
+  `idle`。API 與 worker 以同一個安全 stable public entry key 重建同一筆 context，
+  不得只靠 name/admin 再挑另一個座標。
 - 只有縣市級匹配時，geometry 使用行政區代表範圍，precision 標為
   `admin_area`，不得偽造成門牌點位。
 
@@ -261,6 +288,7 @@ tables；`EvidenceRepository` 對外使用本文件的名稱與契約即可。�
 - `freshness_threshold`
 - `enabled`
 - `config_version`
+- keyed community sources only: operator key ID 與 secret SHA-256 fingerprint（不含 secret）
 
 ### `source_runs`
 
@@ -293,6 +321,16 @@ tables；`EvidenceRepository` 對外使用本文件的名稱與契約即可。�
 更新必須只接受較新的 `observed_at`；相同時間的 conflicting value 進入 rejected
 紀錄，不靜默覆寫。
 
+CAP 是例外的 message lifecycle，不可只用一個行政區 latest 覆蓋：canonical
+message origin 是 `(sender, identifier, sent)`，cross-feed/area evidence origin 再加
+`admin_code`；latest station key 含 admin code 與 canonical message digest，所以同區
+多個警報可同時存在。`Update` 只 retire `references` 中完全相符的
+`(sender, identifier, sent)` triples，並 upsert 自身；`Cancel` 永不進 latest，只
+retire exact references。無 area 的 message-level Cancel 仍保存 lifecycle tombstone。
+保留的 Update/Cancel tombstone 阻止較舊 Alert replay 復活，且不得刪除無關的並行
+警報。每次 warning poll 的 worker-owned `started_at` 是 generation：較舊 empty poll
+不能刪新 Alert，較新 empty poll 也必須阻止舊 Alert 之後復活。
+
 ### `historical_evidence`
 
 - `source_key`
@@ -307,9 +345,10 @@ tables；`EvidenceRepository` 對外使用本文件的名稱與契約即可。�
 
 ### `community_signals`
 
-- `id`：由 canonical public URL 與來源產生，不由作者產生
+- `id`：由來源 post id／canonical public URL 與來源透過 keyed HMAC 產生，不由作者產生
 - `source_key`
-- `source_url`
+- `source_url`：僅允許不含帳號識別的 public URL；本產品第一版的 Threads signal
+  固定為 `null`（不是指版本化 Threads API）
 - `channel`
 - `published_at`、`ingested_at`
 - `matched_flood_terms`
@@ -335,9 +374,13 @@ HTML、媒體、截圖、聯絡方式、私人地址與 raw storage reference。
 
 每個 community signal 至多屬於一個 active cluster，避免重複計分。
 
+Threads permalink 與引用／轉貼物件只存在於 adapter 的短生命週期記憶體；經認證的
+suppression URL 也只存在於該請求的 canonicalization／HMAC 記憶體階段。資料庫只保存
+帶 namespace 的 keyed HMAC。這避免 permalink 內的 handle 變相保存作者身分。
+
 ### `suppressed_sources`
 
-- canonical URL hash
+- keyed canonical URL／source reference HMAC
 - source key
 - suppression reason
 - suppressed at
@@ -348,6 +391,7 @@ HTML、媒體、截圖、聯絡方式、私人地址與 raw storage reference。
 這是有界 operational work list，不是一般化 queue：
 
 - normalized query key
+- stable public gazetteer UUIDv5 anchor
 - county／district／road or landmark
 - radius
 - priority
@@ -362,6 +406,9 @@ HTML、媒體、截圖、聯絡方式、私人地址與 raw storage reference。
 - 未驗證或已交叉佐證的 sanitized community signal 最多保存 30 天；若來源政策
   要求更短保存、refresh 或刪除同步，以較嚴格期限為準。
 - 被來源刪除、收到申訴或判定誤報時立即 suppressed，並排除評分。
+- 已 promotion 的 first-party report 以 private FK link 指向 derived signal；後續
+  rejection／redaction／complaint 讀該 link，不依賴目前 HMAC key 重新推導 ID。
+  重複 approval 重用既有 link，不能 mint 第二個 ID 或隱式復活 suppressed signal。
 - 只有獲得官方資料或人工審核確認的事件，才能另存為去識別化長期
   `historical_evidence`；原社群 signal 仍按 30 天政策到期。
 - 公開 API 的 social evidence `raw_ref` 必須為 `null`。
@@ -384,7 +431,9 @@ Assessment 必須同時輸出：
 - Stale、failed、missing 或無 coverage 的必要官方來源不能支持低風險。
 - 單一社群文章不改變 `realtime` 或 `overall`。
 - 兩個獨立社群來源，或一個社群來源加相容官方異常，形成 corroborated cluster。
-- Corroborated community cluster 最多使 `overall` 提高一個風險等級，不能降低。
+- 官方 realtime 已知時，corroborated community cluster 最多使 `overall` 提高一個
+  風險等級，不能降低；realtime `unknown` 時改用下方 `community_warning` 主導規則，
+  不以歷史等級冒充目前警戒。
 - 同一官方異常若已進入 base realtime score，不得因同時用於 corroboration 再加權；
   多個相近 corroborated clusters 也不疊加超過一次 community uplift。
 - 沒有官方確認時，由社群造成的 overall confidence 上限為 `medium`。
@@ -466,7 +515,13 @@ Assessment 必須同時輸出：
 - API 限流使用來源專屬 backoff 與 cadence 降級，不用 browser scraping 補洞。
 - 每個官方、地方、社群與 browser-discovery source 都有獨立 feature flag 與
   kill switch。
+- Catalog `enabled=false` 立即排除 current/coverage，health 顯示 `disabled`，且其
+  precedence 高於任何先前成功、healthy runtime 或 retained latest；required
+  disabled source 不得支持公開 `低`。
 - Public assessment 不快取 dependency-failure 為成功低風險結果。
+- Evidence/response cache 只能保存 bounded display material，不能成為 enabled、
+  suppression、moderation、retention 或 active-window 的授權來源；每次公開讀取仍以
+  當下資料庫狀態過濾，kill switch／刪除提交後不得由舊 cache 回顯。
 - API credentials 只由 secrets／environment 注入，不寫入 repository、log 或
   response。
 - Browser discovery 與 community ingestion 不得使用個人帳號或保存可識別資料。
@@ -499,6 +554,11 @@ Assessment 必須同時輸出：
 
 凍結功能的既有資料表不在第一個 migration 直接刪除。先停止新增產品依賴與寫入，
 待新 vertical slice 驗證後再另案處理資料保存與移除。
+
+行政區判定只做一個狹義相容例外：唯讀重用一份既有、active、immutable、
+checksum-reviewed 的全臺縣市邊界 snapshot，並由一次性 v1 migration 置換最小
+source mapping／contract rows。既有 snapshot builder、inventory refresh、proof
+publisher、通用 proof API 與排程仍全部凍結；這個例外不恢復 22 縣市 proof 產品。
 
 ## 測試策略
 
