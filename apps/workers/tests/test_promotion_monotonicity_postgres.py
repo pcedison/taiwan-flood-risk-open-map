@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime
-from threading import Event, Thread
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from threading import Barrier, Event, Thread
+from time import monotonic
 from typing import Any, Self
 from uuid import uuid4
 
@@ -46,11 +48,13 @@ def test_absent_latest_key_is_serialized_without_equal_time_overwrite(
 ) -> None:
     suffix = uuid4().hex
     station_id = f"RACE-{suffix}"
-    staging_ids = _insert_staging_candidates(database_url, suffix, 2)
+    staging_fixtures = _insert_staging_candidates(database_url, suffix, 2)
     first_has_lock = Event()
     release_first = Event()
-    second_started = Event()
+    second_attempted = Event()
+    second_acquired = Event()
     results: dict[str, str | None] = {}
+    errors: dict[str, BaseException] = {}
 
     first_writer = PostgresEvidencePromotionWriter(
         connection_factory=_gated_connection_factory(
@@ -60,39 +64,52 @@ def test_absent_latest_key_is_serialized_without_equal_time_overwrite(
             release=release_first,
         )
     )
-    second_writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    second_application_name = f"task8-absent-wait-{suffix}"
+    second_writer = PostgresEvidencePromotionWriter(
+        connection_factory=_gated_connection_factory(
+            database_url,
+            lock_predicate=lambda key: key.startswith("official-realtime-dedupe|"),
+            attempted=second_attempted,
+            acquired=second_acquired,
+            release=None,
+            application_name=second_application_name,
+        )
+    )
     first_payload = _water_payload(
-        suffix=suffix,
         station_id=station_id,
         value=first_value,
-        staging_id=staging_ids[0],
+        staging=staging_fixtures[0],
     )
     second_payload = _water_payload(
-        suffix=suffix + "-second",
         station_id=station_id,
         value=second_value,
-        staging_id=staging_ids[1],
+        staging=staging_fixtures[1],
     )
 
     first_thread = Thread(
-        target=lambda: results.__setitem__("first", first_writer.write_evidence(first_payload))
+        target=lambda: _capture_write(
+            "first", first_writer, first_payload, results, errors
+        )
     )
 
     def run_second() -> None:
-        second_started.set()
-        results["second"] = second_writer.write_evidence(second_payload)
+        _capture_write("second", second_writer, second_payload, results, errors)
 
     second_thread = Thread(target=run_second)
     try:
         first_thread.start()
         assert first_has_lock.wait(5)
         second_thread.start()
-        assert second_started.wait(5)
+        assert second_attempted.wait(5)
+        assert _wait_for_advisory_wait(database_url, second_application_name)
+        assert not second_acquired.is_set()
         release_first.set()
         first_thread.join(10)
         second_thread.join(10)
         assert not first_thread.is_alive()
         assert not second_thread.is_alive()
+        assert second_acquired.is_set()
+        assert errors == {}
         assert results["first"] is not None
         assert results["second"] is None
 
@@ -112,12 +129,12 @@ def test_absent_latest_key_is_serialized_without_equal_time_overwrite(
             assert cursor.fetchone() == (first_value, 1)
             cursor.execute(
                 "SELECT validation_status, rejection_reason FROM staging_evidence WHERE id = %s",
-                (staging_ids[1],),
+                (staging_fixtures[1]["staging_id"],),
             )
             assert cursor.fetchone() == ("rejected", "conflicting_latest")
     finally:
         release_first.set()
-        _cleanup_race(database_url, suffix, station_id, staging_ids)
+        _cleanup_race(database_url, suffix, station_id, staging_fixtures)
 
 
 def test_same_staging_concurrent_retry_is_consumed_once_without_rejection(
@@ -125,15 +142,16 @@ def test_same_staging_concurrent_retry_is_consumed_once_without_rejection(
 ) -> None:
     suffix = uuid4().hex
     station_id = f"SAME-STAGING-{suffix}"
-    staging_ids = _insert_staging_candidates(database_url, suffix, 1)
+    staging_fixtures = _insert_staging_candidates(database_url, suffix, 1)
     first_has_lock = Event()
     release_first = Event()
     results: dict[str, str | None] = {}
+    errors: dict[str, BaseException] = {}
+    second_started = Event()
     payload = _water_payload(
-        suffix=suffix,
         station_id=station_id,
         value=3.2,
-        staging_id=staging_ids[0],
+        staging=staging_fixtures[0],
     )
     first_writer = PostgresEvidencePromotionWriter(
         connection_factory=_gated_connection_factory(
@@ -143,22 +161,32 @@ def test_same_staging_concurrent_retry_is_consumed_once_without_rejection(
             release=release_first,
         )
     )
-    second_writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    second_application_name = f"task8-same-staging-wait-{suffix}"
+    second_writer = PostgresEvidencePromotionWriter(
+        connection_factory=lambda: _named_connection(
+            database_url, second_application_name
+        )
+    )
     first_thread = Thread(
-        target=lambda: results.__setitem__("first", first_writer.write_evidence(payload))
+        target=lambda: _capture_write("first", first_writer, payload, results, errors)
     )
-    second_thread = Thread(
-        target=lambda: results.__setitem__("second", second_writer.write_evidence(payload))
-    )
+    def run_second() -> None:
+        second_started.set()
+        _capture_write("second", second_writer, payload, results, errors)
+
+    second_thread = Thread(target=run_second)
     try:
         first_thread.start()
         assert first_has_lock.wait(5)
         second_thread.start()
+        assert second_started.wait(5)
+        assert _wait_for_database_lock(database_url, second_application_name)
         release_first.set()
         first_thread.join(10)
         second_thread.join(10)
         assert not first_thread.is_alive()
         assert not second_thread.is_alive()
+        assert errors == {}
         assert results["first"] is not None
         assert results["second"] is None
 
@@ -167,7 +195,7 @@ def test_same_staging_concurrent_retry_is_consumed_once_without_rejection(
         with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT validation_status, rejection_reason FROM staging_evidence WHERE id = %s",
-                (staging_ids[0],),
+                (staging_fixtures[0]["staging_id"],),
             )
             assert cursor.fetchone() == ("accepted", None)
             cursor.execute(
@@ -177,7 +205,7 @@ def test_same_staging_concurrent_retry_is_consumed_once_without_rejection(
             assert cursor.fetchone() == (1,)
     finally:
         release_first.set()
-        _cleanup_race(database_url, suffix, station_id, staging_ids)
+        _cleanup_race(database_url, suffix, station_id, staging_fixtures)
 
 
 @pytest.mark.parametrize("commit_order", ["update_first", "cancel_first"])
@@ -194,7 +222,10 @@ def test_cross_adapter_update_cancel_share_global_origin_lock(
     )
     acquired = Event()
     release = Event()
+    second_attempted = Event()
+    second_acquired = Event()
     results: dict[str, str | None] = {}
+    errors: dict[str, BaseException] = {}
     update = _cap_update_payload(suffix, update_identifier)
     cancel = _cap_cancel_payload(suffix, update_identifier)
     first_payload, second_payload = (
@@ -208,22 +239,47 @@ def test_cross_adapter_update_cancel_share_global_origin_lock(
             release=release,
         )
     )
-    second_writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    second_application_name = f"task8-cap-wait-{suffix}"
+    second_writer = PostgresEvidencePromotionWriter(
+        connection_factory=_gated_connection_factory(
+            database_url,
+            lock_predicate=lambda key: key == shared_origin,
+            attempted=second_attempted,
+            acquired=second_acquired,
+            release=None,
+            application_name=second_application_name,
+        )
+    )
     first_thread = Thread(
-        target=lambda: results.__setitem__("first", first_writer.write_evidence(first_payload))
+        target=lambda: _capture_write(
+            "first", first_writer, first_payload, results, errors
+        )
     )
     second_thread = Thread(
-        target=lambda: results.__setitem__("second", second_writer.write_evidence(second_payload))
+        target=lambda: _capture_write(
+            "second", second_writer, second_payload, results, errors
+        )
     )
     try:
         first_thread.start()
         assert acquired.wait(5)
         second_thread.start()
+        assert second_attempted.wait(5)
+        assert _wait_for_advisory_wait(database_url, second_application_name)
+        assert not second_acquired.is_set()
         release.set()
         first_thread.join(10)
         second_thread.join(10)
         assert not first_thread.is_alive()
         assert not second_thread.is_alive()
+        assert second_acquired.is_set()
+        assert errors == {}
+        if commit_order == "update_first":
+            assert results["first"] is not None
+            assert results["second"] is not None
+        else:
+            assert results["first"] is not None
+            assert results["second"] is None
 
         import psycopg
 
@@ -240,9 +296,125 @@ def test_cross_adapter_update_cancel_share_global_origin_lock(
                 (station_id,),
             )
             assert cursor.fetchone() == (0,)
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id LIKE %s",
+                (f"task8-cap-{suffix}-%",),
+            )
+            assert cursor.fetchone() == ((2,) if commit_order == "update_first" else (1,))
     finally:
         release.set()
         _cleanup_cap_race(database_url, suffix)
+
+
+@pytest.mark.parametrize("arrival_order", ["central_first", "local_first"])
+def test_live_exact_central_local_duplicate_always_keeps_central_latest(
+    database_url: str,
+    arrival_order: str,
+) -> None:
+    suffix = uuid4().hex
+    central = _depth_payload(
+        suffix=suffix,
+        adapter_key="official.wra_iow.flood_depth",
+        station_id=f"WRA-{suffix}",
+        observed_at=NOW,
+        value=12.0,
+        longitude=120.2190,
+        latitude=22.9160,
+    )
+    local = _depth_payload(
+        suffix=suffix,
+        adapter_key="local.tainan.flood_sensor",
+        station_id=f"TN-{suffix}",
+        observed_at=NOW,
+        value=12.0,
+        longitude=120.2195,
+        latitude=22.9160,
+    )
+    first, second = (
+        (central, local) if arrival_order == "central_first" else (local, central)
+    )
+    writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    try:
+        first_result = writer.write_evidence(first)
+        second_result = writer.write_evidence(second)
+
+        assert first_result is not None
+        if arrival_order == "central_first":
+            assert second_result is None
+        else:
+            assert second_result is not None
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT adapter_key
+                FROM official_realtime_latest
+                WHERE station_id = ANY(%s)
+                ORDER BY adapter_key
+                """,
+                ([central.properties["station_id"], local.properties["station_id"]],),
+            )
+            assert cursor.fetchall() == [("official.wra_iow.flood_depth",)]
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id LIKE %s",
+                (f"task8-depth-{suffix}-%",),
+            )
+            assert cursor.fetchone() == (
+                (1,) if arrival_order == "central_first" else (2,)
+            )
+    finally:
+        _cleanup_depth_race(database_url, suffix, central, local)
+
+
+@pytest.mark.parametrize("non_match", ["different_time", "different_value", "far_point"])
+def test_live_central_local_negative_controls_keep_both_latest_rows(
+    database_url: str,
+    non_match: str,
+) -> None:
+    suffix = uuid4().hex
+    central = _depth_payload(
+        suffix=suffix,
+        adapter_key="official.wra_iow.flood_depth",
+        station_id=f"WRA-{suffix}",
+        observed_at=NOW,
+        value=12.0,
+        longitude=120.2190,
+        latitude=22.9160,
+    )
+    local = _depth_payload(
+        suffix=suffix,
+        adapter_key="local.tainan.flood_sensor",
+        station_id=f"TN-{suffix}",
+        observed_at=(NOW + timedelta(minutes=1) if non_match == "different_time" else NOW),
+        value=13.0 if non_match == "different_value" else 12.0,
+        longitude=121.0 if non_match == "far_point" else 120.2195,
+        latitude=25.0 if non_match == "far_point" else 22.9160,
+    )
+    writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    try:
+        assert writer.write_evidence(central) is not None
+        assert writer.write_evidence(local) is not None
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT adapter_key
+                FROM official_realtime_latest
+                WHERE station_id = ANY(%s)
+                ORDER BY adapter_key
+                """,
+                ([central.properties["station_id"], local.properties["station_id"]],),
+            )
+            assert cursor.fetchall() == [
+                ("local.tainan.flood_sensor",),
+                ("official.wra_iow.flood_depth",),
+            ]
+    finally:
+        _cleanup_depth_race(database_url, suffix, central, local)
 
 
 def test_reviewed_snapshot_resolves_real_multipolygon_and_point_on_surface(
@@ -285,38 +457,367 @@ def test_reviewed_snapshot_resolves_real_multipolygon_and_point_on_surface(
             connection.rollback()
 
 
-def _insert_staging_candidates(database_url: str, suffix: str, count: int) -> tuple[str, ...]:
+@pytest.mark.parametrize(
+    "boundary_case",
+    [
+        "inactive",
+        "unreviewed",
+        "ambiguous_active",
+        "checksum_mismatch",
+        "exact_code_mismatch",
+    ],
+)
+def test_live_boundary_negative_cases_remain_unlocated_audit_evidence(
+    database_url: str,
+    boundary_case: str,
+) -> None:
     import psycopg
 
-    ids: list[str] = []
+    suffix = uuid4().hex
+    with psycopg.connect(database_url) as connection:
+        try:
+            _install_temp_boundary_case(connection, boundary_case, suffix)
+            writer = PostgresEvidencePromotionWriter(
+                connection_factory=lambda: _BorrowedConnection(connection)
+            )
+            payload = _cap_payload(
+                adapter_key="official.cwa.heavy_rain_warning",
+                suffix=suffix,
+                identifier=f"boundary-negative-{suffix}",
+                message_type="Alert",
+                admin_code=(
+                    "99999999" if boundary_case == "exact_code_mismatch" else "67000000"
+                ),
+                references=[],
+                geometry=False,
+            )
+
+            evidence_id = writer.write_evidence(payload)
+
+            assert evidence_id is not None
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT e.geom IS NULL, latest.evidence_id IS NULL
+                    FROM evidence e
+                    LEFT JOIN official_realtime_latest latest ON latest.evidence_id = e.id
+                    WHERE e.id = %s
+                    """,
+                    (evidence_id,),
+                )
+                assert cursor.fetchone() == (True, True)
+        finally:
+            connection.rollback()
+
+
+@pytest.mark.parametrize("message_type", ["Alert", "Update", "Cancel"])
+def test_live_cap_canonical_replay_across_raw_refs_returns_none(
+    database_url: str,
+    message_type: str,
+) -> None:
+    suffix = uuid4().hex
+    references = (
+        []
+        if message_type == "Alert"
+        else [
+            {
+                "sender": "sender@example.test",
+                "identifier": f"earlier-{suffix}",
+                "sent": (NOW - timedelta(minutes=1)).isoformat(),
+            }
+        ]
+    )
+    canonical = _cap_payload(
+        adapter_key="official.cwa.heavy_rain_warning",
+        suffix=suffix,
+        identifier=f"canonical-{message_type.lower()}-{suffix}",
+        message_type=message_type,
+        admin_code=None if message_type == "Cancel" else "67000000",
+        references=references,
+        geometry=message_type != "Cancel",
+    )
+    replay = replace(
+        canonical,
+        raw_ref=f"raw/task8-cap-{suffix}-{message_type.lower()}-replay.xml",
+    )
+    writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    try:
+        first_id = writer.write_evidence(canonical)
+        replay_id = writer.write_evidence(replay)
+
+        assert first_id is not None
+        assert replay_id is None
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id = %s",
+                (canonical.source_id,),
+            )
+            assert cursor.fetchone() == (1,)
+    finally:
+        _cleanup_cap_race(database_url, suffix)
+
+
+def test_live_cap_identity_keeps_adapters_and_admin_areas_physically_separate(
+    database_url: str,
+) -> None:
+    suffix = uuid4().hex
+    identifier = f"matrix-{suffix}"
+    cwa_tainan = _cap_payload(
+        adapter_key="official.cwa.heavy_rain_warning",
+        suffix=suffix,
+        identifier=identifier,
+        message_type="Alert",
+        admin_code="67000000",
+        references=[],
+        geometry=True,
+    )
+    ncdr_tainan = replace(
+        cwa_tainan,
+        adapter_key="official.ncdr.cap",
+        raw_ref=f"raw/task8-cap-{suffix}-ncdr-tainan.xml",
+    )
+    cwa_kaohsiung = replace(
+        cwa_tainan,
+        source_id=f"task8-cap-{suffix}-{identifier}-64000000",
+        raw_ref=f"raw/task8-cap-{suffix}-cwa-kaohsiung.xml",
+        properties={**cwa_tainan.properties, "admin_code": "64000000"},
+    )
+    writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    try:
+        assert writer.write_evidence(cwa_tainan) is not None
+        assert writer.write_evidence(ncdr_tainan) is not None
+        assert writer.write_evidence(cwa_kaohsiung) is not None
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id LIKE %s",
+                (f"task8-cap-{suffix}-%",),
+            )
+            assert cursor.fetchone() == (3,)
+    finally:
+        _cleanup_cap_race(database_url, suffix)
+
+
+def test_live_generic_natural_key_race_returns_one_id_and_one_none(
+    database_url: str,
+) -> None:
+    suffix = uuid4().hex
+    payload = EvidencePromotionPayload(
+        data_source_id=None,
+        adapter_key="news.public_web.sample",
+        source_id=f"task8-generic-race-{suffix}",
+        source_type="news",
+        event_type="flood_report",
+        title="generic race",
+        summary="generic natural-key race",
+        url="https://example.test/generic-race",
+        occurred_at=NOW,
+        observed_at=NOW,
+        confidence=0.7,
+        raw_ref=f"raw/task8-generic-race-{suffix}.json",
+        properties={
+            "adapter_key": "news.public_web.sample",
+            "evidence_scope": "context",
+            "location_precision": "unknown",
+        },
+    )
+    ready = Event()
+    insert_barrier = Barrier(2)
+    results: dict[str, str | None] = {}
+    errors: dict[str, BaseException] = {}
+
+    def race(name: str) -> None:
+        assert ready.wait(5)
+        _capture_write(
+            name,
+            PostgresEvidencePromotionWriter(
+                connection_factory=lambda: _insert_barrier_connection(
+                    database_url, insert_barrier
+                )
+            ),
+            payload,
+            results,
+            errors,
+        )
+
+    threads = [Thread(target=race, args=(name,)) for name in ("first", "second")]
+    try:
+        for thread in threads:
+            thread.start()
+        ready.set()
+        for thread in threads:
+            thread.join(10)
+        assert all(not thread.is_alive() for thread in threads)
+        assert errors == {}
+        assert sorted(value is None for value in results.values()) == [False, True]
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id = %s",
+                (payload.source_id,),
+            )
+            assert cursor.fetchone() == (1,)
+    finally:
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute("DELETE FROM evidence WHERE source_id = %s", (payload.source_id,))
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "source_id",
+        "data_source_id",
+        "source_type",
+        "raw_ref",
+        "adapter_key",
+        "event_type",
+        "occurred_at",
+        "observed_at",
+        "raw_snapshot_id",
+    ],
+)
+def test_live_forged_staging_identity_is_inert(
+    database_url: str,
+    mismatch: str,
+) -> None:
+    suffix = uuid4().hex
+    station_id = f"FORGED-{suffix}"
+    staging_fixtures = _insert_staging_candidates(database_url, suffix, 1)
+    payload = _water_payload(
+        station_id=station_id,
+        value=3.2,
+        staging=staging_fixtures[0],
+    )
+    properties = dict(payload.properties)
+    replacements: dict[str, object] = {}
+    if mismatch == "source_id":
+        replacements["source_id"] = f"forged-{suffix}"
+    elif mismatch == "data_source_id":
+        replacements["data_source_id"] = staging_fixtures[0]["other_data_source_id"]
+    elif mismatch == "source_type":
+        replacements["source_type"] = "news"
+    elif mismatch == "raw_ref":
+        replacements["raw_ref"] = f"raw/forged-{suffix}.json"
+    elif mismatch == "adapter_key":
+        replacements["adapter_key"] = "official.cwa.rainfall"
+    elif mismatch == "event_type":
+        replacements["event_type"] = "rainfall"
+    elif mismatch == "occurred_at":
+        replacements["occurred_at"] = NOW + timedelta(seconds=1)
+    elif mismatch == "observed_at":
+        replacements["observed_at"] = NOW + timedelta(seconds=1)
+    else:
+        properties["raw_snapshot_id"] = str(uuid4())
+    forged = replace(payload, properties=properties, **replacements)
+    try:
+        writer = PostgresEvidencePromotionWriter(database_url=database_url)
+
+        assert writer.write_evidence(forged) is None
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT validation_status, rejection_reason FROM staging_evidence WHERE id = %s",
+                (staging_fixtures[0]["staging_id"],),
+            )
+            assert cursor.fetchone() == ("accepted", None)
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id IN (%s, %s)",
+                (payload.source_id, f"forged-{suffix}"),
+            )
+            assert cursor.fetchone() == (0,)
+            cursor.execute(
+                "SELECT count(*) FROM official_realtime_latest WHERE station_id = %s",
+                (station_id,),
+            )
+            assert cursor.fetchone() == (0,)
+    finally:
+        _cleanup_race(database_url, suffix, station_id, staging_fixtures)
+
+
+def _insert_staging_candidates(
+    database_url: str, suffix: str, count: int
+) -> tuple[dict[str, str], ...]:
+    import psycopg
+
+    fixtures: list[dict[str, str]] = []
     with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT
+                (SELECT id::text FROM data_sources
+                    WHERE adapter_key = 'official.wra.water_level'),
+                (SELECT id::text FROM data_sources
+                    WHERE adapter_key = 'news.public_web.sample')
+            """
+        )
+        data_source_id, other_data_source_id = cursor.fetchone()
+        assert data_source_id is not None
+        assert other_data_source_id is not None
         for index in range(count):
+            source_id = f"task8-race-{suffix}-{index}"
+            raw_ref = f"raw/task8-race-{suffix}-{index}.json"
             cursor.execute(
                 """
-                INSERT INTO staging_evidence (
-                    data_source_id, source_id, source_type, event_type, title, summary,
-                    occurred_at, observed_at, confidence, validation_status, payload
+                INSERT INTO raw_snapshots (
+                    data_source_id, adapter_key, raw_ref, fetched_at
                 )
                 VALUES (
                     (SELECT id FROM data_sources WHERE adapter_key = 'official.wra.water_level'),
-                    %s, 'official', 'water_level', 'race', 'race', %s, %s, 0.9,
-                    'accepted', '{}'::jsonb
+                    'official.wra.water_level', %s, %s
                 )
                 RETURNING id
                 """,
-                (f"task8-race-{suffix}-{index}", NOW, NOW),
+                (raw_ref, NOW),
             )
-            ids.append(str(cursor.fetchone()[0]))
-    return tuple(ids)
+            raw_snapshot_id = str(cursor.fetchone()[0])
+            cursor.execute(
+                """
+                INSERT INTO staging_evidence (
+                    raw_snapshot_id, data_source_id, source_id, source_type,
+                    event_type, title, summary,
+                    occurred_at, observed_at, confidence, validation_status, payload
+                )
+                VALUES (
+                    %s,
+                    (SELECT id FROM data_sources WHERE adapter_key = 'official.wra.water_level'),
+                    %s, 'official', 'water_level', 'race', 'race', %s, %s, 0.9,
+                    'accepted', '{"adapter_key":"official.wra.water_level"}'::jsonb
+                )
+                RETURNING id
+                """,
+                (raw_snapshot_id, source_id, NOW, NOW),
+            )
+            fixtures.append(
+                {
+                    "staging_id": str(cursor.fetchone()[0]),
+                    "raw_snapshot_id": raw_snapshot_id,
+                    "data_source_id": data_source_id,
+                    "other_data_source_id": other_data_source_id,
+                    "source_id": source_id,
+                    "raw_ref": raw_ref,
+                }
+            )
+    return tuple(fixtures)
 
 
 def _water_payload(
-    *, suffix: str, station_id: str, value: float, staging_id: str
+    *, station_id: str, value: float, staging: dict[str, str]
 ) -> EvidencePromotionPayload:
     return EvidencePromotionPayload(
-        data_source_id=None,
+        data_source_id=staging["data_source_id"],
         adapter_key="official.wra.water_level",
-        source_id=f"task8-race-{suffix}",
+        source_id=staging["source_id"],
         source_type="official",
         event_type="water_level",
         title="race",
@@ -325,16 +826,57 @@ def _water_payload(
         occurred_at=NOW,
         observed_at=NOW,
         confidence=0.9,
-        raw_ref=f"raw/task8-race-{suffix}.json",
+        raw_ref=staging["raw_ref"],
         properties={
             "evidence_scope": "current",
             "station_id": station_id,
             "water_level_m": value,
             "warning_level_m": 4.0,
             "location_precision": "point",
-            "staging_evidence_id": staging_id,
+            "staging_evidence_id": staging["staging_id"],
+            "raw_snapshot_id": staging["raw_snapshot_id"],
             "location_payload": {
                 "geometry": {"type": "Point", "coordinates": [120.2, 23.0]}
+            },
+        },
+    )
+
+
+def _depth_payload(
+    *,
+    suffix: str,
+    adapter_key: str,
+    station_id: str,
+    observed_at: datetime,
+    value: float,
+    longitude: float,
+    latitude: float,
+) -> EvidencePromotionPayload:
+    source_id = f"task8-depth-{suffix}-{adapter_key}-{station_id}"
+    return EvidencePromotionPayload(
+        data_source_id=None,
+        adapter_key=adapter_key,
+        source_id=source_id,
+        source_type="official",
+        event_type="flood_report",
+        title="depth",
+        summary="depth",
+        url=None,
+        occurred_at=observed_at,
+        observed_at=observed_at,
+        confidence=0.9,
+        raw_ref=f"raw/{source_id}.json",
+        properties={
+            "evidence_scope": "current",
+            "station_id": station_id,
+            "flood_depth_cm": value,
+            "location_precision": "point",
+            "ingestion_generation_started_at": observed_at.isoformat(),
+            "location_payload": {
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [longitude, latitude],
+                }
             },
         },
     )
@@ -371,6 +913,7 @@ def _cap_cancel_payload(suffix: str, update_identifier: str) -> EvidencePromotio
         admin_code=None,
         references=[reference],
         geometry=False,
+        sent=NOW + timedelta(minutes=1),
     )
 
 
@@ -383,14 +926,16 @@ def _cap_payload(
     admin_code: str | None,
     references: list[dict[str, str]],
     geometry: bool,
+    sent: datetime = NOW,
 ) -> EvidencePromotionPayload:
     properties: dict[str, Any] = {
+        "adapter_key": adapter_key,
         "evidence_scope": "current",
         "location_precision": "admin_area",
         "admin_code": admin_code,
         "cap_sender": "sender@example.test",
         "cap_identifier": identifier,
-        "cap_sent": NOW.isoformat(),
+        "cap_sent": sent.isoformat(),
         "cap_references": references,
         "cap_status": "Actual",
         "cap_message_type": message_type,
@@ -424,12 +969,94 @@ def _cap_payload(
         title="CAP race",
         summary="CAP race",
         url=None,
-        occurred_at=NOW,
-        observed_at=NOW,
+        occurred_at=sent,
+        observed_at=sent,
         confidence=0.95,
         raw_ref=f"raw/task8-cap-{suffix}-{identifier}.xml",
         properties=properties,
     )
+
+
+def _capture_write(
+    name: str,
+    writer: PostgresEvidencePromotionWriter,
+    payload: EvidencePromotionPayload,
+    results: dict[str, str | None],
+    errors: dict[str, BaseException],
+) -> None:
+    try:
+        results[name] = writer.write_evidence(payload)
+    except BaseException as exc:  # noqa: BLE001 - surfaced in the parent test thread
+        errors[name] = exc
+
+
+def _wait_for_advisory_wait(
+    database_url: str,
+    application_name: str,
+    *,
+    timeout_seconds: float = 5.0,
+) -> bool:
+    import psycopg
+
+    deadline = monotonic() + timeout_seconds
+    while monotonic() < deadline:
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_stat_activity
+                    WHERE application_name = %s
+                        AND wait_event_type = 'Lock'
+                        AND wait_event = 'advisory'
+                )
+                """,
+                (application_name,),
+            )
+            if cursor.fetchone() == (True,):
+                return True
+        Event().wait(0.02)
+    return False
+
+
+def _wait_for_database_lock(
+    database_url: str,
+    application_name: str,
+    *,
+    timeout_seconds: float = 5.0,
+) -> bool:
+    import psycopg
+
+    deadline = monotonic() + timeout_seconds
+    while monotonic() < deadline:
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_stat_activity
+                    WHERE application_name = %s
+                        AND wait_event_type = 'Lock'
+                )
+                """,
+                (application_name,),
+            )
+            if cursor.fetchone() == (True,):
+                return True
+        Event().wait(0.02)
+    return False
+
+
+def _named_connection(database_url: str, application_name: str) -> Any:
+    import psycopg
+
+    return psycopg.connect(database_url, application_name=application_name)
+
+
+def _insert_barrier_connection(database_url: str, barrier: Barrier) -> Any:
+    import psycopg
+
+    return _InsertBarrierConnection(psycopg.connect(database_url), barrier)
 
 
 def _gated_connection_factory(
@@ -437,14 +1064,22 @@ def _gated_connection_factory(
     *,
     lock_predicate: Callable[[str], bool],
     acquired: Event,
-    release: Event,
+    release: Event | None,
+    attempted: Event | None = None,
+    application_name: str | None = None,
 ) -> Callable[[], Any]:
     import psycopg
 
     def factory() -> _GateConnection:
+        connect_options = (
+            {"application_name": application_name}
+            if application_name is not None
+            else {}
+        )
         return _GateConnection(
-            psycopg.connect(database_url),
+            psycopg.connect(database_url, **connect_options),
             lock_predicate=lock_predicate,
+            attempted=attempted,
             acquired=acquired,
             release=release,
         )
@@ -458,11 +1093,13 @@ class _GateConnection:
         connection: Any,
         *,
         lock_predicate: Callable[[str], bool],
+        attempted: Event | None,
         acquired: Event,
-        release: Event,
+        release: Event | None,
     ) -> None:
         self._connection = connection
         self._lock_predicate = lock_predicate
+        self._attempted = attempted
         self._acquired = acquired
         self._release = release
 
@@ -477,6 +1114,7 @@ class _GateConnection:
         return _GateCursor(
             self._connection.cursor(),
             lock_predicate=self._lock_predicate,
+            attempted=self._attempted,
             acquired=self._acquired,
             release=self._release,
         )
@@ -491,11 +1129,13 @@ class _GateCursor:
         cursor: Any,
         *,
         lock_predicate: Callable[[str], bool],
+        attempted: Event | None,
         acquired: Event,
-        release: Event,
+        release: Event | None,
     ) -> None:
         self._cursor = cursor
         self._lock_predicate = lock_predicate
+        self._attempted = attempted
         self._acquired = acquired
         self._release = release
 
@@ -507,16 +1147,60 @@ class _GateCursor:
         return self._cursor.__exit__(*args)
 
     def execute(self, sql: str, params: tuple[object, ...]) -> object:
-        result = self._cursor.execute(sql, params)
-        if (
+        target_lock = (
             "pg_advisory_xact_lock" in sql
-            and params
+            and bool(params)
             and self._lock_predicate(str(params[0]))
             and not self._acquired.is_set()
-        ):
+        )
+        if target_lock and self._attempted is not None:
+            self._attempted.set()
+        result = self._cursor.execute(sql, params)
+        if target_lock:
             self._acquired.set()
-            assert self._release.wait(10)
+            if self._release is not None:
+                assert self._release.wait(10)
         return result
+
+    def fetchone(self) -> Any:
+        return self._cursor.fetchone()
+
+
+class _InsertBarrierConnection:
+    def __init__(self, connection: Any, barrier: Barrier) -> None:
+        self._connection = connection
+        self._barrier = barrier
+
+    def __enter__(self) -> Self:
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, *args: object) -> object:
+        return self._connection.__exit__(*args)
+
+    def cursor(self) -> _InsertBarrierCursor:
+        return _InsertBarrierCursor(self._connection.cursor(), self._barrier)
+
+    def commit(self) -> None:
+        self._connection.commit()
+
+
+class _InsertBarrierCursor:
+    def __init__(self, cursor: Any, barrier: Barrier) -> None:
+        self._cursor = cursor
+        self._barrier = barrier
+
+    def __enter__(self) -> Self:
+        self._cursor.__enter__()
+        return self
+
+    def __exit__(self, *args: object) -> object:
+        return self._cursor.__exit__(*args)
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> object:
+        if "INSERT INTO evidence" in sql:
+            self._barrier.wait(5)
+        return self._cursor.execute(sql, params)
 
     def fetchone(self) -> Any:
         return self._cursor.fetchone()
@@ -615,11 +1299,107 @@ def _install_transactional_reviewed_snapshot(connection: Any, suffix: str) -> No
         )
 
 
+def _install_temp_boundary_case(connection: Any, boundary_case: str, suffix: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE TEMP TABLE realtime_jurisdiction_boundary_snapshots
+                (LIKE public.realtime_jurisdiction_boundary_snapshots INCLUDING DEFAULTS)
+                ON COMMIT DROP
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TEMP TABLE realtime_jurisdiction_boundaries
+                (LIKE public.realtime_jurisdiction_boundaries INCLUDING DEFAULTS)
+                ON COMMIT DROP
+            """
+        )
+        snapshot_count = 2 if boundary_case == "ambiguous_active" else 1
+        for index in range(snapshot_count):
+            cursor.execute(
+                """
+                INSERT INTO realtime_jurisdiction_boundary_snapshots (
+                    source_name, source_url, source_revision, expected_count,
+                    imported_count, is_complete, reviewed_at, review_ref, is_active
+                )
+                VALUES (%s, %s, %s, 22, 22, true, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    "Task 8 negative test",
+                    f"https://example.test/boundary-negative/{suffix}/{index}",
+                    f"{suffix}-{index}",
+                    None if boundary_case == "unreviewed" else NOW,
+                    None if boundary_case == "unreviewed" else "task-8-negative-test",
+                    boundary_case != "inactive",
+                ),
+            )
+            snapshot_id = cursor.fetchone()[0]
+            cursor.execute(
+                """
+                WITH geometry AS (
+                    SELECT ST_Multi(
+                        ST_GeomFromText(
+                            'POLYGON((119 21, 123 21, 123 26, 119 26, 119 21))',
+                            4326
+                        )
+                    )::geometry(MultiPolygon, 4326) AS geom
+                )
+                INSERT INTO realtime_jurisdiction_boundaries (
+                    snapshot_id, jurisdiction_code, geom, geom_sha256
+                )
+                SELECT
+                    %s,
+                    jurisdiction.jurisdiction_code,
+                    geometry.geom,
+                    CASE
+                        WHEN %s = 'checksum_mismatch'
+                            AND jurisdiction.jurisdiction_code = '63000000'
+                            THEN repeat('0', 64)
+                        ELSE encode(digest(ST_AsEWKB(geometry.geom), 'sha256'), 'hex')
+                    END
+                FROM public.realtime_jurisdictions jurisdiction
+                CROSS JOIN geometry
+                """,
+                (snapshot_id, boundary_case),
+            )
+            cursor.execute(
+                """
+                SELECT encode(
+                    digest(
+                        convert_to(
+                            jsonb_agg(
+                                jsonb_build_array(jurisdiction_code, geom_sha256)
+                                ORDER BY jurisdiction_code
+                            )::text,
+                            'UTF8'
+                        ),
+                        'sha256'
+                    ),
+                    'hex'
+                )
+                FROM realtime_jurisdiction_boundaries
+                WHERE snapshot_id = %s
+                """,
+                (snapshot_id,),
+            )
+            manifest_sha256 = cursor.fetchone()[0]
+            cursor.execute(
+                """
+                UPDATE realtime_jurisdiction_boundary_snapshots
+                SET manifest_sha256 = %s, approved_manifest_sha256 = %s
+                WHERE id = %s
+                """,
+                (manifest_sha256, manifest_sha256, snapshot_id),
+            )
+
+
 def _cleanup_race(
     database_url: str,
     suffix: str,
     station_id: str,
-    staging_ids: tuple[str, ...],
+    staging_fixtures: tuple[dict[str, str], ...],
 ) -> None:
     import psycopg
 
@@ -628,7 +1408,14 @@ def _cleanup_race(
             "DELETE FROM official_realtime_latest WHERE station_id = %s", (station_id,)
         )
         cursor.execute("DELETE FROM evidence WHERE source_id LIKE %s", (f"task8-race-{suffix}%",))
-        cursor.execute("DELETE FROM staging_evidence WHERE id = ANY(%s::uuid[])", (list(staging_ids),))
+        cursor.execute(
+            "DELETE FROM staging_evidence WHERE id = ANY(%s::uuid[])",
+            ([fixture["staging_id"] for fixture in staging_fixtures],),
+        )
+        cursor.execute(
+            "DELETE FROM raw_snapshots WHERE id = ANY(%s::uuid[])",
+            ([fixture["raw_snapshot_id"] for fixture in staging_fixtures],),
+        )
 
 
 def _cleanup_cap_race(database_url: str, suffix: str) -> None:
@@ -645,3 +1432,22 @@ def _cleanup_cap_race(database_url: str, suffix: str) -> None:
             (f"task8-cap-{suffix}-%",),
         )
         cursor.execute("DELETE FROM evidence WHERE source_id LIKE %s", (f"task8-cap-{suffix}-%",))
+
+
+def _cleanup_depth_race(
+    database_url: str,
+    suffix: str,
+    central: EvidencePromotionPayload,
+    local: EvidencePromotionPayload,
+) -> None:
+    import psycopg
+
+    with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "DELETE FROM official_realtime_latest WHERE station_id = ANY(%s)",
+            ([central.properties["station_id"], local.properties["station_id"]],),
+        )
+        cursor.execute(
+            "DELETE FROM evidence WHERE source_id LIKE %s",
+            (f"task8-depth-{suffix}-%",),
+        )

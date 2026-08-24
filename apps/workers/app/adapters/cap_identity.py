@@ -30,7 +30,7 @@ def cap_source_id(
     admin_code: str | None,
     message_level: bool = False,
 ) -> str:
-    if not message_level and re.fullmatch(r"\d{8}", admin_code or "") is None:
+    if not message_level and re.fullmatch(r"[0-9]{8}", admin_code or "") is None:
         raise ValueError("CAP area source id requires canonical admin code")
     digest = cap_message_digest(sender=sender, identifier=identifier, sent=sent)
     discriminator = "message" if message_level else f"area:{admin_code}"
@@ -40,6 +40,8 @@ def cap_source_id(
 def official_event_origin_key(
     *, sender: str, identifier: str, sent: datetime, admin_code: str
 ) -> str:
+    if re.fullmatch(r"[0-9]{8}", admin_code) is None:
+        raise ValueError("CAP area origin requires canonical admin code")
     if sent.tzinfo is None or sent.utcoffset() is None:
         raise ValueError("CAP sent must be timezone-aware")
     canonical = json.dumps(

@@ -157,8 +157,10 @@ def _staging_metadata_errors(
     event_type: str,
     ingestion_generation_started_at: datetime | None,
 ) -> tuple[str, ...]:
-    if raw_item is None or not isinstance(raw_item.payload, Mapping):
-        return ()
+    if raw_item is None:
+        return ("normalized evidence requires a matching fetched raw item",)
+    if not isinstance(raw_item.payload, Mapping):
+        return ("matching fetched raw item payload must be a mapping",)
     raw_payload = raw_item.payload
     errors: list[str] = []
 
@@ -173,7 +175,7 @@ def _staging_metadata_errors(
     admin_code = raw_payload.get("admin_code")
     if admin_code is not None and (
         not isinstance(admin_code, str)
-        or re.fullmatch(r"\d{8}", admin_code) is None
+        or re.fullmatch(r"[0-9]{8}", admin_code) is None
     ):
         errors.append("admin_code must be a canonical 8-digit code")
 
@@ -231,6 +233,7 @@ def _staging_metadata_errors(
     if message_type not in {"Alert", "Update", "Cancel"}:
         errors.append("cap_message_type is invalid")
     references = raw_payload.get("cap_references")
+    canonical_references: list[dict[str, str]] | None = None
     if not isinstance(references, list):
         errors.append("cap_references must be a list")
         reference_count = 0
@@ -243,8 +246,14 @@ def _staging_metadata_errors(
             reference_count = len(canonical_references)
             if reference_count > 64:
                 errors.append("cap_references must contain at most 64 unique triples")
-    if message_type in {"Update", "Cancel"} and reference_count == 0:
-        errors.append("Update and Cancel require an earlier reference")
+    if message_type in {"Update", "Cancel"}:
+        has_earlier_reference = sent is not None and canonical_references is not None and any(
+            (reference_sent := _aware_rfc3339(reference["sent"])) is not None
+            and reference_sent < sent
+            for reference in canonical_references
+        )
+        if not has_earlier_reference:
+            errors.append("Update and Cancel require an earlier reference")
     if message_type in {"Alert", "Update"}:
         active_from = _aware_rfc3339(raw_payload.get("active_from"))
         active_until = _aware_rfc3339(raw_payload.get("active_until"))
@@ -470,9 +479,6 @@ def _passthrough_payload(raw_item: Any | None, *, event_type: str) -> dict[str, 
             canonical_references = _canonical_cap_references(references)
             if canonical_references is not None:
                 payload["cap_references"] = canonical_references
-        status = raw_item.payload.get("status")
-        if status is not None:
-            payload["cap_status"] = status
 
     return payload
 

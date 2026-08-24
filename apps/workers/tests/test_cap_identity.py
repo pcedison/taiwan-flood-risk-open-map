@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib import import_module
 
 import pytest
@@ -63,3 +63,70 @@ def test_official_event_origin_key_includes_admin_area() -> None:
     ) != origin_key(
         sender="sender", identifier="alert", sent=CAP_SENT, admin_code="64000000"
     )
+
+
+def test_cap_source_id_distinguishes_each_admin_area_for_one_message() -> None:
+    cap_identity = import_module("app.adapters.cap_identity")
+
+    tainan = cap_identity.cap_source_id(
+        sender="sender", identifier="alert", sent=CAP_SENT, admin_code="67000000"
+    )
+    kaohsiung = cap_identity.cap_source_id(
+        sender="sender", identifier="alert", sent=CAP_SENT, admin_code="64000000"
+    )
+
+    assert tainan != kaohsiung
+
+
+def test_cap_message_identity_changes_when_only_sender_changes() -> None:
+    cap_identity = import_module("app.adapters.cap_identity")
+
+    assert cap_identity.cap_source_id(
+        sender="first@example.test",
+        identifier="alert",
+        sent=CAP_SENT,
+        admin_code="67000000",
+    ) != cap_identity.cap_source_id(
+        sender="second@example.test",
+        identifier="alert",
+        sent=CAP_SENT,
+        admin_code="67000000",
+    )
+
+
+def test_cap_message_identity_changes_when_only_sent_changes() -> None:
+    cap_identity = import_module("app.adapters.cap_identity")
+
+    assert cap_identity.cap_source_id(
+        sender="sender",
+        identifier="alert",
+        sent=CAP_SENT,
+        admin_code="67000000",
+    ) != cap_identity.cap_source_id(
+        sender="sender",
+        identifier="alert",
+        sent=CAP_SENT + timedelta(microseconds=1),
+        admin_code="67000000",
+    )
+
+
+@pytest.mark.parametrize("admin_code", ["６７００００００", "67000", "6700000A"])
+def test_cap_area_identity_rejects_non_ascii_or_malformed_admin_code(
+    admin_code: str,
+) -> None:
+    cap_identity = import_module("app.adapters.cap_identity")
+
+    with pytest.raises(ValueError, match="canonical admin code"):
+        cap_identity.cap_source_id(
+            sender="sender",
+            identifier="alert",
+            sent=CAP_SENT,
+            admin_code=admin_code,
+        )
+    with pytest.raises(ValueError, match="canonical admin code"):
+        cap_identity.official_event_origin_key(
+            sender="sender",
+            identifier="alert",
+            sent=CAP_SENT,
+            admin_code=admin_code,
+        )

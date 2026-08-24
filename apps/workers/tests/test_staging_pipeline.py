@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from app.adapters.cap_identity import cap_source_id
 from app.adapters.civil_iot.flood_sensor import FloodSensorAdapter
 from app.adapters.contracts import (
     AdapterRunResult,
@@ -14,6 +15,11 @@ from app.adapters.contracts import (
 )
 from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.news import SamplePublicWebNewsAdapter
+from app.pipelines.promotion import (
+    EvidencePromotionPayload,
+    PromotionCandidate,
+    promote_accepted_staging,
+)
 from app.pipelines.staging import AdapterStagingBatch, build_staging_batch, persist_staging_batch
 
 FETCHED_AT = datetime(2026, 4, 28, 10, 0, tzinfo=UTC)
@@ -229,6 +235,7 @@ def test_build_staging_batch_preserves_only_reviewed_metadata_fields() -> None:
         ("location_precision", "exact_address"),
         ("admin_code", "67000"),
         ("admin_code", 67000000),
+        ("admin_code", "６７００００００"),
         ("limitations", [f"limitation-{index}" for index in range(17)]),
         ("limitations", ["x" * 257]),
         ("dataset_revision", "x" * 257),
@@ -271,6 +278,41 @@ def test_build_staging_batch_rejects_invalid_reviewed_metadata(
     assert "invalid staging metadata" in (batch.rejected[0].rejection_reason or "")
 
 
+def test_orphan_normalized_evidence_without_matching_raw_item_fails_closed() -> None:
+    raw = RawSourceItem(
+        source_id="raw-a",
+        source_url="https://example.test/source",
+        fetched_at=FETCHED_AT,
+        payload={"evidence_scope": "context"},
+    )
+    normalized = NormalizedEvidence(
+        evidence_id="ev-orphan-b",
+        adapter_key="official.test.context",
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_REPORT,
+        source_id="orphan-b",
+        source_url=raw.source_url,
+        source_title="Orphan normalized row",
+        source_timestamp=FETCHED_AT,
+        fetched_at=FETCHED_AT,
+        summary="No raw item has this source id.",
+        location_text=None,
+        confidence=0.9,
+    )
+
+    batch = build_staging_batch(
+        AdapterRunResult(
+            adapter_key=normalized.adapter_key,
+            fetched=(raw,),
+            normalized=(normalized,),
+        )
+    )
+
+    assert batch.accepted == ()
+    assert batch.rejected[0].validation_status == "rejected"
+    assert "matching fetched raw item" in (batch.rejected[0].rejection_reason or "")
+
+
 def test_build_staging_batch_preserves_validated_cap_lifecycle_fields() -> None:
     generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
     result = _cap_result()
@@ -290,6 +332,18 @@ def test_build_staging_batch_preserves_validated_cap_lifecycle_fields() -> None:
     assert staged.payload["active_until"] == "2026-08-24T03:00:00+00:00"
     assert staged.payload["ingestion_generation_started_at"] == generation.isoformat()
     assert "xml_body" not in staged.payload
+
+
+def test_unreviewed_status_alias_cannot_overwrite_validated_cap_status() -> None:
+    generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+
+    staged = build_staging_batch(
+        _cap_result(cap_status="Actual", status="Test"),
+        ingestion_generation_started_at=generation,
+    ).accepted[0]
+
+    assert staged.payload["cap_status"] == "Actual"
+    assert "status" not in staged.payload
 
 
 def test_non_warning_status_is_not_reinterpreted_as_cap_lifecycle_metadata() -> None:
@@ -399,6 +453,178 @@ def test_cap_reference_duplicates_collapse_by_canonical_utc_triple() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "reference_sent",
+    ["2026-08-24T01:00:00+00:00", "2026-08-24T04:00:00+00:00"],
+)
+def test_cap_mutation_without_any_earlier_reference_fails_closed(
+    reference_sent: str,
+) -> None:
+    generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+    reference = {
+        "sender": "sender@example.test",
+        "identifier": "alert-0",
+        "sent": reference_sent,
+    }
+
+    batch = build_staging_batch(
+        _cap_result(cap_message_type="Update", cap_references=[reference]),
+        ingestion_generation_started_at=generation,
+    )
+
+    assert batch.accepted == ()
+    assert "earlier reference" in (batch.rejected[0].rejection_reason or "")
+
+
+def test_cap_mutation_mixed_reference_list_is_retained_when_one_is_earlier() -> None:
+    generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+    references = [
+        {
+            "sender": "sender@example.test",
+            "identifier": "alert-0",
+            "sent": "2026-08-24T04:00:00+00:00",
+        },
+        {
+            "sender": "sender@example.test",
+            "identifier": "alert-0",
+            "sent": "2026-08-24T00:00:00+00:00",
+        },
+    ]
+
+    staged = build_staging_batch(
+        _cap_result(cap_message_type="Update", cap_references=references),
+        ingestion_generation_started_at=generation,
+    ).accepted[0]
+
+    assert [reference["sent"] for reference in staged.payload["cap_references"]] == [
+        "2026-08-24T00:00:00+00:00",
+        "2026-08-24T04:00:00+00:00",
+    ]
+
+
+def test_area_alert_and_area_less_cancel_survive_staging_and_promotion_distinct() -> None:
+    generation = datetime(2026, 8, 24, 3, 0, tzinfo=UTC)
+    sender = "sender@example.test"
+    alert_sent = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
+    cancel_sent = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+    alert_source_id = cap_source_id(
+        sender=sender,
+        identifier="alert-1",
+        sent=alert_sent,
+        admin_code="67000000",
+    )
+    cancel_source_id = cap_source_id(
+        sender=sender,
+        identifier="cancel-1",
+        sent=cancel_sent,
+        admin_code=None,
+        message_level=True,
+    )
+    alert_payload: dict[str, object] = {
+        "evidence_scope": "current",
+        "location_precision": "admin_area",
+        "admin_code": "67000000",
+        "cap_sender": sender,
+        "cap_identifier": "alert-1",
+        "cap_sent": alert_sent.isoformat(),
+        "cap_references": [],
+        "cap_status": "Actual",
+        "cap_message_type": "Alert",
+        "active_from": alert_sent.isoformat(),
+        "active_until": "2026-08-24T04:00:00+00:00",
+    }
+    cancel_payload: dict[str, object] = {
+        "evidence_scope": "current",
+        "location_precision": "unknown",
+        "cap_sender": sender,
+        "cap_identifier": "cancel-1",
+        "cap_sent": cancel_sent.isoformat(),
+        "cap_references": [
+            {
+                "sender": sender,
+                "identifier": "alert-1",
+                "sent": alert_sent.isoformat(),
+            }
+        ],
+        "cap_status": "Actual",
+        "cap_message_type": "Cancel",
+    }
+    raw_items = (
+        RawSourceItem(
+            source_id=alert_source_id,
+            source_url="https://example.test/cap",
+            fetched_at=FETCHED_AT,
+            payload=alert_payload,
+        ),
+        RawSourceItem(
+            source_id=cancel_source_id,
+            source_url="https://example.test/cap",
+            fetched_at=FETCHED_AT,
+            payload=cancel_payload,
+        ),
+    )
+    normalized = tuple(
+        NormalizedEvidence(
+            evidence_id=f"ev-{raw.source_id}",
+            adapter_key="official.cwa.heavy_rain_warning",
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_WARNING,
+            source_id=raw.source_id,
+            source_url=raw.source_url,
+            source_title="CAP warning",
+            source_timestamp=alert_sent if raw is raw_items[0] else cancel_sent,
+            fetched_at=FETCHED_AT,
+            summary="Synthetic CAP identity matrix fixture.",
+            location_text="臺南市" if raw is raw_items[0] else None,
+            confidence=0.9,
+        )
+        for raw in raw_items
+    )
+    batch = build_staging_batch(
+        AdapterRunResult(
+            adapter_key="official.cwa.heavy_rain_warning",
+            fetched=raw_items,
+            normalized=normalized,
+        ),
+        raw_ref="raw/cap/synthetic-identity-matrix.xml",
+        ingestion_generation_started_at=generation,
+    )
+
+    assert {item.source_id for item in batch.accepted} == {
+        alert_source_id,
+        cancel_source_id,
+    }
+    candidates = tuple(
+        PromotionCandidate(
+            staging_evidence_id=f"staging-{index}",
+            raw_snapshot_id="snapshot-1",
+            raw_ref=item.raw_ref,
+            data_source_id=None,
+            source_id=item.source_id,
+            source_type=item.source_type,
+            event_type=item.event_type,
+            title=item.title,
+            summary=item.summary,
+            url=item.url,
+            occurred_at=item.occurred_at,
+            observed_at=item.observed_at,
+            confidence=item.confidence,
+            validation_status=item.validation_status,
+            payload=item.payload,
+        )
+        for index, item in enumerate(batch.accepted)
+    )
+    writer = _SyntheticPromotionWriter(candidates)
+
+    result = promote_accepted_staging(writer)
+
+    assert result.promoted == 2
+    assert {payload.source_id for payload in writer.payloads} == {
+        alert_source_id,
+        cancel_source_id,
+    }
+
+
 def test_persist_staging_batch_uses_writer_protocol() -> None:
     writer = _MemoryWriter()
     adapter = SamplePublicWebNewsAdapter(
@@ -427,6 +653,25 @@ class _MemoryWriter:
 
     def write_batch(self, batch: AdapterStagingBatch) -> None:
         self.batches.append(batch)
+
+
+class _SyntheticPromotionWriter:
+    def __init__(self, candidates: tuple[PromotionCandidate, ...]) -> None:
+        self.candidates = candidates
+        self.payloads: list[EvidencePromotionPayload] = []
+
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        del limit, adapter_keys
+        return self.candidates
+
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+        self.payloads.append(payload)
+        return f"evidence-{len(self.payloads)}"
 
 
 def _cap_result(**overrides: object) -> AdapterRunResult:

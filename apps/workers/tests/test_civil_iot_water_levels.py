@@ -153,7 +153,7 @@ def _gate_payload() -> dict:
 
 def _candidate_from_staging_payload(payload: dict, *, adapter_key: str) -> PromotionCandidate:
     return PromotionCandidate(
-        staging_evidence_id="staging-id",
+        staging_evidence_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         raw_snapshot_id="raw-snapshot-id",
         raw_ref="raw/civil-iot/water-level/wl-a.json",
         data_source_id="data-source-id",
@@ -420,7 +420,11 @@ class _FakePromotionCursor:
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executions.append((sql, params))
 
-    def fetchone(self) -> tuple[str]:
+    def fetchone(self) -> tuple[str] | None:
+        if self.executions and "/* authorize-staging-candidate */" in self.executions[-1][0]:
+            return ("authorized",)
+        if self.executions and "/* same-staging-evidence */" in self.executions[-1][0]:
+            return None
         if self.executions and "FROM admin_area_profiles" in self.executions[-1][0]:
             return None
         return (self._evidence_id,)

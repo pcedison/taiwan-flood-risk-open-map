@@ -5,7 +5,7 @@ import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -143,18 +143,30 @@ class PostgresEvidencePromotionWriter:
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         with self._connect() as connection:
             with connection.cursor() as cursor:
+                staging_authorization = _authorize_staging_candidate(cursor, payload)
+                if staging_authorization is False:
+                    return None
+                current_rejection_reason = _current_candidate_rejection_reason(payload)
+                if current_rejection_reason is not None:
+                    _terminally_reject_staging(
+                        cursor,
+                        payload,
+                        reason=current_rejection_reason,
+                        authorized=staging_authorization is True,
+                    )
+                    connection.commit()
+                    return None
                 promote_latest = _should_upsert_official_realtime_latest(payload)
-                if promote_latest or (
-                    payload.event_type == "flood_warning"
-                    and payload.properties.get("cap_message_type")
-                    in {"Alert", "Update", "Cancel"}
-                ):
+                cap_lifecycle_candidate = _is_current_cap_lifecycle_candidate(payload)
+                if promote_latest or cap_lifecycle_candidate:
                     _lock_realtime_decision(cursor, payload)
-                if promote_latest and _staging_evidence_was_already_used(cursor, payload):
+                if staging_authorization is True and _staging_evidence_was_already_used(
+                    cursor, payload
+                ):
                     return None
                 cap_rejection_reason = (
                     _cap_rejection_reason(cursor, payload)
-                    if promote_latest and payload.event_type == "flood_warning"
+                    if cap_lifecycle_candidate
                     else None
                 )
                 if cap_rejection_reason is not None:
@@ -162,6 +174,18 @@ class PostgresEvidencePromotionWriter:
                         cursor,
                         payload,
                         reason=cap_rejection_reason,
+                        authorized=staging_authorization is True,
+                    )
+                    connection.commit()
+                    return None
+                if cap_lifecycle_candidate and _canonical_cap_message_exists(
+                    cursor, payload
+                ):
+                    _terminally_reject_staging(
+                        cursor,
+                        payload,
+                        reason="idempotent_existing_cap_message",
+                        authorized=staging_authorization is True,
                     )
                     connection.commit()
                     return None
@@ -171,7 +195,12 @@ class PostgresEvidencePromotionWriter:
                     else None
                 )
                 if duplicate_decision == "duplicate_central":
-                    _terminally_reject_staging(cursor, payload, reason="duplicate_central")
+                    _terminally_reject_staging(
+                        cursor,
+                        payload,
+                        reason="duplicate_central",
+                        authorized=staging_authorization is True,
+                    )
                     connection.commit()
                     return None
                 decision = (
@@ -188,6 +217,7 @@ class PostgresEvidencePromotionWriter:
                             if decision == "idempotent"
                             else "conflicting_latest"
                         ),
+                        authorized=staging_authorization is True,
                     )
                     connection.commit()
                     return None
@@ -233,8 +263,7 @@ class PostgresEvidencePromotionWriter:
                         %s::jsonb
                     )
                     ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique
-                    DO UPDATE SET
-                        updated_at = evidence.updated_at
+                    DO NOTHING
                     RETURNING id
                     """,
                     (
@@ -257,9 +286,9 @@ class PostgresEvidencePromotionWriter:
                 )
                 row = cursor.fetchone()
                 if row is None:
-                    raise RuntimeError("evidence insert did not return an id")
+                    return None
                 evidence_id = str(row[0])
-                if weighted_payload.event_type == "flood_warning" and weighted_payload.properties.get(
+                if cap_lifecycle_candidate and weighted_payload.properties.get(
                     "cap_message_type"
                 ) in {"Update", "Cancel"}:
                     _retire_cap_references(cursor, weighted_payload)
@@ -469,18 +498,105 @@ def _cap_origin_lock_keys(payload: EvidencePromotionPayload) -> set[str]:
 def _cap_triple(
     sender_value: object, identifier_value: object, sent_value: object
 ) -> tuple[str, str, datetime] | None:
-    sender = _optional_text(sender_value)
-    identifier = _optional_text(identifier_value)
+    if not isinstance(sender_value, str) or not isinstance(identifier_value, str):
+        return None
+    sender = sender_value.strip()
+    identifier = identifier_value.strip()
     sent = parse_datetime(sent_value)
     if (
-        sender is None
-        or identifier is None
+        not sender
+        or len(sender) > 512
+        or not identifier
+        or len(identifier) > 512
         or sent is None
         or sent.tzinfo is None
         or sent.utcoffset() is None
     ):
         return None
     return sender, identifier, sent
+
+
+def _cap_reference_triples(
+    value: object,
+) -> tuple[tuple[str, str, datetime], ...] | None:
+    if not isinstance(value, list):
+        return None
+    canonical: dict[tuple[str, str, datetime], None] = {}
+    for reference in value:
+        if not isinstance(reference, dict) or set(reference) != {
+            "sender",
+            "identifier",
+            "sent",
+        }:
+            return None
+        triple = _cap_triple(
+            reference.get("sender"),
+            reference.get("identifier"),
+            reference.get("sent"),
+        )
+        if triple is None:
+            return None
+        sender, identifier, sent = triple
+        canonical[(sender, identifier, sent.astimezone(UTC))] = None
+    if len(canonical) > 64:
+        return None
+    return tuple(sorted(canonical))
+
+
+def _canonical_cap_message_exists(cursor: Any, payload: EvidencePromotionPayload) -> bool:
+    if payload.adapter_key is None:
+        return False
+    triple = _cap_triple(
+        payload.properties.get("cap_sender"),
+        payload.properties.get("cap_identifier"),
+        payload.properties.get("cap_sent"),
+    )
+    if triple is None:
+        return False
+    sender, identifier, sent = triple
+    admin_code = _optional_text(payload.properties.get("admin_code"))
+    discriminator = "area" if admin_code is not None else "message"
+    cursor.execute(
+        """
+        /* canonical-cap-idempotence */
+        SELECT 1
+        FROM evidence cap_evidence
+        LEFT JOIN data_sources cap_source ON cap_source.id = cap_evidence.data_source_id
+        WHERE COALESCE(
+                cap_source.adapter_key,
+                cap_evidence.properties ->> 'adapter_key'
+            ) = %s
+            AND cap_evidence.source_type = 'official'
+            AND cap_evidence.event_type = 'flood_warning'
+            AND cap_evidence.properties ->> 'evidence_scope' = 'current'
+            AND cap_evidence.properties ->> 'cap_status' = 'Actual'
+            AND cap_evidence.properties ->> 'cap_sender' = %s
+            AND cap_evidence.properties ->> 'cap_identifier' = %s
+            AND CASE
+                WHEN pg_input_is_valid(
+                    cap_evidence.properties ->> 'cap_sent',
+                    'timestamptz'
+                )
+                    THEN (cap_evidence.properties ->> 'cap_sent')::timestamptz = %s
+                ELSE false
+            END
+            AND CASE
+                WHEN %s = 'area'
+                    THEN cap_evidence.properties ->> 'admin_code' = %s
+                ELSE cap_evidence.properties ->> 'admin_code' IS NULL
+            END
+        LIMIT 1
+        """,
+        (
+            payload.adapter_key,
+            sender,
+            identifier,
+            sent,
+            discriminator,
+            admin_code,
+        ),
+    )
+    return cursor.fetchone() is not None
 
 
 def _validated_staging_id(payload: EvidencePromotionPayload) -> str | None:
@@ -491,6 +607,54 @@ def _validated_staging_id(payload: EvidencePromotionPayload) -> str | None:
         return str(UUID(value))
     except ValueError:
         return None
+
+
+def _authorize_staging_candidate(
+    cursor: Any, payload: EvidencePromotionPayload
+) -> bool | None:
+    if "staging_evidence_id" not in payload.properties:
+        return None
+    staging_id = _validated_staging_id(payload)
+    if staging_id is None:
+        return False
+    raw_snapshot_id = payload.properties.get("raw_snapshot_id")
+    cursor.execute(
+        """
+        /* authorize-staging-candidate */
+        SELECT se.id
+        FROM staging_evidence se
+        JOIN raw_snapshots rs ON rs.id = se.raw_snapshot_id
+        LEFT JOIN data_sources ds
+            ON ds.id = COALESCE(se.data_source_id, rs.data_source_id)
+        WHERE se.id = %s::uuid
+            AND se.validation_status = 'accepted'
+            AND COALESCE(se.data_source_id, rs.data_source_id, ds.id)::text
+                IS NOT DISTINCT FROM %s
+            AND se.source_id IS NOT DISTINCT FROM %s
+            AND se.source_type = %s
+            AND se.event_type = %s
+            AND se.occurred_at IS NOT DISTINCT FROM %s
+            AND se.observed_at IS NOT DISTINCT FROM %s
+            AND COALESCE(se.payload ->> 'adapter_key', rs.adapter_key, ds.adapter_key)
+                IS NOT DISTINCT FROM %s
+            AND rs.raw_ref IS NOT DISTINCT FROM %s
+            AND se.raw_snapshot_id::text IS NOT DISTINCT FROM %s
+        FOR UPDATE OF se
+        """,
+        (
+            staging_id,
+            str(payload.data_source_id) if payload.data_source_id is not None else None,
+            payload.source_id,
+            payload.source_type,
+            payload.event_type,
+            payload.occurred_at,
+            payload.observed_at,
+            payload.adapter_key,
+            payload.raw_ref,
+            str(raw_snapshot_id) if raw_snapshot_id is not None else None,
+        ),
+    )
+    return cursor.fetchone() is not None
 
 
 def _staging_evidence_was_already_used(
@@ -638,6 +802,38 @@ def _cap_rejection_reason(
     cursor: Any, payload: EvidencePromotionPayload
 ) -> str | None:
     message_type = payload.properties.get("cap_message_type")
+    if _is_expired_cap(payload.properties):
+        return "inactive_cap_window"
+    if payload.properties.get("cap_status") != "Actual" or message_type not in {
+        "Alert",
+        "Update",
+        "Cancel",
+    }:
+        return "invalid_cap_lifecycle"
+    triple = _cap_triple(
+        payload.properties.get("cap_sender"),
+        payload.properties.get("cap_identifier"),
+        payload.properties.get("cap_sent"),
+    )
+    if triple is None:
+        return "invalid_cap_identity"
+    sender, identifier, sent = triple
+    admin_code = _optional_text(payload.properties.get("admin_code"))
+    if message_type in {"Alert", "Update"} and (
+        admin_code is None or re.fullmatch(r"[0-9]{8}", admin_code) is None
+    ):
+        return "invalid_cap_identity"
+    if message_type == "Cancel" and admin_code is not None and re.fullmatch(
+        r"[0-9]{8}", admin_code
+    ) is None:
+        return "invalid_cap_identity"
+    references = _cap_reference_triples(payload.properties.get("cap_references"))
+    if references is None:
+        return "invalid_cap_lifecycle"
+    if message_type in {"Update", "Cancel"} and not any(
+        reference_sent < sent for _, _, reference_sent in references
+    ):
+        return "invalid_cap_lifecycle"
     generation = parse_datetime(
         payload.properties.get("ingestion_generation_started_at")
     )
@@ -659,33 +855,65 @@ def _cap_rejection_reason(
             or not (active_from <= checked_at < active_until)
         ):
             return "inactive_cap_window"
-        triple = _cap_triple(
-            payload.properties.get("cap_sender"),
-            payload.properties.get("cap_identifier"),
-            payload.properties.get("cap_sent"),
-        )
-        if triple is None:
-            return "invalid_cap_identity"
-        sender, identifier, sent = triple
         cursor.execute(
             """
             /* retained-cap-tombstone */
             SELECT 1
             FROM evidence lifecycle_evidence
+            LEFT JOIN data_sources lifecycle_source
+                ON lifecycle_source.id = lifecycle_evidence.data_source_id
             WHERE lifecycle_evidence.event_type = 'flood_warning'
+                AND lifecycle_evidence.source_type = 'official'
+                AND lifecycle_evidence.properties ->> 'evidence_scope' = 'current'
+                AND lifecycle_evidence.properties ->> 'cap_status' = 'Actual'
+                AND COALESCE(
+                        lifecycle_source.adapter_key,
+                        lifecycle_evidence.properties ->> 'adapter_key'
+                    ) IN (
+                        'official.cwa.heavy_rain_warning',
+                        'official.ncdr.cap'
+                    )
                 AND lifecycle_evidence.properties ->> 'cap_message_type'
                     IN ('Update', 'Cancel')
+                AND pg_input_is_valid(
+                    lifecycle_evidence.properties
+                        ->> 'ingestion_generation_started_at',
+                    'timestamptz'
+                )
+                AND CASE
+                    WHEN jsonb_typeof(
+                        lifecycle_evidence.properties -> 'cap_references'
+                    ) = 'array'
+                        THEN jsonb_array_length(
+                            lifecycle_evidence.properties -> 'cap_references'
+                        ) BETWEEN 1 AND 64
+                    ELSE false
+                END
                 AND EXISTS (
                     SELECT 1
                     FROM jsonb_array_elements(
-                        COALESCE(
-                            lifecycle_evidence.properties -> 'cap_references',
-                            '[]'::jsonb
-                        )
+                        CASE
+                            WHEN jsonb_typeof(
+                                lifecycle_evidence.properties -> 'cap_references'
+                            ) = 'array'
+                                THEN lifecycle_evidence.properties -> 'cap_references'
+                            ELSE '[]'::jsonb
+                        END
                     ) reference
-                    WHERE reference ->> 'sender' = %s
+                    WHERE jsonb_typeof(reference) = 'object'
+                        AND reference ?& ARRAY['sender', 'identifier', 'sent']
+                        AND reference - ARRAY['sender', 'identifier', 'sent']
+                            = '{}'::jsonb
+                        AND reference ->> 'sender' = %s
                         AND reference ->> 'identifier' = %s
-                        AND (reference ->> 'sent')::timestamptz = %s
+                        AND CASE
+                            WHEN pg_input_is_valid(
+                                reference ->> 'sent',
+                                'timestamptz'
+                            )
+                                THEN (reference ->> 'sent')::timestamptz = %s
+                            ELSE false
+                        END
                 )
             LIMIT 1
             """,
@@ -714,8 +942,14 @@ def _rounded_geometry(value: object) -> object:
 
 
 def _terminally_reject_staging(
-    cursor: Any, payload: EvidencePromotionPayload, *, reason: str
+    cursor: Any,
+    payload: EvidencePromotionPayload,
+    *,
+    reason: str,
+    authorized: bool,
 ) -> None:
+    if not authorized:
+        return
     staging_id = _validated_staging_id(payload)
     if staging_id is None:
         return
@@ -738,16 +972,53 @@ def _retire_cap_references(cursor: Any, payload: EvidencePromotionPayload) -> No
         /* retire-cap-references */
         DELETE FROM official_realtime_latest latest
         USING evidence linked_evidence
+        LEFT JOIN data_sources linked_source
+            ON linked_source.id = linked_evidence.data_source_id
         WHERE latest.evidence_id = linked_evidence.id
             AND latest.event_type = 'flood_warning'
+            AND latest.adapter_key IN (
+                'official.cwa.heavy_rain_warning',
+                'official.ncdr.cap'
+            )
+            AND linked_evidence.source_type = 'official'
+            AND linked_evidence.event_type = 'flood_warning'
+            AND linked_evidence.properties ->> 'evidence_scope' = 'current'
+            AND linked_evidence.properties ->> 'cap_status' = 'Actual'
+            AND linked_evidence.properties ->> 'cap_message_type'
+                IN ('Alert', 'Update')
+            AND COALESCE(
+                    linked_source.adapter_key,
+                    linked_evidence.properties ->> 'adapter_key'
+                ) = latest.adapter_key
+            AND linked_evidence.properties ->> 'admin_code' ~ '^[0-9]{8}$'
+            AND length(btrim(linked_evidence.properties ->> 'cap_sender'))
+                BETWEEN 1 AND 512
+            AND length(btrim(linked_evidence.properties ->> 'cap_identifier'))
+                BETWEEN 1 AND 512
+            AND pg_input_is_valid(
+                linked_evidence.properties ->> 'cap_sent',
+                'timestamptz'
+            )
             AND EXISTS (
                 SELECT 1
                 FROM jsonb_array_elements(%s::jsonb) reference
                 WHERE linked_evidence.properties ->> 'cap_sender' = reference ->> 'sender'
                     AND linked_evidence.properties ->> 'cap_identifier'
                         = reference ->> 'identifier'
-                    AND (linked_evidence.properties ->> 'cap_sent')::timestamptz
-                        = (reference ->> 'sent')::timestamptz
+                    AND pg_input_is_valid(reference ->> 'sent', 'timestamptz')
+                    AND CASE
+                        WHEN pg_input_is_valid(
+                            linked_evidence.properties ->> 'cap_sent',
+                            'timestamptz'
+                        ) AND pg_input_is_valid(
+                            reference ->> 'sent',
+                            'timestamptz'
+                        )
+                            THEN (
+                                linked_evidence.properties ->> 'cap_sent'
+                            )::timestamptz = (reference ->> 'sent')::timestamptz
+                        ELSE false
+                    END
             )
         """,
         (json.dumps(references, sort_keys=True, separators=(",", ":")),),
@@ -897,7 +1168,7 @@ def _with_reviewed_warning_boundary(
     if _geojson_geometry(payload.properties) is not None:
         return payload
     admin_code = _optional_text(payload.properties.get("admin_code"))
-    if admin_code is None or re.fullmatch(r"\d{8}", admin_code) is None:
+    if admin_code is None or re.fullmatch(r"[0-9]{8}", admin_code) is None:
         return payload
     cursor.execute(
         """
@@ -1061,9 +1332,104 @@ def _should_upsert_official_realtime_latest(payload: EvidencePromotionPayload) -
         ("official.ncdr.cap", "flood_warning"),
     }:
         return False
-    if payload.event_type == "flood_warning" and _is_expired_cap(payload.properties):
-        return False
     return payload.observed_at is not None
+
+
+def _current_candidate_rejection_reason(
+    payload: EvidencePromotionPayload,
+) -> str | None:
+    if not _is_reviewed_current_candidate(payload):
+        return None
+    if not _is_aware_datetime(payload.observed_at) or (
+        payload.occurred_at is not None and not _is_aware_datetime(payload.occurred_at)
+    ):
+        return "invalid_observation_time"
+    assert payload.observed_at is not None
+    generation = parse_datetime(
+        payload.properties.get("ingestion_generation_started_at")
+    )
+    reference_time = generation if _is_aware_datetime(generation) else datetime.now(UTC)
+    assert reference_time is not None
+    if payload.observed_at > reference_time + timedelta(minutes=15):
+        return "future_observation"
+    if _has_invalid_explicit_point(payload.properties):
+        return "invalid_point_geometry"
+    return None
+
+
+def _is_reviewed_current_candidate(payload: EvidencePromotionPayload) -> bool:
+    return (
+        payload.source_type == "official"
+        and payload.properties.get("evidence_scope") == "current"
+        and (payload.adapter_key, payload.event_type)
+        in {
+            ("official.cwa.rainfall", "rainfall"),
+            ("official.wra.water_level", "water_level"),
+            ("official.wra_iow.flood_depth", "flood_report"),
+            ("local.tainan.flood_sensor", "flood_report"),
+            ("official.cwa.heavy_rain_warning", "flood_warning"),
+            ("official.ncdr.cap", "flood_warning"),
+        }
+    )
+
+
+def _is_aware_datetime(value: object) -> bool:
+    return (
+        isinstance(value, datetime)
+        and value.tzinfo is not None
+        and value.utcoffset() is not None
+    )
+
+
+def _has_invalid_explicit_point(properties: dict[str, Any]) -> bool:
+    latest_point = properties.get("latest_point_geometry")
+    if latest_point is not None and (
+        not isinstance(latest_point, dict)
+        or latest_point.get("type") != "Point"
+        or not _valid_wgs84_point(latest_point)
+    ):
+        return True
+    location_payload = properties.get("location_payload")
+    if not isinstance(location_payload, dict):
+        return False
+    geometry = location_payload.get("geometry")
+    return (
+        isinstance(geometry, dict)
+        and geometry.get("type") == "Point"
+        and not _valid_wgs84_point(geometry)
+    )
+
+
+def _valid_wgs84_point(geometry: dict[str, Any]) -> bool:
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, (list, tuple)) or len(coordinates) != 2:
+        return False
+    longitude, latitude = coordinates
+    if (
+        not isinstance(longitude, (int, float))
+        or isinstance(longitude, bool)
+        or not isinstance(latitude, (int, float))
+        or isinstance(latitude, bool)
+    ):
+        return False
+    return (
+        math.isfinite(float(longitude))
+        and math.isfinite(float(latitude))
+        and -180 <= float(longitude) <= 180
+        and -90 <= float(latitude) <= 90
+    )
+
+
+def _is_current_cap_lifecycle_candidate(payload: EvidencePromotionPayload) -> bool:
+    return (
+        payload.source_type == "official"
+        and payload.properties.get("evidence_scope") == "current"
+        and (payload.adapter_key, payload.event_type)
+        in {
+            ("official.cwa.heavy_rain_warning", "flood_warning"),
+            ("official.ncdr.cap", "flood_warning"),
+        }
+    )
 
 
 def _official_realtime_station_id(payload: EvidencePromotionPayload) -> str | None:
@@ -1074,7 +1440,7 @@ def _official_realtime_station_id(payload: EvidencePromotionPayload) -> str | No
         sent = parse_datetime(payload.properties.get("cap_sent"))
         if (
             admin_code is None
-            or re.fullmatch(r"\d{8}", admin_code) is None
+            or re.fullmatch(r"[0-9]{8}", admin_code) is None
             or sender is None
             or identifier is None
             or sent is None
