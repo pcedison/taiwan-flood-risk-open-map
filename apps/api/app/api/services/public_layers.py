@@ -16,6 +16,11 @@ PLACEHOLDER_TILE_URL_MARKERS = (
 )
 REVIEWED_EXTERNAL_TILE_HOSTS_KEY = "reviewed_external_tile_hosts"
 MAX_PERCENT_DECODE_PASSES = 5
+NESTED_NETWORK_AUTHORITY_PATTERN = re.compile(
+    r"(?<![a-z0-9+.-])(?:(?P<scheme>[a-z][a-z0-9+.-]*):)?//",
+    re.IGNORECASE,
+)
+NESTED_AUTHORITY_TERMINATORS = frozenset("/?#&;")
 UNSAFE_EXTERNAL_HOST_SUFFIXES = (
     ".example",
     ".home",
@@ -306,7 +311,62 @@ def is_external_tile_url(
         for candidate in reviewed_hosts
         if (normalized := _normalized_public_host(candidate)) is not None
     }
-    return host is not None and host in normalized_reviewed_hosts
+    return (
+        host is not None
+        and host in normalized_reviewed_hosts
+        and _has_only_reviewed_nested_authorities(
+            parsed,
+            reviewed_hosts=normalized_reviewed_hosts,
+        )
+    )
+
+
+def _has_only_reviewed_nested_authorities(
+    parsed: SplitResult,
+    *,
+    reviewed_hosts: set[str],
+) -> bool:
+    """Validate each syntactic URI or network-path authority in URL components."""
+    for component in (parsed.path, parsed.query, parsed.fragment):
+        for match in NESTED_NETWORK_AUTHORITY_PATTERN.finditer(component):
+            authority_start = match.end()
+            authority_end = next(
+                (
+                    index
+                    for index in range(authority_start, len(component))
+                    if component[index] in NESTED_AUTHORITY_TERMINATORS
+                ),
+                len(component),
+            )
+            authority = component[authority_start:authority_end]
+            scheme = (match.group("scheme") or parsed.scheme).casefold()
+            nested = _safe_urlsplit(f"{scheme}://{authority}")
+            if nested is None or not _is_reviewed_http_authority(
+                nested,
+                reviewed_hosts=reviewed_hosts,
+            ):
+                return False
+    return True
+
+
+def _is_reviewed_http_authority(
+    parsed: SplitResult,
+    *,
+    reviewed_hosts: set[str],
+) -> bool:
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port is not None and port != (443 if scheme == "https" else 80):
+        return False
+    host = _normalized_public_host(parsed.hostname or "")
+    return host is not None and host in reviewed_hosts
 
 
 def _safe_external_url(value: str) -> SplitResult | None:

@@ -1415,6 +1415,94 @@ def test_external_tile_predicate_rejects_canonicalized_local_product_references(
 
 
 @pytest.mark.parametrize(
+    "unsafe_nested_tile_url",
+    [
+        "https://tiles.official.gov.tw/proxy?url=http://127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://localhost/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://user:secret@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http%253A%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=ftp://unreviewed.gov/private/{z}/{x}/{y}.pbf",
+    ],
+)
+def test_external_tile_predicate_rejects_nested_unreviewed_authorities(
+    unsafe_nested_tile_url: str,
+) -> None:
+    assert not public_layer_service.is_external_tile_url(
+        unsafe_nested_tile_url,
+        reviewed_hosts=frozenset({REVIEWED_TILE_HOST}),
+    )
+
+
+@pytest.mark.parametrize(
+    "safe_tile_url",
+    [
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?note=station-127.0.0.1",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?ratio=1//2",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf&style=rainfall",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+    ],
+)
+def test_external_tile_predicate_preserves_non_authority_values_and_reviewed_nested_urls(
+    safe_tile_url: str,
+) -> None:
+    assert public_layer_service.is_external_tile_url(
+        safe_tile_url,
+        reviewed_hosts=frozenset({REVIEWED_TILE_HOST}),
+    )
+
+
+@pytest.mark.parametrize(
+    "unsafe_nested_tile_url",
+    [
+        "https://tiles.official.gov.tw/proxy?url=http://127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://localhost/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://user:secret@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http%253A%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+    ],
+)
+def test_layers_and_tilejson_fail_closed_for_nested_unreviewed_tile_authorities(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_nested_tile_url: str,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [unsafe_nested_tile_url],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert unsafe_nested_tile_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+    assert unsafe_nested_tile_url not in tilejson_response.text
+
+
+@pytest.mark.parametrize(
     "raw_tiles",
     [
         [],
@@ -1465,6 +1553,9 @@ def test_layers_require_original_tiles_to_be_a_nonempty_all_string_list(
         "https://[::1/catalog.json",
         "https://official.example.test/catalog.json",
         "https://unreviewed.gov.tw/catalog.json",
+        "https://tiles.official.gov.tw/proxy?url=http://127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=http://user:secret@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private-tilejson.json",
     ],
 )
 def test_layers_fail_closed_before_serializing_unsafe_tilejson_url(
@@ -1587,6 +1678,44 @@ def test_layers_serialize_only_explicitly_reviewed_external_tile_metadata(
     assert [item["id"] for item in layers_response.json()["layers"]] == [
         "official-flood"
     ]
+    assert tilejson_response.status_code == 200
+    assert tilejson_response.json()["tiles"] == [tile_url]
+
+
+def test_layers_preserve_nested_urls_when_every_authority_is_reviewed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tile_url = (
+        "https://tiles.official.gov.tw/proxy"
+        "?url=https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+    )
+    external_tilejson_url = (
+        "https://tiles.official.gov.tw/proxy"
+        "?url=https://tiles.official.gov.tw/flood/tilejson.json"
+    )
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url=external_tilejson_url,
+        updated_at=None,
+        metadata={
+            "tiles": [tile_url],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.json()["layers"][0]["tilejson_url"] == external_tilejson_url
     assert tilejson_response.status_code == 200
     assert tilejson_response.json()["tiles"] == [tile_url]
 
