@@ -13,7 +13,11 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from app.domain.assessment.repository import _complete_signal_types
-from app.domain.evidence import query_nearby_evidence, query_nearby_latest_official
+from app.domain.evidence import (
+    fetch_assessment_evidence,
+    query_nearby_evidence,
+    query_nearby_latest_official,
+)
 from app.domain.evidence.repository import query_realtime_jurisdiction_context
 
 
@@ -238,6 +242,66 @@ def _insert_evidence(
             observed_at,
             geometry_wkt,
             Jsonb(properties),
+        ),
+    )
+
+
+def _insert_migrated_source(
+    connection: psycopg.Connection,
+    *,
+    source_id: object,
+    adapter_key: str,
+    enabled: bool = True,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO data_sources (
+            id, name, adapter_key, source_type, is_enabled
+        ) VALUES (%s, 'Task 5 privacy regression', %s, 'official', %s)
+        """,
+        (source_id, adapter_key, enabled),
+    )
+
+
+def _insert_migrated_evidence(
+    connection: psycopg.Connection,
+    *,
+    evidence_id: object,
+    source_id: object,
+    observed_at: datetime,
+    limitations: object,
+    event_type: str = "flood_potential",
+    privacy_level: str = "public",
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO evidence (
+            id, data_source_id, source_id, source_type, event_type,
+            title, summary, occurred_at, observed_at, geom, confidence,
+            privacy_level, properties
+        ) VALUES (
+            %s, %s, %s, 'official', %s,
+            'Task 5 privacy regression', 'Task 5 privacy regression', %s, %s,
+            ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326), 0.9,
+            %s, %s::jsonb
+        )
+        """,
+        (
+            evidence_id,
+            source_id,
+            f"task5:{evidence_id}",
+            event_type,
+            observed_at,
+            observed_at,
+            privacy_level,
+            Jsonb(
+                {
+                    "evidence_scope": (
+                        "context" if event_type == "flood_potential" else "historical"
+                    ),
+                    "limitations": limitations,
+                }
+            ),
         ),
     )
 
@@ -501,14 +565,20 @@ def test_latest_reader_preserves_reviewed_precision_and_limitations() -> None:
         _prepare_latest_schema(isolated_url)
         adapter_key = "test.task5.precision"
         cases = (
-            ("absent", None, "point"),
-            ("allowed", "road_or_lane", "road_or_lane"),
-            ("exact", "exact_address", "unknown"),
-            ("unknown", "unknown", "unknown"),
+            ("absent", None, "point", ["array limitation"], ("array limitation",)),
+            ("allowed", "road_or_lane", "road_or_lane", "scalar", ()),
+            ("exact", "exact_address", "unknown", {"dirty": True}, ()),
+            ("unknown", "unknown", "unknown", None, ()),
         )
         with psycopg.connect(isolated_url) as connection:
             _insert_latest_source(connection, adapter_key)
-            for station_id, stored_precision, _expected_precision in cases:
+            for (
+                station_id,
+                stored_precision,
+                _expected_precision,
+                stored_limitations,
+                _expected_limitations,
+            ) in cases:
                 evidence_id = uuid4()
                 _insert_evidence(
                     connection,
@@ -518,7 +588,7 @@ def test_latest_reader_preserves_reviewed_precision_and_limitations() -> None:
                     observed_at=now,
                     properties={
                         "evidence_scope": "current",
-                        "limitations": [f"{station_id} public limitation"],
+                        "limitations": stored_limitations,
                     },
                 )
                 _insert_latest_row(
@@ -554,12 +624,16 @@ def test_latest_reader_preserves_reviewed_precision_and_limitations() -> None:
             connection_factory=lambda: _unpooled_connection(isolated_url),
         )
         by_station = {record.source_id.removeprefix("source:"): record for record in records}
-        assert set(by_station) == {station_id for station_id, _, _ in cases}
-        for station_id, _stored_precision, expected_precision in cases:
+        assert set(by_station) == {station_id for station_id, *_rest in cases}
+        for (
+            station_id,
+            _stored_precision,
+            expected_precision,
+            _stored_limitations,
+            expected_limitations,
+        ) in cases:
             assert by_station[station_id].location_precision == expected_precision
-            assert by_station[station_id].limitations == (
-                f"{station_id} public limitation",
-            )
+            assert by_station[station_id].limitations == expected_limitations
 
 
 def test_latest_reader_excludes_regex_shaped_invalid_cap_fields_per_row() -> None:
@@ -943,6 +1017,243 @@ def test_generic_history_uses_exact_geography_radius_polygon_and_kill_switch() -
     finally:
         with psycopg.connect(database_url) as connection:
             connection.execute("DELETE FROM evidence WHERE data_source_id = %s", (source_id,))
+            connection.execute("DELETE FROM data_sources WHERE id = %s", (source_id,))
+
+
+def test_generic_reader_isolates_malformed_limitations_roots() -> None:
+    database_url = _database_url()
+    source_id = uuid4()
+    adapter_key = f"test.task5.generic-limitations.{source_id}"
+    now = datetime.now(UTC)
+    cases = (
+        (uuid4(), ["array limitation"], ("array limitation",)),
+        (uuid4(), "scalar limitation", ()),
+        (uuid4(), {"dirty": True}, ()),
+        (uuid4(), None, ()),
+    )
+    try:
+        with psycopg.connect(database_url) as connection:
+            _insert_migrated_source(
+                connection,
+                source_id=source_id,
+                adapter_key=adapter_key,
+            )
+            for evidence_id, limitations, _expected in cases:
+                _insert_migrated_evidence(
+                    connection,
+                    evidence_id=evidence_id,
+                    source_id=source_id,
+                    observed_at=now,
+                    limitations=limitations,
+                )
+
+        records = query_nearby_evidence(
+            database_url=database_url,
+            lat=23.0,
+            lng=120.0,
+            radius_m=500,
+            limit=100,
+        )
+        by_id = {record.id: record for record in records}
+        assert {str(evidence_id) for evidence_id, *_rest in cases} <= set(by_id)
+        for evidence_id, _stored, expected in cases:
+            assert by_id[str(evidence_id)].limitations == expected
+    finally:
+        with psycopg.connect(database_url) as connection:
+            connection.execute("DELETE FROM evidence WHERE data_source_id = %s", (source_id,))
+            connection.execute("DELETE FROM data_sources WHERE id = %s", (source_id,))
+
+
+def test_detail_reader_enforces_retention_source_and_privacy_authority() -> None:
+    database_url = _database_url()
+    enabled_source_id, disabled_source_id = uuid4(), uuid4()
+    query_id = uuid4()
+    active_assessment_id, expired_assessment_id, null_assessment_id = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
+    active_id, disabled_id, redacted_id, expired_id, null_id = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
+    now = datetime.now(UTC)
+    assessment_ids = (
+        active_assessment_id,
+        expired_assessment_id,
+        null_assessment_id,
+    )
+    evidence_ids = (active_id, disabled_id, redacted_id, expired_id, null_id)
+    try:
+        with psycopg.connect(database_url) as connection:
+            _insert_migrated_source(
+                connection,
+                source_id=enabled_source_id,
+                adapter_key=f"test.task5.detail-enabled.{enabled_source_id}",
+            )
+            _insert_migrated_source(
+                connection,
+                source_id=disabled_source_id,
+                adapter_key=f"test.task5.detail-disabled.{disabled_source_id}",
+                enabled=False,
+            )
+            connection.execute(
+                """
+                INSERT INTO location_queries (id, input_type, geom, radius_m)
+                VALUES (
+                    %s, 'map_click',
+                    ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326), 500
+                )
+                """,
+                (query_id,),
+            )
+            for assessment_id, expires_at in (
+                (active_assessment_id, now + timedelta(minutes=10)),
+                (expired_assessment_id, now - timedelta(minutes=1)),
+                (null_assessment_id, None),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO risk_assessments (
+                        id, query_id, score_version, created_at, expires_at
+                    ) VALUES (%s, %s, 'task5-privacy-red', %s, %s)
+                    """,
+                    (assessment_id, query_id, now, expires_at),
+                )
+            for evidence_id, source_id, privacy_level in (
+                (active_id, enabled_source_id, "public"),
+                (disabled_id, disabled_source_id, "public"),
+                (redacted_id, enabled_source_id, "redacted"),
+                (expired_id, enabled_source_id, "public"),
+                (null_id, enabled_source_id, "public"),
+            ):
+                _insert_migrated_evidence(
+                    connection,
+                    evidence_id=evidence_id,
+                    source_id=source_id,
+                    observed_at=now,
+                    limitations=["retained array limitation"],
+                    event_type="flood_report",
+                    privacy_level=privacy_level,
+                )
+            for assessment_id, linked_ids in (
+                (active_assessment_id, (active_id, disabled_id, redacted_id)),
+                (expired_assessment_id, (expired_id,)),
+                (null_assessment_id, (null_id,)),
+            ):
+                for evidence_id in linked_ids:
+                    connection.execute(
+                        """
+                        INSERT INTO risk_assessment_evidence (
+                            risk_assessment_id, evidence_id
+                        ) VALUES (%s, %s)
+                        """,
+                        (assessment_id, evidence_id),
+                    )
+
+        active_records = fetch_assessment_evidence(
+            database_url=database_url,
+            assessment_id=str(active_assessment_id),
+        )
+        assert [record.id for record in active_records] == [str(active_id)]
+        assert active_records[0].limitations == ("retained array limitation",)
+        assert fetch_assessment_evidence(
+            database_url=database_url,
+            assessment_id=str(expired_assessment_id),
+        ) == ()
+        assert fetch_assessment_evidence(
+            database_url=database_url,
+            assessment_id=str(null_assessment_id),
+        ) == ()
+    finally:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                "DELETE FROM evidence WHERE id = ANY(%s::uuid[])",
+                (list(evidence_ids),),
+            )
+            connection.execute(
+                "DELETE FROM risk_assessments WHERE id = ANY(%s::uuid[])",
+                (list(assessment_ids),),
+            )
+            connection.execute("DELETE FROM location_queries WHERE id = %s", (query_id,))
+            connection.execute(
+                "DELETE FROM data_sources WHERE id = ANY(%s::uuid[])",
+                ([enabled_source_id, disabled_source_id],),
+            )
+
+
+def test_detail_reader_isolates_malformed_limitations_roots() -> None:
+    database_url = _database_url()
+    source_id, query_id, assessment_id = uuid4(), uuid4(), uuid4()
+    now = datetime.now(UTC)
+    cases = (
+        (uuid4(), ["array limitation"], ("array limitation",)),
+        (uuid4(), "scalar limitation", ()),
+        (uuid4(), {"dirty": True}, ()),
+        (uuid4(), None, ()),
+    )
+    try:
+        with psycopg.connect(database_url) as connection:
+            _insert_migrated_source(
+                connection,
+                source_id=source_id,
+                adapter_key=f"test.task5.detail-limitations.{source_id}",
+            )
+            connection.execute(
+                """
+                INSERT INTO location_queries (id, input_type, geom, radius_m)
+                VALUES (
+                    %s, 'map_click',
+                    ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326), 500
+                )
+                """,
+                (query_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO risk_assessments (
+                    id, query_id, score_version, created_at, expires_at
+                ) VALUES (%s, %s, 'task5-privacy-red', %s, %s)
+                """,
+                (assessment_id, query_id, now, now + timedelta(minutes=10)),
+            )
+            for evidence_id, limitations, _expected in cases:
+                _insert_migrated_evidence(
+                    connection,
+                    evidence_id=evidence_id,
+                    source_id=source_id,
+                    observed_at=now,
+                    limitations=limitations,
+                    event_type="flood_report",
+                )
+                connection.execute(
+                    """
+                    INSERT INTO risk_assessment_evidence (
+                        risk_assessment_id, evidence_id
+                    ) VALUES (%s, %s)
+                    """,
+                    (assessment_id, evidence_id),
+                )
+
+        records = fetch_assessment_evidence(
+            database_url=database_url,
+            assessment_id=str(assessment_id),
+        )
+        by_id = {record.id: record for record in records}
+        assert set(by_id) == {str(evidence_id) for evidence_id, *_rest in cases}
+        for evidence_id, _stored, expected in cases:
+            assert by_id[str(evidence_id)].limitations == expected
+    finally:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                "DELETE FROM evidence WHERE id = ANY(%s::uuid[])",
+                ([evidence_id for evidence_id, *_rest in cases],),
+            )
+            connection.execute("DELETE FROM risk_assessments WHERE id = %s", (assessment_id,))
+            connection.execute("DELETE FROM location_queries WHERE id = %s", (query_id,))
             connection.execute("DELETE FROM data_sources WHERE id = %s", (source_id,))
 
 

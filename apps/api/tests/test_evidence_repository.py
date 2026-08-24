@@ -155,6 +155,7 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert "FROM recent_water_level" not in sql
     assert "AS location_precision" in sql
     assert "AS limitations" in sql
+    assert "jsonb_typeof(c.properties->'limitations') = 'array'" in sql
     # Without relevance arguments the realtime relevance collapses to the radius.
     assert params == (
         121.5654,
@@ -816,6 +817,7 @@ def test_query_nearby_latest_official_uses_selected_radius() -> None:
     assert "active_until" in sql
     assert "pg_input_is_valid" in sql
     assert "no_active_event" in sql
+    assert "jsonb_typeof(ranked.evidence_limitations) = 'array'" in sql
     assert params == (
         121.5654,
         25.033,
@@ -1169,6 +1171,7 @@ def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
     assert "WITH requested AS" in sql
     assert "WITH ORDINALITY" in sql
     assert "ORDER BY requested.ordinality ASC" in sql
+    assert "jsonb_typeof(e.properties->'limitations') = 'array'" in sql
     assert params == (
         [
             "22222222-2222-4222-8222-222222222222",
@@ -1241,6 +1244,7 @@ def test_upsert_public_evidence_writes_point_geometry_and_metadata() -> None:
     assert "INSERT INTO evidence" in sql
     assert "ST_SetSRID(ST_MakePoint" in sql
     assert "ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique" in sql
+    assert "jsonb_typeof(properties->'limitations') = 'array'" in sql
     assert params[0] == "f442ec3f-f013-58d2-8fcb-93f62db8d51c"
     assert params[1] == "news.public_web.gdelt_backfill"
     assert params[11:13] == (120.3034, 22.8052)
@@ -1339,6 +1343,8 @@ def test_evidence_record_reads_reviewed_precision_and_limitations() -> None:
 
     sql, _ = connection.cursor_instance.executions[0]
     assert "ds.is_enabled = true" in sql
+    assert "ra.expires_at > now()" in sql
+    assert "jsonb_typeof(e.properties->'limitations') = 'array'" in sql
     assert "AS location_precision" in sql
     assert "AS limitations" in sql
     assert records[0].location_precision == "road_or_lane"

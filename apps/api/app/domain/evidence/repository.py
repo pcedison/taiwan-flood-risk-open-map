@@ -531,7 +531,11 @@ def query_nearby_evidence(
             COALESCE(
                 ARRAY(
                     SELECT jsonb_array_elements_text(
-                        COALESCE(c.properties->'limitations', '[]'::jsonb)
+                        CASE
+                            WHEN jsonb_typeof(c.properties->'limitations') = 'array'
+                                THEN c.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
                     )
                 ),
                 ARRAY[]::text[]
@@ -872,7 +876,11 @@ def query_nearby_latest_official(
             COALESCE(
                 ARRAY(
                     SELECT jsonb_array_elements_text(
-                        COALESCE(ranked.evidence_limitations, '[]'::jsonb)
+                        CASE
+                            WHEN jsonb_typeof(ranked.evidence_limitations) = 'array'
+                                THEN ranked.evidence_limitations
+                            ELSE '[]'::jsonb
+                        END
                     )
                 ),
                 ARRAY[]::text[]
@@ -1863,7 +1871,11 @@ def upsert_public_evidence(
             COALESCE(
                 ARRAY(
                     SELECT jsonb_array_elements_text(
-                        COALESCE(properties->'limitations', '[]'::jsonb)
+                        CASE
+                            WHEN jsonb_typeof(properties->'limitations') = 'array'
+                                THEN properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
                     )
                 ),
                 ARRAY[]::text[]
@@ -2011,7 +2023,11 @@ def fetch_assessment_evidence(
             COALESCE(
                 ARRAY(
                     SELECT jsonb_array_elements_text(
-                        COALESCE(e.properties->'limitations', '[]'::jsonb)
+                        CASE
+                            WHEN jsonb_typeof(e.properties->'limitations') = 'array'
+                                THEN e.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
                     )
                 ),
                 ARRAY[]::text[]
@@ -2022,6 +2038,7 @@ def fetch_assessment_evidence(
         JOIN evidence e ON e.id = rae.evidence_id
         JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
         WHERE ra.id = %s
+            AND ra.expires_at > now()
             AND e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
         ORDER BY
@@ -2103,7 +2120,11 @@ def fetch_evidence_by_ids(
             COALESCE(
                 ARRAY(
                     SELECT jsonb_array_elements_text(
-                        COALESCE(e.properties->'limitations', '[]'::jsonb)
+                        CASE
+                            WHEN jsonb_typeof(e.properties->'limitations') = 'array'
+                                THEN e.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
                     )
                 ),
                 ARRAY[]::text[]

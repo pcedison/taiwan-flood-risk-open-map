@@ -24,7 +24,6 @@ TAIWAN_BOUNDS = {
 def no_network_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     get_settings.cache_clear()
     public_geocode_cache._MEMORY_CACHE.clear()
-    public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
     public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
 
     monkeypatch.setenv("APP_ENV", "test")
@@ -71,7 +70,6 @@ def no_network_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
         yield TestClient(create_app())
     finally:
         get_settings.cache_clear()
-        public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
         public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
 
 

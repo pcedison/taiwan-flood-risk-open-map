@@ -2944,7 +2944,6 @@ def test_evidence_list_contract(monkeypatch) -> None:
 
 def test_evidence_list_can_read_persisted_assessment_evidence(monkeypatch) -> None:
     assessment_id = "d315d0e6-9c1e-475a-9118-f299d12d5c62"
-    public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
     monkeypatch.setattr(
         public_routes,
         "fetch_assessment_evidence",

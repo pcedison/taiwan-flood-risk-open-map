@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 import pytest
 
+from app.api.routes import public as public_routes
 from app.api.schemas import (
     ConfidenceBlock,
     DataFreshness,
@@ -13,11 +14,10 @@ from app.api.schemas import (
     LatLng,
     NearbyRealtimeCoverage,
     QueryHeat,
-    RiskAssessRequest,
     RiskAssessmentResponse,
+    RiskAssessRequest,
     RiskLevelBlock,
 )
-from app.api.routes import public as public_routes
 from app.api.services import public_risk
 from app.domain.evidence.repository import (
     EvidenceRecord,
@@ -225,7 +225,6 @@ def _dependencies(**overrides: Any) -> public_risk.RiskAssessmentDependencies:
         "persist_or_build_on_demand_evidence": fail,
         "historical_data_freshness": fail,
         "display_evidence_items": fail,
-        "cache_assessment_evidence": fail,
         "persisted_official_realtime_data_freshness": fail,
         "visible_source_limitations": fail,
         "official_flood_disaster_data_freshness": fail,
@@ -315,7 +314,6 @@ def test_assess_risk_includes_nearby_realtime_coverage() -> None:
                 ingested_at=created_at,
             ),
             display_evidence_items=lambda items: items,
-            cache_assessment_evidence=lambda *_args, **_kwargs: None,
             persisted_official_realtime_data_freshness=lambda *_args, **_kwargs: [],
             visible_source_limitations=lambda *_args, **_kwargs: [],
             official_flood_disaster_data_freshness=lambda _lookup: [],
@@ -367,7 +365,6 @@ def test_assess_risk_uses_realtime_bridge_for_nearby_coverage_when_repository_un
                 ingested_at=created_at,
             ),
             display_evidence_items=lambda items: items,
-            cache_assessment_evidence=lambda *_args, **_kwargs: None,
             persisted_official_realtime_data_freshness=lambda *_args, **_kwargs: [],
             visible_source_limitations=lambda *_args, **_kwargs: [],
             official_flood_disaster_data_freshness=lambda _lookup: [],

@@ -104,7 +104,6 @@ router = APIRouter(prefix="/v1", tags=["Public"])
 
 LOW_ATTENTION: AttentionLevel = "低"
 LOCAL_HISTORICAL_FALLBACK_ENVS = {"local", "development", "test", "staging", "production-beta"}
-_ASSESSMENT_EVIDENCE_CACHE = public_evidence._ASSESSMENT_EVIDENCE_CACHE
 _RISK_ASSESSMENT_RESPONSE_CACHE = public_response_cache._MEMORY_CACHE
 _PUBLIC_RATE_LIMIT_MEMORY_ENVS = {"local", "development", "test"}
 _LATEST_OFFICIAL_RAW_REF_PREFIX = "official-realtime-latest:"
@@ -725,7 +724,6 @@ def _risk_assessment_dependencies() -> public_risk.RiskAssessmentDependencies:
         persist_or_build_on_demand_evidence=_persist_or_build_on_demand_evidence,
         historical_data_freshness=_historical_data_freshness,
         display_evidence_items=_display_evidence_items,
-        cache_assessment_evidence=_cache_assessment_evidence,
         persisted_official_realtime_data_freshness=_persisted_official_realtime_data_freshness,
         visible_source_limitations=_visible_source_limitations,
         official_flood_disaster_data_freshness=_official_flood_disaster_data_freshness,
@@ -837,7 +835,6 @@ def _profile_backed_response(
         created_at=created_at,
         top_evidence_items=_profile_top_evidence_items(profile),
         query_heat=_query_heat(request, now=created_at),
-        cache_assessment_evidence=_cache_assessment_evidence,
     )
 
 
@@ -914,17 +911,6 @@ def _persist_or_build_on_demand_evidence(
 
 _on_demand_data_freshness = public_freshness.on_demand_data_freshness
 _official_flood_disaster_data_freshness = public_freshness.official_flood_disaster_data_freshness
-
-
-def _cache_assessment_evidence(assessment_id: str, evidence_items: list[Evidence]) -> None:
-    settings = get_settings()
-    public_evidence.cache_assessment_evidence(
-        assessment_id,
-        evidence_items,
-        ttl_seconds=settings.risk_assessment_evidence_cache_ttl_seconds,
-        backend=settings.risk_assessment_evidence_cache_backend,
-        redis_url=settings.redis_url,
-    )
 
 
 def _risk_assessment_response_cache_key(request: RiskAssessRequest, settings: Any) -> str:
