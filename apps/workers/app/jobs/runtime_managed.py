@@ -9,6 +9,7 @@ from app.adapters.contracts import DataSourceAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.ingestion import (
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
@@ -25,8 +26,7 @@ from app.pipelines.promotion import (
     promote_accepted_staging,
 )
 from app.pipelines.staging import StagingBatchWriter
-from app.scheduler import run_scheduled_ingestion_cycle
-
+from app.scheduler import _legacy_run_scheduled_ingestion_cycle
 
 ManagedRuntimeStatus = Literal["succeeded", "partial", "failed", "skipped"]
 RuntimeAdapterBuilder = Callable[[WorkerSettings], Mapping[str, DataSourceAdapter]]
@@ -60,6 +60,36 @@ class _ManagedPersistenceWriters:
 
 
 def run_managed_runtime_ingestion_cycle(
+    adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
+    *,
+    settings: WorkerSettings | None = None,
+    database_url: str | None = None,
+    staging_writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
+    promotion_writer: EvidencePromotionWriter | None = None,
+    adapter_builder: RuntimeAdapterBuilder | None = None,
+    promote: bool = False,
+    promotion_limit: int | None = None,
+    promotion_adapter_keys: tuple[str, ...] | None = None,
+    job_key: str = "runtime.managed.ingest.enabled_adapters",
+) -> int:
+    del (
+        adapter_by_key,
+        settings,
+        database_url,
+        staging_writer,
+        run_writer,
+        promotion_writer,
+        adapter_builder,
+        promote,
+        promotion_limit,
+        promotion_adapter_keys,
+        job_key,
+    )
+    return report_frozen_legacy()
+
+
+def _legacy_run_managed_runtime_ingestion_cycle(
     adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
     *,
     settings: WorkerSettings | None = None,
@@ -159,7 +189,7 @@ def run_managed_runtime_ingestion_cycle(
             available_adapter_keys=tuple(adapters),
         )
 
-    cycle = run_scheduled_ingestion_cycle(
+    cycle = _legacy_run_scheduled_ingestion_cycle(
         adapters,
         settings=resolved_settings,
         job_key=job_key,
@@ -187,7 +217,7 @@ def run_managed_runtime_ingestion_cycle(
                 limit=promotion_limit,
                 adapter_keys=target_adapter_keys,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - persist adapter failure as a managed result
             _record_pipeline_status_for_adapter_keys(
                 persistence.run_writer,
                 adapter_keys=target_adapter_keys,

@@ -18,10 +18,9 @@ from app.adapters.contracts import (
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.ingestion import AdapterBatchRunSummary
-from app.jobs.runtime_managed import run_managed_runtime_ingestion_cycle
+from app.jobs.runtime_managed import _legacy_run_managed_runtime_ingestion_cycle
 from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
 from app.pipelines.staging import AdapterStagingBatch
-
 
 FETCHED_AT = datetime.now(UTC)
 
@@ -32,7 +31,7 @@ def test_managed_runtime_cycle_persists_enabled_adapters_and_promotes() -> None:
     run_writer = _MemoryRunWriter()
     promotion_writer = _MemoryPromotionWriter([_candidate()])
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         {
             adapter.metadata.key: adapter,
             "official.wra.water_level": _ExplodingAdapter("official.wra.water_level"),
@@ -83,7 +82,7 @@ def test_managed_runtime_cycle_uses_injected_adapter_builder() -> None:
         adapter = _sample_adapter(source_id="builder-news-001")
         return {adapter.metadata.key: adapter}
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         settings=settings,
         adapter_builder=adapter_builder,
         staging_writer=staging_writer,
@@ -107,7 +106,7 @@ def test_managed_runtime_cycle_promotes_adapter_keys_from_ran_summaries() -> Non
     )
     sample_adapter = _sample_adapter()
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         {
             official_adapter.metadata.key: official_adapter,
             sample_adapter.metadata.key: sample_adapter,
@@ -145,7 +144,7 @@ def test_managed_runtime_cycle_noops_without_database_url_before_building_adapte
         called = True
         raise AssertionError("adapter builder should not run without persistence")
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         settings=_settings("news.public_web.sample"),
         adapter_builder=adapter_builder,
         promote=True,
@@ -160,7 +159,7 @@ def test_managed_runtime_cycle_noops_without_adapters_when_writers_are_injected(
     staging_writer = _MemoryStagingWriter()
     run_writer = _MemoryRunWriter()
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         settings=_settings("news.public_web.sample"),
         staging_writer=staging_writer,
         run_writer=run_writer,
@@ -176,7 +175,7 @@ def test_managed_runtime_cycle_records_empty_runtime_selection() -> None:
     run_writer = _MemoryRunWriter()
     settings = replace(_settings("news.public_web.sample"), enabled_adapter_keys=())
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         settings=settings,
         run_writer=run_writer,
     )
@@ -189,7 +188,7 @@ def test_managed_runtime_cycle_records_empty_runtime_selection() -> None:
 def test_managed_runtime_cycle_marks_missing_enabled_adapter_as_pipeline_failure() -> None:
     run_writer = _MemoryRunWriter()
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         {},
         settings=_settings("official.wra.water_level"),
         staging_writer=_MemoryStagingWriter(),
@@ -211,7 +210,7 @@ def test_managed_runtime_cycle_records_promotion_failure_in_public_pipeline_stat
     adapter = _sample_adapter()
     run_writer = _MemoryRunWriter()
 
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         {adapter.metadata.key: adapter},
         settings=_settings("news.public_web.sample"),
         staging_writer=_MemoryStagingWriter(),
@@ -238,7 +237,7 @@ def test_managed_runtime_cycle_records_builder_exception_as_pipeline_failure() -
         raise RuntimeError("adapter initialization failed")
 
     with pytest.raises(RuntimeError, match="adapter initialization failed"):
-        run_managed_runtime_ingestion_cycle(
+        _legacy_run_managed_runtime_ingestion_cycle(
             settings=_settings("news.public_web.sample"),
             staging_writer=_MemoryStagingWriter(),
             run_writer=run_writer,

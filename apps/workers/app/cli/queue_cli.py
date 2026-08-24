@@ -20,7 +20,10 @@ from app.jobs.replay_audit import PostgresRuntimeQueueReplayAudit
 from app.jobs.runtime import work_runtime_queue_once
 from app.logging import log_event
 from app.metrics import render_runtime_queue_metrics, write_prometheus_textfile
-from app.scheduler import enqueue_enabled_adapters_loop, enqueue_enabled_adapters_once
+from app.scheduler import (
+    _legacy_enqueue_enabled_adapters_loop,
+    _legacy_enqueue_enabled_adapters_once,
+)
 
 
 def work_runtime_queue(
@@ -84,11 +87,11 @@ def _legacy_enqueue_runtime_jobs(
     max_ticks: int | None,
 ) -> int:
     if not scheduler:
-        enqueue_enabled_adapters_once(settings=settings)
+        _legacy_enqueue_enabled_adapters_once(settings=settings)
         return 0
 
     tick_limit = 1 if once else max(1, max_ticks) if max_ticks is not None else None
-    enqueue_enabled_adapters_loop(settings=settings, max_ticks=tick_limit)
+    _legacy_enqueue_enabled_adapters_loop(settings=settings, max_ticks=tick_limit)
     return 0
 
 

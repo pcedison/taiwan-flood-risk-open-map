@@ -23,7 +23,6 @@ from app.jobs.ingestion import (
     IngestionRunSummaryWriter,
     run_enabled_adapter_batches,
 )
-from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.query_heat import (
     SUPPORTED_QUERY_HEAT_PERIODS,
     PostgresQueryHeatAggregationJob,  # noqa: F401 - compatibility seam for freeze tests
@@ -37,7 +36,6 @@ from app.jobs.runtime import (
     build_runtime_adapters,
     produce_enabled_runtime_adapter_jobs,
 )
-from app.jobs.sample import run_sample_job
 from app.jobs.tile_cache import (
     PostgresTileCacheWriter,  # noqa: F401 - compatibility seam for freeze tests
     TileCachePruneResult,
@@ -95,6 +93,19 @@ def run_scheduled_ingestion_cycle(
     writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
     pipeline_run_at: datetime | None = None,
+) -> int:
+    del adapter_by_key, settings, job_key, writer, run_writer, pipeline_run_at
+    return report_frozen_legacy()
+
+
+def _legacy_run_scheduled_ingestion_cycle(
+    adapter_by_key: Mapping[str, DataSourceAdapter],
+    *,
+    settings=None,
+    job_key: str = "scheduler.ingest.enabled_adapters",
+    writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
+    pipeline_run_at: datetime | None = None,
 ) -> ScheduledIngestionCycleResult:
     resolved_settings = settings or load_worker_settings()
     summaries = run_enabled_adapter_batches(
@@ -128,6 +139,18 @@ def run_enabled_adapters_once(
     job_key: str = "scheduler.ingest.enabled_adapters",
     writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
+) -> int:
+    del settings, adapter_by_key, job_key, writer, run_writer
+    return report_frozen_legacy()
+
+
+def _legacy_run_enabled_adapters_once(
+    *,
+    settings: WorkerSettings | None = None,
+    adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
+    job_key: str = "scheduler.ingest.enabled_adapters",
+    writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
 ) -> ScheduledIngestionCycleResult:
     resolved_settings = settings or load_worker_settings()
     enabled_keys = enabled_adapter_keys(resolved_settings)
@@ -142,7 +165,7 @@ def run_enabled_adapters_once(
             available_adapter_keys=tuple(adapters),
         )
 
-    result = run_scheduled_ingestion_cycle(
+    result = _legacy_run_scheduled_ingestion_cycle(
         adapters,
         settings=resolved_settings,
         job_key=job_key,
@@ -158,6 +181,16 @@ def run_enabled_adapters_once(
 
 
 def run_enabled_adapters_loop(
+    *,
+    settings: WorkerSettings | None = None,
+    max_ticks: int | None = None,
+    sleep: Callable[[int], object] = time.sleep,
+) -> int:
+    del settings, max_ticks, sleep
+    return report_frozen_legacy()
+
+
+def _legacy_run_enabled_adapters_loop(
     *,
     settings: WorkerSettings | None = None,
     max_ticks: int | None = None,
@@ -179,7 +212,7 @@ def run_enabled_adapters_loop(
 
     try:
         while tick_limit is None or tick < tick_limit:
-            result = run_enabled_adapters_once(settings=resolved_settings)
+            result = _legacy_run_enabled_adapters_once(settings=resolved_settings)
             results.append(result)
             _write_scheduler_heartbeat(settings=resolved_settings, result=result)
             tick += 1
@@ -330,6 +363,16 @@ def enqueue_enabled_adapters_once(
     settings: WorkerSettings | None = None,
     queue: RuntimeQueue | None = None,
     job_key: str = "scheduler.enqueue.enabled_adapters",
+) -> int:
+    del settings, queue, job_key
+    return report_frozen_legacy()
+
+
+def _legacy_enqueue_enabled_adapters_once(
+    *,
+    settings: WorkerSettings | None = None,
+    queue: RuntimeQueue | None = None,
+    job_key: str = "scheduler.enqueue.enabled_adapters",
 ) -> RuntimeQueueProducerResult:
     resolved_settings = settings or load_worker_settings()
     result = produce_enabled_runtime_adapter_jobs(
@@ -353,6 +396,17 @@ def enqueue_enabled_adapters_loop(
     queue: RuntimeQueue | None = None,
     max_ticks: int | None = None,
     sleep: Callable[[int], object] = time.sleep,
+) -> int:
+    del settings, queue, max_ticks, sleep
+    return report_frozen_legacy()
+
+
+def _legacy_enqueue_enabled_adapters_loop(
+    *,
+    settings: WorkerSettings | None = None,
+    queue: RuntimeQueue | None = None,
+    max_ticks: int | None = None,
+    sleep: Callable[[int], object] = time.sleep,
 ) -> tuple[RuntimeQueueProducerResult, ...]:
     resolved_settings = settings or load_worker_settings()
     tick_limit = max_ticks if max_ticks is not None else resolved_settings.scheduler_max_ticks
@@ -370,7 +424,7 @@ def enqueue_enabled_adapters_loop(
 
     try:
         while tick_limit is None or tick < tick_limit:
-            result = enqueue_enabled_adapters_once(
+            result = _legacy_enqueue_enabled_adapters_once(
                 settings=resolved_settings,
                 queue=queue,
             )
@@ -412,30 +466,30 @@ def main(argv: tuple[str, ...] | None = None) -> int:
     parser.add_argument(
         "--query-heat-periods",
         default=",".join(SUPPORTED_QUERY_HEAT_PERIODS),
-        help="Comma-separated periods for maintenance Query Heat aggregation.",
+        help="Frozen Query Heat aggregation compatibility value; parsed and ignored in v1.",
     )
     parser.add_argument(
         "--query-heat-retention-days",
         type=int,
         default=DEFAULT_QUERY_HEAT_RETENTION_DAYS,
-        help="Retention age in days for maintenance Query Heat bucket pruning.",
+        help="Frozen Query Heat retention compatibility value; parsed and ignored in v1.",
     )
     parser.add_argument(
         "--tile-layer-id",
         default=DEFAULT_TILE_LAYER_ID,
-        help="Tile layer for maintenance feature refresh and expired prune.",
+        help="Frozen local-tile layer compatibility value; parsed and ignored in v1.",
     )
     parser.add_argument(
         "--tile-feature-limit",
         type=int,
         default=DEFAULT_TILE_FEATURE_LIMIT,
-        help="Positive row limit for maintenance tile feature refresh.",
+        help="Frozen local-tile refresh compatibility value; parsed and ignored in v1.",
     )
     parser.add_argument(
         "--tile-prune-limit",
         type=int,
         default=DEFAULT_TILE_PRUNE_LIMIT,
-        help="Positive per-table row limit for maintenance tile expired pruning.",
+        help="Frozen local-tile prune compatibility value; parsed and ignored in v1.",
     )
     parser.add_argument(
         "--max-ticks",
@@ -460,44 +514,16 @@ def main(argv: tuple[str, ...] | None = None) -> int:
         enabled_adapters=enabled_adapter_keys(settings),
         max_ticks=max_ticks,
     )
-    if args.maintenance:
-        results = run_maintenance_loop(
-            settings=settings,
-            max_ticks=1 if args.once else max_ticks,
-            periods=_parse_query_heat_periods(args.query_heat_periods),
-            retention_days=args.query_heat_retention_days,
-            tile_layer_id=args.tile_layer_id,
-            tile_feature_limit=args.tile_feature_limit,
-            tile_prune_limit=args.tile_prune_limit,
-        )
-        return 1 if any(result.failed for result in results) else 0
-
-    if args.enqueue_runtime_jobs:
-        enqueue_enabled_adapters_loop(
-            settings=settings,
-            max_ticks=1 if args.once else max_ticks,
-        )
-        return 0
-
-    tick = 0
-    while True:
-        if args.run_enabled_adapters:
-            run_enabled_adapters_once(settings=settings)
-        elif args.official_demo:
-            run_scheduled_ingestion_cycle(
-                build_official_demo_adapters(),
-                settings=settings,
-                job_key="scheduler.official_demo",
-            )
-        else:
-            run_sample_job(
-                job_key="maintenance.placeholder",
-                enabled_adapters=enabled_adapter_keys(settings),
-            )
-        tick += 1
-        if args.once or (max_ticks is not None and tick >= max_ticks):
-            return 0
-        time.sleep(settings.scheduler_interval_seconds)
+    results = run_maintenance_loop(
+        settings=settings,
+        max_ticks=1 if args.once else max_ticks,
+        periods=_parse_query_heat_periods(args.query_heat_periods),
+        retention_days=args.query_heat_retention_days,
+        tile_layer_id=args.tile_layer_id,
+        tile_feature_limit=args.tile_feature_limit,
+        tile_prune_limit=args.tile_prune_limit,
+    )
+    return 1 if any(result.failed for result in results) else 0
 
 
 def _write_worker_heartbeat(

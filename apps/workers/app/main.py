@@ -11,10 +11,6 @@ from app.config import load_worker_settings
 from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.sample import run_sample_job
 from app.logging import log_event
-from app.scheduler import (
-    run_enabled_adapters_loop,
-    run_enabled_adapters_once,
-)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -180,29 +176,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.once:
         run_sample_job(enabled_adapters=enabled_adapter_keys(settings))
         return 0
-
-    if args.run_enabled_adapters:
-        if args.persist:
-            if args.scheduler:
-                return runtime_cli.run_managed_enabled_adapters_loop(
-                    settings=settings,
-                    database_url=args.database_url,
-                    once=args.once,
-                    max_ticks=args.max_ticks,
-                )
-            return runtime_cli.run_managed_enabled_adapters(
-                settings=settings,
-                database_url=args.database_url,
-            )
-        result = run_enabled_adapters_once(settings=settings, job_key="worker.runtime.run_once")
-        return 1 if result.has_alerts else 0
-
-    if args.scheduler:
-        results = run_enabled_adapters_loop(
-            settings=settings,
-            max_ticks=max(1, args.max_ticks) if args.max_ticks is not None else None,
-        )
-        return 1 if any(result.has_alerts for result in results) else 0
 
     if args.run_official_demo:
         return runtime_cli.run_official_demo(

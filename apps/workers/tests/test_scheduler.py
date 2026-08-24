@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from app import scheduler
 from app.config import load_worker_settings
+from app.jobs import runtime as runtime_jobs
+from app.jobs import runtime_managed as runtime_managed_jobs
 
 SETTINGS = load_worker_settings(
     {
@@ -87,6 +90,75 @@ def test_scheduler_maintenance_loop_never_constructs_generic_runtime_queue(
 
 
 @pytest.mark.parametrize(
+    "surface",
+    [
+        "run_scheduled_ingestion_cycle",
+        "run_enabled_adapters_once",
+        "run_enabled_adapters_loop",
+        "enqueue_enabled_adapters_once",
+        "enqueue_enabled_adapters_loop",
+    ],
+)
+def test_public_scheduler_generic_helpers_freeze_before_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    surface: str,
+) -> None:
+    def fail_construction(*_args: object, **_kwargs: object) -> object:
+        pytest.fail(f"generic runtime construction reached from {surface}")
+
+    monkeypatch.setattr(scheduler, "run_enabled_adapter_batches", fail_construction)
+    monkeypatch.setattr(scheduler, "build_runtime_adapters", fail_construction)
+    monkeypatch.setattr(scheduler, "PostgresRuntimeQueue", fail_construction)
+    monkeypatch.setattr(runtime_jobs, "PostgresIngestionRunWriter", fail_construction)
+
+    calls = {
+        "run_scheduled_ingestion_cycle": lambda: scheduler.run_scheduled_ingestion_cycle(
+            {}, settings=SETTINGS
+        ),
+        "run_enabled_adapters_once": lambda: scheduler.run_enabled_adapters_once(
+            settings=SETTINGS
+        ),
+        "run_enabled_adapters_loop": lambda: scheduler.run_enabled_adapters_loop(
+            settings=SETTINGS, max_ticks=1
+        ),
+        "enqueue_enabled_adapters_once": lambda: scheduler.enqueue_enabled_adapters_once(
+            settings=SETTINGS
+        ),
+        "enqueue_enabled_adapters_loop": lambda: scheduler.enqueue_enabled_adapters_loop(
+            settings=SETTINGS, max_ticks=1
+        ),
+    }
+
+    assert calls[surface]() == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "reason": "v1_legacy_product_writers_frozen",
+        "status": "frozen",
+        "tables_retained": True,
+    }
+
+
+def test_public_managed_runtime_facade_freezes_before_writer_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        runtime_managed_jobs,
+        "PostgresIngestionRunWriter",
+        lambda *_args, **_kwargs: pytest.fail("managed runtime writer constructed"),
+    )
+
+    assert runtime_managed_jobs.run_managed_runtime_ingestion_cycle(
+        settings=SETTINGS
+    ) == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "reason": "v1_legacy_product_writers_frozen",
+        "status": "frozen",
+        "tables_retained": True,
+    }
+
+
+@pytest.mark.parametrize(
     "argv",
     [
         ("--run-enabled-adapters", "--once"),
@@ -117,14 +189,31 @@ def test_scheduler_never_dispatches_generic_runtime_paths(
         "run_scheduled_ingestion_cycle",
         lambda *_args, **_kwargs: pytest.fail("official demo dispatched"),
     )
-    monkeypatch.setattr(
-        scheduler,
-        "run_sample_job",
-        lambda **_kwargs: pytest.fail("generic scheduler placeholder dispatched"),
-    )
-
     assert scheduler.main(argv) == 2
     assert '"status": "frozen"' in capsys.readouterr().out
+
+
+def test_scheduler_help_marks_legacy_maintenance_options_frozen_and_ignored(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        scheduler.main(("--help",))
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    normalized_help = " ".join(help_text.split()).lower()
+    for option in (
+        "--query-heat-periods",
+        "--query-heat-retention-days",
+        "--tile-layer-id",
+        "--tile-feature-limit",
+        "--tile-prune-limit",
+    ):
+        option_position = normalized_help.rfind(option)
+        assert option_position >= 0
+        option_help = normalized_help[option_position : option_position + 180]
+        assert "frozen" in option_help
+        assert "ignored" in option_help
 
 
 def test_scheduler_maintenance_failure_is_preserved(

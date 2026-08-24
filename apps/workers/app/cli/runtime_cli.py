@@ -18,11 +18,11 @@ from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
 from app.jobs.runtime import build_runtime_adapters
-from app.jobs.runtime_managed import run_managed_runtime_ingestion_cycle
+from app.jobs.runtime_managed import _legacy_run_managed_runtime_ingestion_cycle
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.promotion import PromotionResult, promote_accepted_staging
-from app.scheduler import run_scheduled_ingestion_cycle
+from app.scheduler import _legacy_run_scheduled_ingestion_cycle
 
 
 class _SchedulerLeaseHeartbeat:
@@ -108,7 +108,7 @@ def _legacy_run_managed_enabled_adapters(
     settings: WorkerSettings,
     database_url: str | None,
 ) -> int:
-    result = run_managed_runtime_ingestion_cycle(
+    result = _legacy_run_managed_runtime_ingestion_cycle(
         settings=settings,
         database_url=database_url,
         adapter_builder=build_runtime_adapters,
@@ -215,7 +215,7 @@ def _legacy_run_managed_enabled_adapters_loop(
                 renew=acquire_or_renew_lease,
                 interval_seconds=heartbeat_interval_seconds,
             ) as heartbeat:
-                result = run_managed_runtime_ingestion_cycle(
+                result = _legacy_run_managed_runtime_ingestion_cycle(
                     settings=settings,
                     database_url=resolved_database_url,
                     adapter_builder=build_runtime_adapters,
@@ -293,7 +293,7 @@ def _legacy_run_official_demo(
         if persist
         else None
     )
-    result = run_scheduled_ingestion_cycle(
+    result = _legacy_run_scheduled_ingestion_cycle(
         adapters,
         settings=settings,
         job_key="worker.official_demo",

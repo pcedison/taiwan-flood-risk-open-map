@@ -1,4 +1,5 @@
 import inspect
+import json
 import warnings
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -51,6 +52,7 @@ ROUTE_NOW = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
 RAIN_ID = "26900bf0-f51c-4326-8f75-68d03a36560e"
 WATER_ID = "911d1bdf-0cc9-49bc-896d-f92680054b08"
 HISTORY_ID = "0ca7e95a-7cfa-4e8d-b7e3-a0ca4b1836ec"
+REVIEWED_TILE_HOST = "tiles.official.gov.tw"
 
 
 class RouteRepository:
@@ -1226,7 +1228,12 @@ def test_layers_uses_db_records_when_available(monkeypatch) -> None:
         attribution="DB attribution",
         tilejson_url="/v1/layers/db-flood/tilejson",
         updated_at=layer_updated_at,
-        metadata={"tiles": ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]},
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
     )
     monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
 
@@ -1293,7 +1300,10 @@ def test_public_layers_hide_query_heat_and_local_tile_products(monkeypatch) -> N
             tilejson_url="/v1/layers/official-flood/tilejson",
             updated_at=now,
             metadata={
-                "tiles": ["https://official.example.test/flood/{z}/{x}/{y}.pbf"]
+                "tiles": [
+                    "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+                ],
+                "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
             },
         ),
     )
@@ -1309,6 +1319,214 @@ def test_public_layers_hide_query_heat_and_local_tile_products(monkeypatch) -> N
     assert "pmtiles" not in serialized
 
 
+@pytest.mark.parametrize(
+    "unsafe_tile_url",
+    [
+        "https://tiles.official.gov.tw/%2576%2531/%2574iles/local/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/archive%252epmtiles/metadata/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?source=archive%252epmtiles",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf#archive%2epmtiles",
+        "https://user:secret@tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf",
+        "https://127.0.0.1/vector/{z}/{x}/{y}.pbf",
+        "https://127.1/vector/{z}/{x}/{y}.pbf",
+        "https://0x7f.0.0.1/vector/{z}/{x}/{y}.pbf",
+        "https://[::1/vector/{z}/{x}/{y}.pbf",
+        "https://tiles.local/vector/{z}/{x}/{y}.pbf",
+        "https://official.example.test/vector/{z}/{x}/{y}.pbf",
+        "https://unreviewed.gov.tw/vector/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/%255cv1%255ctiles%255clocal/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/%2525252525252576%2525252525252531/tiles/local/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf%09",
+        " https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf ",
+    ],
+)
+def test_layers_and_tilejson_fail_closed_for_unsafe_tile_templates(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_tile_url: str,
+) -> None:
+    reviewed_host = next(
+        (
+            candidate
+            for candidate in (
+                "127.0.0.1",
+                "127.1",
+                "0x7f.0.0.1",
+                "tiles.local",
+                "official.example.test",
+            )
+            if f"//{candidate}/" in unsafe_tile_url
+        ),
+        REVIEWED_TILE_HOST,
+    )
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [unsafe_tile_url],
+            "reviewed_external_tile_hosts": [reviewed_host],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert unsafe_tile_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+    assert unsafe_tile_url not in tilejson_response.text
+
+
+@pytest.mark.parametrize(
+    "unsafe_tilejson_url",
+    [
+        "/v1/tiles/private/0/0/0.mvt",
+        "/%2576%2531/%2574iles/private/0/0/0.mvt",
+        "/v1/layers/another-layer/tilejson",
+        "https://tiles.official.gov.tw/archive.pmtiles/metadata.json",
+        "https://tiles.official.gov.tw/catalog.json?source=archive%2epmtiles",
+        "https://tiles.official.gov.tw/catalog.json#archive%2epmtiles",
+        "https://user:secret@tiles.official.gov.tw/catalog.json",
+        "https://10.0.0.2/catalog.json",
+        "https://[::1/catalog.json",
+        "https://official.example.test/catalog.json",
+        "https://unreviewed.gov.tw/catalog.json",
+    ],
+)
+def test_layers_fail_closed_before_serializing_unsafe_tilejson_url(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_tilejson_url: str,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url=unsafe_tilejson_url,
+        updated_at=None,
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert unsafe_tilejson_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+
+
+def test_layers_require_every_tile_template_to_pass_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf",
+                "https://tiles.official.gov.tw/archive.pmtiles/metadata/{z}/{x}/{y}.pbf",
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    assert client.get("/v1/layers").json()["layers"] == []
+    assert client.get("/v1/layers/official-flood/tilejson").status_code == 404
+
+
+def test_layers_reject_partially_invalid_reviewed_host_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST, "127.0.0.1"],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    assert client.get("/v1/layers").json()["layers"] == []
+    assert client.get("/v1/layers/official-flood/tilejson").status_code == 404
+
+
+def test_layers_serialize_only_explicitly_reviewed_external_tile_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tile_url = "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [tile_url],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert [item["id"] for item in layers_response.json()["layers"]] == [
+        "official-flood"
+    ]
+    assert tilejson_response.status_code == 200
+    assert tilejson_response.json()["tiles"] == [tile_url]
+
+
 def test_static_openapi_hides_frozen_layer_products() -> None:
     assert "/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt" not in OPENAPI_SPEC["paths"]
     map_layer_categories = OPENAPI_SPEC["components"]["schemas"]["MapLayer"]["properties"][
@@ -1320,6 +1538,22 @@ def test_static_openapi_hides_frozen_layer_products() -> None:
 
     assert "query_heat" not in map_layer_categories
     assert "local_vector_tile_endpoint" not in tile_url_sources
+
+
+def test_runtime_openapi_hides_frozen_layer_products() -> None:
+    runtime_spec = create_app().openapi()
+
+    assert "/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt" not in runtime_spec["paths"]
+    map_layer_categories = runtime_spec["components"]["schemas"]["MapLayer"][
+        "properties"
+    ]["category"]["enum"]
+    tile_url_source_schema = runtime_spec["components"]["schemas"]["TileJson"][
+        "properties"
+    ]["tile_url_source"]
+
+    assert "query_heat" not in map_layer_categories
+    assert "metadata" in json.dumps(tile_url_source_schema)
+    assert "local_vector_tile_endpoint" not in json.dumps(tile_url_source_schema)
 
 
 @pytest.mark.parametrize(
@@ -1396,7 +1630,10 @@ def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
         metadata={
             "version": "db-v1",
             "scheme": "xyz",
-            "tiles": ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"],
+            "tiles": [
+                "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
             "bounds": [120.0, 22.0, 121.0, 23.0],
             "vector_layers": [
                 {
@@ -1417,7 +1654,9 @@ def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
     assert payload["version"] == "db-v1"
     assert payload["attribution"] == "DB attribution"
     assert payload["status"] == "available"
-    assert payload["tiles"] == ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]
+    assert payload["tiles"] == [
+        "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
+    ]
     assert payload["tile_url_source"] == "metadata"
     assert "cache_control" not in payload
     assert payload["minzoom"] == 5

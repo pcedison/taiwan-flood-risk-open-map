@@ -31,11 +31,11 @@ from app.main import main
 from app.scheduler import (
     MaintenanceCycleResult,
     ScheduledIngestionCycleResult,
-    run_enabled_adapters_loop,
-    run_enabled_adapters_once,
+    _legacy_run_enabled_adapters_loop,
+    _legacy_run_enabled_adapters_once,
+    _legacy_run_scheduled_ingestion_cycle,
     run_maintenance_loop,
     run_maintenance_once,
-    run_scheduled_ingestion_cycle,
 )
 
 FROZEN_SETTINGS = load_worker_settings(
@@ -95,12 +95,14 @@ def test_frozen_legacy_commands_never_construct_writers(
     monkeypatch.setattr(profiles_cli, "rebuild_risk_profile", fail_writer)
     monkeypatch.setattr(profiles_cli, "claim_profile_refresh_jobs", fail_writer)
     monkeypatch.setattr(queue_cli, "build_runtime_persistence_bundle", fail_writer)
-    monkeypatch.setattr(queue_cli, "enqueue_enabled_adapters_once", fail_writer)
+    monkeypatch.setattr(queue_cli, "_legacy_enqueue_enabled_adapters_once", fail_writer)
     monkeypatch.setattr(queue_cli, "PostgresRuntimeQueueReplayAudit", fail_writer)
     monkeypatch.setattr(runtime_cli, "build_demo_persistence_writers", fail_writer)
-    monkeypatch.setattr(runtime_cli, "run_managed_runtime_ingestion_cycle", fail_writer)
-    monkeypatch.setattr("app.main.run_enabled_adapters_once", fail_writer)
-    monkeypatch.setattr("app.main.run_enabled_adapters_loop", fail_writer)
+    monkeypatch.setattr(
+        runtime_cli, "_legacy_run_managed_runtime_ingestion_cycle", fail_writer
+    )
+    monkeypatch.setattr(scheduler_module, "_legacy_run_enabled_adapters_once", fail_writer)
+    monkeypatch.setattr(scheduler_module, "_legacy_run_enabled_adapters_loop", fail_writer)
 
     assert main(argv) == 2
     assert json.loads(capsys.readouterr().out) == {
@@ -118,9 +120,11 @@ def test_direct_generic_cli_helpers_are_frozen_before_writer_construction(
         pytest.fail("generic runtime writer constructed")
 
     monkeypatch.setattr(queue_cli, "build_runtime_persistence_bundle", fail_writer)
-    monkeypatch.setattr(queue_cli, "enqueue_enabled_adapters_once", fail_writer)
+    monkeypatch.setattr(queue_cli, "_legacy_enqueue_enabled_adapters_once", fail_writer)
     monkeypatch.setattr(queue_cli, "PostgresRuntimeQueueReplayAudit", fail_writer)
-    monkeypatch.setattr(runtime_cli, "run_managed_runtime_ingestion_cycle", fail_writer)
+    monkeypatch.setattr(
+        runtime_cli, "_legacy_run_managed_runtime_ingestion_cycle", fail_writer
+    )
     monkeypatch.setattr(runtime_cli, "PostgresRuntimeQueue", fail_writer)
     monkeypatch.setattr(runtime_cli, "build_demo_persistence_writers", fail_writer)
 
@@ -244,7 +248,7 @@ def test_official_demo_builder_covers_default_official_adapter_keys() -> None:
 
 def test_scheduler_official_demo_cycle_runs_ingestion_and_freshness() -> None:
     fetched_at = datetime.now(UTC)
-    result = run_scheduled_ingestion_cycle(
+    result = _legacy_run_scheduled_ingestion_cycle(
         build_official_demo_adapters(fetched_at=fetched_at),
         settings=load_worker_settings({"FRESHNESS_MAX_AGE_SECONDS": "21600"}),
         job_key="test.scheduler.official_demo",
@@ -659,7 +663,7 @@ def test_main_scheduler_can_run_bounded_runtime_loop(monkeypatch) -> None:
             ScheduledIngestionCycleResult(summaries=(), freshness_checks=()),
         )
 
-    monkeypatch.setattr("app.main.run_enabled_adapters_loop", fake_loop)
+    monkeypatch.setattr(scheduler_module, "_legacy_run_enabled_adapters_loop", fake_loop)
 
     exit_code = main(["--scheduler", "--max-ticks", "2"])
 
@@ -732,7 +736,9 @@ def test_main_enqueue_runtime_jobs_is_a_cli_entrypoint(monkeypatch) -> None:
             job_ids=("job-1",),
         )
 
-    monkeypatch.setattr("app.cli.queue_cli.enqueue_enabled_adapters_once", fake_enqueue_once)
+    monkeypatch.setattr(
+        "app.cli.queue_cli._legacy_enqueue_enabled_adapters_once", fake_enqueue_once
+    )
 
     exit_code = main(["--enqueue-runtime-jobs"])
 
@@ -751,7 +757,9 @@ def test_main_scheduler_enqueue_runtime_jobs_can_be_bounded(monkeypatch) -> None
             RuntimeQueueProducerResult(status="skipped", reason="no_database_url"),
         )
 
-    monkeypatch.setattr("app.cli.queue_cli.enqueue_enabled_adapters_loop", fake_enqueue_loop)
+    monkeypatch.setattr(
+        "app.cli.queue_cli._legacy_enqueue_enabled_adapters_loop", fake_enqueue_loop
+    )
 
     exit_code = main(["--enqueue-runtime-jobs", "--scheduler", "--max-ticks", "2"])
 
@@ -1675,7 +1683,9 @@ def test_run_enabled_adapters_once_uses_configured_adapter_selection() -> None:
         }
     )
 
-    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.run_once")
+    result = _legacy_run_enabled_adapters_once(
+        settings=settings, job_key="test.runtime.run_once"
+    )
 
     assert [summary.adapter_key for summary in result.summaries] == [
         "official.wra.water_level"
@@ -1697,7 +1707,9 @@ def test_run_enabled_adapters_once_writes_worker_heartbeat_textfile(tmp_path: Pa
         }
     )
 
-    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.metrics")
+    result = _legacy_run_enabled_adapters_once(
+        settings=settings, job_key="test.runtime.metrics"
+    )
 
     assert not result.has_alerts
     text = metrics_path.read_text(encoding="utf-8")
@@ -1716,7 +1728,9 @@ def test_run_enabled_adapters_once_gracefully_noops_disabled_adapter() -> None:
         }
     )
 
-    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.noop")
+    result = _legacy_run_enabled_adapters_once(
+        settings=settings, job_key="test.runtime.noop"
+    )
 
     assert result.summaries == ()
     assert result.freshness_checks == ()
@@ -1733,7 +1747,9 @@ def test_run_enabled_adapters_once_runs_public_web_sample_fixture() -> None:
         }
     )
 
-    result = run_enabled_adapters_once(settings=settings, job_key="test.runtime.news")
+    result = _legacy_run_enabled_adapters_once(
+        settings=settings, job_key="test.runtime.news"
+    )
 
     assert [summary.adapter_key for summary in result.summaries] == [
         "news.public_web.sample"
@@ -1754,7 +1770,9 @@ def test_run_enabled_adapters_loop_can_be_bounded() -> None:
     )
     sleeps: list[int] = []
 
-    results = run_enabled_adapters_loop(settings=settings, max_ticks=2, sleep=sleeps.append)
+    results = _legacy_run_enabled_adapters_loop(
+        settings=settings, max_ticks=2, sleep=sleeps.append
+    )
 
     assert len(results) == 2
     assert sleeps == [settings.scheduler_interval_seconds]
@@ -1772,7 +1790,7 @@ def test_run_enabled_adapters_loop_writes_scheduler_heartbeat_textfile(tmp_path:
         }
     )
 
-    results = run_enabled_adapters_loop(settings=settings, max_ticks=1)
+    results = _legacy_run_enabled_adapters_loop(settings=settings, max_ticks=1)
 
     assert len(results) == 1
     text = metrics_path.read_text(encoding="utf-8")
@@ -1800,7 +1818,9 @@ def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeyp
         captured["promotion_adapter_keys"] = adapter_keys
         return _PromotionResult()
 
-    monkeypatch.setattr("app.cli.runtime_cli.run_scheduled_ingestion_cycle", fake_cycle)
+    monkeypatch.setattr(
+        "app.cli.runtime_cli._legacy_run_scheduled_ingestion_cycle", fake_cycle
+    )
     monkeypatch.setattr("app.cli.runtime_cli.promote_accepted_staging", fake_promote)
     monkeypatch.setattr("app.cli.persistence.PostgresStagingBatchWriter", _FakeStagingWriter)
     monkeypatch.setattr("app.cli.persistence.PostgresIngestionRunWriter", _FakeRunWriter)
@@ -1845,7 +1865,7 @@ def test_main_run_enabled_adapters_persist_uses_managed_runtime(monkeypatch) -> 
             evidence_ids=("evidence-1", "evidence-2"),
         )
 
-    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli._legacy_run_managed_runtime_ingestion_cycle", fake_managed_cycle)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
     exit_code = runtime_cli._legacy_run_managed_enabled_adapters(
@@ -1905,7 +1925,7 @@ def test_main_run_enabled_adapters_persist_scheduler_uses_lease(monkeypatch) -> 
     monkeypatch.setenv("SCHEDULER_INTERVAL_SECONDS", "7")
     monkeypatch.setenv("SCHEDULER_LEASE_TTL_SECONDS", "14")
     monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli._legacy_run_managed_runtime_ingestion_cycle", fake_managed_cycle)
     monkeypatch.setattr("app.cli.runtime_cli.time.sleep", fake_sleep)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
@@ -1978,7 +1998,7 @@ def test_main_run_enabled_adapters_persist_scheduler_waits_when_lease_held(
     monkeypatch.setenv("WORKER_INSTANCE", "test-scheduler")
     monkeypatch.setenv("SCHEDULER_INTERVAL_SECONDS", "7")
     monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
-    monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
+    monkeypatch.setattr("app.cli.runtime_cli._legacy_run_managed_runtime_ingestion_cycle", fake_managed_cycle)
     monkeypatch.setattr("app.cli.runtime_cli.time.sleep", fake_sleep)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
@@ -2042,7 +2062,7 @@ def test_main_run_enabled_adapters_heartbeats_during_a_long_cycle(monkeypatch) -
     monkeypatch.setenv("SCHEDULER_LEASE_TTL_SECONDS", "1")
     monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FakeRuntimeQueue)
     monkeypatch.setattr(
-        "app.cli.runtime_cli.run_managed_runtime_ingestion_cycle",
+        "app.cli.runtime_cli._legacy_run_managed_runtime_ingestion_cycle",
         long_managed_cycle,
     )
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
@@ -2095,7 +2115,7 @@ def test_managed_scheduler_does_not_log_runtime_queue_exception_details(monkeypa
 
     monkeypatch.setattr("app.cli.runtime_cli.PostgresRuntimeQueue", FailingRuntimeQueue)
     monkeypatch.setattr(
-        "app.cli.runtime_cli.run_managed_runtime_ingestion_cycle",
+        "app.cli.runtime_cli._legacy_run_managed_runtime_ingestion_cycle",
         fake_managed_cycle,
     )
     monkeypatch.setattr("app.cli.runtime_cli.time.sleep", lambda _seconds: None)

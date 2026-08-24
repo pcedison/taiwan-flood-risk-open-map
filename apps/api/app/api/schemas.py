@@ -859,7 +859,6 @@ class MapLayer(ContractModel):
         "water_level",
         "warning",
         "evidence",
-        "query_heat",
     ]
     status: Literal["available", "degraded", "disabled"]
     minzoom: int | None = Field(default=None, ge=0, le=24)
@@ -889,7 +888,7 @@ class TileJson(BaseModel):
     status: Literal["available", "degraded", "disabled"] | None = None
     scheme: Literal["xyz", "tms"] = "xyz"
     tiles: list[str] = Field(min_length=1)
-    tile_url_source: Literal["metadata", "local_vector_tile_endpoint"] | None = None
+    tile_url_source: Literal["metadata"] | None = None
     cache_control: str | None = None
     minzoom: int | None = Field(default=None, ge=0, le=24)
     maxzoom: int | None = Field(default=None, ge=0, le=24)

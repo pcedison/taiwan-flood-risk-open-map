@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 
@@ -39,8 +39,10 @@ from app.jobs.runtime import (
 )
 from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
 from app.pipelines.staging import AdapterStagingBatch
-from app.scheduler import enqueue_enabled_adapters_loop, run_enabled_adapters_loop
-
+from app.scheduler import (
+    _legacy_enqueue_enabled_adapters_loop,
+    _legacy_run_enabled_adapters_loop,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 # Shared with the API bridge (apps/api/app/domain/realtime/official.py); see
@@ -1127,7 +1129,7 @@ def test_scheduler_loop_falls_back_when_database_lease_is_unavailable(monkeypatc
 
     monkeypatch.setattr("app.scheduler.PostgresRuntimeQueue", _UnavailableQueue)
 
-    results = run_enabled_adapters_loop(settings=settings, max_ticks=1)
+    results = _legacy_run_enabled_adapters_loop(settings=settings, max_ticks=1)
 
     assert len(results) == 1
 
@@ -1144,7 +1146,9 @@ def test_scheduler_enqueue_loop_skips_when_database_lease_is_held(monkeypatch) -
 
     monkeypatch.setattr("app.scheduler.PostgresRuntimeQueue", _LeaseHeldQueue)
 
-    results = enqueue_enabled_adapters_loop(settings=settings, queue=queue, max_ticks=1)
+    results = _legacy_enqueue_enabled_adapters_loop(
+        settings=settings, queue=queue, max_ticks=1
+    )
 
     assert results == ()
     assert queue.enqueued == []
@@ -1155,7 +1159,7 @@ class _FakeConnection:
         self.cursor_instance = _FakeCursor(fetch_rows=fetch_rows)
         self.commits = 0
 
-    def __enter__(self) -> _FakeConnection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -1173,7 +1177,7 @@ class _FakeCursor:
         self._fetch_rows = fetch_rows
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> _FakeCursor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -1192,7 +1196,7 @@ class _FakeCursor:
 
 
 class _BrokenConnection:
-    def __enter__(self) -> _BrokenConnection:
+    def __enter__(self) -> Self:
         raise RuntimeError("database unavailable")
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

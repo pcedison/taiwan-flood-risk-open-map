@@ -10,6 +10,7 @@ router = APIRouter(prefix="/v1", tags=["Tiles"])
 
 @router.get(
     "/tiles/{layer_id}/{z}/{x}/{y}.mvt",
+    include_in_schema=False,
     responses={
         200: {"content": {"application/vnd.mapbox-vector-tile": {}}},
         404: {"description": "Unknown tile layer."},
