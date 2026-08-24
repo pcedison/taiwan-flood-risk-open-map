@@ -70,6 +70,8 @@ class EvidenceRecord:
     official_event_origin_key: str | None = None
     active_from: datetime | None = None
     active_until: datetime | None = None
+    location_precision: EvidenceLocationPrecision = "unknown"
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -215,6 +217,8 @@ class RiskAssessmentPersistence:
     evidence_ids: tuple[str, ...]
     created_at: datetime
     expires_at: datetime
+    overall_level: str | None = None
+    dominant_mode: str | None = None
 
 
 def persist_risk_assessment(
@@ -309,6 +313,14 @@ def persist_risk_assessment(
     privacy_bucket = _privacy_bucket(assessment.lat, assessment.lng)
     coarse_lat = _privacy_coordinate(assessment.lat)
     coarse_lng = _privacy_coordinate(assessment.lng)
+    storage_overall = (
+        _storage_risk_level(assessment.overall_level)
+        if assessment.overall_level is not None
+        else _max_storage_risk_level(
+            assessment.realtime_level,
+            assessment.historical_level,
+        )
+    )
     params = (
         None,
         coarse_lat,
@@ -326,7 +338,7 @@ def persist_risk_assessment(
         assessment.confidence_score,
         _storage_risk_level(assessment.realtime_level),
         _storage_risk_level(assessment.historical_level),
-        _max_storage_risk_level(assessment.realtime_level, assessment.historical_level),
+        storage_overall,
         Jsonb(assessment.explanation),
         Jsonb(assessment.data_freshness),
         Jsonb(assessment.result_snapshot),
@@ -504,7 +516,26 @@ def query_nearby_evidence(
             c.adapter_key,
             NULL::text AS official_event_origin_key,
             NULL::timestamptz AS active_from,
-            NULL::timestamptz AS active_until
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN c.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN c.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        COALESCE(c.properties->'limitations', '[]'::jsonb)
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
         FROM candidate_rows c
         WHERE c.computed_distance_to_query_m <= c.branch_relevance_m
         ORDER BY
@@ -667,6 +698,8 @@ def query_nearby_latest_official(
                 e.properties->>'cap_sender' AS cap_sender,
                 e.properties->>'cap_identifier' AS cap_identifier,
                 e.properties->>'admin_code' AS admin_code,
+                latest.quality_flags->>'location_precision' AS location_precision,
+                e.properties->'limitations' AS evidence_limitations,
                 CASE
                     WHEN e.properties->>'active_from'
                             ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
@@ -827,7 +860,23 @@ def query_nearby_latest_official(
             ranked.cap_sender,
             ranked.cap_identifier,
             ranked.safe_cap_sent AS cap_sent,
-            ranked.admin_code
+            ranked.admin_code,
+            CASE
+                WHEN ranked.location_precision IS NULL THEN 'point'
+                WHEN ranked.location_precision IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN ranked.location_precision
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        COALESCE(ranked.evidence_limitations, '[]'::jsonb)
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
         FROM deduplicated_latest ranked
         ORDER BY
             ranked.distance_to_query_m ASC,
@@ -1784,7 +1833,41 @@ def upsert_public_evidence(
             COALESCE(source_weight, CASE WHEN source_type = 'official' THEN 1.0 ELSE 0.85 END)
                 AS source_weight,
             privacy_level,
-            raw_ref
+            raw_ref,
+            NULL::double precision AS rainfall_mm_1h,
+            NULL::double precision AS water_level_m,
+            NULL::double precision AS warning_level_m,
+            NULL::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN properties->>'evidence_scope'
+                WHEN event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            NULL::text AS adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        COALESCE(properties->'limitations', '[]'::jsonb)
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
     """
     try:
         inserted: list[EvidenceRecord] = []
@@ -1903,7 +1986,36 @@ def fetch_assessment_evidence(
             (e.properties->>'water_level_m')::double precision AS water_level_m,
             (e.properties->>'warning_level_m')::double precision AS warning_level_m,
             (e.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
-            NULL::double precision AS realtime_risk_factor
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN e.properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN e.properties->>'evidence_scope'
+                WHEN e.event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            ds.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN e.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN e.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        COALESCE(e.properties->'limitations', '[]'::jsonb)
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
         FROM risk_assessment_evidence rae
         JOIN risk_assessments ra ON ra.id = rae.risk_assessment_id
         JOIN location_queries lq ON lq.id = ra.query_id
@@ -1966,9 +2078,39 @@ def fetch_evidence_by_ids(
             (e.properties->>'water_level_m')::double precision AS water_level_m,
             (e.properties->>'warning_level_m')::double precision AS warning_level_m,
             (e.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
-            NULL::double precision AS realtime_risk_factor
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN e.properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN e.properties->>'evidence_scope'
+                WHEN e.event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            ds.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN e.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN e.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        COALESCE(e.properties->'limitations', '[]'::jsonb)
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
         FROM requested
         JOIN evidence e ON e.id = requested.id
+        JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
         WHERE e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
         ORDER BY requested.ordinality ASC
@@ -2069,7 +2211,29 @@ def _record_from_row(row: Mapping[str, Any] | Sequence[Any]) -> EvidenceRecord:
         official_event_origin_key=(str(origin_key) if origin_key is not None else None),
         active_from=value("active_from", 27),
         active_until=value("active_until", 28),
+        location_precision=_evidence_location_precision(value("location_precision", 33)),
+        limitations=_evidence_limitations(value("limitations", 34)),
     )
+
+
+def _evidence_location_precision(value: object) -> EvidenceLocationPrecision:
+    if value in {
+        "point",
+        "road_or_lane",
+        "poi",
+        "admin_area",
+        "polygon",
+        "inferred",
+        "map_click",
+    }:
+        return cast(EvidenceLocationPrecision, value)
+    return "unknown"
+
+
+def _evidence_limitations(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item) for item in value)
 
 
 def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:
@@ -2347,15 +2511,13 @@ def _privacy_coordinate(value: float) -> float:
 
 
 def _storage_risk_level(level: str) -> str:
-    if level == "雿?":
-        return "low"
-    if level == "銝?":
-        return "medium"
-    if level == "擃?":
-        return "high"
-    if level == "璆菟?":
-        return "severe"
-    return "unknown"
+    return {
+        "低": "low",
+        "中": "medium",
+        "高": "high",
+        "極高": "severe",
+        "未知": "unknown",
+    }.get(level, "unknown")
 
 
 def _max_storage_risk_level(*levels: str) -> str:

@@ -1030,6 +1030,8 @@ def _persist_assessment(
                 confidence_score=scoring.confidence_score,
                 realtime_level=scoring.realtime_level,
                 historical_level=scoring.historical_level,
+                overall_level=None,
+                dominant_mode=None,
                 explanation=explanation.model_dump(mode="json"),
                 data_freshness=[item.model_dump(mode="json") for item in data_freshness],
                 result_snapshot=public_risk.assessment_result_snapshot(

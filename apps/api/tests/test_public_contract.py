@@ -2168,6 +2168,25 @@ def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypa
             ),
         ),
     )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_assessment_evidence",
+        lambda **_kwargs: (
+            replace(
+                _db_evidence_record(),
+                source_id="news:kaohsiung-2024-flood",
+                lat=22.65646,
+                lng=120.32574,
+                geometry={"type": "Point", "coordinates": [120.32574, 22.65646]},
+                distance_to_query_m=88.0,
+            ),
+            replace(
+                _flood_potential_record(),
+                source_id="precomputed-risk-profile:official:flood_potential",
+                distance_to_query_m=88.0,
+            ),
+        ),
+    )
     enqueued: list[dict[str, object]] = []
     monkeypatch.setattr(
         public_routes,
@@ -2872,6 +2891,11 @@ def test_evidence_list_contract(monkeypatch) -> None:
         public_routes,
         "fetch_official_realtime_bundle",
         lambda **_kwargs: _empty_realtime_bundle(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_assessment_evidence",
+        lambda **_kwargs: (_db_evidence_record(),),
     )
 
     risk_response = client.post(

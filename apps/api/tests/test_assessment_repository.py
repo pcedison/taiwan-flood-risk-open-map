@@ -412,6 +412,8 @@ def _persistence_record() -> RiskAssessmentPersistence:
         confidence_score=0.8,
         realtime_level="中",
         historical_level="中",
+        overall_level="中",
+        dominant_mode="realtime",
         explanation={"summary": "persist boundary"},
         data_freshness=[],
         result_snapshot={"assessment_id": "d315d0e6-9c1e-475a-9118-f299d12d5c62"},

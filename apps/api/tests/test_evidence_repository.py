@@ -7,12 +7,12 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from app.domain.layers import fetch_map_layer, fetch_map_layers
 from app.domain.evidence.repository import (
-    EvidenceUpsert,
     EvidenceRepositoryUnavailable,
-    _official_event_origin_key,
+    EvidenceUpsert,
     RiskAssessmentPersistence,
+    _official_event_origin_key,
+    fetch_assessment_evidence,
     fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
     persist_risk_assessment,
@@ -23,6 +23,7 @@ from app.domain.evidence.repository import (
     query_realtime_source_health_rows,
     upsert_public_evidence,
 )
+from app.domain.layers import fetch_map_layer, fetch_map_layers
 
 
 def test_fetch_map_layers_reads_layer_metadata() -> None:
@@ -152,6 +153,8 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert "MATERIALIZED" not in sql
     assert "FROM recent_rainfall" not in sql
     assert "FROM recent_water_level" not in sql
+    assert "AS location_precision" in sql
+    assert "AS limitations" in sql
     # Without relevance arguments the realtime relevance collapses to the radius.
     assert params == (
         121.5654,
@@ -1261,8 +1264,10 @@ def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -
             realtime_score=12.5,
             historical_score=34.5,
             confidence_score=0.67,
-            realtime_level="雿?",
-            historical_level="擃?",
+            realtime_level="低",
+            historical_level="高",
+            overall_level="中",
+            dominant_mode="historical_context",
             explanation={"summary": "Stored assessment"},
             data_freshness=[{"source_id": "db-evidence", "health_status": "healthy"}],
             result_snapshot={
@@ -1301,8 +1306,74 @@ def test_persist_risk_assessment_inserts_query_assessment_and_links_evidence() -
         created_at,
     )
     assert params[9] == "d315d0e6-9c1e-475a-9118-f299d12d5c62"
-    assert params[14:17] == ("low", "high", "high")
+    assert params[14:17] == ("low", "high", "medium")
     assert params[-1] == ["b3f22a36-7316-4e2a-92b6-c6f6443c8528"]
+
+
+def test_evidence_record_reads_reviewed_precision_and_limitations() -> None:
+    connection = _FakeConnection(
+        rows=[
+            {
+                "id": "b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+                "source_id": "official:test",
+                "source_type": "official",
+                "event_type": "flood_report",
+                "title": "淹水觀測",
+                "summary": "測試",
+                "ingested_at": datetime(2026, 8, 24, tzinfo=UTC),
+                "confidence": 0.9,
+                "freshness_score": 0.8,
+                "source_weight": 1.0,
+                "privacy_level": "public",
+                "location_precision": "road_or_lane",
+                "limitations": ["公開資料僅精確至道路尺度"],
+            }
+        ]
+    )
+
+    records = fetch_assessment_evidence(
+        database_url="postgresql://example.test/flood",
+        assessment_id="d315d0e6-9c1e-475a-9118-f299d12d5c62",
+        connection_factory=lambda: connection,
+    )
+
+    sql, _ = connection.cursor_instance.executions[0]
+    assert "ds.is_enabled = true" in sql
+    assert "AS location_precision" in sql
+    assert "AS limitations" in sql
+    assert records[0].location_precision == "road_or_lane"
+    assert records[0].limitations == ("公開資料僅精確至道路尺度",)
+
+
+@pytest.mark.parametrize("stored", ["exact_address", "parcel", "anything_else"])
+def test_unknown_or_exact_address_precision_maps_to_unknown(stored: str) -> None:
+    connection = _FakeConnection(
+        rows=[
+            {
+                "id": "b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+                "source_id": "official:test",
+                "source_type": "official",
+                "event_type": "flood_report",
+                "title": "淹水觀測",
+                "summary": "測試",
+                "ingested_at": datetime(2026, 8, 24, tzinfo=UTC),
+                "confidence": 0.9,
+                "freshness_score": 0.8,
+                "source_weight": 1.0,
+                "privacy_level": "public",
+                "location_precision": stored,
+                "limitations": [],
+            }
+        ]
+    )
+
+    records = fetch_assessment_evidence(
+        database_url="postgresql://example.test/flood",
+        assessment_id="d315d0e6-9c1e-475a-9118-f299d12d5c62",
+        connection_factory=lambda: connection,
+    )
+
+    assert records[0].location_precision == "unknown"
 
 
 class _FakeConnection:

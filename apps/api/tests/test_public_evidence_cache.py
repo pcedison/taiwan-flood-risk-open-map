@@ -5,8 +5,11 @@ import redis
 
 import app.api.services.public_evidence_cache as evidence_cache
 from app.api.schemas import Evidence, LatLng
+from app.api.services.public_evidence import (
+    cache_assessment_evidence,
+    list_assessment_evidence,
+)
 from app.api.services.redis_support import FailOpenRedisClients
-
 
 NOW = datetime(2026, 6, 12, 8, 0, tzinfo=UTC)
 
@@ -193,3 +196,21 @@ def test_redis_failure_pauses_redis_attempts_for_cooldown(
         redis_url="redis://example.test:6379/0",
     )
     assert fake_redis.get_calls == 0
+
+
+def test_v1_detail_read_ignores_legacy_cache_and_always_rereads_database() -> None:
+    cache_assessment_evidence("assessment-1", [_evidence("stale-disabled-evidence")])
+    calls: list[tuple[str, int]] = []
+
+    def fetch_db_evidence(assessment_id: str, *, page_size: int) -> tuple[Evidence, ...]:
+        calls.append((assessment_id, page_size))
+        return (_evidence("currently-authorized-evidence"),)
+
+    response = list_assessment_evidence(
+        "assessment-1",
+        page_size=20,
+        fetch_db_evidence=fetch_db_evidence,
+    )
+
+    assert [item.id for item in response.items] == ["currently-authorized-evidence"]
+    assert calls == [("assessment-1", 20)]

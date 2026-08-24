@@ -1,0 +1,324 @@
+from __future__ import annotations
+
+import inspect
+import json
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+
+import pytest
+
+from app.api.schemas import LatLng, NearbyCoverageSignal, RiskAssessRequest
+from app.api.services.assessment import AssessmentService
+from app.domain.assessment import AssessmentData, AssessmentSourceState
+from app.domain.evidence import (
+    EvidenceRecord,
+    EvidenceRepositoryUnavailable,
+    RiskAssessmentPersistence,
+)
+from app.domain.realtime import build_nearby_realtime_coverage
+from app.domain.risk import RiskEvidenceSignal, RiskScoringResult, score_risk
+
+NOW = datetime(2026, 8, 24, 5, 30, tzinfo=UTC)
+CURRENT_ID = "26900bf0-f51c-4326-8f75-68d03a36560e"
+HISTORY_ID = "911d1bdf-0cc9-49bc-896d-f92680054b08"
+
+
+@dataclass
+class FakeRepository:
+    data: AssessmentData
+    persisted: list[RiskAssessmentPersistence] = field(default_factory=list)
+    fail_persist: bool = False
+    programming_error: BaseException | None = None
+
+    def load(self, **_kwargs: object) -> AssessmentData:
+        return self.data
+
+    def persist(self, assessment: RiskAssessmentPersistence) -> None:
+        if self.programming_error is not None:
+            raise self.programming_error
+        if self.fail_persist:
+            raise EvidenceRepositoryUnavailable("audit write unavailable")
+        self.persisted.append(assessment)
+
+
+def _record(
+    evidence_id: str,
+    *,
+    event_type: str,
+    evidence_scope: str,
+    source_type: str = "official",
+) -> EvidenceRecord:
+    return EvidenceRecord(
+        id=evidence_id,
+        source_id=f"source:{evidence_id}",
+        source_type=source_type,
+        event_type=event_type,
+        title=f"title:{evidence_id}",
+        summary=f"summary:{evidence_id}",
+        url=None,
+        occurred_at=NOW,
+        observed_at=NOW,
+        ingested_at=NOW,
+        lat=22.99974,
+        lng=120.22704,
+        geometry={"type": "Point", "coordinates": [120.22704, 22.99974]},
+        distance_to_query_m=30.0,
+        confidence=0.9,
+        freshness_score=0.95,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref=None,
+        rainfall_mm_1h=0.0 if event_type == "rainfall" else None,
+        evidence_scope=evidence_scope,  # type: ignore[arg-type]
+        adapter_key="official.cwa.rainfall",
+        location_precision="road_or_lane",
+        limitations=("位置為道路尺度",),
+    )
+
+
+@pytest.fixture
+def now() -> datetime:
+    return NOW
+
+
+@pytest.fixture
+def risk_request() -> RiskAssessRequest:
+    return RiskAssessRequest(
+        point=LatLng(lat=22.99974, lng=120.22704),
+        radius_m=750,
+        time_context="now",
+        location_text="臺南市永康區中華路機密查詢文字",
+    )
+
+
+@pytest.fixture
+def data(now: datetime) -> AssessmentData:
+    coverage = build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=750,
+        evaluated_at=now,
+        repository_unavailable=True,
+        source_health_unavailable=True,
+        jurisdiction_status="unavailable",
+    )
+    return AssessmentData(
+        current_official=(
+            _record(CURRENT_ID, event_type="rainfall", evidence_scope="current"),
+        ),
+        historical=(
+            _record(
+                HISTORY_ID,
+                event_type="flood_potential",
+                evidence_scope="context",
+                source_type="derived",
+            ),
+        ),
+        nearby_coverage=coverage,
+        source_states=(
+            AssessmentSourceState(
+                source_key="official.cwa.rainfall",
+                signal_type="rainfall",
+                state="fresh",
+                observed_at=now,
+                checked_at=now,
+                message=None,
+            ),
+            AssessmentSourceState(
+                source_key="official.wra.water_level",
+                signal_type="water_level",
+                state="failed",
+                observed_at=None,
+                checked_at=now,
+                message="官方水位來源暫時無法使用",
+            ),
+        ),
+        required_realtime_source_keys=frozenset(
+            {"official.cwa.rainfall", "official.wra.water_level"}
+        ),
+        current_available=True,
+        historical_available=True,
+        coverage_available=False,
+        health_available=False,
+        jurisdiction_available=False,
+        resolved_admin_code=None,
+        resolved_admin_name=None,
+        local_machine_feed_missing=("地方政府機器介面尚未核准",),
+    )
+
+
+def test_service_scores_current_and_history_in_separate_calls(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    calls: list[tuple[RiskEvidenceSignal, ...]] = []
+
+    def scorer(
+        signals: tuple[RiskEvidenceSignal, ...], *, now: datetime
+    ) -> RiskScoringResult:
+        calls.append(signals)
+        return score_risk(signals, now=now)
+
+    response = AssessmentService(FakeRepository(data), scorer).assess(risk_request, now=now)
+
+    assert len(calls) == 2
+    assert {signal.source_type for signal in calls[0]} == {"official"}
+    assert {signal.event_type for signal in calls[1]} <= {
+        "flood_potential",
+        "flood_report",
+        "road_closure",
+    }
+    assert response.community.state == "none"
+
+
+def test_core_service_never_calls_a_community_composer() -> None:
+    source = inspect.getsource(AssessmentService.assess)
+    assert "compose_base_overall" in source
+    assert "compose_with_community" not in source
+    assert "CommunityDecision" not in source
+
+
+def test_persist_failure_does_not_change_successful_response(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    response = AssessmentService(
+        FakeRepository(data, fail_persist=True), score_risk
+    ).assess(risk_request, now=now)
+    assert response.assessment_id
+    assert response.overall is not None
+
+
+def test_persist_programming_error_is_not_swallowed(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    repository = FakeRepository(data, programming_error=TypeError("bad persistence code"))
+
+    with pytest.raises(TypeError, match="bad persistence code"):
+        AssessmentService(repository, score_risk).assess(risk_request, now=now)
+
+
+def test_persisted_snapshot_is_coarsened_and_has_no_raw_query(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    repository = FakeRepository(data)
+    AssessmentService(repository, score_risk).assess(risk_request, now=now)
+    snapshot = repository.persisted[0].result_snapshot
+    assert snapshot["location"] == {
+        "lat": round(risk_request.point.lat, 2),
+        "lng": round(risk_request.point.lng, 2),
+    }
+    assert snapshot["location_text"] is None
+    assert risk_request.location_text not in json.dumps(snapshot, ensure_ascii=False)
+
+
+def test_persistence_keeps_only_valid_uuid_evidence_ids(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    repository = FakeRepository(
+        replace(
+            data,
+            historical=(
+                *data.historical,
+                _record("not-a-uuid", event_type="flood_report", evidence_scope="historical"),
+            ),
+        )
+    )
+
+    AssessmentService(repository, score_risk).assess(risk_request, now=now)
+
+    assert repository.persisted[0].evidence_ids == (CURRENT_ID, HISTORY_ID)
+    assert repository.persisted[0].result_snapshot["evidence_ids"] == [
+        CURRENT_ID,
+        HISTORY_ID,
+    ]
+
+
+def test_required_current_read_failure_is_unknown_not_low(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    coverage = data.nearby_coverage.model_copy(
+        update={
+            "signal_breakdown": [
+                NearbyCoverageSignal(
+                    signal_type=signal_type,
+                    label=signal_type,
+                    coverage_level="high",
+                    availability_state="fresh_nearby",
+                    nearest_distance_m=20.0,
+                    counts_by_radius_m={"750": 1},
+                    fresh_count=1,
+                    stale_count=0,
+                    status_only_count=0,
+                )
+                for signal_type in ("rainfall", "water_level")
+            ],
+            "source_health_checked": True,
+            "jurisdiction_checked": True,
+            "jurisdiction_catalog_complete": True,
+        }
+    )
+    available_data = replace(
+        data,
+        nearby_coverage=coverage,
+        source_states=tuple(replace(state, state="fresh") for state in data.source_states),
+        coverage_available=True,
+        health_available=True,
+        jurisdiction_available=True,
+    )
+    available_response = AssessmentService(
+        FakeRepository(available_data), score_risk
+    ).assess(risk_request, now=now)
+    response = AssessmentService(
+        FakeRepository(replace(available_data, current_available=False)), score_risk
+    ).assess(risk_request, now=now)
+
+    assert available_response.realtime.level == "低"
+    assert response.realtime.level == "未知"
+    assert response.overall is not None
+    assert response.overall.level != "低"
+
+
+def test_response_uses_same_data_for_status_freshness_and_coverage(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    response = AssessmentService(FakeRepository(data), score_risk).assess(
+        risk_request, now=now
+    )
+
+    assert response.nearby_realtime_coverage is data.nearby_coverage
+    assert {item.source_key for item in response.data_status.sources} == {
+        state.source_key for state in data.source_states
+    }
+    assert {item.source_id for item in response.data_freshness} == {
+        state.source_key for state in data.source_states
+    }
+    assert "官方水位來源暫時無法使用" in response.data_status.missing
+    assert "地方政府機器介面尚未核准" in response.data_status.missing
+    assert response.query_heat.period == "frozen"
+    assert response.query_heat.attention_level == "未知"
+
+
+def test_response_preserves_evidence_precision_and_limitations(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    response = AssessmentService(FakeRepository(data), score_risk).assess(
+        risk_request, now=now
+    )
+
+    current = response.evidence[0]
+    assert current.location_precision == "road_or_lane"
+    assert current.limitations == ["位置為道路尺度"]
