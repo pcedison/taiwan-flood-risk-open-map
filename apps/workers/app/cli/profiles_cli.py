@@ -6,6 +6,7 @@ import json
 import time
 
 from app.config import WorkerSettings
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.profiles import (
     ProfileRefreshJobUnavailable,
     claim_profile_refresh_jobs,
@@ -18,6 +19,21 @@ from app.logging import log_event
 
 
 def seed_risk_profiles(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    profile_kind: str,
+    source_key: str,
+    limit: int | None,
+    grid_system: str,
+    grid_resolution: str,
+    include_privacy_bucket_fallback: bool,
+    enqueue_refresh: bool,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_seed_risk_profiles(
     *,
     settings: WorkerSettings,
     database_url: str | None,
@@ -86,6 +102,16 @@ def rebuild_one_risk_profile(
     profile_kind: str | None,
     profile_key: str | None,
 ) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_rebuild_one_risk_profile(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    profile_kind: str | None,
+    profile_key: str | None,
+) -> int:
     resolved_database_url = database_url or settings.database_url
     if not resolved_database_url:
         log_event("profiles.rebuild.noop", reason="no_database_url")
@@ -143,6 +169,19 @@ def rebuild_one_risk_profile(
 
 
 def work_profile_refresh_jobs(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    worker_id: str | None,
+    limit: int,
+    lease_seconds: int,
+    statement_timeout_ms: int,
+    cooldown_seconds: int,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_work_profile_refresh_jobs(
     *,
     settings: WorkerSettings,
     database_url: str | None,

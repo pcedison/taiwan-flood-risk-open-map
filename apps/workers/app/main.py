@@ -8,6 +8,7 @@ from app.adapters.registry import enabled_adapter_keys
 from app.cli import gdelt, maintenance_cli, profiles_cli, queue_cli, runtime_cli
 from app.cli.parser import build_parser, parse_query_heat_periods
 from app.config import load_worker_settings
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.sample import run_sample_job
 from app.logging import log_event
 from app.scheduler import (
@@ -18,6 +19,21 @@ from app.scheduler import (
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if (
+        args.aggregate_query_heat
+        or args.seed_risk_profiles
+        or args.rebuild_risk_profile
+        or args.work_profile_refresh_jobs
+        or args.refresh_tile_features
+        or args.run_enabled_adapters
+        or args.work_runtime_queue
+        or args.enqueue_runtime_jobs
+        or args.requeue_runtime_job
+        or (args.scheduler and not args.maintenance)
+        or (args.run_official_demo and args.persist)
+    ):
+        return report_frozen_legacy()
+
     settings = load_worker_settings()
 
     if args.list_adapters:

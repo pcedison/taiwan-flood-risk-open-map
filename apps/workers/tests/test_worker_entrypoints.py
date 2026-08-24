@@ -7,11 +7,14 @@ from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
 
+import pytest
+
 from app import scheduler as scheduler_module
+from app.cli import maintenance_cli, profiles_cli, queue_cli, runtime_cli
 from app.config import load_worker_settings
 from app.jobs.historical_news_backfill import HistoricalNewsBackfillConfig
-from app.jobs.profiles import ProfileRefreshJobUnavailable
 from app.jobs.official_demo import build_official_demo_adapters
+from app.jobs.profiles import ProfileRefreshJobUnavailable
 from app.jobs.queue import (
     RuntimeQueueDeadLetterJob,
     RuntimeQueueDeadLetterSummary,
@@ -34,6 +37,191 @@ from app.scheduler import (
     run_maintenance_once,
     run_scheduled_ingestion_cycle,
 )
+
+FROZEN_SETTINGS = load_worker_settings(
+    {
+        "WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood",
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall",
+        "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        "SCHEDULER_MAX_TICKS": "1",
+    }
+)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--aggregate-query-heat"],
+        ["--seed-risk-profiles"],
+        [
+            "--rebuild-risk-profile",
+            "--profile-kind",
+            "risk_grid",
+            "--profile-key",
+            "x",
+        ],
+        ["--work-profile-refresh-jobs"],
+        ["--refresh-tile-features"],
+        ["--run-enabled-adapters"],
+        ["--work-runtime-queue", "--once"],
+        ["--enqueue-runtime-jobs"],
+        ["--scheduler", "--max-ticks", "1"],
+        ["--run-official-demo", "--persist"],
+        [
+            "--requeue-runtime-job",
+            "job-1",
+            "--requeue-requested-by",
+            "fixture-operator",
+            "--requeue-reason",
+            "fixture-reason",
+        ],
+    ],
+)
+def test_frozen_legacy_commands_never_construct_writers(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("WORKER_DATABASE_URL", FROZEN_SETTINGS.database_url or "")
+    monkeypatch.setenv("WORKER_ENABLED_ADAPTER_KEYS", "official.cwa.rainfall")
+    monkeypatch.setenv("WORKER_RUNTIME_FIXTURES_ENABLED", "true")
+
+    def fail_writer(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("legacy writer or generic runtime helper reached")
+
+    monkeypatch.setattr(maintenance_cli, "PostgresQueryHeatAggregationJob", fail_writer)
+    monkeypatch.setattr(maintenance_cli, "PostgresTileCacheWriter", fail_writer)
+    monkeypatch.setattr(profiles_cli, "seed_admin_area_profiles_from_geocoder", fail_writer)
+    monkeypatch.setattr(profiles_cli, "rebuild_risk_profile", fail_writer)
+    monkeypatch.setattr(profiles_cli, "claim_profile_refresh_jobs", fail_writer)
+    monkeypatch.setattr(queue_cli, "build_runtime_persistence_bundle", fail_writer)
+    monkeypatch.setattr(queue_cli, "enqueue_enabled_adapters_once", fail_writer)
+    monkeypatch.setattr(queue_cli, "PostgresRuntimeQueueReplayAudit", fail_writer)
+    monkeypatch.setattr(runtime_cli, "build_demo_persistence_writers", fail_writer)
+    monkeypatch.setattr(runtime_cli, "run_managed_runtime_ingestion_cycle", fail_writer)
+    monkeypatch.setattr("app.main.run_enabled_adapters_once", fail_writer)
+    monkeypatch.setattr("app.main.run_enabled_adapters_loop", fail_writer)
+
+    assert main(argv) == 2
+    assert json.loads(capsys.readouterr().out) == {
+        "reason": "v1_legacy_product_writers_frozen",
+        "status": "frozen",
+        "tables_retained": True,
+    }
+
+
+def test_direct_generic_cli_helpers_are_frozen_before_writer_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail_writer(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("generic runtime writer constructed")
+
+    monkeypatch.setattr(queue_cli, "build_runtime_persistence_bundle", fail_writer)
+    monkeypatch.setattr(queue_cli, "enqueue_enabled_adapters_once", fail_writer)
+    monkeypatch.setattr(queue_cli, "PostgresRuntimeQueueReplayAudit", fail_writer)
+    monkeypatch.setattr(runtime_cli, "run_managed_runtime_ingestion_cycle", fail_writer)
+    monkeypatch.setattr(runtime_cli, "PostgresRuntimeQueue", fail_writer)
+    monkeypatch.setattr(runtime_cli, "build_demo_persistence_writers", fail_writer)
+
+    calls = (
+        lambda: queue_cli.work_runtime_queue(
+            settings=FROZEN_SETTINGS,
+            once=True,
+            max_ticks=None,
+            persist=True,
+            database_url=FROZEN_SETTINGS.database_url,
+        ),
+        lambda: queue_cli.enqueue_runtime_jobs(
+            settings=FROZEN_SETTINGS,
+            scheduler=False,
+            once=True,
+            max_ticks=None,
+        ),
+        lambda: queue_cli.requeue_runtime_job(
+            settings=FROZEN_SETTINGS,
+            database_url=FROZEN_SETTINGS.database_url,
+            job_id="job-1",
+            reset_attempts=True,
+            requested_by="fixture",
+            reason="fixture",
+        ),
+        lambda: runtime_cli.run_managed_enabled_adapters(
+            settings=FROZEN_SETTINGS,
+            database_url=FROZEN_SETTINGS.database_url,
+        ),
+        lambda: runtime_cli.run_managed_enabled_adapters_loop(
+            settings=FROZEN_SETTINGS,
+            database_url=FROZEN_SETTINGS.database_url,
+            once=True,
+            max_ticks=1,
+        ),
+        lambda: runtime_cli.run_official_demo(
+            settings=FROZEN_SETTINGS,
+            persist=True,
+            database_url=FROZEN_SETTINGS.database_url,
+        ),
+    )
+
+    for call in calls:
+        assert call() == 2
+        assert json.loads(capsys.readouterr().out)["status"] == "frozen"
+
+
+def test_direct_legacy_product_helpers_are_frozen_before_writer_construction(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail_writer(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("legacy product writer constructed")
+
+    monkeypatch.setattr(maintenance_cli, "PostgresQueryHeatAggregationJob", fail_writer)
+    monkeypatch.setattr(maintenance_cli, "PostgresTileCacheWriter", fail_writer)
+    monkeypatch.setattr(profiles_cli, "seed_admin_area_profiles_from_geocoder", fail_writer)
+    monkeypatch.setattr(profiles_cli, "rebuild_risk_profile", fail_writer)
+    monkeypatch.setattr(profiles_cli, "claim_profile_refresh_jobs", fail_writer)
+
+    calls = (
+        lambda: maintenance_cli.aggregate_query_heat(
+            settings=FROZEN_SETTINGS,
+            periods=("P1D",),
+        ),
+        lambda: maintenance_cli.refresh_tile_features(
+            settings=FROZEN_SETTINGS,
+            layer_id="flood-potential",
+            limit=1,
+        ),
+        lambda: profiles_cli.seed_risk_profiles(
+            settings=FROZEN_SETTINGS,
+            database_url=FROZEN_SETTINGS.database_url,
+            profile_kind="all",
+            source_key="fixture",
+            limit=1,
+            grid_system="h3",
+            grid_resolution="8",
+            include_privacy_bucket_fallback=False,
+            enqueue_refresh=True,
+        ),
+        lambda: profiles_cli.rebuild_one_risk_profile(
+            settings=FROZEN_SETTINGS,
+            database_url=FROZEN_SETTINGS.database_url,
+            profile_kind="risk_grid",
+            profile_key="x",
+        ),
+        lambda: profiles_cli.work_profile_refresh_jobs(
+            settings=FROZEN_SETTINGS,
+            database_url=FROZEN_SETTINGS.database_url,
+            worker_id="fixture",
+            limit=1,
+            lease_seconds=1,
+            statement_timeout_ms=1,
+            cooldown_seconds=0,
+        ),
+    )
+
+    for call in calls:
+        assert call() == 2
+        assert json.loads(capsys.readouterr().out)["status"] == "frozen"
 
 
 def test_official_demo_builder_covers_default_official_adapter_keys() -> None:
@@ -86,7 +274,7 @@ def test_main_run_official_demo_is_a_cli_entrypoint() -> None:
 def test_main_run_enabled_adapters_noops_without_runtime_fixtures() -> None:
     exit_code = main(["--run-enabled-adapters"])
 
-    assert exit_code == 0
+    assert exit_code == 2
 
 
 def test_main_records_authoritative_disabled_runtime_selection(monkeypatch) -> None:
@@ -475,8 +663,8 @@ def test_main_scheduler_can_run_bounded_runtime_loop(monkeypatch) -> None:
 
     exit_code = main(["--scheduler", "--max-ticks", "2"])
 
-    assert exit_code == 0
-    assert captured["max_ticks"] == 2
+    assert exit_code == 2
+    assert captured == {}
 
 
 def test_main_work_runtime_queue_once_is_a_cli_entrypoint(monkeypatch) -> None:
@@ -491,8 +679,8 @@ def test_main_work_runtime_queue_once_is_a_cli_entrypoint(monkeypatch) -> None:
 
     exit_code = main(["--work-runtime-queue", "--once"])
 
-    assert exit_code == 0
-    assert captured["settings"] is not None
+    assert exit_code == 2
+    assert captured == {}
 
 
 def test_main_work_runtime_queue_persist_wires_runtime_writers(monkeypatch) -> None:
@@ -528,14 +716,8 @@ def test_main_work_runtime_queue_persist_wires_runtime_writers(monkeypatch) -> N
         ]
     )
 
-    assert exit_code == 0
-    assert captured == {
-        "writer_database_url": "postgresql://worker:test@localhost/flood",
-        "writer": persistence[0],
-        "run_writer": persistence[1],
-        "promotion_writer": persistence[2],
-        "promote": True,
-    }
+    assert exit_code == 2
+    assert captured == {}
 
 
 def test_main_enqueue_runtime_jobs_is_a_cli_entrypoint(monkeypatch) -> None:
@@ -554,8 +736,8 @@ def test_main_enqueue_runtime_jobs_is_a_cli_entrypoint(monkeypatch) -> None:
 
     exit_code = main(["--enqueue-runtime-jobs"])
 
-    assert exit_code == 0
-    assert captured["settings"] is not None
+    assert exit_code == 2
+    assert captured == {}
 
 
 def test_main_scheduler_enqueue_runtime_jobs_can_be_bounded(monkeypatch) -> None:
@@ -573,8 +755,8 @@ def test_main_scheduler_enqueue_runtime_jobs_can_be_bounded(monkeypatch) -> None
 
     exit_code = main(["--enqueue-runtime-jobs", "--scheduler", "--max-ticks", "2"])
 
-    assert exit_code == 0
-    assert captured["max_ticks"] == 2
+    assert exit_code == 2
+    assert captured == {}
 
 
 def test_main_list_runtime_dead_letter_jobs_prints_json_lines(monkeypatch, capsys) -> None:
@@ -1039,21 +1221,12 @@ def test_main_requeue_runtime_job_resets_attempts_by_default(monkeypatch, capsys
         ]
     )
 
-    assert exit_code == 0
-    assert captured["audit_database_url"] == "postgresql://worker:test@localhost/flood"
-    assert captured["job_id"] == "job-1"
-    assert captured["requested_by"] == "operator@example.test"
-    assert captured["reason"] == "manual retry"
-    assert captured["reset_attempts"] is True
+    assert exit_code == 2
+    assert captured == {}
     assert json.loads(capsys.readouterr().out) == {
-        "attempts": 0,
-        "attempts_before": 3,
-        "job_id": "job-1",
-        "outcome_audit_id": "audit-completed",
-        "reason": None,
-        "requested_audit_id": "audit-requested",
-        "requeued": True,
-        "reset_attempts": True,
+        "reason": "v1_legacy_product_writers_frozen",
+        "status": "frozen",
+        "tables_retained": True,
     }
 
 
@@ -1108,21 +1281,12 @@ def test_main_requeue_runtime_job_can_keep_attempts_and_database_override(
         ]
     )
 
-    assert exit_code == 0
-    assert captured["audit_database_url"] == "postgresql://override:test@localhost/flood"
-    assert captured["job_id"] == "job-1"
-    assert captured["requested_by"] == "operator@example.test"
-    assert captured["reason"] == "keep attempts after inspection"
-    assert captured["reset_attempts"] is False
+    assert exit_code == 2
+    assert captured == {}
     assert json.loads(capsys.readouterr().out) == {
-        "attempts": 3,
-        "attempts_before": 3,
-        "job_id": "job-1",
-        "outcome_audit_id": "audit-completed",
-        "reason": None,
-        "requested_audit_id": "audit-requested",
-        "requeued": True,
-        "reset_attempts": False,
+        "reason": "v1_legacy_product_writers_frozen",
+        "status": "frozen",
+        "tables_retained": True,
     }
 
 
@@ -1138,7 +1302,7 @@ def test_main_requeue_runtime_job_requires_audit_context(monkeypatch) -> None:
 
     exit_code = main(["--requeue-runtime-job", "job-1"])
 
-    assert exit_code == 1
+    assert exit_code == 2
 
 
 def test_main_requeue_runtime_job_refuses_active_poison_quarantine(
@@ -1193,23 +1357,18 @@ def test_main_requeue_runtime_job_refuses_active_poison_quarantine(
         ]
     )
 
-    assert exit_code == 1
-    assert captured["job_id"] == "job-1"
-    assert captured["requested_by"] == "operator@example.test"
-    assert captured["reason"] == "manual retry"
+    assert exit_code == 2
+    assert captured == {}
     assert json.loads(capsys.readouterr().out) == {
-        "attempts": 5,
-        "attempts_before": 5,
-        "job_id": "job-1",
-        "outcome_audit_id": "audit-failed",
-        "reason": "poison_quarantine_active",
-        "requested_audit_id": "audit-requested",
-        "requeued": False,
-        "reset_attempts": True,
+        "reason": "v1_legacy_product_writers_frozen",
+        "status": "frozen",
+        "tables_retained": True,
     }
 
 
-def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) -> None:
+def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
+    monkeypatch,
+) -> None:
     settings = load_worker_settings(
         {"WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood"}
     )
@@ -1308,18 +1467,16 @@ def test_scheduler_maintenance_once_runs_query_heat_then_tile_jobs(monkeypatch) 
     )
 
     assert result.status == "succeeded"
+    assert result.query_heat_summaries == ()
+    assert result.query_heat_retention is None
     assert result.evidence_retention is not None
     assert result.location_query_retention is not None
+    assert result.tile_refresh is None
+    assert result.tile_prune is None
     assert calls == [
-        ("query.init", "postgresql://worker:test@localhost/flood"),
-        ("query.aggregate", ("P7D", "P1D")),
-        ("query.retention", (("P7D", "P1D"), 14)),
         ("evidence.init", "postgresql://worker:test@localhost/flood"),
         ("evidence.retention", 48),
         ("location_queries.retention", 720),
-        ("tile.init", "postgresql://worker:test@localhost/flood"),
-        ("tile.refresh", ("flood-potential", 25)),
-        ("tile.prune", ("flood-potential", expired_before, 50)),
     ]
 
 
@@ -1427,8 +1584,8 @@ def test_scheduler_cli_enqueue_runtime_jobs_uses_lease_guarded_loop(monkeypatch)
 
     exit_code = scheduler_module.main(("--enqueue-runtime-jobs", "--max-ticks", "2"))
 
-    assert exit_code == 0
-    assert captured["max_ticks"] == 2
+    assert exit_code == 2
+    assert captured == {}
 
 
 def test_main_run_official_demo_does_not_persist_by_default(monkeypatch) -> None:
@@ -1649,13 +1806,10 @@ def test_main_run_official_demo_persist_writes_staging_runs_and_promotes(monkeyp
     monkeypatch.setattr("app.cli.persistence.PostgresIngestionRunWriter", _FakeRunWriter)
     monkeypatch.setattr("app.cli.persistence.PostgresEvidencePromotionWriter", _FakePromotionWriter)
 
-    exit_code = main(
-        [
-            "--run-official-demo",
-            "--persist",
-            "--database-url",
-            "postgresql://worker:test@localhost/flood",
-        ]
+    exit_code = runtime_cli._legacy_run_official_demo(
+        settings=load_worker_settings(),
+        persist=True,
+        database_url="postgresql://worker:test@localhost/flood",
     )
 
     assert exit_code == 0
@@ -1694,13 +1848,9 @@ def test_main_run_enabled_adapters_persist_uses_managed_runtime(monkeypatch) -> 
     monkeypatch.setattr("app.cli.runtime_cli.run_managed_runtime_ingestion_cycle", fake_managed_cycle)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
-    exit_code = main(
-        [
-            "--run-enabled-adapters",
-            "--persist",
-            "--database-url",
-            "postgresql://worker:test@localhost/flood",
-        ]
+    exit_code = runtime_cli._legacy_run_managed_enabled_adapters(
+        settings=load_worker_settings(),
+        database_url="postgresql://worker:test@localhost/flood",
     )
 
     assert exit_code == 0
@@ -1759,16 +1909,11 @@ def test_main_run_enabled_adapters_persist_scheduler_uses_lease(monkeypatch) -> 
     monkeypatch.setattr("app.cli.runtime_cli.time.sleep", fake_sleep)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
-    exit_code = main(
-        [
-            "--run-enabled-adapters",
-            "--persist",
-            "--scheduler",
-            "--max-ticks",
-            "2",
-            "--database-url",
-            "postgresql://worker:test@localhost/flood",
-        ]
+    exit_code = runtime_cli._legacy_run_managed_enabled_adapters_loop(
+        settings=load_worker_settings(),
+        database_url="postgresql://worker:test@localhost/flood",
+        once=False,
+        max_ticks=2,
     )
 
     assert exit_code == 0
@@ -1837,16 +1982,11 @@ def test_main_run_enabled_adapters_persist_scheduler_waits_when_lease_held(
     monkeypatch.setattr("app.cli.runtime_cli.time.sleep", fake_sleep)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
-    exit_code = main(
-        [
-            "--run-enabled-adapters",
-            "--persist",
-            "--scheduler",
-            "--max-ticks",
-            "1",
-            "--database-url",
-            "postgresql://worker:test@localhost/flood",
-        ]
+    exit_code = runtime_cli._legacy_run_managed_enabled_adapters_loop(
+        settings=load_worker_settings(),
+        database_url="postgresql://worker:test@localhost/flood",
+        once=False,
+        max_ticks=1,
     )
 
     assert exit_code == 0
@@ -1907,16 +2047,11 @@ def test_main_run_enabled_adapters_heartbeats_during_a_long_cycle(monkeypatch) -
     )
     monkeypatch.setattr("app.cli.runtime_cli.log_event", lambda *args, **kwargs: None)
 
-    exit_code = main(
-        [
-            "--run-enabled-adapters",
-            "--persist",
-            "--scheduler",
-            "--max-ticks",
-            "1",
-            "--database-url",
-            "postgresql://worker:test@localhost/flood",
-        ]
+    exit_code = runtime_cli._legacy_run_managed_enabled_adapters_loop(
+        settings=load_worker_settings(),
+        database_url="postgresql://worker:test@localhost/flood",
+        once=False,
+        max_ticks=1,
     )
 
     assert exit_code == 0
@@ -1966,16 +2101,11 @@ def test_managed_scheduler_does_not_log_runtime_queue_exception_details(monkeypa
     monkeypatch.setattr("app.cli.runtime_cli.time.sleep", lambda _seconds: None)
     monkeypatch.setattr("app.cli.runtime_cli.log_event", capture_event)
 
-    exit_code = main(
-        [
-            "--run-enabled-adapters",
-            "--persist",
-            "--scheduler",
-            "--max-ticks",
-            "1",
-            "--database-url",
-            "postgresql://worker:test@localhost/flood",
-        ]
+    exit_code = runtime_cli._legacy_run_managed_enabled_adapters_loop(
+        settings=load_worker_settings(),
+        database_url="postgresql://worker:test@localhost/flood",
+        once=False,
+        max_ticks=1,
     )
 
     assert exit_code == 0
@@ -2019,18 +2149,12 @@ def test_main_aggregate_query_heat_uses_configured_periods(monkeypatch) -> None:
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
     monkeypatch.setattr("app.cli.maintenance_cli.PostgresQueryHeatAggregationJob", FakeQueryHeatAggregationJob)
 
-    exit_code = main(
-        [
-            "--aggregate-query-heat",
-            "--query-heat-periods",
-            "P7D,P1D,P7D",
-            "--query-heat-created-at-start",
-            "2026-04-23T00:00:00Z",
-            "--query-heat-created-at-end",
-            "2026-04-30T00:00:00+00:00",
-            "--query-heat-retention-days",
-            "14",
-        ]
+    exit_code = maintenance_cli._legacy_aggregate_query_heat(
+        settings=load_worker_settings(),
+        periods=("P7D", "P1D"),
+        created_at_start=datetime(2026, 4, 23, 0, 0, tzinfo=UTC),
+        created_at_end=datetime(2026, 4, 30, 0, 0, tzinfo=UTC),
+        retention_days=14,
     )
 
     assert exit_code == 0
@@ -2053,7 +2177,10 @@ def test_main_aggregate_query_heat_noops_without_database_url(monkeypatch) -> No
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr("app.cli.maintenance_cli.PostgresQueryHeatAggregationJob", fail_constructor)
 
-    assert main(["--aggregate-query-heat"]) == 0
+    assert maintenance_cli._legacy_aggregate_query_heat(
+        settings=load_worker_settings(),
+        periods=("P1D", "P7D"),
+    ) == 0
 
 
 def test_main_refresh_tile_features_uses_layer_and_limit(monkeypatch) -> None:
@@ -2071,14 +2198,10 @@ def test_main_refresh_tile_features_uses_layer_and_limit(monkeypatch) -> None:
     monkeypatch.setenv("WORKER_DATABASE_URL", "postgresql://worker:test@localhost/flood")
     monkeypatch.setattr("app.cli.maintenance_cli.PostgresTileCacheWriter", FakeTileCacheWriter)
 
-    exit_code = main(
-        [
-            "--refresh-tile-features",
-            "--tile-layer-id",
-            "flood-potential",
-            "--tile-feature-limit",
-            "25",
-        ]
+    exit_code = maintenance_cli._legacy_refresh_tile_features(
+        settings=load_worker_settings(),
+        layer_id="flood-potential",
+        limit=25,
     )
 
     assert exit_code == 0
@@ -2098,7 +2221,11 @@ def test_main_refresh_tile_features_noops_without_database_url(monkeypatch) -> N
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr("app.cli.maintenance_cli.PostgresTileCacheWriter", fail_constructor)
 
-    assert main(["--refresh-tile-features"]) == 0
+    assert maintenance_cli._legacy_refresh_tile_features(
+        settings=load_worker_settings(),
+        layer_id="flood-potential",
+        limit=25,
+    ) == 0
 
 
 def test_main_seed_risk_profiles_runs_admin_and_grid_seeders(monkeypatch, capsys) -> None:
@@ -2127,17 +2254,16 @@ def test_main_seed_risk_profiles_runs_admin_and_grid_seeders(monkeypatch, capsys
     monkeypatch.setattr("app.cli.profiles_cli.seed_grid_profiles_from_query_heat", fake_grid_seed)
     monkeypatch.setattr("app.cli.profiles_cli.log_event", lambda *args, **kwargs: None)
 
-    exit_code = main(
-        [
-            "--seed-risk-profiles",
-            "--profile-seed-limit",
-            "5",
-            "--profile-grid-system",
-            "h3",
-            "--profile-grid-resolution",
-            "8",
-            "--profile-include-privacy-bucket-fallback",
-        ]
+    exit_code = profiles_cli._legacy_seed_risk_profiles(
+        settings=load_worker_settings(),
+        database_url=None,
+        profile_kind="all",
+        source_key="moi-village-boundary-twd97-geographic",
+        limit=5,
+        grid_system="h3",
+        grid_resolution="8",
+        include_privacy_bucket_fallback=True,
+        enqueue_refresh=True,
     )
 
     assert exit_code == 0
@@ -2182,18 +2308,14 @@ def test_main_work_profile_refresh_jobs_claims_rebuilds_and_completes(monkeypatc
     monkeypatch.setattr("app.cli.profiles_cli.rebuild_risk_profile", fake_rebuild)
     monkeypatch.setattr("app.cli.profiles_cli.complete_profile_refresh_job", fake_complete)
 
-    exit_code = main(
-        [
-            "--work-profile-refresh-jobs",
-            "--profile-refresh-limit",
-            "2",
-            "--profile-refresh-worker-id",
-            "worker-a",
-            "--profile-refresh-statement-timeout-ms",
-            "9000",
-            "--profile-refresh-cooldown-seconds",
-            "0",
-        ]
+    exit_code = profiles_cli._legacy_work_profile_refresh_jobs(
+        settings=load_worker_settings(),
+        database_url=None,
+        worker_id="worker-a",
+        limit=2,
+        lease_seconds=300,
+        statement_timeout_ms=9000,
+        cooldown_seconds=0,
     )
 
     assert exit_code == 0
@@ -2239,14 +2361,14 @@ def test_main_work_profile_refresh_jobs_sleeps_between_claimed_jobs(monkeypatch,
     monkeypatch.setattr("app.cli.profiles_cli.complete_profile_refresh_job", lambda **kwargs: True)
     monkeypatch.setattr("app.cli.profiles_cli.time.sleep", lambda seconds: sleep_calls.append(seconds))
 
-    exit_code = main(
-        [
-            "--work-profile-refresh-jobs",
-            "--profile-refresh-limit",
-            "2",
-            "--profile-refresh-cooldown-seconds",
-            "7",
-        ]
+    exit_code = profiles_cli._legacy_work_profile_refresh_jobs(
+        settings=load_worker_settings(),
+        database_url=None,
+        worker_id=None,
+        limit=2,
+        lease_seconds=300,
+        statement_timeout_ms=15000,
+        cooldown_seconds=7,
     )
 
     assert exit_code == 0
@@ -2287,7 +2409,15 @@ def test_main_work_profile_refresh_jobs_aborts_batch_on_database_connection_erro
     monkeypatch.setattr("app.cli.profiles_cli.rebuild_risk_profile", fake_rebuild)
     monkeypatch.setattr("app.cli.profiles_cli.complete_profile_refresh_job", lambda **kwargs: True)
 
-    exit_code = main(["--work-profile-refresh-jobs", "--profile-refresh-limit", "2"])
+    exit_code = profiles_cli._legacy_work_profile_refresh_jobs(
+        settings=load_worker_settings(),
+        database_url=None,
+        worker_id=None,
+        limit=2,
+        lease_seconds=300,
+        statement_timeout_ms=15000,
+        cooldown_seconds=0,
+    )
 
     assert exit_code == 1
     assert rebuild_keys == ["h3:23.00,120.17"]

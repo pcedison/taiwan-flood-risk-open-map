@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Protocol, cast
+from urllib.parse import urlparse
 
 from app.api.schemas import MapLayer, TileJson, TileJsonVectorLayer
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
 from app.domain.tiles import VECTOR_TILE_CACHE_CONTROL
-
 
 PLACEHOLDER_TILE_URL_MARKERS = (
     "tiles.placeholder.flood-risk.local",
@@ -44,18 +44,6 @@ def legacy_static_layers(now: datetime) -> list[MapLayer]:
             tilejson_url="/v1/layers/flood-potential/tilejson",
             updated_at=now,
         ),
-        MapLayer(
-            id="query-heat",
-            name="查詢關注度",
-            description="去識別化後的區域查詢關注度。",
-            category="query_heat",
-            status="available",
-            minzoom=8,
-            maxzoom=14,
-            attribution="Flood Risk 去識別化統計",
-            tilejson_url="/v1/layers/query-heat/tilejson",
-            updated_at=now,
-        ),
     ]
 
 
@@ -79,28 +67,6 @@ def static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
                     {
                         "id": "flood_potential",
                         "fields": {"source_id": "String", "category": "String"},
-                    }
-                ],
-            },
-        ),
-        LayerRecord(
-            id="query-heat",
-            name="查詢關注度",
-            description="去識別化區域查詢密度的靜態備援圖層。",
-            category="query_heat",
-            status="disabled",
-            minzoom=8,
-            maxzoom=14,
-            attribution="本服務去識別化統計",
-            tilejson_url="/v1/layers/query-heat/tilejson",
-            updated_at=now,
-            metadata={
-                "version": "static-fallback",
-                "bounds": [119.3, 21.8, 122.1, 25.4],
-                "vector_layers": [
-                    {
-                        "id": "query_heat",
-                        "fields": {"query_count_bucket": "String", "period": "String"},
                     }
                 ],
             },
@@ -154,12 +120,14 @@ def layer_records(
     try:
         records = fetch_layers(database_url=database_url)
     except LayerRepositoryUnavailable:
-        return static_layer_records(now)
-    return records or static_layer_records(now)
+        records = static_layer_records(now)
+    resolved_records = records or static_layer_records(now)
+    return tuple(record for record in resolved_records if is_public_external_tile_layer(record))
 
 
 def static_layer_by_id(layer_id: str, now: datetime) -> LayerRecord | None:
-    return {layer.id: layer for layer in static_layer_records(now)}.get(layer_id)
+    record = {layer.id: layer for layer in static_layer_records(now)}.get(layer_id)
+    return record if record is not None and is_public_external_tile_layer(record) else None
 
 
 def layer_record(
@@ -170,6 +138,8 @@ def layer_record(
     fetch_layers: FetchMapLayers,
     fetch_layer: FetchMapLayer,
 ) -> LayerRecord | None:
+    if layer_id == "query-heat":
+        return None
     try:
         records = fetch_layers(database_url=database_url)
     except LayerRepositoryUnavailable:
@@ -177,9 +147,10 @@ def layer_record(
     if not records:
         return static_layer_by_id(layer_id, now)
     try:
-        return fetch_layer(database_url=database_url, layer_id=layer_id)
+        record = fetch_layer(database_url=database_url, layer_id=layer_id)
     except LayerRepositoryUnavailable:
         return static_layer_by_id(layer_id, now)
+    return record if record is not None and is_public_external_tile_layer(record) else None
 
 
 def layers(
@@ -228,13 +199,29 @@ def tile_templates_for_layer(
     *,
     allow_local_tile_fallback: bool,
 ) -> tuple[list[str], str]:
+    del allow_local_tile_fallback
     metadata_tiles = _string_list(record.metadata.get("tiles"), fallback=[])
-    safe_tiles = [tile for tile in metadata_tiles if not is_placeholder_tile_url(tile)]
+    safe_tiles = [tile for tile in metadata_tiles if is_external_tile_url(tile)]
     if safe_tiles:
         return safe_tiles, "metadata"
-    if allow_local_tile_fallback:
-        return [f"/v1/tiles/{record.id}/{{z}}/{{x}}/{{y}}.mvt"], "local_vector_tile_endpoint"
-    raise LayerTileJsonUnavailable(record.id)
+    raise LayerTileJsonDisabled(record.id)
+
+
+def is_public_external_tile_layer(record: LayerRecord) -> bool:
+    if record.id == "query-heat" or record.category == "query_heat":
+        return False
+    metadata_tiles = _string_list(record.metadata.get("tiles"), fallback=[])
+    return any(is_external_tile_url(tile) for tile in metadata_tiles)
+
+
+def is_external_tile_url(value: str) -> bool:
+    normalized = value.strip().lower()
+    parsed = urlparse(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    if is_placeholder_tile_url(normalized):
+        return False
+    return not parsed.path.startswith("/v1/tiles/") and not parsed.path.endswith(".pmtiles")
 
 
 def is_placeholder_tile_url(value: str) -> bool:

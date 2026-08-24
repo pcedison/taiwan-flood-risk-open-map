@@ -1,13 +1,9 @@
 from fastapi import APIRouter, HTTPException, Path, Response
 
 from app.api.errors import error_payload
-from app.core.config import get_settings
-from app.domain.tiles import (
-    TileLayerNotFound,
-    TileRepositoryUnavailable,
-    VECTOR_TILE_CACHE_CONTROL,
-    fetch_vector_tile,
-)
+from app.domain import tiles as tile_domain
+
+fetch_vector_tile = tile_domain.fetch_vector_tile
 
 router = APIRouter(prefix="/v1", tags=["Tiles"])
 
@@ -26,44 +22,8 @@ def get_vector_tile(
     x: int = Path(ge=0),
     y: int = Path(ge=0),
 ) -> Response:
-    if x >= 2**z or y >= 2**z:
-        raise HTTPException(
-            status_code=404,
-            detail=error_payload("not_found", "Tile coordinate is outside the zoom bounds.")[
-                "error"
-            ],
-        )
-
-    try:
-        settings = get_settings()
-        tile = fetch_vector_tile(
-            database_url=settings.database_url,
-            layer_id=layer_id,
-            z=z,
-            x=x,
-            y=y,
-            allow_dynamic_fallback=settings.tile_dynamic_fallback_enabled,
-        )
-    except TileLayerNotFound:
-        raise HTTPException(
-            status_code=404,
-            detail=error_payload("not_found", f"Layer '{layer_id}' was not found.")["error"],
-        ) from None
-    except TileRepositoryUnavailable as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=error_payload(
-                "tiles_unavailable",
-                "Tile storage is unavailable.",
-                {"reason": str(exc)},
-            )["error"],
-        ) from exc
-
-    return Response(
-        content=tile,
-        media_type="application/vnd.mapbox-vector-tile",
-        headers={
-            "Cache-Control": VECTOR_TILE_CACHE_CONTROL,
-            "X-Tile-Layer": layer_id,
-        },
+    del layer_id, z, x, y
+    raise HTTPException(
+        status_code=404,
+        detail=error_payload("not_found", "Tile was not found.")["error"],
     )

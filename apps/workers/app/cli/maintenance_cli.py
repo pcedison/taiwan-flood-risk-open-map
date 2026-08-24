@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from app.config import WorkerSettings
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.query_heat import PostgresQueryHeatAggregationJob, QueryHeatAggregationUnavailable
 from app.jobs.tile_cache import PostgresTileCacheWriter, TileCacheUnavailable, TileLayerUnsupported
 from app.logging import log_event
@@ -73,6 +74,17 @@ def aggregate_query_heat(
     created_at_end: datetime | None = None,
     retention_days: int | None = None,
 ) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_aggregate_query_heat(
+    *,
+    settings: WorkerSettings,
+    periods: tuple[str, ...],
+    created_at_start: datetime | None = None,
+    created_at_end: datetime | None = None,
+    retention_days: int | None = None,
+) -> int:
     if not settings.database_url:
         log_event("query_heat.aggregation.noop", reason="no_database_url", periods=periods)
         return 0
@@ -104,6 +116,15 @@ def aggregate_query_heat(
 
 
 def refresh_tile_features(
+    *,
+    settings: WorkerSettings,
+    layer_id: str,
+    limit: int | None,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_refresh_tile_features(
     *,
     settings: WorkerSettings,
     layer_id: str,

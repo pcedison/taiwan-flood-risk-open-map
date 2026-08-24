@@ -1261,9 +1261,124 @@ def test_layers_falls_back_when_db_unavailable(monkeypatch) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert [layer["id"] for layer in payload["layers"]] == ["flood-potential", "query-heat"]
-    assert all(layer["status"] == "disabled" for layer in payload["layers"])
+    assert payload["layers"] == []
     assert_openapi_schema(payload, "LayersResponse")
+
+
+def test_public_layers_hide_query_heat_and_local_tile_products(monkeypatch) -> None:
+    now = datetime.fromisoformat("2026-04-30T03:00:00+00:00")
+    records = (
+        LayerRecord(
+            id="query-heat",
+            name="Query heat",
+            description="Frozen query heat product.",
+            category="query_heat",
+            status="available",
+            minzoom=8,
+            maxzoom=14,
+            attribution="Flood Risk",
+            tilejson_url="/v1/layers/query-heat/tilejson",
+            updated_at=now,
+            metadata={"tiles": ["/v1/tiles/query-heat/{z}/{x}/{y}.mvt"]},
+        ),
+        LayerRecord(
+            id="official-flood",
+            name="Official flood potential",
+            description="Reviewed external official layer.",
+            category="flood_potential",
+            status="available",
+            minzoom=8,
+            maxzoom=18,
+            attribution="Official agency",
+            tilejson_url="/v1/layers/official-flood/tilejson",
+            updated_at=now,
+            metadata={
+                "tiles": ["https://official.example.test/flood/{z}/{x}/{y}.pbf"]
+            },
+        ),
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: records)
+
+    response = client.get("/v1/layers")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["layers"]] == ["official-flood"]
+    serialized = response.text.lower()
+    assert "query_heat" not in serialized
+    assert "/v1/tiles/" not in serialized
+    assert "pmtiles" not in serialized
+
+
+def test_static_openapi_hides_frozen_layer_products() -> None:
+    assert "/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt" not in OPENAPI_SPEC["paths"]
+    map_layer_categories = OPENAPI_SPEC["components"]["schemas"]["MapLayer"]["properties"][
+        "category"
+    ]["enum"]
+    tile_url_sources = OPENAPI_SPEC["components"]["schemas"]["TileJson"]["properties"][
+        "tile_url_source"
+    ]["enum"]
+
+    assert "query_heat" not in map_layer_categories
+    assert "local_vector_tile_endpoint" not in tile_url_sources
+
+
+@pytest.mark.parametrize(
+    "layer_id,tiles",
+    [
+        ("local-flood", ["/v1/tiles/local-flood/{z}/{x}/{y}.mvt"]),
+        (
+            "absolute-local-flood",
+            ["https://api.example.test/v1/tiles/local-flood/{z}/{x}/{y}.mvt"],
+        ),
+        ("pmtiles-flood", ["https://official.example.test/flood.pmtiles"]),
+    ],
+)
+def test_tilejson_hides_local_and_pmtiles_products(
+    monkeypatch,
+    layer_id: str,
+    tiles: list[str],
+) -> None:
+    layer = LayerRecord(
+        id=layer_id,
+        name="Frozen tile product",
+        description=None,
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url=f"/v1/layers/{layer_id}/tilejson",
+        updated_at=None,
+        metadata={"tiles": tiles},
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    response = client.get(f"/v1/layers/{layer_id}/tilejson")
+
+    assert response.status_code == 404
+
+
+def test_query_heat_tilejson_is_not_enumerable(monkeypatch) -> None:
+    layer = LayerRecord(
+        id="query-heat",
+        name="Query heat",
+        description=None,
+        category="query_heat",
+        status="available",
+        minzoom=8,
+        maxzoom=14,
+        attribution="Flood Risk",
+        tilejson_url="/v1/layers/query-heat/tilejson",
+        updated_at=None,
+        metadata={"tiles": ["https://official.example.test/query/{z}/{x}/{y}.pbf"]},
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    response = client.get("/v1/layers/query-heat/tilejson")
+
+    assert response.status_code == 404
 
 
 def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
@@ -1339,13 +1454,8 @@ def test_tilejson_sanitizes_placeholder_tile_metadata(monkeypatch) -> None:
 
     response = client.get("/v1/layers/db-flood/tilejson")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["tiles"] == ["/v1/tiles/db-flood/{z}/{x}/{y}.mvt"]
-    assert payload["tile_url_source"] == "local_vector_tile_endpoint"
-    assert payload["cache_control"] == "public, max-age=60"
+    assert response.status_code == 404
     assert "tiles.placeholder.flood-risk.local" not in response.text
-    assert_openapi_schema(payload, "TileJson")
     get_settings.cache_clear()
 
 
@@ -1396,10 +1506,10 @@ def test_tilejson_returns_503_for_enabled_layer_without_tiles_in_hosted_env(
 
     response = client.get("/v1/layers/db-flood/tilejson")
 
-    assert response.status_code == 503
+    assert response.status_code == 404
     payload = response.json()
     assert_error_envelope(payload)
-    assert payload["error"]["code"] == "tiles_unavailable"
+    assert payload["error"]["code"] == "not_found"
     get_settings.cache_clear()
 
 
@@ -1409,26 +1519,7 @@ def test_layers_and_tilejson_contracts() -> None:
     assert layers_response.status_code == 200
     layers_payload = layers_response.json()
     assert set(layers_payload) == {"layers"}
-    assert layers_payload["layers"]
-    layer = layers_payload["layers"][0]
-    assert set(layer) == {
-        "id",
-        "name",
-        "description",
-        "category",
-        "status",
-        "minzoom",
-        "maxzoom",
-        "attribution",
-        "tilejson_url",
-        "updated_at",
-    }
-
-    tilejson_response = client.get(layer["tilejson_url"])
-    assert tilejson_response.status_code == 404
-    payload = tilejson_response.json()
-    assert_error_envelope(payload)
-    assert payload["error"]["code"] == "layer_disabled"
+    assert layers_payload["layers"] == []
     assert_openapi_schema(layers_payload, "LayersResponse")
 
 

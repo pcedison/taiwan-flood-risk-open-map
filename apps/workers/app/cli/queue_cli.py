@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from app.cli.persistence import build_runtime_persistence_bundle
 from app.config import WorkerSettings
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.queue import (
     PostgresRuntimeQueue,
     RuntimeQueueDeadLetterJob,
@@ -23,6 +24,17 @@ from app.scheduler import enqueue_enabled_adapters_loop, enqueue_enabled_adapter
 
 
 def work_runtime_queue(
+    *,
+    settings: WorkerSettings,
+    once: bool,
+    max_ticks: int | None,
+    persist: bool,
+    database_url: str | None,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_work_runtime_queue(
     *,
     settings: WorkerSettings,
     once: bool,
@@ -55,6 +67,16 @@ def work_runtime_queue(
 
 
 def enqueue_runtime_jobs(
+    *,
+    settings: WorkerSettings,
+    scheduler: bool,
+    once: bool,
+    max_ticks: int | None,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_enqueue_runtime_jobs(
     *,
     settings: WorkerSettings,
     scheduler: bool,
@@ -216,6 +238,18 @@ def _default_queue_metrics_snapshots(
 
 
 def requeue_runtime_job(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    job_id: str,
+    reset_attempts: bool,
+    requested_by: str | None,
+    reason: str | None,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_requeue_runtime_job(
     *,
     settings: WorkerSettings,
     database_url: str | None,

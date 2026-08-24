@@ -522,9 +522,8 @@ paths:
                     status: available
                     scheme: xyz
                     tiles:
-                      - "/v1/tiles/flood-potential/{z}/{x}/{y}.mvt"
-                    tile_url_source: local_vector_tile_endpoint
-                    cache_control: "public, max-age=60"
+                      - "https://official.example.gov.tw/flood/{z}/{x}/{y}.pbf"
+                    tile_url_source: metadata
                     minzoom: 8
                     maxzoom: 18
                     updated_at: "2026-04-28T12:00:00Z"
@@ -542,62 +541,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
-
-  /v1/tiles/{layer_id}/{z}/{x}/{y}.mvt:
-    get:
-      tags:
-        - Public
-      operationId: getVectorTile
-      summary: Return a Mapbox Vector Tile for a seeded map layer.
-      parameters:
-        - $ref: "#/components/parameters/LayerId"
-        - name: z
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 0
-            maximum: 24
-          description: Tile zoom.
-        - name: x
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 0
-          description: Tile x coordinate.
-        - name: y
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 0
-          description: Tile y coordinate.
-      responses:
-        "200":
-          description: Mapbox Vector Tile binary payload.
-          headers:
-            X-Tile-Layer:
-              description: Layer id used to produce the tile.
-              schema:
-                type: string
-            Cache-Control:
-              description: Tile cache policy.
-              schema:
-                type: string
-          content:
-            application/vnd.mapbox-vector-tile:
-              schema:
-                type: string
-                format: binary
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "503":
-          description: Tile storage unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/jobs:
     get:
@@ -2754,7 +2697,6 @@ components:
             - water_level
             - warning
             - evidence
-            - query_heat
         status:
           type: string
           enum:
@@ -2835,7 +2777,6 @@ components:
             - "null"
           enum:
             - metadata
-            - local_vector_tile_endpoint
             - null
         cache_control:
           type:

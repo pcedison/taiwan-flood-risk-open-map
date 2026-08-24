@@ -17,6 +17,7 @@ from app.jobs.evidence_retention import (
     PostgresEvidenceRetentionJob,
 )
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.ingestion import (
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
@@ -25,9 +26,8 @@ from app.jobs.ingestion import (
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.query_heat import (
     SUPPORTED_QUERY_HEAT_PERIODS,
-    PostgresQueryHeatAggregationJob,
+    PostgresQueryHeatAggregationJob,  # noqa: F401 - compatibility seam for freeze tests
     QueryHeatAggregationSummary,
-    QueryHeatAggregationUnavailable,
     QueryHeatRetentionSummary,
 )
 from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
@@ -39,11 +39,9 @@ from app.jobs.runtime import (
 )
 from app.jobs.sample import run_sample_job
 from app.jobs.tile_cache import (
-    PostgresTileCacheWriter,
+    PostgresTileCacheWriter,  # noqa: F401 - compatibility seam for freeze tests
     TileCachePruneResult,
-    TileCacheUnavailable,
     TileFeatureRefreshResult,
-    TileLayerUnsupported,
 )
 from app.logging import log_event
 from app.metrics import (
@@ -55,12 +53,10 @@ from app.metrics import (
 )
 from app.pipelines.staging import StagingBatchWriter
 
-
 DEFAULT_QUERY_HEAT_RETENTION_DAYS = 90
 DEFAULT_TILE_LAYER_ID = "flood-potential"
 DEFAULT_TILE_FEATURE_LIMIT = 1000
 DEFAULT_TILE_PRUNE_LIMIT = 1000
-MAINTENANCE_LEASE_KEY = "scheduler.maintenance"
 
 MaintenanceStatus = Literal["succeeded", "skipped", "failed"]
 
@@ -236,18 +232,9 @@ def run_maintenance_once(
     location_query_retention: LocationQueryRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
-    expired_before = tile_expired_before or datetime.now(UTC)
+    del retention_days, tile_feature_limit, tile_prune_limit, tile_expired_before
 
     try:
-        query_heat_job = PostgresQueryHeatAggregationJob(
-            database_url=resolved_settings.database_url,
-        )
-        query_heat_summaries = query_heat_job.aggregate(periods=resolved_periods)
-        query_heat_retention = query_heat_job.prune_retention(
-            periods=resolved_periods,
-            retention_days=retention_days,
-        )
-
         retention_job = PostgresEvidenceRetentionJob(
             database_url=resolved_settings.database_url,
         )
@@ -258,21 +245,8 @@ def run_maintenance_once(
             retention_hours=resolved_location_query_retention_hours
         )
 
-        tile_cache_writer = PostgresTileCacheWriter(database_url=resolved_settings.database_url)
-        tile_refresh = tile_cache_writer.refresh_layer_features(
-            layer_id=tile_layer_id,
-            limit=tile_feature_limit,
-        )
-        tile_prune = tile_cache_writer.prune_expired(
-            layer_id=tile_layer_id,
-            expired_before=expired_before,
-            limit=tile_prune_limit,
-        )
     except (
-        QueryHeatAggregationUnavailable,
         EvidenceRetentionUnavailable,
-        TileCacheUnavailable,
-        TileLayerUnsupported,
         ValueError,
     ) as exc:
         log_event(
@@ -294,14 +268,6 @@ def run_maintenance_once(
 
     log_event(
         "scheduler.maintenance.completed",
-        periods=tuple(summary.period for summary in query_heat_summaries),
-        query_heat_buckets_upserted=sum(
-            summary.buckets_upserted for summary in query_heat_summaries
-        ),
-        query_heat_retention_days=retention_days,
-        query_heat_buckets_pruned=(
-            query_heat_retention.buckets_pruned if query_heat_retention else 0
-        ),
         evidence_retention_hours=resolved_retention_hours,
         evidence_rows_pruned=(
             evidence_retention.rows_deleted if evidence_retention else 0
@@ -310,10 +276,8 @@ def run_maintenance_once(
         location_query_rows_pruned=(
             location_query_retention.rows_deleted if location_query_retention else 0
         ),
-        tile_layer_id=tile_refresh.layer_id if tile_refresh else tile_layer_id,
-        tile_features_refreshed=tile_refresh.refreshed if tile_refresh else 0,
-        tile_cache_deleted=tile_prune.tile_cache_deleted if tile_prune else 0,
-        tile_features_deleted=tile_prune.features_deleted if tile_prune else 0,
+        frozen_query_heat=True,
+        frozen_local_tiles=True,
     )
     return MaintenanceCycleResult(
         status="succeeded",
@@ -343,42 +307,20 @@ def run_maintenance_loop(
     resolved_periods = tuple(dict.fromkeys(periods))
     results: list[MaintenanceCycleResult] = []
     tick = 0
-    lease_holder = resolved_settings.metrics_instance
-    lease_acquired = _acquire_scheduler_lease(
-        settings=resolved_settings,
-        holder_id=lease_holder,
-        lease_key=MAINTENANCE_LEASE_KEY,
-    )
-    if lease_acquired is False:
-        log_event(
-            "scheduler.maintenance.lease_skipped",
-            lease_key=MAINTENANCE_LEASE_KEY,
-            holder_id=lease_holder,
+    while tick < tick_limit:
+        result = run_maintenance_once(
+            settings=resolved_settings,
+            periods=resolved_periods,
+            retention_days=retention_days,
+            tile_layer_id=tile_layer_id,
+            tile_feature_limit=tile_feature_limit,
+            tile_prune_limit=tile_prune_limit,
         )
-        return ()
-
-    try:
-        while tick < tick_limit:
-            result = run_maintenance_once(
-                settings=resolved_settings,
-                periods=resolved_periods,
-                retention_days=retention_days,
-                tile_layer_id=tile_layer_id,
-                tile_feature_limit=tile_feature_limit,
-                tile_prune_limit=tile_prune_limit,
-            )
-            results.append(result)
-            tick += 1
-            if tick >= tick_limit:
-                break
-            sleep(resolved_settings.scheduler_interval_seconds)
-    finally:
-        if lease_acquired is True:
-            _release_scheduler_lease(
-                settings=resolved_settings,
-                holder_id=lease_holder,
-                lease_key=MAINTENANCE_LEASE_KEY,
-            )
+        results.append(result)
+        tick += 1
+        if tick >= tick_limit:
+            break
+        sleep(resolved_settings.scheduler_interval_seconds)
 
     return tuple(results)
 
@@ -450,22 +392,22 @@ def main(argv: tuple[str, ...] | None = None) -> int:
     parser.add_argument(
         "--enqueue-runtime-jobs",
         action="store_true",
-        help="Enqueue durable runtime adapter jobs selected by WORKER_ENABLED_ADAPTER_KEYS/config gates.",
+        help="Frozen legacy runtime queue producer in v1; accepted and exits 2.",
     )
     parser.add_argument(
         "--run-enabled-adapters",
         action="store_true",
-        help="Run enabled runtime adapters selected by WORKER_ENABLED_ADAPTER_KEYS/config gates.",
+        help="Frozen legacy generic runtime in v1; accepted and exits 2.",
     )
     parser.add_argument(
         "--official-demo",
         action="store_true",
-        help="Run enabled official demo adapters through the scheduler cycle.",
+        help="Frozen legacy official-demo scheduler in v1; accepted and exits 2.",
     )
     parser.add_argument(
         "--maintenance",
         action="store_true",
-        help="Run Query Heat and tile cache maintenance on a bounded scheduler loop.",
+        help="Run evidence realtime and location-query privacy retention only.",
     )
     parser.add_argument(
         "--query-heat-periods",
@@ -501,6 +443,15 @@ def main(argv: tuple[str, ...] | None = None) -> int:
         help="Bound the scheduler loop. Defaults to SCHEDULER_MAX_TICKS when set.",
     )
     args = parser.parse_args(argv)
+    # Task 14's reviewed --v1-baseline branch is intentionally added before this guard.
+    if (
+        not args.maintenance
+        or args.enqueue_runtime_jobs
+        or args.run_enabled_adapters
+        or args.official_demo
+    ):
+        return report_frozen_legacy()
+
     settings = load_worker_settings()
     max_ticks = max(1, args.max_ticks) if args.max_ticks is not None else settings.scheduler_max_ticks
     log_event(

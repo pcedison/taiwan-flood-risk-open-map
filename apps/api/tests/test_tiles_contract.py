@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Self
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from app.api.routes import tiles as tile_routes
 from app.domain.tiles import TileLayerNotFound, TileRepositoryUnavailable, fetch_vector_tile
 from app.main import create_app
-
 
 client = TestClient(create_app())
 
@@ -164,22 +164,14 @@ def test_fetch_vector_tile_reports_db_unavailable() -> None:
 
 
 def test_tile_endpoint_returns_binary_tile_headers(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_fetch(**kwargs: object) -> bytes:
-        assert kwargs["layer_id"] == "query-heat"
-        assert kwargs["z"] == 8
-        assert kwargs["x"] == 215
-        assert kwargs["y"] == 107
-        return b"mvt-bytes"
+    def fake_fetch(**_kwargs: object) -> bytes:
+        pytest.fail("frozen local tile endpoint must not fetch")
 
     monkeypatch.setattr(tile_routes, "fetch_vector_tile", fake_fetch)
 
     response = client.get("/v1/tiles/query-heat/8/215/107.mvt")
 
-    assert response.status_code == 200
-    assert response.content == b"mvt-bytes"
-    assert response.headers["content-type"] == "application/vnd.mapbox-vector-tile"
-    assert response.headers["cache-control"] == "public, max-age=60"
-    assert response.headers["x-tile-layer"] == "query-heat"
+    assert response.status_code == 404
 
 
 def test_tile_endpoint_returns_404_for_unknown_layer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,27 +188,42 @@ def test_tile_endpoint_returns_404_for_unknown_layer(monkeypatch: pytest.MonkeyP
 
 def test_tile_endpoint_returns_503_when_db_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     def unavailable(**_kwargs: object) -> bytes:
-        raise TileRepositoryUnavailable("database unavailable")
+        pytest.fail("frozen local tile endpoint must not construct repository")
 
     monkeypatch.setattr(tile_routes, "fetch_vector_tile", unavailable)
 
     response = client.get("/v1/tiles/query-heat/8/215/107.mvt")
 
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "tiles_unavailable"
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_local_tile_route_is_frozen_before_repository_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        tile_routes,
+        "fetch_vector_tile",
+        lambda *_args, **_kwargs: pytest.fail("tile read executed"),
+    )
+
+    response = client.get("/v1/tiles/query-heat/8/215/107.mvt")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
 
 
 class _FakeConnection:
     def __init__(self, *, row: dict[str, object] | None = None) -> None:
         self.cursor_instance = _FakeCursor(row=row)
 
-    def __enter__(self) -> _FakeConnection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         return None
 
-    def cursor(self) -> "_FakeCursor":
+    def cursor(self) -> _FakeCursor:
         return self.cursor_instance
 
 
@@ -225,7 +232,7 @@ class _FakeCursor:
         self._row = row
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> "_FakeCursor":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
