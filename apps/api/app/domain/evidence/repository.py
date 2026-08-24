@@ -14,6 +14,16 @@ from psycopg.types.json import Jsonb
 from app.core.db import pooled_connection
 
 ConnectionFactory = Callable[[], Any]
+EvidenceLocationPrecision = Literal[
+    "point",
+    "road_or_lane",
+    "poi",
+    "admin_area",
+    "polygon",
+    "inferred",
+    "map_click",
+    "unknown",
+]
 RealtimeJurisdictionResolutionStatus = Literal[
     "verified",
     "boundary_unverified",

@@ -1,6 +1,7 @@
 """Evidence query repositories."""
 
 from app.domain.evidence.repository import (
+    EvidenceLocationPrecision,
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
     EvidenceUpsert,
@@ -24,6 +25,7 @@ from app.domain.evidence.repository import (
 )
 
 __all__ = [
+    "EvidenceLocationPrecision",
     "EvidenceRecord",
     "EvidenceRepositoryUnavailable",
     "EvidenceUpsert",

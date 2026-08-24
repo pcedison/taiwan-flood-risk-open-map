@@ -3,9 +3,26 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.domain.evidence import EvidenceLocationPrecision
+
 RiskLevel = Literal["低", "中", "高", "極高", "未知"]
 ConfidenceLevel = Literal["低", "中", "高", "未知"]
 AttentionLevel = Literal["低", "中", "高", "未知"]
+DominantMode = Literal["realtime", "historical_context", "community_warning", "unknown"]
+CommunityState = Literal[
+    "none",
+    "unverified",
+    "community_corroborated",
+    "officially_corroborated",
+]
+PublicSourceState = Literal[
+    "fresh",
+    "degraded",
+    "stale",
+    "failed",
+    "disabled",
+    "not_applicable",
+]
 GeocodePrecision = Literal[
     "exact_address",
     "road_or_lane",
@@ -535,6 +552,33 @@ class RiskAssessRequest(ContractModel):
 
 class RiskLevelBlock(ContractModel):
     level: RiskLevel
+    confidence: ConfidenceLevel = "未知"
+    reasons: list[str] = Field(default_factory=list)
+
+
+class CommunityRiskBlock(ContractModel):
+    state: CommunityState = "none"
+    level: RiskLevel = "未知"
+    reasons: list[str] = Field(default_factory=list)
+
+
+class PublicSourceStatus(ContractModel):
+    source_key: str
+    signal_type: str
+    state: PublicSourceState
+    observed_at: datetime | None = None
+    checked_at: datetime | None = None
+    message: str | None = None
+
+
+class DataStatus(ContractModel):
+    sources: list[PublicSourceStatus] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+
+
+class CommunityRefresh(ContractModel):
+    state: Literal["not_available", "idle", "prioritized"] = "not_available"
+    last_completed_at: datetime | None = None
 
 
 class ConfidenceBlock(ContractModel):
@@ -568,6 +612,8 @@ class EvidencePreview(ContractModel):
     distance_to_query_m: float | None = Field(default=None, ge=0)
     confidence: float = Field(ge=0, le=1)
     url: str | None = None
+    location_precision: EvidenceLocationPrecision = "unknown"
+    limitations: list[str] = Field(default_factory=list)
 
 
 class DataFreshness(ContractModel):
@@ -723,7 +769,6 @@ class NearbyRealtimeCoverage(ContractModel):
 
 
 class RiskAssessmentResponse(ContractModel):
-
     assessment_id: str
     location: LatLng
     radius_m: int
@@ -738,6 +783,36 @@ class RiskAssessmentResponse(ContractModel):
     data_freshness: list[DataFreshness]
     query_heat: QueryHeat
     nearby_realtime_coverage: NearbyRealtimeCoverage
+    as_of: datetime | None = None
+    dominant_mode: DominantMode = "unknown"
+    community: CommunityRiskBlock = Field(default_factory=CommunityRiskBlock)
+    overall: RiskLevelBlock | None = None
+    data_status: DataStatus = Field(default_factory=DataStatus)
+    community_refresh: CommunityRefresh = Field(default_factory=CommunityRefresh)
+
+    @model_validator(mode="after")
+    def fill_additive_compatibility_defaults(self) -> Self:
+        if self.as_of is None:
+            self.as_of = self.created_at
+        if self.overall is None:
+            if self.realtime.level != "未知":
+                self.overall = RiskLevelBlock(
+                    level=self.realtime.level,
+                    confidence=self.confidence.level,
+                    reasons=list(self.explanation.main_reasons),
+                )
+                self.dominant_mode = "realtime"
+            elif self.historical.level != "未知":
+                self.overall = RiskLevelBlock(
+                    level=self.historical.level,
+                    confidence=self.confidence.level,
+                    reasons=["此相容結果只代表歷史背景風險。"],
+                )
+                self.dominant_mode = "historical_context"
+            else:
+                self.overall = RiskLevelBlock(level="未知")
+                self.dominant_mode = "unknown"
+        return self
 
 
 class GeoJsonGeometry(ContractModel):

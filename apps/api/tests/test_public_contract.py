@@ -17,6 +17,7 @@ from app.api.schemas import (
     NearbyRealtimeCoverage,
     NearbySourceHealth,
     PlaceCandidate,
+    RiskAssessmentResponse,
     RiskAssessRequest,
 )
 from app.api.routes import health as health_routes
@@ -133,6 +134,18 @@ def assert_openapi_schema(payload: dict, schema_name: str) -> None:
     validator = Draft202012Validator(schema, resolver=RefResolver.from_schema(schema))
     errors = list(validator.iter_errors(payload))
     assert errors == []
+
+
+def test_risk_response_schema_exposes_additive_v1_fields() -> None:
+    properties = RiskAssessmentResponse.model_json_schema()["properties"]
+    assert {
+        "as_of",
+        "community",
+        "overall",
+        "dominant_mode",
+        "data_status",
+        "community_refresh",
+    } <= properties.keys()
 
 
 def test_health_contract() -> None:
@@ -746,14 +759,20 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "data_freshness",
         "query_heat",
         "nearby_realtime_coverage",
+        "as_of",
+        "dominant_mode",
+        "community",
+        "overall",
+        "data_status",
+        "community_refresh",
     }
     assert UUID(payload["assessment_id"])
     assert payload["location"] == {"lat": 25.033, "lng": 121.5654}
     assert payload["radius_m"] == 500
     assert_iso_datetime(payload["created_at"])
     assert_iso_datetime(payload["expires_at"])
-    assert set(payload["realtime"]) == {"level"}
-    assert set(payload["historical"]) == {"level"}
+    assert set(payload["realtime"]) == {"level", "confidence", "reasons"}
+    assert set(payload["historical"]) == {"level", "confidence", "reasons"}
     assert set(payload["confidence"]) == {"level"}
     assert payload["realtime"]["level"] in RISK_LEVELS
     assert payload["historical"]["level"] == "未知"
@@ -775,6 +794,8 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "distance_to_query_m",
         "confidence",
         "url",
+        "location_precision",
+        "limitations",
     }
     assert payload["data_freshness"][0]["health_status"] == "healthy"
     assert payload["data_freshness"][0]["source_id"] == "cwa-rainfall"
@@ -2889,6 +2910,8 @@ def test_evidence_list_contract(monkeypatch) -> None:
         "source_weight",
         "privacy_level",
         "raw_ref",
+        "location_precision",
+        "limitations",
     }
     assert UUID(evidence["id"])
     assert evidence["geometry"] == {"type": "Point", "coordinates": [120.213493, 23.038818]}

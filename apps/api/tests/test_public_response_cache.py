@@ -66,6 +66,15 @@ def _response(assessment_id: str = "assessment-1") -> RiskAssessmentResponse:
     )
 
 
+def test_legacy_constructor_gets_safe_additive_defaults() -> None:
+    response = _response()
+    payload = response.model_dump(mode="json")
+    assert payload["as_of"] == payload["created_at"]
+    assert payload["community"]["state"] == "none"
+    assert payload["overall"]["level"] in {"低", "中", "高", "極高", "未知"}
+    assert payload["data_status"] == {"sources": [], "missing": []}
+
+
 def test_memory_backend_roundtrip_and_ttl_expiry() -> None:
     response_cache.store_response("key-a", _response(), now=NOW, ttl_seconds=120)
 
