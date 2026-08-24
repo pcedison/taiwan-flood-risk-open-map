@@ -17,8 +17,7 @@ PLACEHOLDER_TILE_URL_MARKERS = (
 REVIEWED_EXTERNAL_TILE_HOSTS_KEY = "reviewed_external_tile_hosts"
 MAX_PERCENT_DECODE_PASSES = 5
 NESTED_NETWORK_REFERENCE_PATTERN = re.compile(
-    r"(?<![a-z0-9+.-])(?:[a-z][a-z0-9+.-]*:)?//",
-    re.IGNORECASE,
+    r"//",
 )
 UNSAFE_EXTERNAL_HOST_SUFFIXES = (
     ".example",
@@ -319,10 +318,11 @@ def is_external_tile_url(
 
 def _has_nested_network_reference(parsed: SplitResult) -> bool:
     """Reject explicit nested URI and network-path references after decoding."""
-    return any(
-        NESTED_NETWORK_REFERENCE_PATTERN.search(component) is not None
-        for component in (parsed.path, parsed.query, parsed.fragment)
-    )
+    for component in (parsed.path, parsed.query, parsed.fragment):
+        for match in NESTED_NETWORK_REFERENCE_PATTERN.finditer(component):
+            if match.start() == 0 or not component[match.start() - 1].isalnum():
+                return True
+    return False
 
 
 def _safe_external_url(value: str) -> SplitResult | None:

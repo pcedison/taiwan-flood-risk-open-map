@@ -1440,6 +1440,16 @@ def test_external_tile_predicate_rejects_canonicalized_local_product_references(
         "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/proxy?url=//",
+        "https://tiles.official.gov.tw/proxy?url=+//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=+%2F%2F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=++//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=+//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=.//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=-//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=_//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=~//unreviewed.gov/private/{z}/{x}/{y}.pbf",
     ],
 )
 def test_external_tile_predicate_rejects_every_nested_network_reference(
@@ -1456,6 +1466,8 @@ def test_external_tile_predicate_rejects_every_nested_network_reference(
     [
         "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?note=station-127.0.0.1",
         "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?ratio=1//2",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?word=wordx//y",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?token=abc9//def",
         "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?note=https-colon-slash-slash",
     ],
 )
@@ -1490,6 +1502,16 @@ def test_external_tile_predicate_preserves_ordinary_non_authority_values(
         "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
         "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=+//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=+%2F%2F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=++//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=+//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=.//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=-//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=_//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=~//unreviewed.gov/private/{z}/{x}/{y}.pbf",
     ],
 )
 def test_layers_and_tilejson_fail_closed_for_every_nested_network_reference(
@@ -1589,6 +1611,14 @@ def test_layers_require_original_tiles_to_be_a_nonempty_all_string_list(
         "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private-tilejson.json",
         "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private-tilejson.json",
         "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=+//127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=+%2F%2F127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=++//unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=%252B%252F%252F127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=+//unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=%252B%252F%252Funreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=.//unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=-//unreviewed.gov/private-tilejson.json",
     ],
 )
 def test_layers_fail_closed_before_serializing_unsafe_tilejson_url(
