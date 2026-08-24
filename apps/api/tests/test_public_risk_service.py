@@ -9,6 +9,7 @@ import pytest
 from app.api.schemas import (
     ConfidenceBlock,
     DataFreshness,
+    Evidence,
     Explanation,
     LatLng,
     NearbyRealtimeCoverage,
@@ -17,11 +18,13 @@ from app.api.schemas import (
     RiskAssessRequest,
     RiskLevelBlock,
 )
-from app.api.services import public_risk
+from app.api.services import public_evidence, public_risk
+from app.domain.evidence import EvidenceUpsert
 from app.domain.evidence.repository import (
     EvidenceRecord,
     NearbyCoverageRow,
 )
+from app.domain.history.news_enrichment import OnDemandNewsSearchResult
 from app.domain.realtime import OfficialRealtimeBundle, OfficialRealtimeObservation
 
 
@@ -137,8 +140,84 @@ def _settings() -> SimpleNamespace:
         realtime_official_enabled=True,
         source_cwa_api_enabled=True,
         source_wra_api_enabled=True,
+        evidence_repository_enabled=True,
         historical_news_on_demand_writeback_enabled=False,
         risk_assessment_response_cache_seconds=120,
+    )
+
+
+def _standard_dependencies(
+    created_at: datetime,
+    *,
+    db_evidence_items: tuple[Evidence, ...] | None = (),
+    **overrides: Any,
+) -> public_risk.RiskAssessmentDependencies:
+    heat = QueryHeat(
+        period="P7D",
+        attention_level="低",
+        query_count_bucket="1-9",
+        unique_approx_count_bucket="1-9",
+        updated_at=created_at,
+    )
+    values: dict[str, Any] = {
+        "risk_assessment_response_cache_key": lambda *_args: "standard-cache-key",
+        "cached_risk_assessment_response": lambda *_args, **_kwargs: None,
+        "fetch_official_realtime_bundle": lambda **_kwargs: OfficialRealtimeBundle(
+            observations=(),
+            source_statuses=(),
+        ),
+        "nearby_realtime_coverage": lambda _request, *, now: _nearby_coverage(
+            evaluated_at=now
+        ),
+        "nearby_db_evidence": lambda _request: db_evidence_items,
+        "official_flood_disaster_lookup": lambda *_args, **_kwargs: SimpleNamespace(
+            records=()
+        ),
+        "can_use_profile_fast_path": lambda _items: False,
+        "use_local_historical_fallback": lambda _app_env: False,
+        "needs_historical_event_lookup": lambda **_kwargs: False,
+        "persist_or_build_on_demand_evidence": lambda *_args, **_kwargs: (),
+        "historical_data_freshness": lambda **_kwargs: DataFreshness(
+            source_id="historical-flood-records",
+            name="historical records",
+            health_status="unknown",
+            ingested_at=created_at,
+        ),
+        "display_evidence_items": lambda items: items,
+        "persisted_official_realtime_data_freshness": lambda *_args, **_kwargs: [],
+        "visible_source_limitations": lambda *_args, **_kwargs: [],
+        "official_flood_disaster_data_freshness": lambda _lookup: [],
+        "on_demand_data_freshness": lambda *_args, **_kwargs: [],
+        "persist_assessment": lambda **_kwargs: None,
+        "query_heat": lambda _request, *, now: heat,
+        "cache_risk_assessment_response": lambda *_args, **_kwargs: None,
+    }
+    values.update(overrides)
+    return _dependencies(**values)
+
+
+def _on_demand_record(created_at: datetime) -> EvidenceUpsert:
+    return EvidenceUpsert(
+        id="f442ec3f-f013-58d2-8fcb-93f62db8d51c",
+        adapter_key="news.public_web.gdelt_backfill",
+        source_id="gdelt-on-demand:legacy-characterization",
+        source_type="news",
+        event_type="flood_report",
+        title="公開新聞補查淹水事件",
+        summary="公開新聞 citation metadata",
+        url="https://example.test/news/flood",
+        occurred_at=created_at,
+        observed_at=created_at,
+        ingested_at=created_at,
+        lat=25.033,
+        lng=121.5654,
+        distance_to_query_m=40.0,
+        confidence=0.9,
+        freshness_score=0.95,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref="gdelt-doc:legacy-characterization",
+        properties={"full_text_stored": False},
     )
 
 
@@ -513,3 +592,267 @@ def test_assess_risk_profile_fast_path_refreshes_and_caches_response() -> None:
         "now": created_at,
         "ttl_seconds": 120,
     }
+
+
+@pytest.mark.parametrize("profile_case", ["missing_public_news", "ineligible"])
+def test_profile_rejection_falls_through_to_standard_response(
+    profile_case: str,
+) -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    profile = object()
+    trace: list[tuple[str, object]] = []
+    overrides: dict[str, Any] = {
+        "can_use_profile_fast_path": lambda _items: profile_case == "missing_public_news",
+        "persist_assessment": lambda **kwargs: trace.append(("persist", kwargs)),
+        "cache_risk_assessment_response": lambda _key, response, **_kwargs: trace.append(
+            ("cache", response)
+        ),
+    }
+    if profile_case == "missing_public_news":
+        overrides.update(
+            {
+                "precomputed_risk_profile": lambda *_args, **_kwargs: profile,
+                "profile_has_public_news": lambda candidate: candidate is profile and False,
+            }
+        )
+
+    response = public_risk.assess_risk(
+        request,
+        settings=_settings(),
+        created_at=created_at,
+        dependencies=_standard_dependencies(created_at, **overrides),
+    )
+
+    assert [name for name, _value in trace] == ["persist", "cache"]
+    assert trace[1][1] is response
+    assert response.query_heat.query_count_bucket == "1-9"
+
+
+@pytest.mark.parametrize(
+    "repository_mode",
+    ["unavailable", "available_needs_history"],
+)
+def test_on_demand_news_branches_propagate_result_and_persistence_inputs(
+    repository_mode: str,
+) -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    record = _on_demand_record(created_at)
+    result = OnDemandNewsSearchResult(
+        attempted=True,
+        source_id="on-demand-public-news",
+        message="公開新聞補查取得一筆事件。",
+        records=(record,),
+        health_status="healthy",
+    )
+    evidence = public_evidence.evidence_from_upsert(record)
+    historical_freshness = DataFreshness(
+        source_id="captured-history",
+        name="captured history",
+        health_status="healthy",
+        ingested_at=created_at,
+        feature_count=1,
+    )
+    on_demand_freshness = DataFreshness(
+        source_id="captured-on-demand",
+        name="captured on-demand",
+        health_status="healthy",
+        ingested_at=created_at,
+        feature_count=1,
+    )
+    limitations = [f"captured limitation: {repository_mode}"]
+    calls: dict[str, Any] = {}
+
+    def lookup(candidate: RiskAssessRequest, *, now: datetime) -> OnDemandNewsSearchResult:
+        calls["lookup"] = (candidate, now)
+        return result
+
+    def needs_history(**kwargs: object) -> bool:
+        if repository_mode == "unavailable":
+            pytest.fail("unavailable repository does not use the DB-history gate")
+        calls["needs_history"] = kwargs
+        return True
+
+    def writeback(
+        candidate: OnDemandNewsSearchResult,
+        *,
+        writeback_enabled: bool,
+    ) -> tuple[Evidence, ...]:
+        if repository_mode == "unavailable":
+            pytest.fail("unavailable repository cannot write back on-demand evidence")
+        calls["writeback"] = (candidate, writeback_enabled)
+        return (evidence,)
+
+    def history_freshness(**kwargs: object) -> DataFreshness:
+        calls["history_freshness"] = kwargs
+        return historical_freshness
+
+    def visible_limitations(
+        bundle: OfficialRealtimeBundle,
+        historical_records: object,
+        db_items: object,
+        on_demand: OnDemandNewsSearchResult,
+    ) -> list[str]:
+        calls["visible_limitations"] = (
+            bundle,
+            historical_records,
+            db_items,
+            on_demand,
+        )
+        return limitations
+
+    def on_demand_freshness_items(
+        candidate: OnDemandNewsSearchResult,
+        *,
+        now: datetime,
+    ) -> list[DataFreshness]:
+        calls["on_demand_freshness"] = (candidate, now)
+        return [on_demand_freshness]
+
+    def persist(**kwargs: object) -> None:
+        calls["persist"] = kwargs
+
+    settings = _settings()
+    settings.historical_news_on_demand_writeback_enabled = True
+    db_items: tuple[Evidence, ...] | None = (
+        None if repository_mode == "unavailable" else ()
+    )
+    response = public_risk.assess_risk(
+        request,
+        settings=settings,
+        created_at=created_at,
+        dependencies=_standard_dependencies(
+            created_at,
+            db_evidence_items=db_items,
+            on_demand_public_news_result=lookup,
+            needs_historical_event_lookup=needs_history,
+            persist_or_build_on_demand_evidence=writeback,
+            historical_data_freshness=history_freshness,
+            visible_source_limitations=visible_limitations,
+            on_demand_data_freshness=on_demand_freshness_items,
+            persist_assessment=persist,
+        ),
+    )
+
+    assert calls["lookup"] == (request, created_at)
+    if repository_mode == "available_needs_history":
+        assert calls["needs_history"] == {
+            "historical_records": (),
+            "db_evidence_items": (),
+        }
+        assert calls["writeback"] == (result, True)
+    else:
+        assert "needs_history" not in calls
+        assert "writeback" not in calls
+    assert [item.title for item in response.evidence] == [record.title]
+    assert response.explanation.missing_sources == limitations
+    assert on_demand_freshness in response.data_freshness
+    assert calls["history_freshness"] == {
+        "historical_records": (),
+        "db_evidence_items": (evidence,),
+        "now": created_at,
+    }
+    visible_args = calls["visible_limitations"]
+    assert visible_args[1:] == ((), (evidence,), result)
+    assert calls["on_demand_freshness"] == (result, created_at)
+    persisted = calls["persist"]
+    assert persisted["explanation"].missing_sources == limitations
+    assert persisted["evidence_items"] == [evidence]
+    assert on_demand_freshness in persisted["data_freshness"]
+
+
+def test_standard_response_persists_before_query_heat_and_cache() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    heat = QueryHeat(
+        period="P7D",
+        attention_level="中",
+        query_count_bucket="50-199",
+        unique_approx_count_bucket="10-49",
+        updated_at=created_at,
+    )
+    trace: list[str] = []
+    cached: dict[str, object] = {}
+
+    def persist(**_kwargs: object) -> None:
+        trace.append("persist")
+
+    def query_heat(candidate: RiskAssessRequest, *, now: datetime) -> QueryHeat:
+        assert trace == ["persist"]
+        assert (candidate, now) == (request, created_at)
+        trace.append("query_heat")
+        return heat
+
+    def cache(
+        key: str,
+        response: RiskAssessmentResponse,
+        *,
+        now: datetime,
+        ttl_seconds: int,
+    ) -> None:
+        assert trace == ["persist", "query_heat"]
+        trace.append("cache")
+        cached.update(key=key, response=response, now=now, ttl_seconds=ttl_seconds)
+
+    response = public_risk.assess_risk(
+        request,
+        settings=_settings(),
+        created_at=created_at,
+        dependencies=_standard_dependencies(
+            created_at,
+            persist_assessment=persist,
+            query_heat=query_heat,
+            cache_risk_assessment_response=cache,
+        ),
+    )
+
+    assert trace == ["persist", "query_heat", "cache"]
+    assert response.query_heat == heat
+    assert cached == {
+        "key": "standard-cache-key",
+        "response": response,
+        "now": created_at,
+        "ttl_seconds": 120,
+    }
+
+
+@pytest.mark.parametrize(
+    ("db_evidence_items", "expected_cache_writes"),
+    [
+        pytest.param(None, 0, id="repository-unavailable"),
+        pytest.param((), 1, id="repository-available"),
+    ],
+)
+def test_standard_cache_write_requires_repository_availability(
+    db_evidence_items: tuple[Evidence, ...] | None,
+    expected_cache_writes: int,
+) -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    cache_writes: list[RiskAssessmentResponse] = []
+    no_news = OnDemandNewsSearchResult(
+        attempted=True,
+        source_id="on-demand-public-news",
+        message="公開新聞補查沒有結果。",
+        records=(),
+    )
+
+    response = public_risk.assess_risk(
+        request,
+        settings=_settings(),
+        created_at=created_at,
+        dependencies=_standard_dependencies(
+            created_at,
+            db_evidence_items=db_evidence_items,
+            on_demand_public_news_result=lambda *_args, **_kwargs: no_news,
+            cache_risk_assessment_response=lambda _key, candidate, **_kwargs: cache_writes.append(
+                candidate
+            ),
+        ),
+    )
+
+    assert response.assessment_id
+    assert len(cache_writes) == expected_cache_writes
+    if cache_writes:
+        assert cache_writes == [response]
