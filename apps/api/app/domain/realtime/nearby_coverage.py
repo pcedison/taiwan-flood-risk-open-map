@@ -7,9 +7,9 @@ from typing import Literal, cast
 from app.api.schemas import (
     HealthStatus,
     NearbyCoverageLevel,
-    NearbyMissingCause,
     NearbyCoverageSignal,
     NearbyCoverageSignalType,
+    NearbyMissingCause,
     NearbyRealtimeCoverage,
     NearbySignalAvailability,
     NearbySourceHealth,
@@ -26,7 +26,6 @@ REQUIRED_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = (
     "rainfall",
     "water_level",
     "flood_depth",
-    "sewer_water_level",
 )
 SIGNAL_LABELS: dict[NearbyCoverageSignalType, str] = {
     "rainfall": "雨量",
@@ -39,6 +38,7 @@ SIGNAL_LABELS: dict[NearbyCoverageSignalType, str] = {
 }
 
 _ALL_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = REQUIRED_SIGNAL_TYPES + (
+    "sewer_water_level",
     "pump_or_gate_status",
     "flood_warning",
     "status_only",
@@ -216,7 +216,7 @@ def build_nearby_source_health(
         )
         models.append(
             NearbySourceHealth(
-                source_id=_public_source_id(row.adapter_key),
+                source_id=public_realtime_source_id(row.adapter_key),
                 name=_public_source_name(row.adapter_key, signal_type),
                 signal_types=[signal_type],
                 coverage_scope=("national" if row.adapter_key.startswith("official.") else "local"),
@@ -866,6 +866,8 @@ def _source_health_decision(
     signal_type: NearbyCoverageSignalType,
     evaluated_at: datetime,
 ) -> _SourceHealthDecision:
+    if not row.is_enabled:
+        return _source_decision("disabled", "disabled", "此來源目前未啟用。")
     if not row.is_registered:
         return _source_decision(
             "unknown",
@@ -1088,7 +1090,7 @@ def _source_decision(
     )
 
 
-def _public_source_id(adapter_key: str) -> str:
+def public_realtime_source_id(adapter_key: str) -> str:
     normalized = "".join(
         character if character.isalnum() else "-" for character in adapter_key.lower()
     )
@@ -1105,7 +1107,7 @@ def _public_source_name(
     signal_label = SIGNAL_LABELS[signal_type]
     if adapter_key.startswith("official.cwa."):
         return f"中央氣象署{signal_label}觀測"
-    if adapter_key.startswith("official.wra.") or adapter_key.startswith("official.wra_iow."):
+    if adapter_key.startswith(("official.wra.", "official.wra_iow.")):
         return f"經濟部水利署{signal_label}觀測"
     if adapter_key.startswith("official.civil_iot."):
         return f"水利署 Civil IoT {signal_label}觀測"
@@ -1175,4 +1177,5 @@ __all__ = [
     "build_nearby_realtime_coverage",
     "build_nearby_source_health",
     "coverage_signal_type",
+    "public_realtime_source_id",
 ]

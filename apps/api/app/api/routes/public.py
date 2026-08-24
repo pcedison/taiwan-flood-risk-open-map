@@ -1,11 +1,13 @@
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-import re
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request as FastAPIRequest
+import psycopg
+from fastapi import APIRouter, HTTPException, Query
+from fastapi import Request as FastAPIRequest
 
 from app.api.errors import error_payload
 from app.api.schemas import (
@@ -23,8 +25,8 @@ from app.api.schemas import (
     NearbyRealtimeCoverage,
     PlaceCandidate,
     QueryHeat,
-    RiskAssessRequest,
     RiskAssessmentResponse,
+    RiskAssessRequest,
     TileJson,
 )
 from app.api.services import (
@@ -41,12 +43,12 @@ from app.core.config import get_settings
 from app.domain.evidence import (
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
+    RiskAssessmentPersistence,
     fetch_assessment_evidence,
     fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
     persist_risk_assessment,
     query_nearby_evidence,
-    RiskAssessmentPersistence,
     upsert_public_evidence,
 )
 from app.domain.evidence.repository import (
@@ -73,6 +75,12 @@ from app.domain.layers import (
     fetch_map_layer,
     fetch_map_layers,
 )
+from app.domain.profiles import (
+    RiskProfileRecord,
+    RiskProfileRepositoryUnavailable,
+    enqueue_profile_refresh_job,
+    fetch_best_profile_for_point,
+)
 from app.domain.realtime import (
     OfficialRealtimeBundle,
     OfficialRealtimeSourceStatus,  # noqa: F401  (re-exported for tests)
@@ -89,12 +97,6 @@ from app.domain.reports.abuse import (
     RateLimitExceeded,
     RateLimitUnavailable,
     check_rate_limit,
-)
-from app.domain.profiles import (
-    RiskProfileRecord,
-    RiskProfileRepositoryUnavailable,
-    enqueue_profile_refresh_job,
-    fetch_best_profile_for_point,
 )
 from app.domain.risk import RiskScoringResult
 
@@ -170,7 +172,7 @@ def geocoder_open_data_status() -> dict[str, Any]:
         return {**payload, "status": "disabled", "row_count": 0, "source_counts": []}
     try:
         summary = fetch_postgis_geocoder_summary(settings.database_url)
-    except Exception:
+    except (OSError, psycopg.Error):
         return {**payload, "status": "unavailable", "row_count": 0, "source_counts": []}
 
     row_count = int(summary.get("row_count") or 0)
@@ -401,17 +403,16 @@ def _nearby_db_evidence(request: RiskAssessRequest) -> tuple[Evidence, ...] | No
     settings = get_settings()
     if not settings.evidence_repository_enabled:
         return None
-    official_realtime_since = _now() - REALTIME_OFFICIAL_LOOKBACK
+    as_of = _now()
+    official_realtime_since = as_of - REALTIME_OFFICIAL_LOOKBACK
     try:
         latest_records = query_nearby_latest_official(
             database_url=settings.database_url,
             lat=request.point.lat,
             lng=request.point.lng,
+            radius_m=request.radius_m,
+            as_of=as_of,
             limit=50,
-            rainfall_radius_m=REALTIME_RAINFALL_RELEVANCE_M,
-            water_level_radius_m=REALTIME_WATER_RELEVANCE_M,
-            flood_depth_radius_m=REALTIME_FLOOD_DEPTH_RELEVANCE_M,
-            flood_warning_radius_m=REALTIME_FLOOD_WARNING_RELEVANCE_M,
             observed_since=official_realtime_since,
             statement_timeout_ms=EVIDENCE_QUERY_STATEMENT_TIMEOUT_MS,
         )
@@ -511,7 +512,7 @@ def _is_valid_station_id(station_id: str) -> bool:
 
 def _is_iso_observed_at(value: str) -> bool:
     try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
+        datetime.fromisoformat(value)
     except ValueError:
         return False
     return True
@@ -663,7 +664,7 @@ def _public_rate_limit_client_key(
         settings.public_rate_limit_trusted_proxy_cidrs,
     )
     salt = settings.abuse_hash_salt or f"{settings.service_id}:{settings.app_env}"
-    return sha256(f"{namespace}:{salt}:{client_signal}".encode("utf-8")).hexdigest()
+    return sha256(f"{namespace}:{salt}:{client_signal}".encode()).hexdigest()
 
 
 @router.post("/geocode", response_model=GeocodeResponse)

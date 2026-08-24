@@ -17,6 +17,7 @@ from app.api.schemas import (
     NearbyRealtimeCoverage,
     NearbySourceHealth,
     PlaceCandidate,
+    RiskAssessRequest,
 )
 from app.api.routes import health as health_routes
 from app.api.routes import public as public_routes
@@ -86,6 +87,42 @@ def assert_iso_datetime(value: str) -> None:
 def assert_error_envelope(payload: dict) -> None:
     assert set(payload) == {"error"}
     assert {"code", "message"}.issubset(payload["error"])
+
+
+def test_legacy_route_reader_passes_selected_radius_until_service_cutover(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    now = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
+    request = RiskAssessRequest(
+        point=LatLng(lat=22.9997, lng=120.227),
+        radius_m=650,
+        time_context="now",
+    )
+    monkeypatch.setattr(public_routes, "_now", lambda: now)
+    monkeypatch.setattr(
+        public_routes,
+        "get_settings",
+        lambda: type(
+            "Settings",
+            (),
+            {
+                "evidence_repository_enabled": True,
+                "database_url": "postgresql://example.test/flood",
+                "app_env": "test",
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "query_nearby_latest_official",
+        lambda **kwargs: captured.update(kwargs) or (),
+    )
+    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_: ())
+
+    assert public_routes._nearby_db_evidence(request) == ()
+    assert captured["radius_m"] == 650
+    assert captured["as_of"] == now
 
 
 def assert_openapi_schema(payload: dict, schema_name: str) -> None:
@@ -1846,7 +1883,6 @@ def test_risk_assess_skips_db_when_evidence_repository_is_disabled(monkeypatch) 
         "rainfall",
         "water_level",
         "flood_depth",
-        "sewer_water_level",
     }
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 

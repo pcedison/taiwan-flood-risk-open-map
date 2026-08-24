@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timezone
+import json
 from pathlib import Path
 
 import psycopg
@@ -10,6 +11,7 @@ from app.domain.layers import fetch_map_layer, fetch_map_layers
 from app.domain.evidence.repository import (
     EvidenceUpsert,
     EvidenceRepositoryUnavailable,
+    _official_event_origin_key,
     RiskAssessmentPersistence,
     fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
@@ -139,7 +141,11 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     sql, params = connection.cursor_instance.executions[0]
     assert records == ()
     assert "ST_PointOnSurface(c.geom::geometry)" in sql
-    assert "ST_AsGeoJSON(ST_PointOnSurface(c.geom::geometry)) AS geometry" in sql
+    assert "ST_AsGeoJSON(c.geom) AS geometry" in sql
+    assert "ST_Distance(e.geom::geography, qp.geog)" in sql
+    assert "ST_DWithin(e.geom::geography, qp.geog" in sql
+    assert "JOIN data_sources" in sql
+    assert "is_enabled = true" in sql
     assert "candidate_rows AS" in sql
     assert "e.geom && ST_Expand(qp.geom, qp.degree_radius)" in sql
     assert "event_type IN ('rainfall', 'water_level')" in sql
@@ -780,7 +786,7 @@ def test_query_realtime_source_health_rows_wraps_other_missing_relations() -> No
         )
 
 
-def test_query_nearby_latest_official_uses_flood_depth_radius() -> None:
+def test_query_nearby_latest_official_uses_selected_radius() -> None:
 
     connection = _FakeConnection(rows=[])
 
@@ -788,24 +794,32 @@ def test_query_nearby_latest_official_uses_flood_depth_radius() -> None:
         database_url="postgresql://example.test/flood",
         lat=25.033,
         lng=121.5654,
+        radius_m=650,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
         connection_factory=lambda: connection,
     )
 
     sql, params = connection.cursor_instance.executions[0]
     assert records == ()
     assert "FROM official_realtime_latest latest" in sql
-    assert "event_type = 'flood_report'" in sql
+    assert "'flood_report'" in sql
     assert "event_type = 'flood_warning'" in sql
-    assert "flood_depth_degree" in sql
+    assert "radius_degree" in sql
+    assert "COALESCE(e.geom, latest.geom)" in sql
+    assert "JOIN data_sources" in sql
+    assert "data_sources.is_enabled = true" in sql
+    assert "cap_status" in sql
+    assert "cap_message_type" in sql
+    assert "active_until" in sql
+    assert "pg_input_is_valid" in sql
+    assert "no_active_event" in sql
     assert params == (
         121.5654,
         25.033,
         121.5654,
         25.033,
-        10000,
-        3000,
-        1000,
-        10000,
+        650,
+        datetime(2026, 8, 24, tzinfo=UTC),
         50,
     )
 
@@ -818,22 +832,23 @@ def test_query_nearby_latest_official_filters_rows_by_observed_since() -> None:
         database_url="postgresql://example.test/flood",
         lat=25.033,
         lng=121.5654,
+        radius_m=500,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
         observed_since=observed_since,
         connection_factory=lambda: connection,
     )
 
     sql, params = connection.cursor_instance.executions[0]
     assert records == ()
+    assert "latest.event_type IN ('rainfall', 'water_level', 'flood_report')" in sql
     assert "latest.observed_at >= %s::timestamptz" in sql
     assert params == (
         121.5654,
         25.033,
         121.5654,
         25.033,
-        10000,
-        3000,
-        1000,
-        10000,
+        500,
+        datetime(2026, 8, 24, tzinfo=UTC),
         observed_since,
         50,
     )
@@ -849,6 +864,8 @@ def test_query_nearby_latest_official_falls_back_when_table_missing() -> None:
         database_url="postgresql://example.test/flood",
         lat=25.033,
         lng=121.5654,
+        radius_m=500,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
         connection_factory=lambda: connection,
     )
 
@@ -866,6 +883,8 @@ def test_query_nearby_latest_official_raises_when_other_relation_missing() -> No
             database_url="postgresql://example.test/flood",
             lat=25.033,
             lng=121.5654,
+            radius_m=500,
+            as_of=datetime(2026, 8, 24, tzinfo=UTC),
             connection_factory=lambda: connection,
         )
 
@@ -907,6 +926,8 @@ def test_query_nearby_latest_official_decodes_latest_row_metrics() -> None:
         database_url="postgresql://example.test/flood",
         lat=25.033,
         lng=121.5654,
+        radius_m=500,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
         connection_factory=lambda: connection,
     )
 
@@ -916,6 +937,68 @@ def test_query_nearby_latest_official_decodes_latest_row_metrics() -> None:
     assert records[0].warning_level_m == 2.25
     assert records[0].flood_depth_cm == 18.0
     assert records[0].realtime_risk_factor == 0.6
+
+
+def test_cap_origin_vectors_match_canonical_json_contract() -> None:
+    fixture = (
+        Path(__file__).parents[3] / "tests" / "fixtures" / "cap_identity_vectors.json"
+    )
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+
+    assert payload["version"] == 1
+    for case in payload["cases"]:
+        assert _official_event_origin_key(
+            sender=case["sender"],
+            identifier=case["identifier"],
+            sent=datetime.fromisoformat(case["sent"].replace("Z", "+00:00")),
+            admin_code=case["admin_code"],
+        ) == case["origin_digest"]
+
+
+def test_cap_origin_encoding_has_no_delimiter_collision() -> None:
+    sent = datetime(2026, 8, 24, 3, 4, 5, tzinfo=UTC)
+    assert _official_event_origin_key(
+        sender="a|b", identifier="c", sent=sent, admin_code="67000000"
+    ) != _official_event_origin_key(
+        sender="a", identifier="b|c", sent=sent, admin_code="67000000"
+    )
+
+
+def test_latest_and_coverage_queries_apply_catalog_kill_switch() -> None:
+    connection = _FakeConnection(rows=[])
+    query_nearby_realtime_coverage_rows(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        connection_factory=lambda: connection,
+    )
+    queries = [sql for sql, _ in connection.cursor_instance.executions if "FROM" in sql]
+    latest_sql, fallback_sql = queries
+    assert "JOIN data_sources" in latest_sql and "is_enabled = true" in latest_sql
+    assert "JOIN data_sources" in fallback_sql and "is_enabled = true" in fallback_sql
+
+
+def test_jurisdiction_source_mapping_json_requires_valid_reviewed_proof() -> None:
+    connection = _FakeConnection(
+        row={
+            "resolution_status": "verified",
+            "home_jurisdiction_code": "67000000",
+            "home_jurisdiction_name": "臺南市",
+            "considered_jurisdictions": [],
+            "signal_contracts": [],
+            "source_mappings": [],
+        }
+    )
+    query_realtime_jurisdiction_context(
+        database_url="postgresql://example.test/flood",
+        lat=22.9997,
+        lng=120.227,
+        connection_factory=lambda: connection,
+    )
+    sql = connection.cursor_instance.executions[1][0]
+    source_mapping_sql = sql[sql.index("AS source_mappings") - 4000 :]
+    assert "mapping_proof_valid" in source_mapping_sql
+    assert "2026-08-24-v1-baseline" in source_mapping_sql
 
 
 def test_fetch_evidence_by_ids_preserves_requested_order() -> None:

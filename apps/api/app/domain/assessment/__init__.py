@@ -5,6 +5,7 @@ from app.domain.assessment.models import (
     AssessmentSourceState,
     OverallDecision,
 )
+from app.domain.assessment.repository import AssessmentRepository, PostgresAssessmentRepository
 from app.domain.assessment.safety import (
     apply_realtime_safety,
     can_support_low_realtime,
@@ -13,8 +14,10 @@ from app.domain.assessment.safety import (
 
 __all__ = [
     "AssessmentData",
+    "AssessmentRepository",
     "AssessmentSourceState",
     "OverallDecision",
+    "PostgresAssessmentRepository",
     "apply_realtime_safety",
     "can_support_low_realtime",
     "compose_base_overall",

@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
+import hashlib
 import json
 import re
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 import psycopg
-
-from app.core.db import pooled_connection
 from psycopg.types.json import Jsonb
 
+from app.core.db import pooled_connection
 
 ConnectionFactory = Callable[[], Any]
 RealtimeJurisdictionResolutionStatus = Literal[
@@ -55,6 +55,11 @@ class EvidenceRecord:
     warning_level_m: float | None = None
     flood_depth_cm: float | None = None
     realtime_risk_factor: float | None = None
+    evidence_scope: Literal["current", "historical", "context", "unspecified"] = "unspecified"
+    adapter_key: str | None = None
+    official_event_origin_key: str | None = None
+    active_from: datetime | None = None
+    active_until: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -321,10 +326,12 @@ def persist_risk_assessment(
         list(assessment.evidence_ids),
     )
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -359,22 +366,32 @@ def query_nearby_evidence(
     bounded_limit = max(1, min(limit, 100))
     official_realtime_limit = 1
     sql = """
-        WITH query_point AS (
+        WITH query_point_base AS (
             SELECT
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
-                (%s::double precision / 90000.0) AS degree_radius,
-                (%s::double precision / 90000.0) AS rainfall_degree,
-                (%s::double precision / 90000.0) AS water_degree
+                %s::double precision AS radius_m,
+                %s::double precision AS rainfall_m,
+                %s::double precision AS water_m
+        ),
+        query_point AS (
+            SELECT
+                *,
+                (radius_m / 90000.0) AS degree_radius,
+                (rainfall_m / 90000.0) AS rainfall_degree,
+                (water_m / 90000.0) AS water_degree
+            FROM query_point_base
         ),
         candidate_rows AS (
             SELECT *
             FROM (
                 SELECT
                     e.*,
-                    (ST_Distance(e.geom, qp.geom) * 90000.0) AS computed_distance_to_query_m,
+                    ds.adapter_key,
+                    ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
                     %s::double precision AS branch_relevance_m
                 FROM evidence e
+                JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
@@ -384,7 +401,7 @@ def query_nearby_evidence(
                         AND e.event_type IN ('rainfall', 'water_level')
                     )
                     AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
-                    AND ST_DWithin(e.geom, qp.geom, qp.degree_radius)
+                    AND ST_DWithin(e.geom::geography, qp.geog, qp.radius_m)
                 ORDER BY
                     computed_distance_to_query_m ASC,
                     e.occurred_at DESC NULLS LAST,
@@ -396,9 +413,11 @@ def query_nearby_evidence(
             FROM (
                 SELECT
                     e.*,
+                    ds.adapter_key,
                     ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
                     %s::double precision AS branch_relevance_m
                 FROM evidence e
+                JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
@@ -407,7 +426,7 @@ def query_nearby_evidence(
                     AND e.event_type = 'rainfall'
                     AND (%s::timestamptz IS NULL OR e.observed_at >= %s::timestamptz)
                     AND e.geom && ST_Expand(qp.geom, qp.rainfall_degree)
-                    AND ST_DWithin(e.geom, qp.geom, qp.rainfall_degree)
+                    AND ST_DWithin(e.geom::geography, qp.geog, qp.rainfall_m)
                 ORDER BY
                     computed_distance_to_query_m ASC,
                     e.observed_at DESC NULLS LAST,
@@ -419,9 +438,11 @@ def query_nearby_evidence(
             FROM (
                 SELECT
                     e.*,
+                    ds.adapter_key,
                     ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
                     %s::double precision AS branch_relevance_m
                 FROM evidence e
+                JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
@@ -430,7 +451,7 @@ def query_nearby_evidence(
                     AND e.event_type = 'water_level'
                     AND (%s::timestamptz IS NULL OR e.observed_at >= %s::timestamptz)
                     AND e.geom && ST_Expand(qp.geom, qp.water_degree)
-                    AND ST_DWithin(e.geom, qp.geom, qp.water_degree)
+                    AND ST_DWithin(e.geom::geography, qp.geog, qp.water_m)
                 ORDER BY
                     computed_distance_to_query_m ASC,
                     e.observed_at DESC NULLS LAST,
@@ -451,7 +472,7 @@ def query_nearby_evidence(
             c.ingested_at,
             ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
             ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
-            ST_AsGeoJSON(ST_PointOnSurface(c.geom::geometry)) AS geometry,
+            ST_AsGeoJSON(c.geom) AS geometry,
             c.computed_distance_to_query_m AS distance_to_query_m,
             c.confidence,
             COALESCE(c.freshness_score, 0.8) AS freshness_score,
@@ -463,7 +484,17 @@ def query_nearby_evidence(
             (c.properties->>'water_level_m')::double precision AS water_level_m,
             (c.properties->>'warning_level_m')::double precision AS warning_level_m,
             (c.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
-            NULL::double precision AS realtime_risk_factor
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN c.properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN c.properties->>'evidence_scope'
+                WHEN c.event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            c.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until
         FROM candidate_rows c
         WHERE c.computed_distance_to_query_m <= c.branch_relevance_m
         ORDER BY
@@ -506,43 +537,61 @@ def query_nearby_evidence(
     )
 
 
+def _official_event_origin_key(
+    *, sender: str, identifier: str, sent: datetime, admin_code: str
+) -> str:
+    if not 1 <= len(sender) <= 512 or not 1 <= len(identifier) <= 512:
+        raise ValueError("CAP sender and identifier must be bounded")
+    if re.fullmatch(r"\d{8}", admin_code) is None:
+        raise ValueError("CAP admin_code must be canonical")
+    if sent.tzinfo is None or sent.utcoffset() is None:
+        raise ValueError("CAP sent must be timezone-aware")
+    sent_utc = sent.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    canonical = json.dumps(
+        [sender, identifier, sent_utc, admin_code],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def query_nearby_latest_official(
     *,
     database_url: str,
     lat: float,
     lng: float,
+    radius_m: int,
+    as_of: datetime,
     limit: int = 50,
-    rainfall_radius_m: int = 10_000,
-    water_level_radius_m: int = 3_000,
-    flood_depth_radius_m: int = 1_000,
-    flood_warning_radius_m: int = 10_000,
     observed_since: datetime | None = None,
     statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
+    if not 50 <= radius_m <= 2000:
+        raise ValueError("radius_m must be between 50 and 2000")
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
     bounded_limit = max(1, min(limit, 100))
     observed_since_filter = ""
     observed_since_params: tuple[datetime, ...] = ()
     if observed_since is not None:
-        observed_since_filter = "AND latest.observed_at >= %s::timestamptz"
+        observed_since_filter = """
+            AND (
+                latest.event_type NOT IN ('rainfall', 'water_level', 'flood_report')
+                OR latest.observed_at >= %s::timestamptz
+            )
+        """
         observed_since_params = (observed_since,)
     sql = f"""
         WITH query_point_base AS (
             SELECT
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
-                %s::double precision AS rainfall_m,
-                %s::double precision AS water_level_m,
-                %s::double precision AS flood_depth_m,
-                %s::double precision AS flood_warning_m
+                %s::double precision AS radius_m,
+                %s::timestamptz AS as_of
         ),
         query_point AS (
-            SELECT
-                *,
-                (rainfall_m / 90000.0) AS rainfall_degree,
-                (water_level_m / 90000.0) AS water_level_degree,
-                (flood_depth_m / 90000.0) AS flood_depth_degree,
-                (flood_warning_m / 90000.0) AS flood_warning_degree
+            SELECT *, (radius_m / 90000.0) AS radius_degree
             FROM query_point_base
         )
         SELECT
@@ -574,10 +623,11 @@ def query_nearby_latest_official(
             e.occurred_at,
             latest.observed_at,
             latest.ingested_at,
-            ST_Y(ST_PointOnSurface(latest.geom::geometry)) AS lat,
-            ST_X(ST_PointOnSurface(latest.geom::geometry)) AS lng,
-            ST_AsGeoJSON(ST_PointOnSurface(latest.geom::geometry)) AS geometry,
-            ST_Distance(latest.geom::geography, qp.geog) AS distance_to_query_m,
+            ST_Y(ST_PointOnSurface(COALESCE(e.geom, latest.geom)::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(COALESCE(e.geom, latest.geom)::geometry)) AS lng,
+            ST_AsGeoJSON(COALESCE(e.geom, latest.geom)) AS geometry,
+            ST_Distance(COALESCE(e.geom, latest.geom)::geography, qp.geog)
+                AS distance_to_query_m,
             COALESCE(latest.confidence, e.confidence, 0.9) AS confidence,
             COALESCE(latest.freshness_score, e.freshness_score, 0.8) AS freshness_score,
             COALESCE(latest.source_weight, e.source_weight, 1.0) AS source_weight,
@@ -594,32 +644,110 @@ def query_nearby_latest_official(
             latest.water_level_m,
             latest.warning_level_m,
             latest.flood_depth_cm,
-            latest.risk_factor AS realtime_risk_factor
+            latest.risk_factor AS realtime_risk_factor,
+            'current' AS evidence_scope,
+            latest.adapter_key,
+            NULL::text AS official_event_origin_key,
+            CASE WHEN latest.event_type = 'flood_warning'
+                THEN CASE WHEN e.properties->>'active_from'
+                    ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                    AND pg_input_is_valid(
+                        e.properties->>'active_from', 'timestamptz'
+                    )
+                    THEN (e.properties->>'active_from')::timestamptz END
+            END AS active_from,
+            CASE WHEN latest.event_type = 'flood_warning'
+                THEN CASE WHEN e.properties->>'active_until'
+                    ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                    AND pg_input_is_valid(
+                        e.properties->>'active_until', 'timestamptz'
+                    )
+                    THEN (e.properties->>'active_until')::timestamptz END
+            END AS active_until,
+            e.properties->>'cap_sender' AS cap_sender,
+            e.properties->>'cap_identifier' AS cap_identifier,
+            CASE WHEN e.properties->>'cap_sent'
+                ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                AND pg_input_is_valid(e.properties->>'cap_sent', 'timestamptz')
+                THEN (e.properties->>'cap_sent')::timestamptz
+            END AS cap_sent,
+            e.properties->>'admin_code' AS admin_code
         FROM official_realtime_latest latest
         CROSS JOIN query_point qp
+        JOIN data_sources ON data_sources.adapter_key = latest.adapter_key
+            AND data_sources.is_enabled = true
         LEFT JOIN evidence e ON e.id = latest.evidence_id
-        WHERE latest.geom IS NOT NULL
+        WHERE COALESCE(e.geom, latest.geom) IS NOT NULL
+            AND NOT ST_IsEmpty(COALESCE(e.geom, latest.geom))
+            AND ST_IsValid(COALESCE(e.geom, latest.geom))
             {observed_since_filter}
             AND (
                 (
-                    latest.event_type = 'rainfall'
-                    AND latest.geom && ST_Expand(qp.geom, qp.rainfall_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.rainfall_m)
-                )
-                OR (
-                    latest.event_type = 'water_level'
-                    AND latest.geom && ST_Expand(qp.geom, qp.water_level_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.water_level_m)
-                )
-                OR (
-                    latest.event_type = 'flood_report'
-                    AND latest.geom && ST_Expand(qp.geom, qp.flood_depth_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.flood_depth_m)
+                    latest.event_type IN ('rainfall', 'water_level', 'flood_report')
+                    AND COALESCE(e.geom, latest.geom) && ST_Expand(qp.geom, qp.radius_degree)
+                    AND ST_DWithin(
+                        COALESCE(e.geom, latest.geom)::geography,
+                        qp.geog,
+                        qp.radius_m
+                    )
                 )
                 OR (
                     latest.event_type = 'flood_warning'
-                    AND latest.geom && ST_Expand(qp.geom, qp.flood_warning_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.flood_warning_m)
+                    AND e.id IS NOT NULL
+                    AND e.properties->>'cap_status' = 'Actual'
+                    AND e.properties->>'cap_message_type' IN ('Alert', 'Update')
+                    AND e.properties->>'active_from'
+                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                    AND pg_input_is_valid(
+                        e.properties->>'active_from', 'timestamptz'
+                    )
+                    AND e.properties->>'active_until'
+                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                    AND pg_input_is_valid(
+                        e.properties->>'active_until', 'timestamptz'
+                    )
+                    AND CASE WHEN e.properties->>'active_from'
+                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                        THEN (e.properties->>'active_from')::timestamptz
+                    END <= qp.as_of
+                    AND qp.as_of < CASE WHEN e.properties->>'active_until'
+                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                        THEN (e.properties->>'active_until')::timestamptz
+                    END
+                    AND length(e.properties->>'cap_sender') BETWEEN 1 AND 512
+                    AND length(e.properties->>'cap_identifier') BETWEEN 1 AND 512
+                    AND e.properties->>'cap_sent'
+                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                    AND pg_input_is_valid(e.properties->>'cap_sent', 'timestamptz')
+                    AND e.properties->>'admin_code' ~ '^\\d{{8}}$'
+                    AND e.properties->>'ingestion_generation_started_at'
+                        ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                    AND pg_input_is_valid(
+                        e.properties->>'ingestion_generation_started_at',
+                        'timestamptz'
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM ingestion_jobs retired
+                        WHERE retired.adapter_key = latest.adapter_key
+                            AND retired.status = 'succeeded'
+                            AND retired.error_code = 'no_active_event'
+                            AND retired.started_at >= CASE
+                                WHEN e.properties->>'ingestion_generation_started_at'
+                                    ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}T.*(?:Z|[+-]\\d{{2}}:\\d{{2}})$'
+                                    AND pg_input_is_valid(
+                                        e.properties->>'ingestion_generation_started_at',
+                                        'timestamptz'
+                                    )
+                                THEN (e.properties->>'ingestion_generation_started_at')::timestamptz
+                            END
+                    )
+                    AND COALESCE(e.geom, latest.geom) && ST_Expand(qp.geom, qp.radius_degree)
+                    AND ST_DWithin(
+                        COALESCE(e.geom, latest.geom)::geography,
+                        qp.geog,
+                        qp.radius_m
+                    )
                 )
             )
         ORDER BY
@@ -629,25 +757,25 @@ def query_nearby_latest_official(
         LIMIT %s
     """
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(
-                    sql,
-                    (
-                        lng,
-                        lat,
-                        lng,
-                        lat,
-                        rainfall_radius_m,
-                        water_level_radius_m,
-                        flood_depth_radius_m,
-                        flood_warning_radius_m,
-                        *observed_since_params,
-                        bounded_limit,
-                    ),
-                )
-                return tuple(_record_from_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(
+                sql,
+                (
+                    lng,
+                    lat,
+                    lng,
+                    lat,
+                    radius_m,
+                    as_of,
+                    *observed_since_params,
+                    bounded_limit,
+                ),
+            )
+            return tuple(_record_from_row(row) for row in cursor.fetchall())
     except psycopg.errors.UndefinedTable as exc:
         if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
             return ()
@@ -1056,19 +1184,30 @@ def query_realtime_jurisdiction_context(
                 FROM realtime_source_jurisdictions mapping
                 LEFT JOIN realtime_jurisdictions jurisdiction
                     ON jurisdiction.jurisdiction_code = mapping.jurisdiction_code
-                WHERE mapping.coverage_scope = 'national'
-                    OR mapping.jurisdiction_code IN (
-                        SELECT jurisdiction_code FROM considered
+                WHERE mapping.mapping_revision = '2026-08-24-v1-baseline'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM contract_mapping_proofs proof
+                        WHERE proof.mapping_proof_valid = true
+                            AND proof.contract_mapping_revision
+                                = '2026-08-24-v1-baseline'
+                            AND proof.signal_type = mapping.signal_type
+                            AND (
+                                mapping.coverage_scope = 'national'
+                                OR mapping.jurisdiction_code = proof.jurisdiction_code
+                            )
                     )
             ), '[]'::jsonb) ELSE '[]'::jsonb END AS source_mappings
         FROM resolution
     """
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, (lng, lat, search_radius_m))
-                row = cursor.fetchone()
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, (lng, lat, search_radius_m))
+            row = cursor.fetchone()
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1082,6 +1221,7 @@ def query_realtime_jurisdiction_context(
             source_mappings=(),
         )
     return _realtime_jurisdiction_context(row)
+
 
 def _query_realtime_source_health_rows(
     *,
@@ -1284,11 +1424,13 @@ def _query_realtime_source_health_rows(
         {observation_join}
         ORDER BY requested.adapter_key ASC
     """
-    with _connect(database_url, connection_factory) as connection:
-        with connection.cursor() as cursor:
-            _apply_statement_timeout(cursor, statement_timeout_ms)
-            cursor.execute(sql, (list(adapter_keys),))
-            return tuple(_realtime_source_health_row(row) for row in cursor.fetchall())
+    with (
+        _connect(database_url, connection_factory) as connection,
+        connection.cursor() as cursor,
+    ):
+        _apply_statement_timeout(cursor, statement_timeout_ms)
+        cursor.execute(sql, (list(adapter_keys),))
+        return tuple(_realtime_source_health_row(row) for row in cursor.fetchall())
 
 
 def _merge_nearby_coverage_rows(
@@ -1347,6 +1489,8 @@ def _query_nearby_latest_coverage_rows(
                 ELSE 'stale'
             END AS freshness_state
         FROM official_realtime_latest latest
+        JOIN data_sources ON data_sources.adapter_key = latest.adapter_key
+            AND data_sources.is_enabled = true
         CROSS JOIN query_point qp
         WHERE latest.geom IS NOT NULL
             {observed_filter}
@@ -1356,11 +1500,13 @@ def _query_nearby_latest_coverage_rows(
     """
     params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
-                return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
+            return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
     except psycopg.errors.UndefinedTable as exc:
         if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
             return ()
@@ -1412,7 +1558,7 @@ def _query_nearby_evidence_coverage_rows(
                     ELSE 'stale'
                 END AS freshness_state
             FROM evidence e
-            LEFT JOIN data_sources ds ON ds.id = e.data_source_id
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
             CROSS JOIN query_point qp
             WHERE e.source_type = 'official'
                 AND e.ingestion_status = 'accepted'
@@ -1451,11 +1597,13 @@ def _query_nearby_evidence_coverage_rows(
     """
     params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
-                return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
+            return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1561,13 +1709,15 @@ def upsert_public_evidence(
     """
     try:
         inserted: list[EvidenceRecord] = []
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                for record in records:
-                    cursor.execute(sql, _upsert_params(record))
-                    row = cursor.fetchone()
-                    if row is not None:
-                        inserted.append(_record_from_row(row))
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            for record in records:
+                cursor.execute(sql, _upsert_params(record))
+                row = cursor.fetchone()
+                if row is not None:
+                    inserted.append(_record_from_row(row))
         return tuple(inserted)
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
@@ -1608,18 +1758,20 @@ def fetch_query_heat_snapshot(
         FROM nearby_queries
     """
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                if statement_timeout_ms > 0:
-                    cursor.execute(
-                        "SELECT set_config('statement_timeout', %s, true)",
-                        (f"{statement_timeout_ms}ms",),
-                    )
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            if statement_timeout_ms > 0:
                 cursor.execute(
-                    sql,
-                    (lng, lat, lng, lat, radius_m, _period_to_interval(period), radius_m),
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    (f"{statement_timeout_ms}ms",),
                 )
-                row = cursor.fetchone()
+            cursor.execute(
+                sql,
+                (lng, lat, lng, lat, radius_m, _period_to_interval(period), radius_m),
+            )
+            row = cursor.fetchone()
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1677,6 +1829,7 @@ def fetch_assessment_evidence(
         JOIN risk_assessments ra ON ra.id = rae.risk_assessment_id
         JOIN location_queries lq ON lq.id = ra.query_id
         JOIN evidence e ON e.id = rae.evidence_id
+        JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
         WHERE ra.id = %s
             AND e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
@@ -1758,11 +1911,13 @@ def _fetch_records(
     connection_factory: ConnectionFactory | None,
 ) -> tuple[EvidenceRecord, ...]:
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
-                return tuple(_record_from_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
+            return tuple(_record_from_row(row) for row in cursor.fetchall())
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1782,32 +1937,59 @@ def _apply_statement_timeout(cursor: Any, statement_timeout_ms: int) -> None:
     )
 
 
-def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
+def _record_from_row(row: Mapping[str, Any] | Sequence[Any]) -> EvidenceRecord:
+    def value(key: str, index: int, default: Any = None) -> Any:
+        if isinstance(row, Mapping):
+            return row.get(key, default)
+        return row[index] if index < len(row) else default
+
+    origin_key = value("official_event_origin_key", 26)
+    if origin_key is None and value("event_type", 3) == "flood_warning":
+        try:
+            origin_key = _official_event_origin_key(
+                sender=str(value("cap_sender", 29)),
+                identifier=str(value("cap_identifier", 30)),
+                sent=value("cap_sent", 31),
+                admin_code=str(value("admin_code", 32)),
+            )
+        except (AttributeError, TypeError, ValueError):
+            origin_key = None
+
     return EvidenceRecord(
-        id=str(row["id"]),
-        source_id=str(row["source_id"]),
-        source_type=str(row["source_type"]),
-        event_type=str(row["event_type"]),
-        title=str(row["title"]),
-        summary=str(row["summary"]),
-        url=str(row["url"]) if row.get("url") is not None else None,
-        occurred_at=row.get("occurred_at"),
-        observed_at=row.get("observed_at"),
-        ingested_at=row["ingested_at"],
-        lat=_optional_float(row.get("lat")),
-        lng=_optional_float(row.get("lng")),
-        geometry=_geometry(row.get("geometry")),
-        distance_to_query_m=_optional_float(row.get("distance_to_query_m")),
-        confidence=float(row["confidence"]),
-        freshness_score=float(row["freshness_score"]),
-        source_weight=float(row["source_weight"]),
-        privacy_level=str(row["privacy_level"]),
-        raw_ref=str(row["raw_ref"]) if row.get("raw_ref") is not None else None,
-        rainfall_mm_1h=_optional_float(row.get("rainfall_mm_1h")),
-        water_level_m=_optional_float(row.get("water_level_m")),
-        warning_level_m=_optional_float(row.get("warning_level_m")),
-        flood_depth_cm=_optional_float(row.get("flood_depth_cm")),
-        realtime_risk_factor=_optional_float(row.get("realtime_risk_factor")),
+        id=str(value("id", 0)),
+        source_id=str(value("source_id", 1)),
+        source_type=str(value("source_type", 2)),
+        event_type=str(value("event_type", 3)),
+        title=str(value("title", 4)),
+        summary=str(value("summary", 5)),
+        url=str(value("url", 6)) if value("url", 6) is not None else None,
+        occurred_at=value("occurred_at", 7),
+        observed_at=value("observed_at", 8),
+        ingested_at=value("ingested_at", 9),
+        lat=_optional_float(value("lat", 10)),
+        lng=_optional_float(value("lng", 11)),
+        geometry=_geometry(value("geometry", 12)),
+        distance_to_query_m=_optional_float(value("distance_to_query_m", 13)),
+        confidence=float(value("confidence", 14)),
+        freshness_score=float(value("freshness_score", 15)),
+        source_weight=float(value("source_weight", 16)),
+        privacy_level=str(value("privacy_level", 17)),
+        raw_ref=(str(value("raw_ref", 18)) if value("raw_ref", 18) is not None else None),
+        rainfall_mm_1h=_optional_float(value("rainfall_mm_1h", 19)),
+        water_level_m=_optional_float(value("water_level_m", 20)),
+        warning_level_m=_optional_float(value("warning_level_m", 21)),
+        flood_depth_cm=_optional_float(value("flood_depth_cm", 22)),
+        realtime_risk_factor=_optional_float(value("realtime_risk_factor", 23)),
+        evidence_scope=cast(
+            Literal["current", "historical", "context", "unspecified"],
+            value("evidence_scope", 24, "unspecified"),
+        ),
+        adapter_key=(
+            str(value("adapter_key", 25)) if value("adapter_key", 25) is not None else None
+        ),
+        official_event_origin_key=(str(origin_key) if origin_key is not None else None),
+        active_from=value("active_from", 27),
+        active_until=value("active_until", 28),
     )
 
 
@@ -1858,9 +2040,7 @@ def _realtime_source_health_row(row: dict[str, Any]) -> RealtimeSourceHealthRow:
         runtime_pipeline_run_at=row.get("runtime_pipeline_run_at"),
         runtime_pipeline_complete=bool(row.get("runtime_pipeline_complete", False)),
         fresh_station_count=(
-            int(row["fresh_station_count"])
-            if row.get("fresh_station_count") is not None
-            else None
+            int(row["fresh_station_count"]) if row.get("fresh_station_count") is not None else None
         ),
         delayed_station_count=(
             int(row["delayed_station_count"])
@@ -1868,22 +2048,16 @@ def _realtime_source_health_row(row: dict[str, Any]) -> RealtimeSourceHealthRow:
             else None
         ),
         stale_station_count=(
-            int(row["stale_station_count"])
-            if row.get("stale_station_count") is not None
-            else None
+            int(row["stale_station_count"]) if row.get("stale_station_count") is not None else None
         ),
         upstream_station_count=(
             int(row["upstream_station_count"])
             if row.get("upstream_station_count") is not None
             else None
         ),
-        pages_fetched=(
-            int(row["pages_fetched"]) if row.get("pages_fetched") is not None else None
-        ),
+        pages_fetched=(int(row["pages_fetched"]) if row.get("pages_fetched") is not None else None),
         pagination_complete=(
-            bool(row["pagination_complete"])
-            if row.get("pagination_complete") is not None
-            else None
+            bool(row["pagination_complete"]) if row.get("pagination_complete") is not None else None
         ),
         inventory_manifest_sha256=(
             str(row["inventory_manifest_sha256"])
@@ -1895,9 +2069,7 @@ def _realtime_source_health_row(row: dict[str, Any]) -> RealtimeSourceHealthRow:
 
 
 def _realtime_jurisdiction_context(row: dict[str, Any]) -> RealtimeJurisdictionContext:
-    raw_resolution_status = str(
-        row.get("resolution_status") or "boundary_unverified"
-    )
+    raw_resolution_status = str(row.get("resolution_status") or "boundary_unverified")
     resolution_status: RealtimeJurisdictionResolutionStatus = (
         cast(RealtimeJurisdictionResolutionStatus, raw_resolution_status)
         if raw_resolution_status

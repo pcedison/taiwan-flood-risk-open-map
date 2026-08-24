@@ -71,6 +71,36 @@ def test_nearby_coverage_distinguishes_nearby_from_county_available() -> None:
     assert coverage.county_level_note
 
 
+def test_v1_absence_proof_requires_exactly_three_reviewed_signal_types() -> None:
+    assert REQUIRED_SIGNAL_TYPES == ("rainfall", "water_level", "flood_depth")
+
+
+def test_catalog_kill_switch_wins_over_prior_healthy_runtime_state() -> None:
+    row = RealtimeSourceHealthRow(
+        adapter_key="official.wra_iow.flood_depth",
+        name="WRA IoW",
+        is_enabled=False,
+        configured_health_status="healthy",
+        last_success_at=NOW,
+        last_failure_at=None,
+        latest_run_status="succeeded",
+        latest_run_at=NOW,
+        latest_observed_at=NOW,
+        latest_ingested_at=NOW,
+        station_count=1,
+        runtime_enabled=True,
+        runtime_enabled_checked_at=NOW,
+        runtime_pipeline_status="succeeded",
+        runtime_pipeline_checked_at=NOW,
+        runtime_pipeline_run_at=NOW,
+        runtime_pipeline_complete=True,
+        fresh_station_count=1,
+    )
+    health = build_nearby_source_health((row,), evaluated_at=NOW)
+    assert health[0].health_status == "disabled"
+    assert health[0].reason_code == "disabled"
+
+
 def test_nearby_coverage_counts_500_1000_3000_5000_buckets() -> None:
     coverage = build_nearby_realtime_coverage(
         rows=(
@@ -118,7 +148,7 @@ def test_nearby_coverage_counts_500_1000_3000_5000_buckets() -> None:
     assert coverage.overall_level == "low"
 
 
-def test_nearby_coverage_reports_missing_flood_depth_and_sewer() -> None:
+def test_nearby_coverage_reports_missing_required_flood_depth() -> None:
     coverage = build_nearby_realtime_coverage(
         rows=(
             _row(
@@ -140,7 +170,7 @@ def test_nearby_coverage_reports_missing_flood_depth_and_sewer() -> None:
 
     assert coverage.overall_level == "high"
     assert "flood_depth" in coverage.missing_signal_types
-    assert "sewer_water_level" in coverage.missing_signal_types
+    assert "sewer_water_level" not in coverage.missing_signal_types
     assert "water_level" not in coverage.missing_signal_types
 
 
@@ -449,9 +479,9 @@ def test_stale_persisted_disabled_gate_without_runtime_snapshot_stays_unknown() 
     )
 
     rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
-    assert rainfall.missing_cause == "health_unknown"
-    assert coverage.source_health[0].health_status == "unknown"
-    assert coverage.source_health[0].reason_code == "not_yet_observed"
+    assert rainfall.missing_cause == "source_not_configured"
+    assert coverage.source_health[0].health_status == "disabled"
+    assert coverage.source_health[0].reason_code == "disabled"
 
 
 def test_fresh_runtime_disabled_snapshot_overrides_old_activity() -> None:
@@ -488,9 +518,9 @@ def test_fresh_runtime_enabled_snapshot_exposes_stalled_worker() -> None:
     )
 
     rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
-    assert rainfall.missing_cause == "update_pipeline_stalled"
-    assert coverage.source_health[0].health_status == "failed"
-    assert coverage.source_health[0].reason_code == "pipeline_stalled"
+    assert rainfall.missing_cause == "source_not_configured"
+    assert coverage.source_health[0].health_status == "disabled"
+    assert coverage.source_health[0].reason_code == "disabled"
 
 
 def test_fresh_runtime_enabled_snapshot_does_not_fall_back_to_persisted_disabled_gate() -> None:
@@ -509,9 +539,9 @@ def test_fresh_runtime_enabled_snapshot_does_not_fall_back_to_persisted_disabled
     )
 
     rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
-    assert rainfall.missing_cause == "health_unknown"
-    assert coverage.source_health[0].health_status == "unknown"
-    assert coverage.source_health[0].reason_code == "not_yet_observed"
+    assert rainfall.missing_cause == "source_not_configured"
+    assert coverage.source_health[0].health_status == "disabled"
+    assert coverage.source_health[0].reason_code == "disabled"
 
 
 def test_stale_runtime_selection_snapshot_exposes_worker_stall() -> None:
@@ -717,9 +747,9 @@ def test_unregistered_expected_source_is_publicly_unknown() -> None:
     )
 
     rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
-    assert rainfall.missing_cause == "health_unknown"
-    assert coverage.source_health[0].health_status == "unknown"
-    assert coverage.source_health[0].reason_code == "not_yet_observed"
+    assert rainfall.missing_cause == "source_not_configured"
+    assert coverage.source_health[0].health_status == "disabled"
+    assert coverage.source_health[0].reason_code == "disabled"
 
 
 def test_recent_runtime_activity_overrides_stale_persisted_disabled_gate() -> None:
@@ -735,8 +765,8 @@ def test_recent_runtime_activity_overrides_stale_persisted_disabled_gate() -> No
         )
     )
 
-    assert coverage.source_health[0].health_status == "healthy"
-    assert coverage.source_health[0].reason_code == "operational"
+    assert coverage.source_health[0].health_status == "disabled"
+    assert coverage.source_health[0].reason_code == "disabled"
 
 
 def test_one_fresh_station_cannot_hide_stale_stations() -> None:
