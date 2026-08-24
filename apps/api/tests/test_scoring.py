@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from app.domain.risk import RiskEvidenceSignal, score_risk
+from app.domain.risk import RiskEvidenceSignal, RiskScoringResult, score_risk
 
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "scoring"
@@ -47,6 +47,25 @@ def test_scoring_returns_unknown_without_evidence() -> None:
     assert result.realtime_level == "未知"
     assert result.historical_level == "未知"
     assert result.confidence_level == "未知"
+
+
+def _score_fixture(name: str) -> RiskScoringResult:
+    payload = json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
+    return score_risk(
+        tuple(_signal_from_fixture(item) for item in payload["signals"]),
+        now=datetime.fromisoformat(payload["now"]),
+    )
+
+
+def test_partial_source_outage_can_be_low_before_public_safety_gate() -> None:
+    result = _score_fixture("partial_source_outage.json")
+
+    assert result.realtime_level == "低"
+    assert result.missing_sources
+
+
+def test_stale_official_realtime_is_unknown_in_base_scorer() -> None:
+    assert _score_fixture("stale_official_realtime.json").realtime_level == "未知"
 
 
 def test_overlapping_flood_potential_polygons_do_not_stack_to_extreme() -> None:
