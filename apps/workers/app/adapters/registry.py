@@ -66,6 +66,7 @@ from app.adapters.local_yilan import (
 )
 from app.adapters.local_yunlin import YUNLIN_WATER_LEVEL_METADATA
 from app.adapters.ncdr import NCDR_CAP_METADATA
+from app.adapters.police_radio_traffic import POLICE_RADIO_TRAFFIC_METADATA
 from app.adapters.ptt import METADATA as PTT_METADATA
 from app.adapters.wra import WRA_HISTORICAL_FLOOD_METADATA, WRA_WATER_LEVEL_METADATA
 from app.adapters.wra_iow import WRA_IOW_FLOOD_DEPTH_METADATA
@@ -93,6 +94,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         WRA_HISTORICAL_FLOOD_METADATA.key: WRA_HISTORICAL_FLOOD_METADATA,
         WRA_IOW_FLOOD_DEPTH_METADATA.key: WRA_IOW_FLOOD_DEPTH_METADATA,
         NCDR_CAP_METADATA.key: NCDR_CAP_METADATA,
+        POLICE_RADIO_TRAFFIC_METADATA.key: POLICE_RADIO_TRAFFIC_METADATA,
         FLOOD_SENSOR_METADATA.key: FLOOD_SENSOR_METADATA,
         RIVER_WATER_LEVEL_METADATA.key: RIVER_WATER_LEVEL_METADATA,
         POND_WATER_LEVEL.metadata.key: POND_WATER_LEVEL.metadata,
@@ -185,6 +187,8 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         )
     if metadata.key == "official.ncdr.cap":
         return _with_optional_override(metadata.enabled_by_default, settings.source_ncdr_cap_enabled)
+    if metadata.key == "official.npa.police_radio_traffic":
+        return settings.source_npa_police_radio_enabled
     if metadata.key == "official.flood_potential.geojson":
         return _with_optional_override(
             metadata.enabled_by_default,
@@ -423,6 +427,12 @@ def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettin
             settings.source_ncdr_cap_enabled
             and settings.source_ncdr_cap_contract_enabled
         )
+    if metadata.key == "official.npa.police_radio_traffic":
+        return (
+            settings.source_npa_police_radio_enabled
+            and settings.source_npa_police_radio_api_enabled
+            and settings.source_npa_police_radio_contract_enabled
+        )
     if _is_sample_adapter(metadata) and not settings.source_sample_data_enabled:
         return False
     if _is_reviewed_news_adapter(metadata) and settings.source_news_enabled is not True:
@@ -450,6 +460,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_wra_iow_flood_depth_enabled is True
     if metadata.key == "official.ncdr.cap":
         return settings.source_ncdr_cap_enabled is True
+    if metadata.key == "official.npa.police_radio_traffic":
+        return settings.source_npa_police_radio_enabled is True
     if metadata.key == "official.flood_potential.geojson":
         return settings.source_flood_potential_enabled is not False
     if metadata.key == "official.civil_iot.flood_sensor":

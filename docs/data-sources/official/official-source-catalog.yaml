@@ -73,6 +73,21 @@ sources:
       - "The source, API, contract, credential, and persisted catalog gates are independently fail-closed and disabled by default."
       - "Datastore capid values are transport metadata only; canonical identities come from CAP sender, identifier, sent, and area semantics."
       - "Unreviewed administrative, polygon, Circle, and message-level geometry never enters staging, latest, promotion, or scoring."
+  - key: official.npa.police_radio_traffic
+    need: reported_flood_road_incident_context
+    status: disabled_by_default
+    data_gov_dataset_id: "15221"
+    data_gov_url: "https://data.gov.tw/dataset/15221"
+    title: "Police Broadcasting Service realtime road conditions"
+    provider: "Police Broadcasting Service"
+    resource_url: "https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata"
+    resource_format: "JSON"
+    update_frequency: "latest 1000 traffic records; may lag the query page by up to one minute"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Persist explicit flood road reports as reported-unverified status-only context; never use them for official latest or scoring."
+    limitations:
+      - "警廣即時路況通報，尚未由淹水感測器確認。"
+      - "路況通報可能由民眾或勤務單位提供，位置與狀態可能延遲更新。"
   - key: official.wra.water_level
     need: realtime_water_level
     status: primary

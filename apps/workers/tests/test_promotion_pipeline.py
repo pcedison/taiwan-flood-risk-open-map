@@ -1662,6 +1662,43 @@ def test_write_evidence_keeps_unreviewed_status_only_audit_only() -> None:
     assert "INSERT INTO evidence" in connection.cursor_instance.executions[0][0]
 
 
+def test_police_radio_context_persists_to_evidence_without_latest_upsert() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="police-context-evidence")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.npa.police_radio_traffic",
+        source_id="UID-001",
+        source_type="official",
+        event_type="status_only",
+        title="Police-radio flood road incident",
+        summary="Reported road flooding on 安中路",
+        url="https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.62,
+        raw_ref="raw/police-radio/traffic.json",
+        properties={
+            "evidence_scope": "context",
+            "context_kind": "reported_flood_road_incident",
+            "verification_status": "reported_unverified",
+            "incident_state": "active",
+            "location_precision": "road_or_lane",
+            "upstream_updated_at": "2026-04-28T10:01:00+00:00",
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [120.1842, 23.0478]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "police-context-evidence"
+    statements = [statement for statement, _params in connection.cursor_instance.executions]
+    assert sum("INSERT INTO evidence" in statement for statement in statements) == 1
+    assert not any("INSERT INTO official_realtime_latest" in statement for statement in statements)
+
+
 def test_write_evidence_does_not_enrich_audit_only_civil_iot_geometry() -> None:
     connection = _FakeConnection(
         rows=[],

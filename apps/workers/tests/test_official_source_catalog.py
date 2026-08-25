@@ -50,6 +50,16 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
     assert sources["official.ncdr.cap"]["resource_format"] == (
         "JSON datastore index to CAP XML dump"
     )
+    assert sources["official.npa.police_radio_traffic"]["status"] == (
+        "disabled_by_default"
+    )
+    assert sources["official.npa.police_radio_traffic"]["data_gov_dataset_id"] == "15221"
+    assert sources["official.npa.police_radio_traffic"]["data_gov_url"] == (
+        "https://data.gov.tw/dataset/15221"
+    )
+    assert sources["official.npa.police_radio_traffic"]["resource_url"] == (
+        "https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata"
+    )
     assert sources["official.flood_potential.geojson"]["data_gov_dataset_id"] == "25766"
     assert sources["official.wra.flood_warning"]["status"] == "phase4_candidate"
     assert sources["geocoder.moi.village_boundary"]["data_gov_url"].startswith(
@@ -81,6 +91,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
         "official.wra_iow.flood_depth",
         "official.wra.historical_flood",
         "official.ncdr.cap",
+        "official.npa.police_radio_traffic",
         "official.flood_potential.geojson",
     ):
         metadata = ADAPTER_REGISTRY[adapter_key]

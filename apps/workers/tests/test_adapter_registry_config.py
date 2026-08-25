@@ -106,6 +106,64 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.ncdr_dump_api_url is None
     assert settings.ncdr_max_cap_ids_per_run == 50
     assert settings.ncdr_cap_timeout_seconds == 8
+    assert settings.source_npa_police_radio_enabled is False
+    assert settings.source_npa_police_radio_api_enabled is False
+    assert settings.source_npa_police_radio_contract_enabled is False
+    assert settings.npa_police_radio_traffic_url is None
+    assert settings.npa_police_radio_timeout_seconds == 8
+
+
+def test_police_radio_requires_all_three_independent_gates() -> None:
+    required = {
+        "SOURCE_NPA_POLICE_RADIO_ENABLED": "true",
+        "SOURCE_NPA_POLICE_RADIO_API_ENABLED": "true",
+        "SOURCE_NPA_POLICE_RADIO_CONTRACT_ENABLED": "true",
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.npa.police_radio_traffic",
+    }
+
+    for missing in (
+        "SOURCE_NPA_POLICE_RADIO_ENABLED",
+        "SOURCE_NPA_POLICE_RADIO_API_ENABLED",
+        "SOURCE_NPA_POLICE_RADIO_CONTRACT_ENABLED",
+    ):
+        values = dict(required)
+        values.pop(missing)
+        assert enabled_adapter_keys(load_worker_settings(values)) == ()
+        assert build_runtime_adapters(load_worker_settings(values)) == {}
+
+    calls: list[tuple[str, int]] = []
+
+    def fetch_json(url: str, timeout_seconds: int) -> object:
+        calls.append((url, timeout_seconds))
+        return []
+
+    settings = load_worker_settings(
+        {
+            **required,
+            "NPA_POLICE_RADIO_TRAFFIC_URL": "https://example.test/police/roads",
+            "NPA_POLICE_RADIO_TIMEOUT_SECONDS": "5",
+        }
+    )
+    assert enabled_adapter_keys(settings) == ("official.npa.police_radio_traffic",)
+    adapters = build_runtime_adapters(
+        settings,
+        police_radio_traffic_fetch_json=fetch_json,
+    )
+    assert tuple(adapters) == ("official.npa.police_radio_traffic",)
+    assert adapters["official.npa.police_radio_traffic"].run().no_active_event is True
+    assert calls == [("https://example.test/police/roads", 5)]
+
+
+def test_police_radio_registry_metadata_is_context_only_and_default_off() -> None:
+    metadata = ADAPTER_REGISTRY["official.npa.police_radio_traffic"]
+
+    assert metadata.enabled_by_default is False
+    assert metadata.data_gov_dataset_id == "15221"
+    assert metadata.data_gov_url == "https://data.gov.tw/dataset/15221"
+    assert metadata.resource_url == (
+        "https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata"
+    )
+    assert "unverified" in " ".join(metadata.limitations).lower()
 
 
 def test_ncdr_runtime_config_reads_two_stage_settings() -> None:

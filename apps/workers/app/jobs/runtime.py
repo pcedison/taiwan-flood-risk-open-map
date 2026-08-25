@@ -105,6 +105,10 @@ from app.adapters.local_yilan import (
 from app.adapters.local_yunlin import FetchJson as YunlinFetchJson
 from app.adapters.local_yunlin import YunlinWaterLevelApiAdapter
 from app.adapters.ncdr import NcdrCapAlertAdapter, NcdrFetchJson, NcdrFetchText
+from app.adapters.police_radio_traffic import (
+    PoliceRadioFetchJson,
+    PoliceRadioTrafficAdapter,
+)
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import (
@@ -229,6 +233,7 @@ def build_runtime_adapters(
     wra_historical_flood_fetch_text: WraHistoricalFetchText | None = None,
     ncdr_cap_fetch_json: NcdrFetchJson | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
+    police_radio_traffic_fetch_json: PoliceRadioFetchJson | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
     tainan_flood_sensor_fetch_json: TainanFetchJson | None = None,
@@ -389,6 +394,20 @@ def build_runtime_adapters(
             fetch_text=ncdr_cap_fetch_text,
         )
         live_adapters[ncdr_cap_adapter.metadata.key] = ncdr_cap_adapter
+
+    if (
+        settings.source_npa_police_radio_enabled
+        and settings.source_npa_police_radio_api_enabled
+        and settings.source_npa_police_radio_contract_enabled
+        and "official.npa.police_radio_traffic" in enabled_keys
+    ):
+        police_radio_adapter = PoliceRadioTrafficAdapter(
+            endpoint_url=settings.npa_police_radio_traffic_url,
+            timeout_seconds=settings.npa_police_radio_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=police_radio_traffic_fetch_json,
+        )
+        live_adapters[police_radio_adapter.metadata.key] = police_radio_adapter
 
     if (
         settings.source_flood_potential_geojson_enabled
