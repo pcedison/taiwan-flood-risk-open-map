@@ -3,7 +3,7 @@
 import json
 import math
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -12,7 +12,6 @@ from app.adapters._helpers import (
     optional_float,
     optional_str,
     parse_datetime,
-    parse_observed_at_utc,
     stable_evidence_id,
     url_with_query,
 )
@@ -43,6 +42,7 @@ WRA_WATER_LEVEL_DATA_GOV_URL = "https://data.gov.tw/dataset/25768"
 WRA_WATER_LEVEL_ATTRIBUTION = "Water Resources Agency"
 WRA_WATER_LEVEL_USER_AGENT = "FloodRiskTaiwan/0.1 worker-wra-water-level"
 DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS = 8
+WRA_LOCAL_TZ = timezone(timedelta(hours=8))
 
 WRA_WATER_LEVEL_METADATA = AdapterMetadata(
     key="official.wra.water_level",
@@ -339,7 +339,7 @@ def _parse_wra_station_record(
         "StationNameEng",
         "observatoryname",
     )
-    observed_at = parse_observed_at_utc(
+    observed_at = _parse_wra_observed_at(
         _first_value(
             item,
             "observed_at",
@@ -418,6 +418,17 @@ def _parse_wra_station_record(
         record["geometry"] = {"type": "Point", "coordinates": [lng, lat]}
 
     return record
+
+
+def _parse_wra_observed_at(value: object) -> datetime | None:
+    """Normalize WRA timestamps, whose current v2 feed omits its UTC+8 offset."""
+
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=WRA_LOCAL_TZ)
+    return parsed.astimezone(UTC)
 
 
 def _parse_wra_station_metadata_record(item: Mapping[str, Any]) -> Mapping[str, Any] | None:

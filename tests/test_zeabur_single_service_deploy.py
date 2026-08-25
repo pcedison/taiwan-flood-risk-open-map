@@ -34,7 +34,10 @@ def test_zeabur_single_service_autostarts_backbone_when_database_is_attached() -
     dockerfile = ENTRYPOINT.read_text(encoding="utf-8")
 
     assert 'SINGLE_SERVICE_INGESTION_SCHEDULER_ENABLED:-auto' in dockerfile
-    assert 'worker_database_url="${WORKER_DATABASE_URL:-${DATABASE_URL:-}}"' in dockerfile
+    assert (
+        'worker_database_url="${WORKER_DATABASE_URL:-${DATABASE_URL:-${POSTGRES_CONNECTION_STRING:-${POSTGRES_URI:-}}}}"'
+        in dockerfile
+    )
     assert 'realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"' in dockerfile
     assert 'realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"' in dockerfile
     assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor"' in dockerfile
