@@ -7,7 +7,6 @@ import yaml
 
 from app.adapters.registry import ADAPTER_REGISTRY
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CATALOG_PATH = REPO_ROOT / "docs" / "data-sources" / "official" / "official-source-catalog.yaml"
 
@@ -25,6 +24,14 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
 
     assert sources["official.cwa.rainfall"]["data_gov_dataset_id"] == "9177"
     assert sources["official.cwa.tide_level"]["data_gov_dataset_id"] == "O-B0075-001"
+    assert sources["official.cwa.heavy_rain_warning"]["data_gov_dataset_id"] == "W-C0033-003"
+    assert sources["official.cwa.heavy_rain_warning"]["status"] == "disabled_by_default"
+    assert sources["official.cwa.heavy_rain_warning"]["license"] == (
+        "中央氣象署開放資料平臺使用規範"
+    )
+    assert sources["official.cwa.heavy_rain_warning"]["license_url"] == (
+        "https://opendata.cwa.gov.tw/about/rules"
+    )
     assert sources["official.wra.water_level"]["data_gov_dataset_id"] == "25768"
     assert sources["official.wra_iow.flood_depth"]["data_gov_dataset_id"] == "142980"
     assert sources["official.wra.historical_flood"]["data_gov_dataset_id"] == "25770"
@@ -55,6 +62,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
     for adapter_key in (
         "official.cwa.rainfall",
         "official.cwa.tide_level",
+        "official.cwa.heavy_rain_warning",
         "official.wra.water_level",
         "official.wra_iow.flood_depth",
         "official.wra.historical_flood",

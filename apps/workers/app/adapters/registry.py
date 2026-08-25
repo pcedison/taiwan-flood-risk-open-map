@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from types import MappingProxyType
 
-from app.adapters.contracts import AdapterMetadata, SourceFamily
 from app.adapters.civil_iot import (
     FLOOD_SENSOR_METADATA,
     GATE_WATER_LEVEL,
@@ -11,7 +10,12 @@ from app.adapters.civil_iot import (
     RIVER_WATER_LEVEL_METADATA,
     SEWER_WATER_LEVEL,
 )
-from app.adapters.cwa import CWA_RAINFALL_METADATA, CWA_TIDE_LEVEL_METADATA
+from app.adapters.contracts import AdapterMetadata, SourceFamily
+from app.adapters.cwa import (
+    CWA_HEAVY_RAIN_WARNING_METADATA,
+    CWA_RAINFALL_METADATA,
+    CWA_TIDE_LEVEL_METADATA,
+)
 from app.adapters.dcard import METADATA as DCARD_METADATA
 from app.adapters.flood_potential import FLOOD_POTENTIAL_GEOJSON_METADATA
 from app.adapters.local_chiayi_city import (
@@ -19,6 +23,7 @@ from app.adapters.local_chiayi_city import (
     CHIAYI_CITY_WATER_LEVEL_METADATA,
 )
 from app.adapters.local_chiayi_county import CHIAYI_COUNTY_FLOOD_SENSOR_METADATA
+from app.adapters.local_fhy import FHY_LOCAL_FLOOD_SENSOR_SOURCES
 from app.adapters.local_hsinchu_city import (
     HSINCHU_CITY_FLOOD_SENSOR_METADATA,
     HSINCHU_CITY_SEWER_WATER_LEVEL_METADATA,
@@ -28,13 +33,12 @@ from app.adapters.local_kaohsiung import (
     KAOHSIUNG_RAINFALL_METADATA,
     KAOHSIUNG_SEWER_WATER_LEVEL_METADATA,
 )
-from app.adapters.local_kinmen import KINMEN_KWIS_PUMP_STATION_METADATA
-from app.adapters.local_fhy import FHY_LOCAL_FLOOD_SENSOR_SOURCES
 from app.adapters.local_keelung import (
     KEELUNG_FLOOD_SENSOR_METADATA,
     KEELUNG_RAINFALL_METADATA,
     KEELUNG_WATER_LEVEL_METADATA,
 )
+from app.adapters.local_kinmen import KINMEN_KWIS_PUMP_STATION_METADATA
 from app.adapters.local_nantou import NANTOU_SEWER_WATER_LEVEL_METADATA
 from app.adapters.local_new_taipei import (
     NEW_TAIPEI_DRAINAGE_WATER_LEVEL_METADATA,
@@ -44,6 +48,7 @@ from app.adapters.local_new_taipei import (
 )
 from app.adapters.local_penghu import PENGHU_WATER_LEVEL_METADATA
 from app.adapters.local_taichung import TAICHUNG_WATER_LEVEL_METADATA
+from app.adapters.local_tainan import TAINAN_FLOOD_SENSOR_METADATA
 from app.adapters.local_taipei import (
     TAIPEI_PUMP_STATION,
     TAIPEI_RIVER_WATER_LEVEL,
@@ -54,19 +59,17 @@ from app.adapters.local_taoyuan import (
     TAOYUAN_RAINFALL_METADATA,
     TAOYUAN_WATER_LEVEL_METADATA,
 )
-from app.adapters.local_tainan import TAINAN_FLOOD_SENSOR_METADATA
-from app.adapters.ncdr import NCDR_CAP_METADATA
-from app.adapters.ptt import METADATA as PTT_METADATA
-from app.adapters.wra import WRA_HISTORICAL_FLOOD_METADATA, WRA_WATER_LEVEL_METADATA
-from app.adapters.wra_iow import WRA_IOW_FLOOD_DEPTH_METADATA
-from app.adapters.local_yunlin import YUNLIN_WATER_LEVEL_METADATA
 from app.adapters.local_yilan import (
     YILAN_FLOOD_SENSOR_METADATA,
     YILAN_MOBILE_PUMP_STATUS_METADATA,
     YILAN_WATER_LEVEL_METADATA,
 )
+from app.adapters.local_yunlin import YUNLIN_WATER_LEVEL_METADATA
+from app.adapters.ncdr import NCDR_CAP_METADATA
+from app.adapters.ptt import METADATA as PTT_METADATA
+from app.adapters.wra import WRA_HISTORICAL_FLOOD_METADATA, WRA_WATER_LEVEL_METADATA
+from app.adapters.wra_iow import WRA_IOW_FLOOD_DEPTH_METADATA
 from app.config import WorkerSettings, load_worker_settings
-
 
 ADAPTER_REGISTRY = MappingProxyType(
     {
@@ -85,6 +88,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         ),
         CWA_RAINFALL_METADATA.key: CWA_RAINFALL_METADATA,
         CWA_TIDE_LEVEL_METADATA.key: CWA_TIDE_LEVEL_METADATA,
+        CWA_HEAVY_RAIN_WARNING_METADATA.key: CWA_HEAVY_RAIN_WARNING_METADATA,
         WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
         WRA_HISTORICAL_FLOOD_METADATA.key: WRA_HISTORICAL_FLOOD_METADATA,
         WRA_IOW_FLOOD_DEPTH_METADATA.key: WRA_IOW_FLOOD_DEPTH_METADATA,
@@ -165,6 +169,8 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
     if metadata.key == "official.cwa.tide_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
+    if _is_live_cwa_heavy_rain_metadata(metadata):
+        return settings.source_cwa_heavy_rain_warning_enabled
     if metadata.key == "official.wra.water_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_wra_enabled)
     if metadata.key == "official.wra.historical_flood":
@@ -405,18 +411,23 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
 
 
 def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
+    if _is_live_cwa_heavy_rain_metadata(metadata):
+        return (
+            settings.source_cwa_heavy_rain_warning_enabled
+            and settings.source_cwa_heavy_rain_warning_api_enabled
+            and settings.source_cwa_heavy_rain_warning_contract_enabled
+            and bool((settings.cwa_api_authorization or "").strip())
+        )
     if _is_sample_adapter(metadata) and not settings.source_sample_data_enabled:
         return False
     if _is_reviewed_news_adapter(metadata) and settings.source_news_enabled is not True:
         return False
     if metadata.terms_review_required and not settings.source_terms_review_ack:
         return False
-    if metadata.family is SourceFamily.FORUM and not _forum_candidate_approval_ack(
+    return metadata.family is not SourceFamily.FORUM or _forum_candidate_approval_ack(
         metadata,
         settings,
-    ):
-        return False
-    return True
+    )
 
 
 def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
@@ -424,6 +435,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_cwa_enabled is not False
     if metadata.key == "official.cwa.tide_level":
         return settings.source_cwa_enabled is not False
+    if _is_live_cwa_heavy_rain_metadata(metadata):
+        return settings.source_cwa_heavy_rain_warning_enabled
     if metadata.key == "official.wra.water_level":
         return settings.source_wra_enabled is not False
     if metadata.key == "official.wra.historical_flood":
@@ -525,6 +538,12 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
     if metadata.family is SourceFamily.NEWS:
         return settings.source_news_enabled is True or _is_sample_adapter(metadata)
     return True
+
+
+def _is_live_cwa_heavy_rain_metadata(metadata: AdapterMetadata) -> bool:
+    """Keep test-only replacement metadata separate from the live source gates."""
+
+    return metadata is CWA_HEAVY_RAIN_WARNING_METADATA
 
 
 def _validate_configured_adapter_keys(configured_keys: tuple[str, ...]) -> None:

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
-
 
 TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 FALSE_VALUES = frozenset({"0", "false", "no", "off"})
@@ -14,6 +13,9 @@ class WorkerSettings:
     database_url: str | None
     source_cwa_enabled: bool | None
     source_cwa_api_enabled: bool
+    source_cwa_heavy_rain_warning_enabled: bool
+    source_cwa_heavy_rain_warning_api_enabled: bool
+    source_cwa_heavy_rain_warning_contract_enabled: bool
     source_wra_enabled: bool | None
     source_wra_api_enabled: bool
     source_wra_historical_flood_enabled: bool | None
@@ -130,6 +132,8 @@ class WorkerSettings:
     cwa_api_authorization: str | None
     cwa_api_url: str | None
     cwa_api_timeout_seconds: int
+    cwa_heavy_rain_warning_cap_url: str | None
+    cwa_heavy_rain_warning_timeout_seconds: int
     wra_api_url: str | None
     wra_station_api_url: str | None
     wra_api_token: str | None
@@ -205,6 +209,18 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         database_url=env_str(values, "WORKER_DATABASE_URL") or env_str(values, "DATABASE_URL"),
         source_cwa_enabled=env_bool(values, "SOURCE_CWA_ENABLED"),
         source_cwa_api_enabled=env_flag(values, "SOURCE_CWA_API_ENABLED"),
+        source_cwa_heavy_rain_warning_enabled=env_flag(
+            values,
+            "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED",
+        ),
+        source_cwa_heavy_rain_warning_api_enabled=env_flag(
+            values,
+            "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED",
+        ),
+        source_cwa_heavy_rain_warning_contract_enabled=env_flag(
+            values,
+            "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED",
+        ),
         source_wra_enabled=env_bool(values, "SOURCE_WRA_ENABLED"),
         source_wra_api_enabled=env_flag(values, "SOURCE_WRA_API_ENABLED"),
         source_wra_historical_flood_enabled=env_bool(
@@ -589,6 +605,15 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         cwa_api_authorization=env_str(values, "CWA_API_AUTHORIZATION"),
         cwa_api_url=env_str(values, "CWA_API_URL"),
         cwa_api_timeout_seconds=env_int(values, "CWA_API_TIMEOUT_SECONDS", default=8),
+        cwa_heavy_rain_warning_cap_url=env_str(
+            values,
+            "CWA_HEAVY_RAIN_WARNING_CAP_URL",
+        ),
+        cwa_heavy_rain_warning_timeout_seconds=env_int(
+            values,
+            "CWA_HEAVY_RAIN_WARNING_TIMEOUT_SECONDS",
+            default=8,
+        ),
         wra_api_url=env_str(values, "WRA_API_URL"),
         wra_station_api_url=env_str(values, "WRA_STATION_API_URL"),
         wra_api_token=env_str(values, "WRA_API_TOKEN"),

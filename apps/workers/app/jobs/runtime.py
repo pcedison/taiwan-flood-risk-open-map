@@ -16,7 +16,14 @@ from app.adapters.civil_iot import (
     StaWaterLevelApiAdapter,
 )
 from app.adapters.contracts import DataSourceAdapter
-from app.adapters.cwa import CwaRainfallApiAdapter, CwaTideLevelApiAdapter, FetchJson, TideFetchJson
+from app.adapters.cwa import (
+    CwaFetchCap,
+    CwaHeavyRainWarningAdapter,
+    CwaRainfallApiAdapter,
+    CwaTideLevelApiAdapter,
+    FetchJson,
+    TideFetchJson,
+)
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
 from app.adapters.local_chiayi_city import (
@@ -217,6 +224,7 @@ def build_runtime_adapters(
     cwa_fetch_json: FetchJson | None = None,
     cwa_tide_fetch_json: TideFetchJson | None = None,
     cwa_tide_station_fetch_json: TideFetchJson | None = None,
+    cwa_heavy_rain_warning_fetch_cap: CwaFetchCap | None = None,
     wra_fetch_json: WraFetchJson | None = None,
     wra_historical_flood_fetch_json: WraHistoricalFetchJson | None = None,
     wra_historical_flood_fetch_text: WraHistoricalFetchText | None = None,
@@ -309,6 +317,22 @@ def build_runtime_adapters(
             ),
         )
         live_adapters[cwa_tide_adapter.metadata.key] = cwa_tide_adapter
+
+    if (
+        settings.source_cwa_heavy_rain_warning_enabled
+        and settings.source_cwa_heavy_rain_warning_api_enabled
+        and settings.source_cwa_heavy_rain_warning_contract_enabled
+        and bool((settings.cwa_api_authorization or "").strip())
+        and "official.cwa.heavy_rain_warning" in enabled_keys
+    ):
+        cwa_heavy_rain_adapter = CwaHeavyRainWarningAdapter(
+            authorization=settings.cwa_api_authorization,
+            cap_url=settings.cwa_heavy_rain_warning_cap_url,
+            timeout_seconds=settings.cwa_heavy_rain_warning_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_cap=cwa_heavy_rain_warning_fetch_cap,
+        )
+        live_adapters[cwa_heavy_rain_adapter.metadata.key] = cwa_heavy_rain_adapter
 
     if settings.source_wra_api_enabled and "official.wra.water_level" in enabled_keys:
         wra_adapter = WraWaterLevelApiAdapter(

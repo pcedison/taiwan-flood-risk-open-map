@@ -4,18 +4,31 @@ import pytest
 
 from app.adapters.dcard import (
     ADAPTER_DISABLED_REASON as DCARD_DISABLED_REASON,
+)
+from app.adapters.dcard import (
     METADATA as DCARD_METADATA,
+)
+from app.adapters.dcard import (
     REQUIRED_ACCEPTANCE_FIELDS as DCARD_REQUIRED_ACCEPTANCE_FIELDS,
+)
+from app.adapters.dcard import (
     SOURCE_APPROVAL_STATUS as DCARD_SOURCE_APPROVAL_STATUS,
 )
 from app.adapters.ptt import (
     ADAPTER_DISABLED_REASON as PTT_DISABLED_REASON,
+)
+from app.adapters.ptt import (
     METADATA as PTT_METADATA,
+)
+from app.adapters.ptt import (
     REQUIRED_ACCEPTANCE_FIELDS as PTT_REQUIRED_ACCEPTANCE_FIELDS,
+)
+from app.adapters.ptt import (
     SOURCE_APPROVAL_STATUS as PTT_SOURCE_APPROVAL_STATUS,
 )
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
+from app.jobs.runtime import build_runtime_adapters
 
 
 def test_default_enabled_adapters_are_official_only() -> None:
@@ -63,6 +76,11 @@ def test_official_source_flags_can_disable_individual_adapters() -> None:
 def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     settings = load_worker_settings({})
 
+    assert settings.source_cwa_heavy_rain_warning_enabled is False
+    assert settings.source_cwa_heavy_rain_warning_api_enabled is False
+    assert settings.source_cwa_heavy_rain_warning_contract_enabled is False
+    assert settings.cwa_heavy_rain_warning_cap_url is None
+    assert settings.cwa_heavy_rain_warning_timeout_seconds == 8
     assert settings.source_cwa_api_enabled is False
     assert settings.source_wra_api_enabled is False
     assert settings.source_wra_historical_flood_api_enabled is False
@@ -95,6 +113,89 @@ def test_cwa_api_runtime_client_config_reads_env() -> None:
     assert settings.cwa_api_authorization == "test-token"
     assert settings.cwa_api_url == "https://example.test/cwa/rainfall"
     assert settings.cwa_api_timeout_seconds == 4
+
+
+def test_cwa_heavy_rain_warning_requires_all_independent_gates() -> None:
+    required = {
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+        "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+    }
+
+    for missing in required:
+        values = {**required, "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning"}
+        values.pop(missing)
+        assert "official.cwa.heavy_rain_warning" not in enabled_adapter_keys(
+            load_worker_settings(values)
+        )
+
+    settings = load_worker_settings(
+        {
+            **required,
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning",
+            "CWA_HEAVY_RAIN_WARNING_CAP_URL": "https://example.test/cap",
+            "CWA_HEAVY_RAIN_WARNING_TIMEOUT_SECONDS": "5",
+        }
+    )
+    assert enabled_adapter_keys(settings) == ("official.cwa.heavy_rain_warning",)
+    assert settings.cwa_heavy_rain_warning_cap_url == "https://example.test/cap"
+    assert settings.cwa_heavy_rain_warning_timeout_seconds == 5
+
+
+def test_cwa_heavy_rain_warning_registry_metadata_is_audit_only_and_default_off() -> None:
+    metadata = ADAPTER_REGISTRY["official.cwa.heavy_rain_warning"]
+
+    assert metadata.enabled_by_default is False
+    assert metadata.data_gov_dataset_id == "W-C0033-003"
+    assert metadata.resource_url is not None
+    assert "W-C0033-003" in metadata.resource_url
+    assert "unreviewed" in " ".join(metadata.limitations).lower()
+
+
+def test_cwa_heavy_rain_warning_runtime_builder_requires_every_gate_and_credential() -> None:
+    gates = {
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+        "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning",
+    }
+    for missing in (
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED",
+        "CWA_API_AUTHORIZATION",
+    ):
+        values = dict(gates)
+        values.pop(missing)
+        assert build_runtime_adapters(load_worker_settings(values)) == {}
+
+    calls: list[tuple[str, str, int]] = []
+
+    def fetch_cap(url: str, authorization: str, timeout_seconds: int) -> str:
+        calls.append((url, authorization, timeout_seconds))
+        return '<alerts xmlns="urn:oasis:names:tc:emergency:cap:1.2" />'
+
+    adapters = build_runtime_adapters(
+        load_worker_settings(
+            {
+                **gates,
+                "CWA_HEAVY_RAIN_WARNING_CAP_URL": "https://example.test/cap",
+                "CWA_HEAVY_RAIN_WARNING_TIMEOUT_SECONDS": "6",
+            }
+        ),
+        cwa_heavy_rain_warning_fetch_cap=fetch_cap,
+    )
+    assert tuple(adapters) == ("official.cwa.heavy_rain_warning",)
+    assert adapters["official.cwa.heavy_rain_warning"].run().no_active_event is True
+    assert calls == [
+        (
+            "https://example.test/cap?format=CAP",
+            "fixture-authorization-value",
+            6,
+        )
+    ]
 
 
 def test_wra_api_runtime_client_config_reads_env() -> None:

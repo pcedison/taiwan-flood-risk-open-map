@@ -39,6 +39,23 @@ sources:
       - "coastal tide level is not an inland river, sewer, flood-depth, or pump-station reading."
       - "Offshore tide stations such as Matsu use local mean sea level and are not tied back to Taiwan island TWVD2001."
       - "Live observations must be joined with O-B0076-001 station metadata for station name, county, town, and WGS84 coordinates."
+  - key: official.cwa.heavy_rain_warning
+    need: official_heavy_rain_warning_audit
+    status: disabled_by_default
+    data_gov_dataset_id: "W-C0033-003"
+    data_gov_url: "https://opendata.cwa.gov.tw/dataset/warning/W-C0033-003"
+    title: "Heavy-rain CAP warnings"
+    provider: "Central Weather Administration"
+    resource_url: "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/W-C0033-003?format=CAP"
+    resource_format: "CAP XML"
+    update_frequency: "as issued by the Central Weather Administration"
+    license: "中央氣象署開放資料平臺使用規範"
+    license_url: "https://opendata.cwa.gov.tw/about/rules"
+    integration_decision: "Retain bounded raw snapshots and source-rejection audits only; do not normalize until exact administrative geometry is reviewed."
+    limitations:
+      - "The source is independently gated and disabled by default."
+      - "Township and message-level warnings without reviewed exact geometry never enter staging, latest, promotion, or scoring."
+      - "CAP polygon and circle values are retained only as source identity semantics; no centroid or parent-county geometry is inferred."
   - key: official.wra.water_level
     need: realtime_water_level
     status: primary
