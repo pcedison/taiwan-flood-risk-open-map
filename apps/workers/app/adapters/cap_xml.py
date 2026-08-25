@@ -17,6 +17,8 @@ MAX_AREAS_PER_MESSAGE = 128
 MAX_REFERENCES_PER_MESSAGE = 64
 MAX_POLYGON_COORDINATES = 4_096
 CAP_12_NAMESPACE = "urn:oasis:names:tc:emergency:cap:1.2"
+CAP_12_ALERT_TAG = f"{{{CAP_12_NAMESPACE}}}alert"
+CAP_12_ALERTS_TAG = f"{{{CAP_12_NAMESPACE}}}alerts"
 
 
 class CapDocumentError(ValueError):
@@ -71,14 +73,31 @@ def parse_cap_document(xml_text: str) -> tuple[ParsedCapMessage, ...]:
         raise CapDocumentError(f"CAP XML could not be parsed: {type(exc).__name__}") from exc
 
     _validate_tree_bounds(root)
-    alerts = tuple(element for element in root.iter() if _local_name(element.tag) == "alert")
+    alerts = _root_alerts(root)
     if len(alerts) > MAX_CAP_MESSAGES:
         raise CapDocumentError("CAP document exceeds the 256 message limit")
-    if any(_namespace(alert.tag) != CAP_12_NAMESPACE for alert in alerts):
-        raise CapDocumentError("CAP alert must use the CAP 1.2 namespace")
-    if not alerts and root.tag != f"{{{CAP_12_NAMESPACE}}}alerts":
-        raise CapDocumentError("CAP empty collection must use the CAP 1.2 alerts root")
     return tuple(_parse_message(alert) for alert in alerts)
+
+
+def _root_alerts(root: Element) -> tuple[Element, ...]:
+    alerts: tuple[Element, ...]
+    if root.tag == CAP_12_ALERT_TAG:
+        alerts = (root,)
+    elif root.tag == CAP_12_ALERTS_TAG:
+        alerts = tuple(root)
+        if any(child.tag != CAP_12_ALERT_TAG for child in alerts):
+            raise CapDocumentError(
+                "CAP alerts collection children must be direct CAP 1.2 alert elements"
+            )
+    else:
+        raise CapDocumentError("CAP root must be a CAP 1.2 alert or alerts element")
+
+    for alert in alerts:
+        descendants = iter(alert.iter())
+        next(descendants)
+        if any(_local_name(element.tag) == "alert" for element in descendants):
+            raise CapDocumentError("CAP alert elements cannot be nested")
+    return alerts
 
 
 def _validate_tree_bounds(root: Element) -> None:

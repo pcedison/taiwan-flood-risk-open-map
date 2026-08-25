@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.adapters.contracts import AdapterMetadata, SourceFamily
 from app.adapters.dcard import (
     ADAPTER_DISABLED_REASON as DCARD_DISABLED_REASON,
 )
@@ -26,7 +27,7 @@ from app.adapters.ptt import (
 from app.adapters.ptt import (
     SOURCE_APPROVAL_STATUS as PTT_SOURCE_APPROVAL_STATUS,
 )
-from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
+from app.adapters.registry import ADAPTER_REGISTRY, adapter_is_enabled, enabled_adapter_keys
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
 
@@ -141,6 +142,28 @@ def test_cwa_heavy_rain_warning_requires_all_independent_gates() -> None:
     assert enabled_adapter_keys(settings) == ("official.cwa.heavy_rain_warning",)
     assert settings.cwa_heavy_rain_warning_cap_url == "https://example.test/cap"
     assert settings.cwa_heavy_rain_warning_timeout_seconds == 5
+
+
+def test_reconstructed_heavy_rain_metadata_cannot_bypass_key_based_gates() -> None:
+    reconstructed = AdapterMetadata(
+        key="official.cwa.heavy_rain_warning",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=True,
+        display_name="Reconstructed same-key metadata",
+    )
+
+    assert adapter_is_enabled(reconstructed, load_worker_settings({})) is False
+    assert adapter_is_enabled(
+        reconstructed,
+        load_worker_settings(
+            {
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+                "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+            }
+        ),
+    ) is True
 
 
 def test_cwa_heavy_rain_warning_registry_metadata_is_audit_only_and_default_off() -> None:

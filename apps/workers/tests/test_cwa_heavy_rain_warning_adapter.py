@@ -195,6 +195,22 @@ def test_cap_fields_must_use_the_cap_12_namespace() -> None:
         _adapter_for_xml(wrong_child_namespace).run()
 
 
+def test_cap_collection_rejects_wrapper_unknown_child_and_nested_alert() -> None:
+    alert = _alert_xml().split("\n", 1)[1]
+    wrapped = (
+        "<wrapper xmlns='urn:oasis:names:tc:emergency:cap:1.2'>"
+        f"{alert}</wrapper>"
+    )
+    unknown_child = (
+        "<alerts xmlns='urn:oasis:names:tc:emergency:cap:1.2'><unknown /></alerts>"
+    )
+    nested = _alert_xml().replace("</alert>", f"{alert}</alert>", 1)
+
+    for document in (wrapped, unknown_child, nested):
+        with pytest.raises(CapDocumentError):
+            parse_cap_document(document)
+
+
 @pytest.mark.parametrize(
     ("status", "scope", "message_type", "reason_code"),
     (
@@ -232,7 +248,7 @@ def test_non_actual_non_public_and_cancel_messages_are_raw_audited(
 
 def test_update_preserves_structured_reference_triples_and_remains_geometry_audited() -> None:
     references = (
-        "<references>public-warning@cwa.gov.tw,CWA-HR-PRIOR," 
+        "<references>public-warning@cwa.gov.tw,CWA-HR-PRIOR,"
         "2026-08-25T22:00:00+08:00</references>"
     )
     result = _adapter_for_xml(
@@ -336,16 +352,6 @@ def test_element_message_area_reference_and_polygon_limits_are_enforced() -> Non
     ):
         with pytest.raises(CapDocumentError):
             parse_cap_document(xml)
-
-
-def test_nested_alerts_cannot_evade_the_message_limit() -> None:
-    nested = _alert_xml(areas="").replace(
-        "</alert>",
-        ("<alert/>" * 256) + "</alert>",
-    )
-
-    with pytest.raises(CapDocumentError, match="256 message"):
-        parse_cap_document(nested)
 
 
 def test_authorization_is_a_separate_fetch_argument_and_configured_query_is_stripped() -> None:
@@ -570,5 +576,31 @@ def test_injected_fetcher_failure_is_redacted_and_not_converted_to_empty() -> No
     assert secret not in str(exc_info.value)
     assert "discard-me" not in str(exc_info.value)
     assert "REDACTED" in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+
+
+def test_injected_adapter_error_with_secret_chain_is_sanitized() -> None:
+    def fail(url: str, authorization: str, timeout_seconds: int) -> str:
+        del url, timeout_seconds
+        try:
+            raise RuntimeError(f"nested secret={authorization}")
+        except RuntimeError as exc:
+            raise CwaHeavyRainWarningFetchError(
+                f"adapter secret={authorization}"
+            ) from exc
+
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=SAFE_AUTHORIZATION,
+        cap_url="https://example.test/cap",
+        fetched_at=FETCHED_AT,
+        fetch_cap=fail,
+    )
+
+    with pytest.raises(CwaHeavyRainWarningFetchError) as exc_info:
+        adapter.run()
+
+    assert SAFE_AUTHORIZATION not in str(exc_info.value)
+    assert SAFE_AUTHORIZATION not in repr(vars(exc_info.value))
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None

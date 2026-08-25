@@ -233,7 +233,7 @@ def test_managed_no_active_retirement_runs_after_summary_persistence() -> None:
         no_active_event=True,
     )
     settings = replace(
-        load_worker_settings({}),
+        _settings(adapter.metadata.key),
         enabled_adapter_keys=(adapter.metadata.key,),
     )
 
@@ -266,7 +266,7 @@ def test_managed_no_active_retirement_is_not_called_when_promotion_disabled() ->
     )
     promotion_writer = _MemoryPromotionWriter([])
     settings = replace(
-        load_worker_settings({}),
+        _settings(adapter.metadata.key),
         enabled_adapter_keys=(adapter.metadata.key,),
     )
 
@@ -291,7 +291,7 @@ def test_managed_no_active_retirement_failure_returns_failed_result() -> None:
         no_active_event=True,
     )
     settings = replace(
-        load_worker_settings({}),
+        _settings(adapter.metadata.key),
         enabled_adapter_keys=(adapter.metadata.key,),
     )
 
@@ -934,19 +934,27 @@ def test_managed_runtime_cycle_records_builder_exception_as_pipeline_failure() -
 
 
 def _settings(*adapter_keys: str) -> WorkerSettings:
-    return load_worker_settings(
-        {
-            "WORKER_ENABLED_ADAPTER_KEYS": ",".join(adapter_keys),
-            "SOURCE_SAMPLE_DATA_ENABLED": "true",
-            "FRESHNESS_MAX_AGE_SECONDS": "86400",
-        }
-    )
+    values = {
+        "WORKER_ENABLED_ADAPTER_KEYS": ",".join(adapter_keys),
+        "SOURCE_SAMPLE_DATA_ENABLED": "true",
+        "FRESHNESS_MAX_AGE_SECONDS": "86400",
+    }
+    if "official.cwa.heavy_rain_warning" in adapter_keys:
+        values.update(
+            {
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+                "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+            }
+        )
+    return load_worker_settings(values)
 
 
 def _run_task9_managed(adapter: Any):
     key = adapter.metadata.key
     settings = replace(
-        load_worker_settings({}),
+        _settings(key),
         enabled_adapter_keys=(key,),
         source_ncdr_cap_enabled=True,
         source_wra_historical_flood_enabled=(

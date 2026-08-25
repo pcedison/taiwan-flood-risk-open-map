@@ -169,7 +169,7 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
     if metadata.key == "official.cwa.tide_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
-    if _is_live_cwa_heavy_rain_metadata(metadata):
+    if _is_cwa_heavy_rain_metadata(metadata):
         return settings.source_cwa_heavy_rain_warning_enabled
     if metadata.key == "official.wra.water_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_wra_enabled)
@@ -411,7 +411,7 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
 
 
 def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettings) -> bool:
-    if _is_live_cwa_heavy_rain_metadata(metadata):
+    if _is_cwa_heavy_rain_metadata(metadata):
         return (
             settings.source_cwa_heavy_rain_warning_enabled
             and settings.source_cwa_heavy_rain_warning_api_enabled
@@ -435,7 +435,7 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_cwa_enabled is not False
     if metadata.key == "official.cwa.tide_level":
         return settings.source_cwa_enabled is not False
-    if _is_live_cwa_heavy_rain_metadata(metadata):
+    if _is_cwa_heavy_rain_metadata(metadata):
         return settings.source_cwa_heavy_rain_warning_enabled
     if metadata.key == "official.wra.water_level":
         return settings.source_wra_enabled is not False
@@ -540,10 +540,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
     return True
 
 
-def _is_live_cwa_heavy_rain_metadata(metadata: AdapterMetadata) -> bool:
-    """Keep test-only replacement metadata separate from the live source gates."""
-
-    return metadata is CWA_HEAVY_RAIN_WARNING_METADATA
+def _is_cwa_heavy_rain_metadata(metadata: AdapterMetadata) -> bool:
+    return metadata.key == CWA_HEAVY_RAIN_WARNING_METADATA.key
 
 
 def _validate_configured_adapter_keys(configured_keys: tuple[str, ...]) -> None:

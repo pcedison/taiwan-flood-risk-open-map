@@ -128,30 +128,29 @@ class CwaHeavyRainWarningAdapter:
                 "CWA_API_AUTHORIZATION is required when the CWA heavy-rain warning adapter is enabled"
             )
         fetched_at = self._fetched_at or datetime.now(UTC)
-        fetch_failure: CwaHeavyRainWarningFetchError | None = None
-        try:
-            if self._fetch_cap_override is None:
-                xml_text = _fetch_cap(
-                    self._cap_url,
-                    authorization,
-                    self._timeout_seconds,
-                    now=fetched_at,
-                )
-            else:
+        if self._fetch_cap_override is None:
+            xml_text = _fetch_cap(
+                self._cap_url,
+                authorization,
+                self._timeout_seconds,
+                now=fetched_at,
+            )
+        else:
+            fetch_failure: CwaHeavyRainWarningFetchError | None = None
+            try:
                 xml_text = self._fetch_cap_override(
                     self._cap_url,
                     authorization,
                     self._timeout_seconds,
                 )
-        except CwaHeavyRainWarningAdapterError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - redact arbitrary injected transport failures
-            detail = _redact_detail(str(exc), authorization=authorization)
-            fetch_failure = CwaHeavyRainWarningFetchError(
-                f"CWA heavy-rain CAP fetcher failed at {_redacted_url(self._cap_url)}: {detail}"
-            )
-        if fetch_failure is not None:
-            raise fetch_failure
+            except Exception as exc:  # noqa: BLE001 - sanitize the untrusted override boundary
+                detail = _redact_detail(str(exc), authorization=authorization)
+                fetch_failure = CwaHeavyRainWarningFetchError(
+                    f"CWA heavy-rain CAP fetcher failed at "
+                    f"{_redacted_url(self._cap_url)}: {detail}"
+                )
+            if fetch_failure is not None:
+                raise fetch_failure
 
         if authorization in xml_text:
             xml_text = ""
