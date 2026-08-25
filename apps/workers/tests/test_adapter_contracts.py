@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from email.message import Message
 from pathlib import Path
 from urllib.error import HTTPError
@@ -14,6 +14,7 @@ from app.adapters.contracts import (
     DataSourceAdapter,
     EventType,
     IngestionStatus,
+    NormalizedEvidence,
     SourceFamily,
     SourceRejection,
 )
@@ -33,8 +34,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def test_source_rejection_contract_rejects_invalid_detail_records() -> None:
-    with pytest.raises(ValueError, match="canonical reason code"):
-        SourceRejection("cap:unreviewed-town", "CWA_UNREVIEWED_ADMIN_GEOMETRY")
+    for reason_code in ("CWA_UNREVIEWED_ADMIN_GEOMETRY", "a" + "_" * 64):
+        with pytest.raises(ValueError, match="canonical reason code"):
+            SourceRejection("cap:unreviewed-town", reason_code)
 
     with pytest.raises(ValueError, match="unique"):
         AdapterRunResult(
@@ -67,6 +69,50 @@ def test_source_rejection_contract_rejects_invalid_detail_records() -> None:
             source_rejections=tuple(
                 SourceRejection(f"cap:{index}", "cwa_unreviewed_admin_geometry")
                 for index in range(257)
+            ),
+        )
+
+
+@pytest.mark.parametrize("source_id", ("", " cap:unreviewed-town", "cap:unreviewed-town ", "x" * 513))
+def test_source_rejection_rejects_invalid_source_id_boundaries(source_id: str) -> None:
+    with pytest.raises(ValueError, match="trimmed 1..512"):
+        SourceRejection(source_id, "cwa_unreviewed_admin_geometry")
+
+
+@pytest.mark.parametrize("source_id", ("x", "x" * 512))
+@pytest.mark.parametrize("reason_code", ("a", "a" + "_" * 63))
+def test_source_rejection_accepts_source_id_and_reason_code_boundaries(
+    source_id: str, reason_code: str
+) -> None:
+    assert SourceRejection(source_id, reason_code) == SourceRejection(source_id, reason_code)
+
+
+@pytest.mark.parametrize("confidence", (0.9, 1.1))
+def test_source_rejection_cannot_overlap_normalized_evidence(confidence: float) -> None:
+    source_id = "cap:unreviewed-town"
+    normalized = NormalizedEvidence(
+        evidence_id="ev-cap-unreviewed-town",
+        adapter_key="official.cwa.heavy_rain_warning",
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_WARNING,
+        source_id=source_id,
+        source_url="https://example.test/cap",
+        source_title="Unreviewed town warning",
+        source_timestamp=datetime(2026, 8, 26, 8, 0, tzinfo=UTC),
+        fetched_at=datetime(2026, 8, 26, 8, 0, tzinfo=UTC),
+        summary="This row must never reach either staging evidence path.",
+        location_text="安南區",
+        confidence=confidence,
+    )
+
+    with pytest.raises(ValueError, match="disjoint from normalized"):
+        AdapterRunResult(
+            adapter_key="official.cwa.heavy_rain_warning",
+            fetched=(),
+            normalized=(normalized,),
+            rejected=(source_id,),
+            source_rejections=(
+                SourceRejection(source_id, "cwa_unreviewed_admin_geometry"),
             ),
         )
 

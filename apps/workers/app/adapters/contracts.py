@@ -209,6 +209,9 @@ class AdapterRunResult:
             raise ValueError("source_rejections source_ids must be unique")
         if not set(source_rejection_ids).issubset(self.rejected):
             raise ValueError("source_rejections source_ids must be a subset of rejected")
+        normalized_source_ids = {evidence.source_id for evidence in self.normalized}
+        if set(source_rejection_ids).intersection(normalized_source_ids):
+            raise ValueError("source_rejections source_ids must be disjoint from normalized source_ids")
 
 
 class DataSourceAdapter(Protocol):
