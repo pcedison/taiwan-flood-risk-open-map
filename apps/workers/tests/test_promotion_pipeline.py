@@ -228,6 +228,25 @@ def test_generic_natural_key_conflict_is_idempotent_none() -> None:
     assert "DO NOTHING" in insert_sql
 
 
+def test_authorized_distinct_natural_key_loser_is_terminally_rejected() -> None:
+    staging_id = "17171717-1717-4717-8717-171717171717"
+    connection = _FakeConnection(
+        rows=[], evidence_id="unused", evidence_insert_conflict=True
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = build_evidence_promotion_payload(
+        _candidate(staging_evidence_id=staging_id)
+    )
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "idempotent_existing_evidence")
+    ]
+    assert connection.committed is True
+
+
 def test_present_malformed_staging_id_fails_closed_before_any_mutation() -> None:
     connection = _FakeConnection(rows=[], evidence_id="unused")
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
@@ -295,9 +314,14 @@ def test_staging_candidate_is_locked_and_identity_bound_before_advisory_decision
     assert "event_type" in authorization_sql
     assert "occurred_at" in authorization_sql
     assert "observed_at" in authorization_sql
+    assert "se.title IS NOT DISTINCT FROM %s" in authorization_sql
+    assert "se.summary IS NOT DISTINCT FROM %s" in authorization_sql
+    assert "se.url IS NOT DISTINCT FROM %s" in authorization_sql
+    assert "se.confidence IS NOT DISTINCT FROM %s" in authorization_sql
+    assert "se.payload = %s::jsonb" in authorization_sql
     assert "adapter_key" in authorization_sql
     assert "raw_ref" in authorization_sql
-    assert authorization_params == (
+    assert authorization_params[:-1] == (
         staging_id,
         payload.data_source_id,
         payload.source_id,
@@ -305,10 +329,20 @@ def test_staging_candidate_is_locked_and_identity_bound_before_advisory_decision
         payload.event_type,
         payload.occurred_at,
         payload.observed_at,
+        payload.title,
+        payload.summary,
+        payload.url,
+        payload.confidence,
         payload.adapter_key,
         payload.raw_ref,
         payload.properties["raw_snapshot_id"],
     )
+    authorized_properties = json.loads(str(authorization_params[-1]))
+    assert authorized_properties == {
+        key: value
+        for key, value in payload.properties.items()
+        if key not in {"staging_evidence_id", "raw_snapshot_id"}
+    }
 
 
 def test_mismatched_staging_identity_cannot_reject_or_write_the_victim_row() -> None:
@@ -485,10 +519,7 @@ def test_naive_current_observation_timestamp_is_terminal(naive_field: str) -> No
     )
 
 
-@pytest.mark.parametrize(
-    "coordinates",
-    [[181.0, 25.0], [121.0, 91.0], [float("nan"), 25.0], [121.0, float("inf")]],
-)
+@pytest.mark.parametrize("coordinates", [[181.0, 25.0], [121.0, 91.0]])
 def test_invalid_current_point_geometry_is_terminal(
     coordinates: list[float],
 ) -> None:
@@ -513,6 +544,253 @@ def test_invalid_current_point_geometry_is_terminal(
         "INSERT INTO evidence" in statement
         for statement, _ in connection.cursor_instance.executions
     )
+
+
+@pytest.mark.parametrize(
+    "coordinates",
+    [[float("nan"), 25.0], [121.0, float("inf")]],
+)
+def test_non_json_point_payload_with_staging_uuid_fails_closed_without_staging_mutation(
+    coordinates: list[float],
+) -> None:
+    staging_id = "13131313-1313-4313-8313-131313131313"
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _reviewed_realtime_payload()
+    properties = dict(payload.properties)
+    properties["staging_evidence_id"] = staging_id
+    properties["location_payload"] = {
+        "geometry": {"type": "Point", "coordinates": coordinates}
+    }
+    payload = EvidencePromotionPayload(**{**payload.__dict__, "properties": properties})
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.executions == []
+    assert connection.cursor_instance.terminal_rejections == []
+    assert connection.committed is False
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        {"type": "Point", "coordinates": [120.0, 23.0]},
+        {"type": "Polygon", "coordinates": []},
+        {
+            "type": "Polygon",
+            "coordinates": [[[120.0, 23.0], [121.0, 23.0], [120.0, 23.0]]],
+        },
+        {
+            "type": "Polygon",
+            "coordinates": [
+                [[120.0, 23.0], [999.0, 23.0], [121.0, 24.0], [120.0, 23.0]]
+            ],
+        },
+        {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [[[120.0, 23.0], [999.0, 23.0], [121.0, 24.0], [120.0, 23.0]]]
+            ],
+        },
+        {"type": "MultiPolygon", "coordinates": [[[]]]},
+    ],
+)
+def test_invalid_explicit_cap_area_geometry_is_terminal_before_lifecycle_effects(
+    geometry: dict[str, object],
+) -> None:
+    staging_id = "14141414-1414-4414-8414-141414141414"
+    reference = {
+        "sender": "sender@example.test",
+        "identifier": "alert-0",
+        "sent": "2026-08-24T00:30:00+00:00",
+    }
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _cap_payload(
+        message_type="Update",
+        identifier="invalid-geometry-update",
+        references=[reference],
+    )
+    payload.properties.update(
+        {
+            "staging_evidence_id": staging_id,
+            "location_payload": {"geometry": geometry},
+            "latest_point_geometry": {
+                "type": "Point",
+                "coordinates": [120.5, 23.5],
+            },
+        }
+    )
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "invalid_geometry")
+    ]
+    assert not any(
+        marker in statement
+        for statement, _ in connection.cursor_instance.executions
+        for marker in (
+            "pg_advisory_xact_lock",
+            "/* retire-cap-references */",
+            "INSERT INTO evidence",
+            "INSERT INTO official_realtime_latest",
+        )
+    )
+
+
+def test_non_json_cap_area_payload_with_staging_uuid_fails_closed_before_lifecycle_effects() -> None:
+    staging_id = "14141414-1414-4414-8414-141414141414"
+    reference = {
+        "sender": "sender@example.test",
+        "identifier": "alert-0",
+        "sent": "2026-08-24T00:30:00+00:00",
+    }
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _cap_payload(
+        message_type="Update",
+        identifier="non-json-geometry-update",
+        references=[reference],
+    )
+    nan_multipolygon = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[120.0, 23.0], [float("nan"), 23.0], [121.0, 24.0], [120.0, 23.0]]]
+        ],
+    }
+    payload.properties.update(
+        {
+            "staging_evidence_id": staging_id,
+            "location_payload": {"geometry": nan_multipolygon},
+            "latest_point_geometry": {
+                "type": "Point",
+                "coordinates": [120.5, 23.5],
+            },
+        }
+    )
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.executions == []
+    assert connection.cursor_instance.terminal_rejections == []
+    assert connection.committed is False
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        {"type": "Point", "coordinates": [float("nan"), 25.0]},
+        {"type": "Point", "coordinates": [121.0, float("inf")]},
+    ],
+)
+def test_non_json_direct_writer_geometry_fails_closed_without_evidence_insert(
+    geometry: dict[str, object],
+) -> None:
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _reviewed_realtime_payload()
+    assert "staging_evidence_id" not in payload.properties
+    payload.properties.update({"location_payload": {"geometry": geometry}})
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == []
+    assert not any(
+        marker in statement
+        for statement, _ in connection.cursor_instance.executions
+        for marker in (
+            "pg_advisory_xact_lock",
+            "/* retire-cap-references */",
+            "INSERT INTO evidence",
+            "INSERT INTO official_realtime_latest",
+        )
+    )
+
+
+def test_topologically_invalid_cap_polygon_is_terminal_before_lifecycle_effects() -> None:
+    staging_id = "15151515-1515-4515-8515-151515151515"
+    connection = _FakeConnection(
+        rows=[], evidence_id="unused", explicit_geometry_valid=False
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _cap_payload()
+    payload.properties.update(
+        {
+            "staging_evidence_id": staging_id,
+            "location_payload": {
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [
+                            [120.0, 23.0],
+                            [121.0, 24.0],
+                            [121.0, 23.0],
+                            [120.0, 24.0],
+                            [120.0, 23.0],
+                        ]
+                    ],
+                }
+            },
+            "latest_point_geometry": {
+                "type": "Point",
+                "coordinates": [120.5, 23.5],
+            },
+        }
+    )
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "invalid_geometry")
+    ]
+    statements = [statement for statement, _ in connection.cursor_instance.executions]
+    geometry_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if "/* validate-current-geometry */" in statement
+    )
+    assert not any(
+        marker in statement
+        for statement in statements[geometry_index + 1 :]
+        for marker in (
+            "pg_advisory_xact_lock",
+            "/* retire-cap-references */",
+            "INSERT INTO evidence",
+        )
+    )
+
+
+def test_explicit_non_point_telemetry_geometry_is_terminal() -> None:
+    staging_id = "16161616-1616-4616-8616-161616161616"
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _reviewed_realtime_payload()
+    payload.properties.update(
+        {
+            "staging_evidence_id": staging_id,
+            "location_payload": {
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[120.0, 23.0], [121.0, 23.0], [120.0, 24.0], [120.0, 23.0]]
+                    ],
+                }
+            },
+        }
+    )
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "invalid_geometry")
+    ]
 
 
 def test_equal_time_equal_value_is_terminal_idempotent() -> None:
@@ -823,7 +1101,10 @@ def test_invalid_current_cap_mutation_cannot_insert_or_retire(
     )
 
 
-def test_current_cap_mutation_retains_mixed_reference_list_when_one_is_earlier() -> None:
+@pytest.mark.parametrize("message_type", ["Update", "Cancel"])
+def test_current_cap_mutation_retains_mixed_audit_list_but_effects_only_earlier(
+    message_type: str,
+) -> None:
     references = [
         {
             "sender": "sender@example.test",
@@ -841,9 +1122,10 @@ def test_current_cap_mutation_retains_mixed_reference_list_when_one_is_earlier()
 
     evidence_id = writer.write_evidence(
         _cap_payload(
-            message_type="Update",
+            message_type=message_type,
             identifier="mixed-update",
             references=references,
+            admin_code=None if message_type == "Cancel" else "67000000",
         )
     )
 
@@ -853,7 +1135,13 @@ def test_current_cap_mutation_retains_mixed_reference_list_when_one_is_earlier()
         for statement, params in connection.cursor_instance.executions
         if "/* retire-cap-references */" in statement
     )
-    assert json.loads(str(retire_params[0])) == references
+    assert json.loads(str(retire_params[0])) == references[:1]
+    insert_params = next(
+        params
+        for statement, params in connection.cursor_instance.executions
+        if "INSERT INTO evidence" in statement
+    )
+    assert json.loads(str(insert_params[14]))["cap_references"] == references
 
 
 @pytest.mark.parametrize("message_type", ["Update", "Cancel"])
@@ -1039,6 +1327,13 @@ def test_retained_cap_tombstone_blocks_alert_replay_without_new_evidence() -> No
     assert "lifecycle_evidence.properties ->> 'adapter_key'" in tombstone_sql
     assert "jsonb_typeof" in tombstone_sql
     assert "pg_input_is_valid" in tombstone_sql
+    assert "reference ->> 'sent')::timestamptz" in tombstone_sql
+    assert "lifecycle_evidence.properties ->> 'cap_sent'" in tombstone_sql
+    normalized_tombstone_sql = " ".join(tombstone_sql.split())
+    assert (
+        "< ( lifecycle_evidence.properties ->> 'cap_sent' )::timestamptz"
+        in normalized_tombstone_sql
+    )
     assert "official.cwa.heavy_rain_warning" in tombstone_sql
     assert "official.ncdr.cap" in tombstone_sql
 
@@ -1684,6 +1979,7 @@ class _FakeConnection:
         staging_authorized: bool = True,
         evidence_insert_conflict: bool = False,
         cap_identity_exists: bool = False,
+        explicit_geometry_valid: bool = True,
     ) -> None:
         self.cursor_instance = _FakeCursor(
             rows=rows,
@@ -1699,6 +1995,7 @@ class _FakeConnection:
             staging_authorized=staging_authorized,
             evidence_insert_conflict=evidence_insert_conflict,
             cap_identity_exists=cap_identity_exists,
+            explicit_geometry_valid=explicit_geometry_valid,
         )
         self.committed = False
 
@@ -1732,6 +2029,7 @@ class _FakeCursor:
         staging_authorized: bool,
         evidence_insert_conflict: bool,
         cap_identity_exists: bool,
+        explicit_geometry_valid: bool,
     ) -> None:
         self._rows = tuple(rows)
         self._evidence_id = evidence_id
@@ -1740,6 +2038,7 @@ class _FakeCursor:
         self._staging_authorized = staging_authorized
         self._evidence_insert_conflict = evidence_insert_conflict
         self._cap_identity_exists = cap_identity_exists
+        self._explicit_geometry_valid = explicit_geometry_valid
         self.executions: list[tuple[str, tuple[object, ...]]] = []
         self._existing_latest_observed_at = existing_latest_observed_at
         self._existing_latest_row = existing_latest_row
@@ -1799,6 +2098,8 @@ class _FakeCursor:
             return ("1",) if self._cap_tombstone_exists else None
         if self.executions and "/* canonical-cap-idempotence */" in self.executions[-1][0]:
             return ("1",) if self._cap_identity_exists else None
+        if self.executions and "/* validate-current-geometry */" in self.executions[-1][0]:
+            return (self._explicit_geometry_valid,)
         if self.executions and "FROM admin_area_profiles" in self.executions[-1][0]:
             return self._admin_area_row
         if self.executions and "FROM official_realtime_latest" in self.executions[-1][0]:

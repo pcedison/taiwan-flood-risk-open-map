@@ -147,6 +147,10 @@ class PostgresEvidencePromotionWriter:
                 if staging_authorization is False:
                     return None
                 current_rejection_reason = _current_candidate_rejection_reason(payload)
+                if current_rejection_reason is None:
+                    current_rejection_reason = _current_geometry_topology_rejection_reason(
+                        cursor, payload
+                    )
                 if current_rejection_reason is not None:
                     _terminally_reject_staging(
                         cursor,
@@ -286,6 +290,14 @@ class PostgresEvidencePromotionWriter:
                 )
                 row = cursor.fetchone()
                 if row is None:
+                    if staging_authorization is True:
+                        _terminally_reject_staging(
+                            cursor,
+                            payload,
+                            reason="idempotent_existing_evidence",
+                            authorized=True,
+                        )
+                        connection.commit()
                     return None
                 evidence_id = str(row[0])
                 if cap_lifecycle_candidate and weighted_payload.properties.get(
@@ -617,6 +629,9 @@ def _authorize_staging_candidate(
     staging_id = _validated_staging_id(payload)
     if staging_id is None:
         return False
+    staged_payload = _staging_payload_json(payload.properties)
+    if staged_payload is None:
+        return False
     raw_snapshot_id = payload.properties.get("raw_snapshot_id")
     cursor.execute(
         """
@@ -635,10 +650,15 @@ def _authorize_staging_candidate(
             AND se.event_type = %s
             AND se.occurred_at IS NOT DISTINCT FROM %s
             AND se.observed_at IS NOT DISTINCT FROM %s
+            AND se.title IS NOT DISTINCT FROM %s
+            AND se.summary IS NOT DISTINCT FROM %s
+            AND se.url IS NOT DISTINCT FROM %s
+            AND se.confidence IS NOT DISTINCT FROM %s
             AND COALESCE(se.payload ->> 'adapter_key', rs.adapter_key, ds.adapter_key)
                 IS NOT DISTINCT FROM %s
             AND rs.raw_ref IS NOT DISTINCT FROM %s
             AND se.raw_snapshot_id::text IS NOT DISTINCT FROM %s
+            AND se.payload = %s::jsonb
         FOR UPDATE OF se
         """,
         (
@@ -649,12 +669,34 @@ def _authorize_staging_candidate(
             payload.event_type,
             payload.occurred_at,
             payload.observed_at,
+            payload.title,
+            payload.summary,
+            payload.url,
+            payload.confidence,
             payload.adapter_key,
             payload.raw_ref,
             str(raw_snapshot_id) if raw_snapshot_id is not None else None,
+            staged_payload,
         ),
     )
     return cursor.fetchone() is not None
+
+
+def _staging_payload_json(properties: dict[str, Any]) -> str | None:
+    staged_properties = {
+        key: value
+        for key, value in properties.items()
+        if key not in {"staging_evidence_id", "raw_snapshot_id"}
+    }
+    try:
+        return json.dumps(
+            staged_properties,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _staging_evidence_was_already_used(
@@ -880,6 +922,10 @@ def _cap_rejection_reason(
                         ->> 'ingestion_generation_started_at',
                     'timestamptz'
                 )
+                AND pg_input_is_valid(
+                    lifecycle_evidence.properties ->> 'cap_sent',
+                    'timestamptz'
+                )
                 AND CASE
                     WHEN jsonb_typeof(
                         lifecycle_evidence.properties -> 'cap_references'
@@ -912,6 +958,9 @@ def _cap_rejection_reason(
                                 'timestamptz'
                             )
                                 THEN (reference ->> 'sent')::timestamptz = %s
+                                    AND (reference ->> 'sent')::timestamptz < (
+                                        lifecycle_evidence.properties ->> 'cap_sent'
+                                    )::timestamptz
                             ELSE false
                         END
                 )
@@ -964,8 +1013,8 @@ def _terminally_reject_staging(
 
 
 def _retire_cap_references(cursor: Any, payload: EvidencePromotionPayload) -> None:
-    references = payload.properties.get("cap_references")
-    if not isinstance(references, list) or not references:
+    references = _effectful_cap_references(payload)
+    if not references:
         return
     cursor.execute(
         """
@@ -1023,6 +1072,29 @@ def _retire_cap_references(cursor: Any, payload: EvidencePromotionPayload) -> No
         """,
         (json.dumps(references, sort_keys=True, separators=(",", ":")),),
     )
+
+
+def _effectful_cap_references(
+    payload: EvidencePromotionPayload,
+) -> list[dict[str, str]]:
+    own = _cap_triple(
+        payload.properties.get("cap_sender"),
+        payload.properties.get("cap_identifier"),
+        payload.properties.get("cap_sent"),
+    )
+    references = _cap_reference_triples(payload.properties.get("cap_references"))
+    if own is None or references is None:
+        return []
+    own_sent = own[2].astimezone(UTC)
+    return [
+        {
+            "sender": sender,
+            "identifier": identifier,
+            "sent": sent.astimezone(UTC).isoformat(),
+        }
+        for sender, identifier, sent in references
+        if sent < own_sent
+    ]
 
 
 def _accepted_staging_sql(
@@ -1352,9 +1424,7 @@ def _current_candidate_rejection_reason(
     assert reference_time is not None
     if payload.observed_at > reference_time + timedelta(minutes=15):
         return "future_observation"
-    if _has_invalid_explicit_point(payload.properties):
-        return "invalid_point_geometry"
-    return None
+    return _explicit_geometry_rejection_reason(payload)
 
 
 def _is_reviewed_current_candidate(payload: EvidencePromotionPayload) -> bool:
@@ -1381,43 +1451,147 @@ def _is_aware_datetime(value: object) -> bool:
     )
 
 
-def _has_invalid_explicit_point(properties: dict[str, Any]) -> bool:
+def _explicit_geometry_rejection_reason(
+    payload: EvidencePromotionPayload,
+) -> str | None:
+    properties = payload.properties
     latest_point = properties.get("latest_point_geometry")
-    if latest_point is not None and (
+    if "latest_point_geometry" in properties and (
         not isinstance(latest_point, dict)
         or latest_point.get("type") != "Point"
         or not _valid_wgs84_point(latest_point)
     ):
-        return True
+        return "invalid_point_geometry"
+
+    location_payload = properties.get("location_payload")
+    if "location_payload" not in properties:
+        return None
+    if not isinstance(location_payload, dict):
+        return "invalid_geometry"
+    if "geometry" not in location_payload:
+        return None
+    geometry = location_payload.get("geometry")
+    if not isinstance(geometry, dict):
+        return "invalid_geometry"
+    if _is_current_cap_lifecycle_candidate(payload):
+        if not _valid_wgs84_area_geometry(geometry):
+            return "invalid_geometry"
+        if properties.get("cap_message_type") in {"Alert", "Update"} and not isinstance(
+            latest_point, dict
+        ):
+            return "invalid_point_geometry"
+        return None
+    if geometry.get("type") != "Point":
+        return "invalid_geometry"
+    if not _valid_wgs84_point(geometry):
+        return "invalid_point_geometry"
+    return None
+
+
+def _current_geometry_topology_rejection_reason(
+    cursor: Any,
+    payload: EvidencePromotionPayload,
+) -> str | None:
+    if not _is_current_cap_lifecycle_candidate(payload):
+        return None
+    geometry = _explicit_location_geometry(payload.properties)
+    if geometry is None:
+        return None
+    cursor.execute(
+        """
+        /* validate-current-geometry */
+        WITH candidate AS (
+            SELECT ST_SetSRID(
+                ST_GeomFromGeoJSON(%s::text),
+                4326
+            ) AS geom
+        )
+        SELECT
+            NOT ST_IsEmpty(candidate.geom)
+            AND ST_IsValid(candidate.geom)
+            AND GeometryType(candidate.geom) IN ('POLYGON', 'MULTIPOLYGON')
+        FROM candidate
+        """,
+        (
+            json.dumps(
+                {
+                    "type": geometry["type"],
+                    "coordinates": geometry["coordinates"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        ),
+    )
+    row = cursor.fetchone()
+    return None if row is not None and row[0] is True else "invalid_geometry"
+
+
+def _explicit_location_geometry(properties: dict[str, Any]) -> dict[str, Any] | None:
     location_payload = properties.get("location_payload")
     if not isinstance(location_payload, dict):
-        return False
+        return None
     geometry = location_payload.get("geometry")
-    return (
-        isinstance(geometry, dict)
-        and geometry.get("type") == "Point"
-        and not _valid_wgs84_point(geometry)
+    return geometry if isinstance(geometry, dict) else None
+
+
+def _valid_wgs84_area_geometry(geometry: dict[str, Any]) -> bool:
+    coordinates = geometry.get("coordinates")
+    if geometry.get("type") == "Polygon":
+        return _valid_polygon_coordinates(coordinates)
+    if geometry.get("type") != "MultiPolygon" or not isinstance(
+        coordinates, (list, tuple)
+    ):
+        return False
+    return bool(coordinates) and all(
+        _valid_polygon_coordinates(polygon) for polygon in coordinates
     )
 
 
-def _valid_wgs84_point(geometry: dict[str, Any]) -> bool:
-    coordinates = geometry.get("coordinates")
-    if not isinstance(coordinates, (list, tuple)) or len(coordinates) != 2:
+def _valid_polygon_coordinates(value: object) -> bool:
+    if not isinstance(value, (list, tuple)) or not value:
         return False
-    longitude, latitude = coordinates
+    return all(_valid_linear_ring(ring) for ring in value)
+
+
+def _valid_linear_ring(value: object) -> bool:
+    if not isinstance(value, (list, tuple)) or len(value) < 4:
+        return False
+    positions = [_wgs84_position(position) for position in value]
+    if any(position is None for position in positions):
+        return False
+    canonical_positions = [position for position in positions if position is not None]
+    return (
+        canonical_positions[0] == canonical_positions[-1]
+        and len(set(canonical_positions[:-1])) >= 3
+    )
+
+
+def _wgs84_position(value: object) -> tuple[float, float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return None
+    longitude, latitude = value
     if (
         not isinstance(longitude, (int, float))
         or isinstance(longitude, bool)
         or not isinstance(latitude, (int, float))
         or isinstance(latitude, bool)
     ):
-        return False
-    return (
-        math.isfinite(float(longitude))
-        and math.isfinite(float(latitude))
-        and -180 <= float(longitude) <= 180
-        and -90 <= float(latitude) <= 90
-    )
+        return None
+    longitude_value = float(longitude)
+    latitude_value = float(latitude)
+    if (
+        not math.isfinite(longitude_value)
+        or not math.isfinite(latitude_value)
+        or not -180 <= longitude_value <= 180
+        or not -90 <= latitude_value <= 90
+    ):
+        return None
+    return longitude_value, latitude_value
+
+
+def _valid_wgs84_point(geometry: dict[str, Any]) -> bool:
+    return _wgs84_position(geometry.get("coordinates")) is not None
 
 
 def _is_current_cap_lifecycle_candidate(payload: EvidencePromotionPayload) -> bool:
