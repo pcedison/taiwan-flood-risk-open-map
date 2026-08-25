@@ -98,6 +98,38 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.wra_historical_flood_timeout_seconds == 8
     assert settings.flood_potential_geojson_url is None
     assert settings.flood_potential_geojson_timeout_seconds == 8
+    assert settings.source_ncdr_cap_enabled is False
+    assert settings.source_ncdr_cap_api_enabled is False
+    assert settings.source_ncdr_cap_contract_enabled is False
+    assert settings.ncdr_alerts_api_key is None
+    assert settings.ncdr_datastore_api_url is None
+    assert settings.ncdr_dump_api_url is None
+    assert settings.ncdr_max_cap_ids_per_run == 50
+    assert settings.ncdr_cap_timeout_seconds == 8
+
+
+def test_ncdr_runtime_config_reads_two_stage_settings() -> None:
+    settings = load_worker_settings(
+        {
+            "SOURCE_NCDR_CAP_ENABLED": "true",
+            "SOURCE_NCDR_CAP_API_ENABLED": "true",
+            "SOURCE_NCDR_CAP_CONTRACT_ENABLED": "true",
+            "NCDR_ALERTS_API_KEY": "test-secret",
+            "NCDR_DATASTORE_API_URL": "https://example.test/ncdr/datastore",
+            "NCDR_DUMP_API_URL": "https://example.test/ncdr/dump/datastore",
+            "NCDR_MAX_CAP_IDS_PER_RUN": "17",
+            "NCDR_CAP_TIMEOUT_SECONDS": "5",
+        }
+    )
+
+    assert settings.source_ncdr_cap_enabled is True
+    assert settings.source_ncdr_cap_api_enabled is True
+    assert settings.source_ncdr_cap_contract_enabled is True
+    assert settings.ncdr_alerts_api_key == "test-secret"
+    assert settings.ncdr_datastore_api_url == "https://example.test/ncdr/datastore"
+    assert settings.ncdr_dump_api_url == "https://example.test/ncdr/dump/datastore"
+    assert settings.ncdr_max_cap_ids_per_run == 17
+    assert settings.ncdr_cap_timeout_seconds == 5
 
 
 def test_cwa_api_runtime_client_config_reads_env() -> None:
@@ -463,7 +495,11 @@ def test_explicit_adapter_allowlist_does_not_bypass_sample_data_gate() -> None:
         (
             "official.ncdr.cap",
             "SOURCE_NCDR_CAP_ENABLED",
-            {"SOURCE_NCDR_CAP_API_ENABLED": "true"},
+            {
+                "SOURCE_NCDR_CAP_API_ENABLED": "true",
+                "SOURCE_NCDR_CAP_CONTRACT_ENABLED": "true",
+                "NCDR_ALERTS_API_KEY": "test-secret",
+            },
         ),
         (
             "official.civil_iot.flood_sensor",

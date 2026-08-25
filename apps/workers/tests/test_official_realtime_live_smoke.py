@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from app.adapters.contracts import AdapterRunResult, RawSourceItem
 from app.ops.official_realtime_live_smoke import (
     SmokeSource,
+    default_official_smoke_sources,
     load_env_file,
     run_smoke_sources,
 )
-
 
 FETCHED_AT = datetime(2026, 6, 28, 12, 0, tzinfo=UTC)
 
@@ -123,3 +123,16 @@ def test_run_smoke_sources_marks_low_volume_source_failed() -> None:
     assert result.results[0].status == "failed"
     assert "fetched 0" in (result.results[0].message or "")
     assert result.healthy is False
+
+
+def test_default_ncdr_smoke_requires_and_injects_api_key_without_request() -> None:
+    source = next(
+        item
+        for item in default_official_smoke_sources()
+        if item.adapter_key == "official.ncdr.cap"
+    )
+
+    assert source.required_env == "NCDR_ALERTS_API_KEY"
+    adapter = source.build_adapter({"NCDR_ALERTS_API_KEY": "test-secret"}, 5)
+    assert adapter._api_key == "test-secret"
+    assert adapter._timeout_seconds == 5

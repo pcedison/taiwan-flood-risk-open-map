@@ -22,8 +22,9 @@ class WorkerSettings:
     source_wra_historical_flood_api_enabled: bool
     source_wra_iow_flood_depth_enabled: bool | None
     source_wra_iow_flood_depth_api_enabled: bool
-    source_ncdr_cap_enabled: bool | None
+    source_ncdr_cap_enabled: bool
     source_ncdr_cap_api_enabled: bool
+    source_ncdr_cap_contract_enabled: bool
     source_flood_potential_enabled: bool | None
     source_flood_potential_geojson_enabled: bool
     source_flood_sensor_enabled: bool | None
@@ -143,7 +144,10 @@ class WorkerSettings:
     wra_iow_flood_depth_api_url: str | None
     wra_iow_flood_sensor_metadata_api_url: str | None
     wra_iow_flood_depth_timeout_seconds: int
-    ncdr_cap_api_url: str | None
+    ncdr_alerts_api_key: str | None
+    ncdr_datastore_api_url: str | None
+    ncdr_dump_api_url: str | None
+    ncdr_max_cap_ids_per_run: int
     ncdr_cap_timeout_seconds: int
     flood_potential_geojson_url: str | None
     flood_potential_geojson_timeout_seconds: int
@@ -239,8 +243,12 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED",
         ),
-        source_ncdr_cap_enabled=env_bool(values, "SOURCE_NCDR_CAP_ENABLED"),
+        source_ncdr_cap_enabled=env_flag(values, "SOURCE_NCDR_CAP_ENABLED"),
         source_ncdr_cap_api_enabled=env_flag(values, "SOURCE_NCDR_CAP_API_ENABLED"),
+        source_ncdr_cap_contract_enabled=env_flag(
+            values,
+            "SOURCE_NCDR_CAP_CONTRACT_ENABLED",
+        ),
         source_flood_potential_enabled=env_bool(values, "SOURCE_FLOOD_POTENTIAL_ENABLED"),
         source_flood_potential_geojson_enabled=env_flag(
             values,
@@ -637,7 +645,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             "WRA_IOW_FLOOD_DEPTH_TIMEOUT_SECONDS",
             default=8,
         ),
-        ncdr_cap_api_url=env_str(values, "NCDR_CAP_API_URL"),
+        ncdr_alerts_api_key=env_str(values, "NCDR_ALERTS_API_KEY"),
+        ncdr_datastore_api_url=env_str(values, "NCDR_DATASTORE_API_URL"),
+        ncdr_dump_api_url=env_str(values, "NCDR_DUMP_API_URL"),
+        ncdr_max_cap_ids_per_run=env_int(
+            values,
+            "NCDR_MAX_CAP_IDS_PER_RUN",
+            default=50,
+        ),
         ncdr_cap_timeout_seconds=env_int(values, "NCDR_CAP_TIMEOUT_SECONDS", default=8),
         flood_potential_geojson_url=env_str(values, "FLOOD_POTENTIAL_GEOJSON_URL"),
         flood_potential_geojson_timeout_seconds=env_int(

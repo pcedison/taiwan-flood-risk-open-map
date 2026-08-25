@@ -21,7 +21,6 @@ from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.wra import WraWaterLevelApiAdapter
 from app.adapters.wra_iow import WraIowFloodDepthApiAdapter
 
-
 SmokeStatus = Literal["healthy", "failed", "skipped"]
 AdapterBuilder = Callable[[Mapping[str, str], int], Any]
 
@@ -145,7 +144,11 @@ def default_official_smoke_sources() -> tuple[SmokeSource, ...]:
         ),
         SmokeSource(
             adapter_key="official.ncdr.cap",
-            build_adapter=lambda env, timeout: NcdrCapAlertAdapter(timeout_seconds=timeout),
+            required_env="NCDR_ALERTS_API_KEY",
+            build_adapter=lambda env, timeout: NcdrCapAlertAdapter(
+                api_key=env["NCDR_ALERTS_API_KEY"],
+                timeout_seconds=timeout,
+            ),
             minimum_fetched_count=0,
             minimum_normalized_count=0,
         ),

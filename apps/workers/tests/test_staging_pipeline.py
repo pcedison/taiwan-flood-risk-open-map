@@ -211,51 +211,30 @@ def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:
     assert batch.accepted[0].payload["area_code"] == "67000270"
 
 
-def test_legacy_ncdr_cap_shape_fails_closed_until_task_12_wires_contract() -> None:
+def test_ncdr_unreviewed_admin_geometry_never_enters_accepted_staging() -> None:
+    cap_xml = """<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+      <identifier>NCDR-CAP-001</identifier><sender>ncdr@example.test</sender>
+      <sent>2026-06-15T10:30:00+08:00</sent><status>Actual</status>
+      <msgType>Alert</msgType><scope>Public</scope><info><event>淹水警戒</event>
+      <effective>2026-06-15T10:30:00+08:00</effective>
+      <expires>2026-06-15T15:00:00+08:00</expires><area><areaDesc>臺南市</areaDesc>
+      <geocode><valueName>TOWNCODE</valueName><value>67000</value></geocode>
+      </area></info></alert>"""
     adapter = NcdrCapAlertAdapter(
-        payload={
-            "alerts": [
-                {
-                    "identifier": "NCDR-CAP-001",
-                    "sender": "ncdr@example.test",
-                    "sent": "2026-06-15T02:30:00+08:00",
-                    "status": "Actual",
-                    "msgType": "Alert",
-                    "scope": "Public",
-                    "info": [
-                        {
-                            "event": "豪雨淹水警戒",
-                            "headline": "臺南市豪雨淹水警戒",
-                            "description": "豪雨造成局部淹水風險升高",
-                            "effective": "2026-06-15T02:30:00+08:00",
-                            "expires": "2026-06-15T15:00:00+08:00",
-                            "severity": "Severe",
-                            "certainty": "Likely",
-                            "urgency": "Immediate",
-                            "area": [
-                                {
-                                    "areaDesc": "臺南市",
-                                    "geocode": [
-                                        {"valueName": "TOWNCODE", "value": "67000"}
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ]
-        },
+        api_key="test-secret",
         fetched_at=datetime(2026, 6, 15, 3, 10, tzinfo=UTC),
+        fetch_json=lambda _url, _params, _timeout: {"data": [{"capid": "CAP-001"}]},
+        fetch_text=lambda _url, _params, _timeout: cap_xml,
     )
 
     batch = build_staging_batch(adapter.run())
 
     assert batch.accepted == ()
-    assert len(batch.rejected) == 1
-    assert "CAP lifecycle requires an ingestion generation" in (
-        batch.rejected[0].rejection_reason or ""
+    assert batch.rejected == ()
+    assert len(batch.rejected_raw_source_ids) == 1
+    assert batch.raw_snapshot.metadata["source_rejections"][0]["reason_code"] == (
+        "ncdr_unreviewed_admin_geometry"
     )
-    assert "cap_sender" not in batch.rejected[0].payload
 
 
 def test_build_staging_batch_preserves_only_reviewed_metadata_fields() -> None:

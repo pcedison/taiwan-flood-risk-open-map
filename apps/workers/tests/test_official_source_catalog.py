@@ -40,6 +40,16 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
         "72d7aee9-e29b-49a2-bd0b-54acc8e3b75c?format=JSON&sort=_importdate+asc"
     )
     assert sources["official.wra.historical_flood"]["status"] == "disabled_by_default"
+    assert sources["official.ncdr.cap"]["status"] == "disabled_by_default"
+    assert sources["official.ncdr.cap"]["resource_url"] == (
+        "https://alerts.ncdr.nat.gov.tw/api/datastore"
+    )
+    assert sources["official.ncdr.cap"]["dump_url"] == (
+        "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
+    )
+    assert sources["official.ncdr.cap"]["resource_format"] == (
+        "JSON datastore index to CAP XML dump"
+    )
     assert sources["official.flood_potential.geojson"]["data_gov_dataset_id"] == "25766"
     assert sources["official.wra.flood_warning"]["status"] == "phase4_candidate"
     assert sources["geocoder.moi.village_boundary"]["data_gov_url"].startswith(
@@ -48,7 +58,11 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
 
     for source in catalog["sources"]:
         assert source["data_gov_url"].startswith(
-            ("https://data.gov.tw/", "https://opendata.cwa.gov.tw/")
+            (
+                "https://data.gov.tw/",
+                "https://opendata.cwa.gov.tw/",
+                "https://alerts.ncdr.nat.gov.tw/",
+            )
         )
         assert source["resource_url"].startswith("https://")
         assert source["license"]
@@ -66,6 +80,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
         "official.wra.water_level",
         "official.wra_iow.flood_depth",
         "official.wra.historical_flood",
+        "official.ncdr.cap",
         "official.flood_potential.geojson",
     ):
         metadata = ADAPTER_REGISTRY[adapter_key]

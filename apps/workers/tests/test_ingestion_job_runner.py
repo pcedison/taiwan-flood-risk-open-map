@@ -166,6 +166,29 @@ def test_run_adapter_batch_marks_source_specific_rejection_as_partial() -> None:
     assert summary.error_code is None
 
 
+def test_ncdr_dump_fetch_rejection_is_partial_not_healthy_empty() -> None:
+    raw = RawSourceItem(
+        source_id="ncdr-transport:0123456789abcdef01234567",
+        source_url="https://alerts.ncdr.nat.gov.tw/api/dump/datastore",
+        fetched_at=FETCHED_AT,
+        payload={"transport_capid": "CAP-001", "error": "NCDR CAP dump fetch failed"},
+    )
+    result = AdapterRunResult(
+        adapter_key="official.ncdr.cap",
+        fetched=(raw,),
+        normalized=(),
+        rejected=(raw.source_id,),
+        source_rejections=(SourceRejection(raw.source_id, "ncdr_dump_fetch_failed"),),
+    )
+
+    summary = run_adapter_batch(_StaticResultAdapter(result))
+
+    assert summary.status == "partial"
+    assert summary.error_code is None
+    assert summary.items_fetched == 1
+    assert summary.items_rejected == 1
+
+
 def test_run_adapter_batch_skips_empty_fetches() -> None:
     summary = run_adapter_batch(_EmptyAdapter())
 
@@ -513,6 +536,27 @@ class _NamedEmptyAdapter:
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
+
+class _StaticResultAdapter:
+    def __init__(self, result: AdapterRunResult) -> None:
+        self._result = result
+        self.metadata = AdapterMetadata(
+            key=result.adapter_key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name="Static adapter result fixture",
+        )
+
+    def run(self) -> AdapterRunResult:
+        return self._result
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self._result.fetched
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item

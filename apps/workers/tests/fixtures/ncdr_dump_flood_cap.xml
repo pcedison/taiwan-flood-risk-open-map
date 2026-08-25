@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>NCDR-CAP-001</identifier>
+  <sender>ncdr@example.test</sender>
+  <sent>2026-06-15T10:30:00+08:00</sent>
+  <status>Actual</status>
+  <msgType>Alert</msgType>
+  <scope>Public</scope>
+  <references>ncdr@example.test,NCDR-CAP-000,2026-06-15T09:30:00+08:00</references>
+  <info>
+    <event>淹水警戒</event>
+    <headline>臺南市淹水警戒</headline>
+    <description>豪雨造成局部淹水風險升高</description>
+    <effective>2026-06-15T10:30:00+08:00</effective>
+    <onset>2026-06-15T10:35:00+08:00</onset>
+    <expires>2026-06-15T15:00:00+08:00</expires>
+    <area>
+      <areaDesc>臺南市安南區</areaDesc>
+      <geocode>
+        <valueName>TOWNCODE</valueName>
+        <value>6703500</value>
+      </geocode>
+    </area>
+  </info>
+</alert>

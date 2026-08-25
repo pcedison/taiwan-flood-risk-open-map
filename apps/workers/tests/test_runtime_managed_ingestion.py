@@ -957,6 +957,7 @@ def _run_task9_managed(adapter: Any):
         _settings(key),
         enabled_adapter_keys=(key,),
         source_ncdr_cap_enabled=True,
+        source_ncdr_cap_contract_enabled=key == "official.ncdr.cap",
         source_wra_historical_flood_enabled=(
             True if key == "official.wra.historical_flood" else None
         ),

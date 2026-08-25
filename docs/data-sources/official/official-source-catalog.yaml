@@ -56,6 +56,23 @@ sources:
       - "The source is independently gated and disabled by default."
       - "Township and message-level warnings without reviewed exact geometry never enter staging, latest, promotion, or scoring."
       - "CAP polygon and circle values are retained only as source identity semantics; no centroid or parent-county geometry is inferred."
+  - key: official.ncdr.cap
+    need: official_ncdr_cap_alert_audit
+    status: disabled_by_default
+    data_gov_dataset_id: "NCDR-CAP"
+    data_gov_url: "https://alerts.ncdr.nat.gov.tw/"
+    title: "NCDR datastore and CAP dump alerts"
+    provider: "National Science and Technology Center for Disaster Reduction"
+    resource_url: "https://alerts.ncdr.nat.gov.tw/api/datastore"
+    dump_url: "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
+    resource_format: "JSON datastore index to CAP XML dump"
+    update_frequency: "as issued through the NCDR alert datastore"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Retain bounded raw CAP snapshots and source-rejection audits only; do not normalize until administrative and Circle geometry is reviewed."
+    limitations:
+      - "The source, API, contract, credential, and persisted catalog gates are independently fail-closed and disabled by default."
+      - "Datastore capid values are transport metadata only; canonical identities come from CAP sender, identifier, sent, and area semantics."
+      - "Unreviewed administrative, polygon, Circle, and message-level geometry never enters staging, latest, promotion, or scoring."
   - key: official.wra.water_level
     need: realtime_water_level
     status: primary

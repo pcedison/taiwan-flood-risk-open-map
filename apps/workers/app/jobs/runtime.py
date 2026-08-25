@@ -104,8 +104,7 @@ from app.adapters.local_yilan import (
 )
 from app.adapters.local_yunlin import FetchJson as YunlinFetchJson
 from app.adapters.local_yunlin import YunlinWaterLevelApiAdapter
-from app.adapters.ncdr import FetchText as NcdrFetchText
-from app.adapters.ncdr import NcdrCapAlertAdapter
+from app.adapters.ncdr import NcdrCapAlertAdapter, NcdrFetchJson, NcdrFetchText
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import (
@@ -228,6 +227,7 @@ def build_runtime_adapters(
     wra_fetch_json: WraFetchJson | None = None,
     wra_historical_flood_fetch_json: WraHistoricalFetchJson | None = None,
     wra_historical_flood_fetch_text: WraHistoricalFetchText | None = None,
+    ncdr_cap_fetch_json: NcdrFetchJson | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
@@ -371,11 +371,21 @@ def build_runtime_adapters(
         )
         live_adapters[wra_iow_adapter.metadata.key] = wra_iow_adapter
 
-    if settings.source_ncdr_cap_api_enabled and "official.ncdr.cap" in enabled_keys:
+    if (
+        settings.source_ncdr_cap_enabled
+        and settings.source_ncdr_cap_api_enabled
+        and settings.source_ncdr_cap_contract_enabled
+        and bool((settings.ncdr_alerts_api_key or "").strip())
+        and "official.ncdr.cap" in enabled_keys
+    ):
         ncdr_cap_adapter = NcdrCapAlertAdapter(
-            api_url=settings.ncdr_cap_api_url,
+            api_key=settings.ncdr_alerts_api_key,
+            datastore_url=settings.ncdr_datastore_api_url,
+            dump_url=settings.ncdr_dump_api_url,
+            max_cap_ids_per_run=settings.ncdr_max_cap_ids_per_run,
             timeout_seconds=settings.ncdr_cap_timeout_seconds,
             fetched_at=fetched_at,
+            fetch_json=ncdr_cap_fetch_json,
             fetch_text=ncdr_cap_fetch_text,
         )
         live_adapters[ncdr_cap_adapter.metadata.key] = ncdr_cap_adapter

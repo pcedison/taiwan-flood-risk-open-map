@@ -418,6 +418,11 @@ def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettin
             and settings.source_cwa_heavy_rain_warning_contract_enabled
             and bool((settings.cwa_api_authorization or "").strip())
         )
+    if metadata.key == "official.ncdr.cap":
+        return (
+            settings.source_ncdr_cap_enabled
+            and settings.source_ncdr_cap_contract_enabled
+        )
     if _is_sample_adapter(metadata) and not settings.source_sample_data_enabled:
         return False
     if _is_reviewed_news_adapter(metadata) and settings.source_news_enabled is not True:
