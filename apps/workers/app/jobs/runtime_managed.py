@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Final, Literal
 
@@ -16,6 +16,12 @@ from app.jobs.ingestion import (
     IngestionRunSummaryWriter,
     record_pipeline_status,
     record_runtime_selection,
+)
+from app.jobs.source_catalog import (
+    SourceCatalogReader,
+    SourceCatalogUnavailable,
+    filter_catalog_enabled_adapter_keys,
+    resolve_source_catalog_reader,
 )
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
@@ -108,6 +114,7 @@ def run_v1_baseline_adapter_cycle(
     staging_writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
     promotion_writer: EvidencePromotionWriter | None = None,
+    source_catalog_reader: SourceCatalogReader | None = None,
     promote: bool = False,
     promotion_limit: int | None = None,
     promotion_adapter_keys: tuple[str, ...] | None = None,
@@ -131,6 +138,7 @@ def run_v1_baseline_adapter_cycle(
         staging_writer=staging_writer,
         run_writer=run_writer,
         promotion_writer=promotion_writer,
+        source_catalog_reader=source_catalog_reader,
         promote=promote,
         promotion_limit=promotion_limit,
         promotion_adapter_keys=promotion_adapter_keys,
@@ -155,6 +163,7 @@ def _execute_managed_runtime_ingestion_cycle(
     run_writer: IngestionRunSummaryWriter | None = None,
     promotion_writer: EvidencePromotionWriter | None = None,
     adapter_builder: RuntimeAdapterBuilder | None = None,
+    source_catalog_reader: SourceCatalogReader | None = None,
     promote: bool = False,
     promotion_limit: int | None = None,
     promotion_adapter_keys: tuple[str, ...] | None = None,
@@ -176,6 +185,52 @@ def _execute_managed_runtime_ingestion_cycle(
         )
         log_event("runtime.managed.ingestion.noop", reason="no_enabled_adapters")
         return ManagedRuntimeIngestionResult(status="skipped", reason="no_enabled_adapters")
+
+    try:
+        selected_adapter_keys = filter_catalog_enabled_adapter_keys(
+            selected_adapter_keys,
+            source_catalog_reader=resolve_source_catalog_reader(
+                database_url=database_url or resolved_settings.database_url,
+                source_catalog_reader=source_catalog_reader,
+            ),
+        )
+    except SourceCatalogUnavailable:
+        record_runtime_selection(
+            runtime_status_writer,
+            enabled_adapter_keys=enabled_adapter_keys(resolved_settings),
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
+        record_pipeline_status(
+            runtime_status_writer,
+            adapter_keys=enabled_adapter_keys(resolved_settings),
+            status="failed",
+            complete=False,
+            run_at=cycle_started_at,
+        )
+        log_event("runtime.source_catalog.unavailable")
+        return ManagedRuntimeIngestionResult(
+            status="failed",
+            reason="source_catalog_unavailable",
+            error_code="source_catalog_unavailable",
+        )
+
+    if not selected_adapter_keys:
+        record_runtime_selection(
+            runtime_status_writer,
+            enabled_adapter_keys=(),
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
+        log_event("runtime.source_catalog.disabled")
+        return ManagedRuntimeIngestionResult(status="skipped", reason="source_catalog_disabled")
+
+    resolved_settings = replace(
+        resolved_settings,
+        enabled_adapter_keys=selected_adapter_keys,
+    )
+    if promotion_adapter_keys is not None:
+        promotion_adapter_keys = tuple(
+            key for key in promotion_adapter_keys if key in selected_adapter_keys
+        )
 
     persistence = _resolve_persistence_writers(
         resolved_settings,
@@ -267,7 +322,11 @@ def _execute_managed_runtime_ingestion_cycle(
 
     promotion = PromotionResult(promoted=0, evidence_ids=())
     if promote and cycle.summaries:
-        target_adapter_keys = promotion_adapter_keys or _promotion_adapter_keys(cycle.summaries)
+        target_adapter_keys = (
+            promotion_adapter_keys
+            if promotion_adapter_keys is not None
+            else _promotion_adapter_keys(cycle.summaries)
+        )
         promotion_writer_instance = _promotion_writer(persistence)
         no_active_summaries = tuple(
             summary
@@ -370,9 +429,7 @@ def _resolve_persistence_writers(
 ) -> _ManagedPersistenceWriters | None:
     resolved_database_url = database_url or settings.database_url
     needs_database_url = (
-        staging_writer is None
-        or run_writer is None
-        or (promote and promotion_writer is None)
+        staging_writer is None or run_writer is None or (promote and promotion_writer is None)
     )
     if needs_database_url and not resolved_database_url:
         return None
@@ -391,9 +448,7 @@ def _resolve_persistence_writers(
         promotion_writer
         if promotion_writer is not None
         else (
-            PostgresEvidencePromotionWriter(database_url=resolved_database_url)
-            if promote
-            else None
+            PostgresEvidencePromotionWriter(database_url=resolved_database_url) if promote else None
         )
     )
 

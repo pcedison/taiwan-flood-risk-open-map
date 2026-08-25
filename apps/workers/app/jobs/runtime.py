@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -19,11 +19,13 @@ from app.adapters.contracts import DataSourceAdapter
 from app.adapters.cwa import CwaRainfallApiAdapter, CwaTideLevelApiAdapter, FetchJson, TideFetchJson
 from app.adapters.flood_potential import FetchJson as FloodPotentialFetchJson
 from app.adapters.flood_potential import FloodPotentialGeoJsonApiAdapter
-from app.adapters.local_chiayi_city import ChiayiCityRainfallApiAdapter, ChiayiCityWaterLevelApiAdapter
+from app.adapters.local_chiayi_city import (
+    ChiayiCityRainfallApiAdapter,
+    ChiayiCityWaterLevelApiAdapter,
+)
 from app.adapters.local_chiayi_city import FetchText as ChiayiCityFetchText
 from app.adapters.local_chiayi_county import ChiayiCountyFloodSensorApiAdapter
 from app.adapters.local_chiayi_county import FetchJson as ChiayiCountyFetchJson
-from app.adapters.local_fhy import FetchJson as FhyFloodSensorFetchJson
 from app.adapters.local_fhy import (
     CHANGHUA_FHY_FLOOD_SENSOR,
     FHY_LOCAL_FLOOD_SENSOR_SOURCES,
@@ -34,6 +36,7 @@ from app.adapters.local_fhy import (
     TAITUNG_FHY_FLOOD_SENSOR,
     FhyFloodSensorApiAdapter,
 )
+from app.adapters.local_fhy import FetchJson as FhyFloodSensorFetchJson
 from app.adapters.local_hsinchu_city import FetchJson as HsinchuCityFetchJson
 from app.adapters.local_hsinchu_city import (
     HsinchuCityFloodSensorApiAdapter,
@@ -45,14 +48,14 @@ from app.adapters.local_kaohsiung import (
     KaohsiungRainfallApiAdapter,
     KaohsiungSewerWaterLevelApiAdapter,
 )
-from app.adapters.local_kinmen import FetchText as KinmenKwisFetchText
-from app.adapters.local_kinmen import KinmenKwisPumpStationApiAdapter
 from app.adapters.local_keelung import FetchJson as KeelungFetchJson
 from app.adapters.local_keelung import (
     KeelungFloodSensorApiAdapter,
     KeelungRainfallApiAdapter,
     KeelungWaterLevelApiAdapter,
 )
+from app.adapters.local_kinmen import FetchText as KinmenKwisFetchText
+from app.adapters.local_kinmen import KinmenKwisPumpStationApiAdapter
 from app.adapters.local_nantou import FetchText as NantouFetchText
 from app.adapters.local_nantou import NantouSewerWaterLevelKmlAdapter
 from app.adapters.local_new_taipei import FetchJson as NewTaipeiFetchJson
@@ -66,17 +69,20 @@ from app.adapters.local_penghu import FetchJson as PenghuFetchJson
 from app.adapters.local_penghu import PenghuWaterLevelArcgisAdapter
 from app.adapters.local_taichung import FetchJson as TaichungFetchJson
 from app.adapters.local_taichung import TaichungWaterLevelApiAdapter
+from app.adapters.local_tainan import FetchJson as TainanFetchJson
+from app.adapters.local_tainan import TainanFloodSensorApiAdapter
 from app.adapters.local_taipei import (
     TAIPEI_RIVER_WATER_LEVEL,
     TAIPEI_SEWER_WATER_LEVEL,
+    TaipeiPumpStationApiAdapter,
+    TaipeiWaterLevelApiAdapter,
+)
+from app.adapters.local_taipei import (
     FetchJson as TaipeiFetchJson,
 )
 from app.adapters.local_taipei import (
     FetchText as TaipeiFetchText,
 )
-from app.adapters.local_taipei import TaipeiPumpStationApiAdapter, TaipeiWaterLevelApiAdapter
-from app.adapters.local_tainan import FetchJson as TainanFetchJson
-from app.adapters.local_tainan import TainanFloodSensorApiAdapter
 from app.adapters.local_taoyuan import FetchText as TaoyuanFetchText
 from app.adapters.local_taoyuan import (
     TaoyuanFloodSensorApiAdapter,
@@ -97,7 +103,11 @@ from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
 from app.adapters.wra import (
     HistoricalFetchJson as WraHistoricalFetchJson,
+)
+from app.adapters.wra import (
     HistoricalFetchText as WraHistoricalFetchText,
+)
+from app.adapters.wra import (
     WraHistoricalFloodAdapter,
     WraWaterLevelApiAdapter,
 )
@@ -121,6 +131,13 @@ from app.jobs.queue import (
     RuntimeQueueJob,
     RuntimeQueueUnavailable,
 )
+from app.jobs.source_catalog import (
+    OFFICIAL_INCIDENT_CATALOG_GATED_KEYS,
+    SourceCatalogReader,
+    SourceCatalogUnavailable,
+    filter_catalog_enabled_adapter_keys,
+    resolve_source_catalog_reader,
+)
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.postgres_writer import PostgresStagingBatchWriter
@@ -131,7 +148,6 @@ from app.pipelines.promotion import (
     promote_accepted_staging,
 )
 from app.pipelines.staging import StagingBatchWriter
-
 
 RuntimeQueueWorkerStatus = Literal["succeeded", "failed", "skipped"]
 RuntimeQueueProducerStatus = Literal["succeeded", "skipped", "deduped"]
@@ -249,9 +265,7 @@ def build_runtime_adapters(
 ) -> Mapping[str, DataSourceAdapter]:
     if settings.runtime_fixtures_enabled:
         resolved_fetched_at = fetched_at or datetime.now(UTC)
-        fixture_adapters = dict(
-            build_official_demo_adapters(fetched_at=resolved_fetched_at)
-        )
+        fixture_adapters = dict(build_official_demo_adapters(fetched_at=resolved_fetched_at))
         if (
             settings.enabled_adapter_keys is not None
             and "news.public_web.sample" in settings.enabled_adapter_keys
@@ -369,8 +383,7 @@ def build_runtime_adapters(
 
     if (
         settings.source_flood_sensor_api_enabled
-        and settings.source_flood_sensor_use_live
-        is False
+        and settings.source_flood_sensor_use_live is False
         and "official.civil_iot.flood_sensor" in enabled_keys
     ):
         log_event(
@@ -507,10 +520,7 @@ def build_runtime_adapters(
         )
         live_adapters[taoyuan_water_adapter.metadata.key] = taoyuan_water_adapter
 
-    if (
-        settings.source_taoyuan_rainfall_api_enabled
-        and "local.taoyuan.rainfall" in enabled_keys
-    ):
+    if settings.source_taoyuan_rainfall_api_enabled and "local.taoyuan.rainfall" in enabled_keys:
         taoyuan_rainfall_adapter = TaoyuanRainfallApiAdapter(
             api_url=settings.taoyuan_rainfall_api_url,
             timeout_seconds=settings.taoyuan_water_timeout_seconds,
@@ -666,10 +676,7 @@ def build_runtime_adapters(
         )
         live_adapters[keelung_flood_adapter.metadata.key] = keelung_flood_adapter
 
-    if (
-        settings.source_keelung_rainfall_api_enabled
-        and "local.keelung.rainfall" in enabled_keys
-    ):
+    if settings.source_keelung_rainfall_api_enabled and "local.keelung.rainfall" in enabled_keys:
         keelung_rainfall_adapter = KeelungRainfallApiAdapter(
             api_url=settings.keelung_rainfall_api_url,
             timeout_seconds=settings.local_water_timeout_seconds,
@@ -702,10 +709,7 @@ def build_runtime_adapters(
         )
         live_adapters[yilan_flood_adapter.metadata.key] = yilan_flood_adapter
 
-    if (
-        settings.source_yilan_water_level_api_enabled
-        and "local.yilan.water_level" in enabled_keys
-    ):
+    if settings.source_yilan_water_level_api_enabled and "local.yilan.water_level" in enabled_keys:
         yilan_water_level_adapter = YilanWaterLevelArcgisAdapter(
             api_url=settings.yilan_water_level_layer_url,
             timeout_seconds=settings.local_water_timeout_seconds,
@@ -840,9 +844,7 @@ def build_runtime_adapters(
             enabled_adapter_keys=enabled_keys,
             cwa_api_enabled=settings.source_cwa_api_enabled,
             wra_api_enabled=settings.source_wra_api_enabled,
-            wra_historical_flood_api_enabled=(
-                settings.source_wra_historical_flood_api_enabled
-            ),
+            wra_historical_flood_api_enabled=(settings.source_wra_historical_flood_api_enabled),
             ncdr_cap_api_enabled=settings.source_ncdr_cap_api_enabled,
             flood_potential_geojson_enabled=settings.source_flood_potential_geojson_enabled,
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,
@@ -883,6 +885,7 @@ def produce_enabled_runtime_adapter_jobs(
     queue: RuntimeQueue | None = None,
     job_key: str = "runtime.adapter.ingest",
     queue_name: str = "runtime-adapters",
+    source_catalog_reader: SourceCatalogReader | None = None,
 ) -> RuntimeQueueProducerResult:
     attempt_started_at = datetime.now(UTC)
     enabled_keys = enabled_adapter_keys(settings)
@@ -891,13 +894,46 @@ def produce_enabled_runtime_adapter_jobs(
         if settings.database_url and queue is None
         else None
     )
+    if enabled_keys:
+        try:
+            enabled_keys = filter_catalog_enabled_adapter_keys(
+                enabled_keys,
+                source_catalog_reader=resolve_source_catalog_reader(
+                    database_url=settings.database_url,
+                    source_catalog_reader=source_catalog_reader,
+                ),
+            )
+        except SourceCatalogUnavailable:
+            record_runtime_selection(
+                runtime_status_writer,
+                enabled_adapter_keys=enabled_keys,
+                known_adapter_keys=tuple(ADAPTER_REGISTRY),
+            )
+            record_pipeline_status(
+                runtime_status_writer,
+                adapter_keys=enabled_keys,
+                status="failed",
+                complete=False,
+                run_at=attempt_started_at,
+            )
+            log_event("runtime.source_catalog.unavailable")
+            return RuntimeQueueProducerResult(status="skipped", reason="source_catalog_unavailable")
+        if not enabled_keys:
+            record_runtime_selection(
+                runtime_status_writer,
+                enabled_adapter_keys=(),
+                known_adapter_keys=tuple(ADAPTER_REGISTRY),
+            )
+            log_event("runtime.source_catalog.disabled")
+            return RuntimeQueueProducerResult(status="skipped", reason="source_catalog_disabled")
     record_runtime_selection(
         runtime_status_writer,
         enabled_adapter_keys=enabled_keys,
         known_adapter_keys=tuple(ADAPTER_REGISTRY),
     )
+    narrowed_settings = replace(settings, enabled_adapter_keys=enabled_keys)
     try:
-        runnable_adapters = build_runtime_adapters(settings)
+        runnable_adapters = build_runtime_adapters(narrowed_settings)
     except Exception:
         record_pipeline_status(
             runtime_status_writer,
@@ -1102,6 +1138,7 @@ def work_runtime_queue_once(
     queue_name: str = "runtime-adapters",
     worker_id: str | None = None,
     retry_delay_seconds: int = 60,
+    source_catalog_reader: SourceCatalogReader | None = None,
 ) -> RuntimeQueueWorkerResult:
     resolved_settings = settings or load_worker_settings()
     resolved_worker_id = worker_id or resolved_settings.metrics_instance
@@ -1158,6 +1195,56 @@ def work_runtime_queue_once(
             attempt_started_at=attempt_started_at,
             run_writer=run_writer,
         )
+
+    if adapter_key in OFFICIAL_INCIDENT_CATALOG_GATED_KEYS:
+        try:
+            enabled_keys = filter_catalog_enabled_adapter_keys(
+                (adapter_key,),
+                source_catalog_reader=resolve_source_catalog_reader(
+                    database_url=resolved_settings.database_url,
+                    source_catalog_reader=source_catalog_reader,
+                ),
+            )
+        except SourceCatalogUnavailable:
+            return _fail_runtime_queue_job(
+                resolved_settings,
+                queue=runtime_queue,
+                job=job,
+                worker_id=resolved_worker_id,
+                adapter_key=adapter_key,
+                error="source_catalog_unavailable",
+                retry_delay_seconds=retry_delay_seconds,
+                attempt_started_at=attempt_started_at,
+                run_writer=run_writer,
+            )
+        if not enabled_keys:
+            updated = mark_runtime_adapter_job_succeeded(
+                resolved_settings,
+                job_id=job.id,
+                queue=runtime_queue,
+                worker_id=resolved_worker_id,
+            )
+            if not updated:
+                record_pipeline_status(
+                    run_writer,
+                    adapter_keys=(adapter_key,),
+                    status="failed",
+                    complete=False,
+                    run_at=attempt_started_at,
+                )
+                return RuntimeQueueWorkerResult(
+                    status="failed",
+                    job_id=job.id,
+                    adapter_key=adapter_key,
+                    reason="queue_completion_not_updated",
+                )
+            log_event("runtime.source_catalog.disabled", adapter_key=adapter_key)
+            return RuntimeQueueWorkerResult(
+                status="skipped",
+                job_id=job.id,
+                adapter_key=adapter_key,
+                reason="source_catalog_disabled",
+            )
 
     summary: AdapterBatchRunSummary | None = None
     freshness_checks: tuple[FreshnessCheck, ...] = ()
@@ -1217,7 +1304,7 @@ def work_runtime_queue_once(
                 _runtime_promotion_writer(promotion_writer),
                 adapter_keys=(adapter_key,),
             )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - persist adapter failure as queue result
         return _fail_runtime_queue_job(
             resolved_settings,
             queue=runtime_queue,

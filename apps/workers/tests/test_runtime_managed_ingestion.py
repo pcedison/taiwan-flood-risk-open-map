@@ -71,9 +71,7 @@ def task9_synthetic_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_managed_valid_empty_warning_is_success_without_source_timestamp(
     adapter_key: str,
 ) -> None:
-    result = _run_task9_managed(
-        _Task9EmptyWarningAdapter(adapter_key, no_active_event=True)
-    )
+    result = _run_task9_managed(_Task9EmptyWarningAdapter(adapter_key, no_active_event=True))
 
     assert result.status == "succeeded"
     assert len(result.summaries) == 1
@@ -217,9 +215,7 @@ def test_disjoint_expired_and_future_warnings_do_not_form_active_window(
 @pytest.mark.usefixtures("task9_synthetic_registry")
 def test_managed_historical_flood_preserves_event_time_with_background_freshness() -> None:
     event_observed_at = FETCHED_AT - timedelta(days=3650)
-    result = _run_task9_managed(
-        _Task9HistoricalAdapter(event_observed_at=event_observed_at)
-    )
+    result = _run_task9_managed(_Task9HistoricalAdapter(event_observed_at=event_observed_at))
 
     assert result.status == "succeeded"
     assert result.summaries[0].source_timestamp_max == event_observed_at
@@ -247,6 +243,7 @@ def test_managed_no_active_retirement_runs_after_summary_persistence() -> None:
         staging_writer=_MemoryStagingWriter(),
         run_writer=run_writer,
         promotion_writer=promotion_writer,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter.metadata.key})),
         promote=True,
     )
 
@@ -279,6 +276,7 @@ def test_managed_no_active_retirement_is_not_called_when_promotion_disabled() ->
         staging_writer=_MemoryStagingWriter(),
         run_writer=_MemoryRunWriter(),
         promotion_writer=promotion_writer,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter.metadata.key})),
         promote=False,
     )
 
@@ -303,6 +301,7 @@ def test_managed_no_active_retirement_failure_returns_failed_result() -> None:
         staging_writer=_MemoryStagingWriter(),
         run_writer=_MemoryRunWriter(),
         promotion_writer=_FailingNoActiveRetirementWriter([]),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter.metadata.key})),
         promote=True,
     )
 
@@ -395,9 +394,7 @@ def test_each_exact_v1_baseline_key_can_enter_the_scoped_injected_engine(
         raising=False,
     )
 
-    assert runtime_managed_jobs.V1_BASELINE_ADAPTER_KEYS == (
-        EXPECTED_V1_BASELINE_ADAPTER_KEYS
-    )
+    assert runtime_managed_jobs.V1_BASELINE_ADAPTER_KEYS == (EXPECTED_V1_BASELINE_ADAPTER_KEYS)
     for key in EXPECTED_V1_BASELINE_ADAPTER_KEYS:
         adapter = SimpleNamespace(metadata=SimpleNamespace(key=key))
         settings = replace(load_worker_settings({}), enabled_adapter_keys=(key,))
@@ -420,9 +417,7 @@ def test_each_exact_v1_baseline_key_can_enter_the_scoped_injected_engine(
     assert [tuple(mapping) for mapping, _kwargs in calls] == [
         (key,) for key in EXPECTED_V1_BASELINE_ADAPTER_KEYS
     ]
-    for key, (_mapping, kwargs) in zip(
-        EXPECTED_V1_BASELINE_ADAPTER_KEYS, calls, strict=True
-    ):
+    for key, (_mapping, kwargs) in zip(EXPECTED_V1_BASELINE_ADAPTER_KEYS, calls, strict=True):
         assert kwargs["settings"].enabled_adapter_keys == (key,)  # type: ignore[union-attr]
         assert kwargs["promotion_adapter_keys"] == (key,)
         assert kwargs["job_key"] == f"worker.v1_baseline.{key}"
@@ -520,6 +515,133 @@ def test_managed_runtime_cycle_uses_injected_adapter_builder() -> None:
     assert result.status == "succeeded"
     assert captured["settings"] == settings
     assert staging_writer.batches[0].accepted[0].source_id == "builder-news-001"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_disabled_catalog_key_never_builds_or_runs_managed_adapter() -> None:
+    calls = {"build": 0, "run": 0}
+
+    def adapter_builder(settings: WorkerSettings) -> dict[str, _CatalogCountingAdapter]:
+        del settings
+        calls["build"] += 1
+        return {"official.cwa.heavy_rain_warning": _CatalogCountingAdapter(calls)}
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        settings=_settings("official.cwa.heavy_rain_warning"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+        adapter_builder=adapter_builder,
+    )
+
+    assert result.status == "skipped"
+    assert result.reason == "source_catalog_disabled"
+    assert calls == {"build": 0, "run": 0}
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_missing_catalog_row_never_runs_supplied_managed_adapter() -> None:
+    calls = {"run": 0}
+    adapter = _CatalogCountingAdapter(calls)
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=_settings(adapter.metadata.key),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+    )
+
+    assert result.status == "skipped"
+    assert result.reason == "source_catalog_disabled"
+    assert calls == {"run": 0}
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_enabled_catalog_key_runs_managed_adapter() -> None:
+    calls = {"run": 0}
+    adapter = _CatalogCountingAdapter(calls)
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=_settings(adapter.metadata.key),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter.metadata.key})),
+    )
+
+    assert result.status == "partial"
+    assert calls == {"run": 1}
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_catalog_query_exception_fails_managed_cycle_without_upstream_work() -> None:
+    calls = {"build": 0}
+
+    def adapter_builder(settings: WorkerSettings) -> dict[str, _CatalogCountingAdapter]:
+        del settings
+        calls["build"] += 1
+        return {}
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        settings=_settings("official.cwa.heavy_rain_warning"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        source_catalog_reader=_FailingCatalogReader(),
+        adapter_builder=adapter_builder,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "source_catalog_unavailable"
+    assert result.error_code == "source_catalog_unavailable"
+    assert result.error_message is None
+    assert calls == {"build": 0}
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_catalog_gate_narrows_managed_promotion_targets() -> None:
+    adapter = _sample_adapter()
+    promotion_writer = _MemoryPromotionWriter([_candidate()])
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        {
+            adapter.metadata.key: adapter,
+            "official.cwa.heavy_rain_warning": _ExplodingAdapter("official.cwa.heavy_rain_warning"),
+        },
+        settings=_settings("news.public_web.sample", "official.cwa.heavy_rain_warning"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        promotion_writer=promotion_writer,
+        promote=True,
+        promotion_adapter_keys=("news.public_web.sample", "official.cwa.heavy_rain_warning"),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+    )
+
+    assert result.status == "succeeded"
+    assert promotion_writer.requested_adapter_keys == ("news.public_web.sample",)
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_catalog_gate_does_not_fall_back_when_explicit_promotion_targets_are_disabled() -> None:
+    adapter = _sample_adapter()
+    promotion_writer = _MemoryPromotionWriter([_candidate()])
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        {
+            adapter.metadata.key: adapter,
+            "official.cwa.heavy_rain_warning": _ExplodingAdapter("official.cwa.heavy_rain_warning"),
+        },
+        settings=_settings("news.public_web.sample", "official.cwa.heavy_rain_warning"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        promotion_writer=promotion_writer,
+        promote=True,
+        promotion_adapter_keys=("official.cwa.heavy_rain_warning",),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+    )
+
+    assert result.status == "succeeded"
+    assert promotion_writer.requested_adapter_keys == ()
 
 
 def test_managed_runtime_cycle_promotes_adapter_keys_from_ran_summaries() -> None:
@@ -805,6 +927,7 @@ def _run_task9_managed(adapter: Any):
         settings=settings,
         staging_writer=_MemoryStagingWriter(),
         run_writer=_MemoryRunWriter(),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({key})),
         promote=False,
     )
 
@@ -862,9 +985,7 @@ class _MemoryRunWriter:
     def __init__(self, *, timeline: list[str] | None = None) -> None:
         self.calls: list[tuple[AdapterBatchRunSummary, str, dict[str, Any] | None]] = []
         self.runtime_selections: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
-        self.pipeline_statuses: list[
-            tuple[tuple[str, ...], str, bool, datetime | None]
-        ] = []
+        self.pipeline_statuses: list[tuple[tuple[str, ...], str, bool, datetime | None]] = []
         self.snapshot_activations: list[str | None] = []
         self.timeline = timeline
 
@@ -951,9 +1072,7 @@ class _MemoryPromotionWriter:
         generation_started_at: datetime,
         completed_at: datetime,
     ) -> int:
-        self.retired_no_active.append(
-            (adapter_key, generation_started_at, completed_at)
-        )
+        self.retired_no_active.append((adapter_key, generation_started_at, completed_at))
         if self.timeline is not None:
             self.timeline.append("retire")
         return 0
@@ -1053,6 +1172,43 @@ class _ExplodingAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         raise AssertionError(f"{self.metadata.key} should not normalize")
+
+
+class _CatalogCountingAdapter:
+    metadata = AdapterMetadata(
+        key="official.cwa.heavy_rain_warning",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="Catalog counting warning adapter",
+    )
+
+    def __init__(self, calls: dict[str, int]) -> None:
+        self.calls = calls
+
+    def run(self) -> AdapterRunResult:
+        self.calls["run"] += 1
+        return AdapterRunResult(adapter_key=self.metadata.key, fetched=(), normalized=())
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
+
+class _StaticCatalogReader:
+    def __init__(self, *, enabled: frozenset[str]) -> None:
+        self.enabled = enabled
+
+    def enabled_keys(self, adapter_keys: tuple[str, ...]) -> frozenset[str]:
+        return self.enabled.intersection(adapter_keys)
+
+
+class _FailingCatalogReader:
+    def enabled_keys(self, adapter_keys: tuple[str, ...]) -> frozenset[str]:
+        del adapter_keys
+        raise RuntimeError("postgresql://secrets@catalog-unavailable")
 
 
 class _Task9EmptyWarningAdapter:
@@ -1433,9 +1589,7 @@ class _CompleteReplacePartialAdapter:
             adapter_key=self.metadata.key,
             fetched=fetched,
             normalized=normalized,
-            rejected=tuple(
-                item.source_id for item in fetched[self.valid_count :]
-            ),
+            rejected=tuple(item.source_id for item in fetched[self.valid_count :]),
         )
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
