@@ -33,6 +33,8 @@ RealtimeJurisdictionResolutionStatus = Literal[
 ]
 QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
 _LATEST_OFFICIAL_RELATION = "official_realtime_latest"
+_DEFAULT_FRESHNESS_THRESHOLD_SECONDS = 600
+_MAX_FRESHNESS_THRESHOLD_SECONDS = 86_400
 
 
 class EvidenceRepositoryUnavailable(RuntimeError):
@@ -1377,6 +1379,37 @@ def query_realtime_jurisdiction_context(
     return _realtime_jurisdiction_context(row)
 
 
+def _freshness_threshold_lateral_sql(metadata_expression: str) -> str:
+    """Resolve public catalog cadence without allowing unsafe JSON casts."""
+
+    return f"""
+        CROSS JOIN LATERAL (
+            SELECT
+                /* resolved-freshness-threshold */
+                CASE
+                    WHEN candidate.threshold_seconds
+                        BETWEEN 1 AND {_MAX_FRESHNESS_THRESHOLD_SECONDS}
+                        THEN candidate.threshold_seconds
+                    ELSE {_DEFAULT_FRESHNESS_THRESHOLD_SECONDS}
+                END AS fresh_seconds
+            FROM (
+                SELECT CASE
+                    WHEN normalized.threshold_text ~ '^[0-9]{{1,5}}$'
+                        THEN normalized.threshold_text::integer
+                    ELSE NULL
+                END AS threshold_seconds
+                FROM (
+                    SELECT btrim(COALESCE(
+                        {metadata_expression}
+                            ->> 'freshness_threshold_seconds',
+                        ''
+                    )) AS threshold_text
+                ) normalized
+            ) candidate
+        ) freshness_threshold
+    """
+
+
 def _query_realtime_source_health_rows(
     *,
     database_url: str,
@@ -1413,22 +1446,10 @@ def _query_realtime_source_health_rows(
                 )::integer AS stale_station_count
             FROM official_realtime_latest latest
             JOIN requested ON requested.adapter_key = latest.adapter_key
-            LEFT JOIN data_sources observation_source
-                ON observation_source.adapter_key = latest.adapter_key
+            JOIN resolved_freshness
+                ON resolved_freshness.adapter_key = latest.adapter_key
             CROSS JOIN LATERAL (
-                SELECT CASE
-                    WHEN NULLIF(
-                        observation_source.metadata
-                            ->> 'freshness_threshold_seconds',
-                        ''
-                    )::integer > 0
-                        THEN NULLIF(
-                            observation_source.metadata
-                                ->> 'freshness_threshold_seconds',
-                            ''
-                        )::integer
-                    ELSE 600
-                END AS fresh_seconds
+                SELECT resolved_freshness.fresh_seconds
             ) freshness_threshold
             GROUP BY latest.adapter_key
         )
@@ -1524,6 +1545,15 @@ def _query_realtime_source_health_rows(
         WITH requested AS (
             SELECT unnest(%s::text[]) AS adapter_key
         ),
+        resolved_freshness AS MATERIALIZED (
+            SELECT
+                requested.adapter_key,
+                freshness_threshold.fresh_seconds
+            FROM requested
+            LEFT JOIN data_sources
+                ON data_sources.adapter_key = requested.adapter_key
+            {_freshness_threshold_lateral_sql("data_sources.metadata")}
+        ),
         latest_jobs AS (
             SELECT DISTINCT ON (jobs.adapter_key)
                 jobs.id,
@@ -1579,8 +1609,7 @@ def _query_realtime_source_health_rows(
             latest_runtime.latest_run_status,
             latest_runtime.latest_run_at,
             latest_runtime.latest_run_error_code,
-            NULLIF(data_sources.metadata->>'freshness_threshold_seconds', '')::integer
-                AS freshness_threshold_seconds,
+            resolved_freshness.fresh_seconds AS freshness_threshold_seconds,
             {observation_columns},
             latest_inventory.upstream_total AS upstream_station_count,
             latest_inventory.pages_fetched,
@@ -1601,6 +1630,8 @@ def _query_realtime_source_health_rows(
             {inventory_complete_column}
         FROM requested
         LEFT JOIN data_sources ON data_sources.adapter_key = requested.adapter_key
+        JOIN resolved_freshness
+            ON resolved_freshness.adapter_key = requested.adapter_key
         LEFT JOIN latest_runtime ON latest_runtime.adapter_key = requested.adapter_key
         LEFT JOIN station_inventory_snapshots latest_inventory
             ON latest_inventory.ingestion_job_id = latest_runtime.ingestion_job_id
@@ -1668,13 +1699,18 @@ def _query_nearby_latest_coverage_rows(
             ST_Distance(latest.geom::geography, qp.geog) AS distance_to_query_m,
             CASE
                 WHEN latest.observed_at IS NULL THEN 'stale'
-                WHEN latest.observed_at >= now() - interval '10 minutes' THEN 'fresh'
-                WHEN latest.observed_at >= now() - interval '30 minutes' THEN 'degraded'
+                WHEN latest.observed_at >= now() - make_interval(
+                    secs => freshness_threshold.fresh_seconds
+                ) THEN 'fresh'
+                WHEN latest.observed_at >= now() - make_interval(
+                    secs => freshness_threshold.fresh_seconds * 3
+                ) THEN 'degraded'
                 ELSE 'stale'
             END AS freshness_state
         FROM official_realtime_latest latest
         JOIN data_sources ON data_sources.adapter_key = latest.adapter_key
             AND data_sources.is_enabled = true
+        {_freshness_threshold_lateral_sql("data_sources.metadata")}
         CROSS JOIN query_point qp
         WHERE latest.geom IS NOT NULL
             {observed_filter}
@@ -1737,12 +1773,17 @@ def _query_nearby_evidence_coverage_rows(
                 ST_Distance(e.geom::geography, qp.geog) AS distance_to_query_m,
                 CASE
                     WHEN e.observed_at IS NULL THEN 'stale'
-                    WHEN e.observed_at >= now() - interval '10 minutes' THEN 'fresh'
-                    WHEN e.observed_at >= now() - interval '30 minutes' THEN 'degraded'
+                    WHEN e.observed_at >= now() - make_interval(
+                        secs => freshness_threshold.fresh_seconds
+                    ) THEN 'fresh'
+                    WHEN e.observed_at >= now() - make_interval(
+                        secs => freshness_threshold.fresh_seconds * 3
+                    ) THEN 'degraded'
                     ELSE 'stale'
                 END AS freshness_state
             FROM evidence e
             JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+            {_freshness_threshold_lateral_sql("ds.metadata")}
             CROSS JOIN query_point qp
             WHERE e.source_type = 'official'
                 AND e.ingestion_status = 'accepted'

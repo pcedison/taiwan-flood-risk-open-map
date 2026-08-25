@@ -452,3 +452,179 @@ above remains applicable.
 The full-tree Ruff baseline concerns documented above are unchanged. This fix
 wave remains implementer work pending another independent review; it was not
 self-approved, pushed, merged, or deployed.
+
+## Integration milestone safety-fix wave 2
+
+Date: 2026-08-25
+
+Review base: `f675af3c90902bcb9163eea979a2073ca14e1258`
+
+Commit: the commit containing this report, with message
+`fix: close Task 9 milestone safety gaps`. Because a commit cannot embed its
+own final SHA, `git rev-parse HEAD` after this commit is the authoritative
+identifier.
+
+The independent integration milestone review found one critical race and six
+important code/operator-documentation gaps after the earlier task-level
+approval. This wave closes all findings without changing the frozen generic
+runtime, Task 8 staging authorization, persisted-only assessment boundary, or
+source registration/enablement state.
+
+### RED/GREEN evidence
+
+#### Trusted result identity, exact empty shape, and disjoint warning windows
+
+RED:
+
+```bash
+../../.venv/workers/bin/python -m pytest \
+  tests/test_ingestion_job_runner.py tests/test_runtime_managed_ingestion.py \
+  -k 'mismatch or nonempty_normalized or disjoint_expired' -q
+```
+
+Result: `4 failed, 41 deselected`. A forged result key was accepted as NCDR,
+a nonempty normalized result became `no_active_event`, and expired-plus-future
+alerts for both reviewed keys were combined into a false active interval.
+
+GREEN: the same selection returned `4 passed, 41 deselected`. Managed-cycle
+coverage was then added for trusted-key failure plus normalized and inventory
+proof incompatibilities; `3 passed, 28 deselected`. The shared warning-window
+evaluation instant is the authenticated raw snapshot fetch time, so historical
+test fixtures remain deterministic while disjoint intervals cannot bridge a
+gap.
+
+#### Atomic no-active marker and generation-safe CAP reference retirement
+
+Marker RED:
+
+```bash
+../../.venv/workers/bin/python -m pytest tests/test_ingestion_run_writer.py \
+  -k locks_warning_lifecycle -q
+```
+
+Result: `1 failed, 12 deselected`; the ingestion job insert occurred without
+the warning lifecycle advisory lock. GREEN after the minimal lock change:
+`13 passed` for the full run-writer suite.
+
+Reference-retirement RED:
+
+```bash
+../../.venv/workers/bin/python -m pytest tests/test_promotion_pipeline.py \
+  -k cap_mutation_retires_only_exact_reference_triples -q
+```
+
+Result: `2 failed, 86 deselected`; the reference DELETE had no validated latest
+generation guard. GREEN: `2 passed, 86 deselected`; ordinary Update/Cancel
+retirement remains effective only for referenced latest rows with a valid
+generation less than or equal to the mutation generation.
+
+The review's live reproduction had already demonstrated the composite bug:
+both same- and peer-adapter latest rows were deleted when an older Update held
+the lock while a newer empty marker committed. After the two constituent RED
+fixes, the new mandatory two-connection composite test passed on its first run
+for both `update_first` and `empty_marker_first`. It asserts same- and peer-row
+survival and the historical-only Update state when the marker commits first.
+The marker lock is acquired only after adapter fetch/normalization is complete;
+no upstream request is made while it is held.
+
+#### Safe catalog thresholds in health, latest coverage, and evidence fallback
+
+RED:
+
+```bash
+../../.venv/api/bin/python -m pytest tests/test_evidence_repository.py \
+  -k 'query_nearby_realtime_coverage_rows_counts_radius_buckets or \
+      query_nearby_realtime_coverage_rows_falls_back_to_official_evidence_when_latest_empty or \
+      query_realtime_source_health_rows_returns_public_safe_runtime_state' -q
+```
+
+Result: `3 failed, 38 deselected`. Both coverage queries still used fixed
+10/30-minute windows, and source health still exposed an unsafe direct integer
+cast.
+
+GREEN: `3 passed, 38 deselected`. One reusable lateral SQL resolver now trims
+metadata, accepts only `1..86400`, falls back to 600, and is reused by source
+health station counts/projection plus both coverage paths. A live full-query
+regression passed all values: whitespace-wrapped 120, nonnumeric text, zero,
+negative, a 1000-digit overflow input, 86401, and valid 86400. A stale
+short-cadence redundant rainfall row is also proven unable to satisfy the low
+coverage gate.
+
+### Durable operator report corrections
+
+`docs/reviews/remote-integration-2026-08-25.md` now distinguishes the
+`49fbb79` remote-comparison snapshot, original Task 9 head, pre-fix review head,
+and this safety-fix commit. Its activation path is now explicitly:
+
+`Tasks 10–13 -> Task 14A/B (0038, rows disabled) -> Task 15 -> Task 16 isolated proof/operator activation`.
+
+Task 14A/16 own scoped v1 command wiring, Docker entrypoint,
+Compose/Zeabur contract tests, database aliases, and runtime documentation.
+Preview deployments must omit `SERVICE_ROLE=scheduler` and explicitly map
+`DATABASE_URL` until those contracts are ported. Production remains **NO-GO**.
+
+### Fix-wave verification
+
+Focused Worker lifecycle suites:
+
+```bash
+../../.venv/workers/bin/python -m pytest \
+  tests/test_ingestion_job_runner.py tests/test_ingestion_run_writer.py \
+  tests/test_freshness_monitoring.py tests/test_runtime_managed_ingestion.py \
+  tests/test_promotion_pipeline.py -q
+```
+
+Result: `178 passed`.
+
+Mandatory live PostgreSQL:
+
+```bash
+PROMOTION_TEST_DATABASE_URL='postgresql://flood_risk:change-me-local@localhost:5432/flood_risk' \
+OFFICIAL_DB_ACCEPTANCE_REQUIRED=1 \
+../../.venv/workers/bin/python -m pytest \
+  tests/test_promotion_monotonicity_postgres.py -q
+```
+
+Result: `58 passed`, zero skips.
+
+Focused API:
+
+```bash
+../../.venv/api/bin/python -m pytest \
+  tests/test_evidence_repository.py tests/test_nearby_realtime_coverage.py \
+  tests/test_assessment_repository.py -q
+```
+
+Result: `126 passed`.
+
+Live API threshold full-query regression:
+
+```bash
+EVIDENCE_TEST_DATABASE_URL='postgresql://flood_risk:change-me-local@localhost:5432/flood_risk' \
+OFFICIAL_DB_ACCEPTANCE_REQUIRED=1 \
+../../.venv/api/bin/python -m pytest \
+  tests/test_evidence_repository_postgres.py -k safely_resolves_bounded -q
+```
+
+Result: `1 passed, 13 deselected`.
+
+Full suites:
+
+- Worker: `694 passed, 58 skipped` (the skips are optional live collection;
+  the required live process above has zero skips).
+- API: `667 passed, 14 skipped, 1 warning` (the existing third-party
+  Starlette/httpx TestClient deprecation).
+
+Static/contract checks:
+
+- Worker mypy: success, 106 source files (run with the API tooling venv because
+  the Worker venv intentionally has no mypy package).
+- API mypy: success, 68 source files; only the existing informational note
+  about an untyped function body.
+- Scoped Ruff: all changed Worker/API Python files passed.
+- OpenAPI: `OpenAPI 3.1 spec valid. paths=15 schemas=75`.
+- `git diff --check`: clean before commit.
+
+This is implementer evidence, not self-approval. No merge, rebase, push,
+deployment, source activation, or mutation of the three user-owned untracked
+handoff files was performed.

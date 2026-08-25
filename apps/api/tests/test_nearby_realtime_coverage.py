@@ -1417,6 +1417,36 @@ def test_nearby_coverage_stale_water_level_does_not_satisfy_summary_available() 
     assert coverage.limitations[1:]
 
 
+def test_stale_short_cadence_redundant_source_cannot_satisfy_low_coverage() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="local.tainan.rainfall",
+                source_id="local-tainan-rainfall:stale",
+                event_type="rainfall",
+                distance_to_query_m=120.0,
+                freshness_state="stale",
+                observed_delta_minutes=12,
+            ),
+            _row(
+                adapter_key="official.wra.water_level",
+                source_id="wra-water-level:fresh",
+                event_type="water_level",
+                distance_to_query_m=150.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    rainfall = next(
+        item for item in coverage.signal_breakdown if item.signal_type == "rainfall"
+    )
+    assert coverage.overall_level != "low"
+    assert rainfall.fresh_count == 0
+    assert rainfall.stale_count == 1
+
+
 def test_nearby_coverage_warning_only_does_not_satisfy_rainfall_fallback() -> None:
     coverage = build_nearby_realtime_coverage(
         rows=(

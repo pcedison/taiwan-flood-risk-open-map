@@ -1218,7 +1218,11 @@ def test_cap_mutation_retires_only_exact_reference_triples(message_type: str) ->
     assert "official.cwa.heavy_rain_warning" in retire_statement
     assert "official.ncdr.cap" in retire_statement
     assert "pg_input_is_valid" in retire_statement
+    assert "latest.quality_flags" in retire_statement
+    assert "ingestion_generation_started_at" in retire_statement
+    assert "::timestamptz <= %s" in retire_statement
     assert json.loads(str(retire_params[0])) == [reference]
+    assert retire_params[1] == datetime(2026, 8, 24, 1, 5, tzinfo=UTC)
     latest_writes = [
         statement
         for statement, _ in connection.cursor_instance.executions

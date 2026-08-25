@@ -166,6 +166,24 @@ def test_station_empty_result_cannot_use_no_active_event_branch() -> None:
     assert summary.error_code == "empty_fetch"
 
 
+def test_adapter_result_key_mismatch_fails_under_trusted_configured_key() -> None:
+    summary = run_adapter_batch(_MismatchedResultKeyAdapter())
+
+    assert summary.adapter_key == "official.cwa.heavy_rain_warning"
+    assert summary.status == "failed"
+    assert summary.error_code == "ValueError"
+    assert summary.error_message is not None
+    assert "adapter result key mismatch" in summary.error_message
+
+
+def test_nonempty_normalized_warning_result_is_not_no_active_event() -> None:
+    summary = run_adapter_batch(_MalformedNoActiveWarningAdapter())
+
+    assert summary.adapter_key == "official.cwa.heavy_rain_warning"
+    assert summary.status != "succeeded"
+    assert summary.error_code != "no_active_event"
+
+
 def test_run_adapter_batch_reports_adapter_failure() -> None:
     summary = run_adapter_batch(_FailingAdapter())
 
@@ -380,6 +398,46 @@ class _ForgedGenerationAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         return self.run().normalized[0]
+
+
+class _MismatchedResultKeyAdapter(_NamedEmptyAdapter):
+    def __init__(self) -> None:
+        super().__init__("official.cwa.heavy_rain_warning", no_active_event=True)
+
+    def run(self) -> AdapterRunResult:
+        return AdapterRunResult(
+            adapter_key="official.ncdr.cap",
+            fetched=(),
+            normalized=(),
+            no_active_event=True,
+        )
+
+
+class _MalformedNoActiveWarningAdapter(_NamedEmptyAdapter):
+    def __init__(self) -> None:
+        super().__init__("official.cwa.heavy_rain_warning", no_active_event=True)
+
+    def run(self) -> AdapterRunResult:
+        normalized = NormalizedEvidence(
+            evidence_id="malformed-no-active",
+            adapter_key=self.metadata.key,
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_WARNING,
+            source_id="malformed-no-active",
+            source_url="https://example.test/cap",
+            source_title="Malformed no-active result",
+            source_timestamp=FETCHED_AT,
+            fetched_at=FETCHED_AT,
+            summary="A nonempty normalized row cannot prove an empty warning poll.",
+            location_text="臺南市",
+            confidence=0.95,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(),
+            normalized=(normalized,),
+            no_active_event=True,
+        )
 
 
 class _MemoryRunWriter:

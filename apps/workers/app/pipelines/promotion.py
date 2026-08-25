@@ -1147,7 +1147,10 @@ def _terminally_reject_staging(
 
 def _retire_cap_references(cursor: Any, payload: EvidencePromotionPayload) -> None:
     references = _effectful_cap_references(payload)
-    if not references:
+    candidate_generation = parse_datetime(
+        payload.properties.get("ingestion_generation_started_at")
+    )
+    if not references or not _is_aware_datetime(candidate_generation):
         return
     cursor.execute(
         """
@@ -1202,8 +1205,23 @@ def _retire_cap_references(cursor: Any, payload: EvidencePromotionPayload) -> No
                         ELSE false
                     END
             )
+            AND CASE
+                WHEN pg_input_is_valid(
+                    latest.quality_flags
+                        ->> 'ingestion_generation_started_at',
+                    'timestamptz'
+                )
+                    THEN (
+                        latest.quality_flags
+                            ->> 'ingestion_generation_started_at'
+                    )::timestamptz <= %s
+                ELSE false
+            END
         """,
-        (json.dumps(references, sort_keys=True, separators=(",", ":")),),
+        (
+            json.dumps(references, sort_keys=True, separators=(",", ":")),
+            candidate_generation,
+        ),
     )
 
 

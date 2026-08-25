@@ -13,6 +13,8 @@ from uuid import uuid4
 import pytest
 
 from app.adapters.cap_identity import cap_message_digest
+from app.jobs.ingestion import AdapterBatchRunSummary
+from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.promotion import EvidencePromotionPayload, PostgresEvidencePromotionWriter
 
 DATABASE_URL_ENV = "PROMOTION_TEST_DATABASE_URL"
@@ -445,6 +447,24 @@ def test_blocked_update_keeps_same_and_peer_referenced_warning_latest(
     finally:
         _cleanup_cap_race(database_url, suffix)
         _cleanup_no_active_job(database_url, suffix=suffix)
+
+
+@pytest.mark.parametrize("commit_order", ["update_first", "empty_marker_first"])
+def test_update_and_empty_marker_race_preserves_newer_same_and_peer_latest(
+    database_url: str,
+    commit_order: str,
+) -> None:
+    surviving_rows, update_state = _race_update_and_no_active_marker(
+        database_url,
+        commit_order=commit_order,
+    )
+
+    assert surviving_rows == (
+        "official.cwa.heavy_rain_warning",
+        "official.ncdr.cap",
+    )
+    if commit_order == "empty_marker_first":
+        assert update_state == ("historical", "superseded_by_no_active_event")
 
 
 def test_no_active_retirement_preserves_peer_adapter_latest_and_audit_evidence(
@@ -1941,6 +1961,182 @@ def _race_no_active_and_warning_alert(
             )
             evidence_count = int(cursor.fetchone()[0])
         return latest_count, evidence_count
+    finally:
+        release_first.set()
+        _cleanup_cap_race(database_url, suffix)
+        _cleanup_no_active_job(database_url, suffix=suffix)
+
+
+def _race_update_and_no_active_marker(
+    database_url: str,
+    *,
+    commit_order: str,
+) -> tuple[tuple[str, ...], tuple[str | None, str | None]]:
+    suffix = uuid4().hex
+    cwa_adapter = "official.cwa.heavy_rain_warning"
+    ncdr_adapter = "official.ncdr.cap"
+    update_generation = NOW
+    empty_generation = NOW + timedelta(seconds=1)
+    latest_generation = NOW + timedelta(seconds=2)
+    same_alert = _cap_payload(
+        adapter_key=cwa_adapter,
+        suffix=suffix,
+        identifier=f"task9-race-same-{suffix}",
+        message_type="Alert",
+        admin_code="67000000",
+        references=[],
+        geometry=True,
+        sent=NOW,
+    )
+    peer_alert = _cap_payload(
+        adapter_key=ncdr_adapter,
+        suffix=suffix,
+        identifier=f"task9-race-peer-{suffix}",
+        message_type="Alert",
+        admin_code="64000000",
+        references=[],
+        geometry=True,
+        sent=NOW + timedelta(minutes=1),
+    )
+    for alert in (same_alert, peer_alert):
+        alert.properties["ingestion_generation_started_at"] = (
+            latest_generation.isoformat()
+        )
+    update = _cap_payload(
+        adapter_key=cwa_adapter,
+        suffix=suffix,
+        identifier=f"task9-race-update-{suffix}",
+        message_type="Update",
+        admin_code="67000000",
+        references=[
+            {
+                "sender": str(same_alert.properties["cap_sender"]),
+                "identifier": str(same_alert.properties["cap_identifier"]),
+                "sent": str(same_alert.properties["cap_sent"]),
+            },
+            {
+                "sender": str(peer_alert.properties["cap_sender"]),
+                "identifier": str(peer_alert.properties["cap_identifier"]),
+                "sent": str(peer_alert.properties["cap_sent"]),
+            },
+        ],
+        geometry=True,
+        sent=NOW + timedelta(minutes=5),
+    )
+    update.properties["ingestion_generation_started_at"] = update_generation.isoformat()
+    summary = AdapterBatchRunSummary(
+        adapter_key=cwa_adapter,
+        status="succeeded",
+        started_at=empty_generation,
+        finished_at=empty_generation + timedelta(seconds=1),
+        items_fetched=0,
+        items_promoted=0,
+        items_rejected=0,
+        error_code="no_active_event",
+    )
+    first_ready = Event()
+    release_first = Event()
+    errors: dict[str, BaseException] = {}
+    update_result: dict[str, str | None] = {}
+    second_application_name = f"task9-update-empty-race-{suffix}"
+    seed_writer = PostgresEvidencePromotionWriter(database_url=database_url)
+
+    def capture_update(writer: PostgresEvidencePromotionWriter) -> None:
+        try:
+            update_result["evidence_id"] = writer.write_evidence(update)
+        except BaseException as exc:  # noqa: BLE001 - surfaced in parent thread
+            errors["update"] = exc
+
+    def capture_marker(writer: PostgresIngestionRunWriter) -> None:
+        try:
+            writer.write_summary(
+                summary,
+                job_key=f"task9-no-active-{suffix}",
+            )
+        except BaseException as exc:  # noqa: BLE001 - surfaced in parent thread
+            errors["marker"] = exc
+
+    try:
+        assert seed_writer.write_evidence(same_alert) is not None
+        assert seed_writer.write_evidence(peer_alert) is not None
+
+        if commit_order == "update_first":
+            first_writer = PostgresEvidencePromotionWriter(
+                connection_factory=_commit_gated_connection_factory(
+                    database_url,
+                    ready=first_ready,
+                    release=release_first,
+                )
+            )
+            second_writer = PostgresIngestionRunWriter(
+                connection_factory=lambda: _named_connection(
+                    database_url,
+                    second_application_name,
+                )
+            )
+            first_thread = Thread(target=lambda: capture_update(first_writer))
+            second_thread = Thread(target=lambda: capture_marker(second_writer))
+        else:
+            first_writer = PostgresIngestionRunWriter(
+                connection_factory=_commit_gated_connection_factory(
+                    database_url,
+                    ready=first_ready,
+                    release=release_first,
+                )
+            )
+            second_writer = PostgresEvidencePromotionWriter(
+                connection_factory=lambda: _named_connection(
+                    database_url,
+                    second_application_name,
+                )
+            )
+            first_thread = Thread(target=lambda: capture_marker(first_writer))
+            second_thread = Thread(target=lambda: capture_update(second_writer))
+
+        first_thread.start()
+        assert first_ready.wait(5)
+        second_thread.start()
+        assert _wait_for_advisory_wait(database_url, second_application_name)
+        release_first.set()
+        first_thread.join(10)
+        second_thread.join(10)
+        assert not first_thread.is_alive()
+        assert not second_thread.is_alive()
+        assert errors == {}
+
+        seed_writer.retire_warning_latest_for_no_active_event(
+            adapter_key=cwa_adapter,
+            generation_started_at=empty_generation,
+            completed_at=empty_generation + timedelta(seconds=2),
+        )
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT adapter_key
+                FROM official_realtime_latest
+                WHERE source_id = ANY(%s)
+                ORDER BY adapter_key
+                """,
+                ([same_alert.source_id, peer_alert.source_id],),
+            )
+            surviving_rows = tuple(str(row[0]) for row in cursor.fetchall())
+            cursor.execute(
+                """
+                SELECT
+                    properties ->> 'evidence_scope',
+                    properties ->> 'historical_reason'
+                FROM evidence
+                WHERE id = %s
+                """,
+                (update_result["evidence_id"],),
+            )
+            raw_update_state = cursor.fetchone()
+            assert raw_update_state is not None
+            update_state = (raw_update_state[0], raw_update_state[1])
+        return surviving_rows, update_state
     finally:
         release_first.set()
         _cleanup_cap_race(database_url, suffix)

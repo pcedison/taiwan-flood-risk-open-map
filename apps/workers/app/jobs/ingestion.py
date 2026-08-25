@@ -144,6 +144,7 @@ def run_adapter_batch(
         )
     else:
         try:
+            _validate_adapter_result_identity(adapter, result)
             summary = _summary_from_result(
                 result,
                 started_at=started_at,
@@ -151,7 +152,7 @@ def run_adapter_batch(
             )
         except Exception as exc:  # noqa: BLE001 - staging boundary records arbitrary failures
             summary = AdapterBatchRunSummary(
-                adapter_key=result.adapter_key,
+                adapter_key=adapter.metadata.key,
                 status="failed",
                 started_at=started_at,
                 finished_at=_now(),
@@ -258,10 +259,14 @@ def _summary_from_result(
     writer: StagingBatchWriter | None,
 ) -> AdapterBatchRunSummary:
     if not result.fetched:
+        if result.normalized:
+            raise ValueError("adapter returned normalized items without fetched raw items")
         if (
             result.adapter_key in WARNING_EVENT_ADAPTER_KEYS
             and result.no_active_event is True
+            and not result.normalized
             and not result.rejected
+            and result.station_inventory_proof is None
         ):
             return AdapterBatchRunSummary(
                 adapter_key=result.adapter_key,
@@ -299,9 +304,14 @@ def _summary_from_result(
     status: AdapterBatchStatus = "succeeded" if items_rejected == 0 else "partial"
     source_timestamp_min = batch.raw_snapshot.source_timestamp_min
     source_timestamp_max = batch.raw_snapshot.source_timestamp_max
+    finished_at = _now()
     event_active_from_min: datetime | None = None
     event_active_until_max: datetime | None = None
-    warning_window = _validated_warning_active_window(result, batch)
+    warning_window = _validated_warning_active_window(
+        result,
+        batch,
+        evaluated_at=batch.raw_snapshot.fetched_at,
+    )
     if warning_window is not None:
         event_active_from_min, event_active_until_max = warning_window
 
@@ -309,7 +319,7 @@ def _summary_from_result(
         adapter_key=result.adapter_key,
         status=status,
         started_at=started_at,
-        finished_at=_now(),
+        finished_at=finished_at,
         items_fetched=len(result.fetched),
         items_promoted=len(batch.accepted),
         items_rejected=items_rejected,
@@ -325,6 +335,8 @@ def _summary_from_result(
 def _validated_warning_active_window(
     result: AdapterRunResult,
     batch: AdapterStagingBatch,
+    *,
+    evaluated_at: datetime,
 ) -> tuple[datetime, datetime] | None:
     if result.adapter_key not in WARNING_EVENT_ADAPTER_KEYS:
         return None
@@ -338,12 +350,26 @@ def _validated_warning_active_window(
         active_until = parse_observed_at_utc(staged.payload.get("active_until"))
         if active_from is None or active_until is None or active_from >= active_until:
             continue
+        if not (active_from <= evaluated_at < active_until):
+            continue
         active_from_values.append(active_from)
         active_until_values.append(active_until)
 
     if not active_from_values or not active_until_values:
         return None
     return min(active_from_values), max(active_until_values)
+
+
+def _validate_adapter_result_identity(
+    adapter: DataSourceAdapter,
+    result: AdapterRunResult,
+) -> None:
+    configured_key = adapter.metadata.key
+    if result.adapter_key != configured_key:
+        raise ValueError(
+            "adapter result key mismatch: "
+            f"configured={configured_key!r}, returned={result.adapter_key!r}"
+        )
 
 
 def _now() -> datetime:

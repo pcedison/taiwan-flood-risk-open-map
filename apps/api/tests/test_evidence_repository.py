@@ -258,7 +258,12 @@ def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
     assert "official_realtime_latest" in sql
     assert "ST_DWithin" in sql
     assert 15000 in params
-    assert "interval '30 minutes' THEN 'degraded'" in sql
+    assert "freshness_threshold_seconds" in sql
+    assert "make_interval" in sql
+    assert "freshness_threshold.fresh_seconds" in sql
+    assert "freshness_threshold.fresh_seconds * 3" in sql
+    assert "interval '10 minutes'" not in sql
+    assert "interval '30 minutes'" not in sql
 
 
 def test_query_nearby_realtime_coverage_rows_falls_back_to_official_evidence_when_latest_empty() -> None:
@@ -306,6 +311,12 @@ def test_query_nearby_realtime_coverage_rows_falls_back_to_official_evidence_whe
     assert "FROM official_realtime_latest latest" in latest_sql
     assert "FROM evidence e" in fallback_sql
     assert "JOIN data_sources ds" in fallback_sql
+    assert "freshness_threshold_seconds" in fallback_sql
+    assert "make_interval" in fallback_sql
+    assert "freshness_threshold.fresh_seconds" in fallback_sql
+    assert "freshness_threshold.fresh_seconds * 3" in fallback_sql
+    assert "interval '10 minutes'" not in fallback_sql
+    assert "interval '30 minutes'" not in fallback_sql
     assert "e.source_type = 'official'" in fallback_sql
     assert "e.event_type IN" in fallback_sql
     assert "'rainfall'" in fallback_sql
@@ -439,10 +450,13 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
     assert "latest_adapter_run.ingestion_job_id = latest_job.id" in sql
     assert "WHEN latest_adapter_run.status = 'partial' THEN 'partial'" in sql
     assert "jobs.error_code AS latest_run_error_code" in sql
-    assert (
-        "NULLIF(data_sources.metadata->>'freshness_threshold_seconds', '')::integer"
-        in sql
-    )
+    assert "/* resolved-freshness-threshold */" in sql
+    assert "btrim(COALESCE(" in sql
+    assert "~ '^[0-9]{1,5}$'" in sql
+    assert "BETWEEN 1 AND 86400" in sql
+    assert "ELSE 600" in sql
+    assert "NULLIF(data_sources.metadata->>'freshness_threshold_seconds', '')::integer" not in sql
+    assert sql.count("/* resolved-freshness-threshold */") == 1
     assert "FROM official_realtime_latest latest" in sql
     assert "FROM requested" in sql
     assert "LEFT JOIN data_sources" in sql

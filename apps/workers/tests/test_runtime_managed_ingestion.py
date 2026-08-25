@@ -16,6 +16,7 @@ from app.adapters.contracts import (
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    StationInventoryProof,
 )
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.config import WorkerSettings, load_worker_settings
@@ -104,6 +105,27 @@ def test_plain_empty_or_failed_warning_never_uses_no_active_freshness_branch(
 
 
 @pytest.mark.usefixtures("task9_synthetic_registry")
+def test_managed_result_key_mismatch_fails_under_configured_warning_key() -> None:
+    result = _run_task9_managed(_Task9MismatchedResultKeyAdapter())
+
+    assert result.status == "failed"
+    assert result.summaries[0].adapter_key == "official.cwa.heavy_rain_warning"
+    assert result.summaries[0].error_code == "ValueError"
+    assert result.summaries[0].error_code != "no_active_event"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+@pytest.mark.parametrize("malformation", ["normalized", "inventory_proof"])
+def test_managed_malformed_empty_warning_never_becomes_no_active(
+    malformation: str,
+) -> None:
+    result = _run_task9_managed(_Task9MalformedEmptyWarningAdapter(malformation))
+
+    assert result.status != "succeeded"
+    assert result.summaries[0].error_code != "no_active_event"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
 @pytest.mark.parametrize(
     "adapter_key",
     ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
@@ -129,6 +151,35 @@ def test_managed_active_long_lived_warning_uses_validated_event_window(
     assert result.summaries[0].event_active_from_min == active_from
     assert result.summaries[0].event_active_until_max == active_until
     assert result.freshness_checks[0].status == "fresh"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_disjoint_expired_and_future_warnings_do_not_form_active_window(
+    adapter_key: str,
+) -> None:
+    result = _run_task9_managed(
+        _Task9MultiWindowWarningAdapter(
+            adapter_key,
+            windows=(
+                (
+                    FETCHED_AT - timedelta(hours=3),
+                    FETCHED_AT - timedelta(hours=2),
+                ),
+                (
+                    FETCHED_AT + timedelta(hours=2),
+                    FETCHED_AT + timedelta(hours=3),
+                ),
+            ),
+        )
+    )
+
+    assert result.summaries[0].event_active_from_min is None
+    assert result.summaries[0].event_active_until_max is None
+    assert result.freshness_checks[0].status == "stale"
 
 
 @pytest.mark.usefixtures("task9_synthetic_registry")
@@ -833,6 +884,63 @@ class _Task9EmptyWarningAdapter:
         return None
 
 
+class _Task9MismatchedResultKeyAdapter(_Task9EmptyWarningAdapter):
+    def __init__(self) -> None:
+        super().__init__("official.cwa.heavy_rain_warning", no_active_event=True)
+
+    def run(self) -> AdapterRunResult:
+        return AdapterRunResult(
+            adapter_key="official.ncdr.cap",
+            fetched=(),
+            normalized=(),
+            no_active_event=True,
+        )
+
+
+class _Task9MalformedEmptyWarningAdapter(_Task9EmptyWarningAdapter):
+    def __init__(self, malformation: str) -> None:
+        super().__init__("official.cwa.heavy_rain_warning", no_active_event=True)
+        self.malformation = malformation
+
+    def run(self) -> AdapterRunResult:
+        normalized: tuple[NormalizedEvidence, ...] = ()
+        inventory_proof: StationInventoryProof | None = None
+        if self.malformation == "normalized":
+            normalized = (
+                NormalizedEvidence(
+                    evidence_id="task9-malformed-empty",
+                    adapter_key=self.metadata.key,
+                    source_family=SourceFamily.OFFICIAL,
+                    event_type=EventType.FLOOD_WARNING,
+                    source_id="task9-malformed-empty",
+                    source_url="https://example.test/cap",
+                    source_title="Malformed empty warning",
+                    source_timestamp=FETCHED_AT,
+                    fetched_at=FETCHED_AT,
+                    summary="Normalized evidence contradicts the empty poll marker.",
+                    location_text="臺南市",
+                    confidence=0.95,
+                ),
+            )
+        else:
+            inventory_proof = StationInventoryProof(
+                upstream_total=0,
+                pages_fetched=1,
+                pagination_complete=True,
+                source_items_seen=0,
+                missing_station_id_count=0,
+                duplicate_station_id_count=0,
+                station_ids=(),
+            )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(),
+            normalized=normalized,
+            station_inventory_proof=inventory_proof,
+            no_active_event=True,
+        )
+
+
 class _Task9ActiveWarningAdapter:
     def __init__(
         self,
@@ -897,6 +1005,82 @@ class _Task9ActiveWarningAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         return self.run().normalized[0]
+
+
+class _Task9MultiWindowWarningAdapter:
+    def __init__(
+        self,
+        key: str,
+        *,
+        windows: tuple[tuple[datetime, datetime], ...],
+    ) -> None:
+        self.metadata = AdapterMetadata(
+            key=key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name=f"{key} multi-window fixture",
+        )
+        self.windows = windows
+
+    def run(self) -> AdapterRunResult:
+        fetched: list[RawSourceItem] = []
+        normalized: list[NormalizedEvidence] = []
+        for index, (active_from, active_until) in enumerate(self.windows, start=1):
+            sent_at = active_from
+            raw_item = RawSourceItem(
+                source_id=f"{self.metadata.key}:warning-{index}",
+                source_url="https://example.test/cap",
+                fetched_at=FETCHED_AT,
+                payload={
+                    "evidence_scope": "current",
+                    "location_precision": "admin_area",
+                    "admin_code": "67000000",
+                    "cap_sender": "sender@example.test",
+                    "cap_identifier": f"warning-{index}",
+                    "cap_sent": sent_at.isoformat(),
+                    "cap_references": [],
+                    "cap_status": "Actual",
+                    "cap_message_type": "Alert",
+                    "active_from": active_from.isoformat(),
+                    "active_until": active_until.isoformat(),
+                },
+            )
+            fetched.append(raw_item)
+            normalized.append(
+                NormalizedEvidence(
+                    evidence_id=f"{self.metadata.key}:warning-evidence-{index}",
+                    adapter_key=self.metadata.key,
+                    source_family=SourceFamily.OFFICIAL,
+                    event_type=EventType.FLOOD_WARNING,
+                    source_id=raw_item.source_id,
+                    source_url=raw_item.source_url,
+                    source_title="Task 9 warning window",
+                    source_timestamp=sent_at,
+                    fetched_at=FETCHED_AT,
+                    summary="Task 9 synthetic warning window.",
+                    location_text="臺南市",
+                    confidence=0.95,
+                )
+            )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=tuple(fetched),
+            normalized=tuple(normalized),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        result = self.run()
+        return next(
+            (
+                normalized
+                for normalized in result.normalized
+                if normalized.source_id == raw_item.source_id
+            ),
+            None,
+        )
 
 
 class _Task9HistoricalAdapter:

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import json
+from datetime import UTC, datetime
+from typing import Self
 
 from app.adapters.civil_iot import FloodSensorStaApiAdapter
+from app.adapters.news import SamplePublicWebNewsAdapter
 from app.jobs.ingestion import AdapterBatchRunSummary, run_adapter_batch
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from tests.test_ingestion_job_runner import _EmptyAdapter, _MemoryWriter
-from app.adapters.news import SamplePublicWebNewsAdapter
-
 
 STARTED_AT = datetime(2026, 4, 29, 8, 0, tzinfo=UTC)
 FINISHED_AT = datetime(2026, 4, 29, 8, 1, tzinfo=UTC)
@@ -95,6 +95,32 @@ def test_postgres_ingestion_run_writer_maps_partial_to_succeeded_job() -> None:
 
     assert connection.cursor_instance.executions[0][1][4] == "succeeded"
     assert connection.cursor_instance.executions[1][1][4] == "partial"
+
+
+def test_successful_no_active_summary_locks_warning_lifecycle_before_marker() -> None:
+    summary = AdapterBatchRunSummary(
+        adapter_key="official.cwa.heavy_rain_warning",
+        status="succeeded",
+        started_at=STARTED_AT,
+        finished_at=FINISHED_AT,
+        items_fetched=0,
+        items_promoted=0,
+        items_rejected=0,
+        error_code="no_active_event",
+    )
+    connection = _FakeConnection(job_id="job-id")
+
+    PostgresIngestionRunWriter(connection_factory=lambda: connection).write_summary(
+        summary,
+        job_key="ingest.warning",
+    )
+
+    lock_sql, lock_params = connection.cursor_instance.executions[0]
+    marker_sql, marker_params = connection.cursor_instance.executions[1]
+    assert "pg_advisory_xact_lock" in lock_sql
+    assert lock_params == ("official-warning-lifecycle|official.cwa.heavy_rain_warning",)
+    assert "INSERT INTO ingestion_jobs" in marker_sql
+    assert marker_params[8] == "no_active_event"
 
 
 def test_postgres_ingestion_run_writer_does_not_insert_adapter_run_for_skipped_summary() -> None:
@@ -376,7 +402,7 @@ class _FakeConnection:
         self.cursor_instance = _FakeCursor(job_id=job_id)
         self.committed = False
 
-    def __enter__(self) -> _FakeConnection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -394,7 +420,7 @@ class _FakeCursor:
         self._job_id = job_id
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> _FakeCursor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

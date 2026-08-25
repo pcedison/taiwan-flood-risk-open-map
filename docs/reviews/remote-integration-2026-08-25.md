@@ -2,14 +2,19 @@
 
 - 更新時間：2026-08-25（Asia/Taipei）
 - Mac 權威分支：`codex/v1-official-community`
-- Mac 核准起點：`49fbb7953cb679a1a7ac0d566527bd5243bbcf4a`
-- 本次整合後 HEAD：`5fb9e544ccdaa48fa05b24a8da40c7cb5d59810c`
+- 遠端比較快照：`49fbb7953cb679a1a7ac0d566527bd5243bbcf4a`
+- 原始 Task 9 implementation head：`5fb9e544ccdaa48fa05b24a8da40c7cb5d59810c`
+- milestone safety-fix 前 review head：`f675af3c90902bcb9163eea979a2073ca14e1258`
+- milestone safety-fix：本報告所在提交，commit message
+  `fix: close Task 9 milestone safety gaps`（提交後以 `git rev-parse HEAD` 取得權威 SHA）
 
 ## 執行結論
 
 不可把 `origin/main` 直接 pull、merge 或 fast-forward 進 Mac v1 分支。
-兩邊共同基準是 `a526328052b1faa2ac8a54715228f6cff5c05389`；Mac v1 有
-24 個遠端 main 沒有的提交，遠端 main 只有 3 個 Mac v1 尚未整合的提交。
+兩邊共同基準是 `a526328052b1faa2ac8a54715228f6cff5c05389`。在
+`49fbb79` 遠端比較快照，Mac／remote unique commits 是 `24/3`；在 safety-fix 前
+`f675af3` review head 是 `29/3`。這些是具名快照，不是永遠不變的目前數字；本次
+safety-fix 提交後若 `origin/main` 未變，會是 `30/3`。
 直接合併會同時帶回已被 Task 6/7 刻意移除的 request-time official bridge
 與 generic scheduler 路徑，破壞 persisted-only assessment 邊界。
 
@@ -54,7 +59,7 @@
 | 公開風險查詢 | `AssessmentService` 只讀持久化 evidence/health | legacy service 可在 request-time 抓 CWA/WRA | 保留 Mac；拒絕 bridge hunk |
 | 正式 worker 入口 | generic managed/scheduler 已 frozen；只允許 scoped v1 seam | entrypoint 仍呼叫 `--run-enabled-adapters --persist --scheduler` | 不復活 legacy；由 Task 14 v1 runner 接管 |
 | Promotion | Task 8 已有 exact staging authorization、同 adapter lock、generation monotonicity | 今日 PR 未涵蓋 | 完整保留 Mac |
-| Empty warning | Task 9 已定義 `no_active_event` 與 anti-resurrection，尚未實作 | 今日 PR 未實作 | 照原 Task 9 執行 |
+| Empty warning | Task 9 已實作 `no_active_event`、anti-resurrection，並完成 milestone safety-fix wave | 今日 PR 未實作 | 保留 Mac 實作；完成獨立 milestone 複審 |
 | WRA timestamp | 無 offset 值被共同 parser 當 UTC，可能落在未來 | 改以 UTC+8 解析 | 立即 manual port |
 | Source health | persisted health 與 public safety seam 已建立，Task 9 再精化 | smoke 開始拒絕 stalled/failed | 保留監控意圖，接到 Mac seam |
 | DB aliases | API 接受平台 alias；entrypoint 不完整 | entrypoint 補 alias | 由 Task 14 新 runner/entrypoint 採用 |
@@ -112,8 +117,9 @@ transaction 啟用。
    source」的 fail-closed 規則。
 2. Scheduled admin freshness gate；先配置 `ADMIN_BEARER_TOKEN`，否則排程會按設計
    持續紅燈。
-3. `POSTGRES_CONNECTION_STRING`／`POSTGRES_URI` alias；接到 Task 14 scoped v1
-   baseline runner，不宣稱 frozen generic scheduler 已恢復。
+3. `POSTGRES_CONNECTION_STRING`／`POSTGRES_URI` alias；由 Task 14A/16 接到 scoped
+   v1 baseline runner、Docker entrypoint 與 Compose/Zeabur contract tests，不宣稱
+   frozen generic scheduler 已恢復。
 4. 對應 runbook 只在實際 v1 行為存在後更新。
 
 ### 明確拒絕
@@ -134,6 +140,8 @@ transaction 啟用。
 - user reports、dynamic tiles、community browser discovery、未核准 local/Civil IoT
   sources保持 disabled。
 - request-time official diagnostic fallback 保持 disabled。
+- preview deployment 必須省略 `SERVICE_ROLE=scheduler`；在 Task 14A/16 完成平台
+  alias 與 entrypoint 契約前，必須明確把平台連線值映射成 `DATABASE_URL`。
 
 ### P0-B：安全修正整合
 
@@ -157,30 +165,32 @@ transaction 啟用。
 
 為縮短上線時間，把原 Task 14 依提交拆為：
 
-1. `14A`：per-source v1 wrapper、CLI、scheduler entrypoint 與 isolation tests。
+1. `14A`：per-source v1 wrapper、CLI、scoped v1 command wiring、Docker entrypoint、
+   Compose/Zeabur contract tests、runtime 文件與 isolation tests。
 2. `14B`：migration 0038 精確 catalog/mapping/contract replacement，所有來源 disabled。
-3. `14C`：只對已完成 Task 8/9 acceptance 的來源逐一 staging proof、operator enable、
-   assessment smoke、rollback proof。
 
-三個切片都屬原 Task 14 契約，不能以跳過 14B 或批次開啟來源換速度。
+14A/14B 都屬原 Task 14 契約，不能以跳過 14B 或批次開啟來源換速度；migration
+0038 後所有來源仍保持 disabled。
 
 ### P2：正式上線核准
 
 - Task 15 rolling Web fallback。
-- Task 16 full API/Worker/Web、empty DB、0037→0038、mandatory DB suites、hosted
-  source freshness、backup/rollback/on-call evidence。
+- Task 16 full API/Worker/Web、empty DB、0037→0038、mandatory DB suites、Docker／
+  Compose／Zeabur hosted wiring 複證，並逐來源執行 isolated staging proof、operator
+  activation、assessment smoke、backup/rollback/on-call evidence。
 - 只有這一層通過才稱 production ready；在此之前稱 technical preview 或 staging。
 
 ## 最短安全路徑
 
-`49fbb79` → WRA fix → Web dependency fix → Task 9 → Task 14A → Task 14B →
-逐來源 14C → Task 15 → Task 16。
+`49fbb79` → WRA fix → Web dependency fix → Task 9 safety-fix／獨立複審 →
+Tasks 10–13 → Task 14A → Task 14B（0038、rows disabled）→ Task 15 →
+Task 16 isolated proof／operator activation／hosted acceptance。
 
 Community/社群爬文混合模式不進入這條 P0/P1 critical path；它保持既定獨立計畫，
 不得阻塞官方資料 baseline 上線，也不得在尚未完成 privacy/source-policy acceptance
 前影響官方風險分數。
 
-## 本次已完成的實作與核准
+## 本次實作與審查狀態
 
 ### 1. WRA 無時區 timestamp 修正
 
@@ -205,6 +215,8 @@ Community/社群爬文混合模式不進入這條 P0/P1 critical path；它保�
 
 - Feature commit：`72e382c3df9e50265f59b4f1f7e94c6e934fae2f`
 - Review-fix commit：`5fb9e544ccdaa48fa05b24a8da40c7cb5d59810c`
+- Milestone safety-fix commit：本報告所在提交
+  `fix: close Task 9 milestone safety gaps`
 - 完成：
   - exact CWA/NCDR valid empty → persisted succeeded/no-active；
   - active-window freshness 與 authentic source timestamp 分離；
@@ -215,14 +227,19 @@ Community/社群爬文混合模式不進入這條 P0/P1 critical path；它保�
 - 初次獨立 review 找到：
   - Critical：blocked audit-only Update 仍可經 CAP references 刪 current latest；
   - Important：skipped/partial static background run 被誤標 fresh。
-- 兩項均以新 RED tests 修正；複審 APPROVED，無剩餘 finding。
-- 最終驗證：
-  - focused Worker `117 passed`（另 `56` 個 optional live skips）；
-  - mandatory live PostgreSQL `56 passed`、zero skips；
-  - full Worker `686 passed`（另 `56` 個 optional live skips）；
-  - focused API `125 passed`；full API `666 passed`、`13 skipped`、1 個既有
+- 首輪兩項均以新 RED tests 修正，task-level 複審曾 APPROVED；後續 milestone review
+  又找出跨 adapter deletion race、result identity/empty shape、disjoint windows、coverage
+  固定時窗、unsafe metadata cast 與文件順序問題。
+- 本次 safety-fix 已修正全部 milestone findings；實作者驗證：
+  - focused Worker `178 passed`；
+  - mandatory live PostgreSQL `58 passed`、zero skips（包含 Update/empty marker 兩種
+    commit order 與 same/peer latest retention）；
+  - full Worker `694 passed`、`58 skipped`（optional live collection）；
+  - focused API `126 passed`；full API `667 passed`、`14 skipped`、1 個既有
     dependency deprecation warning；
+  - live API unsafe-threshold full-query regression `1 passed`；
   - worker/API mypy、changed-file Ruff、OpenAPI、diff-check 通過。
+- safety-fix 仍須獨立 milestone 複審；實作者不得自行核准。
 
 ## 目前 go/no-go
 
@@ -231,19 +248,21 @@ Community/社群爬文混合模式不進入這條 P0/P1 critical path；它保�
 - 現有 `floodrisk.cc` 可繼續作為部分來源 Beta／technical preview。
 - 必須如實呈現 unknown／資料不足，不能以 degraded source health 宣稱全國低風險。
 - 若把 Mac 分支部署到 hosted preview，在 Task 14 runner 完成前必須保持
-  `REALTIME_BACKBONE_INGESTION_DISABLED=true`，否則 Docker entrypoint 會呼叫 Task 7
-  已 frozen 的 generic scheduler。
+  `REALTIME_BACKBONE_INGESTION_DISABLED=true`，省略 `SERVICE_ROLE=scheduler`，並明確
+  映射 `DATABASE_URL`；否則 Docker entrypoint 可能呼叫 Task 7 已 frozen 的 generic
+  scheduler，或無法辨識平台 DB alias。
 
 ### 正式 production：NO-GO
 
 仍需：
 
 1. Tasks 10–13 的正式 adapter/artifact acceptance；
-2. Task 14A per-source runner、14B migration 0038、14C 逐來源 operator enable／rollback；
-3. Hosted monitoring cache-safe probe 與只針對 approved+enabled source 的 acceptance
+2. Task 14A per-source runner／host wiring、14B migration 0038（rows disabled）；
+3. Task 15 rolling Web fallback；
+4. Task 16 isolated proof、逐來源 operator enable／rollback 與 hosted acceptance；
+5. Hosted monitoring cache-safe probe 與只針對 approved+enabled source 的 acceptance
    gate；
-4. GitHub `ADMIN_BEARER_TOKEN` 與其餘私有監控／備份／rollback/on-call evidence；
-5. Tasks 15–16 Web rolling fallback 與完整 deployment acceptance。
+6. GitHub `ADMIN_BEARER_TOKEN` 與其餘私有監控／備份／rollback/on-call evidence。
 
 在這些條件完成前，不應關掉監控、把失敗來源假標 degraded/healthy，或重新啟用
 request-time official bridge 來取得表面綠燈。

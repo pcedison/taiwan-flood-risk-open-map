@@ -18,7 +18,10 @@ from app.domain.evidence import (
     query_nearby_evidence,
     query_nearby_latest_official,
 )
-from app.domain.evidence.repository import query_realtime_jurisdiction_context
+from app.domain.evidence.repository import (
+    query_realtime_jurisdiction_context,
+    query_realtime_source_health_rows,
+)
 
 
 def _database_url() -> str:
@@ -116,6 +119,67 @@ def _prepare_latest_schema(database_url: str) -> None:
             )
             """
         )
+
+
+def test_source_health_safely_resolves_bounded_catalog_thresholds() -> None:
+    database_url = _database_url()
+    adapter_key = f"test.threshold.{uuid4().hex}"
+    cases = (
+        (" 120 ", 120),
+        ("not-a-number", 600),
+        ("0", 600),
+        ("-1", 600),
+        ("9" * 1000, 600),
+        ("86401", 600),
+        ("86400", 86_400),
+    )
+
+    try:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO data_sources (
+                    name,
+                    adapter_key,
+                    source_type,
+                    is_enabled,
+                    metadata
+                )
+                VALUES (%s, %s, 'official', true, '{}'::jsonb)
+                """,
+                ("Task 9 threshold fixture", adapter_key),
+            )
+
+        for raw_threshold, expected in cases:
+            with psycopg.connect(database_url) as connection:
+                connection.execute(
+                    """
+                    UPDATE data_sources
+                    SET metadata = jsonb_build_object(
+                        'freshness_threshold_seconds',
+                        %s::text
+                    )
+                    WHERE adapter_key = %s
+                    """,
+                    (raw_threshold, adapter_key),
+                )
+
+            rows = query_realtime_source_health_rows(
+                database_url=database_url,
+                adapter_keys=(adapter_key,),
+                connection_factory=lambda: psycopg.connect(
+                    database_url,
+                    row_factory=dict_row,
+                ),
+            )
+
+            assert rows[0].freshness_threshold_seconds == expected
+    finally:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                "DELETE FROM data_sources WHERE adapter_key = %s",
+                (adapter_key,),
+            )
 
 
 def _unpooled_connection(database_url: str) -> psycopg.Connection:
