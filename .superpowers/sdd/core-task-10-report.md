@@ -19,8 +19,9 @@ the frozen generic runtime or persisted-only API boundary.
   `{http://www.opengis.net/kml/2.2}kml` root. The only producer repair is the
   current official KML's missing canonical `xmlns:xsi` declaration when its exact
   four-part WRA `xsi:schemaLocation` mapping is present and it is the sole `xsi:`
-  use. Generic malformed XML, unrelated prefixes/roots/namespaces, arbitrary
-  schema mappings, and entity payloads remain rejected.
+  use. Generic malformed XML, unrelated unbound prefixes, arbitrary XML roots or
+  root namespaces, arbitrary schema mappings, and entity payloads remain rejected;
+  descendant elements continue to be interpreted by local name.
 - Preserve valid Point, Polygon, MultiPolygon, and polygon-hole coordinates inside
   bounded Taiwan coordinates. Before staging, a source-local pure-Python topology
   guard rejects zero-area, self-intersecting/self-touching rings; holes outside,
