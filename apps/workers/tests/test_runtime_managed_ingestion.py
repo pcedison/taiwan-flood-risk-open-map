@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from app.adapters import registry as adapter_registry
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -18,9 +19,13 @@ from app.adapters.contracts import (
 )
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.config import WorkerSettings, load_worker_settings
+from app.jobs import ingestion as ingestion_jobs
 from app.jobs import runtime_managed as runtime_managed_jobs
 from app.jobs.ingestion import AdapterBatchRunSummary
-from app.jobs.runtime_managed import _execute_managed_runtime_ingestion_cycle
+from app.jobs.runtime_managed import (
+    _execute_managed_runtime_ingestion_cycle,
+    run_v1_baseline_adapter_cycle,
+)
 from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
 from app.pipelines.staging import AdapterStagingBatch
 
@@ -35,6 +40,192 @@ EXPECTED_V1_BASELINE_ADAPTER_KEYS = (
     "official.flood_potential.geojson",
     "local.tainan.flood_sensor",
 )
+TASK9_SYNTHETIC_ADAPTER_KEYS = (
+    "official.cwa.heavy_rain_warning",
+    "official.ncdr.cap",
+    "official.wra.historical_flood",
+)
+
+
+@pytest.fixture
+def task9_synthetic_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = dict(adapter_registry.ADAPTER_REGISTRY)
+    for key in TASK9_SYNTHETIC_ADAPTER_KEYS:
+        registry[key] = AdapterMetadata(
+            key=key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name=f"{key} Task 9 synthetic adapter",
+        )
+    monkeypatch.setattr(adapter_registry, "ADAPTER_REGISTRY", registry)
+    monkeypatch.setattr(ingestion_jobs, "ADAPTER_REGISTRY", registry)
+    monkeypatch.setattr(runtime_managed_jobs, "ADAPTER_REGISTRY", registry)
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_managed_valid_empty_warning_is_success_without_source_timestamp(
+    adapter_key: str,
+) -> None:
+    result = _run_task9_managed(
+        _Task9EmptyWarningAdapter(adapter_key, no_active_event=True)
+    )
+
+    assert result.status == "succeeded"
+    assert len(result.summaries) == 1
+    assert result.summaries[0].error_code == "no_active_event"
+    assert result.summaries[0].source_timestamp_max is None
+    assert result.freshness_checks[0].status == "fresh"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_plain_empty_or_failed_warning_never_uses_no_active_freshness_branch(
+    adapter_key: str,
+) -> None:
+    plain = _run_task9_managed(
+        _Task9EmptyWarningAdapter(
+            adapter_key,
+            no_active_event=False,
+        )
+    )
+    failed = _run_task9_managed(_ExplodingAdapter(adapter_key))
+
+    assert plain.status != "succeeded"
+    assert plain.summaries[0].error_code != "no_active_event"
+    assert failed.status == "failed"
+    assert failed.summaries[0].error_code != "no_active_event"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_managed_active_long_lived_warning_uses_validated_event_window(
+    adapter_key: str,
+) -> None:
+    sent_at = FETCHED_AT - timedelta(hours=12)
+    active_from = FETCHED_AT - timedelta(hours=12)
+    active_until = FETCHED_AT + timedelta(hours=3)
+
+    result = _run_task9_managed(
+        _Task9ActiveWarningAdapter(
+            adapter_key,
+            sent_at=sent_at,
+            active_from=active_from,
+            active_until=active_until,
+        )
+    )
+
+    assert result.status == "succeeded"
+    assert result.summaries[0].source_timestamp_max == sent_at
+    assert result.summaries[0].event_active_from_min == active_from
+    assert result.summaries[0].event_active_until_max == active_until
+    assert result.freshness_checks[0].status == "fresh"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_managed_historical_flood_preserves_event_time_with_background_freshness() -> None:
+    event_observed_at = FETCHED_AT - timedelta(days=3650)
+    result = _run_task9_managed(
+        _Task9HistoricalAdapter(event_observed_at=event_observed_at)
+    )
+
+    assert result.status == "succeeded"
+    assert result.summaries[0].source_timestamp_max == event_observed_at
+    assert result.freshness_checks[0].status == "fresh"
+    assert result.freshness_checks[0].cadence == "static"
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_managed_no_active_retirement_runs_after_summary_persistence() -> None:
+    timeline: list[str] = []
+    run_writer = _MemoryRunWriter(timeline=timeline)
+    promotion_writer = _MemoryPromotionWriter([], timeline=timeline)
+    adapter = _Task9EmptyWarningAdapter(
+        "official.cwa.heavy_rain_warning",
+        no_active_event=True,
+    )
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter.metadata.key,),
+    )
+
+    result = run_v1_baseline_adapter_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+        promote=True,
+    )
+
+    assert result.status == "succeeded"
+    assert promotion_writer.retired_no_active == [
+        (
+            adapter.metadata.key,
+            result.summaries[0].started_at,
+            result.summaries[0].finished_at,
+        )
+    ]
+    assert timeline.index("summary") < timeline.index("retire")
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_managed_no_active_retirement_is_not_called_when_promotion_disabled() -> None:
+    adapter = _Task9EmptyWarningAdapter(
+        "official.cwa.heavy_rain_warning",
+        no_active_event=True,
+    )
+    promotion_writer = _MemoryPromotionWriter([])
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter.metadata.key,),
+    )
+
+    result = run_v1_baseline_adapter_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        promotion_writer=promotion_writer,
+        promote=False,
+    )
+
+    assert result.status == "succeeded"
+    assert promotion_writer.retired_no_active == []
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
+def test_managed_no_active_retirement_failure_returns_failed_result() -> None:
+    adapter = _Task9EmptyWarningAdapter(
+        "official.cwa.heavy_rain_warning",
+        no_active_event=True,
+    )
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter.metadata.key,),
+    )
+
+    result = run_v1_baseline_adapter_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        promotion_writer=_FailingNoActiveRetirementWriter([]),
+        promote=True,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "no_active_event_retirement_failed"
+    assert result.error_code == "RuntimeError"
 
 
 @pytest.mark.parametrize(
@@ -417,6 +608,23 @@ def _settings(*adapter_keys: str) -> WorkerSettings:
     )
 
 
+def _run_task9_managed(adapter: Any):
+    key = adapter.metadata.key
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(key,),
+        source_ncdr_cap_enabled=True,
+        freshness_max_age_seconds=24 * 60 * 60,
+    )
+    return run_v1_baseline_adapter_cycle(
+        {key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_MemoryRunWriter(),
+        promote=False,
+    )
+
+
 def _sample_adapter(
     *,
     source_id: str = "sample-news-001",
@@ -467,12 +675,13 @@ class _MemoryStagingWriter:
 
 
 class _MemoryRunWriter:
-    def __init__(self) -> None:
+    def __init__(self, *, timeline: list[str] | None = None) -> None:
         self.calls: list[tuple[AdapterBatchRunSummary, str, dict[str, Any] | None]] = []
         self.runtime_selections: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
         self.pipeline_statuses: list[
             tuple[tuple[str, ...], str, bool, datetime | None]
         ] = []
+        self.timeline = timeline
 
     def write_summary(
         self,
@@ -482,6 +691,8 @@ class _MemoryRunWriter:
         parameters: dict[str, Any] | None = None,
     ) -> None:
         self.calls.append((summary, job_key, parameters))
+        if self.timeline is not None:
+            self.timeline.append("summary")
 
     def write_runtime_selection(
         self,
@@ -507,11 +718,18 @@ class _MemoryRunWriter:
 
 
 class _MemoryPromotionWriter:
-    def __init__(self, candidates: list[PromotionCandidate]) -> None:
+    def __init__(
+        self,
+        candidates: list[PromotionCandidate],
+        *,
+        timeline: list[str] | None = None,
+    ) -> None:
         self._candidates = tuple(candidates)
         self.requested_limit: int | None = None
         self.requested_adapter_keys: tuple[str, ...] | None = None
         self.payloads: list[EvidencePromotionPayload] = []
+        self.retired_no_active: list[tuple[str, datetime, datetime]] = []
+        self.timeline = timeline
 
     def fetch_accepted_staging(
         self,
@@ -526,6 +744,32 @@ class _MemoryPromotionWriter:
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
+
+    def retire_warning_latest_for_no_active_event(
+        self,
+        *,
+        adapter_key: str,
+        generation_started_at: datetime,
+        completed_at: datetime,
+    ) -> int:
+        self.retired_no_active.append(
+            (adapter_key, generation_started_at, completed_at)
+        )
+        if self.timeline is not None:
+            self.timeline.append("retire")
+        return 0
+
+
+class _FailingNoActiveRetirementWriter(_MemoryPromotionWriter):
+    def retire_warning_latest_for_no_active_event(
+        self,
+        *,
+        adapter_key: str,
+        generation_started_at: datetime,
+        completed_at: datetime,
+    ) -> int:
+        del adapter_key, generation_started_at, completed_at
+        raise RuntimeError("retirement storage unavailable")
 
 
 class _FailingPromotionWriter:
@@ -561,6 +805,144 @@ class _ExplodingAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         raise AssertionError(f"{self.metadata.key} should not normalize")
+
+
+class _Task9EmptyWarningAdapter:
+    def __init__(self, key: str, *, no_active_event: bool) -> None:
+        self.metadata = AdapterMetadata(
+            key=key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name=f"{key} empty warning fixture",
+        )
+        self.no_active_event = no_active_event
+
+    def run(self) -> AdapterRunResult:
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(),
+            normalized=(),
+            no_active_event=self.no_active_event,
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
+
+class _Task9ActiveWarningAdapter:
+    def __init__(
+        self,
+        key: str,
+        *,
+        sent_at: datetime,
+        active_from: datetime,
+        active_until: datetime,
+    ) -> None:
+        self.metadata = AdapterMetadata(
+            key=key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name=f"{key} active warning fixture",
+        )
+        self.sent_at = sent_at
+        self.active_from = active_from
+        self.active_until = active_until
+
+    def run(self) -> AdapterRunResult:
+        raw_item = RawSourceItem(
+            source_id=f"{self.metadata.key}:warning-1",
+            source_url="https://example.test/cap",
+            fetched_at=FETCHED_AT,
+            payload={
+                "evidence_scope": "current",
+                "location_precision": "admin_area",
+                "admin_code": "67000000",
+                "cap_sender": "sender@example.test",
+                "cap_identifier": "warning-1",
+                "cap_sent": self.sent_at.isoformat(),
+                "cap_references": [],
+                "cap_status": "Actual",
+                "cap_message_type": "Alert",
+                "active_from": self.active_from.isoformat(),
+                "active_until": self.active_until.isoformat(),
+            },
+        )
+        evidence = NormalizedEvidence(
+            evidence_id=f"{self.metadata.key}:warning-evidence-1",
+            adapter_key=self.metadata.key,
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_WARNING,
+            source_id=raw_item.source_id,
+            source_url=raw_item.source_url,
+            source_title="Task 9 active warning",
+            source_timestamp=self.sent_at,
+            fetched_at=FETCHED_AT,
+            summary="Task 9 synthetic active warning.",
+            location_text="臺南市",
+            confidence=0.95,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw_item,),
+            normalized=(evidence,),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return self.run().normalized[0]
+
+
+class _Task9HistoricalAdapter:
+    metadata = AdapterMetadata(
+        key="official.wra.historical_flood",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="WRA historical flood Task 9 fixture",
+    )
+
+    def __init__(self, *, event_observed_at: datetime) -> None:
+        self.event_observed_at = event_observed_at
+
+    def run(self) -> AdapterRunResult:
+        raw_item = RawSourceItem(
+            source_id="wra-history-1",
+            source_url="https://example.test/wra/history",
+            fetched_at=FETCHED_AT,
+            payload={"event_observed_at": self.event_observed_at.isoformat()},
+        )
+        evidence = NormalizedEvidence(
+            evidence_id="wra-history-evidence-1",
+            adapter_key=self.metadata.key,
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_REPORT,
+            source_id=raw_item.source_id,
+            source_url=raw_item.source_url,
+            source_title="Historical flood",
+            source_timestamp=self.event_observed_at,
+            fetched_at=FETCHED_AT,
+            summary="Historical flood record.",
+            location_text="臺南市",
+            confidence=0.9,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw_item,),
+            normalized=(evidence,),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return self.run().normalized[0]
 
 
 class _SuccessfulAdapter:

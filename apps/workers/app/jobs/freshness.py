@@ -4,9 +4,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from app.jobs.ingestion import AdapterBatchRunSummary
+from app.jobs.ingestion import WARNING_EVENT_ADAPTER_KEYS, AdapterBatchRunSummary
 from app.logging import log_event
-
 
 FreshnessStatus = Literal["fresh", "degraded", "stale", "failed"]
 FreshnessCadence = Literal["realtime", "event", "static", "legacy"]
@@ -38,7 +37,9 @@ REALTIME_ADAPTER_KEYS = frozenset(
         "local.tainan.flood_sensor",
     }
 )
-STATIC_SLOW_CADENCE_ADAPTER_KEYS = frozenset({"official.flood_potential.geojson"})
+STATIC_SLOW_CADENCE_ADAPTER_KEYS = frozenset(
+    {"official.wra.historical_flood", "official.flood_potential.geojson"}
+)
 
 
 @dataclass(frozen=True)
@@ -89,12 +90,47 @@ def check_summary_freshness(
             reason=summary.error_message or summary.error_code or "adapter batch failed",
         )
 
-    if summary.adapter_key == "official.ncdr.cap":
+    if (
+        summary.adapter_key in WARNING_EVENT_ADAPTER_KEYS
+        and summary.status == "succeeded"
+        and summary.error_code == "no_active_event"
+        and summary.items_fetched == 0
+        and summary.items_promoted == 0
+        and summary.items_rejected == 0
+        and summary.source_timestamp_max is None
+    ):
+        return FreshnessCheck(
+            adapter_key=summary.adapter_key,
+            status="fresh",
+            checked_at=resolved_checked_at,
+            max_age_seconds=max_age_seconds,
+            cadence="event",
+            reason="warning source operational; no active event",
+        )
+
+    if summary.adapter_key in WARNING_EVENT_ADAPTER_KEYS:
         return check_ncdr_cap_freshness(
             adapter_key=summary.adapter_key,
-            effective_at=summary.source_timestamp_min,
-            expires_at=summary.source_timestamp_max,
+            effective_at=summary.event_active_from_min,
+            expires_at=summary.event_active_until_max,
             checked_at=resolved_checked_at,
+        )
+
+    if cadence == "static":
+        operational_timestamp = _aware_utc(summary.finished_at)
+        age_seconds = max(
+            0,
+            int((resolved_checked_at - operational_timestamp).total_seconds()),
+        )
+        return FreshnessCheck(
+            adapter_key=summary.adapter_key,
+            status="fresh",
+            checked_at=resolved_checked_at,
+            max_age_seconds=max_age_seconds,
+            cadence=cadence,
+            source_timestamp_max=operational_timestamp,
+            age_seconds=age_seconds,
+            reason="static/slow-cadence source is not evaluated against realtime thresholds",
         )
 
     if summary.source_timestamp_max is None:
@@ -110,18 +146,6 @@ def check_summary_freshness(
     source_timestamp_max = _aware_utc(summary.source_timestamp_max)
     age = resolved_checked_at - source_timestamp_max
     age_seconds = max(0, int(age.total_seconds()))
-    if cadence == "static":
-        return FreshnessCheck(
-            adapter_key=summary.adapter_key,
-            status="fresh",
-            checked_at=resolved_checked_at,
-            max_age_seconds=max_age_seconds,
-            cadence=cadence,
-            source_timestamp_max=source_timestamp_max,
-            age_seconds=age_seconds,
-            reason="static/slow-cadence source is not evaluated against realtime thresholds",
-        )
-
     if cadence == "realtime":
         return _realtime_freshness_check(
             summary.adapter_key,
@@ -194,6 +218,15 @@ def check_ncdr_cap_freshness(
 
     resolved_effective_at = _aware_utc(effective_at)
     resolved_expires_at = _aware_utc(expires_at)
+    if resolved_effective_at >= resolved_expires_at:
+        return FreshnessCheck(
+            adapter_key=adapter_key,
+            status="stale",
+            checked_at=resolved_checked_at,
+            max_age_seconds=0,
+            cadence="event",
+            reason="CAP alert has an invalid active window",
+        )
     max_age_seconds = max(
         0,
         int((resolved_expires_at - resolved_effective_at).total_seconds()),
@@ -202,7 +235,7 @@ def check_ncdr_cap_freshness(
         0,
         int((resolved_checked_at - resolved_effective_at).total_seconds()),
     )
-    if resolved_expires_at < resolved_checked_at:
+    if resolved_expires_at <= resolved_checked_at:
         return FreshnessCheck(
             adapter_key=adapter_key,
             status="stale",
@@ -270,7 +303,7 @@ def _realtime_freshness_check(
 def _cadence_for_adapter(adapter_key: str) -> FreshnessCadence:
     if adapter_key in STATIC_SLOW_CADENCE_ADAPTER_KEYS:
         return "static"
-    if adapter_key == "official.ncdr.cap":
+    if adapter_key in WARNING_EVENT_ADAPTER_KEYS:
         return "event"
     if adapter_key in REALTIME_ADAPTER_KEYS:
         return "realtime"

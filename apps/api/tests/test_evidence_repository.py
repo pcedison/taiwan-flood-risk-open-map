@@ -401,7 +401,9 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
                 "last_success_at": latest_run_at,
                 "last_failure_at": None,
                 "latest_run_status": "partial",
+                "latest_run_error_code": "partial_payload",
                 "latest_run_at": latest_run_at,
+                "freshness_threshold_seconds": 120,
                 "latest_observed_at": observed_at,
                 "latest_ingested_at": ingested_at,
                 "station_count": 236,
@@ -436,6 +438,11 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
     assert "LEFT JOIN adapter_runs latest_adapter_run" in sql
     assert "latest_adapter_run.ingestion_job_id = latest_job.id" in sql
     assert "WHEN latest_adapter_run.status = 'partial' THEN 'partial'" in sql
+    assert "jobs.error_code AS latest_run_error_code" in sql
+    assert (
+        "NULLIF(data_sources.metadata->>'freshness_threshold_seconds', '')::integer"
+        in sql
+    )
     assert "FROM official_realtime_latest latest" in sql
     assert "FROM requested" in sql
     assert "LEFT JOIN data_sources" in sql
@@ -457,11 +464,13 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
     assert "jsonb_array_elements_text" in sql
     assert "approved_station_manifest_sha256" in sql
     assert "approved_station_manifest_version" in sql
-    for unsafe_column in ("error_code", "error_message", "raw_ref", "source_url", "metadata"):
+    for unsafe_column in ("error_message", "raw_ref", "source_url"):
         assert unsafe_column not in sql
     assert len(rows) == 1
     assert rows[0].adapter_key == "official.cwa.rainfall"
     assert rows[0].latest_run_status == "partial"
+    assert rows[0].latest_run_error_code == "partial_payload"
+    assert rows[0].freshness_threshold_seconds == 120
     assert rows[0].latest_observed_at == observed_at
     assert rows[0].latest_ingested_at == ingested_at
     assert rows[0].station_count == 236
@@ -474,6 +483,55 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
     assert rows[0].fresh_station_count == 200
     assert rows[0].delayed_station_count == 20
     assert rows[0].stale_station_count == 16
+
+
+def test_query_realtime_source_health_rows_maps_positional_task9_fields() -> None:
+    latest_run_at = datetime(2026, 7, 18, 6, 2, tzinfo=UTC)
+    connection = _FakeConnection(
+        rows=[
+            (
+                "official.ncdr.cap",
+                "NCDR CAP",
+                True,
+                True,
+                "healthy",
+                latest_run_at,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                False,
+                "succeeded",
+                latest_run_at,
+                "no_active_event",
+                600,
+                None,
+                latest_run_at,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                "missing",
+                False,
+            )
+        ]
+    )
+
+    rows = query_realtime_source_health_rows(
+        database_url="postgresql://example.test/flood",
+        adapter_keys=("official.ncdr.cap",),
+        statement_timeout_ms=0,
+        connection_factory=lambda: connection,
+    )
+
+    assert rows[0].latest_run_error_code == "no_active_event"
+    assert rows[0].freshness_threshold_seconds == 600
 
 
 def test_query_realtime_jurisdiction_context_resolves_home_adjacent_and_mappings() -> None:

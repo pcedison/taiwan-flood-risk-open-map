@@ -310,6 +310,175 @@ def test_cross_adapter_update_cancel_share_global_origin_lock(
         _cleanup_cap_race(database_url, suffix)
 
 
+@pytest.mark.parametrize("commit_order", ["empty_first", "alert_first"])
+def test_older_empty_generation_never_retires_newer_alert(
+    database_url: str,
+    commit_order: str,
+) -> None:
+    latest_count, evidence_count = _race_no_active_and_warning_alert(
+        database_url,
+        empty_generation=NOW,
+        alert_generation=NOW + timedelta(seconds=1),
+        commit_order=commit_order,
+    )
+
+    assert latest_count == 1
+    assert evidence_count == 1
+
+
+@pytest.mark.parametrize("commit_order", ["empty_first", "alert_first"])
+def test_newer_empty_generation_blocks_older_alert_resurrection(
+    database_url: str,
+    commit_order: str,
+) -> None:
+    latest_count, evidence_count = _race_no_active_and_warning_alert(
+        database_url,
+        empty_generation=NOW + timedelta(seconds=1),
+        alert_generation=NOW,
+        commit_order=commit_order,
+    )
+
+    assert latest_count == 0
+    assert evidence_count == 1
+
+
+def test_no_active_retirement_preserves_peer_adapter_latest_and_audit_evidence(
+    database_url: str,
+) -> None:
+    suffix = uuid4().hex
+    cwa_adapter = "official.cwa.heavy_rain_warning"
+    ncdr_adapter = "official.ncdr.cap"
+    cwa_payload = _cap_payload(
+        adapter_key=cwa_adapter,
+        suffix=suffix,
+        identifier=f"task9-cwa-{suffix}",
+        message_type="Alert",
+        admin_code="67000000",
+        references=[],
+        geometry=True,
+        sent=NOW,
+    )
+    ncdr_payload = _cap_payload(
+        adapter_key=ncdr_adapter,
+        suffix=suffix,
+        identifier=f"task9-ncdr-{suffix}",
+        message_type="Alert",
+        admin_code="64000000",
+        references=[],
+        geometry=True,
+        sent=NOW,
+    )
+    writer = PostgresEvidencePromotionWriter(
+        connection_factory=lambda: _named_connection(
+            database_url, f"task9-cross-adapter-{suffix}"
+        )
+    )
+
+    try:
+        assert writer.write_evidence(cwa_payload) is not None
+        assert writer.write_evidence(ncdr_payload) is not None
+
+        retired = writer.retire_warning_latest_for_no_active_event(
+            adapter_key=cwa_adapter,
+            generation_started_at=NOW + timedelta(seconds=1),
+            completed_at=NOW + timedelta(seconds=2),
+        )
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT adapter_key, source_id
+                FROM official_realtime_latest
+                WHERE source_id = ANY(%s)
+                ORDER BY adapter_key
+                """,
+                ([cwa_payload.source_id, ncdr_payload.source_id],),
+            )
+            latest_rows = cursor.fetchall()
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id = ANY(%s)",
+                ([cwa_payload.source_id, ncdr_payload.source_id],),
+            )
+            evidence_count = int(cursor.fetchone()[0])
+
+        assert retired == 1
+        assert latest_rows == [(ncdr_adapter, ncdr_payload.source_id)]
+        assert evidence_count == 2
+    finally:
+        _cleanup_cap_race(database_url, suffix)
+
+
+def test_no_active_retirement_fails_closed_for_malformed_latest_generation(
+    database_url: str,
+) -> None:
+    suffix = uuid4().hex
+    adapter_key = "official.cwa.heavy_rain_warning"
+    payload = _cap_payload(
+        adapter_key=adapter_key,
+        suffix=suffix,
+        identifier=f"task9-malformed-generation-{suffix}",
+        message_type="Alert",
+        admin_code="67000000",
+        references=[],
+        geometry=True,
+        sent=NOW,
+    )
+    writer = PostgresEvidencePromotionWriter(
+        connection_factory=lambda: _named_connection(
+            database_url, f"task9-malformed-generation-{suffix}"
+        )
+    )
+
+    try:
+        assert writer.write_evidence(payload) is not None
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE official_realtime_latest
+                SET quality_flags = jsonb_set(
+                    quality_flags,
+                    '{ingestion_generation_started_at}',
+                    '"malformed"'::jsonb
+                )
+                WHERE adapter_key = %s AND source_id = %s
+                """,
+                (adapter_key, payload.source_id),
+            )
+
+        retired = writer.retire_warning_latest_for_no_active_event(
+            adapter_key=adapter_key,
+            generation_started_at=NOW + timedelta(seconds=1),
+            completed_at=NOW + timedelta(seconds=2),
+        )
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT count(*)
+                FROM official_realtime_latest
+                WHERE adapter_key = %s AND source_id = %s
+                """,
+                (adapter_key, payload.source_id),
+            )
+            latest_count = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id = %s",
+                (payload.source_id,),
+            )
+            evidence_count = int(cursor.fetchone()[0])
+
+        assert retired == 0
+        assert latest_count == 1
+        assert evidence_count == 1
+    finally:
+        _cleanup_cap_race(database_url, suffix)
+
+
 @pytest.mark.parametrize("arrival_order", ["central_first", "local_first"])
 def test_live_exact_central_local_duplicate_always_keeps_central_latest(
     database_url: str,
@@ -1545,6 +1714,171 @@ def _capture_write(
         errors[name] = exc
 
 
+def _race_no_active_and_warning_alert(
+    database_url: str,
+    *,
+    empty_generation: datetime,
+    alert_generation: datetime,
+    commit_order: str,
+) -> tuple[int, int]:
+    suffix = uuid4().hex
+    adapter_key = "official.cwa.heavy_rain_warning"
+    payload = _cap_payload(
+        adapter_key=adapter_key,
+        suffix=suffix,
+        identifier=f"task9-alert-{suffix}",
+        message_type="Alert",
+        admin_code="67000000",
+        references=[],
+        geometry=True,
+        sent=alert_generation,
+    )
+    payload = replace(
+        payload,
+        properties={
+            **payload.properties,
+            "ingestion_generation_started_at": alert_generation.isoformat(),
+        },
+    )
+    first_ready = Event()
+    release_first = Event()
+    results: dict[str, object] = {}
+    errors: dict[str, BaseException] = {}
+    second_application_name = f"task9-warning-race-{suffix}"
+
+    def capture_alert(writer: PostgresEvidencePromotionWriter) -> None:
+        try:
+            results["alert"] = writer.write_evidence(payload)
+        except BaseException as exc:  # noqa: BLE001 - surfaced in parent thread
+            errors["alert"] = exc
+
+    def capture_empty(writer: PostgresEvidencePromotionWriter) -> None:
+        try:
+            results["empty"] = writer.retire_warning_latest_for_no_active_event(
+                adapter_key=adapter_key,
+                generation_started_at=empty_generation,
+                completed_at=empty_generation + timedelta(seconds=2),
+            )
+        except BaseException as exc:  # noqa: BLE001 - surfaced in parent thread
+            errors["empty"] = exc
+
+    try:
+        if commit_order == "empty_first":
+            _insert_no_active_job(
+                database_url,
+                suffix=suffix,
+                adapter_key=adapter_key,
+                generation=empty_generation,
+            )
+            first_writer = PostgresEvidencePromotionWriter(
+                connection_factory=_commit_gated_connection_factory(
+                    database_url,
+                    ready=first_ready,
+                    release=release_first,
+                )
+            )
+            second_writer = PostgresEvidencePromotionWriter(
+                connection_factory=lambda: _named_connection(
+                    database_url, second_application_name
+                )
+            )
+            first_thread = Thread(target=lambda: capture_empty(first_writer))
+            second_thread = Thread(target=lambda: capture_alert(second_writer))
+        else:
+            first_writer = PostgresEvidencePromotionWriter(
+                connection_factory=_commit_gated_connection_factory(
+                    database_url,
+                    ready=first_ready,
+                    release=release_first,
+                )
+            )
+            second_writer = PostgresEvidencePromotionWriter(
+                connection_factory=lambda: _named_connection(
+                    database_url, second_application_name
+                )
+            )
+            first_thread = Thread(target=lambda: capture_alert(first_writer))
+            second_thread = Thread(target=lambda: capture_empty(second_writer))
+
+        first_thread.start()
+        assert first_ready.wait(5)
+        if commit_order == "alert_first":
+            _insert_no_active_job(
+                database_url,
+                suffix=suffix,
+                adapter_key=adapter_key,
+                generation=empty_generation,
+            )
+        second_thread.start()
+        assert _wait_for_advisory_wait(database_url, second_application_name)
+        release_first.set()
+        first_thread.join(10)
+        second_thread.join(10)
+        assert not first_thread.is_alive()
+        assert not second_thread.is_alive()
+        assert errors == {}
+
+        import psycopg
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT count(*)
+                FROM official_realtime_latest
+                WHERE adapter_key = %s AND source_id = %s
+                """,
+                (adapter_key, payload.source_id),
+            )
+            latest_count = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id = %s",
+                (payload.source_id,),
+            )
+            evidence_count = int(cursor.fetchone()[0])
+        return latest_count, evidence_count
+    finally:
+        release_first.set()
+        _cleanup_cap_race(database_url, suffix)
+        _cleanup_no_active_job(database_url, suffix=suffix)
+
+
+def _insert_no_active_job(
+    database_url: str,
+    *,
+    suffix: str,
+    adapter_key: str,
+    generation: datetime,
+) -> None:
+    import psycopg
+
+    with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO ingestion_jobs (
+                job_key, adapter_key, started_at, finished_at, status,
+                items_fetched, items_promoted, items_rejected, error_code
+            )
+            VALUES (%s, %s, %s, %s, 'succeeded', 0, 0, 0, 'no_active_event')
+            """,
+            (
+                f"task9-no-active-{suffix}",
+                adapter_key,
+                generation,
+                generation + timedelta(seconds=1),
+            ),
+        )
+
+
+def _cleanup_no_active_job(database_url: str, *, suffix: str) -> None:
+    import psycopg
+
+    with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "DELETE FROM ingestion_jobs WHERE job_key = %s",
+            (f"task9-no-active-{suffix}",),
+        )
+
+
 def _wait_for_advisory_wait(
     database_url: str,
     application_name: str,
@@ -1606,6 +1940,46 @@ def _named_connection(database_url: str, application_name: str) -> Any:
     import psycopg
 
     return psycopg.connect(database_url, application_name=application_name)
+
+
+def _commit_gated_connection_factory(
+    database_url: str,
+    *,
+    ready: Event,
+    release: Event,
+) -> Callable[[], Any]:
+    import psycopg
+
+    def factory() -> _CommitGateConnection:
+        return _CommitGateConnection(
+            psycopg.connect(database_url),
+            ready=ready,
+            release=release,
+        )
+
+    return factory
+
+
+class _CommitGateConnection:
+    def __init__(self, connection: Any, *, ready: Event, release: Event) -> None:
+        self._connection = connection
+        self._ready = ready
+        self._release = release
+
+    def __enter__(self) -> Self:
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, *args: object) -> object:
+        return self._connection.__exit__(*args)
+
+    def cursor(self) -> Any:
+        return self._connection.cursor()
+
+    def commit(self) -> None:
+        self._ready.set()
+        assert self._release.wait(10)
+        self._connection.commit()
 
 
 def _insert_barrier_connection(database_url: str, barrier: Barrier) -> Any:

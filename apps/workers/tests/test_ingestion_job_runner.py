@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -16,6 +18,19 @@ from app.jobs.ingestion import run_adapter_batch, run_adapter_batches, run_enabl
 from app.pipelines.staging import AdapterStagingBatch
 
 FETCHED_AT = datetime(2026, 4, 29, 8, 0, tzinfo=UTC)
+
+
+def test_task9_result_and_summary_fields_have_backward_compatible_defaults() -> None:
+    result = AdapterRunResult(
+        adapter_key="test.defaults",
+        fetched=(),
+        normalized=(),
+    )
+    summary = run_adapter_batch(_EmptyAdapter())
+
+    assert result.no_active_event is False
+    assert summary.event_active_from_min is None
+    assert summary.event_active_until_max is None
 
 
 def test_run_adapter_batch_builds_and_persists_staging_batch() -> None:
@@ -98,6 +113,56 @@ def test_run_adapter_batch_skips_empty_fetches() -> None:
 
     assert summary.status == "skipped"
     assert summary.items_fetched == 0
+    assert summary.error_code == "empty_fetch"
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_valid_empty_warning_poll_is_success_not_skipped(adapter_key: str) -> None:
+    writer = _MemoryWriter()
+
+    summary = run_adapter_batch(
+        _NamedEmptyAdapter(adapter_key, no_active_event=True),
+        writer=writer,
+    )
+
+    assert summary.status == "succeeded"
+    assert summary.items_fetched == 0
+    assert summary.error_code == "no_active_event"
+    assert summary.source_timestamp_max is None
+    assert writer.batches == []
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_plain_or_rejected_empty_warning_is_not_no_active_event(
+    adapter_key: str,
+) -> None:
+    plain = run_adapter_batch(_NamedEmptyAdapter(adapter_key))
+    rejected = run_adapter_batch(
+        _NamedEmptyAdapter(
+            adapter_key,
+            no_active_event=True,
+            rejected=("malformed-cap",),
+        )
+    )
+
+    assert plain.status == "skipped"
+    assert plain.error_code == "empty_fetch"
+    assert rejected.status != "succeeded"
+    assert rejected.error_code != "no_active_event"
+
+
+def test_station_empty_result_cannot_use_no_active_event_branch() -> None:
+    summary = run_adapter_batch(
+        _NamedEmptyAdapter("official.cwa.rainfall", no_active_event=True)
+    )
+
+    assert summary.status == "skipped"
     assert summary.error_code == "empty_fetch"
 
 
@@ -239,16 +304,30 @@ class _FailingAdapter:
 
 
 class _NamedEmptyAdapter:
-    def __init__(self, key: str) -> None:
+    def __init__(
+        self,
+        key: str,
+        *,
+        no_active_event: bool = False,
+        rejected: tuple[str, ...] = (),
+    ) -> None:
         self.metadata = AdapterMetadata(
             key=key,
             family=SourceFamily.OFFICIAL,
             enabled_by_default=True,
             display_name=f"{key} test adapter",
         )
+        self.no_active_event = no_active_event
+        self.rejected = rejected
 
     def run(self) -> AdapterRunResult:
-        return AdapterRunResult(adapter_key=self.metadata.key, fetched=(), normalized=())
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(),
+            normalized=(),
+            rejected=self.rejected,
+            no_active_event=self.no_active_event,
+        )
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         return ()

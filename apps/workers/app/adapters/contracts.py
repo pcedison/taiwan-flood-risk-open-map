@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import hashlib
-import json
-from typing import Any, Iterable, Mapping, Protocol
-
+from typing import Any, Protocol
 
 STATION_ID_MANIFEST_VERSION = "station-id-json-v1"
 
@@ -175,6 +175,7 @@ class AdapterRunResult:
     normalized: tuple[NormalizedEvidence, ...]
     rejected: tuple[str, ...] = field(default_factory=tuple)
     station_inventory_proof: StationInventoryProof | None = None
+    no_active_event: bool = False
 
 
 class DataSourceAdapter(Protocol):

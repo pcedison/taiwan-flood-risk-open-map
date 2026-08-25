@@ -11,6 +11,7 @@ from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck
 from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.ingestion import (
+    WARNING_EVENT_ADAPTER_KEYS,
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
     record_pipeline_status,
@@ -267,9 +268,48 @@ def _execute_managed_runtime_ingestion_cycle(
     promotion = PromotionResult(promoted=0, evidence_ids=())
     if promote and cycle.summaries:
         target_adapter_keys = promotion_adapter_keys or _promotion_adapter_keys(cycle.summaries)
+        promotion_writer_instance = _promotion_writer(persistence)
+        no_active_summaries = tuple(
+            summary
+            for summary in cycle.summaries
+            if summary.adapter_key in WARNING_EVENT_ADAPTER_KEYS
+            and summary.status == "succeeded"
+            and summary.error_code == "no_active_event"
+            and summary.items_fetched == 0
+            and summary.items_promoted == 0
+            and summary.items_rejected == 0
+        )
+        try:
+            for summary in no_active_summaries:
+                promotion_writer_instance.retire_warning_latest_for_no_active_event(
+                    adapter_key=summary.adapter_key,
+                    generation_started_at=summary.started_at,
+                    completed_at=summary.finished_at,
+                )
+        except Exception as exc:  # noqa: BLE001 - persist retirement failure as managed state
+            _record_pipeline_status_for_adapter_keys(
+                persistence.run_writer,
+                adapter_keys=tuple(summary.adapter_key for summary in no_active_summaries),
+                summaries=cycle.summaries,
+                status="failed",
+                complete=False,
+            )
+            log_event(
+                "runtime.managed.no_active_event_retirement.failed",
+                error_code=exc.__class__.__name__,
+                error_message=str(exc),
+            )
+            return ManagedRuntimeIngestionResult(
+                status="failed",
+                reason="no_active_event_retirement_failed",
+                summaries=cycle.summaries,
+                freshness_checks=cycle.freshness_checks,
+                error_code=exc.__class__.__name__,
+                error_message=str(exc),
+            )
         try:
             promotion = promote_accepted_staging(
-                _promotion_writer(persistence),
+                promotion_writer_instance,
                 limit=promotion_limit,
                 adapter_keys=target_adapter_keys,
             )

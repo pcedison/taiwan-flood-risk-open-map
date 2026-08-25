@@ -115,6 +115,8 @@ class RealtimeSourceHealthRow:
     pagination_complete: bool | None = None
     inventory_manifest_sha256: str | None = None
     inventory_proof_status: str = "missing"
+    latest_run_error_code: str | None = None
+    freshness_threshold_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1391,18 +1393,43 @@ def _query_realtime_source_health_rows(
                 max(latest.ingested_at) AS latest_ingested_at,
                 count(DISTINCT latest.station_id)::integer AS station_count,
                 count(DISTINCT latest.station_id) FILTER (
-                    WHERE latest.observed_at >= now() - interval '10 minutes'
+                    WHERE latest.observed_at >= now() - make_interval(
+                        secs => freshness_threshold.fresh_seconds
+                    )
                 )::integer AS fresh_station_count,
                 count(DISTINCT latest.station_id) FILTER (
-                    WHERE latest.observed_at < now() - interval '10 minutes'
-                        AND latest.observed_at >= now() - interval '1 hour'
+                    WHERE latest.observed_at < now() - make_interval(
+                            secs => freshness_threshold.fresh_seconds
+                        )
+                        AND latest.observed_at >= now() - make_interval(
+                            secs => freshness_threshold.fresh_seconds * 3
+                        )
                 )::integer AS delayed_station_count,
                 count(DISTINCT latest.station_id) FILTER (
                     WHERE latest.observed_at IS NULL
-                        OR latest.observed_at < now() - interval '1 hour'
+                        OR latest.observed_at < now() - make_interval(
+                            secs => freshness_threshold.fresh_seconds * 3
+                        )
                 )::integer AS stale_station_count
             FROM official_realtime_latest latest
             JOIN requested ON requested.adapter_key = latest.adapter_key
+            LEFT JOIN data_sources observation_source
+                ON observation_source.adapter_key = latest.adapter_key
+            CROSS JOIN LATERAL (
+                SELECT CASE
+                    WHEN NULLIF(
+                        observation_source.metadata
+                            ->> 'freshness_threshold_seconds',
+                        ''
+                    )::integer > 0
+                        THEN NULLIF(
+                            observation_source.metadata
+                                ->> 'freshness_threshold_seconds',
+                            ''
+                        )::integer
+                    ELSE 600
+                END AS fresh_seconds
+            ) freshness_threshold
             GROUP BY latest.adapter_key
         )
     """
@@ -1505,6 +1532,7 @@ def _query_realtime_source_health_rows(
                 jobs.items_fetched,
                 jobs.items_promoted,
                 jobs.items_rejected,
+                jobs.error_code AS latest_run_error_code,
                 COALESCE(jobs.started_at, jobs.created_at) AS latest_run_at
             FROM ingestion_jobs jobs
             JOIN requested ON requested.adapter_key = jobs.adapter_key
@@ -1525,7 +1553,8 @@ def _query_realtime_source_health_rows(
                 latest_job.latest_run_at,
                 latest_job.items_fetched,
                 latest_job.items_promoted,
-                latest_job.items_rejected
+                latest_job.items_rejected,
+                latest_job.latest_run_error_code
             FROM latest_jobs latest_job
             LEFT JOIN adapter_runs latest_adapter_run
                 ON latest_adapter_run.ingestion_job_id = latest_job.id
@@ -1549,6 +1578,9 @@ def _query_realtime_source_health_rows(
                 AS runtime_pipeline_complete,
             latest_runtime.latest_run_status,
             latest_runtime.latest_run_at,
+            latest_runtime.latest_run_error_code,
+            NULLIF(data_sources.metadata->>'freshness_threshold_seconds', '')::integer
+                AS freshness_threshold_seconds,
             {observation_columns},
             latest_inventory.upstream_total AS upstream_station_count,
             latest_inventory.pages_fetched,
@@ -2290,61 +2322,100 @@ def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:
     )
 
 
-def _realtime_source_health_row(row: dict[str, Any]) -> RealtimeSourceHealthRow:
+def _realtime_source_health_row(
+    row: Mapping[str, Any] | Sequence[Any],
+) -> RealtimeSourceHealthRow:
+    def value(key: str, index: int, default: Any = None) -> Any:
+        if isinstance(row, Mapping):
+            return row.get(key, default)
+        return row[index] if index < len(row) else default
+
     return RealtimeSourceHealthRow(
-        adapter_key=str(row["adapter_key"]),
-        name=str(row["name"]),
-        is_enabled=bool(row["is_enabled"]),
-        configured_health_status=str(row["configured_health_status"]),
-        last_success_at=row.get("last_success_at"),
-        last_failure_at=row.get("last_failure_at"),
+        adapter_key=str(value("adapter_key", 0)),
+        name=str(value("name", 1)),
+        is_enabled=bool(value("is_enabled", 3)),
+        configured_health_status=str(value("configured_health_status", 4)),
+        last_success_at=value("last_success_at", 5),
+        last_failure_at=value("last_failure_at", 6),
         latest_run_status=(
-            str(row["latest_run_status"]) if row.get("latest_run_status") is not None else None
-        ),
-        latest_run_at=row.get("latest_run_at"),
-        latest_observed_at=row.get("latest_observed_at"),
-        latest_ingested_at=row.get("latest_ingested_at"),
-        station_count=(int(row["station_count"]) if row.get("station_count") is not None else None),
-        inventory_complete=bool(row.get("inventory_complete", False)),
-        is_registered=bool(row.get("is_registered", True)),
-        runtime_enabled=(
-            bool(row["runtime_enabled"]) if row.get("runtime_enabled") is not None else None
-        ),
-        runtime_enabled_checked_at=row.get("runtime_enabled_checked_at"),
-        runtime_pipeline_status=(
-            str(row["runtime_pipeline_status"])
-            if row.get("runtime_pipeline_status") is not None
+            str(value("latest_run_status", 13))
+            if value("latest_run_status", 13) is not None
             else None
         ),
-        runtime_pipeline_checked_at=row.get("runtime_pipeline_checked_at"),
-        runtime_pipeline_run_at=row.get("runtime_pipeline_run_at"),
-        runtime_pipeline_complete=bool(row.get("runtime_pipeline_complete", False)),
+        latest_run_at=value("latest_run_at", 14),
+        latest_observed_at=value("latest_observed_at", 17),
+        latest_ingested_at=value("latest_ingested_at", 18),
+        station_count=(
+            int(value("station_count", 19))
+            if value("station_count", 19) is not None
+            else None
+        ),
+        inventory_complete=bool(value("inventory_complete", 28, False)),
+        is_registered=bool(value("is_registered", 2, True)),
+        runtime_enabled=(
+            bool(value("runtime_enabled", 7))
+            if value("runtime_enabled", 7) is not None
+            else None
+        ),
+        runtime_enabled_checked_at=value("runtime_enabled_checked_at", 8),
+        runtime_pipeline_status=(
+            str(value("runtime_pipeline_status", 9))
+            if value("runtime_pipeline_status", 9) is not None
+            else None
+        ),
+        runtime_pipeline_checked_at=value("runtime_pipeline_checked_at", 10),
+        runtime_pipeline_run_at=value("runtime_pipeline_run_at", 11),
+        runtime_pipeline_complete=bool(
+            value("runtime_pipeline_complete", 12, False)
+        ),
         fresh_station_count=(
-            int(row["fresh_station_count"]) if row.get("fresh_station_count") is not None else None
+            int(value("fresh_station_count", 20))
+            if value("fresh_station_count", 20) is not None
+            else None
         ),
         delayed_station_count=(
-            int(row["delayed_station_count"])
-            if row.get("delayed_station_count") is not None
+            int(value("delayed_station_count", 21))
+            if value("delayed_station_count", 21) is not None
             else None
         ),
         stale_station_count=(
-            int(row["stale_station_count"]) if row.get("stale_station_count") is not None else None
+            int(value("stale_station_count", 22))
+            if value("stale_station_count", 22) is not None
+            else None
         ),
         upstream_station_count=(
-            int(row["upstream_station_count"])
-            if row.get("upstream_station_count") is not None
+            int(value("upstream_station_count", 23))
+            if value("upstream_station_count", 23) is not None
             else None
         ),
-        pages_fetched=(int(row["pages_fetched"]) if row.get("pages_fetched") is not None else None),
+        pages_fetched=(
+            int(value("pages_fetched", 24))
+            if value("pages_fetched", 24) is not None
+            else None
+        ),
         pagination_complete=(
-            bool(row["pagination_complete"]) if row.get("pagination_complete") is not None else None
+            bool(value("pagination_complete", 25))
+            if value("pagination_complete", 25) is not None
+            else None
         ),
         inventory_manifest_sha256=(
-            str(row["inventory_manifest_sha256"])
-            if row.get("inventory_manifest_sha256") is not None
+            str(value("inventory_manifest_sha256", 26))
+            if value("inventory_manifest_sha256", 26) is not None
             else None
         ),
-        inventory_proof_status=str(row.get("inventory_proof_status") or "missing"),
+        inventory_proof_status=str(
+            value("inventory_proof_status", 27) or "missing"
+        ),
+        latest_run_error_code=(
+            str(value("latest_run_error_code", 15))
+            if value("latest_run_error_code", 15) is not None
+            else None
+        ),
+        freshness_threshold_seconds=(
+            int(value("freshness_threshold_seconds", 16))
+            if value("freshness_threshold_seconds", 16) is not None
+            else None
+        ),
     )
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.domain.evidence.repository import NearbyCoverageRow, RealtimeSourceHealthRow
 from app.domain.realtime.nearby_coverage import (
     RADIUS_BUCKETS_M,
@@ -11,8 +13,26 @@ from app.domain.realtime.nearby_coverage import (
     coverage_signal_type,
 )
 
-
 NOW = datetime(2026, 6, 29, 12, 0, tzinfo=UTC)
+
+
+def test_source_health_task9_fields_have_backward_compatible_defaults() -> None:
+    row = RealtimeSourceHealthRow(
+        adapter_key="official.cwa.rainfall",
+        name="CWA rainfall",
+        is_enabled=True,
+        configured_health_status="healthy",
+        last_success_at=NOW,
+        last_failure_at=None,
+        latest_run_status="succeeded",
+        latest_run_at=NOW,
+        latest_observed_at=NOW,
+        latest_ingested_at=NOW,
+        station_count=1,
+    )
+
+    assert row.latest_run_error_code is None
+    assert row.freshness_threshold_seconds is None
 
 
 def _row(
@@ -207,6 +227,7 @@ def _health_row(
     is_enabled: bool = True,
     configured_health_status: str = "healthy",
     latest_run_status: str | None = "succeeded",
+    latest_run_error_code: str | None = None,
     latest_run_delta_minutes: int | None = 5,
     observed_delta_minutes: int | None = 5,
     station_count: int | None = 10,
@@ -221,6 +242,7 @@ def _health_row(
     fresh_station_count: int | None = None,
     delayed_station_count: int | None = None,
     stale_station_count: int | None = None,
+    freshness_threshold_seconds: int | None = None,
 ) -> RealtimeSourceHealthRow:
     latest_run_at = (
         NOW - timedelta(minutes=latest_run_delta_minutes)
@@ -255,6 +277,7 @@ def _health_row(
         last_success_at=latest_run_at if latest_run_status == "succeeded" else None,
         last_failure_at=latest_run_at if latest_run_status == "failed" else None,
         latest_run_status=latest_run_status,
+        latest_run_error_code=latest_run_error_code,
         latest_run_at=latest_run_at,
         latest_observed_at=latest_observed_at,
         latest_ingested_at=latest_run_at,
@@ -270,6 +293,7 @@ def _health_row(
         fresh_station_count=fresh_station_count,
         delayed_station_count=delayed_station_count,
         stale_station_count=stale_station_count,
+        freshness_threshold_seconds=freshness_threshold_seconds,
     )
 
 
@@ -368,8 +392,8 @@ def test_source_observation_freshness_boundaries_are_inclusive() -> None:
     cases = (
         (10, "healthy", "operational"),
         (11, "degraded", "delayed"),
-        (60, "degraded", "delayed"),
-        (61, "failed", "upstream_unavailable"),
+        (30, "degraded", "delayed"),
+        (31, "failed", "upstream_unavailable"),
     )
 
     for observed_minutes, expected_status, expected_reason in cases:
@@ -384,6 +408,96 @@ def test_source_observation_freshness_boundaries_are_inclusive() -> None:
         )[0]
         assert health.health_status == expected_status
         assert health.reason_code == expected_reason
+
+
+@pytest.mark.parametrize(
+    ("threshold_seconds", "observed_minutes", "expected_status"),
+    (
+        (120, 2, "healthy"),
+        (120, 3, "degraded"),
+        (120, 6, "degraded"),
+        (120, 7, "failed"),
+        (None, 10, "healthy"),
+        (None, 30, "degraded"),
+        (None, 31, "failed"),
+    ),
+)
+def test_station_health_uses_catalog_threshold_with_600_second_fallback(
+    threshold_seconds: int | None,
+    observed_minutes: int,
+    expected_status: str,
+) -> None:
+    health = build_nearby_source_health(
+        (
+            _health_row(
+                adapter_key="official.cwa.rainfall",
+                station_count=1,
+                observed_delta_minutes=observed_minutes,
+                freshness_threshold_seconds=threshold_seconds,
+            ),
+        ),
+        evaluated_at=NOW,
+    )[0]
+
+    assert health.health_status == expected_status
+
+
+def test_recent_no_active_warning_poll_is_healthy_without_local_coverage() -> None:
+    source_health = build_nearby_source_health(
+        (
+            _health_row(
+                adapter_key="official.cwa.heavy_rain_warning",
+                latest_run_status="succeeded",
+                latest_run_error_code="no_active_event",
+                latest_run_delta_minutes=2,
+                observed_delta_minutes=None,
+                station_count=0,
+                freshness_threshold_seconds=600,
+            ),
+        ),
+        evaluated_at=NOW,
+    )
+    coverage = build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=500,
+        evaluated_at=NOW,
+        source_health=source_health,
+        source_health_checked=True,
+    )
+
+    warning = next(
+        item for item in coverage.signal_breakdown if item.signal_type == "flood_warning"
+    )
+    assert source_health[0].health_status == "healthy"
+    assert source_health[0].reason_code == "operational"
+    assert warning.fresh_count == 0
+    assert warning.counts_by_radius_m == {
+        "500": 0,
+        "1000": 0,
+        "3000": 0,
+        "5000": 0,
+        "10000": 0,
+        "15000": 0,
+    }
+    assert coverage.overall_level == "no_local_sensor"
+    assert set(coverage.missing_signal_types) == set(REQUIRED_SIGNAL_TYPES)
+
+
+def test_skipped_warning_poll_is_not_healthy_no_active_context() -> None:
+    health = build_nearby_source_health(
+        (
+            _health_row(
+                adapter_key="official.ncdr.cap",
+                latest_run_status="skipped",
+                latest_run_delta_minutes=2,
+                observed_delta_minutes=None,
+                station_count=0,
+            ),
+        ),
+        evaluated_at=NOW,
+    )[0]
+
+    assert health.health_status != "healthy"
 
 
 def test_recent_failed_source_is_not_reported_as_no_station() -> None:

@@ -10,10 +10,18 @@ from app.adapters.contracts import AdapterRunResult, DataSourceAdapter, StationI
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import WorkerSettings
 from app.logging import log_event
-from app.pipelines.staging import StagingBatchWriter, build_staging_batch, persist_staging_batch
+from app.pipelines.staging import (
+    AdapterStagingBatch,
+    StagingBatchWriter,
+    build_staging_batch,
+    persist_staging_batch,
+)
 
 AdapterBatchStatus = Literal["succeeded", "partial", "failed", "skipped"]
 NCDR_CAP_ADAPTER_KEY = "official.ncdr.cap"
+WARNING_EVENT_ADAPTER_KEYS = frozenset(
+    {"official.cwa.heavy_rain_warning", NCDR_CAP_ADAPTER_KEY}
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,8 @@ class AdapterBatchRunSummary:
     source_timestamp_min: datetime | None = None
     source_timestamp_max: datetime | None = None
     station_inventory_proof: StationInventoryProof | None = None
+    event_active_from_min: datetime | None = None
+    event_active_until_max: datetime | None = None
 
     def log_fields(self) -> dict[str, object]:
         return {
@@ -44,6 +54,8 @@ class AdapterBatchRunSummary:
             "error_message": self.error_message,
             "source_timestamp_min": self.source_timestamp_min,
             "source_timestamp_max": self.source_timestamp_max,
+            "event_active_from_min": self.event_active_from_min,
+            "event_active_until_max": self.event_active_until_max,
             "station_inventory_proof": (
                 self.station_inventory_proof.public_summary()
                 if self.station_inventory_proof is not None
@@ -169,6 +181,8 @@ def run_adapter_batch(
                 source_timestamp_min=summary.source_timestamp_min,
                 source_timestamp_max=summary.source_timestamp_max,
                 station_inventory_proof=summary.station_inventory_proof,
+                event_active_from_min=summary.event_active_from_min,
+                event_active_until_max=summary.event_active_until_max,
             )
 
     log_event("adapter.batch.completed", job_key=job_key, **summary.log_fields())
@@ -244,6 +258,23 @@ def _summary_from_result(
     writer: StagingBatchWriter | None,
 ) -> AdapterBatchRunSummary:
     if not result.fetched:
+        if (
+            result.adapter_key in WARNING_EVENT_ADAPTER_KEYS
+            and result.no_active_event is True
+            and not result.rejected
+        ):
+            return AdapterBatchRunSummary(
+                adapter_key=result.adapter_key,
+                status="succeeded",
+                started_at=started_at,
+                finished_at=_now(),
+                items_fetched=0,
+                items_promoted=0,
+                items_rejected=0,
+                error_code="no_active_event",
+                error_message="valid warning poll returned no active event",
+                station_inventory_proof=result.station_inventory_proof,
+            )
         return AdapterBatchRunSummary(
             adapter_key=result.adapter_key,
             status="skipped",
@@ -268,10 +299,11 @@ def _summary_from_result(
     status: AdapterBatchStatus = "succeeded" if items_rejected == 0 else "partial"
     source_timestamp_min = batch.raw_snapshot.source_timestamp_min
     source_timestamp_max = batch.raw_snapshot.source_timestamp_max
-    if result.adapter_key == NCDR_CAP_ADAPTER_KEY:
-        cap_window = _ncdr_cap_effective_expires_window(result)
-        if cap_window is not None:
-            source_timestamp_min, source_timestamp_max = cap_window
+    event_active_from_min: datetime | None = None
+    event_active_until_max: datetime | None = None
+    warning_window = _validated_warning_active_window(result, batch)
+    if warning_window is not None:
+        event_active_from_min, event_active_until_max = warning_window
 
     return AdapterBatchRunSummary(
         adapter_key=result.adapter_key,
@@ -285,28 +317,33 @@ def _summary_from_result(
         source_timestamp_min=source_timestamp_min,
         source_timestamp_max=source_timestamp_max,
         station_inventory_proof=result.station_inventory_proof,
+        event_active_from_min=event_active_from_min,
+        event_active_until_max=event_active_until_max,
     )
 
 
-def _ncdr_cap_effective_expires_window(
+def _validated_warning_active_window(
     result: AdapterRunResult,
+    batch: AdapterStagingBatch,
 ) -> tuple[datetime, datetime] | None:
-    if result.adapter_key != NCDR_CAP_ADAPTER_KEY:
+    if result.adapter_key not in WARNING_EVENT_ADAPTER_KEYS:
         return None
 
-    effective_values: list[datetime] = []
-    expires_values: list[datetime] = []
-    for raw_item in result.fetched:
-        effective_at = parse_observed_at_utc(raw_item.payload.get("effective"))
-        expires_at = parse_observed_at_utc(raw_item.payload.get("expires"))
-        if effective_at is None or expires_at is None:
+    active_from_values: list[datetime] = []
+    active_until_values: list[datetime] = []
+    for staged in batch.accepted:
+        if staged.payload.get("cap_message_type") not in {"Alert", "Update"}:
             continue
-        effective_values.append(effective_at)
-        expires_values.append(expires_at)
+        active_from = parse_observed_at_utc(staged.payload.get("active_from"))
+        active_until = parse_observed_at_utc(staged.payload.get("active_until"))
+        if active_from is None or active_until is None or active_from >= active_until:
+            continue
+        active_from_values.append(active_from)
+        active_until_values.append(active_until)
 
-    if not effective_values or not expires_values:
+    if not active_from_values or not active_until_values:
         return None
-    return min(effective_values), max(expires_values)
+    return min(active_from_values), max(active_until_values)
 
 
 def _now() -> datetime:

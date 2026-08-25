@@ -107,6 +107,112 @@ def test_promote_accepted_staging_counts_only_actual_writes() -> None:
     assert result.evidence_ids == ("evidence-1", "evidence-3")
 
 
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_no_active_retirement_locks_and_deletes_only_valid_older_warning_latest(
+    adapter_key: str,
+) -> None:
+    generation = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+    completed_at = generation + timedelta(seconds=3)
+    connection = _FakeConnection(
+        rows=[("retired-cwa-1",), ("retired-cwa-2",)],
+        evidence_id="unused",
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    retired = writer.retire_warning_latest_for_no_active_event(
+        adapter_key=adapter_key,
+        generation_started_at=generation,
+        completed_at=completed_at,
+    )
+
+    assert retired == 2
+    assert connection.committed is True
+    assert len(connection.cursor_instance.executions) == 2
+    lock_sql, lock_params = connection.cursor_instance.executions[0]
+    delete_sql, delete_params = connection.cursor_instance.executions[1]
+    assert "pg_advisory_xact_lock" in lock_sql
+    assert lock_params == (f"official-warning-lifecycle|{adapter_key}",)
+    assert "DELETE FROM official_realtime_latest" in delete_sql
+    assert "event_type = 'flood_warning'" in delete_sql
+    assert "pg_input_is_valid" in delete_sql
+    assert (
+        "quality_flags ->> 'ingestion_generation_started_at'"
+        in " ".join(delete_sql.split())
+    )
+    assert "<= %s" in delete_sql
+    assert delete_params == (adapter_key, generation)
+    assert "DELETE FROM evidence" not in delete_sql
+
+
+def test_no_active_retirement_rejects_unreviewed_adapter_before_sql() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    with pytest.raises(ValueError, match="reviewed warning adapter"):
+        writer.retire_warning_latest_for_no_active_event(
+            adapter_key="official.cwa.rainfall",
+            generation_started_at=datetime(2026, 8, 24, 2, 0, tzinfo=UTC),
+            completed_at=datetime(2026, 8, 24, 2, 0, 1, tzinfo=UTC),
+        )
+
+    assert connection.cursor_instance.executions == []
+
+
+def test_alert_not_newer_than_persisted_no_active_is_audit_only() -> None:
+    empty_generation = datetime(2026, 8, 24, 1, 6, tzinfo=UTC)
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        max_no_active_generation=empty_generation,
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _cap_payload()
+    payload.properties.update(
+        {
+            "location_payload": {
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [
+                        [
+                            [
+                                [120.0, 22.8],
+                                [120.4, 22.8],
+                                [120.4, 23.2],
+                                [120.0, 22.8],
+                            ]
+                        ]
+                    ],
+                }
+            },
+            "latest_point_geometry": {
+                "type": "Point",
+                "coordinates": [120.2, 23.0],
+            },
+        }
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "evidence-id"
+    assert connection.cursor_instance.latest_attempted is False
+    no_active_sql = next(
+        statement
+        for statement, _ in connection.cursor_instance.executions
+        if "/* max-successful-no-active-event */" in statement
+    )
+    assert "FROM ingestion_jobs" in no_active_sql
+    assert "error_code = 'no_active_event'" in no_active_sql
+    insert_params = next(
+        params
+        for statement, params in connection.cursor_instance.executions
+        if "INSERT INTO evidence" in statement
+    )
+    assert json.loads(str(insert_params[14]))["evidence_scope"] == "historical"
+
+
 def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() -> None:
     connection = _FakeConnection(
         rows=[
@@ -1980,6 +2086,7 @@ class _FakeConnection:
         evidence_insert_conflict: bool = False,
         cap_identity_exists: bool = False,
         explicit_geometry_valid: bool = True,
+        max_no_active_generation: datetime | None = None,
     ) -> None:
         self.cursor_instance = _FakeCursor(
             rows=rows,
@@ -1996,6 +2103,7 @@ class _FakeConnection:
             evidence_insert_conflict=evidence_insert_conflict,
             cap_identity_exists=cap_identity_exists,
             explicit_geometry_valid=explicit_geometry_valid,
+            max_no_active_generation=max_no_active_generation,
         )
         self.committed = False
 
@@ -2030,6 +2138,7 @@ class _FakeCursor:
         evidence_insert_conflict: bool,
         cap_identity_exists: bool,
         explicit_geometry_valid: bool,
+        max_no_active_generation: datetime | None,
     ) -> None:
         self._rows = tuple(rows)
         self._evidence_id = evidence_id
@@ -2039,6 +2148,7 @@ class _FakeCursor:
         self._evidence_insert_conflict = evidence_insert_conflict
         self._cap_identity_exists = cap_identity_exists
         self._explicit_geometry_valid = explicit_geometry_valid
+        self._max_no_active_generation = max_no_active_generation
         self.executions: list[tuple[str, tuple[object, ...]]] = []
         self._existing_latest_observed_at = existing_latest_observed_at
         self._existing_latest_row = existing_latest_row
@@ -2098,6 +2208,11 @@ class _FakeCursor:
             return ("1",) if self._cap_tombstone_exists else None
         if self.executions and "/* canonical-cap-idempotence */" in self.executions[-1][0]:
             return ("1",) if self._cap_identity_exists else None
+        if (
+            self.executions
+            and "/* max-successful-no-active-event */" in self.executions[-1][0]
+        ):
+            return (self._max_no_active_generation,)
         if self.executions and "/* validate-current-geometry */" in self.executions[-1][0]:
             return (self._explicit_geometry_valid,)
         if self.executions and "FROM admin_area_profiles" in self.executions[-1][0]:

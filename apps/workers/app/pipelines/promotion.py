@@ -13,6 +13,9 @@ from app.adapters._helpers import parse_datetime
 from app.adapters.cap_identity import cap_message_digest
 
 ConnectionFactory = Callable[[], Any]
+REVIEWED_WARNING_ADAPTER_KEYS = frozenset(
+    {"official.cwa.heavy_rain_warning", "official.ncdr.cap"}
+)
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,15 @@ class EvidencePromotionWriter(Protocol):
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         """Persist one evidence row, or terminally consume a non-write candidate."""
+
+    def retire_warning_latest_for_no_active_event(
+        self,
+        *,
+        adapter_key: str,
+        generation_started_at: datetime,
+        completed_at: datetime,
+    ) -> int:
+        """Retire eligible latest warning rows after a valid empty poll."""
 
 
 def build_evidence_promotion_payload(candidate: PromotionCandidate) -> EvidencePromotionPayload:
@@ -193,6 +205,22 @@ class PostgresEvidencePromotionWriter:
                     )
                     connection.commit()
                     return None
+                no_active_generation = (
+                    _max_successful_no_active_event_generation(cursor, payload)
+                    if cap_lifecycle_candidate
+                    else None
+                )
+                candidate_generation = parse_datetime(
+                    payload.properties.get("ingestion_generation_started_at")
+                )
+                blocked_by_no_active_event = (
+                    no_active_generation is not None
+                    and candidate_generation is not None
+                    and candidate_generation <= no_active_generation
+                    and payload.properties.get("cap_message_type") in {"Alert", "Update"}
+                )
+                if blocked_by_no_active_event:
+                    promote_latest = False
                 duplicate_decision = (
                     _handle_exact_central_local_duplicate(cursor, payload)
                     if promote_latest
@@ -228,7 +256,14 @@ class PostgresEvidencePromotionWriter:
                 if decision == "historical_only":
                     promote_latest = False
                 enriched_payload = _with_admin_area_enrichment(cursor, payload)
-                weighted_payload = enriched_payload
+                weighted_payload = (
+                    _historical_warning_payload(
+                        enriched_payload,
+                        no_active_generation=no_active_generation,
+                    )
+                    if blocked_by_no_active_event and no_active_generation is not None
+                    else enriched_payload
+                )
                 cursor.execute(
                     """
                     INSERT INTO evidence (
@@ -315,6 +350,54 @@ class PostgresEvidencePromotionWriter:
             connection.commit()
 
         return evidence_id
+
+    def retire_warning_latest_for_no_active_event(
+        self,
+        *,
+        adapter_key: str,
+        generation_started_at: datetime,
+        completed_at: datetime,
+    ) -> int:
+        if adapter_key not in REVIEWED_WARNING_ADAPTER_KEYS:
+            raise ValueError("no-active retirement requires a reviewed warning adapter")
+        if not _is_aware_datetime(generation_started_at) or not _is_aware_datetime(
+            completed_at
+        ):
+            raise ValueError("no-active retirement timestamps must be timezone-aware")
+        if completed_at < generation_started_at:
+            raise ValueError("no-active retirement completion precedes its generation")
+
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (warning_lifecycle_lock_key(adapter_key),),
+                )
+                cursor.execute(
+                    """
+                    DELETE FROM official_realtime_latest
+                    WHERE adapter_key = %s
+                        AND event_type = 'flood_warning'
+                        AND CASE
+                            WHEN pg_input_is_valid(
+                                quality_flags
+                                    ->> 'ingestion_generation_started_at',
+                                'timestamptz'
+                            )
+                                THEN (
+                                    quality_flags
+                                        ->> 'ingestion_generation_started_at'
+                                )::timestamptz <= %s
+                            ELSE false
+                        END
+                    RETURNING source_id
+                    """,
+                    (adapter_key, generation_started_at),
+                )
+                retired = len(cursor.fetchall())
+            connection.commit()
+        return retired
+
     def _connect(self) -> Any:
         if self._connection_factory is not None:
             return self._connection_factory()
@@ -971,6 +1054,53 @@ def _cap_rejection_reason(
         if cursor.fetchone() is not None:
             return "retired_cap_replay"
     return None
+
+
+def _max_successful_no_active_event_generation(
+    cursor: Any,
+    payload: EvidencePromotionPayload,
+) -> datetime | None:
+    if (
+        payload.adapter_key not in REVIEWED_WARNING_ADAPTER_KEYS
+        or payload.properties.get("cap_message_type") not in {"Alert", "Update"}
+    ):
+        return None
+    cursor.execute(
+        """
+        /* max-successful-no-active-event */
+        SELECT max(jobs.started_at)
+        FROM ingestion_jobs jobs
+        WHERE jobs.adapter_key = %s
+            AND jobs.status = 'succeeded'
+            AND jobs.error_code = 'no_active_event'
+            AND jobs.started_at IS NOT NULL
+            AND jobs.items_fetched = 0
+            AND jobs.items_promoted = 0
+            AND jobs.items_rejected = 0
+        """,
+        (payload.adapter_key,),
+    )
+    row = cursor.fetchone()
+    if row is None or row[0] is None:
+        return None
+    generation = parse_datetime(row[0])
+    return generation if _is_aware_datetime(generation) else None
+
+
+def _historical_warning_payload(
+    payload: EvidencePromotionPayload,
+    *,
+    no_active_generation: datetime,
+) -> EvidencePromotionPayload:
+    return replace(
+        payload,
+        properties={
+            **payload.properties,
+            "evidence_scope": "historical",
+            "historical_reason": "superseded_by_no_active_event",
+            "no_active_event_generation_started_at": no_active_generation.isoformat(),
+        },
+    )
 
 
 def _rounded_geometry(value: object) -> object:

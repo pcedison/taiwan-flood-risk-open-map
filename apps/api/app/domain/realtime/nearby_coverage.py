@@ -76,6 +76,7 @@ _ADAPTER_SIGNAL_TYPES: dict[str, NearbyCoverageSignalType] = {
     "official.civil_iot.sewer_water_level": "sewer_water_level",
     "official.civil_iot.pump_water_level": "pump_or_gate_status",
     "official.civil_iot.gate_water_level": "pump_or_gate_status",
+    "official.cwa.heavy_rain_warning": "flood_warning",
     "official.ncdr.cap": "flood_warning",
     "local.taipei.sewer_water_level": "sewer_water_level",
     "local.taipei.river_water_level": "water_level",
@@ -125,8 +126,7 @@ _EVENT_TYPE_ALIASES: dict[str, NearbyCoverageSignalType] = {
     "flood_sensor": "flood_depth",
 }
 REALTIME_SOURCE_ADAPTER_KEYS = tuple(_ADAPTER_SIGNAL_TYPES)
-_SOURCE_OBSERVATION_FRESH = timedelta(minutes=10)
-_SOURCE_OBSERVATION_EXPIRED = timedelta(hours=1)
+_DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS = 600
 _SOURCE_WORKER_DELAYED = timedelta(minutes=15)
 _SOURCE_WORKER_STOPPED = timedelta(minutes=30)
 _EVENT_CONTEXT_SIGNAL_TYPES = frozenset({"flood_warning", "status_only"})
@@ -141,6 +141,7 @@ _PUBLIC_SOURCE_NAMES = {
     "official.civil_iot.sewer_water_level": "水利署 Civil IoT 下水道水位",
     "official.civil_iot.pump_water_level": "水利署 Civil IoT 抽水站水位",
     "official.civil_iot.gate_water_level": "水利署 Civil IoT 水門水位",
+    "official.cwa.heavy_rain_warning": "中央氣象署豪雨警戒",
     "official.ncdr.cap": "國家災害防救科技中心淹水警戒",
 }
 _LOCALITY_LABELS = {
@@ -980,8 +981,6 @@ def _source_health_decision(
     if status == "partial":
         return _source_decision("degraded", "delayed", "最近一次背景更新僅部分完成。")
     if status == "skipped":
-        if signal_type in _EVENT_CONTEXT_SIGNAL_TYPES:
-            return _source_decision("healthy", "operational", "來源正常；目前沒有有效事件。")
         return _source_decision(
             "degraded", "upstream_unavailable", "最近一次更新沒有取得可用觀測。"
         )
@@ -1033,7 +1032,20 @@ def _observation_health_decision(
     evaluated_at: datetime,
 ) -> _SourceHealthDecision:
     if signal_type in _EVENT_CONTEXT_SIGNAL_TYPES:
-        return _source_decision("healthy", "operational", "來源正常；目前沒有有效事件。")
+        if (
+            row.latest_run_status == "succeeded"
+            and row.latest_run_error_code == "no_active_event"
+        ):
+            return _source_decision(
+                "healthy", "operational", "來源正常；目前沒有有效事件。"
+            )
+        if row.latest_observed_at is not None:
+            return _source_decision(
+                "healthy", "operational", "來源正常；目前有有效事件或狀態。"
+            )
+        return _source_decision(
+            "degraded", "upstream_unavailable", "來源有更新紀錄，但無有效事件標記。"
+        )
     if row.station_count is None:
         return _source_decision(
             "unknown", "not_yet_observed", "目前無法確認此來源的站點清冊狀態。"
@@ -1065,13 +1077,18 @@ def _observation_health_decision(
     observed_age = _age(evaluated_at, row.latest_observed_at)
     if observed_age is None:
         return _source_decision("unknown", "not_yet_observed", "尚無足夠觀測時間資訊。")
-    if observed_age <= _SOURCE_OBSERVATION_FRESH:
+    fresh_seconds = row.freshness_threshold_seconds
+    if fresh_seconds is None or fresh_seconds <= 0:
+        fresh_seconds = _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS
+    fresh_window = timedelta(seconds=fresh_seconds)
+    degraded_window = timedelta(seconds=fresh_seconds * 3)
+    if observed_age <= fresh_window:
         return _source_decision(
             "healthy",
             "operational",
             "至少一個已觀測站點近期有更新；清冊完整性另行判定。",
         )
-    if observed_age <= _SOURCE_OBSERVATION_EXPIRED:
+    if observed_age <= degraded_window:
         return _source_decision("degraded", "delayed", "站點觀測更新較慢。")
     return _source_decision(
         "failed", "upstream_unavailable", "站點觀測已超過可用時效。"
