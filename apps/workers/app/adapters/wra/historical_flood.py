@@ -6,10 +6,18 @@ import math
 import re
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta, timezone
+from http.client import HTTPMessage
+from itertools import pairwise
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.parse import urljoin, urlsplit
+from urllib.request import (
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    Request,
+    build_opener,
+    urlopen,
+)
 from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree as ET
@@ -43,6 +51,16 @@ WRA_LOCAL_TZ = timezone(timedelta(hours=8))
 
 _TAIWAN_LONGITUDE_BOUNDS = (117.0, 123.5)
 _TAIWAN_LATITUDE_BOUNDS = (20.0, 27.5)
+_KML_22_NAMESPACE = "http://www.opengis.net/kml/2.2"
+_KML_22_ROOT = f"{{{_KML_22_NAMESPACE}}}kml"
+_XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance"
+_CANONICAL_WRA_SCHEMA_LOCATION = (
+    "http://www.opengis.net/kml/2.2 "
+    "http://schemas.opengis.net/kml/2.2.0/ogckml22.xsd "
+    "http://www.google.com/kml/ext/2.2 "
+    "http://code.google.com/apis/kml/schema/kml22gx.xsd"
+)
+_GEOMETRY_EPSILON = 1e-12
 _HISTORICAL_LIMITATIONS = (
     "Historical footprint only; it is not a realtime flood observation or warning.",
     "The source event time is taken only from a parseable KML event label or field.",
@@ -74,6 +92,30 @@ class WraHistoricalFloodFetchError(WraHistoricalFloodAdapterError):
 
 class WraHistoricalFloodPayloadError(WraHistoricalFloodAdapterError):
     """Raised when metadata or KML violates the reviewed source contract."""
+
+
+class _WraHistoricalRedirectHandler(HTTPRedirectHandler):
+    """Fail closed before urllib follows any WRA historical KML redirect."""
+
+    def redirect_request(
+        self,
+        req: Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> Request | None:
+        resolved_url = urljoin(req.full_url, newurl)
+        approved_url = _approved_kml_url(resolved_url)
+        return super().redirect_request(
+            req,
+            fp,
+            code,
+            msg,
+            headers,
+            approved_url,
+        )
 
 
 class WraHistoricalFloodAdapter:
@@ -229,19 +271,20 @@ def fetch_wra_historical_json(url: str, timeout_seconds: int) -> object:
 
 
 def fetch_wra_historical_text(url: str, timeout_seconds: int) -> str:
+    approved_url = _approved_kml_url(url)
     request = Request(
-        url,
+        approved_url,
         headers={
             "Accept": "application/vnd.google-earth.kml+xml,application/xml,text/xml",
             "User-Agent": WRA_HISTORICAL_FLOOD_USER_AGENT,
         },
     )
     try:
-        with urlopen(
-            request,
-            timeout=timeout_seconds,
-            context=taiwan_gov_open_data_ssl_context(),
-        ) as response:
+        opener = build_opener(
+            HTTPSHandler(context=taiwan_gov_open_data_ssl_context()),
+            _WraHistoricalRedirectHandler(),
+        )
+        with opener.open(request, timeout=timeout_seconds) as response:
             return response.read().decode("utf-8-sig")
     except (HTTPError, URLError, TimeoutError, UnicodeDecodeError) as exc:
         raise WraHistoricalFloodFetchError(
@@ -257,6 +300,11 @@ def parse_wra_historical_flood_kml(text: str) -> tuple[Mapping[str, Any], ...]:
         raise WraHistoricalFloodPayloadError(
             f"WRA historical KML is not parseable: {exc}"
         ) from exc
+
+    if root.tag != _KML_22_ROOT:
+        raise WraHistoricalFloodPayloadError(
+            "WRA historical XML must use the exact KML 2.2 root"
+        )
 
     if not any(_local_name(element.tag) == "Placemark" for element in root.iter()):
         raise WraHistoricalFloodPayloadError(
@@ -436,6 +484,8 @@ def _placemark_geometry(placemark: Element) -> dict[str, Any] | None:
     if len(polygons) == 1:
         return {"type": "Polygon", "coordinates": polygons[0]}
     if len(polygons) > 1:
+        if not _valid_multipolygon_topology(polygons):
+            return None
         return {"type": "MultiPolygon", "coordinates": polygons}
     return None
 
@@ -467,6 +517,8 @@ def _polygon_coordinates(polygon: Element) -> list[list[list[float]]] | None:
             assert ring is not None
             holes.append(ring)
     if outer is None:
+        return None
+    if not _valid_polygon_topology(outer, holes):
         return None
     return [outer, *holes]
 
@@ -503,7 +555,217 @@ def _coordinate_in_taiwan(longitude: float, latitude: float) -> bool:
 def _valid_linear_ring(ring: list[list[float]] | None) -> bool:
     if ring is None or len(ring) < 4 or ring[0] != ring[-1]:
         return False
-    return len({(coordinate[0], coordinate[1]) for coordinate in ring[:-1]}) >= 3
+    topology_ring = _topology_ring(ring)
+    if topology_ring is None or abs(_signed_ring_area(topology_ring)) <= _GEOMETRY_EPSILON:
+        return False
+    if _has_adjacent_segment_overlap(topology_ring):
+        return False
+    segments = _ring_segments(topology_ring)
+    last_index = len(segments) - 1
+    for first_index, first_segment in enumerate(segments):
+        for second_index in range(first_index + 1, len(segments)):
+            if second_index == first_index + 1 or (
+                first_index == 0 and second_index == last_index
+            ):
+                continue
+            if _segments_interact(first_segment, segments[second_index]):
+                return False
+    return True
+
+
+def _valid_polygon_topology(
+    shell: list[list[float]],
+    holes: list[list[list[float]]],
+) -> bool:
+    shell_ring = _topology_ring(shell)
+    hole_rings = [_topology_ring(hole) for hole in holes]
+    if shell_ring is None or any(hole is None for hole in hole_rings):
+        return False
+    valid_holes = [hole for hole in hole_rings if hole is not None]
+    for hole in valid_holes:
+        if _rings_interact(shell_ring, hole):
+            return False
+        if not all(_point_in_ring_strict(point, shell_ring) for point in hole[:-1]):
+            return False
+    for first_index, first_hole in enumerate(valid_holes):
+        for second_hole in valid_holes[first_index + 1 :]:
+            if _rings_interact(first_hole, second_hole):
+                return False
+            if _point_in_ring_strict(first_hole[0], second_hole) or _point_in_ring_strict(
+                second_hole[0], first_hole
+            ):
+                return False
+    return True
+
+
+def _valid_multipolygon_topology(
+    polygons: list[list[list[list[float]]]],
+) -> bool:
+    topology_polygons: list[list[list[tuple[float, float]]]] = []
+    for polygon in polygons:
+        rings = [_topology_ring(ring) for ring in polygon]
+        if any(ring is None for ring in rings):
+            return False
+        topology_polygons.append([ring for ring in rings if ring is not None])
+
+    for first_index, first_polygon in enumerate(topology_polygons):
+        for second_polygon in topology_polygons[first_index + 1 :]:
+            if any(
+                _rings_interact(first_ring, second_ring)
+                for first_ring in first_polygon
+                for second_ring in second_polygon
+            ):
+                return False
+            if _point_in_polygon_surface(first_polygon[0][0], second_polygon) or (
+                _point_in_polygon_surface(second_polygon[0][0], first_polygon)
+            ):
+                return False
+    return True
+
+
+def _point_in_polygon_surface(
+    point: tuple[float, float],
+    polygon: list[list[tuple[float, float]]],
+) -> bool:
+    shell, *holes = polygon
+    return _point_in_ring_strict(point, shell) and not any(
+        _point_in_ring_strict(point, hole) for hole in holes
+    )
+
+
+def _topology_ring(ring: list[list[float]]) -> list[tuple[float, float]] | None:
+    points: list[tuple[float, float]] = []
+    for coordinate in ring[:-1]:
+        point = (coordinate[0], coordinate[1])
+        if not points or point != points[-1]:
+            points.append(point)
+    while len(points) > 1 and points[-1] == points[0]:
+        points.pop()
+    if len(set(points)) < 3:
+        return None
+    return [*points, points[0]]
+
+
+def _signed_ring_area(ring: list[tuple[float, float]]) -> float:
+    origin_x, origin_y = ring[0]
+    twice_area = 0.0
+    for first, second in _ring_segments(ring):
+        twice_area += (first[0] - origin_x) * (second[1] - origin_y)
+        twice_area -= (second[0] - origin_x) * (first[1] - origin_y)
+    return twice_area / 2.0
+
+
+def _has_adjacent_segment_overlap(ring: list[tuple[float, float]]) -> bool:
+    points = ring[:-1]
+    for index, current in enumerate(points):
+        previous = points[index - 1]
+        following = points[(index + 1) % len(points)]
+        if abs(_orientation(previous, current, following)) > _GEOMETRY_EPSILON:
+            continue
+        to_previous = (previous[0] - current[0], previous[1] - current[1])
+        to_following = (following[0] - current[0], following[1] - current[1])
+        if (
+            to_previous[0] * to_following[0]
+            + to_previous[1] * to_following[1]
+            > _GEOMETRY_EPSILON
+        ):
+            return True
+    return False
+
+
+def _ring_segments(
+    ring: list[tuple[float, float]],
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    return list(pairwise(ring))
+
+
+def _rings_interact(
+    first: list[tuple[float, float]],
+    second: list[tuple[float, float]],
+) -> bool:
+    return any(
+        _segments_interact(first_segment, second_segment)
+        for first_segment in _ring_segments(first)
+        for second_segment in _ring_segments(second)
+    )
+
+
+def _segments_interact(
+    first: tuple[tuple[float, float], tuple[float, float]],
+    second: tuple[tuple[float, float], tuple[float, float]],
+) -> bool:
+    first_start, first_end = first
+    second_start, second_end = second
+    orientations = (
+        _orientation(first_start, first_end, second_start),
+        _orientation(first_start, first_end, second_end),
+        _orientation(second_start, second_end, first_start),
+        _orientation(second_start, second_end, first_end),
+    )
+    first_crosses = (orientations[0] > _GEOMETRY_EPSILON) != (
+        orientations[1] > _GEOMETRY_EPSILON
+    )
+    second_crosses = (orientations[2] > _GEOMETRY_EPSILON) != (
+        orientations[3] > _GEOMETRY_EPSILON
+    )
+    if (
+        abs(orientations[0]) > _GEOMETRY_EPSILON
+        and abs(orientations[1]) > _GEOMETRY_EPSILON
+        and abs(orientations[2]) > _GEOMETRY_EPSILON
+        and abs(orientations[3]) > _GEOMETRY_EPSILON
+    ):
+        return first_crosses and second_crosses
+    return (
+        _point_on_segment(second_start, first_start, first_end)
+        or _point_on_segment(second_end, first_start, first_end)
+        or _point_on_segment(first_start, second_start, second_end)
+        or _point_on_segment(first_end, second_start, second_end)
+    )
+
+
+def _orientation(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    point: tuple[float, float],
+) -> float:
+    return (end[0] - start[0]) * (point[1] - start[1]) - (
+        end[1] - start[1]
+    ) * (point[0] - start[0])
+
+
+def _point_on_segment(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> bool:
+    if abs(_orientation(start, end, point)) > _GEOMETRY_EPSILON:
+        return False
+    return (
+        min(start[0], end[0]) - _GEOMETRY_EPSILON
+        <= point[0]
+        <= max(start[0], end[0]) + _GEOMETRY_EPSILON
+        and min(start[1], end[1]) - _GEOMETRY_EPSILON
+        <= point[1]
+        <= max(start[1], end[1]) + _GEOMETRY_EPSILON
+    )
+
+
+def _point_in_ring_strict(
+    point: tuple[float, float],
+    ring: list[tuple[float, float]],
+) -> bool:
+    inside = False
+    for start, end in _ring_segments(ring):
+        if _point_on_segment(point, start, end):
+            return False
+        if (start[1] > point[1]) == (end[1] > point[1]):
+            continue
+        intersection_x = start[0] + (
+            (point[1] - start[1]) * (end[0] - start[0]) / (end[1] - start[1])
+        )
+        if intersection_x > point[0]:
+            inside = not inside
+    return inside
 
 
 def _historical_source_id(record: Mapping[str, Any]) -> str:
@@ -565,13 +827,19 @@ def _approved_kml_url(value: object) -> str:
             "WRA historical KML record is missing an approved HTTPS sourceurl"
         )
     parsed = urlsplit(url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise WraHistoricalFloodPayloadError(
+            "WRA historical KML sourceurl must use the approved HTTPS opendata.wra.gov.tw host"
+        ) from exc
     if (
         parsed.scheme.lower() != "https"
         or parsed.hostname is None
         or parsed.hostname.lower() != "opendata.wra.gov.tw"
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.port not in {None, 443}
+        or port not in {None, 443}
     ):
         raise WraHistoricalFloodPayloadError(
             "WRA historical KML sourceurl must use the approved HTTPS opendata.wra.gov.tw host"
@@ -619,13 +887,33 @@ def _local_name(tag: str) -> str:
 def _inject_missing_official_xsi_namespace(text: str) -> str:
     """Repair the one known WRA producer defect without broad XML recovery."""
 
-    if (
-        "xsi:schemaLocation" not in text
-        or re.search(r"\bxmlns:xsi\s*=", text) is not None
-    ):
+    if re.search(r"\bxmlns:xsi\s*=", text) is not None:
         return text
-    root_match = re.search(r"<kml\b[^>]*", text, flags=re.IGNORECASE)
+    if re.findall(r"\bxsi:[A-Za-z_][\w.-]*", text) != ["xsi:schemaLocation"]:
+        return text
+    root_match = re.search(r"<kml\b(?P<attributes>[^>]*)>", text)
     if root_match is None:
         return text
-    declaration = ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
-    return f"{text[: root_match.end()]}{declaration}{text[root_match.end() :]}"
+    prefix = text[: root_match.start()].lstrip("\ufeff").strip()
+    if prefix and re.fullmatch(r"<\?xml\b.*\?>", prefix, flags=re.DOTALL) is None:
+        return text
+    attributes = root_match.group("attributes")
+    namespace_match = re.search(
+        r"\bxmlns\s*=\s*(['\"])(?P<namespace>.*?)\1",
+        attributes,
+        flags=re.DOTALL,
+    )
+    if namespace_match is None or namespace_match.group("namespace") != _KML_22_NAMESPACE:
+        return text
+    schema_match = re.search(
+        r"\bxsi:schemaLocation\s*=\s*(['\"])(?P<schema>.*?)\1",
+        text,
+        flags=re.DOTALL,
+    )
+    if schema_match is None or " ".join(schema_match.group("schema").split()) != (
+        _CANONICAL_WRA_SCHEMA_LOCATION
+    ):
+        return text
+    declaration = f' xmlns:xsi="{_XSI_NAMESPACE}"'
+    insertion_point = root_match.end() - 1
+    return f"{text[:insertion_point]}{declaration}{text[insertion_point:]}"

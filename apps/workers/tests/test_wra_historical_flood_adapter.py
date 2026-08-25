@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.request import Request
 
 import pytest
 
@@ -13,6 +14,7 @@ from app.adapters.wra import (
     WraHistoricalFloodAdapter,
     WraHistoricalFloodPayloadError,
 )
+from app.adapters.wra import historical_flood as historical_flood_module
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
 from app.pipelines.staging import build_staging_batch
@@ -23,6 +25,12 @@ APPROVED_KML_URL = (
 )
 FETCHED_AT = datetime(2026, 8, 25, 4, 0, tzinfo=UTC)
 RUN_STARTED_AT = datetime(2026, 8, 25, 3, 59, tzinfo=UTC)
+CANONICAL_WRA_SCHEMA_LOCATION = (
+    "http://www.opengis.net/kml/2.2 "
+    "http://schemas.opengis.net/kml/2.2.0/ogckml22.xsd "
+    "http://www.google.com/kml/ext/2.2 "
+    "http://code.google.com/apis/kml/schema/kml22gx.xsd"
+)
 
 
 def _index_payload() -> object:
@@ -46,6 +54,31 @@ def _adapter(
         fetched_at=FETCHED_AT,
         fetch_json=lambda _url, _timeout: _index_payload() if index is None else index,
         fetch_text=lambda _url, _timeout: _kml_text() if kml is None else kml,
+    )
+
+
+def _polygon_kml(
+    outer: tuple[tuple[float, float], ...],
+    *,
+    holes: tuple[tuple[tuple[float, float], ...], ...] = (),
+) -> str:
+    def coordinates(ring: tuple[tuple[float, float], ...]) -> str:
+        return " ".join(f"{longitude},{latitude}" for longitude, latitude in ring)
+
+    inner_boundaries = "".join(
+        "<innerBoundaryIs><LinearRing><coordinates>"
+        f"{coordinates(hole)}"
+        "</coordinates></LinearRing></innerBoundaryIs>"
+        for hole in holes
+    )
+    return (
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
+        "<name>2020-08-01</name><Placemark><name>topology contract</name><Polygon>"
+        "<outerBoundaryIs><LinearRing><coordinates>"
+        f"{coordinates(outer)}"
+        "</coordinates></LinearRing></outerBoundaryIs>"
+        f"{inner_boundaries}"
+        "</Polygon></Placemark></Document></kml>"
     )
 
 
@@ -175,6 +208,107 @@ def test_parser_repairs_only_the_official_missing_xsi_namespace_defect() -> None
 
 
 @pytest.mark.parametrize(
+    "kml",
+    (
+        """\
+        <Document xmlns="http://www.opengis.net/kml/2.2"><name>2020-08-01</name>
+          <Placemark><name>x</name><Point><coordinates>120,23</coordinates></Point></Placemark>
+        </Document>
+        """,
+        """\
+        <kml><Document><name>2020-08-01</name>
+          <Placemark><name>x</name><Point><coordinates>120,23</coordinates></Point></Placemark>
+        </Document></kml>
+        """,
+        """\
+        <kml xmlns="urn:not-kml"><Document><name>2020-08-01</name>
+          <Placemark><name>x</name><Point><coordinates>120,23</coordinates></Point></Placemark>
+        </Document></kml>
+        """,
+    ),
+)
+def test_parser_requires_the_exact_kml_22_root(kml: str) -> None:
+    with pytest.raises(WraHistoricalFloodPayloadError, match="KML 2.2 root"):
+        _adapter(kml=kml).fetch()
+
+
+def test_parser_does_not_repair_an_arbitrary_xsi_schema_location() -> None:
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document
+      xsi:schemaLocation="http://www.opengis.net/kml/2.2 https://evil.example/kml.xsd">
+      <name>2020-08-01</name>
+      <Placemark><name>x</name><Point><coordinates>120,23</coordinates></Point></Placemark>
+    </Document></kml>
+    """
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="parseable"):
+        _adapter(kml=kml).fetch()
+
+
+def test_parser_does_not_repair_extra_unbound_xsi_attributes() -> None:
+    kml = f"""\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document
+      xsi:schemaLocation="{CANONICAL_WRA_SCHEMA_LOCATION}" xsi:arbitrary="unsafe">
+      <name>2020-08-01</name>
+      <Placemark><name>x</name><Point><coordinates>120,23</coordinates></Point></Placemark>
+    </Document></kml>
+    """
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="parseable"):
+        _adapter(kml=kml).fetch()
+
+
+@pytest.mark.parametrize(
+    "redirect_target",
+    (
+        "http://opendata.wra.gov.tw/cloud/downgrade.kml",
+        "https://evil.example/history.kml",
+        "https://opendata.wra.gov.tw.evil.example/history.kml",
+        "https://user@opendata.wra.gov.tw/cloud/history.kml",
+        "https://opendata.wra.gov.tw:444/cloud/history.kml",
+        "https://opendata.wra.gov.tw:not-a-port/cloud/history.kml",
+    ),
+)
+def test_kml_redirect_handler_rejects_every_unapproved_hop(
+    redirect_target: str,
+) -> None:
+    handler = historical_flood_module._WraHistoricalRedirectHandler()
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="approved HTTPS"):
+        handler.redirect_request(
+            Request(APPROVED_KML_URL),
+            None,
+            302,
+            "Found",
+            {},
+            redirect_target,
+        )
+
+
+def test_kml_redirect_handler_allows_relative_and_same_host_https_hops() -> None:
+    handler = historical_flood_module._WraHistoricalRedirectHandler()
+    first = handler.redirect_request(
+        Request(APPROVED_KML_URL),
+        None,
+        302,
+        "Found",
+        {},
+        "../next/history.kml",
+    )
+    assert first.full_url == "https://opendata.wra.gov.tw/cloud/next/history.kml"
+
+    second = handler.redirect_request(
+        first,
+        None,
+        307,
+        "Temporary Redirect",
+        {},
+        "https://opendata.wra.gov.tw:443/cloud/final.kml",
+    )
+    assert second.full_url == "https://opendata.wra.gov.tw:443/cloud/final.kml"
+
+
+@pytest.mark.parametrize(
     "sourceurl",
     (
         "http://opendata.wra.gov.tw/cloud/history.kml",
@@ -265,6 +399,144 @@ def test_fetch_rejects_an_entire_multigeometry_when_any_polygon_is_invalid() -> 
 
     with pytest.raises(WraHistoricalFloodPayloadError, match="valid Placemark"):
         _adapter(kml=kml).fetch()
+
+
+def test_fetch_rejects_overlapping_multipolygon_members() -> None:
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>2020-08-01</name>
+      <Placemark><name>overlapping members</name><MultiGeometry>
+        <Polygon><outerBoundaryIs><LinearRing>
+          <coordinates>120,23 120.06,23 120.06,23.06 120,23.06 120,23</coordinates>
+        </LinearRing></outerBoundaryIs></Polygon>
+        <Polygon><outerBoundaryIs><LinearRing>
+          <coordinates>120.04,23.04 120.1,23.04 120.1,23.1 120.04,23.1 120.04,23.04</coordinates>
+        </LinearRing></outerBoundaryIs></Polygon>
+      </MultiGeometry></Placemark>
+    </Document></kml>
+    """
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="valid Placemark"):
+        _adapter(kml=kml).fetch()
+
+
+@pytest.mark.parametrize(
+    "outer",
+    (
+        (
+            (120.0, 23.0),
+            (120.04, 23.04),
+            (120.0, 23.04),
+            (120.04, 23.0),
+            (120.0, 23.0),
+        ),
+        (
+            (120.0, 23.0),
+            (120.01, 23.0),
+            (120.02, 23.0),
+            (120.0, 23.0),
+        ),
+        (
+            (120.0, 23.0),
+            (120.04, 23.0),
+            (120.04, 23.04),
+            (120.02, 23.02),
+            (120.0, 23.04),
+            (120.02, 23.02),
+            (120.0, 23.0),
+        ),
+    ),
+)
+def test_fetch_rejects_self_intersecting_zero_area_or_self_touching_rings(
+    outer: tuple[tuple[float, float], ...],
+) -> None:
+    with pytest.raises(WraHistoricalFloodPayloadError, match="valid Placemark"):
+        _adapter(kml=_polygon_kml(outer)).fetch()
+
+
+SQUARE_SHELL = (
+    (120.0, 23.0),
+    (120.1, 23.0),
+    (120.1, 23.1),
+    (120.0, 23.1),
+    (120.0, 23.0),
+)
+
+
+@pytest.mark.parametrize(
+    "hole",
+    (
+        (
+            (120.11, 23.02),
+            (120.12, 23.02),
+            (120.12, 23.03),
+            (120.11, 23.03),
+            (120.11, 23.02),
+        ),
+        (
+            (120.0, 23.02),
+            (120.02, 23.02),
+            (120.02, 23.04),
+            (120.0, 23.04),
+            (120.0, 23.02),
+        ),
+        (
+            (119.99, 23.02),
+            (120.02, 23.02),
+            (120.02, 23.04),
+            (119.99, 23.04),
+            (119.99, 23.02),
+        ),
+    ),
+)
+def test_fetch_rejects_holes_outside_touching_or_crossing_the_shell(
+    hole: tuple[tuple[float, float], ...],
+) -> None:
+    with pytest.raises(WraHistoricalFloodPayloadError, match="valid Placemark"):
+        _adapter(kml=_polygon_kml(SQUARE_SHELL, holes=(hole,))).fetch()
+
+
+@pytest.mark.parametrize(
+    "holes",
+    (
+        (
+            ((120.02, 23.02), (120.06, 23.02), (120.06, 23.06), (120.02, 23.06), (120.02, 23.02)),
+            ((120.04, 23.04), (120.08, 23.04), (120.08, 23.08), (120.04, 23.08), (120.04, 23.04)),
+        ),
+        (
+            ((120.02, 23.02), (120.08, 23.02), (120.08, 23.08), (120.02, 23.08), (120.02, 23.02)),
+            ((120.03, 23.03), (120.04, 23.03), (120.04, 23.04), (120.03, 23.04), (120.03, 23.03)),
+        ),
+        (
+            ((120.02, 23.02), (120.04, 23.02), (120.04, 23.04), (120.02, 23.04), (120.02, 23.02)),
+            ((120.04, 23.02), (120.06, 23.02), (120.06, 23.04), (120.04, 23.04), (120.04, 23.02)),
+        ),
+    ),
+)
+def test_fetch_rejects_overlapping_nested_or_touching_holes(
+    holes: tuple[tuple[tuple[float, float], ...], ...],
+) -> None:
+    with pytest.raises(WraHistoricalFloodPayloadError, match="valid Placemark"):
+        _adapter(kml=_polygon_kml(SQUARE_SHELL, holes=holes)).fetch()
+
+
+def test_valid_polygon_hole_reaches_staging_unchanged() -> None:
+    hole = (
+        (120.02, 23.02),
+        (120.04, 23.02),
+        (120.04, 23.04),
+        (120.02, 23.04),
+        (120.02, 23.02),
+    )
+    result = _adapter(kml=_polygon_kml(SQUARE_SHELL, holes=(hole,))).run()
+
+    assert len(result.normalized) == 1
+    staged = build_staging_batch(
+        result,
+        ingestion_generation_started_at=RUN_STARTED_AT,
+    ).accepted[0]
+    assert staged.payload["location_payload"]["geometry"] == result.fetched[0].payload[
+        "geometry"
+    ]
 
 
 def test_source_event_time_never_falls_back_to_dataset_revision_or_fetched_at() -> None:

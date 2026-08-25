@@ -2,7 +2,7 @@
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <Folder>
     <name>歷年颱風淹水範圍</name>
-    <Document id="105梅姬颱風雲嘉地區淹水範圍" xsi:schemaLocation="http://www.opengis.net/kml/2.2 http://schemas.opengis.net/kml/2.2.0/ogckml22.xsd">
+    <Document id="105梅姬颱風雲嘉地區淹水範圍" xsi:schemaLocation="http://www.opengis.net/kml/2.2 http://schemas.opengis.net/kml/2.2.0/ogckml22.xsd http://www.google.com/kml/ext/2.2 http://code.google.com/apis/kml/schema/kml22gx.xsd">
       <name>105-09-27梅姬颱風</name>
       <Placemark id="P-1">
         <name>臺南淹水範圍</name>
