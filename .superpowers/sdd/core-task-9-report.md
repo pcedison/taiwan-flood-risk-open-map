@@ -628,3 +628,72 @@ Static/contract checks:
 This is implementer evidence, not self-approval. No merge, rebase, push,
 deployment, source activation, or mutation of the three user-owned untracked
 handoff files was performed.
+
+## Re-review fix wave 3 — normalized adapter identity
+
+Date: 2026-08-25
+
+Review base: `b8ebacb34e051d0be26ff36c2d79ee2bca04689d`
+
+Commit: the commit containing this section, with message
+`fix: validate normalized adapter identity`; obtain its authoritative SHA with
+`git rev-parse HEAD` after commit.
+
+The second independent milestone review found that the validated outer
+`AdapterRunResult.adapter_key` did not constrain each nested
+`NormalizedEvidence.adapter_key`. Because staging copied the nested identity,
+an outer rainfall result could smuggle a heavy-rain CAP Update into accepted
+staging.
+
+### TDD evidence
+
+RED:
+
+```bash
+../../.venv/workers/bin/python -m pytest \
+  tests/test_runtime_managed_ingestion.py \
+  -k nested_warning_identity_mismatch -q
+```
+
+Result: `1 failed, 31 deselected`. Through the real scoped v1 managed cycle,
+the configured/result `official.cwa.rainfall` batch returned `succeeded`, wrote
+one accepted nested `official.cwa.heavy_rain_warning` CAP Update, promoted one
+candidate, and the stateful regression double retired the pre-existing warning
+latest state.
+
+Fix: before staging construction or persistence, every normalized item's
+adapter key is checked against both the trusted configured key and the already
+validated result key. Any mismatch raises a batch-level `ValueError`; the
+failed summary remains attributed to the configured adapter.
+
+GREEN: the same command returned `1 passed, 31 deselected`. It proves failed
+trusted rainfall attribution, zero staging batches, zero promotion, zero
+no-active retirement, and retention of the existing warning latest state.
+
+### Verification
+
+Focused ingestion/managed/staging/promotion:
+
+```bash
+../../.venv/workers/bin/python -m pytest \
+  tests/test_ingestion_job_runner.py tests/test_runtime_managed_ingestion.py \
+  tests/test_staging_pipeline.py tests/test_promotion_pipeline.py -q
+```
+
+Result: `166 passed`.
+
+Full Worker: `695 passed, 58 skipped`. The skips remain the optional live
+PostgreSQL collection; this wave did not touch lifecycle or SQL code, so the
+prior mandatory live `58 passed`, zero-skip acceptance remains applicable.
+
+Static/contract checks:
+
+- Worker mypy: success, 106 source files.
+- Scoped Ruff for both changed Python files: passed.
+- OpenAPI: `OpenAPI 3.1 spec valid. paths=15 schemas=75`.
+- `git diff --check`: clean before commit.
+
+No API, staging, promotion, lifecycle, catalog, runtime activation, or
+deployment code changed in this wave. No merge, rebase, push, deployment, or
+source enablement was performed, and the three user-owned untracked handoff
+documents remain untouched.

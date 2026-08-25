@@ -125,6 +125,38 @@ def test_managed_malformed_empty_warning_never_becomes_no_active(
     assert result.summaries[0].error_code != "no_active_event"
 
 
+def test_managed_nested_warning_identity_mismatch_is_inert() -> None:
+    adapter = _NestedWarningIdentityAdapter()
+    staging_writer = _MemoryStagingWriter()
+    promotion_writer = _StagingBackedWarningPromotionWriter(staging_writer)
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter.metadata.key,),
+    )
+
+    result = run_v1_baseline_adapter_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=staging_writer,
+        run_writer=_MemoryRunWriter(),
+        promotion_writer=promotion_writer,
+        promote=True,
+    )
+
+    assert result.status == "failed"
+    assert result.summaries[0].status == "failed"
+    assert result.summaries[0].adapter_key == "official.cwa.rainfall"
+    assert result.summaries[0].error_code == "ValueError"
+    assert result.summaries[0].error_message is not None
+    assert "normalized adapter key mismatch" in result.summaries[0].error_message
+    assert staging_writer.batches == []
+    assert result.promoted == 0
+    assert promotion_writer.payloads == []
+    assert promotion_writer.retired_no_active == []
+    assert promotion_writer.retired_references == []
+    assert promotion_writer.existing_warning_latest is True
+
+
 @pytest.mark.usefixtures("task9_synthetic_registry")
 @pytest.mark.parametrize(
     "adapter_key",
@@ -811,6 +843,55 @@ class _MemoryPromotionWriter:
         return 0
 
 
+class _StagingBackedWarningPromotionWriter(_MemoryPromotionWriter):
+    def __init__(self, staging_writer: _MemoryStagingWriter) -> None:
+        super().__init__([])
+        self._staging_writer = staging_writer
+        self.existing_warning_latest = True
+        self.retired_references: list[str] = []
+
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        self.requested_limit = limit
+        self.requested_adapter_keys = adapter_keys
+        if not self._staging_writer.batches:
+            return ()
+        staged = self._staging_writer.batches[0].accepted[0]
+        return (
+            PromotionCandidate(
+                staging_evidence_id="nested-staging-id",
+                raw_snapshot_id=None,
+                raw_ref=staged.raw_ref,
+                data_source_id=None,
+                source_id=staged.source_id,
+                source_type=staged.source_type,
+                event_type=staged.event_type,
+                title=staged.title,
+                summary=staged.summary,
+                url=staged.url,
+                occurred_at=staged.occurred_at,
+                observed_at=staged.observed_at,
+                confidence=staged.confidence,
+                validation_status=staged.validation_status,
+                payload={**staged.payload, "adapter_key": staged.adapter_key},
+            ),
+        )
+
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
+        evidence_id = super().write_evidence(payload)
+        if (
+            payload.adapter_key == "official.cwa.heavy_rain_warning"
+            and payload.properties.get("cap_message_type") == "Update"
+        ):
+            self.retired_references.append("existing-warning")
+            self.existing_warning_latest = False
+        return evidence_id
+
+
 class _FailingNoActiveRetirementWriter(_MemoryPromotionWriter):
     def retire_warning_latest_for_no_active_event(
         self,
@@ -939,6 +1020,68 @@ class _Task9MalformedEmptyWarningAdapter(_Task9EmptyWarningAdapter):
             station_inventory_proof=inventory_proof,
             no_active_event=True,
         )
+
+
+class _NestedWarningIdentityAdapter:
+    metadata = AdapterMetadata(
+        key="official.cwa.rainfall",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="Nested warning identity mismatch fixture",
+    )
+
+    def run(self) -> AdapterRunResult:
+        sent_at = FETCHED_AT
+        raw_item = RawSourceItem(
+            source_id="nested-warning-update",
+            source_url="https://example.test/cap",
+            fetched_at=FETCHED_AT,
+            payload={
+                "evidence_scope": "current",
+                "location_precision": "admin_area",
+                "admin_code": "67000000",
+                "cap_sender": "sender@example.test",
+                "cap_identifier": "nested-warning-update",
+                "cap_sent": sent_at.isoformat(),
+                "cap_references": [
+                    {
+                        "sender": "sender@example.test",
+                        "identifier": "existing-warning",
+                        "sent": (sent_at - timedelta(minutes=1)).isoformat(),
+                    }
+                ],
+                "cap_status": "Actual",
+                "cap_message_type": "Update",
+                "active_from": (sent_at - timedelta(minutes=5)).isoformat(),
+                "active_until": (sent_at + timedelta(hours=1)).isoformat(),
+            },
+        )
+        normalized = NormalizedEvidence(
+            evidence_id="nested-warning-update",
+            adapter_key="official.cwa.heavy_rain_warning",
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_WARNING,
+            source_id=raw_item.source_id,
+            source_url=raw_item.source_url,
+            source_title="Forged nested warning Update",
+            source_timestamp=sent_at,
+            fetched_at=FETCHED_AT,
+            summary="A rainfall result must not smuggle a warning lifecycle mutation.",
+            location_text="臺南市",
+            confidence=0.95,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw_item,),
+            normalized=(normalized,),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return self.run().normalized[0]
 
 
 class _Task9ActiveWarningAdapter:

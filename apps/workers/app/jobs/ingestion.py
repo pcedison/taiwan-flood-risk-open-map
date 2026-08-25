@@ -370,6 +370,17 @@ def _validate_adapter_result_identity(
             "adapter result key mismatch: "
             f"configured={configured_key!r}, returned={result.adapter_key!r}"
         )
+    for index, normalized in enumerate(result.normalized):
+        if (
+            normalized.adapter_key != configured_key
+            or normalized.adapter_key != result.adapter_key
+        ):
+            raise ValueError(
+                "normalized adapter key mismatch: "
+                f"configured={configured_key!r}, "
+                f"result={result.adapter_key!r}, "
+                f"normalized[{index}]={normalized.adapter_key!r}"
+            )
 
 
 def _now() -> datetime:
