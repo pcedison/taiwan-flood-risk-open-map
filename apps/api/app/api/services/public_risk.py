@@ -525,7 +525,7 @@ def _nearby_realtime_coverage_with_bridge_fallback(
     # A healthy bridge observation must repair an empty or stale-only repository
     # result too; otherwise the same response can show a live station in evidence
     # while the coverage panel still reports a stalled update pipeline.
-    if not realtime_bundle.observations:
+    if not _bridge_has_usable_observations(realtime_bundle, now=created_at):
         return coverage
     if _coverage_has_usable_observations(coverage):
         # The repository also includes local-government and status adapters that
@@ -566,6 +566,18 @@ def _coverage_has_usable_observations(coverage: NearbyRealtimeCoverage) -> bool:
     return any(
         signal.fresh_count + signal.degraded_count > 0
         for signal in coverage.signal_breakdown
+    )
+
+
+def _bridge_has_usable_observations(
+    realtime_bundle: OfficialRealtimeBundle,
+    *,
+    now: datetime,
+) -> bool:
+    return any(
+        _official_realtime_freshness_state(observation, now=now)
+        in {"fresh", "degraded"}
+        for observation in realtime_bundle.observations
     )
 
 

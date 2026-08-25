@@ -523,6 +523,43 @@ def test_bridge_fallback_replaces_stale_only_repository_coverage() -> None:
     assert flood_depth.stale_count == 0
 
 
+def test_bridge_fallback_preserves_repository_when_bridge_is_stale_only() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    repository_coverage = public_risk.build_nearby_realtime_coverage(
+        rows=(
+            NearbyCoverageRow(
+                adapter_key="local.tainan.flood_sensor",
+                source_id="tainan-flood-sensor:station-1",
+                event_type="flood_report",
+                station_id="station-1",
+                observed_at=created_at - timedelta(hours=4),
+                ingested_at=created_at - timedelta(hours=4),
+                distance_to_query_m=900.0,
+                freshness_state="stale",
+            ),
+        ),
+        query_radius_m=request.radius_m,
+        evaluated_at=created_at,
+    )
+    stale_bridge_observation = _official_observation(
+        observed_at=created_at - timedelta(minutes=31),
+        distance_to_query_m=230.0,
+    )
+
+    repaired = public_risk._nearby_realtime_coverage_with_bridge_fallback(
+        repository_coverage,
+        OfficialRealtimeBundle(
+            observations=(stale_bridge_observation,),
+            source_statuses=(),
+        ),
+        request=request,
+        created_at=created_at,
+    )
+
+    assert repaired == repository_coverage
+
+
 def test_bridge_freshness_uses_inclusive_ten_and_thirty_minute_boundaries() -> None:
     now = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
     exactly_ten = _official_observation(observed_at=now - timedelta(minutes=10))
