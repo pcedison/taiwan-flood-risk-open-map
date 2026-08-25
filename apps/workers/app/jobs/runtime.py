@@ -1252,11 +1252,18 @@ def work_runtime_queue_once(
     freshness_checks: tuple[FreshnessCheck, ...] = ()
     promotion = PromotionResult(promoted=0, evidence_ids=())
     try:
-        adapters = (
-            adapter_by_key
-            if adapter_by_key is not None
-            else build_runtime_adapters(adapter_settings)
-        )
+        if adapter_by_key is not None:
+            adapters = (
+                {
+                    key: adapter
+                    for key, adapter in adapter_by_key.items()
+                    if key in (adapter_settings.enabled_adapter_keys or ())
+                }
+                if adapter_key in OFFICIAL_INCIDENT_CATALOG_GATED_KEYS
+                else adapter_by_key
+            )
+        else:
+            adapters = build_runtime_adapters(adapter_settings)
         adapter = adapters.get(adapter_key)
         if adapter is None:
             return _fail_runtime_queue_job(

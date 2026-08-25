@@ -1169,6 +1169,34 @@ def test_catalog_enabled_queue_worker_narrows_internal_builder_settings(
     assert calls == {"run": 1}
 
 
+def test_catalog_enabled_queue_worker_filters_supplied_mapping_by_current_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_key = "official.cwa.heavy_rain_warning"
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key=adapter_key))
+    staging_writer = _MemoryStagingWriter()
+    calls = {"run": 0}
+
+    monkeypatch.setattr(runtime_jobs, "enabled_adapter_keys", lambda _: ())
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        adapter_by_key={adapter_key: _QueueCatalogAdapter(adapter_key, calls)},
+        writer=staging_writer,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter_key})),
+    )
+
+    assert result.status == "failed"
+    assert result.reason == f"unknown runtime adapter_key: {adapter_key}"
+    assert calls == {"run": 0}
+    assert staging_writer.batches == []
+    assert queue.failed == [
+        ("failed", "job-1", "worker-a", f"unknown runtime adapter_key: {adapter_key}", 60)
+    ]
+
+
 def test_work_runtime_queue_once_runs_adapter_and_marks_succeeded() -> None:
     settings = load_worker_settings(
         {
