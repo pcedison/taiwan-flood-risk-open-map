@@ -1,5 +1,60 @@
 # 2026-08-25 Windows 更新與 Mac v1 主線整合決策
 
+## 2026-08-26 續查與執行摘要（本節優先於下方舊狀態）
+
+- 2026-08-26 再次執行 `git fetch --prune origin`；`origin/main` 仍為
+  `d64b7b37786a52e3967174b9d0e59c55aa6f2f8a`，最後提交時間是
+  2026-08-25 20:32:28（Asia/Taipei）。本次工作期間沒有新的 Windows push 或 merge。
+- Mac 權威分支目前為 `793d314f7107d4ddd4049bfa1158073e4c9654d7`，相對
+  `origin/main` 的 unique commits 是 `38/3`。仍不可直接 merge/cherry-pick remote
+  三個提交；本報告原訂的 manual-port 決策不變。
+- Remote 的 WRA UTC+8 修正與 Web dependency 安全更新已分別以 `4ec8885`、
+  `7a6ead2` 移植並驗證。Request-time official bridge、舊 generic scheduler 與整體
+  PR merge 仍明確拒絕。
+- Core Task 9 已完成三項契約收斂、mandatory PostgreSQL 驗證與獨立核准；不再是
+  pending review。
+- Core Task 10 已完成 WRA dataset 25770 metadata -> KML、content-addressed
+  complete-replace snapshot、atomic active marker/last-known-good、exact-host redirect、
+  bounded XML/geometry/topology 與完整 rejection observability。最終提交為
+  `97a576a`、`12d20c8`、`793d314`；獨立 code review 為
+  `Critical 0 / Important 0 / Minor 0, Ready yes`，spec review 為 blockers `0`。
+  主代理 fresh 驗證為 Worker `797 passed, 59 skipped`、mandatory PostgreSQL
+  `856 passed`、mypy `107` files 與 CI-pinned Ruff `0.15.20` 全綠。2026-08-26
+  live artifact 維持 `1232 -> 8 invalid geometry -> 1224 fetched -> 149 missing time
+  -> 1075 normalized`；來源仍預設 disabled，沒有部署或啟用。
+
+### 新發現的 Tasks 11–13 規格差異
+
+1. CWA `W-C0033-003` 目前主要提供鄉鎮級 CAP geocode，但 Task 8 的 reviewed
+   boundary snapshot 只有 22 個縣市。直接映射父縣市會把鄉鎮警戒放大並造成過度
+   評分；沒有 reviewed 鄉鎮邊界時不可假裝精確。
+2. NCDR 現行官方契約是 `/api/datastore` 與 `/api/dump/datastore`，認證參數為
+   `apikey`，兩端都需要 `format`，dump 另需 `capid`。舊 Task 12 的 `/api/dump`、
+   `key` 已失效。FloodSensor／臺南 highwater CAP 目前常用 `circle`，不能塞進只接受
+   8 碼行政區 polygon 的 Task 8 promotion。現有 Zeabur entrypoint 還會強制加入
+   NCDR 並預設開啟 gates；在 Task 12/14 修正前必須保持
+   `REALTIME_BACKBONE_INGESTION_DISABLED=true`，且不得宣稱 NCDR 已可用。
+3. WRA flood-potential metadata 現況不符合原 Task 13「單一情境、完整全國 resource
+   set」假設；目前不能產生真實 `production_complete` manifest。應先實作嚴格
+   unavailable/known-gap gate，所有 flood-potential gates 保持 off，不得用假 checksum、
+   coverage 或單一 archive 通過驗收。
+
+### 目前最快且安全的建議路徑
+
+1. 第一版以已驗證的 CWA/WRA 雨量、水位、即時感測與 Task 10 歷史資料為核心。
+2. Tasks 11/12 先完成正確 transport、CAP parser、生命週期、secret redaction 與 audit
+   contracts；鄉鎮/Circle 的精確空間支援完成前不進評分、catalog/gates 保持 disabled。
+   不採「放大為整縣後計分」。此行為修訂等待產品核准。
+3. Task 13 只交付可證明的 manifest enforcement 與 unavailable 狀態；無真實全國
+   artifact 時不得標 completed/covered。
+4. 然後依序完成 Task 14A per-source runner、14B migration 0038（rows 全 disabled）、
+   Task 15 Web fallback、Task 16 isolated source activation/hosted acceptance。
+5. Community/social hybrid pipeline 保持平行計畫，不阻塞官方 baseline，也不在來源
+   政策、隱私與獨立驗證前改寫官方風險分數。
+
+截至本摘要，Mac 分支未 push、merge、deploy 或 enable 任一新來源；三份使用者
+untracked 交接文件亦未修改或納入提交。
+
 - 更新時間：2026-08-25（Asia/Taipei）
 - Mac 權威分支：`codex/v1-official-community`
 - 遠端比較快照：`49fbb7953cb679a1a7ac0d566527bd5243bbcf4a`
