@@ -9,7 +9,14 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from app.adapters.contracts import DataSourceAdapter, EventType, IngestionStatus, SourceFamily
+from app.adapters.contracts import (
+    AdapterRunResult,
+    DataSourceAdapter,
+    EventType,
+    IngestionStatus,
+    SourceFamily,
+    SourceRejection,
+)
 from app.adapters.dcard import DcardCandidateFixtureAdapter
 from app.adapters.news import (
     GdeltPublicNewsBackfillAdapter,
@@ -22,8 +29,46 @@ from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
 from app.pipelines.validation import validate_evidence_for_promotion
 
-
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def test_source_rejection_contract_rejects_invalid_detail_records() -> None:
+    with pytest.raises(ValueError, match="canonical reason code"):
+        SourceRejection("cap:unreviewed-town", "CWA_UNREVIEWED_ADMIN_GEOMETRY")
+
+    with pytest.raises(ValueError, match="unique"):
+        AdapterRunResult(
+            adapter_key="official.cwa.heavy_rain_warning",
+            fetched=(),
+            normalized=(),
+            rejected=("cap:unreviewed-town",),
+            source_rejections=(
+                SourceRejection("cap:unreviewed-town", "cwa_unreviewed_admin_geometry"),
+                SourceRejection("cap:unreviewed-town", "cwa_unreviewed_admin_geometry"),
+            ),
+        )
+
+    with pytest.raises(ValueError, match="subset"):
+        AdapterRunResult(
+            adapter_key="official.cwa.heavy_rain_warning",
+            fetched=(),
+            normalized=(),
+            source_rejections=(
+                SourceRejection("cap:unreviewed-town", "cwa_unreviewed_admin_geometry"),
+            ),
+        )
+
+    with pytest.raises(ValueError, match="at most 256"):
+        AdapterRunResult(
+            adapter_key="official.cwa.heavy_rain_warning",
+            fetched=(),
+            normalized=(),
+            rejected=tuple(f"cap:{index}" for index in range(257)),
+            source_rejections=tuple(
+                SourceRejection(f"cap:{index}", "cwa_unreviewed_admin_geometry")
+                for index in range(257)
+            ),
+        )
 
 
 def test_sample_public_web_news_adapter_normalizes_fixture_records() -> None:

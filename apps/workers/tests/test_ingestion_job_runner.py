@@ -11,6 +11,7 @@ from app.adapters.contracts import (
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    SourceRejection,
 )
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.config import load_worker_settings
@@ -153,6 +154,16 @@ def test_run_adapter_batch_marks_validation_rejections_as_partial() -> None:
     assert summary.items_fetched == 2
     assert summary.items_promoted == 0
     assert summary.items_rejected == 2
+
+
+def test_run_adapter_batch_marks_source_specific_rejection_as_partial() -> None:
+    summary = run_adapter_batch(_SourceSpecificRejectionAdapter())
+
+    assert summary.status == "partial"
+    assert summary.items_fetched == 1
+    assert summary.items_promoted == 0
+    assert summary.items_rejected == 1
+    assert summary.error_code is None
 
 
 def test_run_adapter_batch_skips_empty_fetches() -> None:
@@ -328,6 +339,39 @@ class _MemoryWriter:
 class _FailingWriter:
     def write_batch(self, batch: AdapterStagingBatch) -> None:
         raise RuntimeError("write failed")
+
+
+class _SourceSpecificRejectionAdapter:
+    metadata = AdapterMetadata(
+        key="official.cwa.heavy_rain_warning",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="Source-specific rejection test adapter",
+    )
+
+    def run(self) -> AdapterRunResult:
+        raw = RawSourceItem(
+            source_id="cap:unreviewed-town",
+            source_url="https://example.test/cap",
+            fetched_at=FETCHED_AT,
+            payload={"admin_code": "67037000", "areaDesc": "安南區"},
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw,),
+            normalized=(),
+            rejected=(raw.source_id,),
+            source_rejections=(
+                SourceRejection(raw.source_id, "cwa_unreviewed_admin_geometry"),
+            ),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
 
 
 class _CompleteReplaceAdapter:

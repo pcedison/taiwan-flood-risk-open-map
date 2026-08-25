@@ -12,6 +12,7 @@ from app.adapters.contracts import (
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    SourceRejection,
 )
 from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.news import SamplePublicWebNewsAdapter
@@ -140,6 +141,37 @@ def test_build_staging_batch_keeps_validation_rejections_separate_from_raw_rejec
     assert batch.rejected[0].validation_status == "rejected"
     assert batch.rejected[0].rejection_reason == "confidence must be between 0.0 and 1.0"
     assert batch.rejected_raw_source_ids == ("missing-summary",)
+
+
+def test_source_rejection_is_audited_without_staging_evidence() -> None:
+    raw = RawSourceItem(
+        source_id="cap:unreviewed-town",
+        source_url="https://example.test/cap",
+        fetched_at=FETCHED_AT,
+        payload={"admin_code": "67037000", "areaDesc": "安南區"},
+    )
+    result = AdapterRunResult(
+        adapter_key="official.cwa.heavy_rain_warning",
+        fetched=(raw,),
+        normalized=(),
+        rejected=(raw.source_id,),
+        source_rejections=(
+            SourceRejection(raw.source_id, "cwa_unreviewed_admin_geometry"),
+        ),
+    )
+
+    batch = build_staging_batch(result)
+
+    assert batch.accepted == ()
+    assert batch.rejected == ()
+    assert batch.rejected_raw_source_ids == (raw.source_id,)
+    assert batch.raw_snapshot.metadata["source_rejections"] == [
+        {
+            "source_id": "cap:unreviewed-town",
+            "reason_code": "cwa_unreviewed_admin_geometry",
+        }
+    ]
+    assert batch.raw_snapshot.metadata["source_rejection_count"] == 1
 
 
 def test_build_staging_batch_uses_source_timestamp_as_observed_at() -> None:

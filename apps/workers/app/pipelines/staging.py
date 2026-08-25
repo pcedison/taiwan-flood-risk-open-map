@@ -327,6 +327,11 @@ def build_raw_snapshot(
         "items_fetched": len(result.fetched),
         "items_normalized": len(result.normalized),
         "items_rejected": len(result.rejected),
+        "source_rejection_count": len(result.source_rejections),
+        "source_rejections": [
+            {"source_id": rejection.source_id, "reason_code": rejection.reason_code}
+            for rejection in sorted(result.source_rejections, key=lambda rejection: rejection.source_id)
+        ],
         "retention_source_family": source_family.value,
     }
     if snapshot_generation_mode is not None:
