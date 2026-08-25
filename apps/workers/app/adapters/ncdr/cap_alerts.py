@@ -265,18 +265,20 @@ class NcdrCapAlertAdapter:
                 }
                 if dump_retry_after_seconds is not None:
                     failure_payload["retry_after_seconds"] = dump_retry_after_seconds
-                fetched.append(
-                    RawSourceItem(
-                        source_id=transport_id,
-                        source_url=self._dump_url,
-                        fetched_at=fetched_at,
-                        payload=failure_payload,
-                        raw_snapshot_key=self._raw_snapshot_key,
-                    )
+                failure_raw = RawSourceItem(
+                    source_id=transport_id,
+                    source_url=self._dump_url,
+                    fetched_at=fetched_at,
+                    payload=failure_payload,
+                    raw_snapshot_key=self._raw_snapshot_key,
                 )
+                _reject_secret_bearing_raw(failure_raw, secret=api_key)
+                fetched.append(failure_raw)
                 rejections.append(SourceRejection(transport_id, "ncdr_dump_fetch_failed"))
                 continue
 
+            for raw, _reason in prepared:
+                _reject_secret_bearing_raw(raw, secret=api_key)
             successful_dump_count += 1
             audited_row_count += row_count
             for raw, reason in prepared:
@@ -538,8 +540,37 @@ def _transport_source_id(cap_id: str) -> str:
     return f"ncdr-transport:{digest}"
 
 
+def _reject_secret_bearing_raw(raw: RawSourceItem, *, secret: str) -> None:
+    raw_fields = (
+        raw.source_id,
+        raw.source_url,
+        raw.raw_snapshot_key,
+        raw.payload,
+    )
+    if any(_contains_exact_secret(value, secret=secret) for value in raw_fields):
+        raise NcdrCapAlertPayloadError(
+            "NCDR CAP raw audit contained [REDACTED] credential material"
+        )
+
+
+def _contains_exact_secret(value: object, *, secret: str) -> bool:
+    if isinstance(value, str):
+        return secret in value
+    if isinstance(value, Mapping):
+        return any(
+            _contains_exact_secret(key, secret=secret)
+            or _contains_exact_secret(item, secret=secret)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_contains_exact_secret(item, secret=secret) for item in value)
+    return False
+
+
 def _public_url(url: str) -> str:
     parts = urlsplit(url.strip())
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("NCDR endpoint URL must not contain userinfo")
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
