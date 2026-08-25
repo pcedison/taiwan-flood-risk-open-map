@@ -1,6 +1,6 @@
 # Core Task 10 implementation report
 
-Date: 2026-08-25 (Asia/Taipei)
+Date: 2026-08-26 (Asia/Taipei)
 
 ## Scope
 
@@ -26,7 +26,9 @@ the frozen generic runtime or persisted-only API boundary.
   foreign, sibling, or partially valid geometry is rejected as one Placemark.
 - Bound metadata and KML response bytes, XML depth/elements/Placemark count,
   coordinates per ring and in total, and geometry parts per Placemark before any
-  recursive walk or quadratic topology work.
+  recursive walk or quadratic topology work. A fixed whole-KML topology budget
+  accumulates each Placemark's squared total ring segments before any topology
+  function runs.
 - Preserve valid Point, Polygon, MultiPolygon, and polygon-hole coordinates inside
   bounded Taiwan coordinates. Before staging, a source-local pure-Python topology
   guard rejects zero-area, self-intersecting/self-touching rings; holes outside,
@@ -113,6 +115,27 @@ The five review findings were implemented as isolated RED/GREEN contracts:
    marker fail-closed behavior, later failed-poll last-known-good visibility, and
    older/newer-overlap marker preservation.
 
+### Independent code-quality fix wave 2
+
+Two reproduced Important findings were fixed in one strict TDD wave:
+
+1. Exact geometry-graph regressions cover direct and nested stray KML `LinearRing`,
+   `coordinates`, boundary, Document, Folder, and Placemark nodes, plus misplaced
+   Polygon and MultiGeometry descendants. A mixed fixture retains one valid Point
+   while requiring the malformed Placemark to become one deterministic bounded
+   `invalid_geometry:<sha256>` rejection. Together with the missing topology-budget
+   contract these tests first produced `15 failed, 1 passed`; the minimal graph and
+   budget implementation then produced `16 passed`.
+2. The whole-artifact topology-work contract uses the conservative sum of
+   `(all ring segments in a Placemark)^2`. A monkeypatched two-Polygon fixture has
+   `16 + 16` work: budget `31` rejects the entire KML before monkeypatched topology
+   functions can run, while budget `32` remains valid. The live artifact measured
+   maximum `1,123,600` and cumulative `3,458,657`; the fixed `10,000,000` cap leaves
+   about 2.8x cumulative headroom.
+
+After GREEN, the complete Task 10 adapter contract was `83 passed` and the read-only
+live compatibility sequence remained unchanged.
+
 ## Verification evidence
 
 Latest verification commands and results are recorded before the fix commit:
@@ -147,6 +170,8 @@ The stages and rejection classes are intentionally kept distinct:
   `105-09-27` midnight)
 - complete-replace activation eligibility: `true`; the valid fraction is
   `1075 / (1075 + 157)`, above the reviewed `0.75` floor.
+- conservative topology work: maximum `1,123,600`, cumulative `3,458,657`, below
+  the fixed `10,000,000` whole-KML budget.
 
 The earlier pre-topology diagnostic (`1232 fetched / 1083 normalized / 149 timestamp
 rejected`) counted all parseable-coordinate Placemarks. Seven topology rejections
@@ -187,10 +212,10 @@ intentionally not assigned the metadata revision or retrieval time.
 
 ## Final verification
 
-- Task 10/staging/ingestion/runtime/promotion affected suite: `260 passed`.
-- Full Worker without optional database acceptance: `777 passed, 59 skipped`.
-- Full Worker with local PostgreSQL acceptance enabled: `836 passed`, including the
-  new atomic marker and older/newer-overlap last-known-good regression.
+- Task 10 adapter contract: `83 passed`.
+- Full Worker without optional database acceptance: `793 passed, 59 skipped`.
+- Full Worker with local PostgreSQL acceptance enabled: `852 passed`, including the
+  atomic marker and older/newer-overlap last-known-good regressions.
 - API evidence unit and optional-DB collection without a configured database:
   `42 passed, 15 skipped`; full API: `668 passed, 15 skipped`.
 - New API PostgreSQL A-to-B visibility/last-known-good integration: `1 passed`.
@@ -203,7 +228,6 @@ intentionally not assigned the metadata revision or retrieval time.
   modified opportunistically.
 - Worker mypy: `Success: no issues found in 107 source files`.
 - API mypy: `Success: no issues found in 68 source files`.
-- Scoped API Ruff: `All checks passed!`; Worker Ruff exposed only a test annotation
-  (`_FakeResponse.__enter__`) and it was corrected to `Self` before final diff check.
+- Scoped Worker Ruff with the CI-pinned `ruff 0.15.20`: `All checks passed!`.
 - OpenAPI and contract behavior remained covered by the full API/Worker suites; this
   wave changes no schema or frozen public entry point.

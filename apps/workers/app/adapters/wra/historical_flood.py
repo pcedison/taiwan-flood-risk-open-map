@@ -54,6 +54,10 @@ MAX_WRA_HISTORICAL_PLACEMARKS = 10_000
 MAX_WRA_HISTORICAL_COORDINATES_PER_RING = 2_048
 MAX_WRA_HISTORICAL_TOTAL_COORDINATES = 250_000
 MAX_WRA_HISTORICAL_GEOMETRY_PARTS = 256
+# The 2026-08-26 official artifact measured 1,123,600 maximum and
+# 3,458,657 cumulative conservative topology-work units.  Ten million leaves
+# about 2.8x whole-artifact headroom while bounding all later O(n^2) checks.
+MAX_WRA_HISTORICAL_TOPOLOGY_WORK = 10_000_000
 WRA_LOCAL_TZ = timezone(timedelta(hours=8))
 
 _TAIWAN_LONGITUDE_BOUNDS = (117.0, 123.5)
@@ -77,6 +81,41 @@ _KML_SIMPLE_DATA = f"{{{_KML_22_NAMESPACE}}}SimpleData"
 _KML_VALUE = f"{{{_KML_22_NAMESPACE}}}value"
 _KML_CONTAINER_TAGS = {_KML_DOCUMENT, _KML_FOLDER}
 _KML_SUPPORTED_GEOMETRY_TAGS = {_KML_POINT, _KML_POLYGON, _KML_MULTI_GEOMETRY}
+_KML_STRUCTURAL_TAGS = {
+    _KML_22_ROOT,
+    _KML_DOCUMENT,
+    _KML_FOLDER,
+    _KML_PLACEMARK,
+    _KML_POINT,
+    _KML_POLYGON,
+    _KML_MULTI_GEOMETRY,
+    _KML_OUTER_BOUNDARY,
+    _KML_INNER_BOUNDARY,
+    _KML_LINEAR_RING,
+    _KML_COORDINATES,
+}
+_KML_STRUCTURAL_LOCAL_NAMES = {
+    "kml",
+    "Document",
+    "Folder",
+    "Placemark",
+    "Point",
+    "Polygon",
+    "MultiGeometry",
+    "outerBoundaryIs",
+    "innerBoundaryIs",
+    "LinearRing",
+    "coordinates",
+}
+_KML_ALLOWED_STRUCTURAL_PARENTS = {
+    _KML_POINT: {_KML_PLACEMARK},
+    _KML_POLYGON: {_KML_PLACEMARK, _KML_MULTI_GEOMETRY},
+    _KML_MULTI_GEOMETRY: {_KML_PLACEMARK},
+    _KML_OUTER_BOUNDARY: {_KML_POLYGON},
+    _KML_INNER_BOUNDARY: {_KML_POLYGON},
+    _KML_LINEAR_RING: {_KML_OUTER_BOUNDARY, _KML_INNER_BOUNDARY},
+    _KML_COORDINATES: {_KML_POINT, _KML_LINEAR_RING},
+}
 _GEOMETRY_LOCAL_NAMES = {
     "LineString",
     "LinearRing",
@@ -421,6 +460,8 @@ def _validate_kml_complexity(root: Element) -> None:
     placemark_count = 0
     total_coordinate_count = 0
     geometry_parts_by_placemark: dict[int, int] = {}
+    topology_segments_by_placemark: dict[int, int] = {}
+    total_topology_work = 0
     stack: list[tuple[Element, int, str | None, int | None]] = [
         (root, 1, None, None)
     ]
@@ -447,6 +488,7 @@ def _validate_kml_complexity(root: Element) -> None:
                 )
             placemark_identity = id(element)
             geometry_parts_by_placemark[placemark_identity] = 0
+            topology_segments_by_placemark[placemark_identity] = 0
 
         if element.tag in {_KML_POLYGON, _KML_LINEAR_RING} and (
             placemark_identity is not None
@@ -475,6 +517,19 @@ def _validate_kml_complexity(root: Element) -> None:
                     "WRA historical KML exceeds the total coordinate safety limit "
                     f"{MAX_WRA_HISTORICAL_TOTAL_COORDINATES}"
                 )
+            if parent_tag == _KML_LINEAR_RING and placemark_identity is not None:
+                previous_segments = topology_segments_by_placemark[placemark_identity]
+                next_segments = previous_segments + max(0, coordinate_count - 1)
+                total_topology_work += (
+                    next_segments * next_segments
+                    - previous_segments * previous_segments
+                )
+                if total_topology_work > MAX_WRA_HISTORICAL_TOPOLOGY_WORK:
+                    raise WraHistoricalFloodPayloadError(
+                        "WRA historical KML exceeds the topology work safety limit "
+                        f"{MAX_WRA_HISTORICAL_TOPOLOGY_WORK}"
+                    )
+                topology_segments_by_placemark[placemark_identity] = next_segments
 
         stack.extend(
             (child, depth + 1, element.tag, placemark_identity)
@@ -629,7 +684,10 @@ def _event_timestamp(value: str | None) -> datetime | None:
 
 
 def _placemark_geometry(placemark: Element) -> dict[str, Any] | None:
-    if _contains_foreign_or_unsupported_geometry(placemark):
+    if (
+        not _valid_placemark_geometry_graph(placemark)
+        or _contains_foreign_or_unsupported_geometry(placemark)
+    ):
         return None
     direct_geometries = [
         child for child in placemark if child.tag in _KML_SUPPORTED_GEOMETRY_TAGS
@@ -673,6 +731,30 @@ def _placemark_geometry(placemark: Element) -> dict[str, Any] | None:
     if not _valid_multipolygon_topology(valid_polygons):
         return None
     return {"type": "MultiPolygon", "coordinates": valid_polygons}
+
+
+def _valid_placemark_geometry_graph(placemark: Element) -> bool:
+    stack = [(child, placemark.tag) for child in reversed(placemark)]
+    while stack:
+        element, parent_tag = stack.pop()
+        local_name = _local_name(element.tag)
+        if (
+            local_name in _KML_STRUCTURAL_LOCAL_NAMES
+            and element.tag not in _KML_STRUCTURAL_TAGS
+        ):
+            return False
+        if element.tag in {
+            _KML_22_ROOT,
+            _KML_DOCUMENT,
+            _KML_FOLDER,
+            _KML_PLACEMARK,
+        }:
+            return False
+        allowed_parents = _KML_ALLOWED_STRUCTURAL_PARENTS.get(element.tag)
+        if allowed_parents is not None and parent_tag not in allowed_parents:
+            return False
+        stack.extend((child, element.tag) for child in reversed(element))
+    return True
 
 
 def _contains_foreign_or_unsupported_geometry(placemark: Element) -> bool:

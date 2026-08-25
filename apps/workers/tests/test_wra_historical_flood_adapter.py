@@ -116,6 +116,36 @@ def _polygon_kml(
     )
 
 
+def _kml_with_valid_and_invalid_placemark(invalid_content: str) -> str:
+    return f"""\
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+      <Document><name>2020-08-01</name>
+        <Placemark id="valid"><name>valid point</name>
+          <Point><coordinates>120,23</coordinates></Point>
+        </Placemark>
+        <Placemark id="invalid"><name>invalid graph</name>
+          {invalid_content}
+        </Placemark>
+      </Document>
+    </kml>
+    """
+
+
+def _two_polygon_topology_budget_kml() -> str:
+    return """\
+    <kml xmlns="http://www.opengis.net/kml/2.2">
+      <Document><name>2020-08-01</name>
+        <Placemark><name>first</name><Polygon><outerBoundaryIs><LinearRing>
+          <coordinates>120,23 120.01,23 120.01,23.01 120,23.01 120,23</coordinates>
+        </LinearRing></outerBoundaryIs></Polygon></Placemark>
+        <Placemark><name>second</name><Polygon><outerBoundaryIs><LinearRing>
+          <coordinates>120.02,23 120.03,23 120.03,23.01 120.02,23.01 120.02,23</coordinates>
+        </LinearRing></outerBoundaryIs></Polygon></Placemark>
+      </Document>
+    </kml>
+    """
+
+
 def test_fetch_resolves_metadata_then_reads_kml() -> None:
     requested_urls: list[tuple[str, int]] = []
 
@@ -559,6 +589,7 @@ def test_safety_limits_have_live_source_headroom() -> None:
     assert historical_flood_module.MAX_WRA_HISTORICAL_COORDINATES_PER_RING == 2_048
     assert historical_flood_module.MAX_WRA_HISTORICAL_TOTAL_COORDINATES == 250_000
     assert historical_flood_module.MAX_WRA_HISTORICAL_GEOMETRY_PARTS == 256
+    assert historical_flood_module.MAX_WRA_HISTORICAL_TOPOLOGY_WORK == 10_000_000
 
 
 def test_direct_parser_rejects_kml_limit_plus_one_bytes(
@@ -682,6 +713,57 @@ def test_parser_rejects_geometry_parts_limit_plus_one(
         historical_flood_module.parse_wra_historical_flood_kml(kml)
 
 
+def test_parser_rejects_cumulative_topology_work_before_topology_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden_topology(*_args: object, **_kwargs: object) -> bool:
+        raise AssertionError("topology validation must not run above the work budget")
+
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_TOPOLOGY_WORK",
+        31,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "_valid_linear_ring",
+        forbidden_topology,
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "_valid_polygon_topology",
+        forbidden_topology,
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "_valid_multipolygon_topology",
+        forbidden_topology,
+    )
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="topology work.*31"):
+        historical_flood_module.parse_wra_historical_flood_kml(
+            _two_polygon_topology_budget_kml()
+        )
+
+
+def test_parser_accepts_payload_at_cumulative_topology_work_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_TOPOLOGY_WORK",
+        32,
+        raising=False,
+    )
+
+    assert len(
+        historical_flood_module.parse_wra_historical_flood_kml(
+            _two_polygon_topology_budget_kml()
+        )
+    ) == 2
+
+
 def test_parser_accepts_an_economical_at_limit_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -756,6 +838,132 @@ def test_fetch_rejects_sibling_nested_foreign_or_mixed_geometry_hierarchy(
 
     with pytest.raises(WraHistoricalFloodPayloadError, match="valid Placemark"):
         _adapter(kml=kml).fetch()
+
+
+@pytest.mark.parametrize(
+    "invalid_content",
+    (
+        pytest.param(
+            """
+            <Point><coordinates>120,23</coordinates></Point>
+            <LinearRing><coordinates>
+              120,23 120.01,23 120.01,23.01 120,23
+            </coordinates></LinearRing>
+            """,
+            id="direct-stray-ring",
+        ),
+        pytest.param(
+            """
+            <Point><coordinates>120,23</coordinates></Point>
+            <ExtendedData><LinearRing><coordinates>
+              120,23 120.01,23 120.01,23.01 120,23
+            </coordinates></LinearRing></ExtendedData>
+            """,
+            id="nested-stray-ring",
+        ),
+        pytest.param(
+            "<Point><coordinates>120,23</coordinates></Point><coordinates>120.1,23.1</coordinates>",
+            id="direct-stray-coordinates",
+        ),
+        pytest.param(
+            """
+            <Point><coordinates>120,23</coordinates></Point>
+            <ExtendedData><coordinates>120.1,23.1</coordinates></ExtendedData>
+            """,
+            id="nested-stray-coordinates",
+        ),
+        pytest.param(
+            """
+            <Point><coordinates>120,23</coordinates></Point>
+            <outerBoundaryIs><LinearRing><coordinates>
+              120,23 120.01,23 120.01,23.01 120,23
+            </coordinates></LinearRing></outerBoundaryIs>
+            """,
+            id="direct-stray-boundary",
+        ),
+        pytest.param(
+            """
+            <Point><coordinates>120,23</coordinates></Point>
+            <ExtendedData><innerBoundaryIs><LinearRing><coordinates>
+              120,23 120.01,23 120.01,23.01 120,23
+            </coordinates></LinearRing></innerBoundaryIs></ExtendedData>
+            """,
+            id="nested-stray-boundary",
+        ),
+        pytest.param(
+            "<Point><coordinates>120,23</coordinates></Point><Document><name>stray</name></Document>",
+            id="nested-document",
+        ),
+        pytest.param(
+            "<Point><coordinates>120,23</coordinates></Point><Folder><name>stray</name></Folder>",
+            id="nested-folder",
+        ),
+        pytest.param(
+            "<Point><coordinates>120,23</coordinates></Point><Placemark><name>stray</name></Placemark>",
+            id="nested-placemark",
+        ),
+        pytest.param(
+            """
+            <Polygon><outerBoundaryIs><LinearRing><coordinates>
+              120,23 120.1,23 120.1,23.1 120,23.1 120,23
+            </coordinates></LinearRing></outerBoundaryIs>
+            <ExtendedData><innerBoundaryIs><LinearRing><coordinates>
+              120.01,23.01 120.02,23.01 120.02,23.02 120.01,23.01
+            </coordinates></LinearRing></innerBoundaryIs></ExtendedData>
+            </Polygon>
+            """,
+            id="polygon-nested-boundary",
+        ),
+        pytest.param(
+            """
+            <Polygon><outerBoundaryIs><LinearRing><coordinates>
+              120,23 120.1,23 120.1,23.1 120,23.1 120,23
+            </coordinates></LinearRing></outerBoundaryIs>
+            <LinearRing><coordinates>
+              120.01,23.01 120.02,23.01 120.02,23.02 120.01,23.01
+            </coordinates></LinearRing>
+            </Polygon>
+            """,
+            id="polygon-direct-stray-ring",
+        ),
+        pytest.param(
+            """
+            <MultiGeometry>
+              <Polygon><outerBoundaryIs><LinearRing><coordinates>
+                120,23 120.1,23 120.1,23.1 120,23.1 120,23
+              </coordinates></LinearRing></outerBoundaryIs></Polygon>
+              <LinearRing><coordinates>
+                120.01,23.01 120.02,23.01 120.02,23.02 120.01,23.01
+              </coordinates></LinearRing>
+            </MultiGeometry>
+            """,
+            id="multigeometry-direct-stray-ring",
+        ),
+        pytest.param(
+            """
+            <MultiGeometry>
+              <Polygon><outerBoundaryIs><LinearRing><coordinates>
+                120,23 120.1,23 120.1,23.1 120,23.1 120,23
+              </coordinates></LinearRing></outerBoundaryIs></Polygon>
+              <ExtendedData><coordinates>120.1,23.1</coordinates></ExtendedData>
+            </MultiGeometry>
+            """,
+            id="multigeometry-nested-stray-coordinates",
+        ),
+    ),
+)
+def test_run_rejects_misplaced_exact_kml_structural_graph(
+    invalid_content: str,
+) -> None:
+    result = _adapter(
+        kml=_kml_with_valid_and_invalid_placemark(invalid_content)
+    ).run()
+
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+    assert len(result.rejected) == 1
+    assert result.rejected[0].startswith("invalid_geometry:")
+    assert len(result.rejected[0]) == len("invalid_geometry:") + 64
 
 
 def test_parser_ignores_foreign_namespace_structural_placemarks() -> None:
