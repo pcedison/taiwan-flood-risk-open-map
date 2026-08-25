@@ -1,5 +1,26 @@
 """WRA adapters."""
 
+from app.adapters.wra.historical_flood import (
+    DEFAULT_WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS,
+    WRA_HISTORICAL_FLOOD_ATTRIBUTION,
+    WRA_HISTORICAL_FLOOD_DATA_GOV_DATASET_ID,
+    WRA_HISTORICAL_FLOOD_DATA_GOV_URL,
+    WRA_HISTORICAL_FLOOD_INDEX_URL,
+    WRA_HISTORICAL_FLOOD_METADATA,
+    WraHistoricalFloodAdapter,
+    WraHistoricalFloodAdapterError,
+    WraHistoricalFloodFetchError,
+    WraHistoricalFloodPayloadError,
+    fetch_wra_historical_json,
+    fetch_wra_historical_text,
+    parse_wra_historical_flood_kml,
+)
+from app.adapters.wra.historical_flood import (
+    FetchJson as HistoricalFetchJson,
+)
+from app.adapters.wra.historical_flood import (
+    FetchText as HistoricalFetchText,
+)
 from app.adapters.wra.water_level import (
     DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS,
     WRA_WATER_LEVEL_API_URL,
@@ -18,18 +39,33 @@ from app.adapters.wra.water_level import (
 )
 
 __all__ = [
+    "DEFAULT_WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS",
     "DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS",
+    "WRA_HISTORICAL_FLOOD_ATTRIBUTION",
+    "WRA_HISTORICAL_FLOOD_DATA_GOV_DATASET_ID",
+    "WRA_HISTORICAL_FLOOD_DATA_GOV_URL",
+    "WRA_HISTORICAL_FLOOD_INDEX_URL",
+    "WRA_HISTORICAL_FLOOD_METADATA",
     "WRA_WATER_LEVEL_API_URL",
     "WRA_WATER_LEVEL_DATA_GOV_DATASET_ID",
     "WRA_WATER_LEVEL_DATA_GOV_URL",
     "WRA_WATER_LEVEL_METADATA",
     "WRA_WATER_STATION_API_URL",
     "FetchJson",
+    "HistoricalFetchJson",
+    "HistoricalFetchText",
+    "WraHistoricalFloodAdapter",
+    "WraHistoricalFloodAdapterError",
+    "WraHistoricalFloodFetchError",
+    "WraHistoricalFloodPayloadError",
     "WraWaterLevelAdapter",
     "WraWaterLevelAdapterError",
     "WraWaterLevelApiAdapter",
     "WraWaterLevelFetchError",
     "WraWaterLevelPayloadError",
+    "fetch_wra_historical_json",
+    "fetch_wra_historical_text",
+    "parse_wra_historical_flood_kml",
     "parse_wra_station_metadata_payload",
     "parse_wra_water_level_api_payload",
 ]

@@ -72,6 +72,23 @@ sources:
     limitations:
       - "Latest values are raw IoW telemetry and may be affected by sensor or transmission faults."
       - "Rows without joined station coordinates are rejected from normalization."
+  - key: official.wra.historical_flood
+    need: observed_historical_flood_footprints
+    status: disabled_by_default
+    data_gov_dataset_id: "25770"
+    data_gov_url: "https://data.gov.tw/dataset/25770"
+    title: "Historical flood data"
+    provider: "Water Resources Agency"
+    resource_url: "https://opendata.wra.gov.tw/api/v2/72d7aee9-e29b-49a2-bd0b-54acc8e3b75c?format=JSON&sort=_importdate+asc"
+    resource_format: "JSON metadata index resolving to KML"
+    update_frequency: "irregular historical publication"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Resolve the reviewed metadata row to its approved WRA KML and ingest only source-dated historical Point/Polygon/MultiPolygon evidence."
+    limitations:
+      - "Historical footprint only; it is not a realtime flood observation or warning."
+      - "The source event time is taken only from a parseable KML event label or field."
+      - "KML points and polygons describe source-provided historical locations and extents."
+      - "The catalog landing page is retained as a historical dataset and may be withdrawn."
   - key: official.flood_potential.geojson
     need: planning_flood_potential
     status: primary_reference

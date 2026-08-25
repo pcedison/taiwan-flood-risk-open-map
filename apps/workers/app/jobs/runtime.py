@@ -95,7 +95,12 @@ from app.adapters.ncdr import FetchText as NcdrFetchText
 from app.adapters.ncdr import NcdrCapAlertAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.adapters.wra import FetchJson as WraFetchJson
-from app.adapters.wra import WraWaterLevelApiAdapter
+from app.adapters.wra import (
+    HistoricalFetchJson as WraHistoricalFetchJson,
+    HistoricalFetchText as WraHistoricalFetchText,
+    WraHistoricalFloodAdapter,
+    WraWaterLevelApiAdapter,
+)
 from app.adapters.wra_iow import FetchJson as WraIowFetchJson
 from app.adapters.wra_iow import WraIowFloodDepthApiAdapter
 from app.config import WorkerSettings, load_worker_settings
@@ -197,6 +202,8 @@ def build_runtime_adapters(
     cwa_tide_fetch_json: TideFetchJson | None = None,
     cwa_tide_station_fetch_json: TideFetchJson | None = None,
     wra_fetch_json: WraFetchJson | None = None,
+    wra_historical_flood_fetch_json: WraHistoricalFetchJson | None = None,
+    wra_historical_flood_fetch_text: WraHistoricalFetchText | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
@@ -299,6 +306,19 @@ def build_runtime_adapters(
             fetch_json=wra_fetch_json,
         )
         live_adapters[wra_adapter.metadata.key] = wra_adapter
+
+    if (
+        settings.source_wra_historical_flood_api_enabled
+        and "official.wra.historical_flood" in enabled_keys
+    ):
+        historical_flood_adapter = WraHistoricalFloodAdapter(
+            index_url=settings.wra_historical_flood_index_url,
+            timeout_seconds=settings.wra_historical_flood_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=wra_historical_flood_fetch_json,
+            fetch_text=wra_historical_flood_fetch_text,
+        )
+        live_adapters[historical_flood_adapter.metadata.key] = historical_flood_adapter
 
     if (
         settings.source_wra_iow_flood_depth_api_enabled
@@ -820,6 +840,9 @@ def build_runtime_adapters(
             enabled_adapter_keys=enabled_keys,
             cwa_api_enabled=settings.source_cwa_api_enabled,
             wra_api_enabled=settings.source_wra_api_enabled,
+            wra_historical_flood_api_enabled=(
+                settings.source_wra_historical_flood_api_enabled
+            ),
             ncdr_cap_api_enabled=settings.source_ncdr_cap_api_enabled,
             flood_potential_geojson_enabled=settings.source_flood_potential_geojson_enabled,
             flood_sensor_api_enabled=settings.source_flood_sensor_api_enabled,

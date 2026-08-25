@@ -65,6 +65,7 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
 
     assert settings.source_cwa_api_enabled is False
     assert settings.source_wra_api_enabled is False
+    assert settings.source_wra_historical_flood_api_enabled is False
     assert settings.source_flood_potential_geojson_enabled is False
     assert settings.source_ptt_candidate_approval_ack is False
     assert settings.source_dcard_candidate_approval_ack is False
@@ -74,6 +75,8 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.wra_api_url is None
     assert settings.wra_api_token is None
     assert settings.wra_api_timeout_seconds == 8
+    assert settings.wra_historical_flood_index_url is None
+    assert settings.wra_historical_flood_timeout_seconds == 8
     assert settings.flood_potential_geojson_url is None
     assert settings.flood_potential_geojson_timeout_seconds == 8
 
@@ -108,6 +111,27 @@ def test_wra_api_runtime_client_config_reads_env() -> None:
     assert settings.wra_api_url == "https://example.test/wra/water-level"
     assert settings.wra_api_token == "optional-token"
     assert settings.wra_api_timeout_seconds == 6
+
+
+def test_wra_historical_flood_config_is_independent_from_water_level() -> None:
+    settings = load_worker_settings(
+        {
+            "SOURCE_WRA_ENABLED": "true",
+            "SOURCE_WRA_API_ENABLED": "true",
+            "SOURCE_WRA_HISTORICAL_FLOOD_ENABLED": "false",
+            "SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED": "true",
+            "WRA_HISTORICAL_FLOOD_INDEX_URL": "https://example.test/history-index",
+            "WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS": "7",
+        }
+    )
+
+    assert settings.source_wra_historical_flood_enabled is False
+    assert settings.source_wra_historical_flood_api_enabled is True
+    assert settings.wra_historical_flood_index_url == (
+        "https://example.test/history-index"
+    )
+    assert settings.wra_historical_flood_timeout_seconds == 7
+    assert "official.wra.historical_flood" not in enabled_adapter_keys(settings)
 
 
 def test_flood_potential_geojson_runtime_client_config_reads_env() -> None:

@@ -57,7 +57,7 @@ from app.adapters.local_taoyuan import (
 from app.adapters.local_tainan import TAINAN_FLOOD_SENSOR_METADATA
 from app.adapters.ncdr import NCDR_CAP_METADATA
 from app.adapters.ptt import METADATA as PTT_METADATA
-from app.adapters.wra import WRA_WATER_LEVEL_METADATA
+from app.adapters.wra import WRA_HISTORICAL_FLOOD_METADATA, WRA_WATER_LEVEL_METADATA
 from app.adapters.wra_iow import WRA_IOW_FLOOD_DEPTH_METADATA
 from app.adapters.local_yunlin import YUNLIN_WATER_LEVEL_METADATA
 from app.adapters.local_yilan import (
@@ -86,6 +86,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         CWA_RAINFALL_METADATA.key: CWA_RAINFALL_METADATA,
         CWA_TIDE_LEVEL_METADATA.key: CWA_TIDE_LEVEL_METADATA,
         WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
+        WRA_HISTORICAL_FLOOD_METADATA.key: WRA_HISTORICAL_FLOOD_METADATA,
         WRA_IOW_FLOOD_DEPTH_METADATA.key: WRA_IOW_FLOOD_DEPTH_METADATA,
         NCDR_CAP_METADATA.key: NCDR_CAP_METADATA,
         FLOOD_SENSOR_METADATA.key: FLOOD_SENSOR_METADATA,
@@ -166,6 +167,11 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return _with_optional_override(metadata.enabled_by_default, settings.source_cwa_enabled)
     if metadata.key == "official.wra.water_level":
         return _with_optional_override(metadata.enabled_by_default, settings.source_wra_enabled)
+    if metadata.key == "official.wra.historical_flood":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_wra_historical_flood_enabled,
+        )
     if metadata.key == "official.wra_iow.flood_depth":
         return _with_optional_override(
             metadata.enabled_by_default,
@@ -420,6 +426,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_cwa_enabled is not False
     if metadata.key == "official.wra.water_level":
         return settings.source_wra_enabled is not False
+    if metadata.key == "official.wra.historical_flood":
+        return settings.source_wra_historical_flood_enabled is True
     if metadata.key == "official.wra_iow.flood_depth":
         return settings.source_wra_iow_flood_depth_enabled is True
     if metadata.key == "official.ncdr.cap":

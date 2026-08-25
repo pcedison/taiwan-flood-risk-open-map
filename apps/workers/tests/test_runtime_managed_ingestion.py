@@ -697,6 +697,9 @@ def _run_task9_managed(adapter: Any):
         load_worker_settings({}),
         enabled_adapter_keys=(key,),
         source_ncdr_cap_enabled=True,
+        source_wra_historical_flood_enabled=(
+            True if key == "official.wra.historical_flood" else None
+        ),
         freshness_max_age_seconds=24 * 60 * 60,
     )
     return run_v1_baseline_adapter_cycle(

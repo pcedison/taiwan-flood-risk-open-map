@@ -16,6 +16,8 @@ class WorkerSettings:
     source_cwa_api_enabled: bool
     source_wra_enabled: bool | None
     source_wra_api_enabled: bool
+    source_wra_historical_flood_enabled: bool | None
+    source_wra_historical_flood_api_enabled: bool
     source_wra_iow_flood_depth_enabled: bool | None
     source_wra_iow_flood_depth_api_enabled: bool
     source_ncdr_cap_enabled: bool | None
@@ -132,6 +134,8 @@ class WorkerSettings:
     wra_station_api_url: str | None
     wra_api_token: str | None
     wra_api_timeout_seconds: int
+    wra_historical_flood_index_url: str | None
+    wra_historical_flood_timeout_seconds: int
     wra_iow_flood_depth_api_url: str | None
     wra_iow_flood_sensor_metadata_api_url: str | None
     wra_iow_flood_depth_timeout_seconds: int
@@ -203,6 +207,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_cwa_api_enabled=env_flag(values, "SOURCE_CWA_API_ENABLED"),
         source_wra_enabled=env_bool(values, "SOURCE_WRA_ENABLED"),
         source_wra_api_enabled=env_flag(values, "SOURCE_WRA_API_ENABLED"),
+        source_wra_historical_flood_enabled=env_bool(
+            values,
+            "SOURCE_WRA_HISTORICAL_FLOOD_ENABLED",
+        ),
+        source_wra_historical_flood_api_enabled=env_flag(
+            values,
+            "SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED",
+        ),
         source_wra_iow_flood_depth_enabled=env_bool(
             values,
             "SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED",
@@ -581,6 +593,15 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         wra_station_api_url=env_str(values, "WRA_STATION_API_URL"),
         wra_api_token=env_str(values, "WRA_API_TOKEN"),
         wra_api_timeout_seconds=env_int(values, "WRA_API_TIMEOUT_SECONDS", default=8),
+        wra_historical_flood_index_url=env_str(
+            values,
+            "WRA_HISTORICAL_FLOOD_INDEX_URL",
+        ),
+        wra_historical_flood_timeout_seconds=env_int(
+            values,
+            "WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS",
+            default=8,
+        ),
         wra_iow_flood_depth_api_url=env_str(values, "WRA_IOW_FLOOD_DEPTH_API_URL"),
         wra_iow_flood_sensor_metadata_api_url=env_str(
             values,

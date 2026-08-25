@@ -27,6 +27,12 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
     assert sources["official.cwa.tide_level"]["data_gov_dataset_id"] == "O-B0075-001"
     assert sources["official.wra.water_level"]["data_gov_dataset_id"] == "25768"
     assert sources["official.wra_iow.flood_depth"]["data_gov_dataset_id"] == "142980"
+    assert sources["official.wra.historical_flood"]["data_gov_dataset_id"] == "25770"
+    assert sources["official.wra.historical_flood"]["resource_url"] == (
+        "https://opendata.wra.gov.tw/api/v2/"
+        "72d7aee9-e29b-49a2-bd0b-54acc8e3b75c?format=JSON&sort=_importdate+asc"
+    )
+    assert sources["official.wra.historical_flood"]["status"] == "disabled_by_default"
     assert sources["official.flood_potential.geojson"]["data_gov_dataset_id"] == "25766"
     assert sources["official.wra.flood_warning"]["status"] == "phase4_candidate"
     assert sources["geocoder.moi.village_boundary"]["data_gov_url"].startswith(
@@ -51,6 +57,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
         "official.cwa.tide_level",
         "official.wra.water_level",
         "official.wra_iow.flood_depth",
+        "official.wra.historical_flood",
         "official.flood_potential.geojson",
     ):
         metadata = ADAPTER_REGISTRY[adapter_key]
