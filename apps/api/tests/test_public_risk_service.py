@@ -12,6 +12,7 @@ from app.api.schemas import (
     Explanation,
     LatLng,
     NearbyRealtimeCoverage,
+    NearbySourceHealth,
     QueryHeat,
     RiskAssessRequest,
     RiskAssessmentResponse,
@@ -421,7 +422,7 @@ def test_assess_risk_repairs_empty_repository_coverage_with_realtime_observation
     assert rainfall.degraded_count == 1
 
 
-def test_bridge_fallback_preserves_existing_repository_observations() -> None:
+def test_bridge_fallback_preserves_usable_repository_observations() -> None:
     request = _risk_request()
     created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
     repository_coverage = public_risk.build_nearby_realtime_coverage(
@@ -431,10 +432,10 @@ def test_bridge_fallback_preserves_existing_repository_observations() -> None:
                 source_id="tainan-flood-sensor:station-1",
                 event_type="flood_report",
                 station_id="station-1",
-                observed_at=created_at - timedelta(hours=4),
-                ingested_at=created_at - timedelta(hours=4),
+                observed_at=created_at - timedelta(minutes=4),
+                ingested_at=created_at - timedelta(minutes=4),
                 distance_to_query_m=900.0,
-                freshness_state="stale",
+                freshness_state="fresh",
             ),
         ),
         query_radius_m=request.radius_m,
@@ -457,7 +458,69 @@ def test_bridge_fallback_preserves_existing_repository_observations() -> None:
         item for item in repaired.signal_breakdown if item.signal_type == "flood_depth"
     )
     assert flood_depth.nearest_source_id == "tainan-flood-sensor:station-1"
-    assert flood_depth.availability_state == "stale_observation"
+    assert flood_depth.availability_state == "fresh_nearby"
+
+
+def test_bridge_fallback_replaces_stale_only_repository_coverage() -> None:
+    request = _risk_request()
+    created_at = datetime.fromisoformat("2026-06-09T03:00:00+00:00")
+    repository_coverage = public_risk.build_nearby_realtime_coverage(
+        rows=(
+            NearbyCoverageRow(
+                adapter_key="local.tainan.flood_sensor",
+                source_id="tainan-flood-sensor:station-1",
+                event_type="flood_report",
+                station_id="station-1",
+                observed_at=created_at - timedelta(hours=4),
+                ingested_at=created_at - timedelta(hours=4),
+                distance_to_query_m=900.0,
+                freshness_state="stale",
+            ),
+        ),
+        query_radius_m=request.radius_m,
+        evaluated_at=created_at,
+        source_health=(
+            NearbySourceHealth(
+                source_id="tainan-flood-sensor",
+                name="臺南市淹水感測",
+                signal_types=["flood_depth"],
+                coverage_scope="local",
+                health_status="failed",
+                reason_code="pipeline_stalled",
+                checked_at=created_at,
+                required_for_absence=True,
+                message="背景更新近期沒有活動。",
+            ),
+        ),
+        source_health_checked=True,
+    )
+    bridge_observation = _official_observation(
+        observed_at=created_at - timedelta(minutes=5),
+        distance_to_query_m=230.0,
+    )
+
+    repaired = public_risk._nearby_realtime_coverage_with_bridge_fallback(
+        repository_coverage,
+        OfficialRealtimeBundle(observations=(bridge_observation,), source_statuses=()),
+        request=request,
+        created_at=created_at,
+    )
+
+    assert repaired != repository_coverage
+    assert repaired.overall_level == "low"
+    assert repaired.source_health == repository_coverage.source_health
+    assert repaired.source_health_checked is True
+    assert repaired.source_health_status == "failed"
+    rainfall = next(
+        item for item in repaired.signal_breakdown if item.signal_type == "rainfall"
+    )
+    assert rainfall.nearest_distance_m == 230.0
+    assert rainfall.fresh_count == 1
+    flood_depth = next(
+        item for item in repaired.signal_breakdown if item.signal_type == "flood_depth"
+    )
+    assert flood_depth.nearest_source_id is None
+    assert flood_depth.stale_count == 0
 
 
 def test_bridge_freshness_uses_inclusive_ten_and_thirty_minute_boundaries() -> None:

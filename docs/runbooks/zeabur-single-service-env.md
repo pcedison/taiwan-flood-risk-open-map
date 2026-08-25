@@ -48,6 +48,7 @@ in `schema_migrations` and can be disabled only with
 | `NEXT_PUBLIC_BASEMAP_ATTRIBUTION` | Reviewed attribution text for the selected basemap |
 | `NEXT_TELEMETRY_DISABLED` | `1` |
 | `REALTIME_OFFICIAL_ENABLED` | `true` when official evidence snapshots are enabled; `false` only for no-secret smoke |
+| `REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED` | `false`; hosted responses must use worker-persisted official evidence, not request-time CWA/WRA fetches |
 | `EVIDENCE_REPOSITORY_ENABLED` | `true` when PostgreSQL is attached and migrated |
 | `HISTORICAL_NEWS_ON_DEMAND_ENABLED` | `false` until source terms are reviewed |
 | `HISTORICAL_NEWS_ON_DEMAND_WRITEBACK_ENABLED` | `false` until database writeback is enabled |
@@ -111,6 +112,43 @@ disable that source.
 | `WRA_STATION_API_URL` | Leave blank unless overriding the WRA station metadata endpoint |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` for a 5-minute beta cadence |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` |
+| `SCHEDULER_MAX_TICKS` | Leave unset; any finite value stops the long-running hosted scheduler after that many cycles |
+
+## Stalled Realtime Pipeline Recovery
+
+Use this sequence when the public response reports `pipeline_stalled`, or when
+the hosted public-risk evidence smoke lists failed required worker sources.
+
+1. Confirm the service topology. A single-service deployment must leave
+   `SERVICE_ROLE` unset (defaults to `all`). If `SERVICE_ROLE=api`, a separate
+   private `SERVICE_ROLE=scheduler` service with exactly one replica must exist.
+2. Confirm `DATABASE_URL` is attached and that `WORKER_DATABASE_URL` is either
+   blank or exactly the same database. Never copy either value into logs or an
+   incident ticket.
+3. Set `REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true`,
+   `REALTIME_BACKBONE_INGESTION_DISABLED=false`, and leave
+   `HOSTED_INGESTION_SCHEDULER_ENABLED` unset or `auto`.
+4. Remove `SCHEDULER_MAX_TICKS`, set `SCHEDULER_INTERVAL_SECONDS=300`, and set
+   `SCHEDULER_LEASE_TTL_SECONDS=600`.
+5. Set `REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false`. A diagnostic
+   request-time observation is useful during an incident but is not proof that
+   the background persistence path recovered.
+6. Confirm the source gates listed above are enabled and that the CWA credential
+   exists without printing its value. Keep public-news enrichment disabled
+   until its separate source/terms review is accepted.
+7. Redeploy and verify the service logs contain both
+   `launching official ingestion scheduler loop (first tick runs immediately)`
+   and repeated `worker.runtime.managed_scheduler.tick_completed` events.
+8. Configure the GitHub repository secret `ADMIN_BEARER_TOKEN` and run Hosted
+   Monitoring. The run must pass both `hosted_source_freshness_smoke.py` and
+   `hosted_public_risk_evidence_smoke.py`; do not accept `/health` alone as
+   recovery evidence.
+
+Expected public behavior after recovery: `nearby_realtime_coverage` contains
+fresh or degraded-but-usable rows, `source_health_checked=true`, and no required
+source reports `pipeline_stalled`. If a fresh diagnostic observation is present
+while background health is still failed, the UI may show the observation as a
+partial clue, but monitoring must remain red.
 
 ## Leave Blank For First Preview
 

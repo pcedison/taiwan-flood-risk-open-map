@@ -522,15 +522,16 @@ def _nearby_realtime_coverage_with_bridge_fallback(
     created_at: datetime,
 ) -> NearbyRealtimeCoverage:
     # The realtime bundle and persisted coverage repository are separate paths.
-    # A healthy bridge observation must repair an empty repository result too;
-    # otherwise the same response can show a live station in evidence while the
-    # coverage panel incorrectly says that no sensor exists.
+    # A healthy bridge observation must repair an empty or stale-only repository
+    # result too; otherwise the same response can show a live station in evidence
+    # while the coverage panel still reports a stalled update pipeline.
     if not realtime_bundle.observations:
         return coverage
-    if coverage.overall_level == "no_local_sensor" and _coverage_has_observations(coverage):
+    if _coverage_has_usable_observations(coverage):
         # The repository also includes local-government and status adapters that
-        # are absent from the central bridge.  Preserve those rows instead of
-        # replacing a sparse/stale/regional result with a narrower source set.
+        # are absent from the central bridge. Preserve them whenever at least one
+        # repository observation remains usable; stale-only rows must not mask
+        # fresher request-time official evidence.
         return coverage
     if coverage.overall_level not in {"unavailable", "no_local_sensor"}:
         return coverage
@@ -561,13 +562,9 @@ def _nearby_realtime_coverage_with_bridge_fallback(
     )
 
 
-def _coverage_has_observations(coverage: NearbyRealtimeCoverage) -> bool:
+def _coverage_has_usable_observations(coverage: NearbyRealtimeCoverage) -> bool:
     return any(
-        signal.nearest_distance_m is not None
-        or signal.fresh_count + signal.degraded_count + signal.stale_count
-        + signal.status_only_count
-        > 0
-        or any(signal.counts_by_radius_m.values())
+        signal.fresh_count + signal.degraded_count > 0
         for signal in coverage.signal_breakdown
     )
 
