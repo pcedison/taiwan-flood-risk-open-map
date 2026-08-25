@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from xml.etree.ElementTree import Element
@@ -66,6 +66,15 @@ class NcdrCapAlertAdapterError(RuntimeError):
 class NcdrCapAlertFetchError(NcdrCapAlertAdapterError):
     """Raised when fetching NCDR CAP payloads fails."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = _bounded_retry_after(retry_after_seconds)
+
 
 class NcdrCapAlertPayloadError(NcdrCapAlertAdapterError):
     """Raised when the NCDR CAP payload shape is not parseable."""
@@ -77,8 +86,7 @@ class NcdrCapAlertConfigurationError(NcdrCapAlertAdapterError):
 
 class NcdrCapAlertRateLimitError(NcdrCapAlertFetchError):
     def __init__(self, message: str, *, retry_after_seconds: int | None) -> None:
-        super().__init__(message)
-        self.retry_after_seconds = retry_after_seconds
+        super().__init__(message, retry_after_seconds=retry_after_seconds)
 
 
 class NcdrCapAlertAdapter:
@@ -98,8 +106,10 @@ class NcdrCapAlertAdapter:
         raw_snapshot_key: str | None = None,
     ) -> None:
         self._api_key = api_key
-        self._datastore_url = _public_url(datastore_url or NCDR_DATASTORE_API_URL)
-        self._dump_url = _public_url(dump_url or NCDR_DUMP_API_URL)
+        self._datastore_url = _configured_public_url(
+            datastore_url or NCDR_DATASTORE_API_URL
+        )
+        self._dump_url = _configured_public_url(dump_url or NCDR_DUMP_API_URL)
         self._max_cap_ids_per_run = min(200, max(1, max_cap_ids_per_run))
         self._timeout_seconds = max(1, timeout_seconds)
         self._fetched_at = fetched_at
@@ -108,20 +118,28 @@ class NcdrCapAlertAdapter:
         self._raw_snapshot_key = raw_snapshot_key
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
-        fetched, _rejections, selected_count, successful_dump_count = self._fetch_audited_rows()
+        fetched, _rejections, selected_count, successful_dump_count, retry_after = (
+            self._fetch_audited_rows()
+        )
         if selected_count > 0 and successful_dump_count == 0:
-            raise NcdrCapAlertFetchError("all selected NCDR CAP dumps failed")
+            raise NcdrCapAlertFetchError(
+                "all selected NCDR CAP dumps failed",
+                retry_after_seconds=retry_after,
+            )
         return fetched
 
     def normalize(self, raw_item: RawSourceItem) -> None:
         del raw_item
 
     def run(self) -> AdapterRunResult:
-        fetched, source_rejections, selected_count, successful_dump_count = (
+        fetched, source_rejections, selected_count, successful_dump_count, retry_after = (
             self._fetch_audited_rows()
         )
         if selected_count > 0 and successful_dump_count == 0:
-            raise NcdrCapAlertFetchError("all selected NCDR CAP dumps failed")
+            raise NcdrCapAlertFetchError(
+                "all selected NCDR CAP dumps failed",
+                retry_after_seconds=retry_after,
+            )
         rejected = tuple(rejection.source_id for rejection in source_rejections)
 
         return AdapterRunResult(
@@ -135,7 +153,13 @@ class NcdrCapAlertAdapter:
 
     def _fetch_audited_rows(
         self,
-    ) -> tuple[tuple[RawSourceItem, ...], tuple[SourceRejection, ...], int, int]:
+    ) -> tuple[
+        tuple[RawSourceItem, ...],
+        tuple[SourceRejection, ...],
+        int,
+        int,
+        int | None,
+    ]:
         api_key = (self._api_key or "").strip()
         if not api_key:
             raise NcdrCapAlertConfigurationError(
@@ -162,13 +186,14 @@ class NcdrCapAlertAdapter:
             limit=self._max_cap_ids_per_run,
         )
         if not cap_ids:
-            return (), (), 0, 0
+            return (), (), 0, 0, None
 
         fetched: list[RawSourceItem] = []
         rejections: list[SourceRejection] = []
         seen_source_ids: set[str] = set()
         successful_dump_count = 0
         audited_row_count = 0
+        max_retry_after_seconds: int | None = None
         for cap_id in cap_ids:
             dump_params = {
                 "apikey": api_key,
@@ -176,6 +201,7 @@ class NcdrCapAlertAdapter:
                 "format": "xml",
             }
             dump_failed = False
+            dump_retry_after_seconds: int | None = None
             xml_text = ""
             messages: tuple[ParsedCapMessage, ...] = ()
             try:
@@ -189,6 +215,14 @@ class NcdrCapAlertAdapter:
                         "NCDR CAP dump contained [REDACTED] credential material"
                     )
                 messages = parse_cap_document(xml_text)
+            except NcdrCapAlertRateLimitError as exc:
+                dump_failed = True
+                dump_retry_after_seconds = exc.retry_after_seconds
+                if dump_retry_after_seconds is not None:
+                    max_retry_after_seconds = max(
+                        max_retry_after_seconds or 0,
+                        dump_retry_after_seconds,
+                    )
             except (NcdrCapAlertAdapterError, CapDocumentError):
                 dump_failed = True
             finally:
@@ -225,15 +259,18 @@ class NcdrCapAlertAdapter:
                         "NCDR CAP exceeds the 256 audited-row limit"
                     )
                 transport_id = _transport_source_id(cap_id)
+                failure_payload: dict[str, Any] = {
+                    "transport_capid": cap_id,
+                    "error": "NCDR CAP dump fetch failed",
+                }
+                if dump_retry_after_seconds is not None:
+                    failure_payload["retry_after_seconds"] = dump_retry_after_seconds
                 fetched.append(
                     RawSourceItem(
                         source_id=transport_id,
                         source_url=self._dump_url,
                         fetched_at=fetched_at,
-                        payload={
-                            "transport_capid": cap_id,
-                            "error": "NCDR CAP dump fetch failed",
-                        },
+                        payload=failure_payload,
                         raw_snapshot_key=self._raw_snapshot_key,
                     )
                 )
@@ -249,7 +286,13 @@ class NcdrCapAlertAdapter:
                 fetched.append(raw)
                 rejections.append(SourceRejection(raw.source_id, reason))
 
-        return tuple(fetched), tuple(rejections), len(cap_ids), successful_dump_count
+        return (
+            tuple(fetched),
+            tuple(rejections),
+            len(cap_ids),
+            successful_dump_count,
+            max_retry_after_seconds,
+        )
 
     def _call_json_fetcher(
         self,
@@ -322,7 +365,12 @@ def _parse_datastore_cap_ids(
     elif isinstance(payload, Mapping):
         records = payload.get("data")
         if isinstance(records, Mapping):
-            records = records.get("records") or records.get("items")
+            if "records" in records:
+                records = records["records"]
+            elif "items" in records:
+                records = records["items"]
+            else:
+                records = None
     else:
         raise NcdrCapAlertPayloadError("NCDR datastore payload must be a JSON object or list")
     if not isinstance(records, list):
@@ -345,6 +393,10 @@ def _parse_datastore_cap_ids(
                 "NCDR datastore capid contained [REDACTED] credential material"
             )
         cap_ids.add(cap_id)
+    if records and not cap_ids:
+        raise NcdrCapAlertPayloadError(
+            "NCDR datastore contained no usable capid values"
+        )
     return tuple(sorted(cap_ids)[:limit])
 
 
@@ -489,6 +541,20 @@ def _transport_source_id(cap_id: str) -> str:
 def _public_url(url: str) -> str:
     parts = urlsplit(url.strip())
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _configured_public_url(url: str) -> str:
+    public_url: str | None = None
+    failed = False
+    try:
+        public_url = _public_url(url)
+    except Exception:  # noqa: BLE001 - sanitize configured URL parsing failures
+        failed = True
+    if failed or public_url is None:
+        raise NcdrCapAlertConfigurationError(
+            "NCDR endpoint URL is invalid: [REDACTED]"
+        )
+    return public_url
 
 
 def _bounded_retry_after(value: int | None) -> int | None:
@@ -832,19 +898,20 @@ def _fetch_bytes(
     accept: str,
     now: datetime | None,
 ) -> bytes:
-    public_url = _public_url(url)
-    request_url = f"{public_url}?{urlencode(tuple(params.items()))}"
-    request = Request(
-        request_url,
-        headers={
-            "Accept": accept,
-            "User-Agent": NCDR_CAP_USER_AGENT,
-        },
-        method="GET",
-    )
+    public_url = "[invalid NCDR URL]"
     body: bytes | None = None
     failure: NcdrCapAlertFetchError | None = None
     try:
+        public_url = _public_url(url)
+        request_url = f"{public_url}?{urlencode(tuple(params.items()))}"
+        request = Request(
+            request_url,
+            headers={
+                "Accept": accept,
+                "User-Agent": NCDR_CAP_USER_AGENT,
+            },
+            method="GET",
+        )
         with urlopen(
             request,
             timeout=timeout_seconds,
@@ -852,24 +919,29 @@ def _fetch_bytes(
         ) as response:
             body = response.read(MAX_CAP_BYTES + 1)
     except HTTPError as exc:
-        if exc.code == 429:
-            retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            failure = NcdrCapAlertRateLimitError(
-                f"NCDR request returned HTTP 429 at {public_url}",
-                retry_after_seconds=_retry_after_seconds(
-                    retry_after,
-                    now=now or datetime.now(UTC),
-                ),
-            )
-        else:
+        try:
+            if exc.code == 429:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                failure = NcdrCapAlertRateLimitError(
+                    f"NCDR request returned HTTP 429 at {public_url}",
+                    retry_after_seconds=_retry_after_seconds(
+                        retry_after,
+                        now=now or datetime.now(UTC),
+                    ),
+                )
+            else:
+                failure = NcdrCapAlertFetchError(
+                    f"NCDR request returned HTTP {exc.code} at {public_url}"
+                )
+        except Exception:  # noqa: BLE001 - sanitize malformed HTTP error metadata
             failure = NcdrCapAlertFetchError(
-                f"NCDR request returned HTTP {exc.code} at {public_url}"
+                f"NCDR request failed at {public_url}"
             )
-    except (URLError, TimeoutError, OSError):
+    except Exception:  # noqa: BLE001 - complete untrusted transport boundary
         failure = NcdrCapAlertFetchError(f"NCDR request failed at {public_url}")
     if failure is not None:
         raise failure
-    if body is None:
+    if type(body) is not bytes:
         raise NcdrCapAlertFetchError(f"NCDR request failed at {public_url}")
     if len(body) > MAX_CAP_BYTES:
         raise NcdrCapAlertFetchError(

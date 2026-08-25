@@ -42,6 +42,15 @@ def _index(name: str = "ncdr_datastore_active.json") -> object:
     return json.loads(_fixture(name))
 
 
+def _assert_secret_free_exception(exc: BaseException, *, secret: str) -> None:
+    assert secret not in str(exc)
+    assert secret not in repr(exc)
+    assert secret not in repr(vars(exc))
+    assert "?" not in str(exc)
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+
+
 def _adapter(
     *,
     index_payload: object = _DEFAULT,
@@ -183,6 +192,51 @@ def test_ncdr_valid_empty_datastore_is_succeeded_no_active_event() -> None:
 @pytest.mark.parametrize(
     "payload",
     (
+        {"data": {"records": []}},
+        {"data": {"items": []}},
+    ),
+)
+def test_ncdr_valid_nested_empty_datastore_is_succeeded_no_active_event(
+    payload: object,
+) -> None:
+    result = _adapter(index_payload=payload).run()
+
+    assert result.fetched == ()
+    assert result.rejected == ()
+    assert result.no_active_event is True
+
+
+@pytest.mark.parametrize(
+    "record",
+    (
+        {"other": "CAP-001"},
+        {"capid": ""},
+        {"capid": "   "},
+        {"capid": "X" * 257},
+    ),
+)
+def test_ncdr_nonempty_datastore_with_only_unusable_capids_is_not_healthy_empty(
+    record: dict[str, str],
+) -> None:
+    adapter = _adapter(index_payload={"data": [record]})
+
+    with pytest.raises(NcdrCapAlertPayloadError):
+        adapter.run()
+
+
+def test_ncdr_all_unusable_capids_fail_the_adapter_batch_instead_of_retiring() -> None:
+    summary = run_adapter_batch(
+        _adapter(index_payload={"data": [{"capid": " "}, {"other": "CAP-001"}]})
+    )
+
+    assert summary.status == "failed"
+    assert summary.error_code == "NcdrCapAlertPayloadError"
+    assert summary.error_code != "no_active_event"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
         None,
         "not-json",
         {},
@@ -217,6 +271,106 @@ def test_ncdr_mixed_dump_failure_is_partial_and_uses_digest_transport_identity()
     assert "?" not in str(failed.payload.get("error", ""))
     assert result.no_active_event is False
     assert summary.status == "partial"
+
+
+def test_ncdr_mixed_injected_dump_429_preserves_bounded_cooldown_in_raw_audit() -> None:
+    secret = "test-secret"
+    attempts: list[str] = []
+
+    def fetch_text(_url: str, params: dict[str, str], _timeout: int) -> str:
+        cap_id = params["capid"]
+        attempts.append(cap_id)
+        if cap_id == "CAP-001":
+            raise ncdr_cap_module.NcdrCapAlertRateLimitError(
+                f"rate limited?apikey={secret}",
+                retry_after_seconds=9999,
+            )
+        return _fixture("ncdr_dump_circle_cap.xml")
+
+    adapter = NcdrCapAlertAdapter(
+        api_key=secret,
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda _url, _params, _timeout: _index(),
+        fetch_text=fetch_text,
+    )
+
+    result = adapter.run()
+    failed = next(
+        item for item in result.fetched if item.payload.get("error") is not None
+    )
+
+    assert attempts == ["CAP-001", "CAP-002"]
+    assert failed.payload["retry_after_seconds"] == 3600
+    assert secret not in json.dumps(failed.payload)
+    assert "?" not in json.dumps(failed.payload)
+    assert result.no_active_event is False
+
+
+def test_ncdr_all_injected_dump_429s_expose_max_bounded_cooldown() -> None:
+    secret = "test-secret"
+    attempts: list[str] = []
+    cooldowns = {"CAP-001": -5, "CAP-002": 9999}
+
+    def fetch_text(_url: str, params: dict[str, str], _timeout: int) -> str:
+        cap_id = params["capid"]
+        attempts.append(cap_id)
+        raise ncdr_cap_module.NcdrCapAlertRateLimitError(
+            f"rate limited?apikey={secret}",
+            retry_after_seconds=cooldowns[cap_id],
+        )
+
+    adapter = NcdrCapAlertAdapter(
+        api_key=secret,
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda _url, _params, _timeout: _index(),
+        fetch_text=fetch_text,
+    )
+
+    with pytest.raises(
+        NcdrCapAlertFetchError,
+        match="^all selected NCDR CAP dumps failed$",
+    ) as raised:
+        adapter.run()
+
+    assert attempts == ["CAP-001", "CAP-002"]
+    assert raised.value.retry_after_seconds == 3600
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_ncdr_builtin_dump_429_cooldown_survives_adapter_aggregation(
+    monkeypatch,
+) -> None:
+    secret = "test-secret"
+    calls = 0
+    retry_at = FETCHED_AT + timedelta(hours=2)
+
+    def fake_urlopen(request, **_kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        raise HTTPError(
+            request.full_url,
+            429,
+            f"rate limited?apikey={secret}",
+            {"Retry-After": retry_at.strftime("%a, %d %b %Y %H:%M:%S GMT")},
+            None,
+        )
+
+    monkeypatch.setattr(ncdr_cap_module, "urlopen", fake_urlopen)
+    adapter = NcdrCapAlertAdapter(
+        api_key=secret,
+        fetched_at=FETCHED_AT,
+        fetch_json=lambda _url, _params, _timeout: {"data": [{"capid": "CAP-001"}]},
+    )
+
+    with pytest.raises(
+        NcdrCapAlertFetchError,
+        match="^all selected NCDR CAP dumps failed$",
+    ) as raised:
+        adapter.run()
+
+    assert calls == 1
+    assert raised.value.retry_after_seconds == 3600
+    _assert_secret_free_exception(raised.value, secret=secret)
 
 
 def test_ncdr_all_selected_dump_failures_raise_exact_failure() -> None:
@@ -293,6 +447,174 @@ def test_ncdr_secret_bearing_endpoint_path_fails_before_fetch_or_persistence() -
     assert "[REDACTED]" in str(raised.value)
 
 
+@pytest.mark.parametrize(
+    ("fetch_name", "url"),
+    (
+        ("index", "invalid://example.test/datastore?apikey=test-secret"),
+        ("index", "https://example.test:invalid/datastore?apikey=test-secret"),
+        ("index", "https://[::1/datastore?apikey=test-secret"),
+        ("dump", "invalid://example.test/dump/datastore?apikey=test-secret"),
+        ("dump", "https://example.test:invalid/dump/datastore?apikey=test-secret"),
+        ("dump", "https://[::1/dump/datastore?apikey=test-secret"),
+    ),
+)
+def test_ncdr_builtin_transport_invalid_url_is_sanitized_across_index_and_dump(
+    fetch_name: str,
+    url: str,
+) -> None:
+    params = (
+        {"apikey": "test-secret", "format": "json", "limit": "50"}
+        if fetch_name == "index"
+        else {"apikey": "test-secret", "capid": "CAP-001", "format": "xml"}
+    )
+    fetcher = (
+        ncdr_cap_module._fetch_json
+        if fetch_name == "index"
+        else ncdr_cap_module._fetch_text
+    )
+
+    with pytest.raises(NcdrCapAlertFetchError) as raised:
+        fetcher(url, params, 1, now=FETCHED_AT)
+
+    _assert_secret_free_exception(raised.value, secret="test-secret")
+
+
+def test_ncdr_builtin_transport_failure_summary_is_secret_free() -> None:
+    adapter = NcdrCapAlertAdapter(
+        api_key="test-secret",
+        datastore_url="https://example.test:invalid/datastore?apikey=test-secret",
+    )
+
+    summary = run_adapter_batch(adapter)
+
+    assert summary.status == "failed"
+    assert summary.error_code == "NcdrCapAlertFetchError"
+    assert summary.error_message is not None
+    assert "test-secret" not in summary.error_message
+    assert "?" not in summary.error_message
+    assert "test-secret" not in repr(vars(summary))
+
+
+def test_ncdr_malformed_configured_url_is_a_sanitized_adapter_error() -> None:
+    secret = "test-secret"
+
+    with pytest.raises(ncdr_cap_module.NcdrCapAlertConfigurationError) as raised:
+        NcdrCapAlertAdapter(
+            api_key=secret,
+            datastore_url=f"https://[::1/datastore?apikey={secret}",
+        )
+
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_ncdr_builtin_transport_sanitizes_tls_context_failure(monkeypatch) -> None:
+    secret = "test-secret"
+
+    def fail_context() -> ssl.SSLContext:
+        raise ValueError(f"TLS failed?apikey={secret}")
+
+    monkeypatch.setattr(ncdr_cap_module, "taiwan_gov_open_data_ssl_context", fail_context)
+
+    with pytest.raises(NcdrCapAlertFetchError) as raised:
+        ncdr_cap_module._fetch_json(
+            ncdr_cap_module.NCDR_DATASTORE_API_URL,
+            {"apikey": secret, "format": "json", "limit": "50"},
+            8,
+            now=FETCHED_AT,
+        )
+
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_ncdr_http_429_header_failure_is_sanitized_inside_transport_boundary(
+    monkeypatch,
+) -> None:
+    secret = "test-secret"
+
+    class FailingHeaders:
+        def get(self, _name: str) -> str:
+            raise RuntimeError(f"headers failed?apikey={secret}")
+
+    def fake_urlopen(request, **_kwargs: object) -> object:
+        raise HTTPError(
+            request.full_url,
+            429,
+            f"rate limited?apikey={secret}",
+            cast(Any, FailingHeaders()),
+            None,
+        )
+
+    monkeypatch.setattr(ncdr_cap_module, "urlopen", fake_urlopen)
+
+    with pytest.raises(NcdrCapAlertFetchError) as raised:
+        ncdr_cap_module._fetch_json(
+            ncdr_cap_module.NCDR_DATASTORE_API_URL,
+            {"apikey": secret, "format": "json", "limit": "50"},
+            8,
+            now=FETCHED_AT,
+        )
+
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_ncdr_builtin_transport_sanitizes_response_read_failure(monkeypatch) -> None:
+    secret = "test-secret"
+
+    class FailingResponse:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self, _limit: int = -1) -> bytes:
+            raise RuntimeError(f"read failed?apikey={secret}")
+
+    monkeypatch.setattr(ncdr_cap_module, "urlopen", lambda *_args, **_kwargs: FailingResponse())
+
+    with pytest.raises(NcdrCapAlertFetchError) as raised:
+        ncdr_cap_module._fetch_text(
+            ncdr_cap_module.NCDR_DUMP_API_URL,
+            {"apikey": secret, "capid": "CAP-001", "format": "xml"},
+            8,
+            now=FETCHED_AT,
+        )
+
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_ncdr_builtin_transport_rejects_non_bytes_response_without_inspecting_it(
+    monkeypatch,
+) -> None:
+    secret = "test-secret"
+
+    class HostileBody:
+        def __len__(self) -> int:
+            raise RuntimeError(f"length failed?apikey={secret}")
+
+    class HostileResponse:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def read(self, _limit: int = -1) -> bytes:
+            return cast(bytes, HostileBody())
+
+    monkeypatch.setattr(ncdr_cap_module, "urlopen", lambda *_args, **_kwargs: HostileResponse())
+
+    with pytest.raises(NcdrCapAlertFetchError) as raised:
+        ncdr_cap_module._fetch_text(
+            ncdr_cap_module.NCDR_DUMP_API_URL,
+            {"apikey": secret, "capid": "CAP-001", "format": "xml"},
+            8,
+            now=FETCHED_AT,
+        )
+
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
 def test_ncdr_circle_is_raw_audited_without_center_point() -> None:
     result = _adapter(
         index_payload={"data": [{"capid": "CAP-002"}]},
@@ -339,6 +661,91 @@ def test_ncdr_geocode_area_is_raw_audited_with_canonical_cap_identity() -> None:
         {"valueName": "TOWNCODE", "value": "6703500"}
     ]
     assert "geometry" not in raw.payload
+    assert build_staging_batch(result).accepted == ()
+
+
+def test_ncdr_namespaced_alerts_collection_preserves_every_unreviewed_area() -> None:
+    xml_text = """\
+<alerts xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <alert>
+    <identifier>NCDR-MULTI-001</identifier>
+    <sender>ncdr@example.test</sender>
+    <sent>2026-06-15T02:00:00Z</sent>
+    <status>Actual</status>
+    <msgType>Alert</msgType>
+    <scope>Public</scope>
+    <info>
+      <event>Flood polygon, circle, and admin audit</event>
+      <headline>Preserve source areas</headline>
+      <effective>2026-06-15T02:30:00Z</effective>
+      <expires>2026-06-15T04:30:00Z</expires>
+      <area>
+        <areaDesc>Polygon area</areaDesc>
+        <polygon>22.90,120.10 22.91,120.11 22.90,120.10</polygon>
+      </area>
+      <area>
+        <areaDesc>Circle area</areaDesc>
+        <circle>22.92,120.12 1.5</circle>
+      </area>
+      <area>
+        <areaDesc>Administrative area</areaDesc>
+        <geocode><valueName>TOWNCODE</valueName><value>6703500</value></geocode>
+      </area>
+    </info>
+  </alert>
+  <alert>
+    <identifier>NCDR-MULTI-002</identifier>
+    <sender>ncdr@example.test</sender>
+    <sent>2026-06-15T02:05:00Z</sent>
+    <status>Actual</status>
+    <msgType>Alert</msgType>
+    <scope>Public</scope>
+    <info>
+      <event>Flood message without area</event>
+      <description>Message-level semantics remain available for audit.</description>
+      <effective>2026-06-15T02:35:00Z</effective>
+      <expires>2026-06-15T04:35:00Z</expires>
+    </info>
+  </alert>
+</alerts>
+"""
+    result = _adapter(
+        index_payload={"data": [{"capid": "TRANSPORT-001"}]},
+        dumps={"TRANSPORT-001": xml_text},
+    ).run()
+
+    assert len(result.fetched) == 4
+    assert len(result.source_rejections) == 4
+    assert len({item.source_id for item in result.fetched}) == 4
+    assert all(item.source_id.startswith("cap:") for item in result.fetched)
+    assert all(
+        item.payload["transport_capid"] == "TRANSPORT-001"
+        for item in result.fetched
+    )
+    assert {item.reason_code for item in result.source_rejections} == {
+        "ncdr_polygon_geometry_unreviewed",
+        "ncdr_circle_geometry_unreviewed",
+        "ncdr_unreviewed_admin_geometry",
+        "ncdr_unreviewed_message_geometry",
+    }
+
+    by_area = {item.payload["areaDesc"]: item.payload for item in result.fetched}
+    assert by_area["Polygon area"]["polygon"] == [
+        {"latitude": 22.9, "longitude": 120.1},
+        {"latitude": 22.91, "longitude": 120.11},
+        {"latitude": 22.9, "longitude": 120.1},
+    ]
+    assert by_area["Circle area"]["circle"] == {
+        "latitude": 22.92,
+        "longitude": 120.12,
+        "radius_km": 1.5,
+    }
+    assert by_area["Administrative area"]["source_geocodes"] == [
+        {"valueName": "TOWNCODE", "value": "6703500"}
+    ]
+    assert by_area[None]["cap_identifier"] == "NCDR-MULTI-002"
+    assert by_area[None]["source_geocodes"] == []
+    assert result.normalized == ()
     assert build_staging_batch(result).accepted == ()
 
 
