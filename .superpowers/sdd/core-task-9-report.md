@@ -309,3 +309,146 @@ No unrelated mass-formatting was performed.
   the mandatory live run separately passed all 55 cases with zero skips.
 - The API suite emits one existing third-party TestClient deprecation warning.
 - This is implementer self-review only. Independent approval is still required.
+
+## Independent review fix wave 1
+
+Date: 2026-08-25
+
+Review base: `72e382c3df9e50265f59b4f1f7e94c6e934fae2f`
+
+Commit message: `fix: protect no-active warning state`
+
+### Critical — blocked audit-only Update lifecycle mutation
+
+Root cause: `blocked_by_no_active_event` disabled latest upsert, but the later
+Update/Cancel branch still invoked `_retire_cap_references`. That unguarded
+DELETE could remove referenced same- or peer-reviewed-adapter warning latest
+rows even though the candidate was historical audit evidence only.
+
+Unit RED:
+
+```bash
+../../.venv/workers/bin/python -m pytest tests/test_promotion_pipeline.py -q \
+  -k 'update_blocked_by_no_active'
+```
+
+Result: `1 failed, 87 deselected`. The assertion proved that the executed SQL
+still contained `/* retire-cap-references */`.
+
+Live PostgreSQL RED:
+
+```bash
+PROMOTION_TEST_DATABASE_URL='postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk' \
+OFFICIAL_DB_ACCEPTANCE_REQUIRED=1 \
+../../.venv/workers/bin/python -m pytest \
+  tests/test_promotion_monotonicity_postgres.py -q -rs \
+  -k 'blocked_update_keeps_same_and_peer'
+```
+
+Result: `1 failed, 55 deselected`. The blocked Update audit evidence was
+retained, but the actual DELETE path removed both referenced latest rows
+(`latest_rows == []`).
+
+Fix: reference retirement is now guarded by
+`not blocked_by_no_active_event`. Blocked Alert/Update candidates keep their
+historical-only audit evidence and perform no latest upsert or reference
+retirement. Ordinary newer Update and Cancel behavior is unchanged.
+
+Targeted GREEN:
+
+```bash
+../../.venv/workers/bin/python -m pytest tests/test_promotion_pipeline.py -q \
+  -k 'update_blocked_by_no_active or cap_mutation_retires_only_exact_reference_triples'
+```
+
+Result: `3 passed, 85 deselected`, covering the blocked branch plus ordinary
+Update/Cancel reference retirement.
+
+The strengthened live case uses two referenced current Alerts (same CWA adapter
+and peer NCDR adapter) whose ingestion generations are newer than the equal
+no-active marker. It passed with both latest rows retained and the blocked
+Update evidence stored as `historical` with reason
+`superseded_by_no_active_event`.
+
+### Important — skipped/partial static background freshness
+
+Root cause: the static cadence branch used `finished_at` and returned fresh for
+every non-failed status. Skipped/empty and partial summaries therefore bypassed
+their unsuccessful batch outcome.
+
+RED:
+
+```bash
+../../.venv/workers/bin/python -m pytest tests/test_freshness_monitoring.py -q \
+  -k 'unsuccessful_background_source'
+```
+
+Result: `4 failed, 25 deselected`. Both
+`official.wra.historical_flood` and `official.flood_potential.geojson` returned
+fresh for both skipped and partial summaries.
+
+Fix: an explicit static/background non-success branch now returns an alerting
+`stale` check with a `static/slow-cadence batch did not succeed` reason and the
+authentic summary source timestamp. Only `succeeded` static batches use
+completion-time operational freshness.
+
+Targeted GREEN:
+
+```bash
+../../.venv/workers/bin/python -m pytest tests/test_freshness_monitoring.py -q \
+  -k 'background_source'
+```
+
+Result: `6 passed, 23 deselected`, covering successful completion-time
+freshness and both non-success statuses for both exact background keys.
+
+### Fix-wave final verification
+
+Required focused Worker:
+
+```bash
+../../.venv/workers/bin/python -m pytest \
+  tests/test_freshness_monitoring.py tests/test_promotion_pipeline.py \
+  tests/test_promotion_monotonicity_postgres.py -q
+```
+
+Result: `117 passed, 56 skipped`. The skips are the expected optional live
+database cases in the non-live focused invocation.
+
+Mandatory live PostgreSQL:
+
+```bash
+PROMOTION_TEST_DATABASE_URL='postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk' \
+OFFICIAL_DB_ACCEPTANCE_REQUIRED=1 \
+../../.venv/workers/bin/python -m pytest \
+  tests/test_promotion_monotonicity_postgres.py -q -rs
+```
+
+Result: `56 passed`, zero skips.
+
+Full Worker:
+
+```bash
+../../.venv/workers/bin/python -m pytest -q
+```
+
+Result: `686 passed, 56 skipped`.
+
+Static checks:
+
+```bash
+../../.venv/workers/bin/python -m ruff check \
+  app/jobs/freshness.py app/pipelines/promotion.py \
+  tests/test_freshness_monitoring.py tests/test_promotion_pipeline.py \
+  tests/test_promotion_monotonicity_postgres.py
+../../.venv/api/bin/python -m mypy app
+git diff --check
+```
+
+Results: scoped Ruff passed; Worker mypy passed for 106 source files; diff check
+passed. No API production file changed, so the prior full API/OpenAPI evidence
+above remains applicable.
+
+The full-tree Ruff baseline concerns documented above are unchanged. This fix
+wave remains implementer work pending another independent review; it was not
+self-approved, pushed, merged, or deployed.

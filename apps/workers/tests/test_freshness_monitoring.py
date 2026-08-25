@@ -232,6 +232,41 @@ def test_background_source_uses_fetch_completion_not_historical_event_age(
     )
 
 
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.wra.historical_flood", "official.flood_potential.geojson"),
+)
+@pytest.mark.parametrize("status", ("skipped", "partial"))
+def test_unsuccessful_background_source_is_alerting_not_fresh(
+    adapter_key: str,
+    status: AdapterBatchStatus,
+) -> None:
+    source_timestamp = (
+        None if status == "skipped" else CHECKED_AT - timedelta(days=3650)
+    )
+    check = check_summary_freshness(
+        _summary(
+            adapter_key=adapter_key,
+            status=status,
+            source_timestamp_min=source_timestamp,
+            source_timestamp_max=source_timestamp,
+            finished_at=CHECKED_AT,
+            error_code="empty_fetch" if status == "skipped" else None,
+            items_fetched=0 if status == "skipped" else 2,
+            items_promoted=0 if status == "skipped" else 1,
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.status == "stale"
+    assert check.cadence == "static"
+    assert check.source_timestamp_max == source_timestamp
+    assert check.is_alert()
+    assert check.reason is not None
+    assert check.reason.startswith("static/slow-cadence batch did not succeed:")
+
+
 def test_ncdr_cap_freshness_uses_effective_expires_window() -> None:
     fresh = check_ncdr_cap_freshness(
         adapter_key="official.ncdr.cap",

@@ -213,6 +213,75 @@ def test_alert_not_newer_than_persisted_no_active_is_audit_only() -> None:
     assert json.loads(str(insert_params[14]))["evidence_scope"] == "historical"
 
 
+def test_update_blocked_by_no_active_is_audit_only_without_lifecycle_mutations() -> None:
+    empty_generation = datetime(2026, 8, 24, 1, 6, tzinfo=UTC)
+    references = [
+        {
+            "sender": "sender@example.test",
+            "identifier": "same-adapter-alert",
+            "sent": "2026-08-24T00:20:00+00:00",
+        },
+        {
+            "sender": "sender@example.test",
+            "identifier": "peer-adapter-alert",
+            "sent": "2026-08-24T00:30:00+00:00",
+        },
+    ]
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="blocked-update-evidence-id",
+        max_no_active_generation=empty_generation,
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _cap_payload(
+        message_type="Update",
+        identifier="blocked-update",
+        references=references,
+    )
+    payload.properties.update(
+        {
+            "location_payload": {
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [
+                        [
+                            [
+                                [120.0, 22.8],
+                                [120.4, 22.8],
+                                [120.4, 23.2],
+                                [120.0, 22.8],
+                            ]
+                        ]
+                    ],
+                }
+            },
+            "latest_point_geometry": {
+                "type": "Point",
+                "coordinates": [120.2, 23.0],
+            },
+        }
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "blocked-update-evidence-id"
+    statements = [
+        statement for statement, _params in connection.cursor_instance.executions
+    ]
+    assert not any("/* retire-cap-references */" in statement for statement in statements)
+    assert not any(
+        "INSERT INTO official_realtime_latest" in statement for statement in statements
+    )
+    insert_params = next(
+        params
+        for statement, params in connection.cursor_instance.executions
+        if "INSERT INTO evidence" in statement
+    )
+    properties = json.loads(str(insert_params[14]))
+    assert properties["evidence_scope"] == "historical"
+    assert properties["historical_reason"] == "superseded_by_no_active_event"
+
+
 def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() -> None:
     connection = _FakeConnection(
         rows=[

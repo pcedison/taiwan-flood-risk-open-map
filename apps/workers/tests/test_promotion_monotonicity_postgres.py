@@ -342,6 +342,111 @@ def test_newer_empty_generation_blocks_older_alert_resurrection(
     assert evidence_count == 1
 
 
+def test_blocked_update_keeps_same_and_peer_referenced_warning_latest(
+    database_url: str,
+) -> None:
+    import psycopg
+
+    suffix = uuid4().hex
+    cwa_adapter = "official.cwa.heavy_rain_warning"
+    ncdr_adapter = "official.ncdr.cap"
+    same_identifier = f"task9-same-alert-{suffix}"
+    peer_identifier = f"task9-peer-alert-{suffix}"
+    same_alert = _cap_payload(
+        adapter_key=cwa_adapter,
+        suffix=suffix,
+        identifier=same_identifier,
+        message_type="Alert",
+        admin_code="67000000",
+        references=[],
+        geometry=True,
+        sent=NOW,
+    )
+    peer_alert = _cap_payload(
+        adapter_key=ncdr_adapter,
+        suffix=suffix,
+        identifier=peer_identifier,
+        message_type="Alert",
+        admin_code="64000000",
+        references=[],
+        geometry=True,
+        sent=NOW + timedelta(minutes=1),
+    )
+    update = _cap_payload(
+        adapter_key=cwa_adapter,
+        suffix=suffix,
+        identifier=f"task9-blocked-update-{suffix}",
+        message_type="Update",
+        admin_code="67000000",
+        references=[
+            {
+                "sender": "sender@example.test",
+                "identifier": same_identifier,
+                "sent": NOW.isoformat(),
+            },
+            {
+                "sender": "sender@example.test",
+                "identifier": peer_identifier,
+                "sent": (NOW + timedelta(minutes=1)).isoformat(),
+            },
+        ],
+        geometry=True,
+        sent=NOW + timedelta(minutes=5),
+    )
+    for alert in (same_alert, peer_alert):
+        alert.properties["ingestion_generation_started_at"] = (
+            NOW + timedelta(seconds=1)
+        ).isoformat()
+    writer = PostgresEvidencePromotionWriter(database_url=database_url)
+
+    try:
+        assert writer.write_evidence(same_alert) is not None
+        assert writer.write_evidence(peer_alert) is not None
+        _insert_no_active_job(
+            database_url,
+            suffix=suffix,
+            adapter_key=cwa_adapter,
+            generation=NOW,
+        )
+
+        update_evidence_id = writer.write_evidence(update)
+
+        assert update_evidence_id is not None
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT adapter_key, source_id
+                FROM official_realtime_latest
+                WHERE source_id = ANY(%s)
+                ORDER BY adapter_key, source_id
+                """,
+                ([same_alert.source_id, peer_alert.source_id],),
+            )
+            latest_rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT
+                    properties ->> 'evidence_scope',
+                    properties ->> 'historical_reason'
+                FROM evidence
+                WHERE id = %s
+                """,
+                (update_evidence_id,),
+            )
+            update_state = cursor.fetchone()
+
+        assert latest_rows == sorted(
+            [
+                (cwa_adapter, same_alert.source_id),
+                (ncdr_adapter, peer_alert.source_id),
+            ]
+        )
+        assert update_state == ("historical", "superseded_by_no_active_event")
+    finally:
+        _cleanup_cap_race(database_url, suffix)
+        _cleanup_no_active_job(database_url, suffix=suffix)
+
+
 def test_no_active_retirement_preserves_peer_adapter_latest_and_audit_evidence(
     database_url: str,
 ) -> None:

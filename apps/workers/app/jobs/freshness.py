@@ -116,6 +116,18 @@ def check_summary_freshness(
             checked_at=resolved_checked_at,
         )
 
+    if cadence == "static" and summary.status != "succeeded":
+        failure_detail = summary.error_message or summary.error_code or summary.status
+        return FreshnessCheck(
+            adapter_key=summary.adapter_key,
+            status="stale",
+            checked_at=resolved_checked_at,
+            max_age_seconds=max_age_seconds,
+            cadence=cadence,
+            source_timestamp_max=summary.source_timestamp_max,
+            reason=f"static/slow-cadence batch did not succeed: {failure_detail}",
+        )
+
     if cadence == "static":
         operational_timestamp = _aware_utc(summary.finished_at)
         age_seconds = max(

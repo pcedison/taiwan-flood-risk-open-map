@@ -335,9 +335,12 @@ class PostgresEvidencePromotionWriter:
                         connection.commit()
                     return None
                 evidence_id = str(row[0])
-                if cap_lifecycle_candidate and weighted_payload.properties.get(
-                    "cap_message_type"
-                ) in {"Update", "Cancel"}:
+                if (
+                    cap_lifecycle_candidate
+                    and not blocked_by_no_active_event
+                    and weighted_payload.properties.get("cap_message_type")
+                    in {"Update", "Cancel"}
+                ):
                     _retire_cap_references(cursor, weighted_payload)
                 if weighted_payload.properties.get("cap_message_type") == "Cancel":
                     promote_latest = False
