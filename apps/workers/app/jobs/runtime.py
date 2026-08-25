@@ -904,16 +904,9 @@ def produce_enabled_runtime_adapter_jobs(
                 ),
             )
         except SourceCatalogUnavailable:
-            record_runtime_selection(
-                runtime_status_writer,
-                enabled_adapter_keys=enabled_keys,
-                known_adapter_keys=tuple(ADAPTER_REGISTRY),
-            )
-            record_pipeline_status(
+            _record_source_catalog_unavailable_audit(
                 runtime_status_writer,
                 adapter_keys=enabled_keys,
-                status="failed",
-                complete=False,
                 run_at=attempt_started_at,
             )
             log_event("runtime.source_catalog.unavailable")
@@ -1196,6 +1189,7 @@ def work_runtime_queue_once(
             run_writer=run_writer,
         )
 
+    adapter_settings = resolved_settings
     if adapter_key in OFFICIAL_INCIDENT_CATALOG_GATED_KEYS:
         try:
             enabled_keys = filter_catalog_enabled_adapter_keys(
@@ -1245,6 +1239,14 @@ def work_runtime_queue_once(
                 adapter_key=adapter_key,
                 reason="source_catalog_disabled",
             )
+        adapter_settings = replace(
+            resolved_settings,
+            enabled_adapter_keys=tuple(
+                key
+                for key in enabled_adapter_keys(resolved_settings)
+                if key == adapter_key
+            ),
+        )
 
     summary: AdapterBatchRunSummary | None = None
     freshness_checks: tuple[FreshnessCheck, ...] = ()
@@ -1253,7 +1255,7 @@ def work_runtime_queue_once(
         adapters = (
             adapter_by_key
             if adapter_by_key is not None
-            else build_runtime_adapters(resolved_settings)
+            else build_runtime_adapters(adapter_settings)
         )
         adapter = adapters.get(adapter_key)
         if adapter is None:
@@ -1425,6 +1427,29 @@ def _runtime_promotion_writer(
     if promotion_writer is None:
         raise RuntimeError("promotion_writer is required when promote=True")
     return promotion_writer
+
+
+def _record_source_catalog_unavailable_audit(
+    run_writer: IngestionRunSummaryWriter | None,
+    *,
+    adapter_keys: tuple[str, ...],
+    run_at: datetime,
+) -> None:
+    try:
+        record_runtime_selection(
+            run_writer,
+            enabled_adapter_keys=adapter_keys,
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=adapter_keys,
+            status="failed",
+            complete=False,
+            run_at=run_at,
+        )
+    except Exception:  # noqa: BLE001 - preserve the catalog failure boundary
+        log_event("runtime.source_catalog.audit_unavailable", status="failed")
 
 
 def _fail_runtime_queue_job(

@@ -195,16 +195,9 @@ def _execute_managed_runtime_ingestion_cycle(
             ),
         )
     except SourceCatalogUnavailable:
-        record_runtime_selection(
+        _record_source_catalog_unavailable_audit(
             runtime_status_writer,
-            enabled_adapter_keys=enabled_adapter_keys(resolved_settings),
-            known_adapter_keys=tuple(ADAPTER_REGISTRY),
-        )
-        record_pipeline_status(
-            runtime_status_writer,
-            adapter_keys=enabled_adapter_keys(resolved_settings),
-            status="failed",
-            complete=False,
+            adapter_keys=selected_adapter_keys,
             run_at=cycle_started_at,
         )
         log_event("runtime.source_catalog.unavailable")
@@ -327,6 +320,22 @@ def _execute_managed_runtime_ingestion_cycle(
             if promotion_adapter_keys is not None
             else _promotion_adapter_keys(cycle.summaries)
         )
+        if not target_adapter_keys:
+            log_event(
+                "runtime.managed.ingestion.completed",
+                status=status,
+                reason=reason,
+                adapter_count=len(cycle.summaries),
+                promoted=promotion.promoted,
+            )
+            return ManagedRuntimeIngestionResult(
+                status=status,
+                reason=reason,
+                summaries=cycle.summaries,
+                freshness_checks=cycle.freshness_checks,
+                promoted=promotion.promoted,
+                evidence_ids=promotion.evidence_ids,
+            )
         promotion_writer_instance = _promotion_writer(persistence)
         no_active_summaries = tuple(
             summary
@@ -457,6 +466,29 @@ def _resolve_persistence_writers(
         run_writer=resolved_run_writer,
         promotion_writer=resolved_promotion_writer,
     )
+
+
+def _record_source_catalog_unavailable_audit(
+    run_writer: IngestionRunSummaryWriter | None,
+    *,
+    adapter_keys: tuple[str, ...],
+    run_at: datetime,
+) -> None:
+    try:
+        record_runtime_selection(
+            run_writer,
+            enabled_adapter_keys=adapter_keys,
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=adapter_keys,
+            status="failed",
+            complete=False,
+            run_at=run_at,
+        )
+    except Exception:  # noqa: BLE001 - preserve the catalog failure boundary
+        log_event("runtime.source_catalog.audit_unavailable", status="failed")
 
 
 def _resolve_runtime_status_writer(

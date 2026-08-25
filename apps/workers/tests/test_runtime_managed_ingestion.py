@@ -599,6 +599,35 @@ def test_catalog_query_exception_fails_managed_cycle_without_upstream_work() -> 
 
 
 @pytest.mark.usefixtures("task9_synthetic_registry")
+def test_catalog_query_failure_stays_safe_when_managed_audit_writer_fails(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls = {"build": 0}
+
+    def adapter_builder(settings: WorkerSettings) -> dict[str, _CatalogCountingAdapter]:
+        del settings
+        calls["build"] += 1
+        return {}
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        settings=_settings("official.cwa.heavy_rain_warning"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=_FailingCatalogAuditWriter(),
+        source_catalog_reader=_FailingCatalogReader(),
+        adapter_builder=adapter_builder,
+    )
+
+    captured = capsys.readouterr()
+    assert result.status == "failed"
+    assert result.reason == "source_catalog_unavailable"
+    assert result.error_code == "source_catalog_unavailable"
+    assert result.error_message is None
+    assert calls == {"build": 0}
+    assert "catalog-secret" not in captured.out
+    assert "audit-secret" not in captured.out
+
+
+@pytest.mark.usefixtures("task9_synthetic_registry")
 def test_catalog_gate_narrows_managed_promotion_targets() -> None:
     adapter = _sample_adapter()
     promotion_writer = _MemoryPromotionWriter([_candidate()])
@@ -641,7 +670,10 @@ def test_catalog_gate_does_not_fall_back_when_explicit_promotion_targets_are_dis
     )
 
     assert result.status == "succeeded"
-    assert promotion_writer.requested_adapter_keys == ()
+    assert promotion_writer.fetch_calls == 0
+    assert promotion_writer.requested_adapter_keys is None
+    assert promotion_writer.payloads == []
+    assert result.promoted == 0
 
 
 def test_managed_runtime_cycle_promotes_adapter_keys_from_ran_summaries() -> None:
@@ -1047,6 +1079,7 @@ class _MemoryPromotionWriter:
         self._candidates = tuple(candidates)
         self.requested_limit: int | None = None
         self.requested_adapter_keys: tuple[str, ...] | None = None
+        self.fetch_calls = 0
         self.payloads: list[EvidencePromotionPayload] = []
         self.retired_no_active: list[tuple[str, datetime, datetime]] = []
         self.timeline = timeline
@@ -1057,6 +1090,7 @@ class _MemoryPromotionWriter:
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
+        self.fetch_calls += 1
         self.requested_limit = limit
         self.requested_adapter_keys = adapter_keys
         return self._candidates
@@ -1208,7 +1242,32 @@ class _StaticCatalogReader:
 class _FailingCatalogReader:
     def enabled_keys(self, adapter_keys: tuple[str, ...]) -> frozenset[str]:
         del adapter_keys
-        raise RuntimeError("postgresql://secrets@catalog-unavailable")
+        raise RuntimeError("postgresql://catalog-secret@catalog-unavailable")
+
+
+class _FailingCatalogAuditWriter:
+    def write_runtime_selection(
+        self,
+        *,
+        enabled_adapter_keys: tuple[str, ...],
+        known_adapter_keys: tuple[str, ...],
+        checked_at: datetime,
+    ) -> None:
+        del enabled_adapter_keys, known_adapter_keys, checked_at
+        raise RuntimeError("postgresql://audit-secret@catalog-unavailable")
+
+    def write_pipeline_status(
+        self,
+        *,
+        adapter_keys: tuple[str, ...],
+        status: str,
+        complete: bool,
+        checked_at: datetime,
+        run_at: datetime | None,
+        active_snapshot_raw_ref: str | None = None,
+    ) -> None:
+        del adapter_keys, status, complete, checked_at, run_at, active_snapshot_raw_ref
+        raise RuntimeError("postgresql://audit-secret@catalog-unavailable")
 
 
 class _Task9EmptyWarningAdapter:

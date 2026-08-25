@@ -1100,6 +1100,75 @@ def test_catalog_query_failure_retries_leased_job_without_upstream_work(
     assert queue.failed == [("failed", "job-1", "worker-a", "source_catalog_unavailable", 60)]
 
 
+def test_catalog_query_failure_stays_safe_when_producer_audit_writer_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_DATABASE_URL": "postgresql://runtime-secret@localhost/flood",
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning",
+        }
+    )
+    calls = {"build": 0}
+
+    def forbidden_builder(builder_settings: object) -> dict[str, object]:
+        del builder_settings
+        calls["build"] += 1
+        return {}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", forbidden_builder)
+    monkeypatch.setattr(
+        runtime_jobs,
+        "enabled_adapter_keys",
+        lambda _: ("official.cwa.heavy_rain_warning",),
+    )
+    monkeypatch.setattr(runtime_jobs, "PostgresIngestionRunWriter", _FailingCatalogAuditWriter)
+
+    result = produce_enabled_runtime_adapter_jobs(
+        settings,
+        source_catalog_reader=_FailingCatalogReader(),
+    )
+
+    captured = capsys.readouterr()
+    assert result.status == "skipped"
+    assert result.reason == "source_catalog_unavailable"
+    assert calls == {"build": 0}
+    assert "catalog-secret" not in captured.out
+    assert "audit-secret" not in captured.out
+
+
+def test_catalog_enabled_queue_worker_narrows_internal_builder_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_key = "official.cwa.heavy_rain_warning"
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key=adapter_key))
+    captured: list[tuple[str, ...] | None] = []
+    calls = {"run": 0}
+
+    def narrowed_builder(builder_settings: Any) -> dict[str, _QueueCatalogAdapter]:
+        captured.append(builder_settings.enabled_adapter_keys)
+        return {adapter_key: _QueueCatalogAdapter(adapter_key, calls)}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", narrowed_builder)
+    monkeypatch.setattr(
+        runtime_jobs,
+        "enabled_adapter_keys",
+        lambda _: (adapter_key, "official.ncdr.cap"),
+    )
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter_key})),
+    )
+
+    assert captured == [(adapter_key,)]
+    assert result.status == "succeeded"
+    assert calls == {"run": 1}
+
+
 def test_work_runtime_queue_once_runs_adapter_and_marks_succeeded() -> None:
     settings = load_worker_settings(
         {
@@ -1505,7 +1574,57 @@ class _StaticCatalogReader:
 class _FailingCatalogReader:
     def enabled_keys(self, adapter_keys: tuple[str, ...]) -> frozenset[str]:
         del adapter_keys
-        raise RuntimeError("postgresql://secrets@catalog-unavailable")
+        raise RuntimeError("postgresql://catalog-secret@catalog-unavailable")
+
+
+class _FailingCatalogAuditWriter:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    def write_runtime_selection(
+        self,
+        *,
+        enabled_adapter_keys: tuple[str, ...],
+        known_adapter_keys: tuple[str, ...],
+        checked_at: datetime,
+    ) -> None:
+        del enabled_adapter_keys, known_adapter_keys, checked_at
+        raise RuntimeError("postgresql://audit-secret@catalog-unavailable")
+
+    def write_pipeline_status(
+        self,
+        *,
+        adapter_keys: tuple[str, ...],
+        status: str,
+        complete: bool,
+        checked_at: datetime,
+        run_at: datetime | None,
+        active_snapshot_raw_ref: str | None = None,
+    ) -> None:
+        del adapter_keys, status, complete, checked_at, run_at, active_snapshot_raw_ref
+        raise RuntimeError("postgresql://audit-secret@catalog-unavailable")
+
+
+class _QueueCatalogAdapter:
+    def __init__(self, key: str, calls: dict[str, int]) -> None:
+        self.metadata = AdapterMetadata(
+            key=key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name="Catalog queue adapter",
+        )
+        self.calls = calls
+
+    def run(self) -> AdapterRunResult:
+        self.calls["run"] += 1
+        return AdapterRunResult(adapter_key=self.metadata.key, fetched=(), normalized=())
+
+    def fetch(self) -> Iterable[RawSourceItem]:
+        return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
 
 
 class _MemoryStagingWriter:
