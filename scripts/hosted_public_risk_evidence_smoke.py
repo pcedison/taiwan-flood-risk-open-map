@@ -28,6 +28,7 @@ PUBLIC_RISK_REQUIREMENT_EVIDENCE_PATHS = {
 }
 OFFICIAL_REALTIME_EVENT_TYPES = {"rainfall", "water_level"}
 OFFICIAL_REALTIME_FRESHNESS_SOURCE_IDS = {"cwa-rainfall", "wra-water-level"}
+ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES = {"healthy", "degraded"}
 REQUIRED_NEARBY_SIGNALS = {
     "rainfall",
     "water_level",
@@ -176,6 +177,7 @@ def check_risk_payload(payload: Mapping[str, Any], *, radius_m: int) -> list[str
         failures.append("risk response missing nearby_realtime_coverage")
     else:
         failures.extend(_check_nearby_coverage(coverage, radius_m=radius_m))
+        failures.extend(_check_worker_source_health(coverage))
     return failures
 
 
@@ -266,6 +268,34 @@ def _check_nearby_coverage(coverage: Mapping[str, Any], *, radius_m: int) -> lis
     return failures
 
 
+def _check_worker_source_health(coverage: Mapping[str, Any]) -> list[str]:
+    if coverage.get("source_health_checked") is not True:
+        return [
+            "nearby_realtime_coverage did not verify worker source health; "
+            "request-time official observations are not worker persistence evidence"
+        ]
+
+    source_health = coverage.get("source_health")
+    if not isinstance(source_health, list) or not source_health:
+        return ["nearby_realtime_coverage returned no worker source health records"]
+
+    failures: list[str] = []
+    for source in source_health:
+        if not isinstance(source, Mapping) or source.get("required_for_absence") is False:
+            continue
+        status = source.get("health_status")
+        reason = source.get("reason_code")
+        if (
+            status not in ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES
+            or reason == "pipeline_stalled"
+        ):
+            source_id = source.get("source_id") or source.get("name") or "unknown-source"
+            failures.append(
+                f"required worker source {source_id} health is {status} ({reason})"
+            )
+    return failures
+
+
 def _risk_assessment_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
     coverage = payload.get("nearby_realtime_coverage")
     return {
@@ -302,6 +332,8 @@ def _nearby_coverage_summary(coverage: Mapping[str, Any]) -> dict[str, Any]:
         "radius_buckets_m": coverage.get("radius_buckets_m") or [],
         "signal_types": signal_types,
         "missing_signal_types": coverage.get("missing_signal_types") or [],
+        "source_health_checked": coverage.get("source_health_checked"),
+        "source_health_status": coverage.get("source_health_status"),
     }
 
 

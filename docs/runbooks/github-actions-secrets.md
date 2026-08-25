@@ -40,13 +40,13 @@
 | `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64` | base64 編碼的私有 manifest，餵給 `hosted_monitoring_evidence.py`，涵蓋告警路由與 worker/scheduler ownership 證據。 |
 | `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` | base64 編碼的私有 manifest，餵給 `local-source-request-followups.py`，追蹤向地方政府/官方單位申請資料來源的後續進度。 |
 
-**這些 secrets 目前全部未設定時的行為**：workflow 設計為優雅降級（graceful degradation），不是硬性失敗。
+**這些 secrets 目前全部未設定時的行為**：排程會把來源 freshness 當成硬性門檻；其他私有證據仍採優雅降級（graceful degradation）。
 
 - 不需要任何 secret 的步驟（公開 API 冒煙、hosted deployment smoke、hosted 公開風險證據冒煙、signal-gap 探索/派工就緒檢查、request packet bundle、hosted 私有證據就緒/範本 bundle）**仍會照常執行**，因為它們打的是公開端點（`floodrisk.cc`）或純本地腳本。
 - 每個依賴上述 5 個 secrets 的步驟都有對應的 `if: secrets.X != ''` 判斷式；secret 缺席時，該步驟會被**跳過**（不是失敗），並在 `GITHUB_STEP_SUMMARY` 寫一行「因為 `X` 未設定，所以某項證據沒有被收集」。
-- 例外：若手動觸發（`workflow_dispatch`）時把 `require_admin_source_freshness` 設為 `true`，且 `ADMIN_BEARER_TOKEN` 未設定，這個步驟才會讓整個 workflow **失敗**（`exit 1`）。排程觸發（`schedule`）時這個輸入預設為 `false`，所以定時執行不會因為缺 `ADMIN_BEARER_TOKEN` 而失敗。
+- 來源 freshness 是排程監控的硬性門檻：排程觸發（`schedule`）一律要求 `ADMIN_BEARER_TOKEN`；若未設定，workflow 會 **失敗**（`exit 1`），避免即時資料管線已停滯但監控仍顯示綠燈。手動觸發時則可用 `require_admin_source_freshness=true` 啟用同一門檻。
 
-**2026-07-06 現況（secrets 為空清單）的結論**：這個 workflow 每小時兩次仍會「執行成功」並產生公開端點的冒煙證據，但**私有 hosted 證據（worker 落地、worker policy、monitoring、地方來源派工追蹤）完全沒有被收集**，因為對應 5 個 manifest secret 全部缺席。換句話說，README 若聲稱「hosted monitoring 已上線」，指的頂多是公開端點的健康冒煙，不是完整的私有證據鏈。
+**修復後的預期行為**：`ADMIN_BEARER_TOKEN` 未設定時，排程會失敗並留下明確錯誤；設定後則會實際檢查 `/admin/v1/sources` freshness。其餘 4 個 manifest secret 缺席時，對應的 worker policy、monitoring 與地方來源派工私有證據仍會被跳過，公開端點冒煙則照常執行。
 
 ### `hosted-monitoring-schedule-watchdog.yml`（Hosted Monitoring Schedule Watchdog，排程 `17,47 * * * *`）
 
@@ -101,7 +101,7 @@ target 移除後，strict run 會得到 `no_dispatch_required` 並關閉既有 d
 
 | Workflow | 需要的 secrets 數 | secrets 為空時的行為 |
 |---|---|---|
-| `hosted-monitoring.yml` | 5 個（`ADMIN_BEARER_TOKEN`、`HOSTED_WORKER_EVIDENCE_MANIFEST_B64`、`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`、`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`、`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`） | 公開端點冒煙仍執行成功；5 項私有 hosted 證據全部被跳過收集，不會讓 workflow 失敗（除非手動指定 `require_admin_source_freshness=true`）。 |
+| `hosted-monitoring.yml` | 5 個（`ADMIN_BEARER_TOKEN`、`HOSTED_WORKER_EVIDENCE_MANIFEST_B64`、`HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64`、`HOSTED_MONITORING_EVIDENCE_MANIFEST_B64`、`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`） | 排程缺少 `ADMIN_BEARER_TOKEN` 時直接失敗；設定後會檢查來源 freshness。其餘私有 evidence manifest 缺席時仍採跳過，不影響公開冒煙。 |
 | `hosted-monitoring-schedule-watchdog.yml` | 0（僅用 `github.token`） | 不受影響，正常運作。 |
 | `github-actions-secret-readiness-watchdog.yml` | 0（只檢查上面 5 個 secret 的存在與否，不消費其值） | 排程執行預設只報告、不失敗；手動觸發並指定 `fail_on_completion_blockers=true` 時才會失敗並開 issue。 |
 | `local-source-dispatch-watchdog.yml` | 1 個 optional（`LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64`） | 未設定時仍正常運作並回報完整 pending queue；設定 reviewed accepted evidence 後會縮減 queue，只有派工紀錄時仍維持 pending。 |

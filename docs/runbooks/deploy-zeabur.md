@@ -140,6 +140,7 @@ Required:
 | `NEXT_PUBLIC_BASEMAP_ATTRIBUTION` | reviewed attribution text or blank | Must match the selected basemap provider requirements. |
 | `NEXT_TELEMETRY_DISABLED` | `1` | Disables Next.js telemetry. |
 | `REALTIME_OFFICIAL_ENABLED` | `true` | Enables official realtime observations. |
+| `REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED` | `false` | Hosted incident diagnostics must not replace worker-persisted evidence in normal traffic. |
 | `CWA_API_AUTHORIZATION` | your CWA token | Required when realtime official observations are enabled. |
 | `TILE_DYNAMIC_FALLBACK_ENABLED` | `false` | Keep hosted overlay tiles tied to accepted `map_layers` metadata, cache, or feature tables; local/test may enable runtime fallback. |
 
@@ -186,6 +187,7 @@ Official ingestion scheduler for the single-service beta:
 | `WRA_STATION_API_URL` | leave blank | Optional override for the WRA station metadata endpoint used to add coordinates to realtime water-level rows. |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` | Five-minute beta cadence. |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` | Postgres scheduler lease TTL. |
+| `SCHEDULER_MAX_TICKS` | leave unset | A finite value is for bounded tests only and stops the hosted scheduler loop. |
 
 Do not fill these for the first single-service preview:
 

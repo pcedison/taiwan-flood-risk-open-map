@@ -197,6 +197,37 @@ def test_check_risk_payload_requires_counts_when_nearest_sensor_missing() -> Non
     )
 
 
+def test_check_risk_payload_rejects_unchecked_worker_source_health() -> None:
+    payload = _risk_payload()
+    coverage = payload["nearby_realtime_coverage"]
+    coverage["source_health_checked"] = False
+    coverage["source_health"] = []
+
+    failures = smoke.check_risk_payload(payload, radius_m=500)
+
+    assert (
+        "nearby_realtime_coverage did not verify worker source health; "
+        "request-time official observations are not worker persistence evidence"
+        in failures
+    )
+
+
+def test_check_risk_payload_rejects_stalled_required_worker_source() -> None:
+    payload = _risk_payload()
+    coverage = payload["nearby_realtime_coverage"]
+    coverage["source_health"][0].update(
+        health_status="failed",
+        reason_code="pipeline_stalled",
+    )
+
+    failures = smoke.check_risk_payload(payload, radius_m=500)
+
+    assert (
+        "required worker source cwa-source health is failed (pipeline_stalled)"
+        in failures
+    )
+
+
 def _risk_payload() -> dict:
     return {
         "assessment_id": "risk-1",
@@ -253,6 +284,24 @@ def _risk_payload() -> dict:
             ],
             "missing_signal_types": ["rainfall", "flood_depth"],
             "limitations": ["county-level coverage is not query-point coverage"],
+            "source_health_checked": True,
+            "source_health_status": "healthy",
+            "source_health": [
+                {
+                    "source_id": "cwa-source",
+                    "name": "中央氣象署雨量觀測",
+                    "health_status": "healthy",
+                    "reason_code": "operational",
+                    "required_for_absence": True,
+                },
+                {
+                    "source_id": "wra-source",
+                    "name": "經濟部水利署河川水位觀測",
+                    "health_status": "degraded",
+                    "reason_code": "worker_delayed",
+                    "required_for_absence": True,
+                },
+            ],
             "county_level_note": "county-level coverage is not query-point coverage",
         },
     }
