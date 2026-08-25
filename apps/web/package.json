@@ -20,9 +20,10 @@
     "react-dom": "^19.0.0"
   },
   "overrides": {
-    "brace-expansion": "5.0.8",
+    "brace-expansion": "5.0.9",
+    "js-yaml": "5.4.0",
     "minimatch@3": "10.2.6",
-    "postcss": "^8.5.18",
+    "postcss": "^8.5.26",
     "sharp": "^0.35.0"
   },
   "devDependencies": {
