@@ -43,6 +43,112 @@ def database_url() -> str:
     return url
 
 
+def test_complete_replace_marker_preserves_lkg_across_failure_and_older_runs(
+    database_url: str,
+) -> None:
+    import psycopg
+
+    suffix = uuid4().hex
+    adapter_key = f"test.complete-replace.{suffix}"
+    raw_a = f"raw/test/complete-replace/{'a' * 64}.json"
+    raw_b = f"raw/test/complete-replace/{'b' * 64}.json"
+    raw_c = f"raw/test/complete-replace/{'c' * 64}.json"
+    older_at = NOW - timedelta(minutes=1)
+    active_at = NOW
+    failed_at = NOW + timedelta(minutes=1)
+    blocked_at = NOW + timedelta(minutes=2)
+    newer_job_at = NOW + timedelta(minutes=3)
+    writer = PostgresIngestionRunWriter(database_url=database_url)
+
+    try:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO data_sources (
+                    name, adapter_key, source_type, is_enabled, metadata
+                ) VALUES (%s, %s, 'derived', true, %s::jsonb)
+                """,
+                (
+                    "Complete-replace activation fixture",
+                    adapter_key,
+                    json.dumps({"active_snapshot_raw_ref": raw_a}),
+                ),
+            )
+
+        writer.write_pipeline_status(
+            adapter_keys=(adapter_key,),
+            status="succeeded",
+            complete=True,
+            checked_at=active_at,
+            run_at=active_at,
+            active_snapshot_raw_ref=raw_b,
+        )
+        writer.write_pipeline_status(
+            adapter_keys=(adapter_key,),
+            status="failed",
+            complete=False,
+            checked_at=failed_at,
+            run_at=failed_at,
+        )
+        writer.write_pipeline_status(
+            adapter_keys=(adapter_key,),
+            status="succeeded",
+            complete=True,
+            checked_at=older_at,
+            run_at=older_at,
+            active_snapshot_raw_ref=raw_a,
+        )
+
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO ingestion_jobs (
+                    job_key, adapter_key, started_at, finished_at, status
+                ) VALUES (%s, %s, %s, %s, 'succeeded')
+                """,
+                (
+                    f"complete-replace-newer-{suffix}",
+                    adapter_key,
+                    newer_job_at,
+                    newer_job_at,
+                ),
+            )
+
+        writer.write_pipeline_status(
+            adapter_keys=(adapter_key,),
+            status="succeeded",
+            complete=True,
+            checked_at=blocked_at,
+            run_at=blocked_at,
+            active_snapshot_raw_ref=raw_c,
+        )
+
+        with psycopg.connect(database_url) as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    metadata->>'active_snapshot_raw_ref',
+                    runtime_pipeline_status,
+                    runtime_pipeline_complete,
+                    runtime_pipeline_run_at
+                FROM data_sources
+                WHERE adapter_key = %s
+                """,
+                (adapter_key,),
+            ).fetchone()
+        assert row == (raw_b, "failed", False, failed_at)
+    finally:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                "DELETE FROM ingestion_jobs WHERE adapter_key = %s",
+                (adapter_key,),
+            )
+            connection.execute(
+                "DELETE FROM data_sources WHERE adapter_key = %s",
+                (adapter_key,),
+            )
+
+
 @pytest.mark.parametrize(("first_value", "second_value"), [(3.2, 9.9), (9.9, 3.2)])
 def test_absent_latest_key_is_serialized_without_equal_time_overwrite(
     database_url: str,

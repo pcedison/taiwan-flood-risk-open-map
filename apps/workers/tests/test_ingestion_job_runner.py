@@ -63,6 +63,53 @@ def test_run_adapter_batch_builds_and_persists_staging_batch() -> None:
     assert writer.batches[0].accepted[0].source_id == "sample-news-001"
 
 
+def test_complete_replace_summary_allows_reviewed_source_quality_partial_at_floor() -> None:
+    writer = _MemoryWriter()
+
+    summary = run_adapter_batch(
+        _CompleteReplaceAdapter(valid_count=3, source_rejection_count=1),
+        writer=writer,
+    )
+
+    assert summary.status == "partial"
+    assert summary.items_fetched == 4
+    assert summary.items_promoted == 3
+    assert summary.items_rejected == 1
+    assert summary.snapshot_generation_mode == "complete_replace"
+    assert summary.snapshot_activation_eligible is True
+    assert writer.batches[0].accepted[0].payload["snapshot_generation_mode"] == (
+        "complete_replace"
+    )
+
+
+@pytest.mark.parametrize(
+    ("valid_count", "source_rejection_count", "staging_rejection_count"),
+    ((2, 1, 0), (1, 0, 1)),
+)
+def test_complete_replace_summary_rejects_low_fraction_or_staging_rejection(
+    valid_count: int,
+    source_rejection_count: int,
+    staging_rejection_count: int,
+) -> None:
+    summary = run_adapter_batch(
+        _CompleteReplaceAdapter(
+            valid_count=valid_count,
+            source_rejection_count=source_rejection_count,
+            staging_rejection_count=staging_rejection_count,
+        )
+    )
+
+    assert summary.snapshot_generation_mode == "complete_replace"
+    assert summary.snapshot_activation_eligible is False
+
+
+def test_ordinary_summary_has_no_snapshot_generation_lifecycle() -> None:
+    summary = run_adapter_batch(_CompleteReplaceAdapter(valid_count=1, mode=None))
+
+    assert summary.snapshot_generation_mode is None
+    assert summary.snapshot_activation_eligible is False
+
+
 def test_managed_generation_replaces_forged_adapter_generation(monkeypatch) -> None:
     started_at = datetime(2026, 8, 24, 1, 0, tzinfo=UTC)
     finished_at = datetime(2026, 8, 24, 1, 0, 1, tzinfo=UTC)
@@ -281,6 +328,79 @@ class _MemoryWriter:
 class _FailingWriter:
     def write_batch(self, batch: AdapterStagingBatch) -> None:
         raise RuntimeError("write failed")
+
+
+class _CompleteReplaceAdapter:
+    def __init__(
+        self,
+        *,
+        valid_count: int,
+        source_rejection_count: int = 0,
+        staging_rejection_count: int = 0,
+        mode: str | None = "complete_replace",
+    ) -> None:
+        self.metadata = AdapterMetadata(
+            key="official.test.complete_replace",
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name="Complete-replace fixture",
+            snapshot_generation_mode=mode,
+        )
+        self.valid_count = valid_count
+        self.source_rejection_count = source_rejection_count
+        self.staging_rejection_count = staging_rejection_count
+
+    def run(self) -> AdapterRunResult:
+        normalized_count = self.valid_count + self.staging_rejection_count
+        fetched_count = normalized_count + self.source_rejection_count
+        fetched = tuple(
+            RawSourceItem(
+                source_id=f"history-{index}",
+                source_url=f"https://example.test/history/{index}",
+                fetched_at=FETCHED_AT,
+                payload={"dataset_revision": "revision-a"},
+            )
+            for index in range(fetched_count)
+        )
+        normalized = tuple(
+            NormalizedEvidence(
+                evidence_id=f"ev-history-{index}",
+                adapter_key=self.metadata.key,
+                source_family=SourceFamily.OFFICIAL,
+                event_type=EventType.FLOOD_REPORT,
+                source_id=fetched[index].source_id,
+                source_url=fetched[index].source_url,
+                source_title="Historical fixture",
+                source_timestamp=FETCHED_AT,
+                fetched_at=FETCHED_AT,
+                summary="Complete-replace activation eligibility fixture.",
+                location_text="臺南市",
+                confidence=(0.9 if index < self.valid_count else 1.5),
+            )
+            for index in range(normalized_count)
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=fetched,
+            normalized=normalized,
+            rejected=tuple(
+                fetched[index].source_id
+                for index in range(normalized_count, fetched_count)
+            ),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        return next(
+            (
+                evidence
+                for evidence in self.run().normalized
+                if evidence.source_id == raw_item.source_id
+            ),
+            None,
+        )
 
 
 class _EmptyAdapter:

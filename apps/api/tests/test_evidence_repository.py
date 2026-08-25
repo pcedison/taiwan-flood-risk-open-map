@@ -180,6 +180,26 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     )
 
 
+def test_query_nearby_evidence_uses_trusted_active_snapshot_for_wra_history_only() -> None:
+    connection = _FakeConnection(rows=[])
+
+    query_nearby_evidence(
+        database_url="postgresql://example.test/flood",
+        lat=23.0,
+        lng=120.0,
+        radius_m=500,
+        connection_factory=lambda: connection,
+    )
+
+    sql, _params = connection.cursor_instance.executions[0]
+    assert "ds.adapter_key <> 'official.wra.historical_flood'" in sql
+    assert (
+        "e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')" in sql
+    )
+    assert "snapshot_generation_mode" not in sql
+    assert "runtime_pipeline_status" not in sql
+
+
 def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
     connection = _FakeConnection(rows=[])
     realtime_since = datetime(2026, 6, 16, 5, 0, tzinfo=UTC)

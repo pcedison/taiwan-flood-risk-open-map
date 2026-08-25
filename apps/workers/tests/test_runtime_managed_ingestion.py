@@ -657,6 +657,104 @@ def test_managed_runtime_cycle_records_promotion_failure_in_public_pipeline_stat
     )
 
 
+def test_complete_replace_source_quality_partial_activates_only_after_full_promotion() -> None:
+    adapter = _CompleteReplacePartialAdapter(valid_count=3, rejection_count=1)
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter.metadata.key,),
+        source_wra_historical_flood_enabled=True,
+        freshness_max_age_seconds=24 * 60 * 60,
+    )
+    full_writer = _MemoryRunWriter()
+
+    full = _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=full_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        promote=True,
+    )
+
+    assert full.summaries[0].status == "partial"
+    assert full.summaries[0].snapshot_activation_eligible is True
+    assert full_writer.snapshot_activations == [full.summaries[0].raw_ref]
+
+    limited_writer = _MemoryRunWriter()
+    _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=limited_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        promote=True,
+        promotion_limit=1,
+    )
+
+    assert limited_writer.snapshot_activations == [None]
+
+
+def test_complete_replace_ineligible_partial_or_failed_promotion_preserves_marker() -> None:
+    adapter = _CompleteReplacePartialAdapter(valid_count=2, rejection_count=1)
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter.metadata.key,),
+        source_wra_historical_flood_enabled=True,
+        freshness_max_age_seconds=24 * 60 * 60,
+    )
+    ineligible_writer = _MemoryRunWriter()
+
+    ineligible = _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=ineligible_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        promote=True,
+    )
+
+    assert ineligible.summaries[0].snapshot_activation_eligible is False
+    assert ineligible_writer.snapshot_activations == [None]
+
+    eligible_adapter = _CompleteReplacePartialAdapter(valid_count=3, rejection_count=1)
+    failed_writer = _MemoryRunWriter()
+    failed = _execute_managed_runtime_ingestion_cycle(
+        {eligible_adapter.metadata.key: eligible_adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=failed_writer,
+        promotion_writer=_FailingPromotionWriter(),
+        promote=True,
+    )
+
+    assert failed.reason == "promotion_failed"
+    assert failed_writer.snapshot_activations == [None]
+
+
+def test_complete_replace_audit_summary_failure_cannot_activate_snapshot() -> None:
+    adapter = _CompleteReplacePartialAdapter(valid_count=3, rejection_count=1)
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter.metadata.key,),
+        source_wra_historical_flood_enabled=True,
+        freshness_max_age_seconds=24 * 60 * 60,
+    )
+    run_writer = _FailingSummaryMemoryRunWriter()
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        promote=True,
+    )
+
+    assert result.summaries[0].status == "failed"
+    assert result.summaries[0].snapshot_activation_eligible is True
+    assert run_writer.snapshot_activations == [None]
+
+
 def test_managed_runtime_cycle_records_builder_exception_as_pipeline_failure() -> None:
     run_writer = _MemoryRunWriter()
 
@@ -767,6 +865,7 @@ class _MemoryRunWriter:
         self.pipeline_statuses: list[
             tuple[tuple[str, ...], str, bool, datetime | None]
         ] = []
+        self.snapshot_activations: list[str | None] = []
         self.timeline = timeline
 
     def write_summary(
@@ -798,9 +897,23 @@ class _MemoryRunWriter:
         complete: bool,
         checked_at: datetime,
         run_at: datetime | None,
+        active_snapshot_raw_ref: str | None = None,
     ) -> None:
         del checked_at
         self.pipeline_statuses.append((adapter_keys, status, complete, run_at))
+        self.snapshot_activations.append(active_snapshot_raw_ref)
+
+
+class _FailingSummaryMemoryRunWriter(_MemoryRunWriter):
+    def write_summary(
+        self,
+        summary: AdapterBatchRunSummary,
+        *,
+        job_key: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        del summary, job_key, parameters
+        raise RuntimeError("audit summary unavailable")
 
 
 class _MemoryPromotionWriter:
@@ -1273,6 +1386,70 @@ class _Task9HistoricalAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         return self.run().normalized[0]
+
+
+class _CompleteReplacePartialAdapter:
+    metadata = AdapterMetadata(
+        key="official.wra.historical_flood",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="Complete-replace partial fixture",
+        snapshot_generation_mode="complete_replace",
+    )
+
+    def __init__(self, *, valid_count: int, rejection_count: int) -> None:
+        self.valid_count = valid_count
+        self.rejection_count = rejection_count
+
+    def run(self) -> AdapterRunResult:
+        fetched_count = self.valid_count + self.rejection_count
+        fetched = tuple(
+            RawSourceItem(
+                source_id=f"historical-{index}",
+                source_url=f"https://example.test/history/{index}",
+                fetched_at=FETCHED_AT,
+                payload={"dataset_revision": "revision-a"},
+            )
+            for index in range(fetched_count)
+        )
+        normalized = tuple(
+            NormalizedEvidence(
+                evidence_id=f"historical-evidence-{index}",
+                adapter_key=self.metadata.key,
+                source_family=SourceFamily.OFFICIAL,
+                event_type=EventType.FLOOD_REPORT,
+                source_id=fetched[index].source_id,
+                source_url=fetched[index].source_url,
+                source_title="Historical flood",
+                source_timestamp=FETCHED_AT,
+                fetched_at=FETCHED_AT,
+                summary="Complete-replace source-quality partial fixture.",
+                location_text="臺南市",
+                confidence=0.9,
+            )
+            for index in range(self.valid_count)
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=fetched,
+            normalized=normalized,
+            rejected=tuple(
+                item.source_id for item in fetched[self.valid_count :]
+            ),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        return next(
+            (
+                evidence
+                for evidence in self.run().normalized
+                if evidence.source_id == raw_item.source_id
+            ),
+            None,
+        )
 
 
 class _SuccessfulAdapter:

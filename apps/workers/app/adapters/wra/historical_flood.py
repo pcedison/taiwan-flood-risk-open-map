@@ -16,9 +16,8 @@ from urllib.request import (
     HTTPSHandler,
     Request,
     build_opener,
-    urlopen,
 )
-from xml.etree.ElementTree import Element
+from xml.etree.ElementTree import Element, tostring
 
 from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
@@ -47,12 +46,47 @@ WRA_HISTORICAL_FLOOD_DATA_GOV_URL = "https://data.gov.tw/dataset/25770"
 WRA_HISTORICAL_FLOOD_ATTRIBUTION = "Water Resources Agency historical flood KML"
 WRA_HISTORICAL_FLOOD_USER_AGENT = "FloodRiskTaiwan/0.1 worker-wra-historical-flood"
 DEFAULT_WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS = 8
+MAX_WRA_HISTORICAL_METADATA_BYTES = 256 * 1024
+MAX_WRA_HISTORICAL_KML_BYTES = 8 * 1024 * 1024
+MAX_WRA_HISTORICAL_XML_DEPTH = 64
+MAX_WRA_HISTORICAL_XML_ELEMENTS = 100_000
+MAX_WRA_HISTORICAL_PLACEMARKS = 10_000
+MAX_WRA_HISTORICAL_COORDINATES_PER_RING = 2_048
+MAX_WRA_HISTORICAL_TOTAL_COORDINATES = 250_000
+MAX_WRA_HISTORICAL_GEOMETRY_PARTS = 256
 WRA_LOCAL_TZ = timezone(timedelta(hours=8))
 
 _TAIWAN_LONGITUDE_BOUNDS = (117.0, 123.5)
 _TAIWAN_LATITUDE_BOUNDS = (20.0, 27.5)
 _KML_22_NAMESPACE = "http://www.opengis.net/kml/2.2"
 _KML_22_ROOT = f"{{{_KML_22_NAMESPACE}}}kml"
+_KML_DOCUMENT = f"{{{_KML_22_NAMESPACE}}}Document"
+_KML_FOLDER = f"{{{_KML_22_NAMESPACE}}}Folder"
+_KML_PLACEMARK = f"{{{_KML_22_NAMESPACE}}}Placemark"
+_KML_NAME = f"{{{_KML_22_NAMESPACE}}}name"
+_KML_POINT = f"{{{_KML_22_NAMESPACE}}}Point"
+_KML_POLYGON = f"{{{_KML_22_NAMESPACE}}}Polygon"
+_KML_MULTI_GEOMETRY = f"{{{_KML_22_NAMESPACE}}}MultiGeometry"
+_KML_OUTER_BOUNDARY = f"{{{_KML_22_NAMESPACE}}}outerBoundaryIs"
+_KML_INNER_BOUNDARY = f"{{{_KML_22_NAMESPACE}}}innerBoundaryIs"
+_KML_LINEAR_RING = f"{{{_KML_22_NAMESPACE}}}LinearRing"
+_KML_COORDINATES = f"{{{_KML_22_NAMESPACE}}}coordinates"
+_KML_WHEN = f"{{{_KML_22_NAMESPACE}}}when"
+_KML_DATA = f"{{{_KML_22_NAMESPACE}}}Data"
+_KML_SIMPLE_DATA = f"{{{_KML_22_NAMESPACE}}}SimpleData"
+_KML_VALUE = f"{{{_KML_22_NAMESPACE}}}value"
+_KML_CONTAINER_TAGS = {_KML_DOCUMENT, _KML_FOLDER}
+_KML_SUPPORTED_GEOMETRY_TAGS = {_KML_POINT, _KML_POLYGON, _KML_MULTI_GEOMETRY}
+_GEOMETRY_LOCAL_NAMES = {
+    "LineString",
+    "LinearRing",
+    "Model",
+    "MultiGeometry",
+    "MultiTrack",
+    "Point",
+    "Polygon",
+    "Track",
+}
 _XSI_NAMESPACE = "http://www.w3.org/2001/XMLSchema-instance"
 _CANONICAL_WRA_SCHEMA_LOCATION = (
     "http://www.opengis.net/kml/2.2 "
@@ -79,6 +113,7 @@ WRA_HISTORICAL_FLOOD_METADATA = AdapterMetadata(
     update_frequency="irregular historical KML publication",
     license="Government Open Data License, version 1.0",
     limitations=_HISTORICAL_LIMITATIONS,
+    snapshot_generation_mode="complete_replace",
 )
 
 
@@ -139,6 +174,12 @@ class WraHistoricalFloodAdapter:
         self._raw_snapshot_key = raw_snapshot_key
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
+        rows, _invalid_geometry_rejections = self._fetch_with_rejections()
+        return rows
+
+    def _fetch_with_rejections(
+        self,
+    ) -> tuple[tuple[RawSourceItem, ...], tuple[str, ...]]:
         try:
             index_payload = self._fetch_json(self._index_url, self._timeout_seconds)
             metadata_record = _select_current_kml_record(index_payload)
@@ -152,7 +193,9 @@ class WraHistoricalFloodAdapter:
             ) from exc
 
         dataset_revision = _dataset_revision(metadata_record)
-        records = parse_wra_historical_flood_kml(kml_text)
+        records, invalid_geometry_rejections = (
+            _parse_wra_historical_flood_kml_with_rejections(kml_text)
+        )
         fetched_at = self._fetched_at or datetime.now(UTC)
         seen: set[str] = set()
         rows: list[RawSourceItem] = []
@@ -181,7 +224,7 @@ class WraHistoricalFloodAdapter:
                     raw_snapshot_key=self._raw_snapshot_key,
                 )
             )
-        return tuple(rows)
+        return tuple(rows), invalid_geometry_rejections
 
     def normalize(self, raw: RawSourceItem) -> NormalizedEvidence | None:
         source_timestamp = parse_datetime(raw.payload.get("source_timestamp"))
@@ -226,9 +269,9 @@ class WraHistoricalFloodAdapter:
         )
 
     def run(self) -> AdapterRunResult:
-        fetched = self.fetch()
+        fetched, invalid_geometry_rejections = self._fetch_with_rejections()
         normalized: list[NormalizedEvidence] = []
-        rejected: list[str] = []
+        rejected = list(invalid_geometry_rejections)
         for raw in fetched:
             evidence = self.normalize(raw)
             if evidence is None:
@@ -244,20 +287,24 @@ class WraHistoricalFloodAdapter:
 
 
 def fetch_wra_historical_json(url: str, timeout_seconds: int) -> object:
+    approved_url = _approved_metadata_url(url)
     request = Request(
-        url,
+        approved_url,
         headers={
             "Accept": "application/json",
             "User-Agent": WRA_HISTORICAL_FLOOD_USER_AGENT,
         },
     )
     try:
-        with urlopen(
-            request,
-            timeout=timeout_seconds,
-            context=taiwan_gov_open_data_ssl_context(),
-        ) as response:
-            return json.loads(response.read().decode("utf-8-sig"))
+        opener = _wra_historical_opener()
+        with opener.open(request, timeout=timeout_seconds) as response:
+            _approved_metadata_url(response.geturl())
+            payload = _read_bounded_response(
+                response,
+                limit=MAX_WRA_HISTORICAL_METADATA_BYTES,
+                label="metadata",
+            )
+            return json.loads(payload.decode("utf-8-sig"))
     except (
         HTTPError,
         URLError,
@@ -266,7 +313,7 @@ def fetch_wra_historical_json(url: str, timeout_seconds: int) -> object:
         json.JSONDecodeError,
     ) as exc:
         raise WraHistoricalFloodFetchError(
-            f"Failed to fetch WRA historical metadata {url}: {exc}"
+            f"Failed to fetch WRA historical metadata {approved_url}: {exc}"
         ) from exc
 
 
@@ -280,19 +327,52 @@ def fetch_wra_historical_text(url: str, timeout_seconds: int) -> str:
         },
     )
     try:
-        opener = build_opener(
-            HTTPSHandler(context=taiwan_gov_open_data_ssl_context()),
-            _WraHistoricalRedirectHandler(),
-        )
+        opener = _wra_historical_opener()
         with opener.open(request, timeout=timeout_seconds) as response:
-            return response.read().decode("utf-8-sig")
+            _approved_kml_url(response.geturl())
+            payload = _read_bounded_response(
+                response,
+                limit=MAX_WRA_HISTORICAL_KML_BYTES,
+                label="KML",
+            )
+            return payload.decode("utf-8-sig")
     except (HTTPError, URLError, TimeoutError, UnicodeDecodeError) as exc:
         raise WraHistoricalFloodFetchError(
             f"Failed to fetch WRA historical KML {url}: {exc}"
         ) from exc
 
 
+def _wra_historical_opener() -> Any:
+    return build_opener(
+        HTTPSHandler(context=taiwan_gov_open_data_ssl_context()),
+        _WraHistoricalRedirectHandler(),
+    )
+
+
+def _read_bounded_response(response: Any, *, limit: int, label: str) -> bytes:
+    payload = response.read(limit + 1)
+    if len(payload) > limit:
+        raise WraHistoricalFloodPayloadError(
+            f"WRA historical {label} exceeds the {limit} bytes safety limit"
+        )
+    return payload
+
+
 def parse_wra_historical_flood_kml(text: str) -> tuple[Mapping[str, Any], ...]:
+    records, _invalid_geometry_rejections = (
+        _parse_wra_historical_flood_kml_with_rejections(text)
+    )
+    return records
+
+
+def _parse_wra_historical_flood_kml_with_rejections(
+    text: str,
+) -> tuple[tuple[Mapping[str, Any], ...], tuple[str, ...]]:
+    _validate_text_size(
+        text,
+        limit=MAX_WRA_HISTORICAL_KML_BYTES,
+        label="KML",
+    )
     normalized_text = _inject_missing_official_xsi_namespace(text)
     try:
         root = ET.fromstring(normalized_text.lstrip("\ufeff").strip())
@@ -306,18 +386,100 @@ def parse_wra_historical_flood_kml(text: str) -> tuple[Mapping[str, Any], ...]:
             "WRA historical XML must use the exact KML 2.2 root"
         )
 
-    if not any(_local_name(element.tag) == "Placemark" for element in root.iter()):
+    _validate_kml_complexity(root)
+
+    if not any(element.tag == _KML_PLACEMARK for element in root.iter()):
         raise WraHistoricalFloodPayloadError(
             "WRA historical KML does not contain a Placemark"
         )
 
     records: list[Mapping[str, Any]] = []
-    _walk_kml(root, inherited_event_name=None, inherited_timestamp=None, records=records)
+    invalid_geometry_rejections: list[str] = []
+    _walk_kml(
+        root,
+        inherited_event_name=None,
+        inherited_timestamp=None,
+        records=records,
+        invalid_geometry_rejections=invalid_geometry_rejections,
+    )
     if not records:
         raise WraHistoricalFloodPayloadError(
             "WRA historical KML does not contain a valid Placemark geometry in Taiwan"
         )
-    return tuple(records)
+    return tuple(records), tuple(invalid_geometry_rejections)
+
+
+def _validate_text_size(text: str, *, limit: int, label: str) -> None:
+    if len(text.encode("utf-8")) > limit:
+        raise WraHistoricalFloodPayloadError(
+            f"WRA historical {label} exceeds the {limit} bytes safety limit"
+        )
+
+
+def _validate_kml_complexity(root: Element) -> None:
+    element_count = 0
+    placemark_count = 0
+    total_coordinate_count = 0
+    geometry_parts_by_placemark: dict[int, int] = {}
+    stack: list[tuple[Element, int, str | None, int | None]] = [
+        (root, 1, None, None)
+    ]
+    while stack:
+        element, depth, parent_tag, placemark_identity = stack.pop()
+        element_count += 1
+        if element_count > MAX_WRA_HISTORICAL_XML_ELEMENTS:
+            raise WraHistoricalFloodPayloadError(
+                "WRA historical KML exceeds the elements safety limit "
+                f"{MAX_WRA_HISTORICAL_XML_ELEMENTS}"
+            )
+        if depth > MAX_WRA_HISTORICAL_XML_DEPTH:
+            raise WraHistoricalFloodPayloadError(
+                "WRA historical KML exceeds the depth safety limit "
+                f"{MAX_WRA_HISTORICAL_XML_DEPTH}"
+            )
+
+        if element.tag == _KML_PLACEMARK:
+            placemark_count += 1
+            if placemark_count > MAX_WRA_HISTORICAL_PLACEMARKS:
+                raise WraHistoricalFloodPayloadError(
+                    "WRA historical KML exceeds the Placemark safety limit "
+                    f"{MAX_WRA_HISTORICAL_PLACEMARKS}"
+                )
+            placemark_identity = id(element)
+            geometry_parts_by_placemark[placemark_identity] = 0
+
+        if element.tag in {_KML_POLYGON, _KML_LINEAR_RING} and (
+            placemark_identity is not None
+        ):
+            part_count = geometry_parts_by_placemark[placemark_identity] + 1
+            if part_count > MAX_WRA_HISTORICAL_GEOMETRY_PARTS:
+                raise WraHistoricalFloodPayloadError(
+                    "WRA historical Placemark exceeds the geometry parts safety limit "
+                    f"{MAX_WRA_HISTORICAL_GEOMETRY_PARTS}"
+                )
+            geometry_parts_by_placemark[placemark_identity] = part_count
+
+        if element.tag == _KML_COORDINATES:
+            coordinate_count = len((element.text or "").split())
+            total_coordinate_count += coordinate_count
+            if (
+                parent_tag == _KML_LINEAR_RING
+                and coordinate_count > MAX_WRA_HISTORICAL_COORDINATES_PER_RING
+            ):
+                raise WraHistoricalFloodPayloadError(
+                    "WRA historical coordinate ring exceeds the "
+                    f"{MAX_WRA_HISTORICAL_COORDINATES_PER_RING} coordinates safety limit"
+                )
+            if total_coordinate_count > MAX_WRA_HISTORICAL_TOTAL_COORDINATES:
+                raise WraHistoricalFloodPayloadError(
+                    "WRA historical KML exceeds the total coordinate safety limit "
+                    f"{MAX_WRA_HISTORICAL_TOTAL_COORDINATES}"
+                )
+
+        stack.extend(
+            (child, depth + 1, element.tag, placemark_identity)
+            for child in reversed(element)
+        )
 
 
 def _walk_kml(
@@ -326,18 +488,18 @@ def _walk_kml(
     inherited_event_name: str | None,
     inherited_timestamp: datetime | None,
     records: list[Mapping[str, Any]],
+    invalid_geometry_rejections: list[str],
 ) -> None:
-    tag = _local_name(element.tag)
     event_name = inherited_event_name
     timestamp = inherited_timestamp
-    if tag in {"Document", "Folder"}:
-        container_name = _direct_child_text(element, "name")
+    if element.tag in _KML_CONTAINER_TAGS:
+        container_name = _direct_kml_child_text(element, _KML_NAME)
         container_timestamp = _event_timestamp(container_name)
         if container_timestamp is not None:
             event_name = container_name
             timestamp = container_timestamp
 
-    if tag == "Placemark":
+    if element.tag == _KML_PLACEMARK:
         record = _placemark_record(
             element,
             inherited_event_name=event_name,
@@ -345,14 +507,21 @@ def _walk_kml(
         )
         if record is not None:
             records.append(record)
+        else:
+            invalid_geometry_rejections.append(
+                _invalid_geometry_rejection_id(element)
+            )
         return
 
     for child in element:
+        if child.tag not in {*_KML_CONTAINER_TAGS, _KML_PLACEMARK}:
+            continue
         _walk_kml(
             child,
             inherited_event_name=event_name,
             inherited_timestamp=timestamp,
             records=records,
+            invalid_geometry_rejections=invalid_geometry_rejections,
         )
 
 
@@ -365,7 +534,9 @@ def _placemark_record(
     geometry = _placemark_geometry(placemark)
     if geometry is None:
         return None
-    placemark_name = _direct_child_text(placemark, "name") or "historical flood area"
+    placemark_name = (
+        _direct_kml_child_text(placemark, _KML_NAME) or "historical flood area"
+    )
     source_timestamp = _placemark_timestamp(placemark)
     if source_timestamp is None:
         source_timestamp = _event_timestamp(placemark_name) or inherited_timestamp
@@ -383,7 +554,7 @@ def _placemark_record(
 
 def _placemark_timestamp(placemark: Element) -> datetime | None:
     for element in placemark.iter():
-        if _local_name(element.tag) == "when":
+        if element.tag == _KML_WHEN:
             parsed = _event_timestamp(optional_str(element.text))
             if parsed is not None:
                 return parsed
@@ -402,15 +573,14 @@ def _placemark_timestamp(placemark: Element) -> datetime | None:
         "時間",
     }
     for element in placemark.iter():
-        tag = _local_name(element.tag)
-        if tag not in {"Data", "SimpleData"}:
+        if element.tag not in {_KML_DATA, _KML_SIMPLE_DATA}:
             continue
         key = re.sub(r"[^a-z0-9\u4e00-\u9fff]", "", element.attrib.get("name", "").lower())
         if key not in timestamp_keys:
             continue
         value = optional_str(element.text)
-        if tag == "Data":
-            value = _direct_child_text(element, "value") or value
+        if element.tag == _KML_DATA:
+            value = _direct_kml_child_text(element, _KML_VALUE) or value
         parsed = _event_timestamp(value)
         if parsed is not None:
             return parsed
@@ -459,40 +629,82 @@ def _event_timestamp(value: str | None) -> datetime | None:
 
 
 def _placemark_geometry(placemark: Element) -> dict[str, Any] | None:
-    point_elements = [
-        element for element in placemark.iter() if _local_name(element.tag) == "Point"
-    ]
-    polygon_elements = [
-        element for element in placemark.iter() if _local_name(element.tag) == "Polygon"
-    ]
-    parsed_points = [_point_geometry(element) for element in point_elements]
-    parsed_polygons = [_polygon_coordinates(element) for element in polygon_elements]
-    if any(point is None for point in parsed_points) or any(
-        polygon is None for polygon in parsed_polygons
-    ):
+    if _contains_foreign_or_unsupported_geometry(placemark):
         return None
-    points = [point for point in parsed_points if point is not None]
-    polygons = [polygon for polygon in parsed_polygons if polygon is not None]
-    has_geometry_element = any(
-        _local_name(element.tag) in {"Point", "Polygon", "MultiGeometry"}
+    direct_geometries = [
+        child for child in placemark if child.tag in _KML_SUPPORTED_GEOMETRY_TAGS
+    ]
+    if len(direct_geometries) != 1:
+        return None
+
+    geometry = direct_geometries[0]
+    top_level_descendants = [
+        element
         for element in placemark.iter()
-    )
-    if not has_geometry_element or (points and polygons) or len(points) > 1:
-        return None
-    if len(points) == 1:
-        return {"type": "Point", "coordinates": points[0]}
-    if len(polygons) == 1:
-        return {"type": "Polygon", "coordinates": polygons[0]}
-    if len(polygons) > 1:
-        if not _valid_multipolygon_topology(polygons):
+        if element.tag in _KML_SUPPORTED_GEOMETRY_TAGS
+    ]
+    if geometry.tag == _KML_POINT:
+        if top_level_descendants != [geometry]:
             return None
-        return {"type": "MultiPolygon", "coordinates": polygons}
-    return None
+        point = _point_geometry(geometry)
+        if point is None:
+            return None
+        return {"type": "Point", "coordinates": point}
+
+    if geometry.tag == _KML_POLYGON:
+        if top_level_descendants != [geometry]:
+            return None
+        polygon = _polygon_coordinates(geometry)
+        if polygon is None:
+            return None
+        return {"type": "Polygon", "coordinates": polygon}
+
+    polygon_elements = [
+        child for child in geometry if child.tag == _KML_POLYGON
+    ]
+    if not polygon_elements or top_level_descendants != [geometry, *polygon_elements]:
+        return None
+    polygons = [_polygon_coordinates(element) for element in polygon_elements]
+    if any(polygon is None for polygon in polygons):
+        return None
+    valid_polygons = [polygon for polygon in polygons if polygon is not None]
+    if len(valid_polygons) == 1:
+        return {"type": "Polygon", "coordinates": valid_polygons[0]}
+    if not _valid_multipolygon_topology(valid_polygons):
+        return None
+    return {"type": "MultiPolygon", "coordinates": valid_polygons}
+
+
+def _contains_foreign_or_unsupported_geometry(placemark: Element) -> bool:
+    for element in placemark.iter():
+        local_name = _local_name(element.tag)
+        if local_name not in _GEOMETRY_LOCAL_NAMES:
+            continue
+        if not element.tag.startswith(f"{{{_KML_22_NAMESPACE}}}"):
+            return True
+        if local_name in {"LineString", "Model", "MultiTrack", "Track"}:
+            return True
+    return False
 
 
 def _point_geometry(point: Element) -> list[float] | None:
-    coordinates = _first_descendant_text(point, "coordinates")
-    parsed = _coordinate_sequence(coordinates)
+    if any(
+        element is not point and _local_name(element.tag) in _GEOMETRY_LOCAL_NAMES
+        for element in point.iter()
+    ):
+        return None
+    coordinate_elements = [
+        element for element in point.iter() if element.tag == _KML_COORDINATES
+    ]
+    direct_coordinate_elements = [
+        child for child in point if child.tag == _KML_COORDINATES
+    ]
+    if (
+        len(coordinate_elements) != 1
+        or direct_coordinate_elements != coordinate_elements
+    ):
+        return None
+    parsed = _coordinate_sequence(optional_str(coordinate_elements[0].text))
     if parsed is None or len(parsed) != 1:
         return None
     return parsed[0]
@@ -502,14 +714,18 @@ def _polygon_coordinates(polygon: Element) -> list[list[list[float]]] | None:
     outer: list[list[float]] | None = None
     holes: list[list[list[float]]] = []
     for child in polygon:
-        tag = _local_name(child.tag)
-        if tag not in {"outerBoundaryIs", "innerBoundaryIs"}:
+        local_name = _local_name(child.tag)
+        if local_name in {"outerBoundaryIs", "innerBoundaryIs"} and child.tag not in {
+            _KML_OUTER_BOUNDARY,
+            _KML_INNER_BOUNDARY,
+        }:
+            return None
+        if child.tag not in {_KML_OUTER_BOUNDARY, _KML_INNER_BOUNDARY}:
             continue
-        coordinates = _first_descendant_text(child, "coordinates")
-        ring = _coordinate_sequence(coordinates)
+        ring = _boundary_ring(child)
         if not _valid_linear_ring(ring):
             return None
-        if tag == "outerBoundaryIs":
+        if child.tag == _KML_OUTER_BOUNDARY:
             if outer is not None:
                 return None
             outer = ring
@@ -521,6 +737,30 @@ def _polygon_coordinates(polygon: Element) -> list[list[list[float]]] | None:
     if not _valid_polygon_topology(outer, holes):
         return None
     return [outer, *holes]
+
+
+def _boundary_ring(boundary: Element) -> list[list[float]] | None:
+    ring_elements = [
+        element for element in boundary.iter() if element.tag == _KML_LINEAR_RING
+    ]
+    direct_ring_elements = [
+        child for child in boundary if child.tag == _KML_LINEAR_RING
+    ]
+    if len(ring_elements) != 1 or direct_ring_elements != ring_elements:
+        return None
+    ring = ring_elements[0]
+    coordinate_elements = [
+        element for element in ring.iter() if element.tag == _KML_COORDINATES
+    ]
+    direct_coordinate_elements = [
+        child for child in ring if child.tag == _KML_COORDINATES
+    ]
+    if (
+        len(coordinate_elements) != 1
+        or direct_coordinate_elements != coordinate_elements
+    ):
+        return None
+    return _coordinate_sequence(optional_str(coordinate_elements[0].text))
 
 
 def _coordinate_sequence(value: str | None) -> list[list[float]] | None:
@@ -781,6 +1021,11 @@ def _historical_source_id(record: Mapping[str, Any]) -> str:
     return f"wra-historical:{digest}"
 
 
+def _invalid_geometry_rejection_id(placemark: Element) -> str:
+    digest = hashlib.sha256(tostring(placemark, encoding="utf-8")).hexdigest()
+    return f"invalid_geometry:{digest}"
+
+
 def _select_current_kml_record(payload: object) -> Mapping[str, Any]:
     records = tuple(_index_records(payload))
     candidates = [record for record in records if _is_kml_record(record)]
@@ -821,17 +1066,26 @@ def _is_kml_record(record: Mapping[str, Any]) -> bool:
 
 
 def _approved_kml_url(value: object) -> str:
+    return _approved_wra_url(value, resource="KML sourceurl")
+
+
+def _approved_metadata_url(value: object) -> str:
+    return _approved_wra_url(value, resource="metadata URL")
+
+
+def _approved_wra_url(value: object, *, resource: str) -> str:
     url = optional_str(value)
     if url is None:
         raise WraHistoricalFloodPayloadError(
-            "WRA historical KML record is missing an approved HTTPS sourceurl"
+            f"WRA historical {resource} is missing an approved HTTPS URL"
         )
     parsed = urlsplit(url)
     try:
         port = parsed.port
     except ValueError as exc:
         raise WraHistoricalFloodPayloadError(
-            "WRA historical KML sourceurl must use the approved HTTPS opendata.wra.gov.tw host"
+            f"WRA historical {resource} must use the approved HTTPS "
+            "opendata.wra.gov.tw host"
         ) from exc
     if (
         parsed.scheme.lower() != "https"
@@ -842,7 +1096,8 @@ def _approved_kml_url(value: object) -> str:
         or port not in {None, 443}
     ):
         raise WraHistoricalFloodPayloadError(
-            "WRA historical KML sourceurl must use the approved HTTPS opendata.wra.gov.tw host"
+            f"WRA historical {resource} must use the approved HTTPS "
+            "opendata.wra.gov.tw host"
         )
     return url
 
@@ -866,17 +1121,10 @@ def _revision_sort_key(record: Mapping[str, Any]) -> tuple[int, str]:
     return (1, parsed.astimezone(UTC).isoformat())
 
 
-def _direct_child_text(element: Element, child_name: str) -> str | None:
+def _direct_kml_child_text(element: Element, child_tag: str) -> str | None:
     for child in element:
-        if _local_name(child.tag) == child_name:
+        if child.tag == child_tag:
             return optional_str(child.text)
-    return None
-
-
-def _first_descendant_text(element: Element, descendant_name: str) -> str | None:
-    for descendant in element.iter():
-        if _local_name(descendant.tag) == descendant_name:
-            return optional_str(descendant.text)
     return None
 
 

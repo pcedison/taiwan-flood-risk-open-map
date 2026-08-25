@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 from urllib.request import Request
 
 import pytest
@@ -31,6 +31,40 @@ CANONICAL_WRA_SCHEMA_LOCATION = (
     "http://www.google.com/kml/ext/2.2 "
     "http://code.google.com/apis/kml/schema/kml22gx.xsd"
 )
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes, *, final_url: str) -> None:
+        self._body = body
+        self._final_url = final_url
+        self.read_sizes: list[int | None] = []
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def geturl(self) -> str:
+        return self._final_url
+
+    def read(self, size: int | None = None) -> bytes:
+        self.read_sizes.append(size)
+        return self._body if size is None else self._body[:size]
+
+
+class _FakeOpener:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+        self.requests: list[tuple[Request, int]] = []
+
+    def open(self, request: Request, *, timeout: int) -> _FakeResponse:
+        self.requests.append((request, timeout))
+        return self._response
+
+
+def _forbidden_urlopen(*_args: object, **_kwargs: object) -> object:
+    raise AssertionError("urlopen must not bypass the controlled opener")
 
 
 def _index_payload() -> object:
@@ -308,6 +342,153 @@ def test_kml_redirect_handler_allows_relative_and_same_host_https_hops() -> None
     assert second.full_url == "https://opendata.wra.gov.tw:443/cloud/final.kml"
 
 
+def test_metadata_fetch_uses_a_controlled_opener_and_bounded_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = json.dumps(_index_payload(), ensure_ascii=False).encode()
+    response = _FakeResponse(body, final_url=WRA_HISTORICAL_FLOOD_INDEX_URL)
+    opener = _FakeOpener(response)
+    monkeypatch.setattr(
+        historical_flood_module,
+        "build_opener",
+        lambda *_handlers: opener,
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "urlopen",
+        _forbidden_urlopen,
+        raising=False,
+    )
+
+    payload = historical_flood_module.fetch_wra_historical_json(
+        WRA_HISTORICAL_FLOOD_INDEX_URL,
+        7,
+    )
+
+    assert payload == _index_payload()
+    assert opener.requests[0][0].full_url == WRA_HISTORICAL_FLOOD_INDEX_URL
+    assert opener.requests[0][1] == 7
+    assert response.read_sizes == [
+        historical_flood_module.MAX_WRA_HISTORICAL_METADATA_BYTES + 1
+    ]
+
+
+@pytest.mark.parametrize(
+    "initial_url",
+    (
+        "http://opendata.wra.gov.tw/api/v2/index?format=JSON",
+        "https://evil.example/api/v2/index?format=JSON",
+        "https://opendata.wra.gov.tw.evil.example/api/v2/index?format=JSON",
+        "https://user@opendata.wra.gov.tw/api/v2/index?format=JSON",
+        "https://opendata.wra.gov.tw:444/api/v2/index?format=JSON",
+        "https://opendata.wra.gov.tw:not-a-port/api/v2/index?format=JSON",
+    ),
+)
+def test_metadata_fetch_rejects_an_unapproved_initial_url(
+    monkeypatch: pytest.MonkeyPatch,
+    initial_url: str,
+) -> None:
+    called = False
+
+    def forbidden_build_opener(*_handlers: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("network opener must not be built")
+
+    monkeypatch.setattr(
+        historical_flood_module,
+        "build_opener",
+        forbidden_build_opener,
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "urlopen",
+        _forbidden_urlopen,
+        raising=False,
+    )
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="approved HTTPS"):
+        historical_flood_module.fetch_wra_historical_json(initial_url, 7)
+    assert called is False
+
+
+@pytest.mark.parametrize(
+    "final_url",
+    (
+        "http://opendata.wra.gov.tw/api/v2/index",
+        "https://evil.example/api/v2/index",
+        "https://opendata.wra.gov.tw.evil.example/api/v2/index",
+        "https://user@opendata.wra.gov.tw/api/v2/index",
+        "https://opendata.wra.gov.tw:444/api/v2/index",
+    ),
+)
+def test_metadata_fetch_rejects_an_unapproved_final_response_url(
+    monkeypatch: pytest.MonkeyPatch,
+    final_url: str,
+) -> None:
+    response = _FakeResponse(b"[]", final_url=final_url)
+    monkeypatch.setattr(
+        historical_flood_module,
+        "build_opener",
+        lambda *_handlers: _FakeOpener(response),
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "urlopen",
+        _forbidden_urlopen,
+        raising=False,
+    )
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="approved HTTPS"):
+        historical_flood_module.fetch_wra_historical_json(
+            WRA_HISTORICAL_FLOOD_INDEX_URL,
+            7,
+        )
+    assert response.read_sizes == []
+
+
+def test_network_fetchers_reject_limit_plus_one_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_METADATA_BYTES",
+        32,
+    )
+    metadata_response = _FakeResponse(
+        b"x" * 33,
+        final_url=WRA_HISTORICAL_FLOOD_INDEX_URL,
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "build_opener",
+        lambda *_handlers: _FakeOpener(metadata_response),
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "urlopen",
+        _forbidden_urlopen,
+        raising=False,
+    )
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="metadata.*32 bytes"):
+        historical_flood_module.fetch_wra_historical_json(
+            WRA_HISTORICAL_FLOOD_INDEX_URL,
+            7,
+        )
+
+    monkeypatch.setattr(historical_flood_module, "MAX_WRA_HISTORICAL_KML_BYTES", 32)
+    kml_response = _FakeResponse(b"x" * 33, final_url=APPROVED_KML_URL)
+    monkeypatch.setattr(
+        historical_flood_module,
+        "build_opener",
+        lambda *_handlers: _FakeOpener(kml_response),
+    )
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="KML.*32 bytes"):
+        historical_flood_module.fetch_wra_historical_text(APPROVED_KML_URL, 7)
+
+
 @pytest.mark.parametrize(
     "sourceurl",
     (
@@ -367,6 +548,279 @@ def test_fetch_rejects_metadata_without_a_kml_record() -> None:
 def test_fetch_rejects_malformed_or_empty_kml(kml: str, message: str) -> None:
     with pytest.raises(WraHistoricalFloodPayloadError, match=message):
         _adapter(kml=kml).fetch()
+
+
+def test_safety_limits_have_live_source_headroom() -> None:
+    assert historical_flood_module.MAX_WRA_HISTORICAL_METADATA_BYTES == 256 * 1024
+    assert historical_flood_module.MAX_WRA_HISTORICAL_KML_BYTES == 8 * 1024 * 1024
+    assert historical_flood_module.MAX_WRA_HISTORICAL_XML_DEPTH == 64
+    assert historical_flood_module.MAX_WRA_HISTORICAL_XML_ELEMENTS == 100_000
+    assert historical_flood_module.MAX_WRA_HISTORICAL_PLACEMARKS == 10_000
+    assert historical_flood_module.MAX_WRA_HISTORICAL_COORDINATES_PER_RING == 2_048
+    assert historical_flood_module.MAX_WRA_HISTORICAL_TOTAL_COORDINATES == 250_000
+    assert historical_flood_module.MAX_WRA_HISTORICAL_GEOMETRY_PARTS == 256
+
+
+def test_direct_parser_rejects_kml_limit_plus_one_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kml = (
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>'
+        "<Point><coordinates>120,23</coordinates></Point>"
+        "</Placemark></Document></kml>"
+    )
+    byte_length = len(kml.encode())
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_KML_BYTES",
+        byte_length - 1,
+    )
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="KML.*bytes"):
+        historical_flood_module.parse_wra_historical_flood_kml(kml)
+
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_KML_BYTES",
+        byte_length,
+    )
+    assert len(historical_flood_module.parse_wra_historical_flood_kml(kml)) == 1
+
+
+def test_parser_rejects_over_depth_xml_before_recursive_walk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(historical_flood_module, "MAX_WRA_HISTORICAL_XML_DEPTH", 4)
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document><Folder><Folder>
+      <Placemark><Point><coordinates>120,23</coordinates></Point></Placemark>
+    </Folder></Folder></Document></kml>
+    """
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="depth.*4"):
+        historical_flood_module.parse_wra_historical_flood_kml(kml)
+
+
+def test_parser_rejects_element_and_placemark_limit_plus_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Placemark><Point><coordinates>120,23</coordinates></Point></Placemark>
+      <Placemark><Point><coordinates>120.1,23.1</coordinates></Point></Placemark>
+    </Document></kml>
+    """
+    monkeypatch.setattr(historical_flood_module, "MAX_WRA_HISTORICAL_XML_ELEMENTS", 7)
+    with pytest.raises(WraHistoricalFloodPayloadError, match="elements.*7"):
+        historical_flood_module.parse_wra_historical_flood_kml(kml)
+
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_XML_ELEMENTS",
+        100,
+    )
+    monkeypatch.setattr(historical_flood_module, "MAX_WRA_HISTORICAL_PLACEMARKS", 1)
+    with pytest.raises(WraHistoricalFloodPayloadError, match="Placemark.*1"):
+        historical_flood_module.parse_wra_historical_flood_kml(kml)
+
+
+def test_parser_rejects_per_ring_and_total_coordinate_limit_plus_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_COORDINATES_PER_RING",
+        4,
+    )
+    with pytest.raises(WraHistoricalFloodPayloadError, match="ring.*4"):
+        historical_flood_module.parse_wra_historical_flood_kml(
+            _polygon_kml(SQUARE_SHELL)
+        )
+
+    point_kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <Placemark><Point><coordinates>120,23</coordinates></Point></Placemark>
+      <Placemark><Point><coordinates>120.1,23.1</coordinates></Point></Placemark>
+    </Document></kml>
+    """
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_COORDINATES_PER_RING",
+        2_048,
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_TOTAL_COORDINATES",
+        1,
+    )
+    with pytest.raises(WraHistoricalFloodPayloadError, match="coordinate.*1"):
+        historical_flood_module.parse_wra_historical_flood_kml(point_kml)
+
+
+def test_parser_rejects_geometry_parts_limit_plus_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_GEOMETRY_PARTS",
+        3,
+    )
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>
+      <MultiGeometry>
+        <Polygon><outerBoundaryIs><LinearRing><coordinates>
+          120,23 120.01,23 120.01,23.01 120,23
+        </coordinates></LinearRing></outerBoundaryIs></Polygon>
+        <Polygon><outerBoundaryIs><LinearRing><coordinates>
+          120.02,23.02 120.03,23.02 120.03,23.03 120.02,23.02
+        </coordinates></LinearRing></outerBoundaryIs></Polygon>
+      </MultiGeometry>
+    </Placemark></Document></kml>
+    """
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="geometry parts.*3"):
+        historical_flood_module.parse_wra_historical_flood_kml(kml)
+
+
+def test_parser_accepts_an_economical_at_limit_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kml = (
+        '<kml xmlns="http://www.opengis.net/kml/2.2"><Document><Placemark>'
+        "<Point><coordinates>120,23</coordinates></Point>"
+        "</Placemark></Document></kml>"
+    )
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_KML_BYTES",
+        len(kml.encode()),
+    )
+    monkeypatch.setattr(historical_flood_module, "MAX_WRA_HISTORICAL_XML_DEPTH", 5)
+    monkeypatch.setattr(historical_flood_module, "MAX_WRA_HISTORICAL_XML_ELEMENTS", 5)
+    monkeypatch.setattr(historical_flood_module, "MAX_WRA_HISTORICAL_PLACEMARKS", 1)
+    monkeypatch.setattr(
+        historical_flood_module,
+        "MAX_WRA_HISTORICAL_TOTAL_COORDINATES",
+        1,
+    )
+
+    assert len(historical_flood_module.parse_wra_historical_flood_kml(kml)) == 1
+
+
+@pytest.mark.parametrize(
+    "invalid_geometry",
+    (
+        """
+        <Polygon><outerBoundaryIs><LinearRing><coordinates>
+          120,23 120.01,23 120.01,23.01 120,23
+        </coordinates></LinearRing></outerBoundaryIs></Polygon>
+        <Polygon><outerBoundaryIs><LinearRing><coordinates>
+          120.02,23.02 120.03,23.02 120.03,23.03 120.02,23.02
+        </coordinates></LinearRing></outerBoundaryIs></Polygon>
+        """,
+        """
+        <Point><LinearRing><coordinates>120,23</coordinates></LinearRing></Point>
+        """,
+        """
+        <foreign:Point><foreign:coordinates>120,23</foreign:coordinates></foreign:Point>
+        """,
+        """
+        <Point><coordinates>120,23</coordinates></Point>
+        <LineString><coordinates>120,23 120.1,23.1</coordinates></LineString>
+        """,
+        """
+        <Polygon>
+          <outerBoundaryIs><LinearRing><coordinates>
+            120,23 120.1,23 120.1,23.1 120,23.1 120,23
+          </coordinates></LinearRing></outerBoundaryIs>
+          <innerBoundaryIs>
+            <LinearRing><coordinates>
+              120.01,23.01 120.02,23.01 120.02,23.02 120.01,23.02 120.01,23.01
+            </coordinates></LinearRing>
+            <LinearRing><coordinates>
+              120.03,23.03 120.04,23.03 120.04,23.04 120.03,23.04 120.03,23.03
+            </coordinates></LinearRing>
+          </innerBoundaryIs>
+        </Polygon>
+        """,
+    ),
+)
+def test_fetch_rejects_sibling_nested_foreign_or_mixed_geometry_hierarchy(
+    invalid_geometry: str,
+) -> None:
+    kml = f"""\
+    <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:foreign="urn:foreign">
+      <Document><name>2020-08-01</name><Placemark>{invalid_geometry}</Placemark></Document>
+    </kml>
+    """
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="valid Placemark"):
+        _adapter(kml=kml).fetch()
+
+
+def test_parser_ignores_foreign_namespace_structural_placemarks() -> None:
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:foreign="urn:foreign">
+      <foreign:Document><foreign:Placemark>
+        <foreign:Point><foreign:coordinates>120,23</foreign:coordinates></foreign:Point>
+      </foreign:Placemark></foreign:Document>
+    </kml>
+    """
+
+    with pytest.raises(WraHistoricalFloodPayloadError, match="Placemark"):
+        historical_flood_module.parse_wra_historical_flood_kml(kml)
+
+
+def test_multigeometry_with_one_direct_polygon_remains_supported() -> None:
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>2020-08-01</name>
+      <Placemark><MultiGeometry><Polygon><outerBoundaryIs><LinearRing>
+        <coordinates>120,23 120.01,23 120.01,23.01 120,23</coordinates>
+      </LinearRing></outerBoundaryIs></Polygon></MultiGeometry></Placemark>
+    </Document></kml>
+    """
+
+    rows = _adapter(kml=kml).fetch()
+
+    assert len(rows) == 1
+    assert rows[0].payload["geometry"]["type"] == "Polygon"
+
+
+def test_run_reports_invalid_geometry_separately_from_missing_time() -> None:
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>2020-08-01</name>
+      <Placemark id="good"><name>good</name>
+        <Point><coordinates>120,23</coordinates></Point>
+      </Placemark>
+      <Placemark id="bad"><name>bad hierarchy</name>
+        <Point><LinearRing><coordinates>120.1,23.1</coordinates></LinearRing></Point>
+      </Placemark>
+    </Document><Document><name>94-易淹水調查</name>
+      <Placemark id="undated"><name>undated</name>
+        <Point><coordinates>120.2,23.2</coordinates></Point>
+      </Placemark>
+    </Document></kml>
+    """
+
+    first = _adapter(kml=kml).run()
+    second = _adapter(kml=kml).run()
+
+    assert len(first.fetched) == 2
+    assert len(first.normalized) == 1
+    assert len(first.rejected) == 2
+    invalid_rejections = tuple(
+        rejection
+        for rejection in first.rejected
+        if rejection.startswith("invalid_geometry:")
+    )
+    assert len(invalid_rejections) == 1
+    assert len(invalid_rejections[0]) == len("invalid_geometry:") + 64
+    assert invalid_rejections == tuple(
+        rejection
+        for rejection in second.rejected
+        if rejection.startswith("invalid_geometry:")
+    )
+    assert first.fetched[-1].source_id in first.rejected
 
 
 def test_fetch_rejects_out_of_taiwan_and_invalid_geometries() -> None:
@@ -547,6 +1001,12 @@ def test_source_event_time_never_falls_back_to_dataset_revision_or_fetched_at() 
     assert _adapter().normalize(rejected) is None
     assert rejected.fetched_at == FETCHED_AT
     assert rejected.payload["dataset_revision"] == "2018-06-08T16:26:00"
+
+
+def test_adapter_declares_worker_owned_complete_replace_snapshot_lifecycle() -> None:
+    assert WraHistoricalFloodAdapter.metadata.snapshot_generation_mode == (
+        "complete_replace"
+    )
 
 
 def test_config_and_runtime_require_independent_disabled_by_default_gates() -> None:

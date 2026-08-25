@@ -121,6 +121,161 @@ def _prepare_latest_schema(database_url: str) -> None:
         )
 
 
+def _prepare_history_snapshot_schema(database_url: str) -> None:
+    with psycopg.connect(database_url) as connection:
+        connection.execute(
+            """
+            CREATE TABLE data_sources (
+                id uuid PRIMARY KEY,
+                adapter_key text NOT NULL UNIQUE,
+                is_enabled boolean NOT NULL,
+                metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+                runtime_pipeline_status text
+            );
+            CREATE TABLE evidence (
+                id uuid PRIMARY KEY,
+                data_source_id uuid NOT NULL REFERENCES data_sources(id),
+                source_id text NOT NULL,
+                source_type text NOT NULL,
+                event_type text NOT NULL,
+                title text NOT NULL,
+                summary text NOT NULL,
+                url text,
+                occurred_at timestamptz,
+                observed_at timestamptz,
+                ingested_at timestamptz NOT NULL DEFAULT now(),
+                geom geometry(Geometry, 4326),
+                distance_to_query_m numeric(10,2),
+                confidence numeric(6,3) NOT NULL,
+                freshness_score numeric(6,3),
+                source_weight numeric(6,3),
+                privacy_level text NOT NULL DEFAULT 'public',
+                raw_ref text,
+                ingestion_status text NOT NULL DEFAULT 'accepted',
+                properties jsonb NOT NULL DEFAULT '{}'::jsonb,
+                created_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+
+
+def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good() -> None:
+    database_url = _database_url()
+    raw_a = f"raw/official/wra/historical_flood/{'a' * 64}.json"
+    raw_b = f"raw/official/wra/historical_flood/{'b' * 64}.json"
+    history_source_id = uuid4()
+    ordinary_source_id = uuid4()
+    a_shared_id, a_removed_id, b_shared_id, ordinary_id = (
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        uuid4(),
+    )
+
+    with _isolated_schema(database_url) as isolated_url:
+        _prepare_history_snapshot_schema(isolated_url)
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO data_sources (
+                    id, adapter_key, is_enabled, metadata, runtime_pipeline_status
+                ) VALUES
+                    (%s, 'official.wra.historical_flood', true, %s::jsonb, 'succeeded'),
+                    (%s, 'official.test.ordinary', true, '{}'::jsonb, 'succeeded')
+                """,
+                (
+                    history_source_id,
+                    Jsonb({"active_snapshot_raw_ref": raw_a}),
+                    ordinary_source_id,
+                ),
+            )
+            for evidence_id, data_source_id, source_id, raw_ref, title in (
+                (a_shared_id, history_source_id, "shared-record", raw_a, "A shared"),
+                (a_removed_id, history_source_id, "removed-in-b", raw_a, "A removed"),
+                (b_shared_id, history_source_id, "shared-record", raw_b, "B shared"),
+                (ordinary_id, ordinary_source_id, "ordinary", None, "Ordinary"),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO evidence (
+                        id, data_source_id, source_id, source_type, event_type,
+                        title, summary, occurred_at, observed_at, geom,
+                        confidence, privacy_level, raw_ref, ingestion_status,
+                        properties
+                    ) VALUES (
+                        %s, %s, %s, 'official', 'flood_report', %s, %s,
+                        now(), now(),
+                        ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326),
+                        0.9, 'public', %s, 'accepted',
+                        '{"evidence_scope":"historical"}'::jsonb
+                    )
+                    """,
+                    (
+                        evidence_id,
+                        data_source_id,
+                        source_id,
+                        title,
+                        title,
+                        raw_ref,
+                    ),
+                )
+
+        def visible_ids() -> set[str]:
+            return {
+                record.id
+                for record in query_nearby_evidence(
+                    database_url=isolated_url,
+                    lat=23.0,
+                    lng=120.0,
+                    radius_m=500,
+                    limit=100,
+                    connection_factory=lambda: _unpooled_connection(isolated_url),
+                )
+            }
+
+        # B may already be promoted/auditable, but A remains public until activation.
+        assert visible_ids() == {
+            str(a_shared_id),
+            str(a_removed_id),
+            str(ordinary_id),
+        }
+
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                """
+                UPDATE data_sources
+                SET metadata = jsonb_build_object(
+                    'active_snapshot_raw_ref',
+                    %s::text
+                )
+                WHERE adapter_key = 'official.wra.historical_flood'
+                """,
+                (raw_b,),
+            )
+        # Atomic activation switches the full generation, including removed rows.
+        assert visible_ids() == {str(b_shared_id), str(ordinary_id)}
+
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                """
+                UPDATE data_sources
+                SET runtime_pipeline_status = 'failed'
+                WHERE adapter_key = 'official.wra.historical_flood'
+                """
+            )
+        assert visible_ids() == {str(b_shared_id), str(ordinary_id)}
+
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                """
+                UPDATE data_sources
+                SET metadata = '{}'::jsonb
+                WHERE adapter_key = 'official.wra.historical_flood'
+                """
+            )
+        assert visible_ids() == {str(ordinary_id)}
+
+
 def test_source_health_safely_resolves_bounded_catalog_thresholds() -> None:
     database_url = _database_url()
     adapter_key = f"test.threshold.{uuid4().hex}"

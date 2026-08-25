@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from app.adapters._helpers import parse_observed_at_utc
-from app.adapters.contracts import AdapterRunResult, DataSourceAdapter, StationInventoryProof
+from app.adapters.contracts import (
+    AdapterRunResult,
+    DataSourceAdapter,
+    SnapshotGenerationMode,
+    StationInventoryProof,
+)
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import WorkerSettings
 from app.logging import log_event
@@ -22,6 +27,7 @@ NCDR_CAP_ADAPTER_KEY = "official.ncdr.cap"
 WARNING_EVENT_ADAPTER_KEYS = frozenset(
     {"official.cwa.heavy_rain_warning", NCDR_CAP_ADAPTER_KEY}
 )
+COMPLETE_REPLACE_MIN_VALID_FRACTION = 0.75
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,8 @@ class AdapterBatchRunSummary:
     items_fetched: int
     items_promoted: int
     items_rejected: int
+    snapshot_generation_mode: SnapshotGenerationMode | None = None
+    snapshot_activation_eligible: bool = False
     raw_ref: str | None = None
     error_code: str | None = None
     error_message: str | None = None
@@ -49,6 +57,8 @@ class AdapterBatchRunSummary:
             "items_fetched": self.items_fetched,
             "items_promoted": self.items_promoted,
             "items_rejected": self.items_rejected,
+            "snapshot_generation_mode": self.snapshot_generation_mode,
+            "snapshot_activation_eligible": self.snapshot_activation_eligible,
             "raw_ref": self.raw_ref,
             "error_code": self.error_code,
             "error_message": self.error_message,
@@ -101,22 +111,26 @@ def record_pipeline_status(
     status: Literal["succeeded", "failed"],
     complete: bool,
     run_at: datetime | None = None,
+    active_snapshot_raw_ref: str | None = None,
 ) -> None:
     if run_writer is None or not adapter_keys:
         return
     write_pipeline_status = getattr(run_writer, "write_pipeline_status", None)
     if callable(write_pipeline_status):
         checked_at = _now()
-        write_pipeline_status(
-            adapter_keys=adapter_keys,
-            status=status,
-            complete=complete,
-            checked_at=checked_at,
+        arguments: dict[str, object] = {
+            "adapter_keys": adapter_keys,
+            "status": status,
+            "complete": complete,
+            "checked_at": checked_at,
             # Pre-fetch failures (for example adapter construction) have no
             # ingestion summary.  Give them a generation timestamp anyway so
             # an older overlapping cycle cannot later overwrite the fault.
-            run_at=run_at or checked_at,
-        )
+            "run_at": run_at or checked_at,
+        }
+        if active_snapshot_raw_ref is not None:
+            arguments["active_snapshot_raw_ref"] = active_snapshot_raw_ref
+        write_pipeline_status(**arguments)
 
 
 def run_adapter_batch(
@@ -139,6 +153,7 @@ def run_adapter_batch(
             items_fetched=0,
             items_promoted=0,
             items_rejected=0,
+            snapshot_generation_mode=adapter.metadata.snapshot_generation_mode,
             error_code=exc.__class__.__name__,
             error_message=str(exc),
         )
@@ -149,6 +164,7 @@ def run_adapter_batch(
                 result,
                 started_at=started_at,
                 writer=writer,
+                snapshot_generation_mode=adapter.metadata.snapshot_generation_mode,
             )
         except Exception as exc:  # noqa: BLE001 - staging boundary records arbitrary failures
             summary = AdapterBatchRunSummary(
@@ -159,6 +175,7 @@ def run_adapter_batch(
                 items_fetched=len(result.fetched),
                 items_promoted=0,
                 items_rejected=len(result.rejected),
+                snapshot_generation_mode=adapter.metadata.snapshot_generation_mode,
                 error_code=exc.__class__.__name__,
                 error_message=str(exc),
                 station_inventory_proof=result.station_inventory_proof,
@@ -176,6 +193,8 @@ def run_adapter_batch(
                 items_fetched=summary.items_fetched,
                 items_promoted=summary.items_promoted,
                 items_rejected=summary.items_rejected,
+                snapshot_generation_mode=summary.snapshot_generation_mode,
+                snapshot_activation_eligible=summary.snapshot_activation_eligible,
                 raw_ref=summary.raw_ref,
                 error_code=exc.__class__.__name__,
                 error_message=f"run summary write failed: {exc}",
@@ -257,6 +276,7 @@ def _summary_from_result(
     *,
     started_at: datetime,
     writer: StagingBatchWriter | None,
+    snapshot_generation_mode: SnapshotGenerationMode | None,
 ) -> AdapterBatchRunSummary:
     if not result.fetched:
         if result.normalized:
@@ -276,6 +296,7 @@ def _summary_from_result(
                 items_fetched=0,
                 items_promoted=0,
                 items_rejected=0,
+                snapshot_generation_mode=snapshot_generation_mode,
                 error_code="no_active_event",
                 error_message="valid warning poll returned no active event",
                 station_inventory_proof=result.station_inventory_proof,
@@ -288,6 +309,7 @@ def _summary_from_result(
             items_fetched=0,
             items_promoted=0,
             items_rejected=len(result.rejected),
+            snapshot_generation_mode=snapshot_generation_mode,
             error_code="empty_fetch",
             error_message="adapter returned no fetched raw items",
             station_inventory_proof=result.station_inventory_proof,
@@ -296,6 +318,7 @@ def _summary_from_result(
     batch = build_staging_batch(
         result,
         ingestion_generation_started_at=started_at,
+        snapshot_generation_mode=snapshot_generation_mode,
     )
     if writer is not None:
         persist_staging_batch(batch, writer)
@@ -323,12 +346,35 @@ def _summary_from_result(
         items_fetched=len(result.fetched),
         items_promoted=len(batch.accepted),
         items_rejected=items_rejected,
+        snapshot_generation_mode=snapshot_generation_mode,
+        snapshot_activation_eligible=_snapshot_activation_eligible(
+            batch,
+            snapshot_generation_mode=snapshot_generation_mode,
+        ),
         raw_ref=batch.raw_snapshot.raw_ref,
         source_timestamp_min=source_timestamp_min,
         source_timestamp_max=source_timestamp_max,
         station_inventory_proof=result.station_inventory_proof,
         event_active_from_min=event_active_from_min,
         event_active_until_max=event_active_until_max,
+    )
+
+
+def _snapshot_activation_eligible(
+    batch: AdapterStagingBatch,
+    *,
+    snapshot_generation_mode: SnapshotGenerationMode | None,
+) -> bool:
+    if snapshot_generation_mode != "complete_replace":
+        return False
+    if not batch.accepted or batch.rejected:
+        return False
+    source_outcome_count = len(batch.accepted) + len(batch.rejected_raw_source_ids)
+    if source_outcome_count == 0:
+        return False
+    return (
+        len(batch.accepted) / source_outcome_count
+        >= COMPLETE_REPLACE_MIN_VALID_FRACTION
     )
 
 

@@ -61,6 +61,56 @@ def test_build_staging_batch_maps_adapter_result_to_raw_snapshot_and_accepted_ro
     assert staged.payload["location_text"] == "Riverside District"
 
 
+def test_complete_replace_snapshot_uses_full_content_stable_worker_owned_raw_ref() -> None:
+    first = build_staging_batch(
+        _complete_replace_result(
+            fetched_at=FETCHED_AT,
+            raw_snapshot_key="raw/adapter-controlled/a.json",
+            dataset_revision="revision-a",
+        ),
+        raw_ref="raw/caller-controlled/mutable.json",
+        snapshot_generation_mode="complete_replace",
+    )
+    identical = build_staging_batch(
+        _complete_replace_result(
+            fetched_at=datetime(2026, 4, 29, 10, 0, tzinfo=UTC),
+            raw_snapshot_key="raw/adapter-controlled/b.json",
+            dataset_revision="revision-a",
+        ),
+        snapshot_generation_mode="complete_replace",
+    )
+    changed = build_staging_batch(
+        _complete_replace_result(
+            fetched_at=FETCHED_AT,
+            raw_snapshot_key="raw/adapter-controlled/a.json",
+            dataset_revision="revision-b",
+        ),
+        snapshot_generation_mode="complete_replace",
+    )
+
+    assert first.raw_snapshot.raw_ref == identical.raw_snapshot.raw_ref
+    assert first.raw_snapshot.raw_ref != changed.raw_snapshot.raw_ref
+    assert first.raw_snapshot.raw_ref == (
+        f"raw/official/test/history/{first.raw_snapshot.content_hash}.json"
+    )
+    assert len(first.raw_snapshot.content_hash) == 64
+    assert first.accepted[0].payload["snapshot_generation_mode"] == "complete_replace"
+    assert first.raw_snapshot.metadata["snapshot_generation_mode"] == "complete_replace"
+
+
+def test_ordinary_snapshot_keeps_existing_adapter_raw_ref_contract() -> None:
+    batch = build_staging_batch(
+        _complete_replace_result(
+            fetched_at=FETCHED_AT,
+            raw_snapshot_key="raw/adapter-controlled/a.json",
+            dataset_revision="revision-a",
+        )
+    )
+
+    assert batch.raw_snapshot.raw_ref == "raw/adapter-controlled/a.json"
+    assert "snapshot_generation_mode" not in batch.accepted[0].payload
+
+
 def test_build_staging_batch_keeps_validation_rejections_separate_from_raw_rejections() -> None:
     adapter = SamplePublicWebNewsAdapter(
         [
@@ -672,6 +722,43 @@ class _SyntheticPromotionWriter:
     def write_evidence(self, payload: EvidencePromotionPayload) -> str:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
+
+
+def _complete_replace_result(
+    *,
+    fetched_at: datetime,
+    raw_snapshot_key: str,
+    dataset_revision: str,
+) -> AdapterRunResult:
+    raw = RawSourceItem(
+        source_id="historical-1",
+        source_url="https://example.test/history",
+        fetched_at=fetched_at,
+        payload={
+            "dataset_revision": dataset_revision,
+            "snapshot_generation_mode": "adapter-forged-value",
+        },
+        raw_snapshot_key=raw_snapshot_key,
+    )
+    normalized = NormalizedEvidence(
+        evidence_id="ev-historical-1",
+        adapter_key="official.test.history",
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_REPORT,
+        source_id=raw.source_id,
+        source_url=raw.source_url,
+        source_title="Historical fixture",
+        source_timestamp=FETCHED_AT,
+        fetched_at=fetched_at,
+        summary="Content-stable complete-replace fixture.",
+        location_text="臺南市",
+        confidence=0.9,
+    )
+    return AdapterRunResult(
+        adapter_key=normalized.adapter_key,
+        fetched=(raw,),
+        normalized=(normalized,),
+    )
 
 
 def _cap_result(**overrides: object) -> AdapterRunResult:

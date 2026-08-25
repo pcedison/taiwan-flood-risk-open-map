@@ -8,7 +8,12 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any, Literal, Protocol
 
-from app.adapters.contracts import AdapterRunResult, NormalizedEvidence, SourceFamily
+from app.adapters.contracts import (
+    AdapterRunResult,
+    NormalizedEvidence,
+    SnapshotGenerationMode,
+    SourceFamily,
+)
 from app.pipelines.validation import validate_evidence_for_promotion
 
 ValidationStatus = Literal["accepted", "rejected"]
@@ -74,6 +79,7 @@ def build_staging_batch(
     *,
     raw_ref: str | None = None,
     ingestion_generation_started_at: datetime | None = None,
+    snapshot_generation_mode: SnapshotGenerationMode | None = None,
 ) -> AdapterStagingBatch:
     if not result.fetched:
         raise ValueError("adapter run must include at least one fetched raw item before staging")
@@ -84,7 +90,11 @@ def build_staging_batch(
         raise ValueError("ingestion generation must be timezone-aware")
 
     validation = validate_evidence_for_promotion(result.normalized)
-    raw_snapshot = build_raw_snapshot(result, raw_ref=raw_ref)
+    raw_snapshot = build_raw_snapshot(
+        result,
+        raw_ref=raw_ref,
+        snapshot_generation_mode=snapshot_generation_mode,
+    )
     raw_by_source_id = {item.source_id: item for item in result.fetched}
     accepted_items: list[StagingEvidenceUpsert] = []
     metadata_rejected_items: list[StagingEvidenceUpsert] = []
@@ -112,6 +122,7 @@ def build_staging_batch(
                     if not metadata_errors
                     else None
                 ),
+                snapshot_generation_mode,
             )
         )
 
@@ -123,6 +134,7 @@ def build_staging_batch(
             "rejected",
             "; ".join(errors),
             raw_by_source_id.get(evidence.source_id),
+            snapshot_generation_mode=snapshot_generation_mode,
         )
         for evidence, errors in validation.rejected
     )
@@ -298,7 +310,12 @@ def _canonical_cap_references(value: list[object]) -> list[dict[str, str]] | Non
     return [canonical[key] for key in sorted(canonical)]
 
 
-def build_raw_snapshot(result: AdapterRunResult, *, raw_ref: str | None = None) -> RawSnapshotUpsert:
+def build_raw_snapshot(
+    result: AdapterRunResult,
+    *,
+    raw_ref: str | None = None,
+    snapshot_generation_mode: SnapshotGenerationMode | None = None,
+) -> RawSnapshotUpsert:
     if not result.fetched:
         raise ValueError("adapter run must include at least one fetched raw item before raw snapshot")
 
@@ -312,6 +329,8 @@ def build_raw_snapshot(result: AdapterRunResult, *, raw_ref: str | None = None) 
         "items_rejected": len(result.rejected),
         "retention_source_family": source_family.value,
     }
+    if snapshot_generation_mode is not None:
+        metadata["snapshot_generation_mode"] = snapshot_generation_mode
     if result.station_inventory_proof is not None:
         # Counts and the manifest checksum are public-safe diagnostics.  The
         # full station-ID manifest belongs only in station_inventory_snapshots.
@@ -319,7 +338,15 @@ def build_raw_snapshot(result: AdapterRunResult, *, raw_ref: str | None = None) 
 
     return RawSnapshotUpsert(
         adapter_key=result.adapter_key,
-        raw_ref=raw_ref or _raw_ref(result, content_hash),
+        raw_ref=(
+            _raw_ref(
+                result,
+                content_hash,
+                snapshot_generation_mode=snapshot_generation_mode,
+            )
+            if snapshot_generation_mode == "complete_replace"
+            else raw_ref or _raw_ref(result, content_hash)
+        ),
         content_hash=content_hash,
         fetched_at=fetched_at,
         source_timestamp_min=min(source_timestamps) if source_timestamps else None,
@@ -341,6 +368,7 @@ def _to_staging_upsert(
     rejection_reason: str | None,
     raw_item: Any | None,
     ingestion_generation_started_at: datetime | None = None,
+    snapshot_generation_mode: SnapshotGenerationMode | None = None,
 ) -> StagingEvidenceUpsert:
     return StagingEvidenceUpsert(
         raw_ref=raw_ref,
@@ -369,6 +397,11 @@ def _to_staging_upsert(
                     )
                 }
                 if ingestion_generation_started_at is not None
+                else {}
+            ),
+            **(
+                {"snapshot_generation_mode": snapshot_generation_mode}
+                if snapshot_generation_mode is not None
                 else {}
             ),
             "attribution": evidence.attribution,
@@ -505,7 +538,15 @@ def _content_hash(result: AdapterRunResult) -> str:
     return sha256(raw_json.encode("utf-8")).hexdigest()
 
 
-def _raw_ref(result: AdapterRunResult, content_hash: str) -> str:
+def _raw_ref(
+    result: AdapterRunResult,
+    content_hash: str,
+    *,
+    snapshot_generation_mode: SnapshotGenerationMode | None = None,
+) -> str:
+    if snapshot_generation_mode == "complete_replace":
+        adapter_path = result.adapter_key.replace(".", "/")
+        return f"raw/{adapter_path}/{content_hash}.json"
     raw_snapshot_keys = {item.raw_snapshot_key for item in result.fetched if item.raw_snapshot_key}
     if len(raw_snapshot_keys) == 1:
         return raw_snapshot_keys.pop()

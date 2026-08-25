@@ -94,9 +94,21 @@ class PostgresIngestionRunWriter:
         complete: bool,
         checked_at: datetime | None = None,
         run_at: datetime | None = None,
+        active_snapshot_raw_ref: str | None = None,
     ) -> None:
         if not adapter_keys:
             return
+        if active_snapshot_raw_ref is not None:
+            if (
+                not active_snapshot_raw_ref
+                or active_snapshot_raw_ref != active_snapshot_raw_ref.strip()
+                or len(active_snapshot_raw_ref) > 256
+            ):
+                raise ValueError("active snapshot raw ref must be a trimmed 1..256 value")
+            if status != "succeeded" or not complete:
+                raise ValueError(
+                    "active snapshot requires a succeeded complete pipeline status"
+                )
         resolved_checked_at = checked_at or datetime.now(UTC)
         resolved_run_at = run_at or resolved_checked_at
         with self._connect() as connection:
@@ -109,6 +121,15 @@ class PostgresIngestionRunWriter:
                         runtime_pipeline_checked_at = %s,
                         runtime_pipeline_complete = %s,
                         runtime_pipeline_run_at = %s,
+                        metadata = CASE
+                            WHEN %s::text IS NULL THEN metadata
+                            ELSE jsonb_set(
+                                COALESCE(metadata, '{}'::jsonb),
+                                '{active_snapshot_raw_ref}',
+                                to_jsonb(%s::text),
+                                true
+                            )
+                        END,
                         updated_at = now()
                     WHERE adapter_key = ANY(%s::text[])
                         AND (
@@ -127,6 +148,8 @@ class PostgresIngestionRunWriter:
                         resolved_checked_at,
                         complete,
                         resolved_run_at,
+                        active_snapshot_raw_ref,
+                        active_snapshot_raw_ref,
                         list(adapter_keys),
                         resolved_run_at,
                         resolved_run_at,

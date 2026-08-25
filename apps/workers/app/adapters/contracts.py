@@ -6,9 +6,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 STATION_ID_MANIFEST_VERSION = "station-id-json-v1"
+SnapshotGenerationMode = Literal["complete_replace"]
 
 
 class SourceFamily(str, Enum):
@@ -50,6 +51,7 @@ class AdapterMetadata:
     update_frequency: str | None = None
     license: str | None = None
     limitations: tuple[str, ...] = field(default_factory=tuple)
+    snapshot_generation_mode: SnapshotGenerationMode | None = None
 
 
 @dataclass(frozen=True)

@@ -422,6 +422,10 @@ def query_nearby_evidence(
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
                     AND e.geom IS NOT NULL
+                    AND (
+                        ds.adapter_key <> 'official.wra.historical_flood'
+                        OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
+                    )
                     AND NOT (
                         e.source_type = 'official'
                         AND e.event_type IN ('rainfall', 'water_level')

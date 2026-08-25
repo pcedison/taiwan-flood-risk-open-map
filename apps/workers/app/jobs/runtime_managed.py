@@ -454,12 +454,26 @@ def _record_pipeline_status_for_adapter_keys(
     summary_by_key = {summary.adapter_key: summary for summary in summaries}
     for adapter_key in adapter_keys:
         summary = summary_by_key.get(adapter_key)
+        active_snapshot_raw_ref = (
+            summary.raw_ref
+            if (
+                status == "succeeded"
+                and complete
+                and summary is not None
+                and summary.status in {"succeeded", "partial"}
+                and summary.snapshot_generation_mode == "complete_replace"
+                and summary.snapshot_activation_eligible
+                and summary.raw_ref is not None
+            )
+            else None
+        )
         record_pipeline_status(
             run_writer,
             adapter_keys=(adapter_key,),
             status=status,
             complete=complete,
             run_at=summary.started_at if summary is not None else None,
+            active_snapshot_raw_ref=active_snapshot_raw_ref,
         )
 
 

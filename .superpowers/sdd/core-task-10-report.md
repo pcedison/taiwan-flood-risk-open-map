@@ -20,8 +20,13 @@ the frozen generic runtime or persisted-only API boundary.
   current official KML's missing canonical `xmlns:xsi` declaration when its exact
   four-part WRA `xsi:schemaLocation` mapping is present and it is the sole `xsi:`
   use. Generic malformed XML, unrelated unbound prefixes, arbitrary XML roots or
-  root namespaces, arbitrary schema mappings, and entity payloads remain rejected;
-  descendant elements continue to be interpreted by local name.
+  root namespaces, arbitrary schema mappings, and entity payloads remain rejected.
+  Structural containers and geometries require exact KML 2.2 namespace identity and
+  direct Point/Polygon/MultiGeometry/boundary/ring/coordinates hierarchy; mixed,
+  foreign, sibling, or partially valid geometry is rejected as one Placemark.
+- Bound metadata and KML response bytes, XML depth/elements/Placemark count,
+  coordinates per ring and in total, and geometry parts per Placemark before any
+  recursive walk or quadratic topology work.
 - Preserve valid Point, Polygon, MultiPolygon, and polygon-hole coordinates inside
   bounded Taiwan coordinates. Before staging, a source-local pure-Python topology
   guard rejects zero-area, self-intersecting/self-touching rings; holes outside,
@@ -40,6 +45,13 @@ the frozen generic runtime or persisted-only API boundary.
 - Add independent catalog and live-fetch gates:
   `SOURCE_WRA_HISTORICAL_FLOOD_ENABLED` and
   `SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED`; both default off.
+- Declare the worker-owned `complete_replace` snapshot lifecycle. Its full 64-character
+  content hash raw ref is stable for identical content and changes with source content
+  or revision. A full successful promotion may atomically move the trusted
+  `data_sources.metadata.active_snapshot_raw_ref` only for an eligible succeeded or
+  source-quality-partial summary; failed, limited, staging-invalid, low-fraction, and
+  older overlapping runs preserve the last-known-good marker. The public history
+  reader fail-closes Task 10 rows to that marker while ordinary evidence is unchanged.
 
 ## TDD evidence
 
@@ -78,6 +90,29 @@ The review findings were implemented in two strict RED/GREEN cycles:
 The final Task 10 adapter contract is `39 passed`; affected staging/runtime
 regressions are `61 passed`.
 
+### Independent code-quality fix wave 1
+
+The five review findings were implemented as isolated RED/GREEN contracts:
+
+1. Metadata redirect and response-size boundaries first produced `13 failed`, then
+   `20 passed` after the metadata and KML fetchers both used the controlled per-hop
+   HTTPS WRA-host opener and `limit + 1` reads.
+2. XML/geometry complexity caps first produced `7 failed, 1 passed`, then `8 passed`.
+3. Exact KML geometry hierarchy and bounded rejection observability first produced
+   `6 failed, 1 passed`, then `7 passed`; the full Task 10 contract was `66 passed`
+   at that checkpoint.
+4. Complete-replace raw-ref, worker-owned staging mode, summary eligibility, atomic
+   activation, last-known-good and trusted-reader contracts produced `5 failed,
+   1 passed`, then `6 passed`; atomic/runtime declarations produced `7 failed,
+   1 passed`, then `10 passed`; the trusted public reader produced `1 failed`, then
+   `2 passed` with its existing query regression. A separate audit-summary failure
+   regression first demonstrated an unsafe activation (`1 failed`) and then passed
+   after activation additionally required summary status `succeeded` or `partial`.
+5. PostgreSQL lifecycle checks passed for A-visible/B-hidden-before-activation,
+   atomic A-to-B switch including removed rows, ordinary untagged evidence, missing
+   marker fail-closed behavior, later failed-poll last-known-good visibility, and
+   older/newer-overlap marker preservation.
+
 ## Verification evidence
 
 Latest verification commands and results are recorded before the fix commit:
@@ -93,27 +128,40 @@ Latest verification commands and results are recorded before the fix commit:
 
 ## Read-only live compatibility diagnostic
 
-The live check was deliberately outside unit tests. The adapter fetched the current
-official metadata and 1,481,530-byte KML without test-network dependency. The stages
-and rejection classes are intentionally kept distinct:
+The live check was deliberately outside unit tests. On 2026-08-26 (Asia/Taipei), the
+adapter fetched metadata revision `2018-06-08T16:26:00` and the current official
+1,481,530-byte KML from the catalog-pinned URL without test-network dependency. The
+artifact SHA-256 was
+`70e44d54625ed8c1207e6e5f441819bbd45ff5cac7ecf17a3cac0b416c6fdce1`.
+The stages and rejection classes are intentionally kept distinct:
 
 - raw upstream KML Placemarks: `1232`
-- rejected before `RawSourceItem` creation for invalid polygon topology: `7`
-- fetched records with valid geometry: `1225`
+- rejected before `RawSourceItem` creation for invalid geometry/topology: `8`
+- fetched records with valid geometry: `1224`
 - rejected during normalization for missing event time: `149`
-- normalized source-dated records: `1076`
-- preserved valid geometries: `1224 Polygon`, `1 Point`
-- unique stable IDs among fetched records: `1225`
+- normalized source-dated records: `1075`
+- total `AdapterRunResult.rejected` entries: `157`
+- preserved valid geometries: `1223 Polygon`, `1 Point`
+- unique stable IDs among fetched records: `1224`
 - first normalized event timestamp: `2016-09-26T16:00:00Z` (Taiwan-local
   `105-09-27` midnight)
+- complete-replace activation eligibility: `true`; the valid fraction is
+  `1075 / (1075 + 157)`, above the reviewed `0.75` floor.
 
 The earlier pre-topology diagnostic (`1232 fetched / 1083 normalized / 149 timestamp
-rejected`) counted all parseable-coordinate Placemarks. The evidence-backed seven-row
-difference is deliberate: upstream contains self-interacting polygons in
+rejected`) counted all parseable-coordinate Placemarks. Seven topology rejections
+remain deliberate: upstream contains self-interacting polygons in
 `101-06-10豪雨` (`22`), `98-08-08莫拉克颱風` (`32`, `74`), and
 `96-08-18聖帕颱風` (`2`), plus adjacent edge overlap/backtracking in
 `97-07-18卡玫基颱風` (`23`, `57`, `157`). Those geometries cannot safely reach
-staging. The separate 149 timestamp rejects plausibly correspond to the current
+staging. The exact-hierarchy review exposed one additional malformed official row:
+one-based Document `5` / Placemark `5` (global Placemark `120`),
+`104-05-20豪雨淹水範圍` / `虎尾_五間厝`, has one direct `innerBoundaryIs` with
+two direct `LinearRing`/coordinates children. KML 2.2 and the reviewed contract
+require exactly one ring per boundary, so choosing one or partially retaining that
+Polygon would violate the fail-closed source-geometry boundary. A deterministic
+fixture now pins this producer shape. The separate 149 timestamp rejects plausibly
+correspond to the current
 `94-易淹水調查` Document, which lacks a complete parseable event date; they are
 intentionally not assigned the metadata revision or retrieval time.
 
@@ -123,9 +171,13 @@ intentionally not assigned the metadata revision or retrieval time.
   data; upstream availability and shape can change.
 - The source supplies no full date for 149 current Placemarks, so they remain auditable
   raw rejections rather than fabricated history.
-- Seven current upstream polygon Placemarks violate the reviewed topology contract and
-  are filtered before raw-item creation; the source remains disabled by default while
-  upstream correction or a separately reviewed repair policy is considered.
+- Eight current upstream Polygon Placemarks violate the reviewed topology or exact
+  hierarchy contract and are filtered before raw-item creation; the source remains
+  disabled by default while upstream correction or a separately reviewed repair
+  policy is considered.
+- A changed but still syntactically accepted upstream artifact can produce a new
+  content-addressed generation. Public reads retain the last-known-good active marker
+  until an eligible full promotion atomically activates that generation.
 - This commit does not activate the adapter, schedule it, deploy it, or use it as
   realtime evidence. Operator activation remains a later reviewed gate decision.
 - No live network call occurs in automated tests; injected deterministic fixtures cover
@@ -135,13 +187,23 @@ intentionally not assigned the metadata revision or retrieval time.
 
 ## Final verification
 
-- Task 10 adapter contract: `39 passed in 0.09s`.
-- Focused Task 10/config/catalog: `114 passed in 0.14s`.
-- Affected staging/runtime: `61 passed in 0.08s`.
-- Full Worker: `735 passed, 58 skipped in 0.89s`; skips are the existing optional
-  PostgreSQL-backed suite in this environment.
+- Task 10/staging/ingestion/runtime/promotion affected suite: `260 passed`.
+- Full Worker without optional database acceptance: `777 passed, 59 skipped`.
+- Full Worker with local PostgreSQL acceptance enabled: `836 passed`, including the
+  new atomic marker and older/newer-overlap last-known-good regression.
+- API evidence unit and optional-DB collection without a configured database:
+  `42 passed, 15 skipped`; full API: `668 passed, 15 skipped`.
+- New API PostgreSQL A-to-B visibility/last-known-good integration: `1 passed`.
+- Full API with all local PostgreSQL acceptance tests enabled produced
+  `682 passed, 1 failed`: the failure is the pre-existing untouched node
+  `test_latest_reader_preserves_reviewed_precision_and_limitations` (expected absent
+  realtime precision fallback `point`, received `unknown`). A focused rerun reproduces
+  it; this wave changes only `query_nearby_evidence`, not
+  `query_nearby_latest_official`. It is recorded as unrelated evidence and was not
+  modified opportunistically.
 - Worker mypy: `Success: no issues found in 107 source files`.
-- Scoped Ruff: `All checks passed!`.
-- OpenAPI: valid (`15` paths, `75` schemas).
-- Contract examples/fixtures: all conform.
-- `git diff --check`: exit `0`.
+- API mypy: `Success: no issues found in 68 source files`.
+- Scoped API Ruff: `All checks passed!`; Worker Ruff exposed only a test annotation
+  (`_FakeResponse.__enter__`) and it was corrected to `Self` before final diff check.
+- OpenAPI and contract behavior remained covered by the full API/Worker suites; this
+  wave changes no schema or frozen public entry point.
