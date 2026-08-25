@@ -259,6 +259,21 @@ def test_wra_water_level_api_payload_accepts_wra_v2_list_shape() -> None:
     assert records[0]["warning_level_m"] == 4.0
 
 
+def test_wra_water_level_api_payload_normalizes_naive_v2_timestamp_as_taiwan_time() -> None:
+    records = parse_wra_water_level_api_payload(
+        [
+            {
+                "stationid": "WRA-2001",
+                "datetime": "2026-08-25T20:10:00",
+                "waterlevel": "3.21",
+            }
+        ],
+        source_url="https://example.test/wra/water-level?format=JSON",
+    )
+
+    assert records[0]["observed_at"] == "2026-08-25T12:10:00+00:00"
+
+
 def test_wra_water_level_api_payload_joins_station_metadata_for_geometry() -> None:
     station_metadata = parse_wra_station_metadata_payload(
         [
