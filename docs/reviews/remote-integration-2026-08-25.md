@@ -5,16 +5,19 @@
 - 遠端比較快照：`49fbb7953cb679a1a7ac0d566527bd5243bbcf4a`
 - 原始 Task 9 implementation head：`5fb9e544ccdaa48fa05b24a8da40c7cb5d59810c`
 - milestone safety-fix 前 review head：`f675af3c90902bcb9163eea979a2073ca14e1258`
-- milestone safety-fix：本報告所在提交，commit message
-  `fix: close Task 9 milestone safety gaps`（提交後以 `git rev-parse HEAD` 取得權威 SHA）
+- milestone safety-fix：`b8ebacb34e051d0be26ff36c2d79ee2bca04689d`
+- normalized-item identity review-fix：
+  `48555cb4fc41b494e2d6af504155d1f88fc7431c`
+- durable-report 同步：本報告所在提交，commit message
+  `docs: synchronize Task 9 review status`
 
 ## 執行結論
 
 不可把 `origin/main` 直接 pull、merge 或 fast-forward 進 Mac v1 分支。
 兩邊共同基準是 `a526328052b1faa2ac8a54715228f6cff5c05389`。在
 `49fbb79` 遠端比較快照，Mac／remote unique commits 是 `24/3`；在 safety-fix 前
-`f675af3` review head 是 `29/3`。這些是具名快照，不是永遠不變的目前數字；本次
-safety-fix 提交後若 `origin/main` 未變，會是 `30/3`。
+`f675af3` review head 是 `29/3`，`b8ebacb` 是 `30/3`，而 `48555cb` 是 `31/3`。
+這些是相對 `origin/main=d64b7b3` 的具名快照，不是永遠不變的目前數字。
 直接合併會同時帶回已被 Task 6/7 刻意移除的 request-time official bridge
 與 generic scheduler 路徑，破壞 persisted-only assessment 邊界。
 
@@ -59,7 +62,7 @@ safety-fix 提交後若 `origin/main` 未變，會是 `30/3`。
 | 公開風險查詢 | `AssessmentService` 只讀持久化 evidence/health | legacy service 可在 request-time 抓 CWA/WRA | 保留 Mac；拒絕 bridge hunk |
 | 正式 worker 入口 | generic managed/scheduler 已 frozen；只允許 scoped v1 seam | entrypoint 仍呼叫 `--run-enabled-adapters --persist --scheduler` | 不復活 legacy；由 Task 14 v1 runner 接管 |
 | Promotion | Task 8 已有 exact staging authorization、同 adapter lock、generation monotonicity | 今日 PR 未涵蓋 | 完整保留 Mac |
-| Empty warning | Task 9 已實作 `no_active_event`、anti-resurrection，並完成 milestone safety-fix wave | 今日 PR 未實作 | 保留 Mac 實作；完成獨立 milestone 複審 |
+| Empty warning | Task 9 已實作 `no_active_event`、anti-resurrection、milestone safety-fix 與 normalized identity closure | 今日 PR 未實作 | 保留 Mac 實作；code closure 已獨立驗證，report sync 待最終文件複審 |
 | WRA timestamp | 無 offset 值被共同 parser 當 UTC，可能落在未來 | 改以 UTC+8 解析 | 立即 manual port |
 | Source health | persisted health 與 public safety seam 已建立，Task 9 再精化 | smoke 開始拒絕 stalled/failed | 保留監控意圖，接到 Mac seam |
 | DB aliases | API 接受平台 alias；entrypoint 不完整 | entrypoint 補 alias | 由 Task 14 新 runner/entrypoint 採用 |
@@ -215,8 +218,10 @@ Community/社群爬文混合模式不進入這條 P0/P1 critical path；它保�
 
 - Feature commit：`72e382c3df9e50265f59b4f1f7e94c6e934fae2f`
 - Review-fix commit：`5fb9e544ccdaa48fa05b24a8da40c7cb5d59810c`
-- Milestone safety-fix commit：本報告所在提交
-  `fix: close Task 9 milestone safety gaps`
+- Milestone safety-fix commit：
+  `b8ebacb34e051d0be26ff36c2d79ee2bca04689d`
+- Normalized-item identity review-fix commit：
+  `48555cb4fc41b494e2d6af504155d1f88fc7431c`
 - 完成：
   - exact CWA/NCDR valid empty → persisted succeeded/no-active；
   - active-window freshness 與 authentic source timestamp 分離；
@@ -230,16 +235,25 @@ Community/社群爬文混合模式不進入這條 P0/P1 critical path；它保�
 - 首輪兩項均以新 RED tests 修正，task-level 複審曾 APPROVED；後續 milestone review
   又找出跨 adapter deletion race、result identity/empty shape、disjoint windows、coverage
   固定時窗、unsafe metadata cast 與文件順序問題。
-- 本次 safety-fix 已修正全部 milestone findings；實作者驗證：
-  - focused Worker `178 passed`；
+- `b8ebacb` 修正上述 milestone findings；最終 code re-review 另發現外層
+  `AdapterRunResult.adapter_key` 雖已驗證，但 nested
+  `NormalizedEvidence.adapter_key` 仍可能偽裝成另一來源，讓 rainfall batch 夾帶 CAP
+  Update 進 staging。
+- `48555cb` 在 staging 前逐筆比對 configured/result/normalized adapter identity；不一致
+  時以 trusted configured key 回報 failed，且不寫 staging、不 promotion、不 retirement，
+  既有 warning latest 保留。
+- 最終 code closure 驗證：
+  - safety/lifecycle focused Worker `178 passed`；normalized-identity focused
+    ingestion/managed/staging/promotion `166 passed`；
   - mandatory live PostgreSQL `58 passed`、zero skips（包含 Update/empty marker 兩種
     commit order 與 same/peer latest retention）；
-  - full Worker `694 passed`、`58 skipped`（optional live collection）；
+  - full Worker `695 passed`、`58 skipped`（optional live collection）；
   - focused API `126 passed`；full API `667 passed`、`14 skipped`、1 個既有
     dependency deprecation warning；
   - live API unsafe-threshold full-query regression `1 passed`；
   - worker/API mypy、changed-file Ruff、OpenAPI、diff-check 通過。
-- safety-fix 仍須獨立 milestone 複審；實作者不得自行核准。
+- `48555cb` 的 code closure 已通過獨立 re-review；本次 durable-report 同步提交仍須最終
+  文件複審。在該文件複審完成前，本報告不預先宣稱整體獨立核准。
 
 ## 目前 go/no-go
 
