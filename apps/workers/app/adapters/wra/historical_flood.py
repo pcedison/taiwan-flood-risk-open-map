@@ -433,7 +433,9 @@ def _parse_wra_historical_flood_kml_with_rejections(
         )
 
     records: list[Mapping[str, Any]] = []
-    invalid_geometry_rejections: list[str] = []
+    invalid_geometry_rejections = list(
+        _externally_misplaced_placemark_rejections(root)
+    )
     _walk_kml(
         root,
         inherited_event_name=None,
@@ -535,6 +537,31 @@ def _validate_kml_complexity(root: Element) -> None:
             (child, depth + 1, element.tag, placemark_identity)
             for child in reversed(element)
         )
+
+
+def _externally_misplaced_placemark_rejections(root: Element) -> tuple[str, ...]:
+    rejections: list[str] = []
+    stack = [(root, True, False)]
+    while stack:
+        element, walker_reachable, has_placemark_ancestor = stack.pop()
+        walker_descends = walker_reachable and element.tag != _KML_PLACEMARK
+        for child in reversed(element):
+            child_reachable = walker_descends and (
+                child.tag in _KML_CONTAINER_TAGS or child.tag == _KML_PLACEMARK
+            )
+            child_has_placemark_ancestor = (
+                has_placemark_ancestor or element.tag == _KML_PLACEMARK
+            )
+            if (
+                child.tag == _KML_PLACEMARK
+                and not child_reachable
+                and not child_has_placemark_ancestor
+            ):
+                rejections.append(_invalid_geometry_rejection_id(child))
+            stack.append(
+                (child, child_reachable, child_has_placemark_ancestor)
+            )
+    return tuple(rejections)
 
 
 def _walk_kml(

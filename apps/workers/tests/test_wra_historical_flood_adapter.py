@@ -966,6 +966,87 @@ def test_run_rejects_misplaced_exact_kml_structural_graph(
     assert len(result.rejected[0]) == len("invalid_geometry:") + 64
 
 
+@pytest.mark.parametrize(
+    "misplaced_branch",
+    (
+        pytest.param(
+            """
+            <ExtendedData><Placemark id="misplaced"><name>misplaced</name>
+              <Point><coordinates>120.1,23.1</coordinates></Point>
+            </Placemark></ExtendedData>
+            """,
+            id="placemark-below-non-container",
+        ),
+        pytest.param(
+            """
+            <ExtendedData><Document><name>2020-08-02</name>
+              <Placemark id="misplaced"><name>misplaced document row</name>
+                <Point><coordinates>120.1,23.1</coordinates></Point>
+              </Placemark>
+            </Document></ExtendedData>
+            """,
+            id="document-below-non-container",
+        ),
+        pytest.param(
+            """
+            <ExtendedData><Folder><name>2020-08-02</name>
+              <Placemark id="misplaced"><name>misplaced folder row</name>
+                <Point><coordinates>120.1,23.1</coordinates></Point>
+              </Placemark>
+            </Folder></ExtendedData>
+            """,
+            id="folder-below-non-container",
+        ),
+    ),
+)
+def test_run_rejects_exact_placemark_hidden_from_walker_by_parent_chain(
+    misplaced_branch: str,
+) -> None:
+    kml = f"""\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <name>2020-08-01</name>
+      <Placemark id="valid"><name>valid</name>
+        <Point><coordinates>120,23</coordinates></Point>
+      </Placemark>
+      {misplaced_branch}
+    </Document></kml>
+    """
+
+    first = _adapter(kml=kml).run()
+    second = _adapter(kml=kml).run()
+
+    assert len(first.fetched) == 1
+    assert len(first.normalized) == 1
+    assert len(first.rejected) == 1
+    assert first.rejected == second.rejected
+    assert first.rejected[0].startswith("invalid_geometry:")
+    assert len(first.rejected[0]) == len("invalid_geometry:") + 64
+
+
+def test_run_counts_only_outermost_externally_misplaced_placemark() -> None:
+    kml = """\
+    <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+      <name>2020-08-01</name>
+      <Placemark id="valid"><name>valid</name>
+        <Point><coordinates>120,23</coordinates></Point>
+      </Placemark>
+      <ExtendedData><Placemark id="misplaced-outer"><name>outer</name>
+        <Point><coordinates>120.1,23.1</coordinates></Point>
+        <ExtendedData><Placemark id="nested"><name>nested</name>
+          <Point><coordinates>120.2,23.2</coordinates></Point>
+        </Placemark></ExtendedData>
+      </Placemark></ExtendedData>
+    </Document></kml>
+    """
+
+    result = _adapter(kml=kml).run()
+
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+    assert len(result.rejected) == 1
+    assert result.rejected[0].startswith("invalid_geometry:")
+
+
 def test_parser_ignores_foreign_namespace_structural_placemarks() -> None:
     kml = """\
     <kml xmlns="http://www.opengis.net/kml/2.2" xmlns:foreign="urn:foreign">

@@ -23,7 +23,10 @@ the frozen generic runtime or persisted-only API boundary.
   root namespaces, arbitrary schema mappings, and entity payloads remain rejected.
   Structural containers and geometries require exact KML 2.2 namespace identity and
   direct Point/Polygon/MultiGeometry/boundary/ring/coordinates hierarchy; mixed,
-  foreign, sibling, or partially valid geometry is rejected as one Placemark.
+  foreign, sibling, or partially valid geometry is rejected as one Placemark. Exact
+  KML Placemarks outside the walkable root-to-Document/Folder parent chain become
+  deterministic `invalid_geometry` rejections; only the outermost Placemark is counted
+  when rejected Placemark content itself contains a nested Placemark.
 - Bound metadata and KML response bytes, XML depth/elements/Placemark count,
   coordinates per ring and in total, and geometry parts per Placemark before any
   recursive walk or quadratic topology work. A fixed whole-KML topology budget
@@ -136,6 +139,26 @@ Two reproduced Important findings were fixed in one strict TDD wave:
 After GREEN, the complete Task 10 adapter contract was `83 passed` and the read-only
 live compatibility sequence remained unchanged.
 
+### Independent code-quality fix wave 3
+
+The final review finding reproduced a mismatch between the whole-document Placemark
+count and the restricted container walker. A valid direct Placemark plus a second
+exact-KML Placemark below `ExtendedData` produced one fetched record but no rejection.
+Three parent-chain regressions cover a directly misplaced Placemark and Placemark rows
+below misplaced Document and Folder branches. A fourth regression requires a misplaced
+outer Placemark containing a nested Placemark to count exactly once. Before production
+changes they produced `4 failed, 83 deselected`, each because the omitted rejection
+count was zero.
+
+The minimal GREEN implementation performs a bounded iterative pre-walk after the
+existing whole-document complexity checks. It records each outermost exact-KML
+Placemark that the root/Document/Folder walker cannot reach, while leaving descendants
+of any Placemark to that outer Placemark's single rejection. This preserves partial
+source-quality ingestion instead of making a mixed artifact wholly fatal. The focused
+wave became `4 passed, 83 deselected`; the complete adapter contract became
+`87 passed`. The read-only live sequence remained
+`1232 -> 8 -> 1224 -> 149 -> 1075`.
+
 ## Verification evidence
 
 Latest verification commands and results are recorded before the fix commit:
@@ -212,9 +235,9 @@ intentionally not assigned the metadata revision or retrieval time.
 
 ## Final verification
 
-- Task 10 adapter contract: `83 passed`.
-- Full Worker without optional database acceptance: `793 passed, 59 skipped`.
-- Full Worker with local PostgreSQL acceptance enabled: `852 passed`, including the
+- Task 10 adapter contract: `87 passed`.
+- Full Worker without optional database acceptance: `797 passed, 59 skipped`.
+- Full Worker with local PostgreSQL acceptance enabled: `856 passed`, including the
   atomic marker and older/newer-overlap last-known-good regressions.
 - API evidence unit and optional-DB collection without a configured database:
   `42 passed, 15 skipped`; full API: `668 passed, 15 skipped`.
