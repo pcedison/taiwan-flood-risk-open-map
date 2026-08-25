@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+from collections import UserList
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from email.message import Message
 from pathlib import Path
-from typing import Self
+from typing import Any, Self, cast
 from urllib.error import HTTPError
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, quote_plus, urlparse
 
 import pytest
 
-from app.adapters.cap_xml import MAX_CAP_BYTES, CapDocumentError, parse_cap_document
+from app.adapters.cap_xml import (
+    MAX_CAP_BYTES,
+    CapDocumentError,
+    ParsedCapMessage,
+    parse_cap_document,
+)
+from app.adapters.contracts import RawSourceItem
+from app.adapters.cwa import heavy_rain_warning as cwa_cap_module
 from app.adapters.cwa.heavy_rain_warning import (
     CWA_HEAVY_RAIN_CAP_URL,
     CwaHeavyRainWarningAdapter,
@@ -18,11 +27,69 @@ from app.adapters.cwa.heavy_rain_warning import (
     CwaHeavyRainWarningRateLimitError,
     unresolved_cap_area_source_id,
 )
+from app.jobs.ingestion import run_adapter_batch
 from app.pipelines.staging import build_staging_batch
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 FETCHED_AT = datetime(2026, 8, 26, 2, 0, tzinfo=UTC)
 SAFE_AUTHORIZATION = "fixture-authorization-value"
+
+
+def _assert_secret_free_exception(exc: BaseException, *, secret: str) -> None:
+    rendered = (str(exc), repr(exc), repr(vars(exc)))
+    for reflected in {secret, quote(secret, safe=""), quote_plus(secret)}:
+        assert all(reflected not in value for value in rendered)
+    assert "?" not in str(exc)
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+
+
+def _entity_encoded_secret_cap(field_name: str, reference: str) -> str:
+    encoded_secret = f"fixture-auth{reference}marker"
+    sender = encoded_secret if field_name == "sender" else "public-warning@cwa.gov.tw"
+    identifier = encoded_secret if field_name == "identifier" else "CWA-ENTITY-001"
+    reference_sender = (
+        encoded_secret if field_name == "reference_sender" else "prior@cwa.gov.tw"
+    )
+    reference_identifier = (
+        encoded_secret if field_name == "reference_identifier" else "CWA-PRIOR-001"
+    )
+    event = encoded_secret if field_name == "event" else "Synthetic heavy-rain audit"
+    headline = encoded_secret if field_name == "headline" else "Synthetic headline"
+    description = (
+        encoded_secret if field_name == "description" else "Synthetic description"
+    )
+    scope = encoded_secret if field_name == "scope" else "Public"
+    area_desc = encoded_secret if field_name == "area_desc" else "Synthetic district"
+    geocode_name = encoded_secret if field_name == "geocode_name" else "TownshipCode"
+    geocode_value = encoded_secret if field_name == "geocode_value" else "6703500"
+    return f"""\
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>{identifier}</identifier>
+  <sender>{sender}</sender>
+  <sent>2026-08-26T08:00:00+08:00</sent>
+  <status>Actual</status>
+  <msgType>Update</msgType>
+  <scope>{scope}</scope>
+  <references>{reference_sender},{reference_identifier},2026-08-26T07:00:00+08:00</references>
+  <info>
+    <event>{event}</event>
+    <headline>{headline}</headline>
+    <description>{description}</description>
+    <effective>2026-08-26T08:00:00+08:00</effective>
+    <expires>2026-08-26T14:00:00+08:00</expires>
+    <area>
+      <areaDesc>{area_desc}</areaDesc>
+      <geocode><valueName>{geocode_name}</valueName><value>{geocode_value}</value></geocode>
+    </area>
+  </info>
+</alert>
+"""
+
+
+@dataclass(frozen=True)
+class _FutureParsedCapMessage(ParsedCapMessage):
+    future_metadata: object = None
 
 
 def _fixture(name: str) -> str:
@@ -377,6 +444,134 @@ def test_authorization_is_a_separate_fetch_argument_and_configured_query_is_stri
     ]
 
 
+@pytest.mark.parametrize(
+    "cap_url",
+    (
+        "https://audit-user:fixture-userinfo-password@example.test/cap?trace=private",
+        "https://audit%2Duser:fixture%2Duserinfo%2Dpassword@example.test/cap?trace=private",
+        "https://[::1/cap?trace=private",
+        "https://example.test:invalid/cap?trace=private",
+    ),
+)
+def test_configured_url_authority_and_parse_failures_are_generic_and_clean(
+    cap_url: str,
+) -> None:
+    with pytest.raises(CwaHeavyRainWarningConfigurationError) as raised:
+        CwaHeavyRainWarningAdapter(
+            authorization=SAFE_AUTHORIZATION,
+            cap_url=cap_url,
+        )
+
+    rendered = str(raised.value)
+    assert "fixture-userinfo-password" not in rendered
+    assert "fixture%2Duserinfo%2Dpassword" not in rendered
+    assert "audit-user" not in rendered
+    assert "audit%2Duser" not in rendered
+    assert "private" not in rendered
+    assert "@" not in rendered
+    _assert_secret_free_exception(raised.value, secret=SAFE_AUTHORIZATION)
+
+
+@pytest.mark.parametrize(
+    "sensitive_key",
+    (
+        "apikey",
+        "api%5Fkey",
+        "token",
+        "access%5Ftoken",
+        "password",
+        "secret",
+        "client%5Fsecret",
+    ),
+)
+def test_configured_url_rejects_decoded_sensitive_query_keys(
+    sensitive_key: str,
+) -> None:
+    with pytest.raises(CwaHeavyRainWarningConfigurationError) as raised:
+        CwaHeavyRainWarningAdapter(
+            authorization=SAFE_AUTHORIZATION,
+            cap_url=f"https://example.test/cap?{sensitive_key}=fixture-private-query",
+        )
+
+    assert "fixture-private-query" not in str(raised.value)
+    assert sensitive_key not in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=SAFE_AUTHORIZATION)
+
+
+@pytest.mark.parametrize("location", ("name", "value"))
+def test_configured_url_rejects_encoded_exact_authorization_in_benign_query(
+    location: str,
+) -> None:
+    secret = "fixture authorization+/value"
+    encoded = quote_plus(secret)
+    query = (
+        f"trace-{encoded}=public"
+        if location == "name"
+        else f"trace=public-{encoded}-value"
+    )
+
+    with pytest.raises(CwaHeavyRainWarningConfigurationError) as raised:
+        CwaHeavyRainWarningAdapter(
+            authorization=secret,
+            cap_url=f"https://example.test/cap?{query}",
+        )
+
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_configured_url_is_fragment_free_and_canonical_for_fetch_and_raw() -> None:
+    calls: list[tuple[str, str, int]] = []
+
+    def fetch_cap(url: str, authorization: str, timeout_seconds: int) -> str:
+        calls.append((url, authorization, timeout_seconds))
+        return _alert_xml()
+
+    result = CwaHeavyRainWarningAdapter(
+        authorization=SAFE_AUTHORIZATION,
+        cap_url=(
+            "https://example.test/cap?channel=warning&FoRmAt=XML&format=json"
+            "&AUTHORIZATION=discard-me#fixture-private-fragment"
+        ),
+        fetched_at=FETCHED_AT,
+        fetch_cap=fetch_cap,
+    ).run()
+
+    expected_url = "https://example.test/cap?channel=warning&format=CAP"
+    assert calls == [(expected_url, SAFE_AUTHORIZATION, 8)]
+    assert result.fetched[0].source_url == expected_url
+    assert "discard-me" not in result.fetched[0].source_url
+    assert "fixture-private-fragment" not in result.fetched[0].source_url
+
+
+def test_secret_bearing_raw_snapshot_key_fails_before_fetch_and_log_fields() -> None:
+    secret = "fixture-snapshot-authorization"
+    calls = 0
+
+    def fetch_cap(_url: str, _authorization: str, _timeout: int) -> str:
+        nonlocal calls
+        calls += 1
+        return _alert_xml()
+
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        fetch_cap=fetch_cap,
+        raw_snapshot_key=f"raw/cwa/{secret}/fixture.xml",
+    )
+
+    summary = run_adapter_batch(adapter)
+
+    assert calls == 0
+    assert summary.status == "failed"
+    assert summary.error_code == "CwaHeavyRainWarningConfigurationError"
+    assert summary.raw_ref is None
+    assert secret not in repr(vars(summary))
+    assert secret not in repr(summary.log_fields())
+    assert summary.error_message is not None
+    assert "[REDACTED]" in summary.error_message
+    assert "?" not in summary.error_message
+
+
 def test_missing_authorization_fails_before_transport_and_is_not_empty() -> None:
     calls = 0
 
@@ -426,10 +621,221 @@ def test_actual_request_inserts_authorization_once_and_redaction_never_leaks_sec
     rendered = str(exc_info.value)
     assert SAFE_AUTHORIZATION not in rendered
     assert "discard-me" not in rendered
-    assert "Authorization=REDACTED" in rendered
+    assert "[REDACTED]" in rendered
+    assert "?" not in rendered
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
     assert len(attempts) == 1
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        "invalid://example.test/cap?trace=fixture-private-query",
+        "https://example.test:invalid/cap?trace=fixture-private-query",
+        "https://[::1/cap?trace=fixture-private-query",
+    ),
+)
+def test_direct_builtin_transport_invalid_urls_are_generic_and_clean(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+) -> None:
+    secret = "fixture transport+/authorization"
+    attempts = 0
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError(
+            f"transport reflected {secret} {quote(secret, safe='')} {quote_plus(secret)}"
+        )
+
+    monkeypatch.setattr(cwa_cap_module, "urlopen", fail_if_called)
+
+    with pytest.raises(CwaHeavyRainWarningFetchError) as raised:
+        cwa_cap_module._fetch_cap(url, secret, 1, now=FETCHED_AT)
+
+    assert attempts <= 1
+    assert "fixture-private-query" not in str(raised.value)
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_builtin_request_construction_failure_is_generic_and_clean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "fixture request+/authorization"
+
+    def failing_request(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError(
+            f"request reflected {secret} {quote(secret, safe='')} {quote_plus(secret)}"
+        )
+
+    monkeypatch.setattr(cwa_cap_module, "Request", failing_request)
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        cap_url="https://example.test/cap?channel=fixture-private-query",
+        fetched_at=FETCHED_AT,
+    )
+
+    with pytest.raises(CwaHeavyRainWarningFetchError) as raised:
+        adapter.run()
+
+    assert "fixture-private-query" not in str(raised.value)
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+@pytest.mark.parametrize("phase", ("enter", "read", "exit"))
+def test_builtin_response_context_failures_are_generic_and_clean(
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    secret = "fixture response+/authorization"
+    attempts = 0
+
+    class HostileResponse:
+        def __enter__(self) -> Self:
+            if phase == "enter":
+                raise RuntimeError(f"enter reflected {quote_plus(secret)}")
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            del args
+            if phase == "exit":
+                raise RuntimeError(f"exit reflected {quote(secret, safe='')}")
+
+        def read(self, _limit: int = -1) -> bytes:
+            if phase == "read":
+                raise RuntimeError(f"read reflected {secret}")
+            return _fixture("cwa_heavy_rain_warning_empty.xml").encode()
+
+    def fake_urlopen(*_args: object, **_kwargs: object) -> HostileResponse:
+        nonlocal attempts
+        attempts += 1
+        return HostileResponse()
+
+    monkeypatch.setattr(cwa_cap_module, "urlopen", fake_urlopen)
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        cap_url="https://example.test/cap?channel=fixture-private-query",
+        fetched_at=FETCHED_AT,
+    )
+
+    with pytest.raises(CwaHeavyRainWarningFetchError) as raised:
+        adapter.run()
+
+    assert attempts == 1
+    assert "fixture-private-query" not in str(raised.value)
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_builtin_429_hostile_headers_are_contained_by_transport_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "fixture headers+/authorization"
+    attempts = 0
+
+    class HostileHeaders:
+        def get(self, _name: str) -> str:
+            raise RuntimeError(f"headers reflected {quote_plus(secret)}")
+
+    def fake_urlopen(request: object, **_kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        raise HTTPError(
+            request.full_url,  # type: ignore[attr-defined]
+            429,
+            f"rate limited {secret}",
+            cast(Any, HostileHeaders()),
+            None,
+        )
+
+    monkeypatch.setattr(cwa_cap_module, "urlopen", fake_urlopen)
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        cap_url="https://example.test/cap?channel=fixture-private-query",
+        fetched_at=FETCHED_AT,
+    )
+
+    with pytest.raises(CwaHeavyRainWarningFetchError) as raised:
+        adapter.run()
+
+    assert attempts == 1
+    assert not isinstance(raised.value, CwaHeavyRainWarningRateLimitError)
+    assert "fixture-private-query" not in str(raised.value)
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_builtin_transport_rejects_non_bytes_without_inspecting_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "fixture body+/authorization"
+
+    class HostileBody:
+        def __len__(self) -> int:
+            raise RuntimeError(f"body length reflected {secret}")
+
+    class HostileResponse:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            del args
+
+        def read(self, _limit: int = -1) -> bytes:
+            return cast(bytes, HostileBody())
+
+    monkeypatch.setattr(
+        cwa_cap_module,
+        "urlopen",
+        lambda *_args, **_kwargs: HostileResponse(),
+    )
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        cap_url="https://example.test/cap?channel=fixture-private-query",
+        fetched_at=FETCHED_AT,
+    )
+
+    with pytest.raises(CwaHeavyRainWarningFetchError) as raised:
+        adapter.run()
+
+    assert "fixture-private-query" not in str(raised.value)
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_builtin_transport_failure_batch_summary_is_secret_free(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "fixture batch+/authorization"
+
+    def failing_request(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError(f"request reflected {quote_plus(secret)}")
+
+    monkeypatch.setattr(cwa_cap_module, "Request", failing_request)
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        cap_url="https://example.test/cap?channel=fixture-private-query",
+        fetched_at=FETCHED_AT,
+    )
+
+    summary = run_adapter_batch(adapter)
+    logged = capsys.readouterr().out
+
+    assert summary.status == "failed"
+    assert summary.items_fetched == 0
+    assert summary.raw_ref is None
+    assert summary.error_code == "CwaHeavyRainWarningFetchError"
+    assert summary.error_message is not None
+    assert "fixture-private-query" not in summary.error_message
+    for reflected in {secret, quote(secret, safe=""), quote_plus(secret)}:
+        assert reflected not in repr(vars(summary))
+        assert reflected not in repr(summary.log_fields())
+        assert reflected not in logged
 
 
 def test_transport_caps_response_read_before_parser_allocation(
@@ -453,7 +859,7 @@ def test_transport_caps_response_read_before_parser_allocation(
     monkeypatch.setattr(module, "urlopen", lambda _request, *, timeout: OversizeResponse())
     adapter = CwaHeavyRainWarningAdapter(
         authorization=SAFE_AUTHORIZATION,
-        cap_url="https://example.test/cap",
+        cap_url="https://example.test/cap?channel=fixture-private-query",
         fetched_at=FETCHED_AT,
     )
 
@@ -461,6 +867,9 @@ def test_transport_caps_response_read_before_parser_allocation(
         adapter.run()
 
     assert read_limits == [MAX_CAP_BYTES + 1]
+    assert "fixture-private-query" not in str(exc_info.value)
+    assert "[REDACTED]" in str(exc_info.value)
+    assert "?" not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
@@ -484,7 +893,7 @@ def test_decode_failure_does_not_retain_secret_bearing_response_bytes(
     monkeypatch.setattr(module, "urlopen", lambda _request, *, timeout: InvalidResponse())
     adapter = CwaHeavyRainWarningAdapter(
         authorization=SAFE_AUTHORIZATION,
-        cap_url="https://example.test/cap",
+        cap_url="https://example.test/cap?channel=fixture-private-query",
         fetched_at=FETCHED_AT,
     )
 
@@ -511,6 +920,208 @@ def test_parser_failure_severs_secret_bearing_entity_exception_state() -> None:
     assert SAFE_AUTHORIZATION not in repr(vars(exc_info.value))
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
+
+
+def test_injected_cap_error_hostile_str_is_sanitized_without_context() -> None:
+    secret = "fixture-parser-auth-marker"
+
+    class HostileCapDocumentError(CapDocumentError):
+        def __str__(self) -> str:
+            raise RuntimeError(f"hostile parser reflected {secret}")
+
+    def parse_cap(_xml: str) -> tuple[ParsedCapMessage, ...]:
+        raise HostileCapDocumentError()
+
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        fetch_cap=lambda _url, _authorization, _timeout: _alert_xml(),
+        parse_cap=parse_cap,
+    )
+
+    with pytest.raises(CapDocumentError) as raised:
+        adapter.run()
+
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "sender",
+        "identifier",
+        "reference_sender",
+        "reference_identifier",
+        "event",
+        "headline",
+        "description",
+        "scope",
+        "area_desc",
+        "geocode_name",
+        "geocode_value",
+    ),
+)
+@pytest.mark.parametrize("reference", ("&#45;", "&#x2d;"))
+def test_entity_decoded_authorization_is_rejected_before_identity_or_raw_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    reference: str,
+) -> None:
+    secret = "fixture-auth-marker"
+    xml_text = _entity_encoded_secret_cap(field_name, reference)
+    prepare_calls = 0
+    original_prepare = cwa_cap_module._prepare_row
+
+    def observing_prepare(*args: Any, **kwargs: Any) -> tuple[RawSourceItem, str]:
+        nonlocal prepare_calls
+        prepare_calls += 1
+        return original_prepare(*args, **kwargs)
+
+    monkeypatch.setattr(cwa_cap_module, "_prepare_row", observing_prepare)
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        fetch_cap=lambda _url, _authorization, _timeout: xml_text,
+    )
+
+    with pytest.raises(CapDocumentError) as raised:
+        adapter.run()
+
+    assert prepare_calls == 0
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_entity_decoded_authorization_fails_batch_without_raw_or_log_reflection(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "fixture-auth-marker"
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        raw_snapshot_key="raw/cwa/synthetic-safe.xml",
+        fetch_cap=lambda _url, _authorization, _timeout: (
+            _entity_encoded_secret_cap("description", "&#45;")
+        ),
+    )
+
+    summary = run_adapter_batch(adapter)
+    logged = capsys.readouterr().out
+
+    assert summary.status == "failed"
+    assert summary.items_fetched == 0
+    assert summary.items_rejected == 0
+    assert summary.raw_ref is None
+    assert summary.error_code == "CapDocumentError"
+    assert summary.error_message is not None
+    assert "[REDACTED]" in summary.error_message
+    assert secret not in repr(vars(summary))
+    assert secret not in repr(summary.log_fields())
+    assert secret not in logged
+
+
+@pytest.mark.parametrize("geometry_field", ("polygon", "circle"))
+def test_recursive_parsed_guard_checks_nested_polygon_and_circle_strings(
+    geometry_field: str,
+) -> None:
+    secret = "fixture-auth-marker"
+    parsed = parse_cap_document(_alert_xml())[0]
+    poisoned_geometry: object = (
+        ((cast(Any, secret), 120.1),)
+        if geometry_field == "polygon"
+        else (23.1, cast(Any, secret), 1.0)
+    )
+    poisoned_area = replace(
+        parsed.areas[0],
+        **{geometry_field: poisoned_geometry},
+    )
+    poisoned_message = replace(parsed, areas=(poisoned_area,))
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        fetch_cap=lambda _url, _authorization, _timeout: _alert_xml(),
+        parse_cap=lambda _xml: (poisoned_message,),
+    )
+
+    with pytest.raises(CapDocumentError) as raised:
+        adapter.run()
+
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_recursive_parsed_guard_checks_future_dataclass_fields() -> None:
+    secret = "fixture-auth-marker"
+    parsed = parse_cap_document(_alert_xml())[0]
+    future_message = _FutureParsedCapMessage(
+        **vars(parsed),
+        future_metadata={"nested": ("public", [secret])},
+    )
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        fetch_cap=lambda _url, _authorization, _timeout: _alert_xml(),
+        parse_cap=lambda _xml: (future_message,),
+    )
+
+    with pytest.raises(CapDocumentError) as raised:
+        adapter.run()
+
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+def test_recursive_parsed_guard_checks_general_sequence_fields() -> None:
+    secret = "fixture-auth-marker"
+    parsed = parse_cap_document(_alert_xml())[0]
+    future_message = _FutureParsedCapMessage(
+        **vars(parsed),
+        future_metadata=UserList(["public", secret]),
+    )
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        fetch_cap=lambda _url, _authorization, _timeout: _alert_xml(),
+        parse_cap=lambda _xml: (future_message,),
+    )
+
+    with pytest.raises(CapDocumentError) as raised:
+        adapter.run()
+
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+
+@pytest.mark.parametrize("poisoned_field", ("source_id", "source_url", "payload"))
+def test_recursive_pre_persistence_guard_rejects_secret_in_prepared_raw(
+    monkeypatch: pytest.MonkeyPatch,
+    poisoned_field: str,
+) -> None:
+    secret = "fixture-auth-marker"
+    original_prepare = cwa_cap_module._prepare_row
+
+    def poisoned_prepare(*args: Any, **kwargs: Any) -> tuple[RawSourceItem, str]:
+        raw, reason = original_prepare(*args, **kwargs)
+        replacement: object
+        if poisoned_field == "payload":
+            replacement = {"future": {"nested": ["public", secret]}}
+        else:
+            replacement = f"synthetic-{poisoned_field}-{secret}"
+        return replace(raw, **{poisoned_field: replacement}), reason
+
+    monkeypatch.setattr(cwa_cap_module, "_prepare_row", poisoned_prepare)
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        fetched_at=FETCHED_AT,
+        fetch_cap=lambda _url, _authorization, _timeout: _alert_xml(),
+    )
+
+    with pytest.raises(CapDocumentError) as raised:
+        adapter.run()
+
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
 
 
 @pytest.mark.parametrize(
@@ -541,7 +1152,7 @@ def test_429_is_attempted_once_and_records_bounded_retry_after(
     monkeypatch.setattr(module, "urlopen", limited_urlopen)
     adapter = CwaHeavyRainWarningAdapter(
         authorization=SAFE_AUTHORIZATION,
-        cap_url="https://example.test/cap",
+        cap_url="https://example.test/cap?channel=fixture-private-query",
         fetched_at=FETCHED_AT,
     )
 
@@ -551,7 +1162,9 @@ def test_429_is_attempted_once_and_records_bounded_retry_after(
     assert attempts == 1
     assert exc_info.value.retry_after_seconds == expected
     assert SAFE_AUTHORIZATION not in str(exc_info.value)
-    assert "Authorization=REDACTED" in str(exc_info.value)
+    assert "fixture-private-query" not in str(exc_info.value)
+    assert "[REDACTED]" in str(exc_info.value)
+    assert "?" not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
@@ -575,7 +1188,8 @@ def test_injected_fetcher_failure_is_redacted_and_not_converted_to_empty() -> No
 
     assert secret not in str(exc_info.value)
     assert "discard-me" not in str(exc_info.value)
-    assert "REDACTED" in str(exc_info.value)
+    assert "[REDACTED]" in str(exc_info.value)
+    assert "?" not in str(exc_info.value)
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
 
@@ -604,3 +1218,41 @@ def test_injected_adapter_error_with_secret_chain_is_sanitized() -> None:
     assert SAFE_AUTHORIZATION not in repr(vars(exc_info.value))
     assert exc_info.value.__cause__ is None
     assert exc_info.value.__context__ is None
+
+
+def test_injected_fetcher_encoded_secret_message_chain_and_batch_are_sanitized(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "fixture injected+/authorization"
+    encoded = quote(secret, safe="")
+    plus_encoded = quote_plus(secret)
+
+    def fail(_url: str, _authorization: str, _timeout_seconds: int) -> str:
+        inner = RuntimeError(f"inner encoded={encoded}")
+        raise CwaHeavyRainWarningFetchError(
+            f"outer plus-encoded={plus_encoded}"
+        ) from inner
+
+    adapter = CwaHeavyRainWarningAdapter(
+        authorization=secret,
+        cap_url="https://example.test/cap?channel=fixture-private-query",
+        fetched_at=FETCHED_AT,
+        fetch_cap=fail,
+    )
+
+    with pytest.raises(CwaHeavyRainWarningFetchError) as raised:
+        adapter.run()
+
+    assert "fixture-private-query" not in str(raised.value)
+    assert "[REDACTED]" in str(raised.value)
+    _assert_secret_free_exception(raised.value, secret=secret)
+
+    summary = run_adapter_batch(adapter)
+    logged = capsys.readouterr().out
+    assert summary.status == "failed"
+    assert summary.items_fetched == 0
+    assert summary.raw_ref is None
+    for reflected in {secret, encoded, plus_encoded}:
+        assert reflected not in repr(vars(summary))
+        assert reflected not in repr(summary.log_fields())
+        assert reflected not in logged

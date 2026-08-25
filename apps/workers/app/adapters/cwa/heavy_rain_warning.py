@@ -3,12 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.error import HTTPError
+from urllib.parse import (
+    parse_qsl,
+    quote,
+    quote_plus,
+    unquote,
+    urlencode,
+    urlsplit,
+    urlunsplit,
+)
 from urllib.request import Request, urlopen
 
 from app.adapters.cap_identity import cap_message_digest, cap_source_id
@@ -40,6 +48,24 @@ CWA_HEAVY_RAIN_LICENSE_URL = "https://opendata.cwa.gov.tw/about/rules"
 CWA_HEAVY_RAIN_USER_AGENT = "FloodRiskTaiwan/0.1 worker-cwa-heavy-rain-cap"
 DEFAULT_CWA_HEAVY_RAIN_TIMEOUT_SECONDS = 8
 MAX_AUDITED_ROWS = 256
+SENSITIVE_QUERY_KEYS = frozenset(
+    {
+        "apikey",
+        "api_key",
+        "token",
+        "access_token",
+        "password",
+        "secret",
+        "client_secret",
+    }
+)
+CONFIGURATION_ERROR_MESSAGE = (
+    "CWA heavy-rain CAP configuration is invalid: [REDACTED]"
+)
+FETCH_ERROR_MESSAGE = "CWA heavy-rain CAP request failed: [REDACTED]"
+CAP_CREDENTIAL_ERROR_MESSAGE = (
+    "CWA heavy-rain CAP contained [REDACTED] credential material"
+)
 
 CwaFetchCap = Callable[[str, str, int], str]
 
@@ -93,7 +119,10 @@ class CwaHeavyRainWarningAdapter:
         raw_snapshot_key: str | None = None,
     ) -> None:
         self._authorization = authorization
-        self._cap_url = _source_url(cap_url or CWA_HEAVY_RAIN_CAP_URL)
+        self._cap_url = _configured_source_url(
+            cap_url or CWA_HEAVY_RAIN_CAP_URL,
+            authorization=(authorization or "").strip(),
+        )
         self._timeout_seconds = max(1, timeout_seconds)
         self._fetched_at = fetched_at
         self._fetch_cap_override = fetch_cap
@@ -127,7 +156,15 @@ class CwaHeavyRainWarningAdapter:
             raise CwaHeavyRainWarningConfigurationError(
                 "CWA_API_AUTHORIZATION is required when the CWA heavy-rain warning adapter is enabled"
             )
+        if _value_contains_credential(
+            self._raw_snapshot_key,
+            authorization=authorization,
+        ):
+            raise CwaHeavyRainWarningConfigurationError(
+                CONFIGURATION_ERROR_MESSAGE
+            )
         fetched_at = self._fetched_at or datetime.now(UTC)
+        xml_text: str | None = None
         if self._fetch_cap_override is None:
             xml_text = _fetch_cap(
                 self._cap_url,
@@ -143,57 +180,108 @@ class CwaHeavyRainWarningAdapter:
                     authorization,
                     self._timeout_seconds,
                 )
-            except Exception as exc:  # noqa: BLE001 - sanitize the untrusted override boundary
-                detail = _redact_detail(str(exc), authorization=authorization)
+            except Exception:  # noqa: BLE001 - sanitize the untrusted override boundary
                 fetch_failure = CwaHeavyRainWarningFetchError(
-                    f"CWA heavy-rain CAP fetcher failed at "
-                    f"{_redacted_url(self._cap_url)}: {detail}"
+                    "CWA heavy-rain CAP fetcher failed: [REDACTED]"
                 )
             if fetch_failure is not None:
                 raise fetch_failure
+        if type(xml_text) is not str:
+            raise CwaHeavyRainWarningFetchError(
+                "CWA heavy-rain CAP fetcher returned invalid data: [REDACTED]"
+            )
 
-        if authorization in xml_text:
+        if _string_contains_credential(xml_text, authorization=authorization):
             xml_text = ""
             raise CapDocumentError(
-                "CWA heavy-rain CAP response contained the redacted authorization value"
+                CAP_CREDENTIAL_ERROR_MESSAGE
             )
 
         parse_failure: CapDocumentError | None = None
+        messages: tuple[ParsedCapMessage, ...] = ()
         try:
             messages = self._parse_cap(xml_text)
         except CapDocumentError as exc:
+            if self._parse_cap is parse_cap_document:
+                trusted_detail = str(exc)
+                parse_failure = CapDocumentError(
+                    trusted_detail
+                # The shared parser emits only fixed text and field names, never
+                    # decoded source values.
+                    if not _string_contains_credential(
+                        trusted_detail,
+                        authorization=authorization,
+                    )
+                    else "CWA heavy-rain CAP document was rejected: [REDACTED]"
+                )
+            else:
+                # Do not call even __str__ on an injected parser's exception.
+                parse_failure = CapDocumentError(
+                    "CWA heavy-rain CAP document was rejected: [REDACTED]"
+                )
+        except Exception:  # noqa: BLE001 - contain arbitrary injected parser failures
             parse_failure = CapDocumentError(
-                _redact_detail(str(exc), authorization=authorization)
+                "CWA heavy-rain CAP parser failed: [REDACTED]"
             )
-        except Exception as exc:  # noqa: BLE001 - contain arbitrary injected parser failures
-            parse_failure = CapDocumentError(
-                f"CWA heavy-rain CAP parser failed: {type(exc).__name__}"
-            )
+        xml_text = ""
         if parse_failure is not None:
-            xml_text = ""
             raise parse_failure
 
-        prepared = [
-            _prepare_row(message, area, fetched_at=fetched_at, source_url=self._cap_url)
-            for message in messages
-            for area in (message.areas or (None,))
-        ]
+        scan_failed = False
+        contains_credential = False
+        try:
+            contains_credential = _value_contains_credential(
+                messages,
+                authorization=authorization,
+            )
+        except Exception:  # noqa: BLE001 - fail closed on an untrusted parsed structure
+            scan_failed = True
+        if scan_failed or contains_credential:
+            messages = ()
+            raise CapDocumentError(CAP_CREDENTIAL_ERROR_MESSAGE)
+
+        preparation_failure: CapDocumentError | None = None
+        prepared: list[tuple[RawSourceItem, str]] = []
+        try:
+            prepared = [
+                _prepare_row(
+                    message,
+                    area,
+                    fetched_at=fetched_at,
+                    source_url=self._cap_url,
+                )
+                for message in messages
+                for area in (message.areas or (None,))
+            ]
+        except Exception:  # noqa: BLE001 - contain an untrusted parsed structure
+            preparation_failure = CapDocumentError(
+                "CWA heavy-rain CAP audit preparation failed: [REDACTED]"
+            )
+        if preparation_failure is not None:
+            prepared = []
+            raise preparation_failure
         if len(prepared) > MAX_AUDITED_ROWS:
             raise CapDocumentError("CWA heavy-rain CAP exceeds the 256 audited-row limit")
         source_ids = [raw.source_id for raw, _reason in prepared]
         if len(source_ids) != len(set(source_ids)):
             raise CapDocumentError("CWA heavy-rain CAP contains duplicate deterministic row identities")
 
-        fetched = tuple(
-            RawSourceItem(
+        fetched_rows: list[RawSourceItem] = []
+        for raw, reason in prepared:
+            prepared_raw = RawSourceItem(
                 source_id=raw.source_id,
                 source_url=raw.source_url,
                 fetched_at=raw.fetched_at,
                 payload=raw.payload,
                 raw_snapshot_key=self._raw_snapshot_key,
             )
-            for raw, _reason in prepared
-        )
+            _reject_credential_bearing_raw(
+                prepared_raw,
+                reason=reason,
+                authorization=authorization,
+            )
+            fetched_rows.append(prepared_raw)
+        fetched = tuple(fetched_rows)
         rejections = tuple(
             SourceRejection(raw.source_id, reason) for raw, reason in prepared
         )
@@ -313,6 +401,116 @@ def _rejection_reason(
     return "cwa_unreviewed_admin_geometry" if has_area else "cwa_unreviewed_message_geometry"
 
 
+def _credential_reflections(authorization: str) -> tuple[str, ...]:
+    if not authorization:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            (
+                authorization,
+                quote(authorization, safe=""),
+                quote_plus(authorization),
+            )
+        )
+    )
+
+
+def _string_contains_credential(value: str, *, authorization: str) -> bool:
+    return any(
+        reflection in value
+        for reflection in _credential_reflections(authorization)
+    )
+
+
+def _value_contains_credential(
+    value: object,
+    *,
+    authorization: str,
+    _seen: set[int] | None = None,
+) -> bool:
+    if isinstance(value, str):
+        return _string_contains_credential(value, authorization=authorization)
+    if value is None:
+        return False
+
+    seen = _seen if _seen is not None else set()
+    marker = id(value)
+    if marker in seen:
+        return False
+
+    if is_dataclass(value) and not isinstance(value, type):
+        seen.add(marker)
+        return any(
+            _value_contains_credential(
+                getattr(value, field.name),
+                authorization=authorization,
+                _seen=seen,
+            )
+            for field in fields(value)
+        )
+    if isinstance(value, Mapping):
+        seen.add(marker)
+        return any(
+            _value_contains_credential(
+                key,
+                authorization=authorization,
+                _seen=seen,
+            )
+            or _value_contains_credential(
+                item,
+                authorization=authorization,
+                _seen=seen,
+            )
+            for key, item in value.items()
+        )
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        seen.add(marker)
+        return any(
+            _value_contains_credential(
+                item,
+                authorization=authorization,
+                _seen=seen,
+            )
+            for item in value
+        )
+    if isinstance(value, (set, frozenset)):
+        seen.add(marker)
+        return any(
+            _value_contains_credential(
+                item,
+                authorization=authorization,
+                _seen=seen,
+            )
+            for item in value
+        )
+    return False
+
+
+def _reject_credential_bearing_raw(
+    raw: RawSourceItem,
+    *,
+    reason: str,
+    authorization: str,
+) -> None:
+    scan_failed = False
+    contains_credential = False
+    try:
+        contains_credential = _value_contains_credential(
+            (
+                raw.source_id,
+                raw.source_url,
+                raw.raw_snapshot_key,
+                raw.payload,
+                reason,
+            ),
+            authorization=authorization,
+        )
+    except Exception:  # noqa: BLE001 - fail closed before persistence
+        scan_failed = True
+    if scan_failed or contains_credential:
+        raise CapDocumentError(CAP_CREDENTIAL_ERROR_MESSAGE)
+
+
 def _fetch_cap(
     url: str,
     authorization: str,
@@ -320,10 +518,10 @@ def _fetch_cap(
     *,
     now: datetime | None = None,
 ) -> str:
-    request_url = _request_url(url, authorization)
     body: bytes | None = None
     failure: CwaHeavyRainWarningFetchError | None = None
     try:
+        request_url = _request_url(url, authorization)
         request = Request(
             request_url,
             headers={
@@ -335,87 +533,116 @@ def _fetch_cap(
         with urlopen(request, timeout=timeout_seconds) as response:
             body = response.read(MAX_CAP_BYTES + 1)
     except HTTPError as exc:
-        redacted_url = _redacted_url(url)
-        if exc.code == 429:
-            retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            cooldown = _retry_after_seconds(retry_after, now=now or datetime.now(UTC))
+        metadata_failed = False
+        is_rate_limited = False
+        cooldown: int | None = None
+        try:
+            is_rate_limited = type(exc.code) is int and exc.code == 429
+            if is_rate_limited:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                cooldown = _retry_after_seconds(
+                    retry_after,
+                    now=now or datetime.now(UTC),
+                )
+        except Exception:  # noqa: BLE001 - contain hostile HTTP error metadata
+            metadata_failed = True
+        if is_rate_limited and not metadata_failed:
             failure = CwaHeavyRainWarningRateLimitError(
-                f"CWA heavy-rain CAP returned HTTP 429 at {redacted_url}",
+                "CWA heavy-rain CAP returned HTTP 429: [REDACTED]",
                 retry_after_seconds=cooldown,
             )
         else:
-            failure = CwaHeavyRainWarningFetchError(
-                f"CWA heavy-rain CAP returned HTTP {exc.code} at {redacted_url}"
-            )
-    except (URLError, TimeoutError, OSError) as exc:
-        detail = _redact_detail(str(exc), authorization=authorization)
-        failure = CwaHeavyRainWarningFetchError(
-            f"CWA heavy-rain CAP request failed at {_redacted_url(url)}: {detail}"
-        )
+            failure = CwaHeavyRainWarningFetchError(FETCH_ERROR_MESSAGE)
+    except Exception:  # noqa: BLE001 - complete untrusted transport boundary
+        failure = CwaHeavyRainWarningFetchError(FETCH_ERROR_MESSAGE)
     if failure is not None:
         raise failure
-    if body is None:
-        raise CwaHeavyRainWarningFetchError(
-            f"CWA heavy-rain CAP request failed at {_redacted_url(url)}"
-        )
+    if type(body) is not bytes:
+        raise CwaHeavyRainWarningFetchError(FETCH_ERROR_MESSAGE)
     if len(body) > MAX_CAP_BYTES:
+        body = None
         raise CwaHeavyRainWarningFetchError(
-            f"CWA heavy-rain CAP response exceeds the 2 MiB limit at {_redacted_url(url)}"
+            "CWA heavy-rain CAP response exceeds the 2 MiB limit: [REDACTED]"
         )
     decoded: str | None = None
-    decode_failure: CwaHeavyRainWarningFetchError | None = None
+    decode_failed = False
     try:
         decoded = body.decode("utf-8")
-    except UnicodeDecodeError:
-        decode_failure = CwaHeavyRainWarningFetchError(
-            f"CWA heavy-rain CAP response could not be decoded at {_redacted_url(url)}"
+    except Exception:  # noqa: BLE001 - contain response decode state
+        decode_failed = True
+    body = None
+    if decode_failed:
+        raise CwaHeavyRainWarningFetchError(
+            "CWA heavy-rain CAP response could not be decoded: [REDACTED]"
         )
-    if decode_failure is not None:
-        raise decode_failure
     if decoded is None:
         raise CwaHeavyRainWarningFetchError(
-            f"CWA heavy-rain CAP response could not be decoded at {_redacted_url(url)}"
+            "CWA heavy-rain CAP response could not be decoded: [REDACTED]"
         )
     return decoded
 
 
-def _source_url(url: str) -> str:
+def _source_url(url: str, *, authorization: str = "") -> str:
     parts = urlsplit(url.strip())
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("CWA CAP URL must be an HTTP endpoint")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("CWA CAP URL must not contain userinfo")
+    _ = parts.port
+    for component in (parts.netloc, parts.path):
+        if _string_contains_credential(
+            component,
+            authorization=authorization,
+        ) or _string_contains_credential(
+            unquote(component),
+            authorization=authorization,
+        ):
+            raise ValueError("CWA CAP URL must not contain authorization material")
+
     query: list[tuple[str, str]] = []
     found_format = False
     for name, value in parse_qsl(parts.query, keep_blank_values=True):
         lowered = name.lower()
         if lowered == "authorization":
             continue
+        if lowered in SENSITIVE_QUERY_KEYS:
+            raise ValueError("CWA CAP URL must not contain credential query keys")
+        if _string_contains_credential(
+            name,
+            authorization=authorization,
+        ) or _string_contains_credential(
+            value,
+            authorization=authorization,
+        ):
+            raise ValueError("CWA CAP URL must not contain authorization material")
         if lowered == "format":
             if not found_format:
-                query.append((name, "CAP"))
+                query.append(("format", "CAP"))
                 found_format = True
             continue
         query.append((name, value))
     if not found_format:
         query.append(("format", "CAP"))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+
+
+def _configured_source_url(url: str, *, authorization: str) -> str:
+    source_url: str | None = None
+    failed = False
+    try:
+        source_url = _source_url(url, authorization=authorization)
+    except Exception:  # noqa: BLE001 - sanitize configured URL parsing failures
+        failed = True
+    if failed or source_url is None:
+        raise CwaHeavyRainWarningConfigurationError(CONFIGURATION_ERROR_MESSAGE)
+    return source_url
 
 
 def _request_url(url: str, authorization: str) -> str:
-    parts = urlsplit(_source_url(url))
+    parts = urlsplit(_source_url(url, authorization=authorization))
     query = parse_qsl(parts.query, keep_blank_values=True)
     query.append(("Authorization", authorization))
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
-
-
-def _redacted_url(url: str) -> str:
-    return _request_url(url, "REDACTED")
-
-
-def _redact_detail(detail: str, *, authorization: str) -> str:
-    redacted = detail.replace(authorization, "REDACTED") if authorization else detail
-    return re.sub(
-        r"(?i)(Authorization(?:=|%3D))[^&\s]+",
-        r"\1REDACTED",
-        redacted,
-    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
 
 def _retry_after_seconds(value: str | None, *, now: datetime) -> int | None:
