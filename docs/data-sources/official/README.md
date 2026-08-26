@@ -109,3 +109,30 @@ Production enablement requirements:
 - keep adapter disablement controlled by configuration;
 - fail with structured errors without blocking the public API.
 - promote the MVP live bridge into the worker ingestion pipeline so public API reads persisted, auditable snapshots instead of fetching upstream sources on demand.
+
+## Manual external request packets
+
+`official-incident-request-packets.md` is a generated, review-only artifact. It
+lists the nine manual application packets for the official incident and local
+water sources the v1 baseline still cannot read: NCDR citizen disaster reports
+and EDXL-SitRep, the Kinmen/Hualien/Miaoli/Pingtung/Taitung/Lienchiang local
+read contracts, and Waze for Cities eligibility.
+
+Regenerate it with:
+
+```bash
+python scripts/official-incident-request-packets.py \
+  --format markdown \
+  --output docs/data-sources/official/official-incident-request-packets.md
+```
+
+The generator is inert by construction. It imports no network or mail client,
+has no send/dispatch/login/browser/webhook flag, contains no credential, and
+leaves every contact field empty. Submitting a packet is always a human action
+performed through the organization's own official channel.
+
+Each packet records how its public entry point was established:
+`repo_reviewed_local_source_evidence` means the URL already appears in this
+repository's reviewed local-source coverage evidence, and
+`unverified_pending_operator_confirmation` means the operator must confirm the
+current entry point before submitting.
