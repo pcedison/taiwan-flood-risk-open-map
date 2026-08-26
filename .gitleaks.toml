@@ -1,0 +1,34 @@
+# Gitleaks configuration for flood-risk.
+#
+# Purpose: keep `gitleaks detect` at ZERO findings so a real secret is never
+# buried under known false positives. Every allowlist below is narrowly scoped
+# and carries the reason plus the date it was verified.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(?:key|api[_.-]?key|token|secret|passwd|password)(?:[0-9a-z\-_\t .]{0,20})(?:[\s|']|[\s|"]){0,3}(?:=|>|:{1,3}=|\|\||:|<=|=>|:=|\?=)(?:'|\"|\s|=|`){0,5}([0-9a-z\-_.=]{10,150})(?:['|\"|\n|\r|\s|`|;|\\]|$)'''
+keywords = ["key", "api", "token", "secret", "passwd", "password"]
+
+  # 1) Open-data DATASET identifiers, not credentials.
+  #    `docs/data-sources/geocoding/geocoding-data-manifest.yaml` uses `- key:`
+  #    for dataset slugs such as `moi-national-road-names`. Verified 2026-08-26:
+  #    the file holds dataset slugs, data.gov.tw dataset ids, and public landing
+  #    and resource URLs only. No credential has ever been stored in it.
+  [[rules.allowlists]]
+  paths = ['''docs/data-sources/geocoding/geocoding-data-manifest\.yaml''']
+
+  # 2) Synthetic secrets used by the adapter security regression tests, which
+  #    assert that a sanitized exception never reflects a credential.
+  #    These are matched by VALUE, not by path, so a real credential pasted into
+  #    any file -- a test file included -- is still reported. Verified 2026-08-26.
+  [[rules.allowlists]]
+  regexes = [
+    '''^test-secret$''',
+    '''^s3cr3t$''',
+    '''^s3cr3t-api-key$''',
+    '''^s&#51;cr3t$''',
+  ]
