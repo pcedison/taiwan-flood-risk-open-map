@@ -28,6 +28,10 @@ from app.adapters.ptt import (
     SOURCE_APPROVAL_STATUS as PTT_SOURCE_APPROVAL_STATUS,
 )
 from app.adapters.registry import ADAPTER_REGISTRY, adapter_is_enabled, enabled_adapter_keys
+from app.adapters.wra import (
+    WRA_FLOOD_WARNING_INDEX_URL,
+    WRA_FLOOD_WARNING_KML_URLS,
+)
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
 
@@ -111,6 +115,10 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.source_npa_police_radio_contract_enabled is False
     assert settings.npa_police_radio_traffic_url is None
     assert settings.npa_police_radio_timeout_seconds == 8
+    assert settings.source_wra_flood_warning_enabled is False
+    assert settings.source_wra_flood_warning_api_enabled is False
+    assert settings.source_wra_flood_warning_contract_enabled is False
+    assert settings.wra_flood_warning_timeout_seconds == 8
 
 
 def test_police_radio_requires_all_three_independent_gates() -> None:
@@ -165,6 +173,65 @@ def test_police_radio_registry_metadata_is_context_only_and_default_off() -> Non
     )
     assert "unverified" in " ".join(metadata.limitations).lower()
 
+
+def test_wra_flood_warning_requires_all_three_independent_gates() -> None:
+    required = {
+        "SOURCE_WRA_FLOOD_WARNING_ENABLED": "true",
+        "SOURCE_WRA_FLOOD_WARNING_API_ENABLED": "true",
+        "SOURCE_WRA_FLOOD_WARNING_CONTRACT_ENABLED": "true",
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.wra.flood_warning",
+    }
+
+    for missing in (
+        "SOURCE_WRA_FLOOD_WARNING_ENABLED",
+        "SOURCE_WRA_FLOOD_WARNING_API_ENABLED",
+        "SOURCE_WRA_FLOOD_WARNING_CONTRACT_ENABLED",
+    ):
+        values = dict(required)
+        values.pop(missing)
+        assert enabled_adapter_keys(load_worker_settings(values)) == ()
+        assert build_runtime_adapters(load_worker_settings(values)) == {}
+
+    index_calls: list[tuple[str, int]] = []
+    text_calls: list[tuple[str, int]] = []
+
+    def fetch_json(url: str, timeout_seconds: int) -> object:
+        index_calls.append((url, timeout_seconds))
+        return [{"fileex": "kml", "sourceurl": WRA_FLOOD_WARNING_KML_URLS[0]}]
+
+    def fetch_text(url: str, timeout_seconds: int) -> str:
+        text_calls.append((url, timeout_seconds))
+        return (
+            '<?xml version="1.0"?>'
+            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>'
+        )
+
+    settings = load_worker_settings(
+        {**required, "WRA_FLOOD_WARNING_TIMEOUT_SECONDS": "5"}
+    )
+    assert enabled_adapter_keys(settings) == ("official.wra.flood_warning",)
+    adapters = build_runtime_adapters(
+        settings,
+        wra_flood_warning_fetch_json=fetch_json,
+        wra_flood_warning_fetch_text=fetch_text,
+    )
+    assert tuple(adapters) == ("official.wra.flood_warning",)
+    assert adapters["official.wra.flood_warning"].run().no_active_event is True
+    assert index_calls == [(WRA_FLOOD_WARNING_INDEX_URL, 5)]
+    assert text_calls == [(WRA_FLOOD_WARNING_KML_URLS[0], 5)]
+
+
+def test_wra_flood_warning_registry_metadata_is_context_only_and_default_off() -> None:
+    metadata = ADAPTER_REGISTRY["official.wra.flood_warning"]
+
+    assert metadata.enabled_by_default is False
+    assert metadata.data_gov_dataset_id == "5982"
+    assert metadata.data_gov_url == "https://data.gov.tw/dataset/5982"
+    assert metadata.resource_url == WRA_FLOOD_WARNING_INDEX_URL
+    assert any(
+        "active_fixture_reviewed=false" in limitation
+        for limitation in metadata.limitations
+    )
 
 def test_ncdr_runtime_config_reads_two_stage_settings() -> None:
     settings = load_worker_settings(

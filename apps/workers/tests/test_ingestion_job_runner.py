@@ -199,7 +199,11 @@ def test_run_adapter_batch_skips_empty_fetches() -> None:
 
 @pytest.mark.parametrize(
     "adapter_key",
-    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+    (
+        "official.cwa.heavy_rain_warning",
+        "official.ncdr.cap",
+        "official.wra.flood_warning",
+    ),
 )
 def test_valid_empty_warning_poll_is_success_not_skipped(adapter_key: str) -> None:
     writer = _MemoryWriter()
@@ -218,7 +222,11 @@ def test_valid_empty_warning_poll_is_success_not_skipped(adapter_key: str) -> No
 
 @pytest.mark.parametrize(
     "adapter_key",
-    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+    (
+        "official.cwa.heavy_rain_warning",
+        "official.ncdr.cap",
+        "official.wra.flood_warning",
+    ),
 )
 def test_plain_or_rejected_empty_warning_is_not_no_active_event(
     adapter_key: str,
@@ -236,6 +244,33 @@ def test_plain_or_rejected_empty_warning_is_not_no_active_event(
     assert plain.error_code == "empty_fetch"
     assert rejected.status != "succeeded"
     assert rejected.error_code != "no_active_event"
+
+
+def test_wra_warning_context_is_valid_empty_but_never_retires_latest() -> None:
+    from app.jobs.ingestion import (
+        VALID_EMPTY_WARNING_ADAPTER_KEYS,
+        WARNING_EVENT_ADAPTER_KEYS,
+    )
+    from app.pipelines.promotion import (
+        REVIEWED_WARNING_ADAPTER_KEYS,
+        PostgresEvidencePromotionWriter,
+    )
+
+    assert "official.wra.flood_warning" in VALID_EMPTY_WARNING_ADAPTER_KEYS
+    assert "official.wra.flood_warning" not in WARNING_EVENT_ADAPTER_KEYS
+    assert "official.wra.flood_warning" not in REVIEWED_WARNING_ADAPTER_KEYS
+
+    writer = PostgresEvidencePromotionWriter(connection_factory=_unreachable_connection)
+    with pytest.raises(ValueError):
+        writer.retire_warning_latest_for_no_active_event(
+            adapter_key="official.wra.flood_warning",
+            generation_started_at=datetime(2026, 8, 26, 2, 0, tzinfo=UTC),
+            completed_at=datetime(2026, 8, 26, 2, 1, tzinfo=UTC),
+        )
+
+
+def _unreachable_connection() -> object:  # pragma: no cover - must never be called
+    raise AssertionError("no database connection may be opened")
 
 
 def test_station_empty_result_cannot_use_no_active_event_branch() -> None:

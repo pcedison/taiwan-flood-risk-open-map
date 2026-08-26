@@ -463,6 +463,8 @@ _STAGING_PAYLOAD_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "verification_status",
     "incident_state",
     "upstream_updated_at",
+    "warning_kind",
+    "network_link_source_url",
     "limitations",
     "admin_code",
     "dataset_revision",

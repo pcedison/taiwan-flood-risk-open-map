@@ -1699,6 +1699,44 @@ def test_police_radio_context_persists_to_evidence_without_latest_upsert() -> No
     assert not any("INSERT INTO official_realtime_latest" in statement for statement in statements)
 
 
+def test_wra_warning_context_persists_to_evidence_without_latest_upsert() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="wra-warning-context-evidence")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = EvidencePromotionPayload(
+        data_source_id="data-source-id",
+        adapter_key="official.wra.flood_warning",
+        source_id="NewstFloodWarm.kml:FW-1",
+        source_type="official",
+        event_type="status_only",
+        title="WRA warning KML context adapter",
+        summary="水利署警戒圖層（flood_warning／active）",
+        url="https://opendata.wra.gov.tw/api/v2/301c0b62-8736-4e03-95ef-55309c1a5e74",
+        occurred_at=OCCURRED_AT,
+        observed_at=OBSERVED_AT,
+        confidence=0.7,
+        raw_ref="raw/wra-flood-warning/NewstFloodWarm.kml",
+        properties={
+            "evidence_scope": "context",
+            "context_kind": "official_wra_warning_context",
+            "verification_status": "official_reported",
+            "incident_state": "active",
+            "location_precision": "point",
+            "warning_kind": "flood_warning",
+            "network_link_source_url": None,
+            "location_payload": {
+                "geometry": {"type": "Point", "coordinates": [120.1842, 23.0478]}
+            },
+        },
+    )
+
+    evidence_id = writer.write_evidence(payload)
+
+    assert evidence_id == "wra-warning-context-evidence"
+    statements = [statement for statement, _params in connection.cursor_instance.executions]
+    assert sum("INSERT INTO evidence" in statement for statement in statements) == 1
+    assert not any("INSERT INTO official_realtime_latest" in statement for statement in statements)
+
+
 def test_write_evidence_does_not_enrich_audit_only_civil_iot_geometry() -> None:
     connection = _FakeConnection(
         rows=[],

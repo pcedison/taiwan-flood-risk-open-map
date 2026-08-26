@@ -27,6 +27,13 @@ NCDR_CAP_ADAPTER_KEY = "official.ncdr.cap"
 WARNING_EVENT_ADAPTER_KEYS = frozenset(
     {"official.cwa.heavy_rain_warning", NCDR_CAP_ADAPTER_KEY}
 )
+WRA_FLOOD_WARNING_ADAPTER_KEY = "official.wra.flood_warning"
+# A valid empty poll is a healthy signal for these reviewed adapters only.  It is
+# deliberately narrower than warning-latest retirement, which stays restricted to
+# `REVIEWED_WARNING_ADAPTER_KEYS` in `app.pipelines.promotion`.
+VALID_EMPTY_WARNING_ADAPTER_KEYS = frozenset(
+    {*WARNING_EVENT_ADAPTER_KEYS, WRA_FLOOD_WARNING_ADAPTER_KEY}
+)
 COMPLETE_REPLACE_MIN_VALID_FRACTION = 0.75
 
 
@@ -282,7 +289,7 @@ def _summary_from_result(
         if result.normalized:
             raise ValueError("adapter returned normalized items without fetched raw items")
         if (
-            result.adapter_key in WARNING_EVENT_ADAPTER_KEYS
+            result.adapter_key in VALID_EMPTY_WARNING_ADAPTER_KEYS
             and result.no_active_event is True
             and not result.normalized
             and not result.rejected

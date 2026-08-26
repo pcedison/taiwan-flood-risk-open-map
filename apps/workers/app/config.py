@@ -28,6 +28,9 @@ class WorkerSettings:
     source_npa_police_radio_enabled: bool
     source_npa_police_radio_api_enabled: bool
     source_npa_police_radio_contract_enabled: bool
+    source_wra_flood_warning_enabled: bool
+    source_wra_flood_warning_api_enabled: bool
+    source_wra_flood_warning_contract_enabled: bool
     source_flood_potential_enabled: bool | None
     source_flood_potential_geojson_enabled: bool
     source_flood_sensor_enabled: bool | None
@@ -154,6 +157,7 @@ class WorkerSettings:
     ncdr_cap_timeout_seconds: int
     npa_police_radio_traffic_url: str | None
     npa_police_radio_timeout_seconds: int
+    wra_flood_warning_timeout_seconds: int
     flood_potential_geojson_url: str | None
     flood_potential_geojson_timeout_seconds: int
     civil_iot_flood_sensor_url: str | None
@@ -265,6 +269,18 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_npa_police_radio_contract_enabled=env_flag(
             values,
             "SOURCE_NPA_POLICE_RADIO_CONTRACT_ENABLED",
+        ),
+        source_wra_flood_warning_enabled=env_flag(
+            values,
+            "SOURCE_WRA_FLOOD_WARNING_ENABLED",
+        ),
+        source_wra_flood_warning_api_enabled=env_flag(
+            values,
+            "SOURCE_WRA_FLOOD_WARNING_API_ENABLED",
+        ),
+        source_wra_flood_warning_contract_enabled=env_flag(
+            values,
+            "SOURCE_WRA_FLOOD_WARNING_CONTRACT_ENABLED",
         ),
         source_flood_potential_enabled=env_bool(values, "SOURCE_FLOOD_POTENTIAL_ENABLED"),
         source_flood_potential_geojson_enabled=env_flag(
@@ -675,6 +691,11 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         npa_police_radio_timeout_seconds=env_int(
             values,
             "NPA_POLICE_RADIO_TIMEOUT_SECONDS",
+            default=8,
+        ),
+        wra_flood_warning_timeout_seconds=env_int(
+            values,
+            "WRA_FLOOD_WARNING_TIMEOUT_SECONDS",
             default=8,
         ),
         flood_potential_geojson_url=env_str(values, "FLOOD_POTENTIAL_GEOJSON_URL"),

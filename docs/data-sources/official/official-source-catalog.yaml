@@ -171,19 +171,37 @@ sources:
       - "Source coordinates are TWD97 / TM2 and must be converted to EPSG:4326 before spatial queries."
       - "Recent flood facts must be corroborated through public news/wiki metadata or other separately modeled official sources, not merged into this official snapshot."
   - key: official.wra.flood_warning
-    need: realtime_flood_warning
-    status: phase4_candidate
+    need: official_warning_context
+    status: disabled_by_default
     data_gov_dataset_id: "5982"
+    data_gov_dataset_ids:
+      - "5982"
+      - "5983"
+      - "5984"
     data_gov_url: "https://data.gov.tw/dataset/5982"
-    title: "Flood warning disaster information"
+    related_data_gov_urls:
+      - "https://data.gov.tw/dataset/5982"
+      - "https://data.gov.tw/dataset/5983"
+      - "https://data.gov.tw/dataset/5984"
+    title: "Flood, water level, and reservoir warning disaster information"
     provider: "Water Resources Agency"
     resource_url: "https://opendata.wra.gov.tw/api/v2/301c0b62-8736-4e03-95ef-55309c1a5e74"
-    resource_format: "JSON API / KML list"
-    update_frequency: "irregular"
+    kml_resource_urls:
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstFloodWarm.kml"
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstWaterWarm.kml"
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstReservoirWarm.kml"
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/AnnounceFlood.kml"
+    resource_format: "JSON API index to a fixed four-file KML allowlist"
+    update_frequency: "irregular warning publication; polled per ingestion cycle"
     license: "Government Open Data License, version 1.0"
-    integration_decision: "Keep as a Phase 4 warning-layer candidate; do not blend into flood-potential scoring until warning semantics are implemented."
+    active_fixture_reviewed: false
+    integration_decision: "Persist bounded warning placemarks as official-reported status-only context; never use them for official latest or scoring."
     limitations:
-      - "Requires parser, cadence review, source-health alerts, and UI language before scoring use."
+      - "官方警戒範圍為情境背景，尚未經淹水感測器逐點確認。"
+      - "警戒發布與解除可能延遲；解除後仍保留為稽核脈絡。"
+      - "active_fixture_reviewed=false: no reviewed live active-warning capture exists yet."
+      - "The source, API, and contract gates are independently fail-closed and disabled by default."
+      - "Only the four immutable HTTPS KML URLs are ever fetched; the index can never widen the allowlist."
   - key: geocoder.moi.village_boundary
     need: village_admin_fallback
     status: primary

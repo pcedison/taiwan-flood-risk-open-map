@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>淹水警戒</name>
+    <Placemark id="FW-1">
+      <name>臺南市安南區 一級警戒</name>
+      <TimeStamp>
+        <when>2026-08-26T10:15:00+08:00</when>
+      </TimeStamp>
+      <Point>
+        <coordinates>120.1842,23.0478,0</coordinates>
+      </Point>
+    </Placemark>
+    <Placemark id="FW-2">
+      <name>嘉義縣東石鄉 二級警戒</name>
+      <TimeSpan>
+        <begin>2026-08-26T09:00:00+08:00</begin>
+        <end>2026-08-26T09:30:00+08:00</end>
+      </TimeSpan>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>120.10,23.00,0 120.12,23.00,0 120.12,23.02,0 120.10,23.02,0 120.10,23.00,0</coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+    <Placemark id="FW-3">
+      <name>缺少事件時間的警戒</name>
+      <Point>
+        <coordinates>120.2000,23.1000,0</coordinates>
+      </Point>
+    </Placemark>
+  </Document>
+</kml>

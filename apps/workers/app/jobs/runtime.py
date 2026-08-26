@@ -118,6 +118,9 @@ from app.adapters.wra import (
     HistoricalFetchText as WraHistoricalFetchText,
 )
 from app.adapters.wra import (
+    WraFloodWarningAdapter,
+    WraFloodWarningFetchJson,
+    WraFloodWarningFetchText,
     WraHistoricalFloodAdapter,
     WraWaterLevelApiAdapter,
 )
@@ -234,6 +237,8 @@ def build_runtime_adapters(
     ncdr_cap_fetch_json: NcdrFetchJson | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     police_radio_traffic_fetch_json: PoliceRadioFetchJson | None = None,
+    wra_flood_warning_fetch_json: WraFloodWarningFetchJson | None = None,
+    wra_flood_warning_fetch_text: WraFloodWarningFetchText | None = None,
     flood_potential_fetch_json: FloodPotentialFetchJson | None = None,
     flood_sensor_fetch_json: StaFetchJson | None = None,
     tainan_flood_sensor_fetch_json: TainanFetchJson | None = None,
@@ -408,6 +413,22 @@ def build_runtime_adapters(
             fetch_json=police_radio_traffic_fetch_json,
         )
         live_adapters[police_radio_adapter.metadata.key] = police_radio_adapter
+
+    if (
+        settings.source_wra_flood_warning_enabled
+        and settings.source_wra_flood_warning_api_enabled
+        and settings.source_wra_flood_warning_contract_enabled
+        and "official.wra.flood_warning" in enabled_keys
+    ):
+        wra_flood_warning_adapter = WraFloodWarningAdapter(
+            timeout_seconds=settings.wra_flood_warning_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=wra_flood_warning_fetch_json,
+            fetch_text=wra_flood_warning_fetch_text,
+        )
+        live_adapters[wra_flood_warning_adapter.metadata.key] = (
+            wra_flood_warning_adapter
+        )
 
     if (
         settings.source_flood_potential_geojson_enabled

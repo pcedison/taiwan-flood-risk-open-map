@@ -6,6 +6,7 @@ from typing import Any
 import yaml
 
 from app.adapters.registry import ADAPTER_REGISTRY
+from app.adapters.wra import WRA_FLOOD_WARNING_KML_URLS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CATALOG_PATH = REPO_ROOT / "docs" / "data-sources" / "official" / "official-source-catalog.yaml"
@@ -61,7 +62,16 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
         "https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata"
     )
     assert sources["official.flood_potential.geojson"]["data_gov_dataset_id"] == "25766"
-    assert sources["official.wra.flood_warning"]["status"] == "phase4_candidate"
+    assert sources["official.wra.flood_warning"]["status"] == "disabled_by_default"
+    assert sources["official.wra.flood_warning"]["data_gov_dataset_ids"] == [
+        "5982",
+        "5983",
+        "5984",
+    ]
+    assert sources["official.wra.flood_warning"]["active_fixture_reviewed"] is False
+    assert sources["official.wra.flood_warning"]["kml_resource_urls"] == list(
+        WRA_FLOOD_WARNING_KML_URLS
+    )
     assert sources["geocoder.moi.village_boundary"]["data_gov_url"].startswith(
         "https://data.gov.tw/dataset/"
     )
@@ -92,6 +102,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
         "official.wra.historical_flood",
         "official.ncdr.cap",
         "official.npa.police_radio_traffic",
+        "official.wra.flood_warning",
         "official.flood_potential.geojson",
     ):
         metadata = ADAPTER_REGISTRY[adapter_key]
