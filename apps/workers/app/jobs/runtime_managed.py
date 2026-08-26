@@ -37,20 +37,71 @@ from app.scheduler import _execute_scheduled_ingestion_cycle
 
 ManagedRuntimeStatus = Literal["succeeded", "partial", "failed", "skipped"]
 RuntimeAdapterBuilder = Callable[[WorkerSettings], Mapping[str, DataSourceAdapter]]
+# Adapters the v1 baseline runner may execute, one isolated cycle at a time.
+#
+# Membership does NOT enable a source: each still needs its own runtime gates and
+# an enabled persisted catalog row. Membership only means "the runner is allowed
+# to consider this source". A source outside this tuple can never ingest, no
+# matter how its gates or catalog row are set -- which is exactly how five
+# backbone sources and thirty-five local sources went silently dark.
+#
+# The two non-scoring context sources are deliberately excluded. Drift is caught
+# by test_v1_baseline_runner.py, which fails if a registered official/local
+# adapter is missing here, forcing an explicit decision instead of silence.
 V1_BASELINE_ADAPTER_KEYS: Final[tuple[str, ...]] = (
+    # Official national backbone.
+    "official.civil_iot.flood_sensor",
+    "official.civil_iot.gate_water_level",
+    "official.civil_iot.pond_water_level",
+    "official.civil_iot.pump_water_level",
+    "official.civil_iot.river_water_level",
+    "official.civil_iot.sewer_water_level",
+    "official.cwa.heavy_rain_warning",
     "official.cwa.rainfall",
     "official.cwa.tide_level",
-    "official.cwa.heavy_rain_warning",
+    "official.flood_potential.geojson",
+    "official.ncdr.cap",
+    "official.wra.historical_flood",
     "official.wra.water_level",
     "official.wra_iow.flood_depth",
-    "official.wra.historical_flood",
-    "official.ncdr.cap",
-    "official.flood_potential.geojson",
-    "official.civil_iot.flood_sensor",
-    "official.civil_iot.sewer_water_level",
-    "official.civil_iot.pump_water_level",
-    "official.civil_iot.gate_water_level",
+    # Local government sources. Each still has its own runtime gates and
+    # persisted catalog row; scope membership only makes the source eligible.
+    "local.changhua.flood_sensor",
+    "local.chiayi_city.rainfall",
+    "local.chiayi_city.water_level",
+    "local.chiayi_county.flood_sensor",
+    "local.hsinchu_city.flood_sensor",
+    "local.hsinchu_city.sewer_water_level",
+    "local.hsinchu_county.flood_sensor",
+    "local.hualien.flood_sensor",
+    "local.kaohsiung.flood_sensor",
+    "local.kaohsiung.rainfall",
+    "local.kaohsiung.sewer_water_level",
+    "local.keelung.flood_sensor",
+    "local.keelung.rainfall",
+    "local.keelung.water_level",
+    "local.kinmen.kwis_pump_station",
+    "local.miaoli.flood_sensor",
+    "local.nantou.sewer_water_level",
+    "local.new_taipei.drainage_water_level",
+    "local.new_taipei.flood_sensor",
+    "local.new_taipei.rainfall",
+    "local.new_taipei.water_level",
+    "local.penghu.water_level",
+    "local.pingtung.flood_sensor",
+    "local.taichung.water_level",
     "local.tainan.flood_sensor",
+    "local.taipei.pump_station",
+    "local.taipei.river_water_level",
+    "local.taipei.sewer_water_level",
+    "local.taitung.flood_sensor",
+    "local.taoyuan.flood_sensor",
+    "local.taoyuan.rainfall",
+    "local.taoyuan.water_level",
+    "local.yilan.flood_sensor",
+    "local.yilan.mobile_pump_status",
+    "local.yilan.water_level",
+    "local.yunlin.water_level",
 )
 
 
