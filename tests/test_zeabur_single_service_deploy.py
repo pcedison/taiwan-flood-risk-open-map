@@ -59,7 +59,11 @@ def test_zeabur_single_service_scheduler_loop_runs_the_initial_tick() -> None:
     dockerfile = ENTRYPOINT.read_text(encoding="utf-8")
 
     assert "first tick runs immediately" in dockerfile
-    assert "python -m app.main --run-enabled-adapters --persist --scheduler &" in dockerfile
+    # The legacy `--run-enabled-adapters` entry point is frozen and exits 2, which
+    # takes the whole container down under `set -Eeuo pipefail`. The deployed
+    # scheduler must use the sanctioned v1 baseline runner instead.
+    assert "python -m app.main --run-v1-baseline-adapters --scheduler &" in dockerfile
+    assert "--run-enabled-adapters" not in dockerfile
 
 
 def test_zeabur_single_service_sets_backbone_source_gates() -> None:
@@ -110,4 +114,4 @@ def test_image_runs_as_non_root_with_role_dispatch() -> None:
     # Single-role paths must exec so signals reach the real process.
     assert "exec python -m uvicorn app.main:app" in entrypoint
     assert "exec node node_modules/next/dist/bin/next start" in entrypoint
-    assert "exec python -m app.main --run-enabled-adapters --persist --scheduler" in entrypoint
+    assert "exec python -m app.main --run-v1-baseline-adapters --scheduler" in entrypoint
