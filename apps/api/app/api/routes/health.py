@@ -9,9 +9,9 @@ from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summar
 
 router = APIRouter(tags=["health"])
 
-REQUIRED_SCHEMA_VERSION = 37
-REQUIRED_SCHEMA_FILENAME = "0037_yilan_mobile_pump_status_source.sql"
-REQUIRED_SCHEMA_CHECKSUM = "4a5215f6d32f83a7710a5782bdbd8168811affb306740c5acfb0cf45d0eb9447"
+REQUIRED_SCHEMA_VERSION = 38
+REQUIRED_SCHEMA_FILENAME = "0038_official_incident_context_sources.sql"
+REQUIRED_SCHEMA_CHECKSUM = "b7f4ca9252e84c207bfd0cda6f86ff164f4faab77f8ee72b73c6359f11d7f298"
 REQUIRED_SCHEMA_RELATIONS = (
     "public.station_inventory_snapshots",
     "public.realtime_jurisdiction_boundary_snapshots",

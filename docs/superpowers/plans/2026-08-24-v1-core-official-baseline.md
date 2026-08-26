@@ -23,7 +23,7 @@
 - Evidence previews are bounded to 10 and add `location_precision` and `limitations`; `/v1/evidence/{assessment_id}` remains the bounded detail route.
 - Persistence is fail-soft and ADR-0006-safe: coarsen coordinates, persist no raw query text, never dump the exact public response into `result_snapshot`, and never convert a successful assessment into HTTP 500 because its audit write failed.
 - Live adapters default off. Credentials are environment/secrets only and are redacted from URLs, exceptions, logs, snapshots, and responses.
-- Retain but freeze v2 batch/replay, query heat, precomputed profiles, profile refresh, embeddings, tiles, and the 22-county proof refresh/publication machinery. Stop their production entry-point writes and do not drop tables or delete modules. The only scoped compatibility exception is read-only reuse of one already-active, immutable, checksum-reviewed jurisdiction boundary snapshot plus migration 0038's exact v1 source-mapping/contract replacement; no snapshot builder, inventory refresher, proof publisher, or generic proof API becomes reachable.
+- Retain but freeze v2 batch/replay, query heat, precomputed profiles, profile refresh, embeddings, tiles, and the 22-county proof refresh/publication machinery. Stop their production entry-point writes and do not drop tables or delete modules. The only scoped compatibility exception is read-only reuse of one already-active, immutable, checksum-reviewed jurisdiction boundary snapshot plus migration 0039's exact v1 source-mapping/contract replacement; no snapshot builder, inventory refresher, proof publisher, or generic proof API becomes reachable.
 - WRA dataset 25770 is a metadata index whose `sourceurl` points to KML. CWA `W-C0033-003` is CAP XML with `areaDesc`/Taiwan geocodes. NCDR current access is `datastore -> capid -> dump`; the legacy Atom endpoint is parser regression coverage only.
 
 ---
@@ -48,7 +48,7 @@
   NCDR, staging/promotion tests, and canonical CAP lifecycle locking.
 - Create `docs/runbooks/flood-potential-import.production.yaml` only from an actually downloaded, checksummed official artifact; extend the existing validator/importer rather than adding a parallel materializer.
 - Modify `apps/workers/app/adapters/contracts.py`, `apps/workers/app/jobs/ingestion.py`, `apps/workers/app/jobs/freshness.py`, `apps/workers/app/jobs/runtime.py`, `apps/workers/app/jobs/runtime_managed.py` only where a public type/export is explicitly required, `apps/workers/app/pipelines/promotion.py`, `apps/workers/app/config.py`, `apps/workers/app/adapters/registry.py`, `apps/workers/app/main.py`, `apps/workers/app/cli/parser.py`, `apps/workers/app/scheduler.py`, `apps/workers/app/cli/maintenance_cli.py`, and `apps/workers/app/cli/profiles_cli.py`.
-- Create `infra/migrations/0038_v1_official_baseline_sources.sql` and
+- Create `infra/migrations/0039_v1_official_baseline_sources.sql` and
   `tests/test_v1_official_migration_postgres.py`; do not create a second
   evidence/latest/run schema.
 
@@ -3283,7 +3283,7 @@ git add docs/runbooks/flood-potential-import.production.yaml docs/runbooks/flood
 git commit -m "feat: pin flood potential production evidence"
 ```
 
-### Task 14: Add the per-source managed v1 baseline and migration 0038
+### Task 14: Add the per-source managed v1 baseline and migration 0039
 
 **Files:**
 
@@ -3300,7 +3300,7 @@ git commit -m "feat: pin flood potential production evidence"
 - Modify: `apps/workers/tests/test_scheduler.py`
 - Modify: `apps/workers/tests/test_runtime_managed_ingestion.py`
 - Modify: `apps/workers/tests/test_ingestion_job_runner.py`
-- Create: `infra/migrations/0038_v1_official_baseline_sources.sql`
+- Create: `infra/migrations/0039_v1_official_baseline_sources.sql`
 - Modify: `infra/migrations/README.md`
 - Modify: `apps/api/app/api/routes/health.py`
 - Modify: `apps/api/app/domain/realtime/nearby_coverage.py`
@@ -3578,7 +3578,7 @@ writer guards, call a generic managed/scheduler facade, or import an `_execute_*
 engine directly. Only `run_v1_baseline_adapter_cycle` may enter the reviewed
 per-source managed engine.
 
-- [ ] **Step 3: Write migration 0038 tests before SQL**
+- [ ] **Step 3: Write migration 0039 tests before SQL**
 
 Tests must require:
 
@@ -3615,7 +3615,7 @@ Tests must require:
   ```
 
   All six rows use mapping revision `2026-08-24-v1-baseline`, null redundancy
-  parent, reviewed timestamp, and `review_ref='0038_v1_official_baseline_sources'`.
+  parent, reviewed timestamp, and `review_ref='0039_v1_official_baseline_sources'`.
   There are no other v1 mapping rows or `required` adapters; this prevents frozen
   tide/Civil-IoT/other-local candidates from making nationwide low-risk readiness
   impossible. Kaohsiung and Pingtung remain central-only and are surfaced by the
@@ -3636,7 +3636,7 @@ Tests must require:
   the post-migration rows, recompute hashes, and assert both warning keys enter
   every verified jurisdiction's applicable/required set rather than checking
   filename strings only;
-- before inserting `flood_warning` contract rows, migration 0038 explicitly
+- before inserting `flood_warning` contract rows, migration 0039 explicitly
   drops the 0035 constraint
   `realtime_jurisdiction_signal_contracts_signal_type_check` and recreates that
   same named CHECK with exactly `rainfall`, `water_level`, `flood_depth`,
@@ -3652,14 +3652,14 @@ Tests must require:
   `official.cwa.heavy_rain_warning -> flood_warning`, adds its reviewed public
   label, and keeps it distinct from `official.ncdr.cap`; a health row for the
   new key must not be silently dropped by `build_nearby_source_health`;
-- the expected filename/version/checksum contract moving from 0037 to 0038.
+- the expected filename/version/checksum contract moving from 0038 to 0039.
 
-- [ ] **Step 4: Implement 0038 and update every schema sentinel**
+- [ ] **Step 4: Implement 0039 and update every schema sentinel**
 
-Create `0038_v1_official_baseline_sources.sql`, document it in
+Create `0039_v1_official_baseline_sources.sql`, document it in
 `infra/migrations/README.md`, set
 `REQUIRED_SCHEMA_VERSION = 38` and
-`REQUIRED_SCHEMA_FILENAME = "0038_v1_official_baseline_sources.sql"`, recompute
+`REQUIRED_SCHEMA_FILENAME = "0039_v1_official_baseline_sources.sql"`, recompute
 the SHA-256 with the same bytes/algorithm used by `infra/scripts/apply_migrations.py`,
 and update `apps/api/tests/test_public_contract.py` assertions and migration test
 fixtures. The mapping replacement and contract digest refresh occur in the same
@@ -3688,15 +3688,15 @@ both projects import a top-level package named `app`.
 `test_v1_official_migration_postgres.py` is the non-mocked migration-path suite.
 With `OFFICIAL_DB_ACCEPTANCE_REQUIRED=1` it requires two reachable, dedicated
 empty database URLs. It applies all migrations to the first; on the second it
-applies exactly 0001–0037 from a temporary manifest directory, seeds the
-pre-0038 enabled/conflict state, then applies 0038. It queries real constraints,
+applies exactly 0001–0038 from a temporary manifest directory, seeds the
+pre-0039 enabled/conflict state, then applies 0039. It queries real constraints,
 all eight disabled catalog rows, six mapping rows, all 22 warning contracts and
 digests. Missing URLs, a skip, or an already-dirty target is a hard failure.
 
 - [ ] **Step 7: Commit the baseline runner and schema gate**
 
 ```bash
-git add apps/workers/app/jobs/v1_baseline.py apps/workers/app/jobs/runtime_managed.py apps/workers/app/jobs/ingestion.py apps/workers/app/cli/v1_baseline_cli.py apps/workers/app/main.py apps/workers/app/cli/parser.py apps/workers/app/scheduler.py apps/workers/tests/test_v1_baseline.py apps/workers/tests/test_runtime_managed_ingestion.py apps/workers/tests/test_ingestion_job_runner.py apps/workers/tests/test_official_source_catalog.py apps/workers/tests/test_worker_entrypoints.py apps/workers/tests/test_scheduler.py apps/workers/pyproject.toml infra/migrations/0038_v1_official_baseline_sources.sql infra/migrations/README.md apps/api/app/api/routes/health.py apps/api/app/domain/realtime/nearby_coverage.py apps/api/tests/test_public_contract.py apps/api/tests/test_evidence_repository.py apps/api/tests/test_nearby_realtime_coverage.py tests/test_apply_migrations_script.py tests/test_v1_official_migration_postgres.py .env.example docs/runbooks/worker-scheduler-deployment.md
+git add apps/workers/app/jobs/v1_baseline.py apps/workers/app/jobs/runtime_managed.py apps/workers/app/jobs/ingestion.py apps/workers/app/cli/v1_baseline_cli.py apps/workers/app/main.py apps/workers/app/cli/parser.py apps/workers/app/scheduler.py apps/workers/tests/test_v1_baseline.py apps/workers/tests/test_runtime_managed_ingestion.py apps/workers/tests/test_ingestion_job_runner.py apps/workers/tests/test_official_source_catalog.py apps/workers/tests/test_worker_entrypoints.py apps/workers/tests/test_scheduler.py apps/workers/pyproject.toml infra/migrations/0039_v1_official_baseline_sources.sql infra/migrations/README.md apps/api/app/api/routes/health.py apps/api/app/domain/realtime/nearby_coverage.py apps/api/tests/test_public_contract.py apps/api/tests/test_evidence_repository.py apps/api/tests/test_nearby_realtime_coverage.py tests/test_apply_migrations_script.py tests/test_v1_official_migration_postgres.py .env.example docs/runbooks/worker-scheduler-deployment.md
 git commit -m "feat: add isolated v1 official baseline cycle"
 ```
 
@@ -3853,7 +3853,7 @@ git commit -m "feat: render additive assessment model with fallback"
 
 - [ ] **Step 1: Document the one public read path and rollout order**
 
-Document: migrate through 0038; deploy API with additive fields; deploy the Web
+Document: migrate through 0039; deploy API with additive fields; deploy the Web
 fallback; deploy workers with all new source gates off; validate each source in
 staging; then enable one gate at a time. State that the public risk route has one
 read-model load and one `AssessmentService` call, the base composer never applies
@@ -3897,7 +3897,7 @@ the import name `app`.
 
 - [ ] **Step 4: Run database concurrency and privacy acceptance**
 
-Apply migrations to an empty PostGIS database and exercise the 0037→0038 path
+Apply migrations to an empty PostGIS database and exercise the 0038→0039 path
 through `tests/test_apply_migrations_script.py`, then run these mandatory
 real-database suites:
 
@@ -3945,7 +3945,7 @@ local candidates in v1.
 
 - [ ] **Step 6: Exercise and document explicit post-migration activation**
 
-Migration 0038 intentionally resets every v1 catalog row to
+Migration 0039 intentionally resets every v1 catalog row to
 `data_sources.is_enabled=false`; configuration gates alone therefore cannot make
 readiness healthy. After a source passes Step 5, use the documented operator
 transaction in staging to enable exactly that one catalog row, reopen only its
@@ -3995,7 +3995,7 @@ The core official baseline is complete only when all of the following are true:
    scenario, plus a deterministic merged output and explicit 22-jurisdiction
    covered/known-gap partition; a template, single-county archive, or synthetic
    fixture does not satisfy this gate.
-9. Migration 0038 passes both real empty-database and real 0037→0038 paths;
+9. Migration 0039 passes both real empty-database and real 0038→0039 paths;
    evidence geography and promotion concurrency run against migrated PostGIS
    with the completion sentinel and zero skips. Its checksum/schema sentinel,
    the full API suite, the full worker suite, root tests, and the complete Web

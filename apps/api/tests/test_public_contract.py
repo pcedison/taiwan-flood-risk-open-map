@@ -361,10 +361,10 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        37,
-        "0037_yilan_mobile_pump_status_source.sql",
-        "4a5215f6d32f83a7710a5782bdbd8168811affb306740c5acfb0cf45d0eb9447",
-        37,
+        38,
+        "0038_official_incident_context_sources.sql",
+        "b7f4ca9252e84c207bfd0cda6f86ff164f4faab77f8ee72b73c6359f11d7f298",
+        38,
         "public.station_inventory_snapshots",
         "public.realtime_jurisdiction_boundary_snapshots",
         "public.realtime_jurisdiction_boundaries",
@@ -381,7 +381,7 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
         def fetchone(self) -> tuple[bool, ...]:
             return (True, True, True, True, False, True, True)
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0037 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0038 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 

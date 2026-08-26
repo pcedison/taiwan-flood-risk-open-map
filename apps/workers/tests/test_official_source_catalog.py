@@ -114,3 +114,27 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
         assert metadata.resource_url.startswith(source["resource_url"])
         assert metadata.license == source["license"]
         assert metadata.limitations
+
+
+def test_migration_0038_registered_keys_stay_disabled_in_catalog_and_registry() -> None:
+    migration = (
+        REPO_ROOT
+        / "infra"
+        / "migrations"
+        / "0038_official_incident_context_sources.sql"
+    ).read_text(encoding="utf-8")
+    registered_keys = {
+        "official.cwa.heavy_rain_warning",
+        "official.ncdr.cap",
+        "official.npa.police_radio_traffic",
+        "official.wra.flood_warning",
+    }
+    sources = {source["key"]: source for source in _catalog()["sources"]}
+
+    for key in registered_keys:
+        assert f"'{key}'" in migration, key
+        assert sources[key]["status"] == "disabled_by_default", key
+        assert ADAPTER_REGISTRY[key].enabled_by_default is False, key
+
+    assert "true" not in migration
+    assert migration.count("false") == len(registered_keys)

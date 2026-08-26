@@ -121,3 +121,18 @@ before changing any review or approval field.
 `pump_or_gate_status` jurisdiction mapping. The migration does not enable the
 adapter or approve station-inventory evidence; operators must still enable both
 runtime gates and complete the existing fail-closed source review.
+
+`0038_official_incident_context_sources.sql` registers four disabled-by-default
+official catalog rows: `official.cwa.heavy_rain_warning`, `official.ncdr.cap`,
+`official.npa.police_radio_traffic`, and `official.wra.flood_warning`. Every row
+is inserted with `is_enabled = false` and the conflict branch re-asserts that
+value, so re-running the migration on a database where an operator enabled one
+of these rows forces it back off. The migration stores no API key, token, or
+other credential; it records only public-safe owner, landing/resource URL,
+license, limitation, review status, and phase metadata. The police-radio and WRA
+warning rows are marked `evidence_scope = context` with `scoring_use = never`;
+the CWA and NCDR rows keep `spatial_review = unapproved`. The migration
+deliberately creates no `realtime_source_jurisdictions` mapping, so none of
+these sources can become a required realtime coverage signal. Operators must
+still enable each runtime gate and complete the fail-closed source review before
+enabling a row.
