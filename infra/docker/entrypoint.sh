@@ -46,7 +46,7 @@ api_host="${API_HOST:-127.0.0.1}"
 api_port="${API_PORT:-8000}"
 web_host="${WEB_HOST:-0.0.0.0}"
 web_port="${PORT:-${WEB_PORT:-8080}}"
-worker_database_url="${WORKER_DATABASE_URL:-${DATABASE_URL:-}}"
+worker_database_url="${WORKER_DATABASE_URL:-${DATABASE_URL:-${POSTGRES_CONNECTION_STRING:-${POSTGRES_URI:-}}}}"
 ingestion_enabled="${HOSTED_INGESTION_SCHEDULER_ENABLED:-${SINGLE_SERVICE_INGESTION_SCHEDULER_ENABLED:-auto}}"
 realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"
 realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"
@@ -95,7 +95,7 @@ setup_ingestion_env() {
   local required_adapter_keys
   export WORKER_DATABASE_URL="${worker_database_url}"
   if [ -z "${WORKER_DATABASE_URL}" ]; then
-    echo "[start] ingestion scheduler requested but WORKER_DATABASE_URL/DATABASE_URL is empty"
+    echo "[start] ingestion scheduler requested but no supported database URL is configured"
     exit 1
   fi
   if truthy "${realtime_backbone_force_ingestion}"; then

@@ -55,7 +55,8 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}"
     )
     assert job["env"]["REQUIRE_ADMIN_SOURCE_FRESHNESS"] == (
-        "${{ github.event.inputs.require_admin_source_freshness || 'false' }}"
+        "${{ github.event_name == 'schedule' || "
+        "github.event.inputs.require_admin_source_freshness || false }}"
     )
     assert job["env"]["FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS"] == (
         "${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}"

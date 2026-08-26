@@ -33,7 +33,7 @@ jobs:
       HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 }}
       HOSTED_MONITORING_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 }}
       LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64: ${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}
-      REQUIRE_ADMIN_SOURCE_FRESHNESS: ${{ github.event.inputs.require_admin_source_freshness || 'false' }}
+      REQUIRE_ADMIN_SOURCE_FRESHNESS: ${{ github.event_name == 'schedule' || github.event.inputs.require_admin_source_freshness || false }}
       FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS: ${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}
     steps:
       - name: Checkout
