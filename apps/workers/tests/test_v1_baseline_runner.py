@@ -31,6 +31,12 @@ BACKBONE_KEYS = (
 )
 
 
+NON_SCORING_CONTEXT_KEYS = (
+    "official.npa.police_radio_traffic",
+    "official.wra.flood_warning",
+)
+
+
 def test_every_production_backbone_source_is_in_the_v1_baseline_scope() -> None:
     """The deployed scheduler only runs sources inside this scope.
 
@@ -40,6 +46,35 @@ def test_every_production_backbone_source_is_in_the_v1_baseline_scope() -> None:
 
     for adapter_key in BACKBONE_KEYS:
         assert adapter_key in V1_BASELINE_ADAPTER_KEYS, adapter_key
+
+
+def test_no_registered_official_or_local_source_is_silently_left_out() -> None:
+    """Drift guard: adding an adapter must be an explicit scope decision.
+
+    Thirty-five local sources were integrated with real endpoints and then never
+    ran, because nothing failed when they were absent from this tuple. This test
+    is what turns that silence into a failure.
+    """
+
+    expected = {
+        key
+        for key in ADAPTER_REGISTRY
+        if key.startswith(("official.", "local."))
+        and key not in NON_SCORING_CONTEXT_KEYS
+    }
+    missing = sorted(expected - set(V1_BASELINE_ADAPTER_KEYS))
+    unexpected = sorted(set(V1_BASELINE_ADAPTER_KEYS) - expected)
+
+    assert missing == [], f"registered but unreachable by the runner: {missing}"
+    assert unexpected == [], f"in scope but not a registered official/local source: {unexpected}"
+
+
+def test_all_local_government_sources_are_reachable() -> None:
+    local_registered = sorted(k for k in ADAPTER_REGISTRY if k.startswith("local."))
+    local_in_scope = sorted(k for k in V1_BASELINE_ADAPTER_KEYS if k.startswith("local."))
+
+    assert local_in_scope == local_registered
+    assert len(local_in_scope) >= 36
 
 
 def test_context_sources_stay_outside_the_v1_baseline_scope() -> None:
