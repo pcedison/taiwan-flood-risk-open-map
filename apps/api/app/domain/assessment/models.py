@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -36,6 +36,7 @@ class AssessmentData:
     resolved_admin_code: str | None
     resolved_admin_name: str | None
     local_machine_feed_missing: tuple[str, ...]
+    recent_incident_context: tuple[EvidenceRecord, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

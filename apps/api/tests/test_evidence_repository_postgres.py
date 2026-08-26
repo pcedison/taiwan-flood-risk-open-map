@@ -17,6 +17,7 @@ from app.domain.evidence import (
     fetch_assessment_evidence,
     query_nearby_evidence,
     query_nearby_latest_official,
+    query_nearby_recent_context,
 )
 from app.domain.evidence.repository import (
     query_realtime_jurisdiction_context,
@@ -1577,3 +1578,221 @@ def test_warning_read_uses_area_geometry_active_window_and_not_station_lookback(
             )
             connection.execute("DELETE FROM evidence WHERE data_source_id = %s", (source_id,))
             connection.execute("DELETE FROM data_sources WHERE id = %s", (source_id,))
+
+
+_CONTEXT_LAT = 23.0478
+_CONTEXT_LNG = 120.1842
+_CONTEXT_AS_OF = datetime(2026, 8, 26, 2, 20, tzinfo=UTC)
+
+
+def _context_row(
+    *,
+    source_key: str,
+    source_id: str,
+    observed_at: datetime,
+    upstream_updated_at: datetime | None = None,
+    incident_state: str = "active",
+    event_type: str = "status_only",
+    evidence_scope: str = "context",
+    lng: float = _CONTEXT_LNG,
+    lat: float = _CONTEXT_LAT,
+    geom: bool = True,
+    title: str | None = None,
+) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "evidence_scope": evidence_scope,
+        "incident_state": incident_state,
+    }
+    if upstream_updated_at is not None:
+        properties["upstream_updated_at"] = upstream_updated_at.isoformat()
+    return {
+        "id": uuid4(),
+        "source_key": source_key,
+        "source_id": source_id,
+        "event_type": event_type,
+        "title": title or source_id,
+        "observed_at": observed_at,
+        "lng": lng,
+        "lat": lat,
+        "geom": geom,
+        "properties": properties,
+    }
+
+
+def _insert_context_rows(
+    connection: psycopg.Connection,
+    source_ids: dict[str, object],
+    rows: list[dict[str, object]],
+) -> None:
+    for row in rows:
+        connection.execute(
+            """
+            INSERT INTO evidence (
+                id, data_source_id, source_id, source_type, event_type,
+                title, summary, url, occurred_at, observed_at, geom,
+                confidence, privacy_level, ingestion_status, properties
+            ) VALUES (
+                %s, %s, %s, 'official', %s,
+                %s, 'summary', NULL, NULL, %s,
+                CASE WHEN %s THEN ST_SetSRID(ST_MakePoint(%s, %s), 4326) ELSE NULL END,
+                0.62, 'public', 'accepted', %s::jsonb
+            )
+            """,
+            (
+                row["id"],
+                source_ids[row["source_key"]],
+                row["source_id"],
+                row["event_type"],
+                row["title"],
+                row["observed_at"],
+                row["geom"],
+                row["lng"],
+                row["lat"],
+                Jsonb(row["properties"]),
+            ),
+        )
+
+
+def test_recent_context_reader_returns_only_latest_active_recent_in_radius_rows() -> None:
+    database_url = _database_url()
+    police_id, wra_id, rainfall_id = uuid4(), uuid4(), uuid4()
+
+    with _isolated_schema(database_url) as isolated_url:
+        _prepare_history_snapshot_schema(isolated_url)
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO data_sources (id, adapter_key, is_enabled) VALUES
+                    (%s, 'official.npa.police_radio_traffic', true),
+                    (%s, 'official.wra.flood_warning', true),
+                    (%s, 'official.cwa.rainfall', true)
+                """,
+                (police_id, wra_id, rainfall_id),
+            )
+            source_ids = {
+                "police": police_id,
+                "wra": wra_id,
+                "rainfall": rainfall_id,
+            }
+            _insert_context_rows(
+                connection,
+                source_ids,
+                [
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-ACTIVE",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=30),
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-STALE",
+                        observed_at=_CONTEXT_AS_OF - timedelta(hours=7),
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-FUTURE",
+                        observed_at=_CONTEXT_AS_OF + timedelta(minutes=30),
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-RESOLVED",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=40),
+                        upstream_updated_at=_CONTEXT_AS_OF - timedelta(minutes=40),
+                        incident_state="active",
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-RESOLVED",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=10),
+                        upstream_updated_at=_CONTEXT_AS_OF - timedelta(minutes=10),
+                        incident_state="resolved",
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-DUP",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=50),
+                        upstream_updated_at=_CONTEXT_AS_OF - timedelta(minutes=50),
+                        title="older version",
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-DUP",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=5),
+                        upstream_updated_at=_CONTEXT_AS_OF - timedelta(minutes=5),
+                        title="newest version",
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-FAR",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=15),
+                        lng=_CONTEXT_LNG + 0.08,
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-NO-GEOM",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=15),
+                        geom=False,
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-WRONG-EVENT",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=15),
+                        event_type="flood_report",
+                    ),
+                    _context_row(
+                        source_key="police",
+                        source_id="UID-WRONG-SCOPE",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=15),
+                        evidence_scope="current",
+                    ),
+                    _context_row(
+                        source_key="wra",
+                        source_id="NewstFloodWarm.kml:FW-1",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=20),
+                    ),
+                    _context_row(
+                        source_key="rainfall",
+                        source_id="RAIN-CTX",
+                        observed_at=_CONTEXT_AS_OF - timedelta(minutes=20),
+                    ),
+                ],
+            )
+            connection.commit()
+
+        records = query_nearby_recent_context(
+            database_url=isolated_url,
+            lat=_CONTEXT_LAT,
+            lng=_CONTEXT_LNG,
+            radius_m=800,
+            as_of=_CONTEXT_AS_OF,
+        )
+
+        assert sorted(item.source_id for item in records) == [
+            "NewstFloodWarm.kml:FW-1",
+            "UID-ACTIVE",
+            "UID-DUP",
+        ]
+        duplicate = next(item for item in records if item.source_id == "UID-DUP")
+        assert duplicate.title == "newest version"
+        assert {item.adapter_key for item in records} == {
+            "official.npa.police_radio_traffic",
+            "official.wra.flood_warning",
+        }
+        assert all(item.evidence_scope == "context" for item in records)
+        assert all(item.event_type == "status_only" for item in records)
+        assert all(item.geometry is not None for item in records)
+
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute("UPDATE data_sources SET is_enabled = false")
+            connection.commit()
+
+        assert (
+            query_nearby_recent_context(
+                database_url=isolated_url,
+                lat=_CONTEXT_LAT,
+                lng=_CONTEXT_LNG,
+                radius_m=800,
+                as_of=_CONTEXT_AS_OF,
+            )
+            == ()
+        )

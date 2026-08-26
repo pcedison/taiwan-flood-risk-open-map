@@ -69,6 +69,18 @@ HISTORY = _record(
     event_type="water_level",
     evidence_scope="historical",
 )
+POLICE_CONTEXT = _record(
+    "police-context",
+    adapter_key="official.npa.police_radio_traffic",
+    event_type="status_only",
+    evidence_scope="context",
+)
+WRA_CONTEXT = _record(
+    "wra-context",
+    adapter_key="official.wra.flood_warning",
+    event_type="status_only",
+    evidence_scope="context",
+)
 
 
 def _mapping(
@@ -133,6 +145,7 @@ def _repository(monkeypatch: pytest.MonkeyPatch, **overrides) -> PostgresAssessm
         "query_nearby_evidence": lambda **_: (HISTORY,),
         "query_nearby_realtime_coverage_rows": lambda **_: (),
         "query_realtime_source_health_rows": lambda **_: (),
+        "query_nearby_recent_context": lambda **_: (POLICE_CONTEXT, WRA_CONTEXT),
     }
     values.update(overrides)
     for name, value in values.items():
@@ -205,6 +218,61 @@ def test_coverage_health_and_jurisdiction_fail_independently(
     assert data.current_official == (LATEST,)
     assert data.historical == (HISTORY,)
     assert getattr(data, f"{boundary}_available") is False
+
+
+def test_load_keeps_current_historical_and_context_disjoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _repository(monkeypatch).load(**POINT)
+
+    assert data.current_official == (LATEST,)
+    assert data.historical == (HISTORY,)
+    assert data.recent_incident_context == (POLICE_CONTEXT, WRA_CONTEXT)
+
+
+def test_recent_context_reader_receives_the_selected_radius_and_as_of(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    repository = _repository(
+        monkeypatch,
+        query_nearby_recent_context=lambda **kwargs: captured.update(kwargs) or (),
+    )
+
+    repository.load(**POINT)
+
+    assert captured["radius_m"] == 750
+    assert captured["as_of"] == NOW
+    assert captured["lat"] == 22.9997
+    assert captured["lng"] == 120.227
+
+
+def test_recent_context_failure_never_degrades_current_or_historical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _repository(monkeypatch, query_nearby_recent_context=_unavailable).load(**POINT)
+
+    assert data.recent_incident_context == ()
+    assert data.current_official == (LATEST,)
+    assert data.historical == (HISTORY,)
+    assert data.current_available is True
+    assert data.historical_available is True
+
+
+def test_historical_only_rejects_status_only_context_rows() -> None:
+    records = (POLICE_CONTEXT, WRA_CONTEXT, HISTORY)
+
+    assert {item.id for item in _historical_only(records)} == {"history"}
+
+
+def test_assessment_data_context_field_defaults_to_empty() -> None:
+    from app.domain.assessment.models import AssessmentData
+
+    fields = list(AssessmentData.__dataclass_fields__)
+    assert fields[-1] == "recent_incident_context"
+    assert AssessmentData.__dataclass_fields__[
+        "recent_incident_context"
+    ].default_factory() == ()
 
 
 def test_recent_news_forum_and_social_never_enter_core_scoring_partitions() -> None:

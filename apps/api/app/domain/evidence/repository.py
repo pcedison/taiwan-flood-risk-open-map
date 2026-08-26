@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
 import psycopg
@@ -32,6 +32,15 @@ RealtimeJurisdictionResolutionStatus = Literal[
     "unavailable",
 ]
 QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
+RECENT_INCIDENT_CONTEXT_WINDOW = timedelta(hours=6)
+RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE = timedelta(minutes=5)
+RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS = (
+    "official.npa.police_radio_traffic",
+    "official.wra.flood_warning",
+)
+_RECENT_INCIDENT_CONTEXT_MIN_RADIUS_M = 50
+_RECENT_INCIDENT_CONTEXT_MAX_RADIUS_M = 2_000
+_RECENT_INCIDENT_CONTEXT_SUPPRESSED_STATES = ("resolved", "excluded")
 _LATEST_OFFICIAL_RELATION = "official_realtime_latest"
 _DEFAULT_FRESHNESS_THRESHOLD_SECONDS = 600
 _MAX_FRESHNESS_THRESHOLD_SECONDS = 86_400
@@ -582,6 +591,171 @@ def query_nearby_evidence(
             official_realtime_since,
             official_realtime_since,
             official_realtime_limit,
+            bounded_limit,
+        ),
+        database_url=database_url,
+        statement_timeout_ms=statement_timeout_ms,
+        connection_factory=connection_factory,
+    )
+
+
+
+def query_nearby_recent_context(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    as_of: datetime,
+    limit: int = 50,
+    statement_timeout_ms: int = 0,
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[EvidenceRecord, ...]:
+    """Return latest active, nearby, display-only official context rows.
+
+    The result is display-only. It never reaches the scorer, coverage, or the
+    overall decision; it exists so a reader can see recent reported incidents
+    next to an official assessment that legitimately says "unknown".
+    """
+
+    if not (
+        _RECENT_INCIDENT_CONTEXT_MIN_RADIUS_M
+        <= radius_m
+        <= _RECENT_INCIDENT_CONTEXT_MAX_RADIUS_M
+    ):
+        raise ValueError(
+            "recent context radius_m must be within "
+            f"{_RECENT_INCIDENT_CONTEXT_MIN_RADIUS_M}..{_RECENT_INCIDENT_CONTEXT_MAX_RADIUS_M}"
+        )
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("recent context as_of must be timezone-aware")
+
+    bounded_limit = max(1, min(limit, 100))
+    window_start = as_of - RECENT_INCIDENT_CONTEXT_WINDOW
+    window_end = as_of + RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE
+    sql = """
+        WITH query_point AS (
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                %s::double precision AS radius_m,
+                (%s::double precision / 90000.0) AS degree_radius
+        ),
+        candidate_rows AS (
+            SELECT
+                e.*,
+                ds.adapter_key,
+                ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ds.adapter_key, e.source_id
+                    ORDER BY
+                        COALESCE(
+                            CASE
+                                WHEN pg_input_is_valid(
+                                    e.properties->>'upstream_updated_at',
+                                    'timestamptz'
+                                )
+                                THEN (e.properties->>'upstream_updated_at')::timestamptz
+                            END,
+                            e.observed_at,
+                            e.created_at
+                        ) DESC,
+                        e.created_at DESC,
+                        e.id DESC
+                ) AS version_rank
+            FROM evidence e
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+            CROSS JOIN query_point qp
+            WHERE e.ingestion_status = 'accepted'
+                AND e.privacy_level IN ('public', 'aggregated')
+                AND e.source_type = 'official'
+                AND e.event_type = 'status_only'
+                AND e.properties->>'evidence_scope' = 'context'
+                AND ds.adapter_key IN (
+                    'official.npa.police_radio_traffic',
+                    'official.wra.flood_warning'
+                )
+                AND e.geom IS NOT NULL
+                AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
+                AND ST_DWithin(e.geom::geography, qp.geog, qp.radius_m)
+        )
+        SELECT
+            c.id::text AS id,
+            c.source_id,
+            c.source_type,
+            c.event_type,
+            c.title,
+            c.summary,
+            c.url,
+            c.occurred_at,
+            c.observed_at,
+            c.ingested_at,
+            ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
+            ST_AsGeoJSON(c.geom) AS geometry,
+            c.computed_distance_to_query_m AS distance_to_query_m,
+            c.confidence,
+            COALESCE(c.freshness_score, 0.8) AS freshness_score,
+            COALESCE(c.source_weight, 1.0) AS source_weight,
+            c.privacy_level,
+            c.raw_ref,
+            NULL::double precision AS rainfall_mm_1h,
+            NULL::double precision AS water_level_m,
+            NULL::double precision AS warning_level_m,
+            NULL::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor,
+            'context'::text AS evidence_scope,
+            c.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN c.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN c.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(c.properties->'limitations') = 'array'
+                                THEN c.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
+        FROM candidate_rows c
+        WHERE c.version_rank = 1
+            AND c.observed_at IS NOT NULL
+            AND c.observed_at >= %s::timestamptz
+            AND c.observed_at <= %s::timestamptz
+            AND COALESCE(c.properties->>'incident_state', 'active')
+                NOT IN ('resolved', 'excluded')
+        ORDER BY
+            c.observed_at DESC,
+            c.computed_distance_to_query_m ASC,
+            c.id
+        LIMIT %s
+    """
+    return _fetch_records(
+        sql,
+        (
+            lng,
+            lat,
+            lng,
+            lat,
+            radius_m,
+            radius_m,
+            window_start,
+            window_end,
             bounded_limit,
         ),
         database_url=database_url,

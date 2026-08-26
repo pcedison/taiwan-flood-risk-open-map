@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Self
 
@@ -9,6 +9,8 @@ import psycopg
 import pytest
 
 from app.domain.evidence.repository import (
+    RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE,
+    RECENT_INCIDENT_CONTEXT_WINDOW,
     EvidenceRepositoryUnavailable,
     EvidenceUpsert,
     RiskAssessmentPersistence,
@@ -20,6 +22,7 @@ from app.domain.evidence.repository import (
     query_nearby_evidence,
     query_nearby_latest_official,
     query_nearby_realtime_coverage_rows,
+    query_nearby_recent_context,
     query_realtime_jurisdiction_context,
     query_realtime_source_health_rows,
     upsert_public_evidence,
@@ -1039,6 +1042,103 @@ def test_query_nearby_latest_official_decodes_latest_row_metrics() -> None:
     assert records[0].warning_level_m == 2.25
     assert records[0].flood_depth_cm == 18.0
     assert records[0].realtime_risk_factor == 0.6
+
+
+def test_query_nearby_recent_context_is_display_only_and_bounded() -> None:
+    connection = _FakeConnection(rows=[])
+    as_of = datetime(2026, 8, 26, 2, 20, tzinfo=UTC)
+
+    records = query_nearby_recent_context(
+        database_url="postgresql://example.test/flood",
+        lat=23.0478,
+        lng=120.1842,
+        radius_m=800,
+        as_of=as_of,
+        connection_factory=lambda: connection,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert records == ()
+    assert "data_sources.is_enabled = true" in sql or "ds.is_enabled = true" in sql
+    assert "e.source_type = 'official'" in sql
+    assert "e.event_type = 'status_only'" in sql
+    assert "e.properties->>'evidence_scope' = 'context'" in sql
+    assert "'official.npa.police_radio_traffic'" in sql
+    assert "'official.wra.flood_warning'" in sql
+    assert "ROW_NUMBER() OVER" in sql
+    assert "PARTITION BY ds.adapter_key, e.source_id" in sql
+    assert "pg_input_is_valid" in sql
+    assert "upstream_updated_at" in sql
+    assert "version_rank = 1" in sql
+    assert "'resolved'" in sql
+    assert "'excluded'" in sql
+    assert "e.geom IS NOT NULL" in sql
+    assert "ST_DWithin" in sql
+    assert params == (
+        120.1842,
+        23.0478,
+        120.1842,
+        23.0478,
+        800,
+        800,
+        as_of - RECENT_INCIDENT_CONTEXT_WINDOW,
+        as_of + RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE,
+        50,
+    )
+
+
+def test_recent_context_window_constants_are_six_hours_and_five_minutes() -> None:
+    assert RECENT_INCIDENT_CONTEXT_WINDOW == timedelta(hours=6)
+    assert RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE == timedelta(minutes=5)
+
+
+@pytest.mark.parametrize("limit,expected", [(0, 1), (1, 1), (50, 50), (100, 100), (5000, 100)])
+def test_query_nearby_recent_context_bounds_the_limit(limit: int, expected: int) -> None:
+    connection = _FakeConnection(rows=[])
+
+    query_nearby_recent_context(
+        database_url="postgresql://example.test/flood",
+        lat=23.0478,
+        lng=120.1842,
+        radius_m=800,
+        as_of=datetime(2026, 8, 26, 2, 20, tzinfo=UTC),
+        limit=limit,
+        connection_factory=lambda: connection,
+    )
+
+    _sql, params = connection.cursor_instance.executions[0]
+    assert params[-1] == expected
+
+
+@pytest.mark.parametrize("radius_m", [49, 2001, 0, -1])
+def test_query_nearby_recent_context_rejects_out_of_range_radius(radius_m: int) -> None:
+    connection = _FakeConnection(rows=[])
+
+    with pytest.raises(ValueError):
+        query_nearby_recent_context(
+            database_url="postgresql://example.test/flood",
+            lat=23.0478,
+            lng=120.1842,
+            radius_m=radius_m,
+            as_of=datetime(2026, 8, 26, 2, 20, tzinfo=UTC),
+            connection_factory=lambda: connection,
+        )
+    assert connection.cursor_instance.executions == []
+
+
+def test_query_nearby_recent_context_requires_aware_as_of() -> None:
+    connection = _FakeConnection(rows=[])
+
+    with pytest.raises(ValueError):
+        query_nearby_recent_context(
+            database_url="postgresql://example.test/flood",
+            lat=23.0478,
+            lng=120.1842,
+            radius_m=800,
+            as_of=datetime(2026, 8, 26, 2, 20),  # noqa: DTZ001 - naive input under test
+            connection_factory=lambda: connection,
+        )
+    assert connection.cursor_instance.executions == []
 
 
 def test_cap_origin_vectors_match_canonical_json_contract() -> None:

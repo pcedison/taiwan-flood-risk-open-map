@@ -1,6 +1,9 @@
 """Evidence query repositories."""
 
 from app.domain.evidence.repository import (
+    RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS,
+    RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE,
+    RECENT_INCIDENT_CONTEXT_WINDOW,
     EvidenceLocationPrecision,
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
@@ -19,12 +22,16 @@ from app.domain.evidence.repository import (
     query_nearby_evidence,
     query_nearby_latest_official,
     query_nearby_realtime_coverage_rows,
+    query_nearby_recent_context,
     query_realtime_jurisdiction_context,
     query_realtime_source_health_rows,
     upsert_public_evidence,
 )
 
 __all__ = [
+    "RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS",
+    "RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE",
+    "RECENT_INCIDENT_CONTEXT_WINDOW",
     "EvidenceLocationPrecision",
     "EvidenceRecord",
     "EvidenceRepositoryUnavailable",
@@ -43,6 +50,7 @@ __all__ = [
     "query_nearby_evidence",
     "query_nearby_latest_official",
     "query_nearby_realtime_coverage_rows",
+    "query_nearby_recent_context",
     "query_realtime_jurisdiction_context",
     "query_realtime_source_health_rows",
     "upsert_public_evidence",

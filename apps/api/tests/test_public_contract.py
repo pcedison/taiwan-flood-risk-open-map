@@ -155,6 +155,7 @@ def _route_data(
     resolved_admin_code: str = "67000000",
     resolved_admin_name: str = "臺南市",
     local_machine_feed_missing: tuple[str, ...] = (),
+    recent_incident_context: tuple[EvidenceRecord, ...] = (),
 ) -> AssessmentData:
     if current is None:
         current = (
@@ -191,6 +192,7 @@ def _route_data(
         resolved_admin_code=resolved_admin_code,
         resolved_admin_name=resolved_admin_name,
         local_machine_feed_missing=local_machine_feed_missing,
+        recent_incident_context=recent_incident_context,
     )
 
 
@@ -243,6 +245,56 @@ def test_risk_response_schema_exposes_additive_v1_fields() -> None:
         "data_status",
         "community_refresh",
     } <= properties.keys()
+
+
+def test_recent_context_is_additive_and_does_not_change_the_public_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = json.dumps(RiskAssessmentResponse.model_json_schema(), sort_keys=True)
+
+    _install_route_data(monkeypatch, _route_data())
+    baseline = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.99974, "lng": 120.22704},
+            "radius_m": 750,
+            "time_context": "now",
+        },
+    ).json()
+
+    context_id = "d5b0a1b6-4a2a-4f78-9f2a-6b6d8f0c1e34"
+    _install_route_data(
+        monkeypatch,
+        _route_data(
+            recent_incident_context=(
+                _route_record(
+                    context_id,
+                    event_type="status_only",
+                    evidence_scope="context",
+                ),
+            )
+        ),
+    )
+    with_context = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.99974, "lng": 120.22704},
+            "radius_m": 750,
+            "time_context": "now",
+        },
+    ).json()
+
+    assert json.dumps(RiskAssessmentResponse.model_json_schema(), sort_keys=True) == before
+    assert with_context.keys() == baseline.keys()
+    assert with_context["realtime"] == baseline["realtime"]
+    assert with_context["historical"] == baseline["historical"]
+    assert with_context["overall"] == baseline["overall"]
+    assert with_context["confidence"] == baseline["confidence"]
+    assert with_context["dominant_mode"] == baseline["dominant_mode"]
+    assert with_context["nearby_realtime_coverage"] == baseline["nearby_realtime_coverage"]
+    assert context_id in {item["id"] for item in with_context["evidence"]}
+    assert context_id not in {item["id"] for item in baseline["evidence"]}
+    assert_openapi_schema(with_context, "RiskAssessmentResponse")
 
 
 def test_health_contract() -> None:

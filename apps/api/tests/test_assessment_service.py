@@ -21,6 +21,9 @@ from app.domain.risk import RiskEvidenceSignal, RiskScoringResult, score_risk
 NOW = datetime(2026, 8, 24, 5, 30, tzinfo=UTC)
 CURRENT_ID = "26900bf0-f51c-4326-8f75-68d03a36560e"
 HISTORY_ID = "911d1bdf-0cc9-49bc-896d-f92680054b08"
+POLICE_CONTEXT_ID = "3b3a3f0f-0b6a-4f0a-9b4a-8c1f5b6a2d31"
+WRA_CONTEXT_ID = "5f2c1a44-8f2b-4d4c-9a2e-1c7d3e9b6a52"
+POLICE_LIMITATION = "警廣即時路況通報，尚未由淹水感測器確認。"
 
 
 @dataclass
@@ -47,6 +50,8 @@ def _record(
     event_type: str,
     evidence_scope: str,
     source_type: str = "official",
+    adapter_key: str = "official.cwa.rainfall",
+    limitations: tuple[str, ...] = ("位置為道路尺度",),
 ) -> EvidenceRecord:
     return EvidenceRecord(
         id=evidence_id,
@@ -70,9 +75,9 @@ def _record(
         raw_ref=None,
         rainfall_mm_1h=0.0 if event_type == "rainfall" else None,
         evidence_scope=evidence_scope,  # type: ignore[arg-type]
-        adapter_key="official.cwa.rainfall",
+        adapter_key=adapter_key,
         location_precision="road_or_lane",
-        limitations=("位置為道路尺度",),
+        limitations=limitations,
     )
 
 
@@ -169,6 +174,83 @@ def test_service_scores_current_and_history_in_separate_calls(
         "road_closure",
     }
     assert response.community.state == "none"
+
+
+def _context_records() -> tuple[EvidenceRecord, ...]:
+    return (
+        _record(
+            POLICE_CONTEXT_ID,
+            event_type="status_only",
+            evidence_scope="context",
+            adapter_key="official.npa.police_radio_traffic",
+            limitations=(POLICE_LIMITATION,),
+        ),
+        _record(
+            WRA_CONTEXT_ID,
+            event_type="status_only",
+            evidence_scope="context",
+            adapter_key="official.wra.flood_warning",
+            limitations=("官方警戒範圍為情境背景，尚未經淹水感測器逐點確認。",),
+        ),
+    )
+
+
+def test_recent_context_is_display_only_and_never_changes_the_score(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    without_calls: list[tuple[RiskEvidenceSignal, ...]] = []
+    with_calls: list[tuple[RiskEvidenceSignal, ...]] = []
+
+    def _scorer(sink: list[tuple[RiskEvidenceSignal, ...]]):
+        def scorer(
+            signals: tuple[RiskEvidenceSignal, ...], *, now: datetime
+        ) -> RiskScoringResult:
+            sink.append(signals)
+            return score_risk(signals, now=now)
+
+        return scorer
+
+    without_context = AssessmentService(
+        FakeRepository(data), _scorer(without_calls)
+    ).assess(risk_request, now=now)
+    with_data = replace(data, recent_incident_context=_context_records())
+    with_context = AssessmentService(
+        FakeRepository(with_data), _scorer(with_calls)
+    ).assess(risk_request, now=now)
+
+    assert with_context.realtime == without_context.realtime
+    assert with_context.historical == without_context.historical
+    assert with_context.overall == without_context.overall
+    assert with_context.confidence == without_context.confidence
+    assert with_context.explanation == without_context.explanation
+    assert with_context.nearby_realtime_coverage == without_context.nearby_realtime_coverage
+
+    assert len(with_calls) == 2
+    assert with_calls == without_calls
+
+    displayed = {item.id for item in with_context.evidence}
+    assert POLICE_CONTEXT_ID in displayed
+    assert WRA_CONTEXT_ID in displayed
+    police = next(item for item in with_context.evidence if item.id == POLICE_CONTEXT_ID)
+    assert POLICE_LIMITATION in police.limitations
+
+
+def test_recent_context_is_ordered_after_current_and_before_historical(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    with_data = replace(data, recent_incident_context=_context_records())
+
+    response = AssessmentService(FakeRepository(with_data), score_risk).assess(
+        risk_request, now=now
+    )
+
+    ordered = [item.id for item in response.evidence]
+    assert ordered.index(CURRENT_ID) < ordered.index(POLICE_CONTEXT_ID)
+    assert ordered.index(POLICE_CONTEXT_ID) < ordered.index(HISTORY_ID)
 
 
 def test_core_service_never_calls_a_community_composer() -> None:

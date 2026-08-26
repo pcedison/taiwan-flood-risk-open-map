@@ -62,6 +62,11 @@ class AssessmentService:
         )
         current_items = tuple(evidence_from_record(item) for item in data.current_official)
         historical_items = tuple(evidence_from_record(item) for item in data.historical)
+        # Display-only. Context never becomes a scorer signal, so it cannot move
+        # realtime, historical, overall, confidence, or coverage.
+        context_items = tuple(
+            evidence_from_record(item) for item in data.recent_incident_context
+        )
         current_scoring = self._scorer(
             tuple(signal_from_evidence(item) for item in current_items),
             now=now,
@@ -74,7 +79,11 @@ class AssessmentService:
         overall = compose_base_overall(current_scoring, historical_scoring)
 
         display_items = display_evidence_items(
-            list(_deduplicate_evidence((*current_items, *historical_items)))
+            list(
+                _deduplicate_evidence(
+                    (*current_items, *context_items, *historical_items)
+                )
+            )
         )
         persisted_evidence_ids = tuple(
             item.id for item in display_items if _is_uuid(item.id)

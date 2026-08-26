@@ -9,7 +9,6 @@ import pytest
 
 from app.domain.risk import RiskEvidenceSignal, RiskScoringResult, score_risk
 
-
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "scoring"
 
 
@@ -47,6 +46,29 @@ def test_scoring_returns_unknown_without_evidence() -> None:
     assert result.realtime_level == "未知"
     assert result.historical_level == "未知"
     assert result.confidence_level == "未知"
+
+
+def test_status_only_context_signals_never_move_the_score() -> None:
+    now = datetime.fromisoformat("2026-08-26T02:20:00+00:00")
+    context = RiskEvidenceSignal(
+        source_type="official",
+        event_type="status_only",
+        confidence=0.62,
+        distance_to_query_m=30.0,
+        freshness_score=0.95,
+        source_weight=1.0,
+        observed_at=now,
+    )
+
+    baseline = score_risk((), now=now)
+    with_context = score_risk((context,), now=now)
+
+    assert with_context.realtime_score == baseline.realtime_score
+    assert with_context.historical_score == baseline.historical_score
+    assert with_context.realtime_level == baseline.realtime_level
+    assert with_context.historical_level == baseline.historical_level
+    assert with_context.realtime_level == "未知"
+    assert with_context.historical_level == "未知"
 
 
 def _score_fixture(name: str) -> RiskScoringResult:

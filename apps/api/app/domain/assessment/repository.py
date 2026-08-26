@@ -13,6 +13,7 @@ from app.domain.evidence import (
     query_nearby_evidence,
     query_nearby_latest_official,
     query_nearby_realtime_coverage_rows,
+    query_nearby_recent_context,
     query_realtime_jurisdiction_context,
     query_realtime_source_health_rows,
 )
@@ -126,6 +127,12 @@ class PostgresAssessmentRepository:
             lng=lng,
             as_of=as_of,
         )
+        recent_context = self._load_recent_context(
+            lat=lat,
+            lng=lng,
+            radius_m=radius_m,
+            as_of=as_of,
+        )
         latest = tuple(item for item in latest if item.adapter_key in applicable_keys)
         coverage_rows = tuple(item for item in coverage_rows if item.adapter_key in applicable_keys)
         health_rows, health_available = self._load_health(tuple(sorted(applicable_keys)))
@@ -170,6 +177,7 @@ class PostgresAssessmentRepository:
             resolved_admin_code=jurisdiction.home_jurisdiction_code,
             resolved_admin_name=jurisdiction.home_jurisdiction_name,
             local_machine_feed_missing=_local_machine_gaps(jurisdiction, source_health),
+            recent_incident_context=recent_context,
         )
 
     def persist(self, assessment: RiskAssessmentPersistence) -> None:
@@ -225,6 +233,22 @@ class PostgresAssessmentRepository:
             )
         except EvidenceRepositoryUnavailable:
             return (), False
+
+    def _load_recent_context(
+        self, *, lat: float, lng: float, radius_m: int, as_of: datetime
+    ) -> tuple[EvidenceRecord, ...]:
+        """Load display-only context; a failure here must never degrade scoring."""
+
+        try:
+            return query_nearby_recent_context(
+                database_url=self._database_url,
+                lat=lat,
+                lng=lng,
+                radius_m=radius_m,
+                as_of=as_of,
+            )
+        except (EvidenceRepositoryUnavailable, ValueError):
+            return ()
 
     def _load_coverage(self, *, lat: float, lng: float, as_of: datetime) -> tuple[tuple, bool]:
         try:
@@ -288,13 +312,18 @@ def _warning_origin_rank(item: EvidenceRecord) -> tuple[int, float]:
 
 
 def _historical_only(records: tuple[EvidenceRecord, ...]) -> tuple[EvidenceRecord, ...]:
+    """Keep historical footprints and flood-potential context only.
+
+    Reported status-only incident context is display-only. It is loaded
+    separately into ``AssessmentData.recent_incident_context`` and must never
+    reach the historical scorer or the historical confidence calculation.
+    """
+
     return tuple(
         item
         for item in records
         if item.source_type in {"official", "derived"}
-        and (
-            item.evidence_scope in {"historical", "context"} or item.event_type == "flood_potential"
-        )
+        and (item.evidence_scope == "historical" or item.event_type == "flood_potential")
     )
 
 
