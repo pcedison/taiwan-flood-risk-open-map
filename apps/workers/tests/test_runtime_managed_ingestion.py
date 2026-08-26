@@ -258,6 +258,49 @@ def test_managed_no_active_retirement_runs_after_summary_persistence() -> None:
     assert timeline.index("summary") < timeline.index("retire")
 
 
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.npa.police_radio_traffic", "official.wra.flood_warning"),
+)
+def test_context_sources_are_fenced_out_of_the_managed_v1_baseline_cycle(
+    adapter_key: str,
+) -> None:
+    """The two non-scoring context sources cannot run through the managed cycle.
+
+    They are deliberately absent from ``V1_BASELINE_ADAPTER_KEYS``, so the cycle
+    refuses the scope before any adapter work, and nothing is staged, promoted,
+    or retired. Turning on their three runtime gates is therefore not enough to
+    make them run; that is the outermost fence, and it stays shut in v1.
+    """
+
+    assert adapter_key not in runtime_managed_jobs.V1_BASELINE_ADAPTER_KEYS
+    assert adapter_key not in EXPECTED_V1_BASELINE_ADAPTER_KEYS
+
+    run_writer = _MemoryRunWriter()
+    promotion_writer = _MemoryPromotionWriter([])
+    staging_writer = _MemoryStagingWriter()
+    adapter = _Task9EmptyWarningAdapter(adapter_key, no_active_event=True)
+    settings = replace(_settings(adapter_key), enabled_adapter_keys=(adapter_key,))
+
+    result = run_v1_baseline_adapter_cycle(
+        {adapter_key: adapter},
+        settings=settings,
+        staging_writer=staging_writer,
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter_key})),
+        promote=True,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "invalid_v1_baseline_scope"
+    assert result.error_code == "invalid_v1_baseline_scope"
+    assert result.summaries == ()
+    assert result.promoted == 0
+    assert promotion_writer.retired_no_active == []
+    assert staging_writer.batches == []
+
+
 @pytest.mark.usefixtures("task9_synthetic_registry")
 def test_managed_no_active_retirement_is_not_called_when_promotion_disabled() -> None:
     adapter = _Task9EmptyWarningAdapter(

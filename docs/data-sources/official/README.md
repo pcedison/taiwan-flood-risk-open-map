@@ -136,3 +136,18 @@ Each packet records how its public entry point was established:
 repository's reviewed local-source coverage evidence, and
 `unverified_pending_operator_confirmation` means the operator must confirm the
 current entry point before submitting.
+
+## Safe-fast official incident expansion release status
+
+**code landed/default off; not production activated.**
+
+Four sources are registered and disabled: `official.cwa.heavy_rain_warning`,
+`official.ncdr.cap`, `official.npa.police_radio_traffic`, and
+`official.wra.flood_warning`. CWA and NCDR remain audit-only until their exact
+administrative geometry is reviewed. The police-radio and WRA warning sources are
+non-scoring display context: they never write `official_realtime_latest`, never
+become a scorer signal, and never raise or lower an official risk level.
+
+See [the activation runbook](../../runbooks/safe-fast-official-incident-activation.md)
+before enabling anything. The aggregate contract that keeps every gate off is
+enforced by `tests/test_safe_fast_official_incident_release_contract.py`.

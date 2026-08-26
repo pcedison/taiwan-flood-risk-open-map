@@ -892,3 +892,36 @@ def test_unknown_adapter_allowlist_key_raises() -> None:
 
     with pytest.raises(ValueError, match="official.unknown.sensor"):
         enabled_adapter_keys(settings)
+
+
+def test_all_safe_fast_incident_sources_are_disabled_with_no_environment() -> None:
+    """No environment at all must leave every new incident source off."""
+
+    settings = load_worker_settings({})
+    keys = (
+        "official.cwa.heavy_rain_warning",
+        "official.ncdr.cap",
+        "official.npa.police_radio_traffic",
+        "official.wra.flood_warning",
+    )
+
+    enabled = enabled_adapter_keys(settings)
+    for key in keys:
+        assert ADAPTER_REGISTRY[key].enabled_by_default is False, key
+        assert key not in enabled, key
+        assert adapter_is_enabled(ADAPTER_REGISTRY[key], settings) is not True, key
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_enabling_only_the_source_flag_never_builds_an_incident_adapter() -> None:
+    """A single flag must not be enough; every independent gate is required."""
+
+    for flag, key in (
+        ("SOURCE_NCDR_CAP_ENABLED", "official.ncdr.cap"),
+        ("SOURCE_NPA_POLICE_RADIO_ENABLED", "official.npa.police_radio_traffic"),
+        ("SOURCE_WRA_FLOOD_WARNING_ENABLED", "official.wra.flood_warning"),
+    ):
+        settings = load_worker_settings(
+            {flag: "true", "WORKER_ENABLED_ADAPTER_KEYS": key}
+        )
+        assert build_runtime_adapters(settings) == {}, key
