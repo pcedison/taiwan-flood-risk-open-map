@@ -710,23 +710,27 @@ def query_nearby_latest_official(
                 e.properties->>'cap_sender' AS cap_sender,
                 e.properties->>'cap_identifier' AS cap_identifier,
                 e.properties->>'admin_code' AS admin_code,
-                COALESCE(
-                    CASE
-                        WHEN e.properties->>'location_precision' IN (
-                            'point', 'road_or_lane', 'poi', 'admin_area',
-                            'polygon', 'inferred', 'map_click'
-                        )
-                        THEN e.properties->>'location_precision'
-                    END,
-                    CASE
-                        WHEN latest.quality_flags->>'location_precision' IN (
-                            'point', 'road_or_lane', 'poi', 'admin_area',
-                            'polygon', 'inferred', 'map_click'
-                        )
-                        THEN latest.quality_flags->>'location_precision'
-                    END,
-                    'unknown'
-                ) AS location_precision,
+                CASE
+                    WHEN e.properties ? 'location_precision'
+                        OR latest.quality_flags ? 'location_precision'
+                    THEN COALESCE(
+                        CASE
+                            WHEN e.properties->>'location_precision' IN (
+                                'point', 'road_or_lane', 'poi', 'admin_area',
+                                'polygon', 'inferred', 'map_click'
+                            )
+                            THEN e.properties->>'location_precision'
+                        END,
+                        CASE
+                            WHEN latest.quality_flags->>'location_precision' IN (
+                                'point', 'road_or_lane', 'poi', 'admin_area',
+                                'polygon', 'inferred', 'map_click'
+                            )
+                            THEN latest.quality_flags->>'location_precision'
+                        END,
+                        'unknown'
+                    )
+                END AS location_precision,
                 e.properties->'limitations' AS evidence_limitations,
                 CASE
                     WHEN e.properties->>'active_from'
