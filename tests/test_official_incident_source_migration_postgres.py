@@ -105,10 +105,18 @@ def _source_rows(database_url: str) -> dict[str, dict[str, object]]:
     return {str(row["adapter_key"]): row for row in rows}
 
 
+# `official.ncdr.cap` was already part of the production realtime backbone before
+# the persisted catalog gate existed, so migration 0039 deliberately restores its
+# catalog enablement after 0038 registers it. Every other key 0038 registers must
+# still be disabled once the whole chain has been applied.
+BACKBONE_RESTORED_BY_0039 = ("official.ncdr.cap",)
+
+
 def _assert_disabled_and_credential_free(rows: dict[str, dict[str, object]]) -> None:
     assert set(rows) == set(EXPECTED_KEYS)
     for key, row in rows.items():
-        assert row["is_enabled"] is False, key
+        expected_enabled = key in BACKBONE_RESTORED_BY_0039
+        assert row["is_enabled"] is expected_enabled, key
         assert row["source_type"] == "official", key
         assert row["health_status"] == "unknown", key
         metadata_text = str(row["metadata_text"]).lower()

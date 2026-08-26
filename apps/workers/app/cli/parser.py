@@ -25,6 +25,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--run-v1-baseline-adapters",
+        action="store_true",
+        help=(
+            "Run the v1 baseline ingestion cycle, one isolated cycle per eligible "
+            "source. This is the sanctioned replacement for the frozen legacy "
+            "--run-enabled-adapters path."
+        ),
+    )
+    parser.add_argument(
         "--run-enabled-adapters",
         action="store_true",
         help="Frozen legacy generic-runtime command in v1; accepted for compatibility and exits 2.",
