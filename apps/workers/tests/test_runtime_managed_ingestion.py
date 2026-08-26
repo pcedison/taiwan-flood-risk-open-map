@@ -33,12 +33,17 @@ from app.pipelines.staging import AdapterStagingBatch
 FETCHED_AT = datetime.now(UTC)
 EXPECTED_V1_BASELINE_ADAPTER_KEYS = (
     "official.cwa.rainfall",
+    "official.cwa.tide_level",
     "official.cwa.heavy_rain_warning",
     "official.wra.water_level",
     "official.wra_iow.flood_depth",
     "official.wra.historical_flood",
     "official.ncdr.cap",
     "official.flood_potential.geojson",
+    "official.civil_iot.flood_sensor",
+    "official.civil_iot.sewer_water_level",
+    "official.civil_iot.pump_water_level",
+    "official.civil_iot.gate_water_level",
     "local.tainan.flood_sensor",
 )
 TASK9_SYNTHETIC_ADAPTER_KEYS = (

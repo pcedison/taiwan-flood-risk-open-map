@@ -16,6 +16,7 @@ from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.cli.persistence import build_demo_persistence_writers
 from app.config import WorkerSettings
 from app.jobs.frozen_legacy import report_frozen_legacy
+from app.jobs.ingestion import record_runtime_selection
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
 from app.jobs.runtime import build_runtime_adapters
@@ -299,6 +300,7 @@ def _run_v1_baseline_tick(
         return False
 
     had_failure = False
+    ran_keys: list[str] = []
     for adapter_key in eligible:
         scoped_settings = replace(settings, enabled_adapter_keys=(adapter_key,))
         adapters = build_runtime_adapters(scoped_settings)
@@ -319,6 +321,7 @@ def _run_v1_baseline_tick(
             promotion_adapter_keys=(adapter_key,),
             job_key=job_key,
         )
+        ran_keys.append(adapter_key)
         had_failure = had_failure or result.failed or result.has_alerts
         log_event(
             "worker.runtime.v1_baseline.source_completed",
@@ -326,6 +329,19 @@ def _run_v1_baseline_tick(
             status=result.status,
             reason=result.reason,
             promoted=result.promoted,
+        )
+
+    # Each scoped cycle records the runtime selection with only its own key, and
+    # `write_runtime_selection` sets `runtime_enabled = false` for every other
+    # known adapter. Left alone, the last source of the tick would be the only one
+    # the public API reports as enabled, and every other live source would show
+    # "background worker recently reported this source as disabled". Re-record the
+    # real selection for the whole tick so the reported state matches reality.
+    if ran_keys:
+        record_runtime_selection(
+            PostgresIngestionRunWriter(database_url=database_url),
+            enabled_adapter_keys=tuple(ran_keys),
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
         )
     return had_failure
 
