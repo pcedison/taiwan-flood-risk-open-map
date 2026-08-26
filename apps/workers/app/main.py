@@ -15,6 +15,18 @@ from app.logging import log_event
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.run_v1_baseline_adapters:
+        # The sanctioned v1 ingestion entry point. It is checked before the frozen
+        # legacy guard below because it does not use the frozen writers: every
+        # cycle goes through `run_v1_baseline_adapter_cycle`, which admits exactly
+        # one reviewed baseline source at a time.
+        return runtime_cli.run_v1_baseline_enabled_adapters(
+            settings=load_worker_settings(),
+            database_url=args.database_url,
+            scheduler=args.scheduler,
+            once=args.once,
+            max_ticks=args.max_ticks,
+        )
     if (
         args.aggregate_query_heat
         or args.seed_risk_profiles
