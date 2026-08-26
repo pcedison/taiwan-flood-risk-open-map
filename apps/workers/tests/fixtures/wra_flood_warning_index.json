@@ -1,0 +1,44 @@
+[
+  {
+    "createdatatime": "2026-08-26T10:00:00",
+    "fileex": "kml",
+    "filename": "淹水警戒",
+    "sourceurl": "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstFloodWarm.kml",
+    "type": "文件"
+  },
+  {
+    "createdatatime": "2026-08-26T10:00:00",
+    "fileex": "kml",
+    "filename": "水位警戒",
+    "sourceurl": "http://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstWaterWarm.kml",
+    "type": "文件"
+  },
+  {
+    "createdatatime": "2026-08-26T10:00:00",
+    "fileex": "kml",
+    "filename": "水庫放流警戒",
+    "sourceurl": "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstReservoirWarm.kml",
+    "type": "文件"
+  },
+  {
+    "createdatatime": "2026-08-26T10:00:00",
+    "fileex": "kml",
+    "filename": "淹水警戒發布",
+    "sourceurl": "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/AnnounceFlood.kml",
+    "type": "文件"
+  },
+  {
+    "createdatatime": "2026-08-26T10:00:00",
+    "fileex": "kml",
+    "filename": "未列管警戒",
+    "sourceurl": "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/OtherWarm.kml",
+    "type": "文件"
+  },
+  {
+    "createdatatime": "2026-08-26T10:00:00",
+    "fileex": "json",
+    "filename": "資料清單",
+    "sourceurl": "https://opendata.wra.gov.tw/api/v2/301c0b62-8736-4e03-95ef-55309c1a5e74",
+    "type": "文件"
+  }
+]

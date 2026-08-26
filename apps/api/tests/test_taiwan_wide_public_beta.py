@@ -1,16 +1,13 @@
 from collections.abc import Iterator
-from datetime import datetime
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from app.api.routes import public as public_routes
 from app.api.services import public_geocode_cache
 from app.core.config import get_settings
 from app.domain.geocoding.providers import TaiwanAdminArea, load_taiwan_admin_areas
-from app.domain.realtime import OfficialRealtimeBundle, OfficialRealtimeSourceStatus
 from app.main import create_app
-
 
 TAIWAN_BOUNDS = {
     "lat_min": 21.7,
@@ -24,8 +21,6 @@ TAIWAN_BOUNDS = {
 def no_network_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     get_settings.cache_clear()
     public_geocode_cache._MEMORY_CACHE.clear()
-    public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
-    public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
 
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
@@ -45,34 +40,10 @@ def no_network_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
 
     monkeypatch.setattr(public_routes, "_cached_nominatim_candidates", external_geocoder_lookup)
     monkeypatch.setattr(public_routes, "_cached_wikimedia_candidates", external_geocoder_lookup)
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: pytest.fail("DB evidence should stay disabled in Taiwan smoke"),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "persist_risk_assessment",
-        lambda **_kwargs: pytest.fail("risk persistence should stay disabled in Taiwan smoke"),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_query_heat_snapshot",
-        lambda **_kwargs: pytest.fail("query heat DB should stay disabled in Taiwan smoke"),
-    )
-    monkeypatch.setattr(public_routes, "nearest_public_news_location_text", lambda **_kwargs: None)
-
     try:
         yield TestClient(create_app())
     finally:
         get_settings.cache_clear()
-        public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
-        public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
 
 
 def test_taiwan_wide_admin_samples_are_complete() -> None:
@@ -133,21 +104,10 @@ def test_public_api_geocodes_and_assesses_all_taiwan_admin_samples(
             failures.append(f"{sample.name} risk missing explanation summary")
         if not isinstance(payload.get("data_freshness"), list):
             failures.append(f"{sample.name} risk data_freshness should be a list")
-        else:
-            official_history = [
-                item
-                for item in payload["data_freshness"]
-                if item.get("source_id") == "official-flood-disaster-points"
-            ]
-            if len(official_history) != 1:
-                failures.append(f"{sample.name} missing official flood disaster source status")
-            elif official_history[0].get("health_status") not in {"healthy", "degraded"}:
-                failures.append(
-                    f"{sample.name} official flood disaster source status="
-                    f"{official_history[0].get('health_status')}"
-                )
-            elif "快照" not in str(official_history[0].get("name")):
-                failures.append(f"{sample.name} official flood disaster source should be labeled as a snapshot")
+        if payload.get("dominant_mode") != "unknown":
+            failures.append(f"{sample.name} disabled repository should produce unknown mode")
+        if payload.get("query_heat", {}).get("period") != "frozen":
+            failures.append(f"{sample.name} query heat should stay frozen")
         if not isinstance(payload.get("evidence"), list):
             failures.append(f"{sample.name} risk evidence should be a list")
 
@@ -168,29 +128,4 @@ def _within_taiwan(point: dict[str, float]) -> bool:
     return (
         TAIWAN_BOUNDS["lat_min"] <= float(point["lat"]) <= TAIWAN_BOUNDS["lat_max"]
         and TAIWAN_BOUNDS["lng_min"] <= float(point["lng"]) <= TAIWAN_BOUNDS["lng_max"]
-    )
-
-
-def _empty_realtime_bundle() -> OfficialRealtimeBundle:
-    observed_at = datetime.fromisoformat("2026-04-29T03:00:00+00:00")
-    return OfficialRealtimeBundle(
-        observations=(),
-        source_statuses=(
-            OfficialRealtimeSourceStatus(
-                source_id="cwa-rainfall",
-                name="CWA rainfall",
-                health_status="healthy",
-                observed_at=observed_at,
-                ingested_at=observed_at,
-                message="disabled in no-network Taiwan-wide smoke",
-            ),
-            OfficialRealtimeSourceStatus(
-                source_id="wra-water-level",
-                name="WRA water level",
-                health_status="healthy",
-                observed_at=observed_at,
-                ingested_at=observed_at,
-                message="disabled in no-network Taiwan-wide smoke",
-            ),
-        ),
     )

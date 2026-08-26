@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
 import pytest
 
@@ -18,6 +18,7 @@ from app.adapters.contracts import (
 from app.adapters.cwa import CwaRainfallConfigurationError, CwaTideLevelConfigurationError
 from app.adapters.flood_potential import FloodPotentialGeoJsonConfigurationError
 from app.config import load_worker_settings
+from app.jobs import runtime as runtime_jobs
 from app.jobs.queue import (
     NullRuntimeQueue,
     PostgresRuntimeQueue,
@@ -39,8 +40,10 @@ from app.jobs.runtime import (
 )
 from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
 from app.pipelines.staging import AdapterStagingBatch
-from app.scheduler import enqueue_enabled_adapters_loop, run_enabled_adapters_loop
-
+from app.scheduler import (
+    _execute_enabled_adapters_loop,
+    _execute_enqueue_enabled_adapters_loop,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 # Shared with the API bridge (apps/api/app/domain/realtime/official.py); see
@@ -76,9 +79,7 @@ def test_scheduler_lease_acquire_release_sql_supports_expired_lease() -> None:
 
 
 def test_scheduler_lease_acquire_returns_false_when_active_holder_exists() -> None:
-    queue = PostgresRuntimeQueue(
-        connection_factory=lambda: _FakeConnection(fetch_rows=[None])
-    )
+    queue = PostgresRuntimeQueue(connection_factory=lambda: _FakeConnection(fetch_rows=[None]))
 
     acquired = queue.acquire_scheduler_lease(
         lease_key="scheduler.enabled-adapters",
@@ -120,8 +121,7 @@ def test_runtime_queue_enqueue_dequeue_adapter_job() -> None:
     assert enqueue_result.status == "enqueued"
     assert enqueue_result.job_id == "job-1"
     assert (
-        enqueue_result.dedupe_key
-        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
+        enqueue_result.dedupe_key == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
     )
     assert job is not None
     assert job.id == "job-1"
@@ -138,14 +138,8 @@ def test_runtime_queue_enqueue_dequeue_adapter_job() -> None:
     assert "dedupe_key IS NOT NULL" in enqueue_sql
     assert "status IN ('queued', 'running')" in enqueue_sql
     assert enqueue_params[2] == "official.cwa.rainfall"
-    assert (
-        enqueue_params[3]
-        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
-    )
-    assert (
-        enqueue_params[-1]
-        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
-    )
+    assert enqueue_params[3] == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
+    assert enqueue_params[-1] == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
     assert "FOR UPDATE SKIP LOCKED" in dequeue_sql
     assert "lease_expires_at <= now()" in dequeue_sql
     assert dequeue_params == ("runtime-adapters", "worker-a", 300)
@@ -241,10 +235,7 @@ def test_runtime_queue_lists_final_failed_jobs_for_dead_letter_visibility() -> N
     assert jobs[0].max_attempts == 3
     assert jobs[0].last_error == "source timeout"
     assert jobs[0].final_failed_at == final_failed_at
-    assert (
-        jobs[0].dedupe_key
-        == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
-    )
+    assert jobs[0].dedupe_key == "runtime-adapters:runtime.adapter.ingest:official.cwa.rainfall"
     sql, params = connection.cursor_instance.executions[0]
     assert "status = 'failed'" in sql
     assert "attempts >= max_attempts" in sql
@@ -455,17 +446,13 @@ def test_runtime_queue_unavailable_raises_for_db_errors() -> None:
 
 
 def test_enqueue_enabled_runtime_adapter_jobs_noops_without_database_url() -> None:
-    settings = load_worker_settings(
-        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall"}
-    )
+    settings = load_worker_settings({"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall"})
 
     assert enqueue_enabled_runtime_adapter_jobs(settings) == ()
 
 
 def test_build_runtime_adapters_noops_without_fixture_or_cwa_api_gate() -> None:
-    settings = load_worker_settings(
-        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall"}
-    )
+    settings = load_worker_settings({"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.rainfall"})
 
     assert build_runtime_adapters(settings) == {}
 
@@ -511,9 +498,7 @@ def test_build_runtime_adapters_fixture_mode_supplies_forum_candidate_fixtures()
         assert len(result.fetched) == 1
         assert len(result.normalized) == 1
         assert result.normalized[0].source_family is SourceFamily.FORUM
-        assert result.fetched[0].payload["governance"]["candidate_contract"][
-            "http_fetch"
-        ] is False
+        assert result.fetched[0].payload["governance"]["candidate_contract"]["http_fetch"] is False
 
 
 def test_build_runtime_adapters_respects_cwa_source_gate_even_with_api_gate() -> None:
@@ -805,6 +790,76 @@ def test_produce_enabled_runtime_adapter_jobs_reports_no_enabled_adapters() -> N
     assert queue.enqueued == []
 
 
+def test_catalog_disabled_producer_never_builds_or_enqueues_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = load_worker_settings(
+        {"WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning"}
+    )
+    queue = _RecordingProducerQueue()
+    calls = 0
+
+    def forbidden_builder(builder_settings: object) -> dict[str, object]:
+        nonlocal calls
+        del builder_settings
+        calls += 1
+        return {}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", forbidden_builder)
+    monkeypatch.setattr(
+        runtime_jobs,
+        "enabled_adapter_keys",
+        lambda _: ("official.cwa.heavy_rain_warning",),
+    )
+
+    result = produce_enabled_runtime_adapter_jobs(
+        settings,
+        queue=queue,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+    )
+
+    assert result.status == "skipped"
+    assert result.reason == "source_catalog_disabled"
+    assert calls == 0
+    assert queue.enqueued == []
+
+
+def test_catalog_gate_narrows_mixed_producer_before_building_and_enqueueing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_ENABLED_ADAPTER_KEYS": (
+                "official.cwa.heavy_rain_warning,official.cwa.rainfall"
+            ),
+            "WORKER_RUNTIME_FIXTURES_ENABLED": "true",
+        }
+    )
+    queue = _RecordingProducerQueue()
+    captured: list[tuple[str, ...] | None] = []
+
+    def narrowed_builder(builder_settings: Any) -> dict[str, object]:
+        captured.append(builder_settings.enabled_adapter_keys)
+        return {"official.cwa.rainfall": object()}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", narrowed_builder)
+    monkeypatch.setattr(
+        runtime_jobs,
+        "enabled_adapter_keys",
+        lambda _: ("official.cwa.heavy_rain_warning", "official.cwa.rainfall"),
+    )
+
+    result = produce_enabled_runtime_adapter_jobs(
+        settings,
+        queue=queue,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+    )
+
+    assert captured == [("official.cwa.rainfall",)]
+    assert result.adapter_keys == ("official.cwa.rainfall",)
+    assert [entry[0] for entry in queue.enqueued] == ["official.cwa.rainfall"]
+
+
 def test_enqueue_enabled_runtime_adapter_jobs_uses_durable_queue_when_available() -> None:
     settings = load_worker_settings(
         {
@@ -974,6 +1029,174 @@ def test_work_runtime_queue_once_noops_when_no_job() -> None:
     assert queue.failed == []
 
 
+def test_catalog_disabled_leased_job_is_acknowledged_without_building_or_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key="official.cwa.heavy_rain_warning"))
+    calls = 0
+
+    def forbidden_builder(builder_settings: object) -> dict[str, object]:
+        nonlocal calls
+        del builder_settings
+        calls += 1
+        return {}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", forbidden_builder)
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+    )
+
+    assert result.status == "skipped"
+    assert result.reason == "source_catalog_disabled"
+    assert calls == 0
+    assert queue.completed == [("succeeded", "job-1", "worker-a")]
+    assert queue.failed == []
+
+
+def test_catalog_disabled_leased_job_fails_when_terminal_ack_is_not_updated() -> None:
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _LostCompletionQueue(job=_runtime_job(adapter_key="official.cwa.heavy_rain_warning"))
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "queue_completion_not_updated"
+    assert queue.completed == [("succeeded", "job-1", "worker-a")]
+
+
+def test_catalog_query_failure_retries_leased_job_without_upstream_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key="official.cwa.heavy_rain_warning"))
+    calls = 0
+
+    def forbidden_builder(builder_settings: object) -> dict[str, object]:
+        nonlocal calls
+        del builder_settings
+        calls += 1
+        return {}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", forbidden_builder)
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        source_catalog_reader=_FailingCatalogReader(),
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "source_catalog_unavailable"
+    assert calls == 0
+    assert queue.completed == []
+    assert queue.failed == [("failed", "job-1", "worker-a", "source_catalog_unavailable", 60)]
+
+
+def test_catalog_query_failure_stays_safe_when_producer_audit_writer_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_DATABASE_URL": "postgresql://runtime-secret@localhost/flood",
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning",
+        }
+    )
+    calls = {"build": 0}
+
+    def forbidden_builder(builder_settings: object) -> dict[str, object]:
+        del builder_settings
+        calls["build"] += 1
+        return {}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", forbidden_builder)
+    monkeypatch.setattr(
+        runtime_jobs,
+        "enabled_adapter_keys",
+        lambda _: ("official.cwa.heavy_rain_warning",),
+    )
+    monkeypatch.setattr(runtime_jobs, "PostgresIngestionRunWriter", _FailingCatalogAuditWriter)
+
+    result = produce_enabled_runtime_adapter_jobs(
+        settings,
+        source_catalog_reader=_FailingCatalogReader(),
+    )
+
+    captured = capsys.readouterr()
+    assert result.status == "skipped"
+    assert result.reason == "source_catalog_unavailable"
+    assert calls == {"build": 0}
+    assert "catalog-secret" not in captured.out
+    assert "audit-secret" not in captured.out
+
+
+def test_catalog_enabled_queue_worker_narrows_internal_builder_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_key = "official.cwa.heavy_rain_warning"
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key=adapter_key))
+    captured: list[tuple[str, ...] | None] = []
+    calls = {"run": 0}
+
+    def narrowed_builder(builder_settings: Any) -> dict[str, _QueueCatalogAdapter]:
+        captured.append(builder_settings.enabled_adapter_keys)
+        return {adapter_key: _QueueCatalogAdapter(adapter_key, calls)}
+
+    monkeypatch.setattr(runtime_jobs, "build_runtime_adapters", narrowed_builder)
+    monkeypatch.setattr(
+        runtime_jobs,
+        "enabled_adapter_keys",
+        lambda _: (adapter_key, "official.ncdr.cap"),
+    )
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter_key})),
+    )
+
+    assert captured == [(adapter_key,)]
+    assert result.status == "succeeded"
+    assert calls == {"run": 1}
+
+
+def test_catalog_enabled_queue_worker_filters_supplied_mapping_by_current_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_key = "official.cwa.heavy_rain_warning"
+    settings = load_worker_settings({"WORKER_INSTANCE": "worker-a"})
+    queue = _RuntimeWorkerQueue(job=_runtime_job(adapter_key=adapter_key))
+    staging_writer = _MemoryStagingWriter()
+    calls = {"run": 0}
+
+    monkeypatch.setattr(runtime_jobs, "enabled_adapter_keys", lambda _: ())
+
+    result = work_runtime_queue_once(
+        settings=settings,
+        queue=queue,
+        adapter_by_key={adapter_key: _QueueCatalogAdapter(adapter_key, calls)},
+        writer=staging_writer,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter_key})),
+    )
+
+    assert result.status == "failed"
+    assert result.reason == f"unknown runtime adapter_key: {adapter_key}"
+    assert calls == {"run": 0}
+    assert staging_writer.batches == []
+    assert queue.failed == [
+        ("failed", "job-1", "worker-a", f"unknown runtime adapter_key: {adapter_key}", 60)
+    ]
+
+
 def test_work_runtime_queue_once_runs_adapter_and_marks_succeeded() -> None:
     settings = load_worker_settings(
         {
@@ -1127,7 +1350,7 @@ def test_scheduler_loop_falls_back_when_database_lease_is_unavailable(monkeypatc
 
     monkeypatch.setattr("app.scheduler.PostgresRuntimeQueue", _UnavailableQueue)
 
-    results = run_enabled_adapters_loop(settings=settings, max_ticks=1)
+    results = _execute_enabled_adapters_loop(settings=settings, max_ticks=1)
 
     assert len(results) == 1
 
@@ -1144,7 +1367,7 @@ def test_scheduler_enqueue_loop_skips_when_database_lease_is_held(monkeypatch) -
 
     monkeypatch.setattr("app.scheduler.PostgresRuntimeQueue", _LeaseHeldQueue)
 
-    results = enqueue_enabled_adapters_loop(settings=settings, queue=queue, max_ticks=1)
+    results = _execute_enqueue_enabled_adapters_loop(settings=settings, queue=queue, max_ticks=1)
 
     assert results == ()
     assert queue.enqueued == []
@@ -1155,7 +1378,7 @@ class _FakeConnection:
         self.cursor_instance = _FakeCursor(fetch_rows=fetch_rows)
         self.commits = 0
 
-    def __enter__(self) -> _FakeConnection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -1173,7 +1396,7 @@ class _FakeCursor:
         self._fetch_rows = fetch_rows
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> _FakeCursor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -1192,7 +1415,7 @@ class _FakeCursor:
 
 
 class _BrokenConnection:
-    def __enter__(self) -> _BrokenConnection:
+    def __enter__(self) -> Self:
         raise RuntimeError("database unavailable")
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -1368,6 +1591,70 @@ class _FailingAdapter:
         raise RuntimeError("source timeout")
 
 
+class _StaticCatalogReader:
+    def __init__(self, *, enabled: frozenset[str]) -> None:
+        self.enabled = enabled
+
+    def enabled_keys(self, adapter_keys: tuple[str, ...]) -> frozenset[str]:
+        return self.enabled.intersection(adapter_keys)
+
+
+class _FailingCatalogReader:
+    def enabled_keys(self, adapter_keys: tuple[str, ...]) -> frozenset[str]:
+        del adapter_keys
+        raise RuntimeError("postgresql://catalog-secret@catalog-unavailable")
+
+
+class _FailingCatalogAuditWriter:
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    def write_runtime_selection(
+        self,
+        *,
+        enabled_adapter_keys: tuple[str, ...],
+        known_adapter_keys: tuple[str, ...],
+        checked_at: datetime,
+    ) -> None:
+        del enabled_adapter_keys, known_adapter_keys, checked_at
+        raise RuntimeError("postgresql://audit-secret@catalog-unavailable")
+
+    def write_pipeline_status(
+        self,
+        *,
+        adapter_keys: tuple[str, ...],
+        status: str,
+        complete: bool,
+        checked_at: datetime,
+        run_at: datetime | None,
+        active_snapshot_raw_ref: str | None = None,
+    ) -> None:
+        del adapter_keys, status, complete, checked_at, run_at, active_snapshot_raw_ref
+        raise RuntimeError("postgresql://audit-secret@catalog-unavailable")
+
+
+class _QueueCatalogAdapter:
+    def __init__(self, key: str, calls: dict[str, int]) -> None:
+        self.metadata = AdapterMetadata(
+            key=key,
+            family=SourceFamily.OFFICIAL,
+            enabled_by_default=False,
+            display_name="Catalog queue adapter",
+        )
+        self.calls = calls
+
+    def run(self) -> AdapterRunResult:
+        self.calls["run"] += 1
+        return AdapterRunResult(adapter_key=self.metadata.key, fetched=(), normalized=())
+
+    def fetch(self) -> Iterable[RawSourceItem]:
+        return ()
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return None
+
+
 class _MemoryStagingWriter:
     def __init__(self) -> None:
         self.batches: list[AdapterStagingBatch] = []
@@ -1406,7 +1693,7 @@ class _MemoryPromotionWriter:
         self.requested_adapter_keys = adapter_keys
         return self._candidates
 
-    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
 
@@ -1445,9 +1732,7 @@ def _promotion_candidate() -> PromotionCandidate:
 
 
 def _load_cwa_api_payload() -> dict[str, Any]:
-    return json.loads(
-        (SHARED_UPSTREAM_FIXTURES / "cwa-rainfall.json").read_text(encoding="utf-8")
-    )
+    return json.loads((SHARED_UPSTREAM_FIXTURES / "cwa-rainfall.json").read_text(encoding="utf-8"))
 
 
 def _load_wra_api_payload() -> dict[str, Any]:

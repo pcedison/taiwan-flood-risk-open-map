@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Folder>
+    <name>歷年颱風淹水範圍</name>
+    <Document id="105梅姬颱風雲嘉地區淹水範圍" xsi:schemaLocation="http://www.opengis.net/kml/2.2 http://schemas.opengis.net/kml/2.2.0/ogckml22.xsd http://www.google.com/kml/ext/2.2 http://code.google.com/apis/kml/schema/kml22gx.xsd">
+      <name>105-09-27梅姬颱風</name>
+      <Placemark id="P-1">
+        <name>臺南淹水範圍</name>
+        <Polygon>
+          <outerBoundaryIs>
+            <LinearRing>
+              <coordinates>120.10,23.00,0 120.12,23.00,0 120.12,23.02,0 120.10,23.02,0 120.10,23.00,0</coordinates>
+            </LinearRing>
+          </outerBoundaryIs>
+          <innerBoundaryIs>
+            <LinearRing>
+              <coordinates>120.105,23.005,0 120.110,23.005,0 120.110,23.010,0 120.105,23.010,0 120.105,23.005,0</coordinates>
+            </LinearRing>
+          </innerBoundaryIs>
+        </Polygon>
+      </Placemark>
+      <Placemark id="P-1">
+        <name>臺南淹水範圍</name>
+        <Polygon>
+          <outerBoundaryIs>
+            <LinearRing>
+              <coordinates>120.10,23.00,0 120.12,23.00,0 120.12,23.02,0 120.10,23.02,0 120.10,23.00,0</coordinates>
+            </LinearRing>
+          </outerBoundaryIs>
+          <innerBoundaryIs>
+            <LinearRing>
+              <coordinates>120.105,23.005,0 120.110,23.005,0 120.110,23.010,0 120.105,23.010,0 120.105,23.005,0</coordinates>
+            </LinearRing>
+          </innerBoundaryIs>
+        </Polygon>
+      </Placemark>
+      <Placemark>
+        <name>屏東淹水點</name>
+        <Point><coordinates>120.488,22.682,0</coordinates></Point>
+      </Placemark>
+      <Placemark id="MP-1">
+        <name>嘉義多區淹水範圍</name>
+        <MultiGeometry>
+          <Polygon>
+            <outerBoundaryIs><LinearRing><coordinates>120.40,23.45 120.41,23.45 120.41,23.46 120.40,23.46 120.40,23.45</coordinates></LinearRing></outerBoundaryIs>
+          </Polygon>
+          <Polygon>
+            <outerBoundaryIs><LinearRing><coordinates>120.42,23.47 120.43,23.47 120.43,23.48 120.42,23.48 120.42,23.47</coordinates></LinearRing></outerBoundaryIs>
+          </Polygon>
+        </MultiGeometry>
+      </Placemark>
+    </Document>
+    <Document id="missing-event-date">
+      <name>沒有日期的歷史事件</name>
+      <Placemark id="NO-DATE">
+        <name>不可以用下載時間取代</name>
+        <Point><coordinates>121.50,25.04,0</coordinates></Point>
+      </Placemark>
+    </Document>
+  </Folder>
+</kml>

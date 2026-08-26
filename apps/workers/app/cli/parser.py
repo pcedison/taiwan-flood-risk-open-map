@@ -19,12 +19,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-official-demo",
         action="store_true",
-        help="Run enabled official demo adapters once through ingestion and freshness checks.",
+        help=(
+            "Run enabled official demo adapters without persistence; "
+            "--persist is frozen in v1 and exits 2."
+        ),
     )
     parser.add_argument(
         "--run-enabled-adapters",
         action="store_true",
-        help="Run configured runtime adapters once, selected by WORKER_ENABLED_ADAPTER_KEYS/config gates.",
+        help="Frozen legacy generic-runtime command in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--record-runtime-sources-disabled",
@@ -189,24 +192,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scheduler",
         action="store_true",
-        help="Run configured runtime adapters in a scheduler loop.",
+        help="Frozen legacy generic scheduler in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--maintenance",
         action="store_true",
-        help="Run Query Heat and tile cache maintenance. Combine with --scheduler for a loop.",
+        help="Run evidence realtime and location-query privacy retention only.",
     )
     parser.add_argument(
         "--work-runtime-queue",
         action="store_true",
-        help="Consume durable worker_runtime_jobs. Use --once for one dequeue attempt.",
+        help="Frozen legacy runtime-queue writer in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--enqueue-runtime-jobs",
         action="store_true",
         help=(
-            "Producer path: enqueue durable worker_runtime_jobs for configured runtime adapters. "
-            "Combine with --scheduler for a lease-guarded loop."
+            "Frozen legacy runtime-queue producer in v1; accepted for compatibility and exits 2."
         ),
     )
     parser.add_argument(
@@ -247,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--requeue-runtime-job",
         metavar="JOB_ID",
-        help="Requeue a failed worker_runtime_jobs row by id, resetting attempts by default.",
+        help="Frozen legacy requeue mutation in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--requeue-keep-attempts",
@@ -265,7 +267,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--aggregate-query-heat",
         action="store_true",
-        help="Materialize query heat buckets from location_queries into query_heat_buckets.",
+        help="Frozen legacy query-heat writer in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--query-heat-periods",
@@ -290,12 +292,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--refresh-tile-features",
         action="store_true",
-        help="Refresh worker-generated map_layer_features for supported tile layers.",
+        help="Frozen legacy local-tile writer in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--seed-risk-profiles",
         action="store_true",
-        help="Seed stale precomputed admin-area and grid profile shards.",
+        help="Frozen legacy profile writer in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--seed-profile-kind",
@@ -337,7 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rebuild-risk-profile",
         action="store_true",
-        help="Rebuild one precomputed profile identified by --profile-kind and --profile-key.",
+        help="Frozen legacy profile writer in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--profile-kind",
@@ -351,7 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--work-profile-refresh-jobs",
         action="store_true",
-        help="Claim and rebuild queued profile_refresh_jobs.",
+        help="Frozen legacy profile writer in v1; accepted for compatibility and exits 2.",
     )
     parser.add_argument(
         "--profile-refresh-limit",

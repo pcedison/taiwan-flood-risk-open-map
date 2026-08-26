@@ -8,8 +8,13 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from app.adapters._helpers import optional_float, optional_str, parse_datetime
-from app.adapters._helpers import parse_observed_at_utc, stable_evidence_id
+from app.adapters._helpers import (
+    optional_float,
+    optional_str,
+    parse_datetime,
+    parse_observed_at_utc,
+    stable_evidence_id,
+)
 from app.adapters._taiwan_gov_tls import taiwan_gov_open_data_ssl_context
 from app.adapters.contracts import (
     AdapterMetadata,
@@ -20,7 +25,6 @@ from app.adapters.contracts import (
     RawSourceItem,
     SourceFamily,
 )
-
 
 FetchJson = Callable[[str, int], Any]
 
@@ -52,10 +56,14 @@ WRA_IOW_FLOOD_DEPTH_METADATA = AdapterMetadata(
     ),
     license="Government Open Data License, version 1.0",
     limitations=(
-        "Latest values are raw IoW telemetry and may be affected by sensor or "
-        "transmission faults.",
-        "Station coordinates are joined from the paired WRA IoW basic metadata "
-        "dataset; rows without coordinates are rejected from normalization.",
+        (
+            "Latest values are raw IoW telemetry and may be affected by sensor or "
+            "transmission faults."
+        ),
+        (
+            "Station coordinates are joined from the paired WRA IoW basic metadata "
+            "dataset; rows without coordinates are rejected from normalization."
+        ),
     ),
 )
 
@@ -119,7 +127,7 @@ class WraIowFloodDepthApiAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in records

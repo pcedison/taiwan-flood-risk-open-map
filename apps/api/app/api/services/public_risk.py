@@ -10,10 +10,10 @@ from app.api.schemas import (
     DataFreshness,
     Evidence,
     Explanation,
-    QueryHeat,
     NearbyRealtimeCoverage,
-    RiskAssessRequest,
+    QueryHeat,
     RiskAssessmentResponse,
+    RiskAssessRequest,
     RiskLevelBlock,
 )
 from app.api.services import public_evidence, public_freshness
@@ -23,14 +23,14 @@ from app.domain.geocoding import stable_uuid
 from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.history.news_enrichment import OnDemandNewsSearchResult
 from app.domain.profiles import RiskProfileRecord
+from app.domain.realtime import (
+    OfficialRealtimeBundle,
+    OfficialRealtimeObservation,
+)
 from app.domain.realtime.nearby_coverage import (
     RADIUS_BUCKETS_M,
     REQUIRED_SIGNAL_TYPES,
     build_nearby_realtime_coverage,
-)
-from app.domain.realtime import (
-    OfficialRealtimeBundle,
-    OfficialRealtimeObservation,
 )
 from app.domain.risk import RiskScoringResult, score_risk
 
@@ -216,7 +216,6 @@ class RiskAssessmentDependencies:
     persist_or_build_on_demand_evidence: PersistOrBuildOnDemandEvidence
     historical_data_freshness: HistoricalDataFreshness
     display_evidence_items: Callable[[list[Evidence]], list[Evidence]]
-    cache_assessment_evidence: Callable[[str, list[Evidence]], None]
     persisted_official_realtime_data_freshness: PersistedOfficialRealtimeDataFreshness
     visible_source_limitations: Callable[
         [
@@ -440,7 +439,6 @@ def assess_risk(
         ),
         now=created_at,
     )
-    dependencies.cache_assessment_evidence(assessment_id, display_evidence_items)
     expires_at = created_at + timedelta(minutes=10)
     explanation = Explanation(
         summary=scoring.explanation_summary,

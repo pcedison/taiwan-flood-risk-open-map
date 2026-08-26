@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import json
+from datetime import UTC, datetime
+from typing import Self
+
+import pytest
 
 from app.adapters.civil_iot import FloodSensorStaApiAdapter
+from app.adapters.news import SamplePublicWebNewsAdapter
 from app.jobs.ingestion import AdapterBatchRunSummary, run_adapter_batch
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from tests.test_ingestion_job_runner import _EmptyAdapter, _MemoryWriter
-from app.adapters.news import SamplePublicWebNewsAdapter
-
 
 STARTED_AT = datetime(2026, 4, 29, 8, 0, tzinfo=UTC)
 FINISHED_AT = datetime(2026, 4, 29, 8, 1, tzinfo=UTC)
@@ -97,6 +99,32 @@ def test_postgres_ingestion_run_writer_maps_partial_to_succeeded_job() -> None:
     assert connection.cursor_instance.executions[1][1][4] == "partial"
 
 
+def test_successful_no_active_summary_locks_warning_lifecycle_before_marker() -> None:
+    summary = AdapterBatchRunSummary(
+        adapter_key="official.cwa.heavy_rain_warning",
+        status="succeeded",
+        started_at=STARTED_AT,
+        finished_at=FINISHED_AT,
+        items_fetched=0,
+        items_promoted=0,
+        items_rejected=0,
+        error_code="no_active_event",
+    )
+    connection = _FakeConnection(job_id="job-id")
+
+    PostgresIngestionRunWriter(connection_factory=lambda: connection).write_summary(
+        summary,
+        job_key="ingest.warning",
+    )
+
+    lock_sql, lock_params = connection.cursor_instance.executions[0]
+    marker_sql, marker_params = connection.cursor_instance.executions[1]
+    assert "pg_advisory_xact_lock" in lock_sql
+    assert lock_params == ("official-warning-lifecycle|official.cwa.heavy_rain_warning",)
+    assert "INSERT INTO ingestion_jobs" in marker_sql
+    assert marker_params[8] == "no_active_event"
+
+
 def test_postgres_ingestion_run_writer_does_not_insert_adapter_run_for_skipped_summary() -> None:
     summary = AdapterBatchRunSummary(
         adapter_key="test.empty",
@@ -174,10 +202,73 @@ def test_postgres_ingestion_run_writer_persists_final_pipeline_status() -> None:
         FINISHED_AT,
         False,
         STARTED_AT,
+        None,
+        None,
         ["official.wra.water_level"],
         STARTED_AT,
         STARTED_AT,
     )
+
+
+def test_pipeline_status_atomically_activates_bounded_complete_replace_snapshot() -> None:
+    connection = _FakeConnection(job_id="unused")
+    writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+    raw_ref = f"raw/official/wra/historical_flood/{'a' * 64}.json"
+
+    writer.write_pipeline_status(
+        adapter_keys=("official.wra.historical_flood",),
+        status="succeeded",
+        complete=True,
+        checked_at=FINISHED_AT,
+        run_at=STARTED_AT,
+        active_snapshot_raw_ref=raw_ref,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert "metadata = CASE" in sql
+    assert "'{active_snapshot_raw_ref}'" in sql
+    assert "jsonb_set" in sql
+    assert "runtime_pipeline_run_at <= %s" in sql
+    assert params == (
+        "succeeded",
+        FINISHED_AT,
+        True,
+        STARTED_AT,
+        raw_ref,
+        raw_ref,
+        ["official.wra.historical_flood"],
+        STARTED_AT,
+        STARTED_AT,
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw_ref", "status", "complete"),
+    (
+        (" raw/ref.json", "succeeded", True),
+        ("x" * 257, "succeeded", True),
+        ("raw/ref.json", "failed", True),
+        ("raw/ref.json", "succeeded", False),
+    ),
+)
+def test_pipeline_status_rejects_invalid_or_incomplete_snapshot_activation(
+    raw_ref: str,
+    status: str,
+    complete: bool,
+) -> None:
+    writer = PostgresIngestionRunWriter(
+        connection_factory=lambda: _FakeConnection(job_id="unused")
+    )
+
+    with pytest.raises(ValueError, match="active snapshot"):
+        writer.write_pipeline_status(
+            adapter_keys=("official.wra.historical_flood",),
+            status=status,  # type: ignore[arg-type]
+            complete=complete,
+            checked_at=FINISHED_AT,
+            run_at=STARTED_AT,
+            active_snapshot_raw_ref=raw_ref,
+        )
 
 
 def test_pipeline_failure_without_ingestion_summary_gets_ordered_generation() -> None:
@@ -376,7 +467,7 @@ class _FakeConnection:
         self.cursor_instance = _FakeCursor(job_id=job_id)
         self.committed = False
 
-    def __enter__(self) -> _FakeConnection:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -394,7 +485,7 @@ class _FakeCursor:
         self._job_id = job_id
         self.executions: list[tuple[str, tuple[object, ...]]] = []
 
-    def __enter__(self) -> _FakeCursor:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

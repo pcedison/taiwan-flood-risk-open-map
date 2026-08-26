@@ -39,6 +39,55 @@ sources:
       - "coastal tide level is not an inland river, sewer, flood-depth, or pump-station reading."
       - "Offshore tide stations such as Matsu use local mean sea level and are not tied back to Taiwan island TWVD2001."
       - "Live observations must be joined with O-B0076-001 station metadata for station name, county, town, and WGS84 coordinates."
+  - key: official.cwa.heavy_rain_warning
+    need: official_heavy_rain_warning_audit
+    status: disabled_by_default
+    data_gov_dataset_id: "W-C0033-003"
+    data_gov_url: "https://opendata.cwa.gov.tw/dataset/warning/W-C0033-003"
+    title: "Heavy-rain CAP warnings"
+    provider: "Central Weather Administration"
+    resource_url: "https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/W-C0033-003?format=CAP"
+    resource_format: "CAP XML"
+    update_frequency: "as issued by the Central Weather Administration"
+    license: "中央氣象署開放資料平臺使用規範"
+    license_url: "https://opendata.cwa.gov.tw/about/rules"
+    integration_decision: "Retain bounded raw snapshots and source-rejection audits only; do not normalize until exact administrative geometry is reviewed."
+    limitations:
+      - "The source is independently gated and disabled by default."
+      - "Township and message-level warnings without reviewed exact geometry never enter staging, latest, promotion, or scoring."
+      - "CAP polygon and circle values are retained only as source identity semantics; no centroid or parent-county geometry is inferred."
+  - key: official.ncdr.cap
+    need: official_ncdr_cap_alert_audit
+    status: disabled_by_default
+    data_gov_dataset_id: "NCDR-CAP"
+    data_gov_url: "https://alerts.ncdr.nat.gov.tw/"
+    title: "NCDR datastore and CAP dump alerts"
+    provider: "National Science and Technology Center for Disaster Reduction"
+    resource_url: "https://alerts.ncdr.nat.gov.tw/api/datastore"
+    dump_url: "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
+    resource_format: "JSON datastore index to CAP XML dump"
+    update_frequency: "as issued through the NCDR alert datastore"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Retain bounded raw CAP snapshots and source-rejection audits only; do not normalize until administrative and Circle geometry is reviewed."
+    limitations:
+      - "The source, API, contract, credential, and persisted catalog gates are independently fail-closed and disabled by default."
+      - "Datastore capid values are transport metadata only; canonical identities come from CAP sender, identifier, sent, and area semantics."
+      - "Unreviewed administrative, polygon, Circle, and message-level geometry never enters staging, latest, promotion, or scoring."
+  - key: official.npa.police_radio_traffic
+    need: reported_flood_road_incident_context
+    status: disabled_by_default
+    data_gov_dataset_id: "15221"
+    data_gov_url: "https://data.gov.tw/dataset/15221"
+    title: "Police Broadcasting Service realtime road conditions"
+    provider: "Police Broadcasting Service"
+    resource_url: "https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata"
+    resource_format: "JSON"
+    update_frequency: "latest 1000 traffic records; may lag the query page by up to one minute"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Persist explicit flood road reports as reported-unverified status-only context; never use them for official latest or scoring."
+    limitations:
+      - "警廣即時路況通報，尚未由淹水感測器確認。"
+      - "路況通報可能由民眾或勤務單位提供，位置與狀態可能延遲更新。"
   - key: official.wra.water_level
     need: realtime_water_level
     status: primary
@@ -72,6 +121,23 @@ sources:
     limitations:
       - "Latest values are raw IoW telemetry and may be affected by sensor or transmission faults."
       - "Rows without joined station coordinates are rejected from normalization."
+  - key: official.wra.historical_flood
+    need: observed_historical_flood_footprints
+    status: disabled_by_default
+    data_gov_dataset_id: "25770"
+    data_gov_url: "https://data.gov.tw/dataset/25770"
+    title: "Historical flood data"
+    provider: "Water Resources Agency"
+    resource_url: "https://opendata.wra.gov.tw/api/v2/72d7aee9-e29b-49a2-bd0b-54acc8e3b75c?format=JSON&sort=_importdate+asc"
+    resource_format: "JSON metadata index resolving to KML"
+    update_frequency: "irregular historical publication"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Resolve the reviewed metadata row to its approved WRA KML and ingest only source-dated historical Point/Polygon/MultiPolygon evidence."
+    limitations:
+      - "Historical footprint only; it is not a realtime flood observation or warning."
+      - "The source event time is taken only from a parseable KML event label or field."
+      - "KML points and polygons describe source-provided historical locations and extents."
+      - "The catalog landing page is retained as a historical dataset and may be withdrawn."
   - key: official.flood_potential.geojson
     need: planning_flood_potential
     status: primary_reference
@@ -105,19 +171,37 @@ sources:
       - "Source coordinates are TWD97 / TM2 and must be converted to EPSG:4326 before spatial queries."
       - "Recent flood facts must be corroborated through public news/wiki metadata or other separately modeled official sources, not merged into this official snapshot."
   - key: official.wra.flood_warning
-    need: realtime_flood_warning
-    status: phase4_candidate
+    need: official_warning_context
+    status: disabled_by_default
     data_gov_dataset_id: "5982"
+    data_gov_dataset_ids:
+      - "5982"
+      - "5983"
+      - "5984"
     data_gov_url: "https://data.gov.tw/dataset/5982"
-    title: "Flood warning disaster information"
+    related_data_gov_urls:
+      - "https://data.gov.tw/dataset/5982"
+      - "https://data.gov.tw/dataset/5983"
+      - "https://data.gov.tw/dataset/5984"
+    title: "Flood, water level, and reservoir warning disaster information"
     provider: "Water Resources Agency"
     resource_url: "https://opendata.wra.gov.tw/api/v2/301c0b62-8736-4e03-95ef-55309c1a5e74"
-    resource_format: "JSON API / KML list"
-    update_frequency: "irregular"
+    kml_resource_urls:
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstFloodWarm.kml"
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstWaterWarm.kml"
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/NewstReservoirWarm.kml"
+      - "https://fhy.wra.gov.tw/pub_web_2011/kml/KmlShare/AnnounceFlood.kml"
+    resource_format: "JSON API index to a fixed four-file KML allowlist"
+    update_frequency: "irregular warning publication; polled per ingestion cycle"
     license: "Government Open Data License, version 1.0"
-    integration_decision: "Keep as a Phase 4 warning-layer candidate; do not blend into flood-potential scoring until warning semantics are implemented."
+    active_fixture_reviewed: false
+    integration_decision: "Persist bounded warning placemarks as official-reported status-only context; never use them for official latest or scoring."
     limitations:
-      - "Requires parser, cadence review, source-health alerts, and UI language before scoring use."
+      - "官方警戒範圍為情境背景，尚未經淹水感測器逐點確認。"
+      - "警戒發布與解除可能延遲；解除後仍保留為稽核脈絡。"
+      - "active_fixture_reviewed=false: no reviewed live active-warning capture exists yet."
+      - "The source, API, and contract gates are independently fail-closed and disabled by default."
+      - "Only the four immutable HTTPS KML URLs are ever fetched; the index can never widen the allowlist."
   - key: geocoder.moi.village_boundary
     need: village_admin_fallback
     status: primary

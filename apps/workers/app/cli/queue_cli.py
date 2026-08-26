@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from app.cli.persistence import build_runtime_persistence_bundle
 from app.config import WorkerSettings
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.queue import (
     PostgresRuntimeQueue,
     RuntimeQueueDeadLetterJob,
@@ -19,10 +20,24 @@ from app.jobs.replay_audit import PostgresRuntimeQueueReplayAudit
 from app.jobs.runtime import work_runtime_queue_once
 from app.logging import log_event
 from app.metrics import render_runtime_queue_metrics, write_prometheus_textfile
-from app.scheduler import enqueue_enabled_adapters_loop, enqueue_enabled_adapters_once
+from app.scheduler import (
+    _execute_enqueue_enabled_adapters_loop,
+    _execute_enqueue_enabled_adapters_once,
+)
 
 
 def work_runtime_queue(
+    *,
+    settings: WorkerSettings,
+    once: bool,
+    max_ticks: int | None,
+    persist: bool,
+    database_url: str | None,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_work_runtime_queue(
     *,
     settings: WorkerSettings,
     once: bool,
@@ -61,12 +76,22 @@ def enqueue_runtime_jobs(
     once: bool,
     max_ticks: int | None,
 ) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_enqueue_runtime_jobs(
+    *,
+    settings: WorkerSettings,
+    scheduler: bool,
+    once: bool,
+    max_ticks: int | None,
+) -> int:
     if not scheduler:
-        enqueue_enabled_adapters_once(settings=settings)
+        _execute_enqueue_enabled_adapters_once(settings=settings)
         return 0
 
     tick_limit = 1 if once else max(1, max_ticks) if max_ticks is not None else None
-    enqueue_enabled_adapters_loop(settings=settings, max_ticks=tick_limit)
+    _execute_enqueue_enabled_adapters_loop(settings=settings, max_ticks=tick_limit)
     return 0
 
 
@@ -216,6 +241,18 @@ def _default_queue_metrics_snapshots(
 
 
 def requeue_runtime_job(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    job_id: str,
+    reset_attempts: bool,
+    requested_by: str | None,
+    reason: str | None,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_requeue_runtime_job(
     *,
     settings: WorkerSettings,
     database_url: str | None,

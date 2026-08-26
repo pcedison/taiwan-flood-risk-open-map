@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Final, Literal
 
 from app.adapters.contracts import DataSourceAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.ingestion import (
+    WARNING_EVENT_ADAPTER_KEYS,
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
     record_pipeline_status,
     record_runtime_selection,
+)
+from app.jobs.source_catalog import (
+    SourceCatalogReader,
+    SourceCatalogUnavailable,
+    filter_catalog_enabled_adapter_keys,
+    resolve_source_catalog_reader,
 )
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
@@ -25,11 +33,20 @@ from app.pipelines.promotion import (
     promote_accepted_staging,
 )
 from app.pipelines.staging import StagingBatchWriter
-from app.scheduler import run_scheduled_ingestion_cycle
-
+from app.scheduler import _execute_scheduled_ingestion_cycle
 
 ManagedRuntimeStatus = Literal["succeeded", "partial", "failed", "skipped"]
 RuntimeAdapterBuilder = Callable[[WorkerSettings], Mapping[str, DataSourceAdapter]]
+V1_BASELINE_ADAPTER_KEYS: Final[tuple[str, ...]] = (
+    "official.cwa.rainfall",
+    "official.cwa.heavy_rain_warning",
+    "official.wra.water_level",
+    "official.wra_iow.flood_depth",
+    "official.wra.historical_flood",
+    "official.ncdr.cap",
+    "official.flood_potential.geojson",
+    "local.tainan.flood_sensor",
+)
 
 
 @dataclass(frozen=True)
@@ -72,6 +89,85 @@ def run_managed_runtime_ingestion_cycle(
     promotion_limit: int | None = None,
     promotion_adapter_keys: tuple[str, ...] | None = None,
     job_key: str = "runtime.managed.ingest.enabled_adapters",
+) -> int:
+    del (
+        adapter_by_key,
+        settings,
+        database_url,
+        staging_writer,
+        run_writer,
+        promotion_writer,
+        adapter_builder,
+        promote,
+        promotion_limit,
+        promotion_adapter_keys,
+        job_key,
+    )
+    return report_frozen_legacy()
+
+
+def run_v1_baseline_adapter_cycle(
+    adapter_by_key: Mapping[str, DataSourceAdapter],
+    *,
+    settings: WorkerSettings,
+    database_url: str | None = None,
+    staging_writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
+    promotion_writer: EvidencePromotionWriter | None = None,
+    source_catalog_reader: SourceCatalogReader | None = None,
+    promote: bool = False,
+    promotion_limit: int | None = None,
+    promotion_adapter_keys: tuple[str, ...] | None = None,
+    job_key: str = "runtime.v1_baseline.ingest.adapter",
+) -> ManagedRuntimeIngestionResult:
+    adapter_keys = tuple(adapter_by_key)
+    if len(adapter_keys) != 1:
+        return _invalid_v1_baseline_scope_result()
+    adapter_key = adapter_keys[0]
+    if (
+        adapter_key not in V1_BASELINE_ADAPTER_KEYS
+        or settings.enabled_adapter_keys != (adapter_key,)
+        or adapter_by_key[adapter_key].metadata.key != adapter_key
+        or promotion_adapter_keys not in {None, (adapter_key,)}
+    ):
+        return _invalid_v1_baseline_scope_result()
+    return _execute_managed_runtime_ingestion_cycle(
+        adapter_by_key,
+        settings=settings,
+        database_url=database_url,
+        staging_writer=staging_writer,
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+        source_catalog_reader=source_catalog_reader,
+        promote=promote,
+        promotion_limit=promotion_limit,
+        promotion_adapter_keys=promotion_adapter_keys,
+        job_key=job_key,
+    )
+
+
+def _invalid_v1_baseline_scope_result() -> ManagedRuntimeIngestionResult:
+    return ManagedRuntimeIngestionResult(
+        status="failed",
+        reason="invalid_v1_baseline_scope",
+        error_code="invalid_v1_baseline_scope",
+    )
+
+
+def _execute_managed_runtime_ingestion_cycle(
+    adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
+    *,
+    settings: WorkerSettings | None = None,
+    database_url: str | None = None,
+    staging_writer: StagingBatchWriter | None = None,
+    run_writer: IngestionRunSummaryWriter | None = None,
+    promotion_writer: EvidencePromotionWriter | None = None,
+    adapter_builder: RuntimeAdapterBuilder | None = None,
+    source_catalog_reader: SourceCatalogReader | None = None,
+    promote: bool = False,
+    promotion_limit: int | None = None,
+    promotion_adapter_keys: tuple[str, ...] | None = None,
+    job_key: str = "runtime.managed.ingest.enabled_adapters",
 ) -> ManagedRuntimeIngestionResult:
     cycle_started_at = datetime.now(UTC)
     resolved_settings = settings or load_worker_settings()
@@ -89,6 +185,45 @@ def run_managed_runtime_ingestion_cycle(
         )
         log_event("runtime.managed.ingestion.noop", reason="no_enabled_adapters")
         return ManagedRuntimeIngestionResult(status="skipped", reason="no_enabled_adapters")
+
+    try:
+        selected_adapter_keys = filter_catalog_enabled_adapter_keys(
+            selected_adapter_keys,
+            source_catalog_reader=resolve_source_catalog_reader(
+                database_url=database_url or resolved_settings.database_url,
+                source_catalog_reader=source_catalog_reader,
+            ),
+        )
+    except SourceCatalogUnavailable:
+        _record_source_catalog_unavailable_audit(
+            runtime_status_writer,
+            adapter_keys=selected_adapter_keys,
+            run_at=cycle_started_at,
+        )
+        log_event("runtime.source_catalog.unavailable")
+        return ManagedRuntimeIngestionResult(
+            status="failed",
+            reason="source_catalog_unavailable",
+            error_code="source_catalog_unavailable",
+        )
+
+    if not selected_adapter_keys:
+        record_runtime_selection(
+            runtime_status_writer,
+            enabled_adapter_keys=(),
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
+        log_event("runtime.source_catalog.disabled")
+        return ManagedRuntimeIngestionResult(status="skipped", reason="source_catalog_disabled")
+
+    resolved_settings = replace(
+        resolved_settings,
+        enabled_adapter_keys=selected_adapter_keys,
+    )
+    if promotion_adapter_keys is not None:
+        promotion_adapter_keys = tuple(
+            key for key in promotion_adapter_keys if key in selected_adapter_keys
+        )
 
     persistence = _resolve_persistence_writers(
         resolved_settings,
@@ -159,7 +294,7 @@ def run_managed_runtime_ingestion_cycle(
             available_adapter_keys=tuple(adapters),
         )
 
-    cycle = run_scheduled_ingestion_cycle(
+    cycle = _execute_scheduled_ingestion_cycle(
         adapters,
         settings=resolved_settings,
         job_key=job_key,
@@ -180,14 +315,73 @@ def run_managed_runtime_ingestion_cycle(
 
     promotion = PromotionResult(promoted=0, evidence_ids=())
     if promote and cycle.summaries:
-        target_adapter_keys = promotion_adapter_keys or _promotion_adapter_keys(cycle.summaries)
+        target_adapter_keys = (
+            promotion_adapter_keys
+            if promotion_adapter_keys is not None
+            else _promotion_adapter_keys(cycle.summaries)
+        )
+        if not target_adapter_keys:
+            log_event(
+                "runtime.managed.ingestion.completed",
+                status=status,
+                reason=reason,
+                adapter_count=len(cycle.summaries),
+                promoted=promotion.promoted,
+            )
+            return ManagedRuntimeIngestionResult(
+                status=status,
+                reason=reason,
+                summaries=cycle.summaries,
+                freshness_checks=cycle.freshness_checks,
+                promoted=promotion.promoted,
+                evidence_ids=promotion.evidence_ids,
+            )
+        promotion_writer_instance = _promotion_writer(persistence)
+        no_active_summaries = tuple(
+            summary
+            for summary in cycle.summaries
+            if summary.adapter_key in WARNING_EVENT_ADAPTER_KEYS
+            and summary.status == "succeeded"
+            and summary.error_code == "no_active_event"
+            and summary.items_fetched == 0
+            and summary.items_promoted == 0
+            and summary.items_rejected == 0
+        )
+        try:
+            for summary in no_active_summaries:
+                promotion_writer_instance.retire_warning_latest_for_no_active_event(
+                    adapter_key=summary.adapter_key,
+                    generation_started_at=summary.started_at,
+                    completed_at=summary.finished_at,
+                )
+        except Exception as exc:  # noqa: BLE001 - persist retirement failure as managed state
+            _record_pipeline_status_for_adapter_keys(
+                persistence.run_writer,
+                adapter_keys=tuple(summary.adapter_key for summary in no_active_summaries),
+                summaries=cycle.summaries,
+                status="failed",
+                complete=False,
+            )
+            log_event(
+                "runtime.managed.no_active_event_retirement.failed",
+                error_code=exc.__class__.__name__,
+                error_message=str(exc),
+            )
+            return ManagedRuntimeIngestionResult(
+                status="failed",
+                reason="no_active_event_retirement_failed",
+                summaries=cycle.summaries,
+                freshness_checks=cycle.freshness_checks,
+                error_code=exc.__class__.__name__,
+                error_message=str(exc),
+            )
         try:
             promotion = promote_accepted_staging(
-                _promotion_writer(persistence),
+                promotion_writer_instance,
                 limit=promotion_limit,
                 adapter_keys=target_adapter_keys,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - persist adapter failure as a managed result
             _record_pipeline_status_for_adapter_keys(
                 persistence.run_writer,
                 adapter_keys=target_adapter_keys,
@@ -244,9 +438,7 @@ def _resolve_persistence_writers(
 ) -> _ManagedPersistenceWriters | None:
     resolved_database_url = database_url or settings.database_url
     needs_database_url = (
-        staging_writer is None
-        or run_writer is None
-        or (promote and promotion_writer is None)
+        staging_writer is None or run_writer is None or (promote and promotion_writer is None)
     )
     if needs_database_url and not resolved_database_url:
         return None
@@ -265,9 +457,7 @@ def _resolve_persistence_writers(
         promotion_writer
         if promotion_writer is not None
         else (
-            PostgresEvidencePromotionWriter(database_url=resolved_database_url)
-            if promote
-            else None
+            PostgresEvidencePromotionWriter(database_url=resolved_database_url) if promote else None
         )
     )
 
@@ -276,6 +466,29 @@ def _resolve_persistence_writers(
         run_writer=resolved_run_writer,
         promotion_writer=resolved_promotion_writer,
     )
+
+
+def _record_source_catalog_unavailable_audit(
+    run_writer: IngestionRunSummaryWriter | None,
+    *,
+    adapter_keys: tuple[str, ...],
+    run_at: datetime,
+) -> None:
+    try:
+        record_runtime_selection(
+            run_writer,
+            enabled_adapter_keys=adapter_keys,
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        )
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=adapter_keys,
+            status="failed",
+            complete=False,
+            run_at=run_at,
+        )
+    except Exception:  # noqa: BLE001 - preserve the catalog failure boundary
+        log_event("runtime.source_catalog.audit_unavailable", status="failed")
 
 
 def _resolve_runtime_status_writer(
@@ -328,12 +541,26 @@ def _record_pipeline_status_for_adapter_keys(
     summary_by_key = {summary.adapter_key: summary for summary in summaries}
     for adapter_key in adapter_keys:
         summary = summary_by_key.get(adapter_key)
+        active_snapshot_raw_ref = (
+            summary.raw_ref
+            if (
+                status == "succeeded"
+                and complete
+                and summary is not None
+                and summary.status in {"succeeded", "partial"}
+                and summary.snapshot_generation_mode == "complete_replace"
+                and summary.snapshot_activation_eligible
+                and summary.raw_ref is not None
+            )
+            else None
+        )
         record_pipeline_status(
             run_writer,
             adapter_keys=(adapter_key,),
             status=status,
             complete=complete,
             run_at=summary.started_at if summary is not None else None,
+            active_snapshot_raw_ref=active_snapshot_raw_ref,
         )
 
 

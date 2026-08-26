@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-import json
 from typing import Any, Literal
 
 from app.jobs.ingestion import AdapterBatchRunSummary
-
+from app.pipelines.promotion import (
+    REVIEWED_WARNING_ADAPTER_KEYS,
+    warning_lifecycle_lock_key,
+)
 
 ConnectionFactory = Callable[[], Any]
 IngestionJobStatus = Literal["succeeded", "failed", "skipped"]
@@ -34,6 +37,11 @@ class PostgresIngestionRunWriter:
     ) -> None:
         with self._connect() as connection:
             with connection.cursor() as cursor:
+                if _is_successful_no_active_warning_summary(summary):
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                        (warning_lifecycle_lock_key(summary.adapter_key),),
+                    )
                 job_id = _insert_ingestion_job(
                     cursor,
                     summary,
@@ -86,9 +94,21 @@ class PostgresIngestionRunWriter:
         complete: bool,
         checked_at: datetime | None = None,
         run_at: datetime | None = None,
+        active_snapshot_raw_ref: str | None = None,
     ) -> None:
         if not adapter_keys:
             return
+        if active_snapshot_raw_ref is not None:
+            if (
+                not active_snapshot_raw_ref
+                or active_snapshot_raw_ref != active_snapshot_raw_ref.strip()
+                or len(active_snapshot_raw_ref) > 256
+            ):
+                raise ValueError("active snapshot raw ref must be a trimmed 1..256 value")
+            if status != "succeeded" or not complete:
+                raise ValueError(
+                    "active snapshot requires a succeeded complete pipeline status"
+                )
         resolved_checked_at = checked_at or datetime.now(UTC)
         resolved_run_at = run_at or resolved_checked_at
         with self._connect() as connection:
@@ -101,6 +121,15 @@ class PostgresIngestionRunWriter:
                         runtime_pipeline_checked_at = %s,
                         runtime_pipeline_complete = %s,
                         runtime_pipeline_run_at = %s,
+                        metadata = CASE
+                            WHEN %s::text IS NULL THEN metadata
+                            ELSE jsonb_set(
+                                COALESCE(metadata, '{}'::jsonb),
+                                '{active_snapshot_raw_ref}',
+                                to_jsonb(%s::text),
+                                true
+                            )
+                        END,
                         updated_at = now()
                     WHERE adapter_key = ANY(%s::text[])
                         AND (
@@ -119,6 +148,8 @@ class PostgresIngestionRunWriter:
                         resolved_checked_at,
                         complete,
                         resolved_run_at,
+                        active_snapshot_raw_ref,
+                        active_snapshot_raw_ref,
                         list(adapter_keys),
                         resolved_run_at,
                         resolved_run_at,
@@ -354,6 +385,25 @@ def _job_status(summary: AdapterBatchRunSummary) -> IngestionJobStatus:
     if summary.status == "partial":
         return "succeeded"
     return summary.status
+
+
+def _is_successful_no_active_warning_summary(
+    summary: AdapterBatchRunSummary,
+) -> bool:
+    return (
+        summary.adapter_key in REVIEWED_WARNING_ADAPTER_KEYS
+        and summary.status == "succeeded"
+        and summary.error_code == "no_active_event"
+        and summary.items_fetched == 0
+        and summary.items_promoted == 0
+        and summary.items_rejected == 0
+        and summary.raw_ref is None
+        and summary.source_timestamp_min is None
+        and summary.source_timestamp_max is None
+        and summary.station_inventory_proof is None
+        and summary.event_active_from_min is None
+        and summary.event_active_until_max is None
+    )
 
 
 def _adapter_run_status(summary: AdapterBatchRunSummary) -> Literal["succeeded", "failed", "partial"]:

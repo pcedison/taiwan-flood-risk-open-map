@@ -2,25 +2,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import os
 import socket
 import threading
 import time
+from collections.abc import Callable
 from types import TracebackType
+from typing import Self
 from uuid import uuid4
 
 from app.adapters.registry import ADAPTER_REGISTRY
 from app.cli.persistence import build_demo_persistence_writers
 from app.config import WorkerSettings
+from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
 from app.jobs.runtime import build_runtime_adapters
-from app.jobs.runtime_managed import run_managed_runtime_ingestion_cycle
+from app.jobs.runtime_managed import _execute_managed_runtime_ingestion_cycle
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.promotion import PromotionResult, promote_accepted_staging
-from app.scheduler import run_scheduled_ingestion_cycle
+from app.scheduler import _execute_scheduled_ingestion_cycle
 
 
 class _SchedulerLeaseHeartbeat:
@@ -46,7 +48,7 @@ class _SchedulerLeaseHeartbeat:
     def lost(self) -> bool:
         return self._lost.is_set()
 
-    def __enter__(self) -> _SchedulerLeaseHeartbeat:
+    def __enter__(self) -> Self:
         self._thread.start()
         return self
 
@@ -98,7 +100,15 @@ def run_managed_enabled_adapters(
     settings: WorkerSettings,
     database_url: str | None,
 ) -> int:
-    result = run_managed_runtime_ingestion_cycle(
+    return report_frozen_legacy()
+
+
+def _legacy_run_managed_enabled_adapters(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+) -> int:
+    result = _execute_managed_runtime_ingestion_cycle(
         settings=settings,
         database_url=database_url,
         adapter_builder=build_runtime_adapters,
@@ -116,6 +126,16 @@ def run_managed_enabled_adapters(
 
 
 def run_managed_enabled_adapters_loop(
+    *,
+    settings: WorkerSettings,
+    database_url: str | None,
+    once: bool,
+    max_ticks: int | None,
+) -> int:
+    return report_frozen_legacy()
+
+
+def _legacy_run_managed_enabled_adapters_loop(
     *,
     settings: WorkerSettings,
     database_url: str | None,
@@ -195,7 +215,7 @@ def run_managed_enabled_adapters_loop(
                 renew=acquire_or_renew_lease,
                 interval_seconds=heartbeat_interval_seconds,
             ) as heartbeat:
-                result = run_managed_runtime_ingestion_cycle(
+                result = _execute_managed_runtime_ingestion_cycle(
                     settings=settings,
                     database_url=resolved_database_url,
                     adapter_builder=build_runtime_adapters,
@@ -252,13 +272,28 @@ def run_official_demo(
     persist: bool,
     database_url: str | None,
 ) -> int:
+    if persist:
+        return report_frozen_legacy()
+    return _legacy_run_official_demo(
+        settings=settings,
+        persist=persist,
+        database_url=database_url,
+    )
+
+
+def _legacy_run_official_demo(
+    *,
+    settings: WorkerSettings,
+    persist: bool,
+    database_url: str | None,
+) -> int:
     adapters = build_official_demo_adapters()
     persistence = (
         build_demo_persistence_writers(settings, database_url=database_url)
         if persist
         else None
     )
-    result = run_scheduled_ingestion_cycle(
+    result = _execute_scheduled_ingestion_cycle(
         adapters,
         settings=settings,
         job_key="worker.official_demo",

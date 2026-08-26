@@ -2,20 +2,38 @@ from __future__ import annotations
 
 import pytest
 
+from app.adapters.contracts import AdapterMetadata, SourceFamily
 from app.adapters.dcard import (
     ADAPTER_DISABLED_REASON as DCARD_DISABLED_REASON,
+)
+from app.adapters.dcard import (
     METADATA as DCARD_METADATA,
+)
+from app.adapters.dcard import (
     REQUIRED_ACCEPTANCE_FIELDS as DCARD_REQUIRED_ACCEPTANCE_FIELDS,
+)
+from app.adapters.dcard import (
     SOURCE_APPROVAL_STATUS as DCARD_SOURCE_APPROVAL_STATUS,
 )
 from app.adapters.ptt import (
     ADAPTER_DISABLED_REASON as PTT_DISABLED_REASON,
+)
+from app.adapters.ptt import (
     METADATA as PTT_METADATA,
+)
+from app.adapters.ptt import (
     REQUIRED_ACCEPTANCE_FIELDS as PTT_REQUIRED_ACCEPTANCE_FIELDS,
+)
+from app.adapters.ptt import (
     SOURCE_APPROVAL_STATUS as PTT_SOURCE_APPROVAL_STATUS,
 )
-from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
+from app.adapters.registry import ADAPTER_REGISTRY, adapter_is_enabled, enabled_adapter_keys
+from app.adapters.wra import (
+    WRA_FLOOD_WARNING_INDEX_URL,
+    WRA_FLOOD_WARNING_KML_URLS,
+)
 from app.config import load_worker_settings
+from app.jobs.runtime import build_runtime_adapters
 
 
 def test_default_enabled_adapters_are_official_only() -> None:
@@ -63,8 +81,14 @@ def test_official_source_flags_can_disable_individual_adapters() -> None:
 def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     settings = load_worker_settings({})
 
+    assert settings.source_cwa_heavy_rain_warning_enabled is False
+    assert settings.source_cwa_heavy_rain_warning_api_enabled is False
+    assert settings.source_cwa_heavy_rain_warning_contract_enabled is False
+    assert settings.cwa_heavy_rain_warning_cap_url is None
+    assert settings.cwa_heavy_rain_warning_timeout_seconds == 8
     assert settings.source_cwa_api_enabled is False
     assert settings.source_wra_api_enabled is False
+    assert settings.source_wra_historical_flood_api_enabled is False
     assert settings.source_flood_potential_geojson_enabled is False
     assert settings.source_ptt_candidate_approval_ack is False
     assert settings.source_dcard_candidate_approval_ack is False
@@ -74,8 +98,163 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.wra_api_url is None
     assert settings.wra_api_token is None
     assert settings.wra_api_timeout_seconds == 8
+    assert settings.wra_historical_flood_index_url is None
+    assert settings.wra_historical_flood_timeout_seconds == 8
     assert settings.flood_potential_geojson_url is None
     assert settings.flood_potential_geojson_timeout_seconds == 8
+    assert settings.source_ncdr_cap_enabled is False
+    assert settings.source_ncdr_cap_api_enabled is False
+    assert settings.source_ncdr_cap_contract_enabled is False
+    assert settings.ncdr_alerts_api_key is None
+    assert settings.ncdr_datastore_api_url is None
+    assert settings.ncdr_dump_api_url is None
+    assert settings.ncdr_max_cap_ids_per_run == 50
+    assert settings.ncdr_cap_timeout_seconds == 8
+    assert settings.source_npa_police_radio_enabled is False
+    assert settings.source_npa_police_radio_api_enabled is False
+    assert settings.source_npa_police_radio_contract_enabled is False
+    assert settings.npa_police_radio_traffic_url is None
+    assert settings.npa_police_radio_timeout_seconds == 8
+    assert settings.source_wra_flood_warning_enabled is False
+    assert settings.source_wra_flood_warning_api_enabled is False
+    assert settings.source_wra_flood_warning_contract_enabled is False
+    assert settings.wra_flood_warning_timeout_seconds == 8
+
+
+def test_police_radio_requires_all_three_independent_gates() -> None:
+    required = {
+        "SOURCE_NPA_POLICE_RADIO_ENABLED": "true",
+        "SOURCE_NPA_POLICE_RADIO_API_ENABLED": "true",
+        "SOURCE_NPA_POLICE_RADIO_CONTRACT_ENABLED": "true",
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.npa.police_radio_traffic",
+    }
+
+    for missing in (
+        "SOURCE_NPA_POLICE_RADIO_ENABLED",
+        "SOURCE_NPA_POLICE_RADIO_API_ENABLED",
+        "SOURCE_NPA_POLICE_RADIO_CONTRACT_ENABLED",
+    ):
+        values = dict(required)
+        values.pop(missing)
+        assert enabled_adapter_keys(load_worker_settings(values)) == ()
+        assert build_runtime_adapters(load_worker_settings(values)) == {}
+
+    calls: list[tuple[str, int]] = []
+
+    def fetch_json(url: str, timeout_seconds: int) -> object:
+        calls.append((url, timeout_seconds))
+        return []
+
+    settings = load_worker_settings(
+        {
+            **required,
+            "NPA_POLICE_RADIO_TRAFFIC_URL": "https://example.test/police/roads",
+            "NPA_POLICE_RADIO_TIMEOUT_SECONDS": "5",
+        }
+    )
+    assert enabled_adapter_keys(settings) == ("official.npa.police_radio_traffic",)
+    adapters = build_runtime_adapters(
+        settings,
+        police_radio_traffic_fetch_json=fetch_json,
+    )
+    assert tuple(adapters) == ("official.npa.police_radio_traffic",)
+    assert adapters["official.npa.police_radio_traffic"].run().no_active_event is True
+    assert calls == [("https://example.test/police/roads", 5)]
+
+
+def test_police_radio_registry_metadata_is_context_only_and_default_off() -> None:
+    metadata = ADAPTER_REGISTRY["official.npa.police_radio_traffic"]
+
+    assert metadata.enabled_by_default is False
+    assert metadata.data_gov_dataset_id == "15221"
+    assert metadata.data_gov_url == "https://data.gov.tw/dataset/15221"
+    assert metadata.resource_url == (
+        "https://rtr.pbs.gov.tw/NMP103_PbsWS/resources/roadData/opendata"
+    )
+    assert "unverified" in " ".join(metadata.limitations).lower()
+
+
+def test_wra_flood_warning_requires_all_three_independent_gates() -> None:
+    required = {
+        "SOURCE_WRA_FLOOD_WARNING_ENABLED": "true",
+        "SOURCE_WRA_FLOOD_WARNING_API_ENABLED": "true",
+        "SOURCE_WRA_FLOOD_WARNING_CONTRACT_ENABLED": "true",
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.wra.flood_warning",
+    }
+
+    for missing in (
+        "SOURCE_WRA_FLOOD_WARNING_ENABLED",
+        "SOURCE_WRA_FLOOD_WARNING_API_ENABLED",
+        "SOURCE_WRA_FLOOD_WARNING_CONTRACT_ENABLED",
+    ):
+        values = dict(required)
+        values.pop(missing)
+        assert enabled_adapter_keys(load_worker_settings(values)) == ()
+        assert build_runtime_adapters(load_worker_settings(values)) == {}
+
+    index_calls: list[tuple[str, int]] = []
+    text_calls: list[tuple[str, int]] = []
+
+    def fetch_json(url: str, timeout_seconds: int) -> object:
+        index_calls.append((url, timeout_seconds))
+        return [{"fileex": "kml", "sourceurl": WRA_FLOOD_WARNING_KML_URLS[0]}]
+
+    def fetch_text(url: str, timeout_seconds: int) -> str:
+        text_calls.append((url, timeout_seconds))
+        return (
+            '<?xml version="1.0"?>'
+            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>'
+        )
+
+    settings = load_worker_settings(
+        {**required, "WRA_FLOOD_WARNING_TIMEOUT_SECONDS": "5"}
+    )
+    assert enabled_adapter_keys(settings) == ("official.wra.flood_warning",)
+    adapters = build_runtime_adapters(
+        settings,
+        wra_flood_warning_fetch_json=fetch_json,
+        wra_flood_warning_fetch_text=fetch_text,
+    )
+    assert tuple(adapters) == ("official.wra.flood_warning",)
+    assert adapters["official.wra.flood_warning"].run().no_active_event is True
+    assert index_calls == [(WRA_FLOOD_WARNING_INDEX_URL, 5)]
+    assert text_calls == [(WRA_FLOOD_WARNING_KML_URLS[0], 5)]
+
+
+def test_wra_flood_warning_registry_metadata_is_context_only_and_default_off() -> None:
+    metadata = ADAPTER_REGISTRY["official.wra.flood_warning"]
+
+    assert metadata.enabled_by_default is False
+    assert metadata.data_gov_dataset_id == "5982"
+    assert metadata.data_gov_url == "https://data.gov.tw/dataset/5982"
+    assert metadata.resource_url == WRA_FLOOD_WARNING_INDEX_URL
+    assert any(
+        "active_fixture_reviewed=false" in limitation
+        for limitation in metadata.limitations
+    )
+
+def test_ncdr_runtime_config_reads_two_stage_settings() -> None:
+    settings = load_worker_settings(
+        {
+            "SOURCE_NCDR_CAP_ENABLED": "true",
+            "SOURCE_NCDR_CAP_API_ENABLED": "true",
+            "SOURCE_NCDR_CAP_CONTRACT_ENABLED": "true",
+            "NCDR_ALERTS_API_KEY": "test-secret",
+            "NCDR_DATASTORE_API_URL": "https://example.test/ncdr/datastore",
+            "NCDR_DUMP_API_URL": "https://example.test/ncdr/dump/datastore",
+            "NCDR_MAX_CAP_IDS_PER_RUN": "17",
+            "NCDR_CAP_TIMEOUT_SECONDS": "5",
+        }
+    )
+
+    assert settings.source_ncdr_cap_enabled is True
+    assert settings.source_ncdr_cap_api_enabled is True
+    assert settings.source_ncdr_cap_contract_enabled is True
+    assert settings.ncdr_alerts_api_key == "test-secret"
+    assert settings.ncdr_datastore_api_url == "https://example.test/ncdr/datastore"
+    assert settings.ncdr_dump_api_url == "https://example.test/ncdr/dump/datastore"
+    assert settings.ncdr_max_cap_ids_per_run == 17
+    assert settings.ncdr_cap_timeout_seconds == 5
 
 
 def test_cwa_api_runtime_client_config_reads_env() -> None:
@@ -94,6 +273,111 @@ def test_cwa_api_runtime_client_config_reads_env() -> None:
     assert settings.cwa_api_timeout_seconds == 4
 
 
+def test_cwa_heavy_rain_warning_requires_all_independent_gates() -> None:
+    required = {
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+        "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+    }
+
+    for missing in required:
+        values = {**required, "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning"}
+        values.pop(missing)
+        assert "official.cwa.heavy_rain_warning" not in enabled_adapter_keys(
+            load_worker_settings(values)
+        )
+
+    settings = load_worker_settings(
+        {
+            **required,
+            "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning",
+            "CWA_HEAVY_RAIN_WARNING_CAP_URL": "https://example.test/cap",
+            "CWA_HEAVY_RAIN_WARNING_TIMEOUT_SECONDS": "5",
+        }
+    )
+    assert enabled_adapter_keys(settings) == ("official.cwa.heavy_rain_warning",)
+    assert settings.cwa_heavy_rain_warning_cap_url == "https://example.test/cap"
+    assert settings.cwa_heavy_rain_warning_timeout_seconds == 5
+
+
+def test_reconstructed_heavy_rain_metadata_cannot_bypass_key_based_gates() -> None:
+    reconstructed = AdapterMetadata(
+        key="official.cwa.heavy_rain_warning",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=True,
+        display_name="Reconstructed same-key metadata",
+    )
+
+    assert adapter_is_enabled(reconstructed, load_worker_settings({})) is False
+    assert adapter_is_enabled(
+        reconstructed,
+        load_worker_settings(
+            {
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+                "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+                "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+            }
+        ),
+    ) is True
+
+
+def test_cwa_heavy_rain_warning_registry_metadata_is_audit_only_and_default_off() -> None:
+    metadata = ADAPTER_REGISTRY["official.cwa.heavy_rain_warning"]
+
+    assert metadata.enabled_by_default is False
+    assert metadata.data_gov_dataset_id == "W-C0033-003"
+    assert metadata.resource_url is not None
+    assert "W-C0033-003" in metadata.resource_url
+    assert "unreviewed" in " ".join(metadata.limitations).lower()
+
+
+def test_cwa_heavy_rain_warning_runtime_builder_requires_every_gate_and_credential() -> None:
+    gates = {
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+        "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+        "WORKER_ENABLED_ADAPTER_KEYS": "official.cwa.heavy_rain_warning",
+    }
+    for missing in (
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED",
+        "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED",
+        "CWA_API_AUTHORIZATION",
+    ):
+        values = dict(gates)
+        values.pop(missing)
+        assert build_runtime_adapters(load_worker_settings(values)) == {}
+
+    calls: list[tuple[str, str, int]] = []
+
+    def fetch_cap(url: str, authorization: str, timeout_seconds: int) -> str:
+        calls.append((url, authorization, timeout_seconds))
+        return '<alerts xmlns="urn:oasis:names:tc:emergency:cap:1.2" />'
+
+    adapters = build_runtime_adapters(
+        load_worker_settings(
+            {
+                **gates,
+                "CWA_HEAVY_RAIN_WARNING_CAP_URL": "https://example.test/cap",
+                "CWA_HEAVY_RAIN_WARNING_TIMEOUT_SECONDS": "6",
+            }
+        ),
+        cwa_heavy_rain_warning_fetch_cap=fetch_cap,
+    )
+    assert tuple(adapters) == ("official.cwa.heavy_rain_warning",)
+    assert adapters["official.cwa.heavy_rain_warning"].run().no_active_event is True
+    assert calls == [
+        (
+            "https://example.test/cap?format=CAP",
+            "fixture-authorization-value",
+            6,
+        )
+    ]
+
+
 def test_wra_api_runtime_client_config_reads_env() -> None:
     settings = load_worker_settings(
         {
@@ -108,6 +392,27 @@ def test_wra_api_runtime_client_config_reads_env() -> None:
     assert settings.wra_api_url == "https://example.test/wra/water-level"
     assert settings.wra_api_token == "optional-token"
     assert settings.wra_api_timeout_seconds == 6
+
+
+def test_wra_historical_flood_config_is_independent_from_water_level() -> None:
+    settings = load_worker_settings(
+        {
+            "SOURCE_WRA_ENABLED": "true",
+            "SOURCE_WRA_API_ENABLED": "true",
+            "SOURCE_WRA_HISTORICAL_FLOOD_ENABLED": "false",
+            "SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED": "true",
+            "WRA_HISTORICAL_FLOOD_INDEX_URL": "https://example.test/history-index",
+            "WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS": "7",
+        }
+    )
+
+    assert settings.source_wra_historical_flood_enabled is False
+    assert settings.source_wra_historical_flood_api_enabled is True
+    assert settings.wra_historical_flood_index_url == (
+        "https://example.test/history-index"
+    )
+    assert settings.wra_historical_flood_timeout_seconds == 7
+    assert "official.wra.historical_flood" not in enabled_adapter_keys(settings)
 
 
 def test_flood_potential_geojson_runtime_client_config_reads_env() -> None:
@@ -315,7 +620,11 @@ def test_explicit_adapter_allowlist_does_not_bypass_sample_data_gate() -> None:
         (
             "official.ncdr.cap",
             "SOURCE_NCDR_CAP_ENABLED",
-            {"SOURCE_NCDR_CAP_API_ENABLED": "true"},
+            {
+                "SOURCE_NCDR_CAP_API_ENABLED": "true",
+                "SOURCE_NCDR_CAP_CONTRACT_ENABLED": "true",
+                "NCDR_ALERTS_API_KEY": "test-secret",
+            },
         ),
         (
             "official.civil_iot.flood_sensor",
@@ -583,3 +892,36 @@ def test_unknown_adapter_allowlist_key_raises() -> None:
 
     with pytest.raises(ValueError, match="official.unknown.sensor"):
         enabled_adapter_keys(settings)
+
+
+def test_all_safe_fast_incident_sources_are_disabled_with_no_environment() -> None:
+    """No environment at all must leave every new incident source off."""
+
+    settings = load_worker_settings({})
+    keys = (
+        "official.cwa.heavy_rain_warning",
+        "official.ncdr.cap",
+        "official.npa.police_radio_traffic",
+        "official.wra.flood_warning",
+    )
+
+    enabled = enabled_adapter_keys(settings)
+    for key in keys:
+        assert ADAPTER_REGISTRY[key].enabled_by_default is False, key
+        assert key not in enabled, key
+        assert adapter_is_enabled(ADAPTER_REGISTRY[key], settings) is not True, key
+    assert build_runtime_adapters(settings) == {}
+
+
+def test_enabling_only_the_source_flag_never_builds_an_incident_adapter() -> None:
+    """A single flag must not be enough; every independent gate is required."""
+
+    for flag, key in (
+        ("SOURCE_NCDR_CAP_ENABLED", "official.ncdr.cap"),
+        ("SOURCE_NPA_POLICE_RADIO_ENABLED", "official.npa.police_radio_traffic"),
+        ("SOURCE_WRA_FLOOD_WARNING_ENABLED", "official.wra.flood_warning"),
+    ):
+        settings = load_worker_settings(
+            {flag: "true", "WORKER_ENABLED_ADAPTER_KEYS": key}
+        )
+        assert build_runtime_adapters(settings) == {}, key

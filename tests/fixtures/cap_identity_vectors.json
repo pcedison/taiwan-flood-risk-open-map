@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "sender": "sender@example.tw",
+      "identifier": "alert-1",
+      "sent": "2026-08-24T03:04:05.000000Z",
+      "admin_code": "67000000",
+      "message_digest": "8fff28c9e7630535ac7df92504b443f1c8c4818a6d4223d72be7e33b6955e849",
+      "origin_digest": "1425d38d7b9591c97400a7beeea5f8aab16dd20d2db3b3c25a2cdb2fcff240e0"
+    },
+    {
+      "sender": "a|b",
+      "identifier": "c",
+      "sent": "2026-08-24T03:04:05.000000Z",
+      "admin_code": "67000000",
+      "message_digest": "0cddd41ff889825cccc30940a919dd52ea38b1590c3bed6ef49c826cfc8eb216",
+      "origin_digest": "e74025e8ea3e281f71a6bb664e9b260c7467c80d3ab4d4c08f294c4d00850294"
+    },
+    {
+      "sender": "a",
+      "identifier": "b|c",
+      "sent": "2026-08-24T03:04:05.000000Z",
+      "admin_code": "67000000",
+      "message_digest": "0b003b2031a7e713eb2e84b2d350f31cc51d0036a781e506d9f0846e9ed5c79d",
+      "origin_digest": "460a3ac34b78fb98e9d02e373b80db1e1c68f538c7ce8e4263ebd3cd2b824ba4"
+    }
+  ],
+  "invalid_cases": [
+    {
+      "sender": "sender@example.tw",
+      "identifier": "alert-1",
+      "sent": "2026-08-24T03:04:05.000000Z",
+      "admin_code": "６７００００００",
+      "reason": "admin_code_must_be_ascii"
+    }
+  ]
+}

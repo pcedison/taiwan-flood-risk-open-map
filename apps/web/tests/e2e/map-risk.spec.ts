@@ -561,7 +561,12 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
 
   await expect(page.getByText(/定位精度：門牌/)).toBeVisible();
   await expect(page.getByText("已定位：台南市安南區長溪路二段410巷16弄1號").first()).toBeVisible();
-  await expect(page.getByText(/歷史與淹水潛勢參考為中/)).toBeVisible({ timeout: 20_000 });
+  // v1 serves persisted data only. With no ingested evidence for this point the
+  // app must disclose the gap rather than infer a level, so this asserts the
+  // fail-closed narrative instead of a specific historical level.
+  await expect(
+    page.getByText(/本次資料不足，暫不把即時或歷史參考推成結論/),
+  ).toBeVisible({ timeout: 20_000 });
   await expect.poll(() => riskCalls).toBe(1);
 
   await page.getByLabel("搜尋地點").fill("宜蘭縣礁溪鄉");

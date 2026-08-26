@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ssl
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Self, cast
 
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.wra_iow import (
@@ -13,7 +13,7 @@ from app.adapters.wra_iow import (
 from app.adapters.wra_iow import flood_depth as wra_iow_flood_depth_module
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
-
+from app.pipelines.staging import build_staging_batch
 
 FETCHED_AT = datetime(2026, 6, 27, 12, 0, tzinfo=UTC)
 
@@ -95,6 +95,8 @@ def test_wra_iow_flood_depth_join_outputs_flood_report() -> None:
     assert first_raw["station_name"] == "斗六市測站"
     assert first_raw["observed_at"] == "2026-06-27T11:55:00+00:00"
     assert first_raw["flood_depth_cm"] == 12.5
+    assert first_raw["evidence_scope"] == "current"
+    assert build_staging_batch(result).accepted[0].payload["evidence_scope"] == "current"
     assert first_raw["county"] == "雲林縣"
     assert first_raw["town"] == "斗六市"
     assert first_raw["authority"] == "雲林縣政府"
@@ -209,7 +211,7 @@ def test_wra_iow_fetch_uses_taiwan_gov_tls_context(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     class FakeResponse:
-        def __enter__(self) -> "FakeResponse":
+        def __enter__(self) -> Self:
             return self
 
         def __exit__(self, *args: object) -> None:

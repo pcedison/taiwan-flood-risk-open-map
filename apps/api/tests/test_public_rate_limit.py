@@ -185,8 +185,8 @@ def test_public_endpoint_rate_limited_returns_429(
     monkeypatch.setattr(public_routes, "check_rate_limit", rate_limited)
     monkeypatch.setattr(
         public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: pytest.fail("rate-limited risk request should stop before work"),
+        "_assessment_service",
+        lambda _settings: pytest.fail("rate-limited risk request should stop before work"),
     )
     monkeypatch.setattr(
         public_routes,

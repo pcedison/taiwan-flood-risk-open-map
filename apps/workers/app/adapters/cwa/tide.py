@@ -25,7 +25,6 @@ from app.adapters.contracts import (
     SourceFamily,
 )
 
-
 FetchJson = Callable[[str, int], Mapping[str, Any]]
 
 CWA_TIDE_LEVEL_API_URL = "https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-B0075-001"

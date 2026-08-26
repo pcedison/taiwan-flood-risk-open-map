@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-import hashlib
-import json
-from typing import Any, Iterable, Mapping, Protocol
-
+from typing import Any, Literal, Protocol
 
 STATION_ID_MANIFEST_VERSION = "station-id-json-v1"
+SnapshotGenerationMode = Literal["complete_replace"]
 
 
 class SourceFamily(str, Enum):
@@ -50,6 +52,7 @@ class AdapterMetadata:
     update_frequency: str | None = None
     license: str | None = None
     limitations: tuple[str, ...] = field(default_factory=tuple)
+    snapshot_generation_mode: SnapshotGenerationMode | None = None
 
 
 @dataclass(frozen=True)
@@ -169,12 +172,46 @@ class StationInventoryProof:
 
 
 @dataclass(frozen=True)
+class SourceRejection:
+    source_id: str
+    reason_code: str
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.source_id, str)
+            or not self.source_id
+            or self.source_id != self.source_id.strip()
+            or len(self.source_id) > 512
+        ):
+            raise ValueError("source_id must be a trimmed 1..512 character string")
+        if (
+            not isinstance(self.reason_code, str)
+            or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", self.reason_code) is None
+        ):
+            raise ValueError("reason_code must be a canonical reason code")
+
+
+@dataclass(frozen=True)
 class AdapterRunResult:
     adapter_key: str
     fetched: tuple[RawSourceItem, ...]
     normalized: tuple[NormalizedEvidence, ...]
     rejected: tuple[str, ...] = field(default_factory=tuple)
+    source_rejections: tuple[SourceRejection, ...] = field(default_factory=tuple)
     station_inventory_proof: StationInventoryProof | None = None
+    no_active_event: bool = False
+
+    def __post_init__(self) -> None:
+        if len(self.source_rejections) > 256:
+            raise ValueError("source_rejections must contain at most 256 records")
+        source_rejection_ids = tuple(rejection.source_id for rejection in self.source_rejections)
+        if len(source_rejection_ids) != len(set(source_rejection_ids)):
+            raise ValueError("source_rejections source_ids must be unique")
+        if not set(source_rejection_ids).issubset(self.rejected):
+            raise ValueError("source_rejections source_ids must be a subset of rejected")
+        normalized_source_ids = {evidence.source_id for evidence in self.normalized}
+        if set(source_rejection_ids).intersection(normalized_source_ids):
+            raise ValueError("source_rejections source_ids must be disjoint from normalized source_ids")
 
 
 class DataSourceAdapter(Protocol):

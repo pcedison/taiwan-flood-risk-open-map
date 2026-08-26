@@ -1,19 +1,29 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import datetime
+import hashlib
 import json
 import re
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
 import psycopg
-
-from app.core.db import pooled_connection
 from psycopg.types.json import Jsonb
 
+from app.core.db import pooled_connection
 
 ConnectionFactory = Callable[[], Any]
+EvidenceLocationPrecision = Literal[
+    "point",
+    "road_or_lane",
+    "poi",
+    "admin_area",
+    "polygon",
+    "inferred",
+    "map_click",
+    "unknown",
+]
 RealtimeJurisdictionResolutionStatus = Literal[
     "verified",
     "boundary_unverified",
@@ -22,7 +32,18 @@ RealtimeJurisdictionResolutionStatus = Literal[
     "unavailable",
 ]
 QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
+RECENT_INCIDENT_CONTEXT_WINDOW = timedelta(hours=6)
+RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE = timedelta(minutes=5)
+RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS = (
+    "official.npa.police_radio_traffic",
+    "official.wra.flood_warning",
+)
+_RECENT_INCIDENT_CONTEXT_MIN_RADIUS_M = 50
+_RECENT_INCIDENT_CONTEXT_MAX_RADIUS_M = 2_000
+_RECENT_INCIDENT_CONTEXT_SUPPRESSED_STATES = ("resolved", "excluded")
 _LATEST_OFFICIAL_RELATION = "official_realtime_latest"
+_DEFAULT_FRESHNESS_THRESHOLD_SECONDS = 600
+_MAX_FRESHNESS_THRESHOLD_SECONDS = 86_400
 
 
 class EvidenceRepositoryUnavailable(RuntimeError):
@@ -55,6 +76,13 @@ class EvidenceRecord:
     warning_level_m: float | None = None
     flood_depth_cm: float | None = None
     realtime_risk_factor: float | None = None
+    evidence_scope: Literal["current", "historical", "context", "unspecified"] = "unspecified"
+    adapter_key: str | None = None
+    official_event_origin_key: str | None = None
+    active_from: datetime | None = None
+    active_until: datetime | None = None
+    location_precision: EvidenceLocationPrecision = "unknown"
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -98,6 +126,8 @@ class RealtimeSourceHealthRow:
     pagination_complete: bool | None = None
     inventory_manifest_sha256: str | None = None
     inventory_proof_status: str = "missing"
+    latest_run_error_code: str | None = None
+    freshness_threshold_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -200,6 +230,8 @@ class RiskAssessmentPersistence:
     evidence_ids: tuple[str, ...]
     created_at: datetime
     expires_at: datetime
+    overall_level: str | None = None
+    dominant_mode: str | None = None
 
 
 def persist_risk_assessment(
@@ -294,6 +326,14 @@ def persist_risk_assessment(
     privacy_bucket = _privacy_bucket(assessment.lat, assessment.lng)
     coarse_lat = _privacy_coordinate(assessment.lat)
     coarse_lng = _privacy_coordinate(assessment.lng)
+    storage_overall = (
+        _storage_risk_level(assessment.overall_level)
+        if assessment.overall_level is not None
+        else _max_storage_risk_level(
+            assessment.realtime_level,
+            assessment.historical_level,
+        )
+    )
     params = (
         None,
         coarse_lat,
@@ -311,7 +351,7 @@ def persist_risk_assessment(
         assessment.confidence_score,
         _storage_risk_level(assessment.realtime_level),
         _storage_risk_level(assessment.historical_level),
-        _max_storage_risk_level(assessment.realtime_level, assessment.historical_level),
+        storage_overall,
         Jsonb(assessment.explanation),
         Jsonb(assessment.data_freshness),
         Jsonb(assessment.result_snapshot),
@@ -321,10 +361,12 @@ def persist_risk_assessment(
         list(assessment.evidence_ids),
     )
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -359,32 +401,46 @@ def query_nearby_evidence(
     bounded_limit = max(1, min(limit, 100))
     official_realtime_limit = 1
     sql = """
-        WITH query_point AS (
+        WITH query_point_base AS (
             SELECT
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
-                (%s::double precision / 90000.0) AS degree_radius,
-                (%s::double precision / 90000.0) AS rainfall_degree,
-                (%s::double precision / 90000.0) AS water_degree
+                %s::double precision AS radius_m,
+                %s::double precision AS rainfall_m,
+                %s::double precision AS water_m
+        ),
+        query_point AS (
+            SELECT
+                *,
+                (radius_m / 90000.0) AS degree_radius,
+                (rainfall_m / 90000.0) AS rainfall_degree,
+                (water_m / 90000.0) AS water_degree
+            FROM query_point_base
         ),
         candidate_rows AS (
             SELECT *
             FROM (
                 SELECT
                     e.*,
-                    (ST_Distance(e.geom, qp.geom) * 90000.0) AS computed_distance_to_query_m,
+                    ds.adapter_key,
+                    ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
                     %s::double precision AS branch_relevance_m
                 FROM evidence e
+                JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
                     AND e.geom IS NOT NULL
+                    AND (
+                        ds.adapter_key <> 'official.wra.historical_flood'
+                        OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
+                    )
                     AND NOT (
                         e.source_type = 'official'
                         AND e.event_type IN ('rainfall', 'water_level')
                     )
                     AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
-                    AND ST_DWithin(e.geom, qp.geom, qp.degree_radius)
+                    AND ST_DWithin(e.geom::geography, qp.geog, qp.radius_m)
                 ORDER BY
                     computed_distance_to_query_m ASC,
                     e.occurred_at DESC NULLS LAST,
@@ -396,9 +452,11 @@ def query_nearby_evidence(
             FROM (
                 SELECT
                     e.*,
+                    ds.adapter_key,
                     ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
                     %s::double precision AS branch_relevance_m
                 FROM evidence e
+                JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
@@ -407,7 +465,7 @@ def query_nearby_evidence(
                     AND e.event_type = 'rainfall'
                     AND (%s::timestamptz IS NULL OR e.observed_at >= %s::timestamptz)
                     AND e.geom && ST_Expand(qp.geom, qp.rainfall_degree)
-                    AND ST_DWithin(e.geom, qp.geom, qp.rainfall_degree)
+                    AND ST_DWithin(e.geom::geography, qp.geog, qp.rainfall_m)
                 ORDER BY
                     computed_distance_to_query_m ASC,
                     e.observed_at DESC NULLS LAST,
@@ -419,9 +477,11 @@ def query_nearby_evidence(
             FROM (
                 SELECT
                     e.*,
+                    ds.adapter_key,
                     ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
                     %s::double precision AS branch_relevance_m
                 FROM evidence e
+                JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
@@ -430,7 +490,7 @@ def query_nearby_evidence(
                     AND e.event_type = 'water_level'
                     AND (%s::timestamptz IS NULL OR e.observed_at >= %s::timestamptz)
                     AND e.geom && ST_Expand(qp.geom, qp.water_degree)
-                    AND ST_DWithin(e.geom, qp.geom, qp.water_degree)
+                    AND ST_DWithin(e.geom::geography, qp.geog, qp.water_m)
                 ORDER BY
                     computed_distance_to_query_m ASC,
                     e.observed_at DESC NULLS LAST,
@@ -451,7 +511,7 @@ def query_nearby_evidence(
             c.ingested_at,
             ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
             ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
-            ST_AsGeoJSON(ST_PointOnSurface(c.geom::geometry)) AS geometry,
+            ST_AsGeoJSON(c.geom) AS geometry,
             c.computed_distance_to_query_m AS distance_to_query_m,
             c.confidence,
             COALESCE(c.freshness_score, 0.8) AS freshness_score,
@@ -463,7 +523,40 @@ def query_nearby_evidence(
             (c.properties->>'water_level_m')::double precision AS water_level_m,
             (c.properties->>'warning_level_m')::double precision AS warning_level_m,
             (c.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
-            NULL::double precision AS realtime_risk_factor
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN c.properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN c.properties->>'evidence_scope'
+                WHEN c.event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            c.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN c.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN c.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(c.properties->'limitations') = 'array'
+                                THEN c.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
         FROM candidate_rows c
         WHERE c.computed_distance_to_query_m <= c.branch_relevance_m
         ORDER BY
@@ -506,148 +599,521 @@ def query_nearby_evidence(
     )
 
 
+
+def query_nearby_recent_context(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    as_of: datetime,
+    limit: int = 50,
+    statement_timeout_ms: int = 0,
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[EvidenceRecord, ...]:
+    """Return latest active, nearby, display-only official context rows.
+
+    The result is display-only. It never reaches the scorer, coverage, or the
+    overall decision; it exists so a reader can see recent reported incidents
+    next to an official assessment that legitimately says "unknown".
+    """
+
+    if not (
+        _RECENT_INCIDENT_CONTEXT_MIN_RADIUS_M
+        <= radius_m
+        <= _RECENT_INCIDENT_CONTEXT_MAX_RADIUS_M
+    ):
+        raise ValueError(
+            "recent context radius_m must be within "
+            f"{_RECENT_INCIDENT_CONTEXT_MIN_RADIUS_M}..{_RECENT_INCIDENT_CONTEXT_MAX_RADIUS_M}"
+        )
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("recent context as_of must be timezone-aware")
+
+    bounded_limit = max(1, min(limit, 100))
+    window_start = as_of - RECENT_INCIDENT_CONTEXT_WINDOW
+    window_end = as_of + RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE
+    sql = """
+        WITH query_point AS (
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                %s::double precision AS radius_m,
+                (%s::double precision / 90000.0) AS degree_radius
+        ),
+        candidate_rows AS (
+            SELECT
+                e.*,
+                ds.adapter_key,
+                ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
+                ROW_NUMBER() OVER (
+                    PARTITION BY ds.adapter_key, e.source_id
+                    ORDER BY
+                        COALESCE(
+                            CASE
+                                WHEN pg_input_is_valid(
+                                    e.properties->>'upstream_updated_at',
+                                    'timestamptz'
+                                )
+                                THEN (e.properties->>'upstream_updated_at')::timestamptz
+                            END,
+                            e.observed_at,
+                            e.created_at
+                        ) DESC,
+                        e.created_at DESC,
+                        e.id DESC
+                ) AS version_rank
+            FROM evidence e
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+            CROSS JOIN query_point qp
+            WHERE e.ingestion_status = 'accepted'
+                AND e.privacy_level IN ('public', 'aggregated')
+                AND e.source_type = 'official'
+                AND e.event_type = 'status_only'
+                AND e.properties->>'evidence_scope' = 'context'
+                AND ds.adapter_key IN (
+                    'official.npa.police_radio_traffic',
+                    'official.wra.flood_warning'
+                )
+                AND e.geom IS NOT NULL
+                AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
+                AND ST_DWithin(e.geom::geography, qp.geog, qp.radius_m)
+        )
+        SELECT
+            c.id::text AS id,
+            c.source_id,
+            c.source_type,
+            c.event_type,
+            c.title,
+            c.summary,
+            c.url,
+            c.occurred_at,
+            c.observed_at,
+            c.ingested_at,
+            ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
+            ST_AsGeoJSON(c.geom) AS geometry,
+            c.computed_distance_to_query_m AS distance_to_query_m,
+            c.confidence,
+            COALESCE(c.freshness_score, 0.8) AS freshness_score,
+            COALESCE(c.source_weight, 1.0) AS source_weight,
+            c.privacy_level,
+            c.raw_ref,
+            NULL::double precision AS rainfall_mm_1h,
+            NULL::double precision AS water_level_m,
+            NULL::double precision AS warning_level_m,
+            NULL::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor,
+            'context'::text AS evidence_scope,
+            c.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN c.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN c.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(c.properties->'limitations') = 'array'
+                                THEN c.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
+        FROM candidate_rows c
+        WHERE c.version_rank = 1
+            AND c.observed_at IS NOT NULL
+            AND c.observed_at >= %s::timestamptz
+            AND c.observed_at <= %s::timestamptz
+            AND COALESCE(c.properties->>'incident_state', 'active')
+                NOT IN ('resolved', 'excluded')
+        ORDER BY
+            c.observed_at DESC,
+            c.computed_distance_to_query_m ASC,
+            c.id
+        LIMIT %s
+    """
+    return _fetch_records(
+        sql,
+        (
+            lng,
+            lat,
+            lng,
+            lat,
+            radius_m,
+            radius_m,
+            window_start,
+            window_end,
+            bounded_limit,
+        ),
+        database_url=database_url,
+        statement_timeout_ms=statement_timeout_ms,
+        connection_factory=connection_factory,
+    )
+
+
+def _official_event_origin_key(
+    *, sender: str, identifier: str, sent: datetime, admin_code: str
+) -> str:
+    if not 1 <= len(sender) <= 512 or not 1 <= len(identifier) <= 512:
+        raise ValueError("CAP sender and identifier must be bounded")
+    if re.fullmatch(r"[0-9]{8}", admin_code) is None:
+        raise ValueError("CAP admin_code must be canonical")
+    if sent.tzinfo is None or sent.utcoffset() is None:
+        raise ValueError("CAP sent must be timezone-aware")
+    sent_utc = sent.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    canonical = json.dumps(
+        [sender, identifier, sent_utc, admin_code],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def query_nearby_latest_official(
     *,
     database_url: str,
     lat: float,
     lng: float,
+    radius_m: int,
+    as_of: datetime,
     limit: int = 50,
-    rainfall_radius_m: int = 10_000,
-    water_level_radius_m: int = 3_000,
-    flood_depth_radius_m: int = 1_000,
-    flood_warning_radius_m: int = 10_000,
     observed_since: datetime | None = None,
     statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
+    if not 50 <= radius_m <= 2000:
+        raise ValueError("radius_m must be between 50 and 2000")
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("as_of must be timezone-aware")
     bounded_limit = max(1, min(limit, 100))
     observed_since_filter = ""
     observed_since_params: tuple[datetime, ...] = ()
     if observed_since is not None:
-        observed_since_filter = "AND latest.observed_at >= %s::timestamptz"
+        observed_since_filter = """
+            AND (
+                latest.event_type NOT IN (
+                    'rainfall', 'water_level', 'flood_report', 'flood_depth'
+                )
+                OR latest.observed_at >= %s::timestamptz
+            )
+        """
         observed_since_params = (observed_since,)
     sql = f"""
         WITH query_point_base AS (
             SELECT
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
                 ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
-                %s::double precision AS rainfall_m,
-                %s::double precision AS water_level_m,
-                %s::double precision AS flood_depth_m,
-                %s::double precision AS flood_warning_m
+                %s::double precision AS radius_m,
+                %s::timestamptz AS as_of
         ),
         query_point AS (
-            SELECT
-                *,
-                (rainfall_m / 90000.0) AS rainfall_degree,
-                (water_level_m / 90000.0) AS water_level_degree,
-                (flood_depth_m / 90000.0) AS flood_depth_degree,
-                (flood_warning_m / 90000.0) AS flood_warning_degree
+            SELECT *, (radius_m / 90000.0) AS radius_degree
             FROM query_point_base
-        )
-        SELECT
-            COALESCE(e.id::text, latest.source_id) AS id,
-            latest.source_id,
-            'official' AS source_type,
-            latest.event_type,
-            COALESCE(
-                e.title,
-                CASE latest.event_type
-                    WHEN 'rainfall' THEN '官方最新雨量站觀測'
-                    WHEN 'water_level' THEN '官方最新水位站觀測'
-                    WHEN 'flood_report' THEN '官方最新淹水觀測'
-                    WHEN 'flood_warning' THEN '官方最新淹水警戒'
-                    ELSE '官方最新即時觀測'
-                END
-            ) AS title,
-            COALESCE(
-                e.summary,
-                CASE latest.event_type
-                    WHEN 'rainfall' THEN '官方最新雨量站觀測值。'
-                    WHEN 'water_level' THEN '官方最新水位站觀測值。'
-                    WHEN 'flood_report' THEN '官方最新淹水感測觀測值。'
-                    WHEN 'flood_warning' THEN '官方最新淹水警戒。'
-                    ELSE '官方最新即時觀測值。'
-                END
-            ) AS summary,
-            COALESCE(e.url, latest.source_url) AS url,
-            e.occurred_at,
-            latest.observed_at,
-            latest.ingested_at,
-            ST_Y(ST_PointOnSurface(latest.geom::geometry)) AS lat,
-            ST_X(ST_PointOnSurface(latest.geom::geometry)) AS lng,
-            ST_AsGeoJSON(ST_PointOnSurface(latest.geom::geometry)) AS geometry,
-            ST_Distance(latest.geom::geography, qp.geog) AS distance_to_query_m,
-            COALESCE(latest.confidence, e.confidence, 0.9) AS confidence,
-            COALESCE(latest.freshness_score, e.freshness_score, 0.8) AS freshness_score,
-            COALESCE(latest.source_weight, e.source_weight, 1.0) AS source_weight,
-            'public' AS privacy_level,
-            CONCAT(
-                'official-realtime-latest:',
-                latest.adapter_key,
-                ':',
+        ),
+        parsed_latest AS MATERIALIZED (
+            SELECT
+                e.id::text AS id,
+                latest.source_id,
+                'official' AS source_type,
                 latest.event_type,
-                ':',
-                latest.station_id
-            ) AS raw_ref,
-            latest.rainfall_mm_1h,
-            latest.water_level_m,
-            latest.warning_level_m,
-            latest.flood_depth_cm,
-            latest.risk_factor AS realtime_risk_factor
-        FROM official_realtime_latest latest
-        CROSS JOIN query_point qp
-        LEFT JOIN evidence e ON e.id = latest.evidence_id
-        WHERE latest.geom IS NOT NULL
-            {observed_since_filter}
-            AND (
-                (
-                    latest.event_type = 'rainfall'
-                    AND latest.geom && ST_Expand(qp.geom, qp.rainfall_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.rainfall_m)
+                COALESCE(
+                    e.title,
+                    CASE latest.event_type
+                        WHEN 'rainfall' THEN '官方最新雨量站觀測'
+                        WHEN 'water_level' THEN '官方最新水位站觀測'
+                        WHEN 'flood_report' THEN '官方最新淹水觀測'
+                        WHEN 'flood_depth' THEN '官方最新淹水觀測'
+                        WHEN 'flood_warning' THEN '官方最新淹水警戒'
+                        ELSE '官方最新即時觀測'
+                    END
+                ) AS title,
+                COALESCE(
+                    e.summary,
+                    CASE latest.event_type
+                        WHEN 'rainfall' THEN '官方最新雨量站觀測值。'
+                        WHEN 'water_level' THEN '官方最新水位站觀測值。'
+                        WHEN 'flood_report' THEN '官方最新淹水感測觀測值。'
+                        WHEN 'flood_depth' THEN '官方最新淹水感測觀測值。'
+                        WHEN 'flood_warning' THEN '官方最新淹水警戒。'
+                        ELSE '官方最新即時觀測值。'
+                    END
+                ) AS summary,
+                COALESCE(e.url, latest.source_url) AS url,
+                e.occurred_at,
+                latest.observed_at,
+                latest.ingested_at,
+                COALESCE(e.geom, latest.geom) AS evidence_geom,
+                ST_Distance(
+                    COALESCE(e.geom, latest.geom)::geography,
+                    qp.geog
+                ) AS distance_to_query_m,
+                COALESCE(latest.confidence, e.confidence, 0.9) AS confidence,
+                COALESCE(latest.freshness_score, e.freshness_score, 0.8)
+                    AS freshness_score,
+                COALESCE(latest.source_weight, e.source_weight, 1.0) AS source_weight,
+                CONCAT(
+                    'official-realtime-latest:',
+                    latest.adapter_key,
+                    ':',
+                    latest.event_type,
+                    ':',
+                    latest.station_id
+                ) AS raw_ref,
+                latest.rainfall_mm_1h,
+                latest.water_level_m,
+                latest.warning_level_m,
+                latest.flood_depth_cm,
+                latest.risk_factor AS realtime_risk_factor,
+                e.properties->>'evidence_scope' AS evidence_scope,
+                latest.adapter_key,
+                e.properties->>'cap_status' AS cap_status,
+                e.properties->>'cap_message_type' AS cap_message_type,
+                e.properties->>'cap_sender' AS cap_sender,
+                e.properties->>'cap_identifier' AS cap_identifier,
+                e.properties->>'admin_code' AS admin_code,
+                CASE
+                    WHEN e.properties ? 'location_precision'
+                        OR latest.quality_flags ? 'location_precision'
+                    THEN COALESCE(
+                        CASE
+                            WHEN e.properties->>'location_precision' IN (
+                                'point', 'road_or_lane', 'poi', 'admin_area',
+                                'polygon', 'inferred', 'map_click'
+                            )
+                            THEN e.properties->>'location_precision'
+                        END,
+                        CASE
+                            WHEN latest.quality_flags->>'location_precision' IN (
+                                'point', 'road_or_lane', 'poi', 'admin_area',
+                                'polygon', 'inferred', 'map_click'
+                            )
+                            THEN latest.quality_flags->>'location_precision'
+                        END,
+                        'unknown'
+                    )
+                END AS location_precision,
+                e.properties->'limitations' AS evidence_limitations,
+                CASE
+                    WHEN e.properties->>'active_from'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'active_from', 'timestamptz'
+                        )
+                    THEN (e.properties->>'active_from')::timestamptz
+                END AS safe_active_from,
+                CASE
+                    WHEN e.properties->>'active_until'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'active_until', 'timestamptz'
+                        )
+                    THEN (e.properties->>'active_until')::timestamptz
+                END AS safe_active_until,
+                CASE
+                    WHEN e.properties->>'cap_sent'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'cap_sent', 'timestamptz'
+                        )
+                    THEN (e.properties->>'cap_sent')::timestamptz
+                END AS safe_cap_sent,
+                CASE
+                    WHEN e.properties->>'ingestion_generation_started_at'
+                            ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}T.*(Z|[+-][0-9]{{2}}:[0-9]{{2}})$'
+                        AND pg_input_is_valid(
+                            e.properties->>'ingestion_generation_started_at',
+                            'timestamptz'
+                        )
+                    THEN (e.properties->>'ingestion_generation_started_at')::timestamptz
+                END AS safe_generation_started_at,
+                latest.updated_at
+            FROM official_realtime_latest latest
+            JOIN data_sources
+                ON data_sources.adapter_key = latest.adapter_key
+                AND data_sources.is_enabled = true
+            JOIN evidence e ON e.id = latest.evidence_id
+            CROSS JOIN query_point qp
+            WHERE latest.event_type IN (
+                    'rainfall',
+                    'water_level',
+                    'flood_report',
+                    'flood_depth',
+                    'flood_warning'
+                )
+                AND e.properties->>'evidence_scope' = 'current'
+                AND COALESCE(e.geom, latest.geom) IS NOT NULL
+                AND NOT ST_IsEmpty(COALESCE(e.geom, latest.geom))
+                AND ST_IsValid(COALESCE(e.geom, latest.geom))
+                {observed_since_filter}
+                AND COALESCE(e.geom, latest.geom)
+                    && ST_Expand(qp.geom, qp.radius_degree)
+                AND ST_DWithin(
+                    COALESCE(e.geom, latest.geom)::geography,
+                    qp.geog,
+                    qp.radius_m
+                )
+        ),
+        eligible_latest AS (
+            SELECT candidate.*
+            FROM parsed_latest candidate
+            CROSS JOIN query_point qp
+            WHERE (
+                candidate.event_type IN (
+                    'rainfall',
+                    'water_level',
+                    'flood_report',
+                    'flood_depth'
                 )
                 OR (
-                    latest.event_type = 'water_level'
-                    AND latest.geom && ST_Expand(qp.geom, qp.water_level_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.water_level_m)
-                )
-                OR (
-                    latest.event_type = 'flood_report'
-                    AND latest.geom && ST_Expand(qp.geom, qp.flood_depth_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.flood_depth_m)
-                )
-                OR (
-                    latest.event_type = 'flood_warning'
-                    AND latest.geom && ST_Expand(qp.geom, qp.flood_warning_degree)
-                    AND ST_DWithin(latest.geom::geography, qp.geog, qp.flood_warning_m)
+                    candidate.event_type = 'flood_warning'
+                    AND candidate.cap_status = 'Actual'
+                    AND candidate.cap_message_type IN ('Alert', 'Update')
+                    AND candidate.safe_active_from IS NOT NULL
+                    AND candidate.safe_active_until IS NOT NULL
+                    AND candidate.safe_active_from <= qp.as_of
+                    AND qp.as_of < candidate.safe_active_until
+                    AND length(candidate.cap_sender) BETWEEN 1 AND 512
+                    AND length(candidate.cap_identifier) BETWEEN 1 AND 512
+                    AND candidate.safe_cap_sent IS NOT NULL
+                    AND candidate.admin_code ~ '^[0-9]{{8}}$'
+                    AND candidate.safe_generation_started_at IS NOT NULL
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM ingestion_jobs retired
+                        WHERE retired.adapter_key = candidate.adapter_key
+                            AND retired.status = 'succeeded'
+                            AND retired.error_code = 'no_active_event'
+                            AND retired.started_at
+                                >= candidate.safe_generation_started_at
+                    )
                 )
             )
+        ),
+        ranked_warnings AS (
+            SELECT
+                warning.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY
+                        warning.cap_sender,
+                        warning.cap_identifier,
+                        warning.safe_cap_sent,
+                        warning.admin_code
+                    ORDER BY
+                        CASE warning.adapter_key
+                            WHEN 'official.cwa.heavy_rain_warning' THEN 0
+                            WHEN 'official.ncdr.cap' THEN 1
+                            ELSE 2
+                        END,
+                        warning.observed_at DESC NULLS LAST,
+                        warning.updated_at DESC,
+                        warning.id
+                ) AS warning_origin_rank
+            FROM eligible_latest warning
+            WHERE warning.event_type = 'flood_warning'
+        ),
+        deduplicated_latest AS (
+            SELECT non_warning.*, NULL::bigint AS warning_origin_rank
+            FROM eligible_latest non_warning
+            WHERE non_warning.event_type <> 'flood_warning'
+            UNION ALL
+            SELECT warning.*
+            FROM ranked_warnings warning
+            WHERE warning.warning_origin_rank = 1
+        )
+        SELECT
+            ranked.id,
+            ranked.source_id,
+            ranked.source_type,
+            ranked.event_type,
+            ranked.title,
+            ranked.summary,
+            ranked.url,
+            ranked.occurred_at,
+            ranked.observed_at,
+            ranked.ingested_at,
+            ST_Y(ST_PointOnSurface(ranked.evidence_geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(ranked.evidence_geom::geometry)) AS lng,
+            ST_AsGeoJSON(ranked.evidence_geom) AS geometry,
+            ranked.distance_to_query_m,
+            ranked.confidence,
+            ranked.freshness_score,
+            ranked.source_weight,
+            'public' AS privacy_level,
+            ranked.raw_ref,
+            ranked.rainfall_mm_1h,
+            ranked.water_level_m,
+            ranked.warning_level_m,
+            ranked.flood_depth_cm,
+            ranked.realtime_risk_factor,
+            ranked.evidence_scope,
+            ranked.adapter_key,
+            NULL::text AS official_event_origin_key,
+            ranked.safe_active_from AS active_from,
+            ranked.safe_active_until AS active_until,
+            ranked.cap_sender,
+            ranked.cap_identifier,
+            ranked.safe_cap_sent AS cap_sent,
+            ranked.admin_code,
+            CASE
+                WHEN ranked.location_precision IS NULL THEN 'point'
+                WHEN ranked.location_precision IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN ranked.location_precision
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(ranked.evidence_limitations) = 'array'
+                                THEN ranked.evidence_limitations
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
+        FROM deduplicated_latest ranked
         ORDER BY
-            distance_to_query_m ASC,
-            latest.observed_at DESC,
-            latest.updated_at DESC
+            ranked.distance_to_query_m ASC,
+            ranked.observed_at DESC,
+            ranked.updated_at DESC
         LIMIT %s
     """
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(
-                    sql,
-                    (
-                        lng,
-                        lat,
-                        lng,
-                        lat,
-                        rainfall_radius_m,
-                        water_level_radius_m,
-                        flood_depth_radius_m,
-                        flood_warning_radius_m,
-                        *observed_since_params,
-                        bounded_limit,
-                    ),
-                )
-                return tuple(_record_from_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(
+                sql,
+                (
+                    lng,
+                    lat,
+                    lng,
+                    lat,
+                    radius_m,
+                    as_of,
+                    *observed_since_params,
+                    bounded_limit,
+                ),
+            )
+            return tuple(_record_from_row(row) for row in cursor.fetchall())
     except psycopg.errors.UndefinedTable as exc:
         if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
             return ()
@@ -1056,19 +1522,30 @@ def query_realtime_jurisdiction_context(
                 FROM realtime_source_jurisdictions mapping
                 LEFT JOIN realtime_jurisdictions jurisdiction
                     ON jurisdiction.jurisdiction_code = mapping.jurisdiction_code
-                WHERE mapping.coverage_scope = 'national'
-                    OR mapping.jurisdiction_code IN (
-                        SELECT jurisdiction_code FROM considered
+                WHERE mapping.mapping_revision = '2026-08-24-v1-baseline'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM contract_mapping_proofs proof
+                        WHERE proof.mapping_proof_valid = true
+                            AND proof.contract_mapping_revision
+                                = '2026-08-24-v1-baseline'
+                            AND proof.signal_type = mapping.signal_type
+                            AND (
+                                mapping.coverage_scope = 'national'
+                                OR mapping.jurisdiction_code = proof.jurisdiction_code
+                            )
                     )
             ), '[]'::jsonb) ELSE '[]'::jsonb END AS source_mappings
         FROM resolution
     """
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, (lng, lat, search_radius_m))
-                row = cursor.fetchone()
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, (lng, lat, search_radius_m))
+            row = cursor.fetchone()
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1082,6 +1559,38 @@ def query_realtime_jurisdiction_context(
             source_mappings=(),
         )
     return _realtime_jurisdiction_context(row)
+
+
+def _freshness_threshold_lateral_sql(metadata_expression: str) -> str:
+    """Resolve public catalog cadence without allowing unsafe JSON casts."""
+
+    return f"""
+        CROSS JOIN LATERAL (
+            SELECT
+                /* resolved-freshness-threshold */
+                CASE
+                    WHEN candidate.threshold_seconds
+                        BETWEEN 1 AND {_MAX_FRESHNESS_THRESHOLD_SECONDS}
+                        THEN candidate.threshold_seconds
+                    ELSE {_DEFAULT_FRESHNESS_THRESHOLD_SECONDS}
+                END AS fresh_seconds
+            FROM (
+                SELECT CASE
+                    WHEN normalized.threshold_text ~ '^[0-9]{{1,5}}$'
+                        THEN normalized.threshold_text::integer
+                    ELSE NULL
+                END AS threshold_seconds
+                FROM (
+                    SELECT btrim(COALESCE(
+                        {metadata_expression}
+                            ->> 'freshness_threshold_seconds',
+                        ''
+                    )) AS threshold_text
+                ) normalized
+            ) candidate
+        ) freshness_threshold
+    """
+
 
 def _query_realtime_source_health_rows(
     *,
@@ -1099,18 +1608,31 @@ def _query_realtime_source_health_rows(
                 max(latest.ingested_at) AS latest_ingested_at,
                 count(DISTINCT latest.station_id)::integer AS station_count,
                 count(DISTINCT latest.station_id) FILTER (
-                    WHERE latest.observed_at >= now() - interval '10 minutes'
+                    WHERE latest.observed_at >= now() - make_interval(
+                        secs => freshness_threshold.fresh_seconds
+                    )
                 )::integer AS fresh_station_count,
                 count(DISTINCT latest.station_id) FILTER (
-                    WHERE latest.observed_at < now() - interval '10 minutes'
-                        AND latest.observed_at >= now() - interval '1 hour'
+                    WHERE latest.observed_at < now() - make_interval(
+                            secs => freshness_threshold.fresh_seconds
+                        )
+                        AND latest.observed_at >= now() - make_interval(
+                            secs => freshness_threshold.fresh_seconds * 3
+                        )
                 )::integer AS delayed_station_count,
                 count(DISTINCT latest.station_id) FILTER (
                     WHERE latest.observed_at IS NULL
-                        OR latest.observed_at < now() - interval '1 hour'
+                        OR latest.observed_at < now() - make_interval(
+                            secs => freshness_threshold.fresh_seconds * 3
+                        )
                 )::integer AS stale_station_count
             FROM official_realtime_latest latest
             JOIN requested ON requested.adapter_key = latest.adapter_key
+            JOIN resolved_freshness
+                ON resolved_freshness.adapter_key = latest.adapter_key
+            CROSS JOIN LATERAL (
+                SELECT resolved_freshness.fresh_seconds
+            ) freshness_threshold
             GROUP BY latest.adapter_key
         )
     """
@@ -1205,6 +1727,15 @@ def _query_realtime_source_health_rows(
         WITH requested AS (
             SELECT unnest(%s::text[]) AS adapter_key
         ),
+        resolved_freshness AS MATERIALIZED (
+            SELECT
+                requested.adapter_key,
+                freshness_threshold.fresh_seconds
+            FROM requested
+            LEFT JOIN data_sources
+                ON data_sources.adapter_key = requested.adapter_key
+            {_freshness_threshold_lateral_sql("data_sources.metadata")}
+        ),
         latest_jobs AS (
             SELECT DISTINCT ON (jobs.adapter_key)
                 jobs.id,
@@ -1213,6 +1744,7 @@ def _query_realtime_source_health_rows(
                 jobs.items_fetched,
                 jobs.items_promoted,
                 jobs.items_rejected,
+                jobs.error_code AS latest_run_error_code,
                 COALESCE(jobs.started_at, jobs.created_at) AS latest_run_at
             FROM ingestion_jobs jobs
             JOIN requested ON requested.adapter_key = jobs.adapter_key
@@ -1233,7 +1765,8 @@ def _query_realtime_source_health_rows(
                 latest_job.latest_run_at,
                 latest_job.items_fetched,
                 latest_job.items_promoted,
-                latest_job.items_rejected
+                latest_job.items_rejected,
+                latest_job.latest_run_error_code
             FROM latest_jobs latest_job
             LEFT JOIN adapter_runs latest_adapter_run
                 ON latest_adapter_run.ingestion_job_id = latest_job.id
@@ -1257,6 +1790,8 @@ def _query_realtime_source_health_rows(
                 AS runtime_pipeline_complete,
             latest_runtime.latest_run_status,
             latest_runtime.latest_run_at,
+            latest_runtime.latest_run_error_code,
+            resolved_freshness.fresh_seconds AS freshness_threshold_seconds,
             {observation_columns},
             latest_inventory.upstream_total AS upstream_station_count,
             latest_inventory.pages_fetched,
@@ -1277,6 +1812,8 @@ def _query_realtime_source_health_rows(
             {inventory_complete_column}
         FROM requested
         LEFT JOIN data_sources ON data_sources.adapter_key = requested.adapter_key
+        JOIN resolved_freshness
+            ON resolved_freshness.adapter_key = requested.adapter_key
         LEFT JOIN latest_runtime ON latest_runtime.adapter_key = requested.adapter_key
         LEFT JOIN station_inventory_snapshots latest_inventory
             ON latest_inventory.ingestion_job_id = latest_runtime.ingestion_job_id
@@ -1284,11 +1821,13 @@ def _query_realtime_source_health_rows(
         {observation_join}
         ORDER BY requested.adapter_key ASC
     """
-    with _connect(database_url, connection_factory) as connection:
-        with connection.cursor() as cursor:
-            _apply_statement_timeout(cursor, statement_timeout_ms)
-            cursor.execute(sql, (list(adapter_keys),))
-            return tuple(_realtime_source_health_row(row) for row in cursor.fetchall())
+    with (
+        _connect(database_url, connection_factory) as connection,
+        connection.cursor() as cursor,
+    ):
+        _apply_statement_timeout(cursor, statement_timeout_ms)
+        cursor.execute(sql, (list(adapter_keys),))
+        return tuple(_realtime_source_health_row(row) for row in cursor.fetchall())
 
 
 def _merge_nearby_coverage_rows(
@@ -1342,11 +1881,18 @@ def _query_nearby_latest_coverage_rows(
             ST_Distance(latest.geom::geography, qp.geog) AS distance_to_query_m,
             CASE
                 WHEN latest.observed_at IS NULL THEN 'stale'
-                WHEN latest.observed_at >= now() - interval '10 minutes' THEN 'fresh'
-                WHEN latest.observed_at >= now() - interval '30 minutes' THEN 'degraded'
+                WHEN latest.observed_at >= now() - make_interval(
+                    secs => freshness_threshold.fresh_seconds
+                ) THEN 'fresh'
+                WHEN latest.observed_at >= now() - make_interval(
+                    secs => freshness_threshold.fresh_seconds * 3
+                ) THEN 'degraded'
                 ELSE 'stale'
             END AS freshness_state
         FROM official_realtime_latest latest
+        JOIN data_sources ON data_sources.adapter_key = latest.adapter_key
+            AND data_sources.is_enabled = true
+        {_freshness_threshold_lateral_sql("data_sources.metadata")}
         CROSS JOIN query_point qp
         WHERE latest.geom IS NOT NULL
             {observed_filter}
@@ -1356,11 +1902,13 @@ def _query_nearby_latest_coverage_rows(
     """
     params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
-                return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
+            return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
     except psycopg.errors.UndefinedTable as exc:
         if _is_missing_relation(exc, _LATEST_OFFICIAL_RELATION):
             return ()
@@ -1407,12 +1955,17 @@ def _query_nearby_evidence_coverage_rows(
                 ST_Distance(e.geom::geography, qp.geog) AS distance_to_query_m,
                 CASE
                     WHEN e.observed_at IS NULL THEN 'stale'
-                    WHEN e.observed_at >= now() - interval '10 minutes' THEN 'fresh'
-                    WHEN e.observed_at >= now() - interval '30 minutes' THEN 'degraded'
+                    WHEN e.observed_at >= now() - make_interval(
+                        secs => freshness_threshold.fresh_seconds
+                    ) THEN 'fresh'
+                    WHEN e.observed_at >= now() - make_interval(
+                        secs => freshness_threshold.fresh_seconds * 3
+                    ) THEN 'degraded'
                     ELSE 'stale'
                 END AS freshness_state
             FROM evidence e
-            LEFT JOIN data_sources ds ON ds.id = e.data_source_id
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+            {_freshness_threshold_lateral_sql("ds.metadata")}
             CROSS JOIN query_point qp
             WHERE e.source_type = 'official'
                 AND e.ingestion_status = 'accepted'
@@ -1451,11 +2004,13 @@ def _query_nearby_evidence_coverage_rows(
     """
     params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
-                return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
+            return tuple(_nearby_coverage_row(row) for row in cursor.fetchall())
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1557,17 +2112,57 @@ def upsert_public_evidence(
             COALESCE(source_weight, CASE WHEN source_type = 'official' THEN 1.0 ELSE 0.85 END)
                 AS source_weight,
             privacy_level,
-            raw_ref
+            raw_ref,
+            NULL::double precision AS rainfall_mm_1h,
+            NULL::double precision AS water_level_m,
+            NULL::double precision AS warning_level_m,
+            NULL::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN properties->>'evidence_scope'
+                WHEN event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            NULL::text AS adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(properties->'limitations') = 'array'
+                                THEN properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
     """
     try:
         inserted: list[EvidenceRecord] = []
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                for record in records:
-                    cursor.execute(sql, _upsert_params(record))
-                    row = cursor.fetchone()
-                    if row is not None:
-                        inserted.append(_record_from_row(row))
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            for record in records:
+                cursor.execute(sql, _upsert_params(record))
+                row = cursor.fetchone()
+                if row is not None:
+                    inserted.append(_record_from_row(row))
         return tuple(inserted)
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
@@ -1608,18 +2203,20 @@ def fetch_query_heat_snapshot(
         FROM nearby_queries
     """
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                if statement_timeout_ms > 0:
-                    cursor.execute(
-                        "SELECT set_config('statement_timeout', %s, true)",
-                        (f"{statement_timeout_ms}ms",),
-                    )
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            if statement_timeout_ms > 0:
                 cursor.execute(
-                    sql,
-                    (lng, lat, lng, lat, radius_m, _period_to_interval(period), radius_m),
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    (f"{statement_timeout_ms}ms",),
                 )
-                row = cursor.fetchone()
+            cursor.execute(
+                sql,
+                (lng, lat, lng, lat, radius_m, _period_to_interval(period), radius_m),
+            )
+            row = cursor.fetchone()
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1672,12 +2269,47 @@ def fetch_assessment_evidence(
             (e.properties->>'water_level_m')::double precision AS water_level_m,
             (e.properties->>'warning_level_m')::double precision AS warning_level_m,
             (e.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
-            NULL::double precision AS realtime_risk_factor
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN e.properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN e.properties->>'evidence_scope'
+                WHEN e.event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            ds.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN e.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN e.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(e.properties->'limitations') = 'array'
+                                THEN e.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
         FROM risk_assessment_evidence rae
         JOIN risk_assessments ra ON ra.id = rae.risk_assessment_id
         JOIN location_queries lq ON lq.id = ra.query_id
         JOIN evidence e ON e.id = rae.evidence_id
+        JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
         WHERE ra.id = %s
+            AND ra.expires_at > now()
             AND e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
         ORDER BY
@@ -1734,9 +2366,43 @@ def fetch_evidence_by_ids(
             (e.properties->>'water_level_m')::double precision AS water_level_m,
             (e.properties->>'warning_level_m')::double precision AS warning_level_m,
             (e.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
-            NULL::double precision AS realtime_risk_factor
+            NULL::double precision AS realtime_risk_factor,
+            CASE
+                WHEN e.properties->>'evidence_scope' IN ('current', 'historical', 'context')
+                    THEN e.properties->>'evidence_scope'
+                WHEN e.event_type = 'flood_potential' THEN 'context'
+                ELSE 'unspecified'
+            END AS evidence_scope,
+            ds.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN e.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN e.properties->>'location_precision'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(e.properties->'limitations') = 'array'
+                                THEN e.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) AS limitations
         FROM requested
         JOIN evidence e ON e.id = requested.id
+        JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
         WHERE e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
         ORDER BY requested.ordinality ASC
@@ -1758,11 +2424,13 @@ def _fetch_records(
     connection_factory: ConnectionFactory | None,
 ) -> tuple[EvidenceRecord, ...]:
     try:
-        with _connect(database_url, connection_factory) as connection:
-            with connection.cursor() as cursor:
-                _apply_statement_timeout(cursor, statement_timeout_ms)
-                cursor.execute(sql, params)
-                return tuple(_record_from_row(row) for row in cursor.fetchall())
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
+            cursor.execute(sql, params)
+            return tuple(_record_from_row(row) for row in cursor.fetchall())
     except (OSError, psycopg.Error) as exc:
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
@@ -1782,33 +2450,82 @@ def _apply_statement_timeout(cursor: Any, statement_timeout_ms: int) -> None:
     )
 
 
-def _record_from_row(row: dict[str, Any]) -> EvidenceRecord:
+def _record_from_row(row: Mapping[str, Any] | Sequence[Any]) -> EvidenceRecord:
+    def value(key: str, index: int, default: Any = None) -> Any:
+        if isinstance(row, Mapping):
+            return row.get(key, default)
+        return row[index] if index < len(row) else default
+
+    origin_key = value("official_event_origin_key", 26)
+    if origin_key is None and value("event_type", 3) == "flood_warning":
+        try:
+            origin_key = _official_event_origin_key(
+                sender=str(value("cap_sender", 29)),
+                identifier=str(value("cap_identifier", 30)),
+                sent=value("cap_sent", 31),
+                admin_code=str(value("admin_code", 32)),
+            )
+        except (AttributeError, TypeError, ValueError):
+            origin_key = None
+
     return EvidenceRecord(
-        id=str(row["id"]),
-        source_id=str(row["source_id"]),
-        source_type=str(row["source_type"]),
-        event_type=str(row["event_type"]),
-        title=str(row["title"]),
-        summary=str(row["summary"]),
-        url=str(row["url"]) if row.get("url") is not None else None,
-        occurred_at=row.get("occurred_at"),
-        observed_at=row.get("observed_at"),
-        ingested_at=row["ingested_at"],
-        lat=_optional_float(row.get("lat")),
-        lng=_optional_float(row.get("lng")),
-        geometry=_geometry(row.get("geometry")),
-        distance_to_query_m=_optional_float(row.get("distance_to_query_m")),
-        confidence=float(row["confidence"]),
-        freshness_score=float(row["freshness_score"]),
-        source_weight=float(row["source_weight"]),
-        privacy_level=str(row["privacy_level"]),
-        raw_ref=str(row["raw_ref"]) if row.get("raw_ref") is not None else None,
-        rainfall_mm_1h=_optional_float(row.get("rainfall_mm_1h")),
-        water_level_m=_optional_float(row.get("water_level_m")),
-        warning_level_m=_optional_float(row.get("warning_level_m")),
-        flood_depth_cm=_optional_float(row.get("flood_depth_cm")),
-        realtime_risk_factor=_optional_float(row.get("realtime_risk_factor")),
+        id=str(value("id", 0)),
+        source_id=str(value("source_id", 1)),
+        source_type=str(value("source_type", 2)),
+        event_type=str(value("event_type", 3)),
+        title=str(value("title", 4)),
+        summary=str(value("summary", 5)),
+        url=str(value("url", 6)) if value("url", 6) is not None else None,
+        occurred_at=value("occurred_at", 7),
+        observed_at=value("observed_at", 8),
+        ingested_at=value("ingested_at", 9),
+        lat=_optional_float(value("lat", 10)),
+        lng=_optional_float(value("lng", 11)),
+        geometry=_geometry(value("geometry", 12)),
+        distance_to_query_m=_optional_float(value("distance_to_query_m", 13)),
+        confidence=float(value("confidence", 14)),
+        freshness_score=float(value("freshness_score", 15)),
+        source_weight=float(value("source_weight", 16)),
+        privacy_level=str(value("privacy_level", 17)),
+        raw_ref=(str(value("raw_ref", 18)) if value("raw_ref", 18) is not None else None),
+        rainfall_mm_1h=_optional_float(value("rainfall_mm_1h", 19)),
+        water_level_m=_optional_float(value("water_level_m", 20)),
+        warning_level_m=_optional_float(value("warning_level_m", 21)),
+        flood_depth_cm=_optional_float(value("flood_depth_cm", 22)),
+        realtime_risk_factor=_optional_float(value("realtime_risk_factor", 23)),
+        evidence_scope=cast(
+            Literal["current", "historical", "context", "unspecified"],
+            value("evidence_scope", 24, "unspecified"),
+        ),
+        adapter_key=(
+            str(value("adapter_key", 25)) if value("adapter_key", 25) is not None else None
+        ),
+        official_event_origin_key=(str(origin_key) if origin_key is not None else None),
+        active_from=value("active_from", 27),
+        active_until=value("active_until", 28),
+        location_precision=_evidence_location_precision(value("location_precision", 33)),
+        limitations=_evidence_limitations(value("limitations", 34)),
     )
+
+
+def _evidence_location_precision(value: object) -> EvidenceLocationPrecision:
+    if value in {
+        "point",
+        "road_or_lane",
+        "poi",
+        "admin_area",
+        "polygon",
+        "inferred",
+        "map_click",
+    }:
+        return cast(EvidenceLocationPrecision, value)
+    return "unknown"
+
+
+def _evidence_limitations(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(str(item) for item in value)
 
 
 def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:
@@ -1828,76 +2545,105 @@ def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:
     )
 
 
-def _realtime_source_health_row(row: dict[str, Any]) -> RealtimeSourceHealthRow:
+def _realtime_source_health_row(
+    row: Mapping[str, Any] | Sequence[Any],
+) -> RealtimeSourceHealthRow:
+    def value(key: str, index: int, default: Any = None) -> Any:
+        if isinstance(row, Mapping):
+            return row.get(key, default)
+        return row[index] if index < len(row) else default
+
     return RealtimeSourceHealthRow(
-        adapter_key=str(row["adapter_key"]),
-        name=str(row["name"]),
-        is_enabled=bool(row["is_enabled"]),
-        configured_health_status=str(row["configured_health_status"]),
-        last_success_at=row.get("last_success_at"),
-        last_failure_at=row.get("last_failure_at"),
+        adapter_key=str(value("adapter_key", 0)),
+        name=str(value("name", 1)),
+        is_enabled=bool(value("is_enabled", 3)),
+        configured_health_status=str(value("configured_health_status", 4)),
+        last_success_at=value("last_success_at", 5),
+        last_failure_at=value("last_failure_at", 6),
         latest_run_status=(
-            str(row["latest_run_status"]) if row.get("latest_run_status") is not None else None
-        ),
-        latest_run_at=row.get("latest_run_at"),
-        latest_observed_at=row.get("latest_observed_at"),
-        latest_ingested_at=row.get("latest_ingested_at"),
-        station_count=(int(row["station_count"]) if row.get("station_count") is not None else None),
-        inventory_complete=bool(row.get("inventory_complete", False)),
-        is_registered=bool(row.get("is_registered", True)),
-        runtime_enabled=(
-            bool(row["runtime_enabled"]) if row.get("runtime_enabled") is not None else None
-        ),
-        runtime_enabled_checked_at=row.get("runtime_enabled_checked_at"),
-        runtime_pipeline_status=(
-            str(row["runtime_pipeline_status"])
-            if row.get("runtime_pipeline_status") is not None
+            str(value("latest_run_status", 13))
+            if value("latest_run_status", 13) is not None
             else None
         ),
-        runtime_pipeline_checked_at=row.get("runtime_pipeline_checked_at"),
-        runtime_pipeline_run_at=row.get("runtime_pipeline_run_at"),
-        runtime_pipeline_complete=bool(row.get("runtime_pipeline_complete", False)),
+        latest_run_at=value("latest_run_at", 14),
+        latest_observed_at=value("latest_observed_at", 17),
+        latest_ingested_at=value("latest_ingested_at", 18),
+        station_count=(
+            int(value("station_count", 19))
+            if value("station_count", 19) is not None
+            else None
+        ),
+        inventory_complete=bool(value("inventory_complete", 28, False)),
+        is_registered=bool(value("is_registered", 2, True)),
+        runtime_enabled=(
+            bool(value("runtime_enabled", 7))
+            if value("runtime_enabled", 7) is not None
+            else None
+        ),
+        runtime_enabled_checked_at=value("runtime_enabled_checked_at", 8),
+        runtime_pipeline_status=(
+            str(value("runtime_pipeline_status", 9))
+            if value("runtime_pipeline_status", 9) is not None
+            else None
+        ),
+        runtime_pipeline_checked_at=value("runtime_pipeline_checked_at", 10),
+        runtime_pipeline_run_at=value("runtime_pipeline_run_at", 11),
+        runtime_pipeline_complete=bool(
+            value("runtime_pipeline_complete", 12, False)
+        ),
         fresh_station_count=(
-            int(row["fresh_station_count"])
-            if row.get("fresh_station_count") is not None
+            int(value("fresh_station_count", 20))
+            if value("fresh_station_count", 20) is not None
             else None
         ),
         delayed_station_count=(
-            int(row["delayed_station_count"])
-            if row.get("delayed_station_count") is not None
+            int(value("delayed_station_count", 21))
+            if value("delayed_station_count", 21) is not None
             else None
         ),
         stale_station_count=(
-            int(row["stale_station_count"])
-            if row.get("stale_station_count") is not None
+            int(value("stale_station_count", 22))
+            if value("stale_station_count", 22) is not None
             else None
         ),
         upstream_station_count=(
-            int(row["upstream_station_count"])
-            if row.get("upstream_station_count") is not None
+            int(value("upstream_station_count", 23))
+            if value("upstream_station_count", 23) is not None
             else None
         ),
         pages_fetched=(
-            int(row["pages_fetched"]) if row.get("pages_fetched") is not None else None
+            int(value("pages_fetched", 24))
+            if value("pages_fetched", 24) is not None
+            else None
         ),
         pagination_complete=(
-            bool(row["pagination_complete"])
-            if row.get("pagination_complete") is not None
+            bool(value("pagination_complete", 25))
+            if value("pagination_complete", 25) is not None
             else None
         ),
         inventory_manifest_sha256=(
-            str(row["inventory_manifest_sha256"])
-            if row.get("inventory_manifest_sha256") is not None
+            str(value("inventory_manifest_sha256", 26))
+            if value("inventory_manifest_sha256", 26) is not None
             else None
         ),
-        inventory_proof_status=str(row.get("inventory_proof_status") or "missing"),
+        inventory_proof_status=str(
+            value("inventory_proof_status", 27) or "missing"
+        ),
+        latest_run_error_code=(
+            str(value("latest_run_error_code", 15))
+            if value("latest_run_error_code", 15) is not None
+            else None
+        ),
+        freshness_threshold_seconds=(
+            int(value("freshness_threshold_seconds", 16))
+            if value("freshness_threshold_seconds", 16) is not None
+            else None
+        ),
     )
 
 
 def _realtime_jurisdiction_context(row: dict[str, Any]) -> RealtimeJurisdictionContext:
-    raw_resolution_status = str(
-        row.get("resolution_status") or "boundary_unverified"
-    )
+    raw_resolution_status = str(row.get("resolution_status") or "boundary_unverified")
     resolution_status: RealtimeJurisdictionResolutionStatus = (
         cast(RealtimeJurisdictionResolutionStatus, raw_resolution_status)
         if raw_resolution_status
@@ -2096,15 +2842,13 @@ def _privacy_coordinate(value: float) -> float:
 
 
 def _storage_risk_level(level: str) -> str:
-    if level == "雿?":
-        return "low"
-    if level == "銝?":
-        return "medium"
-    if level == "擃?":
-        return "high"
-    if level == "璆菟?":
-        return "severe"
-    return "unknown"
+    return {
+        "低": "low",
+        "中": "medium",
+        "高": "high",
+        "極高": "severe",
+        "未知": "unknown",
+    }.get(level, "unknown")
 
 
 def _max_storage_risk_level(*levels: str) -> str:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
@@ -16,7 +18,6 @@ from app.jobs.freshness import (
     check_summary_freshness,
 )
 from app.jobs.ingestion import AdapterBatchRunSummary, AdapterBatchStatus, run_adapter_batch
-
 
 CHECKED_AT = datetime(2026, 4, 30, 4, 0, tzinfo=UTC)
 
@@ -202,11 +203,19 @@ def test_batch_freshness_checks_each_summary() -> None:
     assert [check.status for check in checks] == ["fresh", "failed"]
 
 
-def test_static_flood_potential_is_not_failed_by_realtime_thresholds() -> None:
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.wra.historical_flood", "official.flood_potential.geojson"),
+)
+def test_background_source_uses_fetch_completion_not_historical_event_age(
+    adapter_key: str,
+) -> None:
     check = check_summary_freshness(
         _summary(
-            adapter_key="official.flood_potential.geojson",
-            source_timestamp_max=CHECKED_AT - timedelta(days=90),
+            adapter_key=adapter_key,
+            source_timestamp_min=CHECKED_AT - timedelta(days=3650),
+            source_timestamp_max=CHECKED_AT - timedelta(days=3650),
+            finished_at=CHECKED_AT,
         ),
         checked_at=CHECKED_AT,
         max_age_seconds=60 * 60,
@@ -214,11 +223,48 @@ def test_static_flood_potential_is_not_failed_by_realtime_thresholds() -> None:
 
     assert check.status == "fresh"
     assert check.cadence == "static"
+    assert check.source_timestamp_max == CHECKED_AT
+    assert check.age_seconds == 0
     assert not check.is_alert()
     assert (
         check.reason
         == "static/slow-cadence source is not evaluated against realtime thresholds"
     )
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.wra.historical_flood", "official.flood_potential.geojson"),
+)
+@pytest.mark.parametrize("status", ("skipped", "partial"))
+def test_unsuccessful_background_source_is_alerting_not_fresh(
+    adapter_key: str,
+    status: AdapterBatchStatus,
+) -> None:
+    source_timestamp = (
+        None if status == "skipped" else CHECKED_AT - timedelta(days=3650)
+    )
+    check = check_summary_freshness(
+        _summary(
+            adapter_key=adapter_key,
+            status=status,
+            source_timestamp_min=source_timestamp,
+            source_timestamp_max=source_timestamp,
+            finished_at=CHECKED_AT,
+            error_code="empty_fetch" if status == "skipped" else None,
+            items_fetched=0 if status == "skipped" else 2,
+            items_promoted=0 if status == "skipped" else 1,
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.status == "stale"
+    assert check.cadence == "static"
+    assert check.source_timestamp_max == source_timestamp
+    assert check.is_alert()
+    assert check.reason is not None
+    assert check.reason.startswith("static/slow-cadence batch did not succeed:")
 
 
 def test_ncdr_cap_freshness_uses_effective_expires_window() -> None:
@@ -253,8 +299,10 @@ def test_summary_freshness_uses_ncdr_cap_effective_expires_window() -> None:
     fresh = check_summary_freshness(
         _summary(
             adapter_key="official.ncdr.cap",
-            source_timestamp_min=CHECKED_AT - timedelta(minutes=5),
-            source_timestamp_max=CHECKED_AT + timedelta(minutes=25),
+            source_timestamp_min=CHECKED_AT - timedelta(hours=12),
+            source_timestamp_max=CHECKED_AT - timedelta(hours=12),
+            event_active_from_min=CHECKED_AT - timedelta(minutes=5),
+            event_active_until_max=CHECKED_AT + timedelta(minutes=25),
         ),
         checked_at=CHECKED_AT,
         max_age_seconds=60 * 60,
@@ -262,8 +310,8 @@ def test_summary_freshness_uses_ncdr_cap_effective_expires_window() -> None:
     degraded = check_summary_freshness(
         _summary(
             adapter_key="official.ncdr.cap",
-            source_timestamp_min=CHECKED_AT + timedelta(minutes=5),
-            source_timestamp_max=CHECKED_AT + timedelta(minutes=35),
+            event_active_from_min=CHECKED_AT + timedelta(minutes=5),
+            event_active_until_max=CHECKED_AT + timedelta(minutes=35),
         ),
         checked_at=CHECKED_AT,
         max_age_seconds=60 * 60,
@@ -271,8 +319,8 @@ def test_summary_freshness_uses_ncdr_cap_effective_expires_window() -> None:
     stale = check_summary_freshness(
         _summary(
             adapter_key="official.ncdr.cap",
-            source_timestamp_min=CHECKED_AT - timedelta(hours=1),
-            source_timestamp_max=CHECKED_AT - timedelta(minutes=1),
+            event_active_from_min=CHECKED_AT - timedelta(hours=1),
+            event_active_until_max=CHECKED_AT - timedelta(minutes=1),
         ),
         checked_at=CHECKED_AT,
         max_age_seconds=60 * 60,
@@ -283,6 +331,83 @@ def test_summary_freshness_uses_ncdr_cap_effective_expires_window() -> None:
     assert stale.status == "stale"
     assert stale.reason == "CAP alert expired; no active alert"
     assert not stale.is_alert()
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_long_lived_warning_uses_validated_window_not_sent_age(
+    adapter_key: str,
+) -> None:
+    check = check_summary_freshness(
+        _summary(
+            adapter_key=adapter_key,
+            source_timestamp_min=CHECKED_AT - timedelta(hours=12),
+            source_timestamp_max=CHECKED_AT - timedelta(hours=12),
+            event_active_from_min=CHECKED_AT - timedelta(hours=12),
+            event_active_until_max=CHECKED_AT + timedelta(hours=3),
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.status == "fresh"
+    assert check.cadence == "event"
+
+
+@pytest.mark.parametrize(
+    ("active_from", "active_until", "expected_status"),
+    (
+        (None, None, "stale"),
+        (CHECKED_AT, CHECKED_AT, "stale"),
+        (CHECKED_AT + timedelta(minutes=1), CHECKED_AT + timedelta(hours=1), "degraded"),
+        (CHECKED_AT - timedelta(hours=1), CHECKED_AT - timedelta(minutes=1), "stale"),
+    ),
+)
+def test_missing_future_or_expired_warning_window_is_not_rescued(
+    active_from: datetime | None,
+    active_until: datetime | None,
+    expected_status: str,
+) -> None:
+    check = check_summary_freshness(
+        _summary(
+            adapter_key="official.cwa.heavy_rain_warning",
+            source_timestamp_min=CHECKED_AT - timedelta(hours=12),
+            source_timestamp_max=CHECKED_AT - timedelta(hours=12),
+            event_active_from_min=active_from,
+            event_active_until_max=active_until,
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.status == expected_status
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    ("official.cwa.heavy_rain_warning", "official.ncdr.cap"),
+)
+def test_successful_no_active_warning_poll_is_fresh_without_source_timestamp(
+    adapter_key: str,
+) -> None:
+    check = check_summary_freshness(
+        _summary(
+            adapter_key=adapter_key,
+            error_code="no_active_event",
+            source_timestamp_min=None,
+            source_timestamp_max=None,
+            items_fetched=0,
+            items_promoted=0,
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.status == "fresh"
+    assert check.cadence == "event"
+    assert check.source_timestamp_max is None
 
 
 def test_ncdr_cap_failed_batch_is_the_only_failed_no_active_alert_case() -> None:
@@ -315,7 +440,7 @@ def test_ncdr_cap_failed_batch_is_the_only_failed_no_active_alert_case() -> None
     assert failed_batch.is_alert()
 
 
-def test_ncdr_cap_batch_summary_preserves_expired_raw_window_without_normalized_alert() -> None:
+def test_warning_summary_ignores_unvalidated_window_without_normalized_alert() -> None:
     effective_at = CHECKED_AT - timedelta(hours=2)
     expires_at = CHECKED_AT - timedelta(hours=1)
 
@@ -333,22 +458,26 @@ def test_ncdr_cap_batch_summary_preserves_expired_raw_window_without_normalized_
         max_age_seconds=60 * 60,
     )
 
-    assert summary.source_timestamp_min == effective_at
-    assert summary.source_timestamp_max == expires_at
+    assert summary.source_timestamp_min is None
+    assert summary.source_timestamp_max is None
+    assert summary.event_active_from_min is None
+    assert summary.event_active_until_max is None
     assert check.status == "stale"
-    assert check.reason == "CAP alert expired; no active alert"
+    assert check.reason == "CAP alert is missing effective or expires timestamp"
     assert not check.is_alert()
 
 
 def test_ncdr_cap_batch_summary_preserves_effective_expires_window() -> None:
     effective_at = CHECKED_AT - timedelta(minutes=5)
     expires_at = CHECKED_AT + timedelta(minutes=25)
+    sent_at = CHECKED_AT - timedelta(hours=12)
 
     summary = run_adapter_batch(
         _CapAdapter(
             effective_at=effective_at,
             expires_at=expires_at,
             fetched_at=CHECKED_AT,
+            sent_at=sent_at,
         )
     )
     check = check_summary_freshness(
@@ -357,8 +486,10 @@ def test_ncdr_cap_batch_summary_preserves_effective_expires_window() -> None:
         max_age_seconds=60 * 60,
     )
 
-    assert summary.source_timestamp_min == effective_at
-    assert summary.source_timestamp_max == expires_at
+    assert summary.source_timestamp_min == sent_at
+    assert summary.source_timestamp_max == sent_at
+    assert summary.event_active_from_min == effective_at
+    assert summary.event_active_until_max == expires_at
     assert check.status == "fresh"
 
 
@@ -368,19 +499,28 @@ def _summary(
     status: AdapterBatchStatus = "succeeded",
     source_timestamp_min: datetime | None = CHECKED_AT,
     source_timestamp_max: datetime | None = CHECKED_AT,
+    finished_at: datetime = CHECKED_AT,
+    error_code: str | None = None,
     error_message: str | None = None,
+    event_active_from_min: datetime | None = None,
+    event_active_until_max: datetime | None = None,
+    items_fetched: int = 1,
+    items_promoted: int = 1,
 ) -> AdapterBatchRunSummary:
     return AdapterBatchRunSummary(
         adapter_key=adapter_key,
         status=status,
         started_at=CHECKED_AT,
-        finished_at=CHECKED_AT,
-        items_fetched=1,
-        items_promoted=1,
+        finished_at=finished_at,
+        items_fetched=items_fetched,
+        items_promoted=items_promoted,
         items_rejected=0,
+        error_code=error_code,
         error_message=error_message,
         source_timestamp_min=source_timestamp_min,
         source_timestamp_max=source_timestamp_max,
+        event_active_from_min=event_active_from_min,
+        event_active_until_max=event_active_until_max,
     )
 
 
@@ -398,11 +538,13 @@ class _CapAdapter:
         effective_at: datetime,
         expires_at: datetime,
         fetched_at: datetime,
+        sent_at: datetime | None = None,
         normalize: bool = True,
     ) -> None:
         self.effective_at = effective_at
         self.expires_at = expires_at
         self.fetched_at = fetched_at
+        self.sent_at = sent_at or effective_at
         self.normalize = normalize
 
     def run(self) -> AdapterRunResult:
@@ -412,6 +554,17 @@ class _CapAdapter:
             fetched_at=self.fetched_at,
             payload={
                 "identifier": "NCDR-CAP-001",
+                "evidence_scope": "current",
+                "location_precision": "admin_area",
+                "admin_code": "67000000",
+                "cap_sender": "sender@example.test",
+                "cap_identifier": "NCDR-CAP-001",
+                "cap_sent": self.sent_at.isoformat(),
+                "cap_references": [],
+                "cap_status": "Actual",
+                "cap_message_type": "Alert",
+                "active_from": self.effective_at.isoformat(),
+                "active_until": self.expires_at.isoformat(),
                 "effective": self.effective_at.isoformat(),
                 "expires": self.expires_at.isoformat(),
                 "areaDesc": "Tainan City",
@@ -425,7 +578,7 @@ class _CapAdapter:
             source_id="NCDR-CAP-001",
             source_url="https://example.test/ncdr/cap",
             source_title="NCDR CAP alert",
-            source_timestamp=self.effective_at,
+            source_timestamp=self.sent_at,
             fetched_at=self.fetched_at,
             summary="NCDR CAP flood warning",
             location_text="Tainan City",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -47,9 +47,9 @@ def test_historical_news_backfill_is_no_network_until_all_gates_pass(
         return {"articles": []}
 
     config = HistoricalNewsBackfillConfig(
-        start_datetime=datetime(2025, 8, 1, tzinfo=timezone.utc),
-        end_datetime=datetime(2025, 8, 5, tzinfo=timezone.utc),
-        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, tzinfo=UTC),
+        end_datetime=datetime(2025, 8, 5, tzinfo=UTC),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=UTC),
         queries=("台灣豪雨",),
         gdelt_source_enabled=gdelt_source_enabled,
         gdelt_backfill_enabled=gdelt_backfill_enabled,
@@ -83,9 +83,9 @@ def test_historical_news_backfill_requires_news_and_terms_gates(
         return {"articles": []}
 
     config = HistoricalNewsBackfillConfig(
-        start_datetime=datetime(2025, 8, 1, tzinfo=timezone.utc),
-        end_datetime=datetime(2025, 8, 5, tzinfo=timezone.utc),
-        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, tzinfo=UTC),
+        end_datetime=datetime(2025, 8, 5, tzinfo=UTC),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=UTC),
         queries=("台灣豪雨",),
         gdelt_source_enabled=True,
         gdelt_backfill_enabled=True,
@@ -118,9 +118,9 @@ def test_historical_news_backfill_uses_injected_fetcher_when_all_gates_pass() ->
         }
 
     config = HistoricalNewsBackfillConfig(
-        start_datetime=datetime(2025, 8, 1, tzinfo=timezone.utc),
-        end_datetime=datetime(2025, 8, 5, tzinfo=timezone.utc),
-        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, tzinfo=UTC),
+        end_datetime=datetime(2025, 8, 5, tzinfo=UTC),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=UTC),
         queries=("台南市安南區積淹水",),
         gdelt_source_enabled=True,
         gdelt_backfill_enabled=True,
@@ -157,9 +157,9 @@ def test_gdelt_rehearsal_staging_batch_contract_is_bounded_and_metadata_only() -
         }
 
     config = HistoricalNewsBackfillConfig(
-        start_datetime=datetime(2025, 8, 1, tzinfo=timezone.utc),
-        end_datetime=datetime(2025, 8, 5, tzinfo=timezone.utc),
-        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        start_datetime=datetime(2025, 8, 1, tzinfo=UTC),
+        end_datetime=datetime(2025, 8, 5, tzinfo=UTC),
+        fetched_at=datetime(2026, 4, 29, 8, 0, tzinfo=UTC),
         queries=("台南淹水", "安南區豪雨"),
         max_records_per_query=7,
         request_cadence_seconds=30,
@@ -338,9 +338,9 @@ def _production_candidate_config(
     **overrides: object,
 ) -> HistoricalNewsBackfillConfig:
     values: dict[str, object] = {
-        "start_datetime": datetime(2025, 8, 1, tzinfo=timezone.utc),
-        "end_datetime": datetime(2025, 8, 5, tzinfo=timezone.utc),
-        "fetched_at": datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc),
+        "start_datetime": datetime(2025, 8, 1, tzinfo=UTC),
+        "end_datetime": datetime(2025, 8, 5, tzinfo=UTC),
+        "fetched_at": datetime(2026, 4, 29, 8, 0, tzinfo=UTC),
         "queries": ("台南淹水",),
         "max_records_per_query": 7,
         "request_cadence_seconds": 30,
@@ -360,8 +360,8 @@ def _production_candidate_config(
 
 
 def _candidate() -> PromotionCandidate:
-    occurred_at = datetime(2025, 8, 2, 1, 28, tzinfo=timezone.utc)
-    observed_at = datetime(2026, 4, 29, 8, 0, tzinfo=timezone.utc)
+    occurred_at = datetime(2025, 8, 2, 1, 28, tzinfo=UTC)
+    observed_at = datetime(2026, 4, 29, 8, 0, tzinfo=UTC)
     return PromotionCandidate(
         staging_evidence_id="staging-id",
         raw_snapshot_id="raw-snapshot-id",
@@ -420,6 +420,6 @@ class _MemoryPromotionWriter:
         self.requested_adapter_keys = adapter_keys
         return self._candidates
 
-    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from hashlib import sha256
 from pathlib import Path
 from types import TracebackType
@@ -427,3 +428,31 @@ def test_main_redacts_password_from_unexpected_failure(
     assert captured.err == "Migration failed: unexpected error.\n"
     assert database_url not in captured.err
     assert "private-password" not in captured.err
+
+
+def test_real_migration_manifest_matches_the_api_schema_sentinel() -> None:
+    """The newest migration must stay in lockstep with the API readiness gate.
+
+    The sentinel is read as text rather than imported so this root-level suite
+    never has to put ``apps/api`` on ``sys.path``.
+    """
+
+    repository_root = Path(__file__).resolve().parents[1]
+    migrations = sorted(
+        (repository_root / "infra" / "migrations").glob("[0-9][0-9][0-9][0-9]_*.sql")
+    )
+    latest = migrations[-1]
+    health_source = (
+        repository_root / "apps" / "api" / "app" / "api" / "routes" / "health.py"
+    ).read_text(encoding="utf-8")
+
+    def _constant(name: str) -> str:
+        match = re.search(rf'^{name} = "?([^"\n]+)"?$', health_source, re.MULTILINE)
+        assert match is not None, name
+        return match.group(1)
+
+    assert latest.name == _constant("REQUIRED_SCHEMA_FILENAME")
+    assert int(latest.name[:4]) == int(_constant("REQUIRED_SCHEMA_VERSION"))
+    assert _checksum(latest.read_text(encoding="utf-8")) == _constant(
+        "REQUIRED_SCHEMA_CHECKSUM"
+    )

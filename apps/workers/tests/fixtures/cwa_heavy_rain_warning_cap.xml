@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alerts xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <alert>
+    <identifier>CWA-HR-20260826-001</identifier>
+    <sender>public-warning@cwa.gov.tw</sender>
+    <sent>2026-08-26T08:00:00+08:00</sent>
+    <status>Actual</status>
+    <msgType>Alert</msgType>
+    <scope>Public</scope>
+    <info>
+      <event>大雨特報</event>
+      <headline>臺南市大雨特報</headline>
+      <description>臺南市山區及沿海地區有局部大雨發生的機率。</description>
+      <effective>2026-08-26T08:00:00+08:00</effective>
+      <onset>2026-08-26T08:30:00+08:00</onset>
+      <expires>2026-08-26T14:00:00+08:00</expires>
+      <area>
+        <areaDesc>安南區</areaDesc>
+        <geocode><valueName>TownshipCode</valueName><value>6703500</value></geocode>
+        <polygon>23.1000,120.1000 23.2000,120.1000 23.2000,120.2000 23.1000,120.1000</polygon>
+      </area>
+      <area>
+        <areaDesc>南化區</areaDesc>
+        <geocode><valueName>TownshipCode</valueName><value>6702400</value></geocode>
+        <circle>23.0400,120.4800 8.0</circle>
+      </area>
+    </info>
+  </alert>
+</alerts>

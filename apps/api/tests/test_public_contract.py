@@ -1,15 +1,19 @@
+import inspect
+import json
+import warnings
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-import warnings
 from uuid import UUID
 
-from fastapi.testclient import TestClient
-from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 import pytest
 import yaml  # type: ignore[import-untyped]
+from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 
+from app.api.routes import health as health_routes
+from app.api.routes import public as public_routes
 from app.api.schemas import (
     DependencyReadiness,
     LatLng,
@@ -17,32 +21,20 @@ from app.api.schemas import (
     NearbyRealtimeCoverage,
     NearbySourceHealth,
     PlaceCandidate,
+    RiskAssessmentResponse,
 )
-from app.api.routes import health as health_routes
-from app.api.routes import public as public_routes
+from app.api.services import public_layers as public_layer_service
+from app.api.services.assessment import AssessmentService
 from app.core.config import get_settings
+from app.domain.assessment import AssessmentData, AssessmentSourceState
 from app.domain.evidence import (
     EvidenceRecord,
-    EvidenceRepositoryUnavailable,
-    EvidenceUpsert,
-    QueryHeatSnapshot,
 )
-from app.domain.evidence.repository import (
-    NearbyCoverageRow,
-    RealtimeJurisdictionContext,
-    RealtimeJurisdictionSignalContract,
-    RealtimeJurisdictionSourceMapping,
-    RealtimeSourceHealthRow,
-)
-from app.domain.history import HistoricalFloodRecord, OfficialFloodDisasterLookup
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
-from app.domain.profiles import RiskProfileRecord
 from app.domain.realtime import (
-    OfficialRealtimeBundle,
-    OfficialRealtimeObservation,
-    OfficialRealtimeSourceStatus,
+    build_nearby_realtime_coverage,
 )
-from app.domain.realtime import official as official_realtime
+from app.domain.risk import score_risk
 from app.main import create_app
 
 with warnings.catch_warnings():
@@ -57,30 +49,175 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 OPENAPI_SPEC = yaml.safe_load((REPO_ROOT / "docs" / "api" / "openapi.yaml").read_text(encoding="utf-8"))
 
 
-@pytest.fixture(autouse=True)
-def fallback_to_local_historical_records(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unavailable(**_kwargs: object) -> tuple[EvidenceRecord, ...]:
-        raise EvidenceRepositoryUnavailable("database unavailable in contract tests")
+ROUTE_NOW = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
+RAIN_ID = "26900bf0-f51c-4326-8f75-68d03a36560e"
+WATER_ID = "911d1bdf-0cc9-49bc-896d-f92680054b08"
+HISTORY_ID = "0ca7e95a-7cfa-4e8d-b7e3-a0ca4b1836ec"
+REVIEWED_TILE_HOST = "tiles.official.gov.tw"
 
+
+class RouteRepository:
+    def __init__(self, data: AssessmentData) -> None:
+        self.data = data
+        self.loads: list[dict[str, object]] = []
+
+    def load(self, **kwargs: object) -> AssessmentData:
+        self.loads.append(kwargs)
+        radius_m = int(kwargs["radius_m"])
+        coverage = self.data.nearby_coverage.model_copy(
+            update={"query_radius_m": radius_m}
+        )
+        return replace(self.data, nearby_coverage=coverage)
+
+    def persist(self, _assessment: object) -> None:
+        return
+
+
+def _route_record(
+    evidence_id: str,
+    *,
+    event_type: str,
+    evidence_scope: str,
+    source_type: str = "official",
+    realtime_risk_factor: float = 0.0,
+) -> EvidenceRecord:
+    return EvidenceRecord(
+        id=evidence_id,
+        source_id=f"route:{evidence_id}",
+        source_type=source_type,
+        event_type=event_type,
+        title=f"route {event_type}",
+        summary=f"route {event_type} evidence",
+        url=None,
+        occurred_at=ROUTE_NOW,
+        observed_at=ROUTE_NOW,
+        ingested_at=ROUTE_NOW,
+        lat=22.9997,
+        lng=120.227,
+        geometry={"type": "Point", "coordinates": [120.227, 22.9997]},
+        distance_to_query_m=20.0,
+        confidence=0.9,
+        freshness_score=1.0,
+        source_weight=1.0,
+        privacy_level="public",
+        raw_ref=None,
+        realtime_risk_factor=realtime_risk_factor,
+        evidence_scope=evidence_scope,  # type: ignore[arg-type]
+        adapter_key=(
+            "official.wra.water_level"
+            if event_type == "water_level"
+            else "official.cwa.rainfall"
+        ),
+        location_precision="map_click",
+    )
+
+
+def _route_coverage():
+    coverage = build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=1000,
+        evaluated_at=ROUTE_NOW,
+        jurisdiction_status="verified",
+    )
+    return coverage.model_copy(
+        update={
+            "signal_breakdown": [
+                NearbyCoverageSignal(
+                    signal_type=signal_type,
+                    label=signal_type,
+                    coverage_level="high",
+                    availability_state="fresh_nearby",
+                    nearest_distance_m=20.0,
+                    counts_by_radius_m={"1000": 1},
+                    fresh_count=1,
+                    stale_count=0,
+                    status_only_count=0,
+                )
+                for signal_type in ("rainfall", "water_level")
+            ],
+            "source_health_checked": True,
+            "jurisdiction_checked": True,
+            "jurisdiction_catalog_complete": True,
+        }
+    )
+
+
+def _route_data(
+    *,
+    current: tuple[EvidenceRecord, ...] | None = None,
+    historical: tuple[EvidenceRecord, ...] = (),
+    states: tuple[AssessmentSourceState, ...] | None = None,
+    current_available: bool = True,
+    historical_available: bool = True,
+    coverage_available: bool = True,
+    health_available: bool = True,
+    jurisdiction_available: bool = True,
+    resolved_admin_code: str = "67000000",
+    resolved_admin_name: str = "臺南市",
+    local_machine_feed_missing: tuple[str, ...] = (),
+    recent_incident_context: tuple[EvidenceRecord, ...] = (),
+) -> AssessmentData:
+    if current is None:
+        current = (
+            _route_record(RAIN_ID, event_type="rainfall", evidence_scope="current"),
+            _route_record(WATER_ID, event_type="water_level", evidence_scope="current"),
+        )
+    states = states or tuple(
+        AssessmentSourceState(
+            source_key=source_key,
+            signal_type=signal_type,
+            state="fresh",
+            observed_at=ROUTE_NOW,
+            checked_at=ROUTE_NOW,
+            message=None,
+        )
+        for source_key, signal_type in (
+            ("official.cwa.rainfall", "rainfall"),
+            ("official.wra.water_level", "water_level"),
+        )
+    )
+    return AssessmentData(
+        current_official=current,
+        historical=historical,
+        nearby_coverage=_route_coverage(),
+        source_states=states,
+        required_realtime_source_keys=frozenset(
+            {"official.cwa.rainfall", "official.wra.water_level"}
+        ),
+        current_available=current_available,
+        historical_available=historical_available,
+        coverage_available=coverage_available,
+        health_available=health_available,
+        jurisdiction_available=jurisdiction_available,
+        resolved_admin_code=resolved_admin_code,
+        resolved_admin_name=resolved_admin_name,
+        local_machine_feed_missing=local_machine_feed_missing,
+        recent_incident_context=recent_incident_context,
+    )
+
+
+def _install_route_data(
+    monkeypatch: pytest.MonkeyPatch,
+    data: AssessmentData,
+) -> RouteRepository:
+    repository = RouteRepository(data)
+    service = AssessmentService(repository, score_risk)
+    monkeypatch.setattr(public_routes, "_assessment_service", lambda _settings: service)
+    monkeypatch.setattr(public_routes, "_now", lambda: ROUTE_NOW)
+    return repository
+
+
+@pytest.fixture(autouse=True)
+def repository_service_seam(monkeypatch: pytest.MonkeyPatch) -> None:
     def layers_unavailable(**_kwargs: object) -> tuple[LayerRecord, ...]:
         raise LayerRepositoryUnavailable("database unavailable in contract tests")
 
-    def profile_unavailable(**_kwargs: object) -> None:
-        raise public_routes.RiskProfileRepositoryUnavailable(
-            "profile database unavailable in contract tests"
-        )
-
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", unavailable)
-    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", unavailable)
-    monkeypatch.setattr(public_routes, "query_realtime_jurisdiction_context", unavailable)
-    monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
-    monkeypatch.setattr(public_routes, "persist_risk_assessment", unavailable)
+    _install_route_data(monkeypatch, _route_data())
     monkeypatch.setattr(public_routes, "fetch_map_layers", layers_unavailable)
-    monkeypatch.setattr(public_routes, "fetch_best_profile_for_point", profile_unavailable)
 
 
 def assert_iso_datetime(value: str) -> None:
-    datetime.fromisoformat(value.replace("Z", "+00:00"))
+    datetime.fromisoformat(value)
 
 
 def assert_error_envelope(payload: dict) -> None:
@@ -96,6 +233,68 @@ def assert_openapi_schema(payload: dict, schema_name: str) -> None:
     validator = Draft202012Validator(schema, resolver=RefResolver.from_schema(schema))
     errors = list(validator.iter_errors(payload))
     assert errors == []
+
+
+def test_risk_response_schema_exposes_additive_v1_fields() -> None:
+    properties = RiskAssessmentResponse.model_json_schema()["properties"]
+    assert {
+        "as_of",
+        "community",
+        "overall",
+        "dominant_mode",
+        "data_status",
+        "community_refresh",
+    } <= properties.keys()
+
+
+def test_recent_context_is_additive_and_does_not_change_the_public_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = json.dumps(RiskAssessmentResponse.model_json_schema(), sort_keys=True)
+
+    _install_route_data(monkeypatch, _route_data())
+    baseline = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.99974, "lng": 120.22704},
+            "radius_m": 750,
+            "time_context": "now",
+        },
+    ).json()
+
+    context_id = "d5b0a1b6-4a2a-4f78-9f2a-6b6d8f0c1e34"
+    _install_route_data(
+        monkeypatch,
+        _route_data(
+            recent_incident_context=(
+                _route_record(
+                    context_id,
+                    event_type="status_only",
+                    evidence_scope="context",
+                ),
+            )
+        ),
+    )
+    with_context = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.99974, "lng": 120.22704},
+            "radius_m": 750,
+            "time_context": "now",
+        },
+    ).json()
+
+    assert json.dumps(RiskAssessmentResponse.model_json_schema(), sort_keys=True) == before
+    assert with_context.keys() == baseline.keys()
+    assert with_context["realtime"] == baseline["realtime"]
+    assert with_context["historical"] == baseline["historical"]
+    assert with_context["overall"] == baseline["overall"]
+    assert with_context["confidence"] == baseline["confidence"]
+    assert with_context["dominant_mode"] == baseline["dominant_mode"]
+    assert with_context["nearby_realtime_coverage"] == baseline["nearby_realtime_coverage"]
+    assert context_id in {item["id"] for item in with_context["evidence"]}
+    assert context_id not in {item["id"] for item in baseline["evidence"]}
+    assert_openapi_schema(with_context, "RiskAssessmentResponse")
 
 
 def test_health_contract() -> None:
@@ -162,10 +361,10 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        37,
-        "0037_yilan_mobile_pump_status_source.sql",
-        "4a5215f6d32f83a7710a5782bdbd8168811affb306740c5acfb0cf45d0eb9447",
-        37,
+        38,
+        "0038_official_incident_context_sources.sql",
+        "b7f4ca9252e84c207bfd0cda6f86ff164f4faab77f8ee72b73c6359f11d7f298",
+        38,
         "public.station_inventory_snapshots",
         "public.realtime_jurisdiction_boundary_snapshots",
         "public.realtime_jurisdiction_boundaries",
@@ -182,7 +381,7 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
         def fetchone(self) -> tuple[bool, ...]:
             return (True, True, True, True, False, True, True)
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0037 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0038 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 
@@ -671,23 +870,12 @@ def test_geocode_uses_wikimedia_poi_fallback_when_osm_misses(monkeypatch) -> Non
     assert candidate["point"] == {"lat": 23.1, "lng": 120.2}
 
 
-def test_risk_assess_contract(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _official_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "nearest_public_news_location_text",
-        lambda **_kwargs: None,
-    )
-
+def test_risk_assess_contract() -> None:
     response = client.post(
         "/v1/risk/assess",
         json={
-            "point": {"lat": 25.033, "lng": 121.5654},
-            "radius_m": 500,
+            "point": {"lat": 22.9997, "lng": 120.227},
+            "radius_m": 1000,
             "time_context": "now",
         },
     )
@@ -709,2112 +897,313 @@ def test_risk_assess_contract(monkeypatch) -> None:
         "data_freshness",
         "query_heat",
         "nearby_realtime_coverage",
+        "as_of",
+        "dominant_mode",
+        "community",
+        "overall",
+        "data_status",
+        "community_refresh",
     }
     assert UUID(payload["assessment_id"])
-    assert payload["location"] == {"lat": 25.033, "lng": 121.5654}
-    assert payload["radius_m"] == 500
-    assert_iso_datetime(payload["created_at"])
-    assert_iso_datetime(payload["expires_at"])
-    assert set(payload["realtime"]) == {"level"}
-    assert set(payload["historical"]) == {"level"}
-    assert set(payload["confidence"]) == {"level"}
-    assert payload["realtime"]["level"] in RISK_LEVELS
-    assert payload["historical"]["level"] == "未知"
-    assert payload["confidence"]["level"] in CONFIDENCE_LEVELS
-    assert len(payload["evidence"]) >= 2
-    assert payload["explanation"]["missing_sources"] == [
-        "查詢半徑內尚未匯入實際歷史淹水事件或公開新聞紀錄；"
-        "目前資料不足，淹水潛勢圖資只能作為情境參考，不能標記為低風險或購屋安全。"
-    ]
-    assert set(payload["evidence"][0]) == {
-        "id",
-        "source_type",
-        "event_type",
-        "title",
-        "summary",
-        "occurred_at",
-        "observed_at",
-        "ingested_at",
-        "distance_to_query_m",
-        "confidence",
-        "url",
-    }
-    assert payload["data_freshness"][0]["health_status"] == "healthy"
-    assert payload["data_freshness"][0]["source_id"] == "cwa-rainfall"
-    assert payload["query_heat"]["period"] == "P7D"
-    assert payload["query_heat"]["attention_level"] in RISK_LEVELS
-    coverage = payload["nearby_realtime_coverage"]
-    assert coverage["query_radius_m"] == 500
-    assert coverage["radius_buckets_m"] == [500, 1000, 3000, 5000, 10000, 15000]
-    assert coverage["overall_level"] in {
-        "high",
-        "medium",
-        "low",
-        "no_local_sensor",
-        "unavailable",
-    }
-    assert coverage["county_level_note"] == (
-        '縣市層級涵蓋只作背景參考，不代表查詢點附'
-        '近的感測器覆蓋；附近涵蓋會依查詢點重新計算。'
-    )
+    assert payload["location"] == {"lat": 22.9997, "lng": 120.227}
+    assert payload["radius_m"] == 1000
+    assert payload["realtime"]["level"] == "低"
+    assert payload["overall"]["level"] == "低"
+    assert payload["dominant_mode"] == "realtime"
+    assert payload["query_heat"]["period"] == "frozen"
+    assert payload["nearby_realtime_coverage"]["query_radius_m"] == 1000
     assert_openapi_schema(payload, "RiskAssessmentResponse")
 
 
-def test_risk_assess_exposes_public_safe_realtime_source_health(monkeypatch) -> None:
-    now = datetime.now(UTC)
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
+def test_risk_assess_partial_current_source_is_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _route_data()
+    states = (
+        base.source_states[0],
+        replace(
+            base.source_states[1],
+            state="failed",
+            observed_at=None,
+            message="官方水位來源暫時無法使用",
+        ),
     )
-    monkeypatch.setattr(public_routes, "nearest_public_news_location_text", lambda **_: None)
-    monkeypatch.setattr(public_routes, "query_nearby_realtime_coverage_rows", lambda **_: ())
-    monkeypatch.setattr(
-        public_routes,
-        "query_realtime_jurisdiction_context",
-        lambda **_: RealtimeJurisdictionContext(
-            resolution_status="verified",
-            home_jurisdiction_code="63000000",
-            home_jurisdiction_name="臺北市",
-            considered_jurisdictions=(("63000000", "臺北市"),),
-            signal_contracts=tuple(
-                RealtimeJurisdictionSignalContract(
-                    jurisdiction_code="63000000",
-                    jurisdiction_name="臺北市",
-                    signal_type=signal_type,
-                    catalog_status="reviewed_complete",
-                    mapping_revision="contract-test-v1",
-                    mapping_proof_valid=True,
-                )
-                for signal_type in (
-                    "rainfall",
-                    "water_level",
-                    "flood_depth",
-                    "sewer_water_level",
-                )
+    _install_route_data(
+        monkeypatch,
+        _route_data(
+            current=(
+                _route_record(
+                    RAIN_ID,
+                    event_type="rainfall",
+                    evidence_scope="current",
+                ),
             ),
-            source_mappings=(
-                RealtimeJurisdictionSourceMapping(
-                    adapter_key="official.cwa.rainfall",
-                    signal_type="rainfall",
-                    coverage_scope="national",
-                    jurisdiction_code="TW",
-                    jurisdiction_name=None,
-                    requirement_role="required",
-                    mapping_revision="contract-test-v1",
+            states=states,
+        ),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.9997, "lng": 120.227},
+            "radius_m": 1000,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["realtime"]["level"] == "未知"
+    assert response.json()["overall"]["level"] != "低"
+
+
+def test_risk_assess_current_high(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_route_data(
+        monkeypatch,
+        _route_data(
+            current=(
+                _route_record(
+                    RAIN_ID,
+                    event_type="rainfall",
+                    evidence_scope="current",
+                    realtime_risk_factor=1.0,
+                ),
+                _route_record(
+                    WATER_ID,
+                    event_type="water_level",
+                    evidence_scope="current",
+                    realtime_risk_factor=1.0,
                 ),
             ),
         ),
     )
-    monkeypatch.setattr(
-        public_routes,
-        "query_realtime_source_health_rows",
-        lambda **_kwargs: (
-            RealtimeSourceHealthRow(
-                adapter_key="official.cwa.rainfall",
-                name="postgresql://private-user:private-token@db.internal/flood",
-                is_enabled=True,
-                configured_health_status="healthy",
-                last_success_at=now - timedelta(minutes=5),
-                last_failure_at=None,
-                latest_run_status="succeeded",
-                latest_run_at=now - timedelta(minutes=5),
-                latest_observed_at=now - timedelta(minutes=3),
-                latest_ingested_at=now - timedelta(minutes=2),
-                station_count=42,
-                inventory_complete=True,
-            ),
-        ),
-    )
 
     response = client.post(
         "/v1/risk/assess",
         json={
-            "point": {"lat": 25.033, "lng": 121.5654},
-            "radius_m": 500,
+            "point": {"lat": 22.9997, "lng": 120.227},
+            "radius_m": 1000,
             "time_context": "now",
         },
     )
 
     assert response.status_code == 200
-    payload = response.json()
-    coverage = payload["nearby_realtime_coverage"]
-    rainfall = next(
-        item for item in coverage["signal_breakdown"] if item["signal_type"] == "rainfall"
-    )
-    source = coverage["source_health"][0]
-    assert coverage["source_health_checked"] is True
-    assert coverage["source_health_status"] == "healthy"
-    assert source["name"] == "中央氣象署雨量觀測"
-    assert source["health_status"] == "healthy"
-    assert source["reason_code"] == "operational"
-    assert source["station_count"] == 42
-    assert source["inventory_complete"] is True
-    assert rainfall["availability_state"] == "no_station"
-    assert rainfall["missing_cause"] == "no_station_in_range"
-    assert "private-token" not in response.text
-    assert "adapter_key" not in source
-    assert "error_message" not in source
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
+    assert response.json()["realtime"]["level"] == "高"
+    assert response.json()["overall"]["level"] == "高"
+    assert response.json()["dominant_mode"] == "realtime"
 
 
-def test_official_evidence_links_to_data_gov_catalog() -> None:
-    rainfall, water_level = _official_realtime_bundle().observations
-
-    rainfall_evidence = public_routes._official_realtime_evidence(rainfall)
-    water_level_evidence = public_routes._official_realtime_evidence(water_level)
-    flood_potential_evidence = public_routes._evidence_from_record(_flood_potential_record())
-
-    assert rainfall_evidence.url == "https://data.gov.tw/dataset/9177"
-    assert water_level_evidence.url == "https://data.gov.tw/dataset/25768"
-    assert flood_potential_evidence.url == "https://data.gov.tw/dataset/25766"
-
-
-def test_risk_assess_surfaces_official_flood_disaster_points(
-    monkeypatch,
-    tmp_path,
+def test_risk_assess_history_only_is_historical_context(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    csv_path = tmp_path / "flood_points.csv"
-    csv_path.write_text(
-        "\n".join(
-            (
-                "FID,year,X_97,Y_97,source",
-                "0,2023,172956.00,2543478.00,EMIC",
-            )
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("OFFICIAL_FLOOD_DISASTER_POINTS_ENABLED", "true")
-    monkeypatch.setenv("OFFICIAL_FLOOD_DISASTER_POINTS_PATH", str(csv_path))
-    monkeypatch.setenv("HISTORICAL_NEWS_ON_DEMAND_ENABLED", "false")
-    get_settings.cache_clear()
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-
-    try:
-        response = client.post(
-            "/v1/risk/assess",
-            json={
-                "point": {"lat": 22.990947, "lng": 120.248506},
-                "radius_m": 300,
-                "time_context": "now",
-            },
-        )
-    finally:
-        get_settings.cache_clear()
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "中"
-    assert any(item["source_type"] == "official" for item in payload["evidence"])
-    assert any("官方淹水災害情資點位" in item["title"] for item in payload["evidence"])
-    assert not any(
-        "尚未匯入實際歷史淹水事件" in source
-        for source in payload["explanation"]["missing_sources"]
-    )
-    official_status = next(
-        item for item in payload["data_freshness"] if item["source_id"] == "official-flood-disaster-points"
-    )
-    assert official_status["health_status"] == "degraded"
-    assert "命中 1 筆" in official_status["message"]
-    assert "尚未涵蓋 2024-2026" in official_status["message"]
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_keeps_single_old_official_hit_with_potential_context_at_medium(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("HISTORICAL_NEWS_ON_DEMAND_ENABLED", "false")
-    get_settings.cache_clear()
-    now = datetime.fromisoformat("2026-06-10T14:30:00+00:00")
-    official_record = HistoricalFloodRecord(
-        source_id="data-gov-130016:2021:EMIC:4972",
-        source_name="官方資料：淹水災點快照",
-        source_type="official",
-        event_type="flood_report",
-        title="2021 官方淹水災害情資點位（EMIC #4972）",
-        summary=(
-            "data.gov.tw dataset 130016 彙整防救災部會署淹水災害情資點位；"
-            "此筆資料提供年度與座標點，未提供完整事件時間、淹水深度或地址。"
-        ),
-        url="https://data.gov.tw/dataset/130016",
-        occurred_at=datetime.fromisoformat("2021-12-31T12:00:00+08:00"),
-        ingested_at=now,
-        lat=23.59045,
-        lng=120.29340,
-        confidence=0.82,
-        freshness_score=0.74,
-        source_weight=1.0,
-        risk_factor=1.0,
-    )
-    first_potential = replace(
-        _flood_potential_record(),
-        id="potential-context-1",
-        source_id="dprc-taiwan-flood-potential-context-1",
-        lat=23.59100,
-        lng=120.29320,
-        distance_to_query_m=185.0,
-        freshness_score=1.0,
-        source_weight=1.0,
-    )
-    second_potential = replace(
-        first_potential,
-        id="potential-context-2",
-        source_id="dprc-taiwan-flood-potential-context-2",
-        distance_to_query_m=240.0,
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (first_potential, second_potential),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "lookup_official_flood_disaster_points",
-        lambda **_kwargs: OfficialFloodDisasterLookup(
-            attempted=True,
-            source_id="official-flood-disaster-points",
-            name="官方資料：淹水災點快照（2018-2022）",
-            health_status="degraded",
-            message="官方淹水災點快照命中 1 筆。",
-            records=((official_record, 101.0),),
-            observed_at=official_record.occurred_at,
-            ingested_at=now,
-        ),
-    )
-
-    try:
-        response = client.post(
-            "/v1/risk/assess",
-            json={
-                "point": {"lat": 23.59132, "lng": 120.29373},
-                "radius_m": 500,
-                "time_context": "now",
-                "location_text": "劉厝",
-            },
-        )
-    finally:
-        get_settings.cache_clear()
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["realtime"]["level"] == "未知"
-    assert payload["historical"]["level"] == "中"
-    assert "歷史與淹水潛勢參考為中" in payload["explanation"]["summary"]
-    assert any("官方淹水災害情資點位" in item["title"] for item in payload["evidence"])
-    assert any("官方淹水潛勢規劃圖資" in item["title"] for item in payload["evidence"])
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_display_evidence_items_collapses_repeated_official_disaster_points() -> None:
-    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
-    items = [
-        public_routes.Evidence(
-            id="official-2018",
-            source_id="data-gov-130016:2018:EMIC:1",
-            source_type="official",
-            event_type="flood_report",
-            title="2018 官方淹水災害情資點位（EMIC #1）",
-            summary="官方淹水災點快照命中。",
-            url="https://data.gov.tw/dataset/130016",
-            occurred_at=datetime.fromisoformat("2018-12-31T12:00:00+08:00"),
-            observed_at=datetime.fromisoformat("2018-12-31T12:00:00+08:00"),
-            ingested_at=now,
-            point=public_routes.LatLng(lat=23.0, lng=120.2),
-            geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[120.2, 23.0]),
-            distance_to_query_m=42.0,
-            confidence=0.82,
-            freshness_score=0.74,
-            source_weight=1.0,
-            privacy_level="public",
-            raw_ref="historical-record:data-gov-130016:2018:EMIC:1",
-        ),
-        public_routes.Evidence(
-            id="official-2020",
-            source_id="data-gov-130016:2020:EMIC:2",
-            source_type="official",
-            event_type="flood_report",
-            title="2020 官方淹水災害情資點位（EMIC #2）",
-            summary="官方淹水災點快照命中。",
-            url="https://data.gov.tw/dataset/130016",
-            occurred_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
-            observed_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
-            ingested_at=now,
-            point=public_routes.LatLng(lat=23.0, lng=120.2),
-            geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[120.2, 23.0]),
-            distance_to_query_m=80.0,
-            confidence=0.86,
-            freshness_score=0.82,
-            source_weight=1.0,
-            privacy_level="public",
-            raw_ref="historical-record:data-gov-130016:2020:EMIC:2",
-        ),
-    ]
-
-    displayed = public_routes._display_evidence_items(items)
-
-    assert len(displayed) == 1
-    assert displayed[0].source_id == "data-gov-130016:summary"
-    assert displayed[0].title == "官方淹水災害情資點位彙整（2018、2020）"
-    assert "命中 2 筆" in displayed[0].summary
-    assert "風險計分仍使用原始命中點位" in displayed[0].summary
-
-
-def test_official_disaster_summary_uses_latest_available_timestamp() -> None:
-    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
-
-    def evidence(
-        *,
-        item_id: str,
-        source_id: str,
-        distance_to_query_m: float,
-        observed_at: datetime | None,
-        occurred_at: datetime | None,
-    ) -> public_routes.Evidence:
-        return public_routes.Evidence(
-            id=item_id,
-            source_id=source_id,
-            source_type="official",
-            event_type="flood_report",
-            title="Official flood disaster point",
-            summary="Official flood disaster point summary.",
-            url="https://data.gov.tw/dataset/130016",
-            occurred_at=occurred_at,
-            observed_at=observed_at,
-            ingested_at=now,
-            point=public_routes.LatLng(lat=23.0, lng=120.2),
-            geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[120.2, 23.0]),
-            distance_to_query_m=distance_to_query_m,
-            confidence=0.82,
-            freshness_score=0.74,
-            source_weight=1.0,
-            privacy_level="public",
-            raw_ref=f"historical-record:{source_id}",
-        )
-
-    nearest_without_time = evidence(
-        item_id="official-nearest",
-        source_id="data-gov-130016:nearest",
-        distance_to_query_m=10.0,
-        observed_at=None,
-        occurred_at=None,
-    )
-    older_observed = evidence(
-        item_id="official-observed",
-        source_id="data-gov-130016:observed",
-        distance_to_query_m=50.0,
-        observed_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
-        occurred_at=None,
-    )
-    latest_occurred = evidence(
-        item_id="official-occurred",
-        source_id="data-gov-130016:occurred",
-        distance_to_query_m=90.0,
-        observed_at=None,
-        occurred_at=datetime.fromisoformat("2022-12-31T12:00:00+08:00"),
-    )
-
-    summary = public_routes._official_flood_disaster_summary_item(
-        [nearest_without_time, older_observed, latest_occurred]
-    )
-
-    assert summary.distance_to_query_m == 10.0
-    assert summary.observed_at == datetime.fromisoformat("2022-12-31T12:00:00+08:00")
-    assert summary.occurred_at == datetime.fromisoformat("2022-12-31T12:00:00+08:00")
-
-
-def test_public_news_failure_is_not_promoted_when_history_exists() -> None:
-    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
-    official_record = HistoricalFloodRecord(
-        source_id="official-flood-disaster-points:test",
-        source_name="官方資料：淹水災點快照",
-        source_type="official",
-        event_type="flood_report",
-        title="2020 官方淹水災害情資點位",
-        summary="官方資料命中。",
-        url="https://data.gov.tw/dataset/130016",
-        occurred_at=datetime.fromisoformat("2020-12-31T12:00:00+08:00"),
-        ingested_at=now,
-        lat=23.0,
-        lng=120.2,
-        confidence=0.82,
-        freshness_score=0.82,
-        source_weight=1.0,
-        risk_factor=1.0,
-    )
-    limitations = public_routes._visible_source_limitations(
-        public_routes.OfficialRealtimeBundle(observations=(), source_statuses=()),
-        ((official_record, 30.0),),
-        None,
-        public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="公開新聞、RSS 或百科索引暫時無法完整回應；保留既有資料。",
-            records=(),
-            health_status="degraded",
-        ),
-    )
-
-    assert limitations == []
-
-
-def test_visible_source_limitations_respects_persisted_official_realtime_evidence() -> None:
-    now = datetime.fromisoformat("2026-06-10T03:00:00+00:00")
-    rainfall = public_routes.Evidence(
-        id="official-rainfall",
-        source_id="cwa-rainfall:test",
-        source_type="official",
-        event_type="rainfall",
-        title="Persisted rainfall",
-        summary="Persisted CWA rainfall snapshot.",
-        url="https://data.gov.tw/dataset/9177",
-        occurred_at=None,
-        observed_at=now,
-        ingested_at=now,
-        point=public_routes.LatLng(lat=25.0, lng=121.5),
-        geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[121.5, 25.0]),
-        distance_to_query_m=100.0,
-        confidence=0.92,
-        freshness_score=0.95,
-        source_weight=1.0,
-        privacy_level="public",
-        raw_ref="raw/cwa/rainfall/test.json",
-    )
-    historical_news = public_routes.Evidence(
-        id="historical-news",
-        source_id="news:test",
-        source_type="news",
-        event_type="flood_report",
-        title="Historical flood evidence",
-        summary="Historical observed flood evidence.",
-        url="https://example.test/news",
-        occurred_at=now,
-        observed_at=now,
-        ingested_at=now,
-        point=public_routes.LatLng(lat=25.0, lng=121.5),
-        geometry=public_routes.GeoJsonGeometry(type="Point", coordinates=[121.5, 25.0]),
-        distance_to_query_m=100.0,
-        confidence=0.8,
-        freshness_score=0.8,
-        source_weight=0.85,
-        privacy_level="public",
-        raw_ref="raw/news/test.json",
-    )
-
-    limitations = public_routes._visible_source_limitations(
-        public_routes.OfficialRealtimeBundle(
-            observations=(),
-            source_statuses=(
-                public_routes.OfficialRealtimeSourceStatus(
-                    source_id="cwa-rainfall",
-                    name="CWA rainfall",
-                    health_status="degraded",
-                    observed_at=None,
-                    ingested_at=now,
-                    message="rainfall missing",
-                ),
-                public_routes.OfficialRealtimeSourceStatus(
-                    source_id="wra-water-level",
-                    name="WRA water level",
-                    health_status="degraded",
-                    observed_at=None,
-                    ingested_at=now,
-                    message="water level missing",
+    _install_route_data(
+        monkeypatch,
+        _route_data(
+            current=(),
+            historical=(
+                _route_record(
+                    HISTORY_ID,
+                    event_type="flood_report",
+                    evidence_scope="historical",
+                    realtime_risk_factor=1.0,
                 ),
             ),
         ),
-        (),
-        (rainfall, historical_news),
-        public_routes.OnDemandNewsSearchResult(
-            attempted=False,
-            source_id="on-demand-public-news",
-            message="not attempted",
-            records=(),
-        ),
-    )
-
-    assert limitations == ["water level missing"]
-
-
-def test_risk_assess_surfaces_nearby_historical_flood_records(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
     )
 
     response = client.post(
         "/v1/risk/assess",
         json={
-            "point": {"lat": 23.038818, "lng": 120.213493},
-            "radius_m": 300,
+            "point": {"lat": 22.9997, "lng": 120.227},
+            "radius_m": 1000,
             "time_context": "now",
         },
     )
 
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["realtime"]["level"] == "未知"
-    assert payload["historical"]["level"] == "高"
-    assert any(item["source_type"] == "news" for item in payload["evidence"])
-    assert any("2025-08-02" in item["title"] for item in payload["evidence"])
-    assert any(
-        item["source_type"] == "news" and item["url"]
-        for item in payload["evidence"]
-    )
-    assert payload["data_freshness"][-1]["source_id"] == "historical-flood-records"
-    assert "2 筆" in payload["data_freshness"][-1]["message"]
-    assert payload["data_freshness"][-1]["feature_count"] == 2
+    assert response.json()["realtime"]["level"] == "未知"
+    assert response.json()["historical"]["level"] == "中"
+    assert response.json()["dominant_mode"] == "historical_context"
 
 
-def test_risk_assess_uses_db_evidence_when_repository_is_available(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (_db_evidence_record(),),
-    )
+@pytest.mark.parametrize(
+    "availability_field",
+    [
+        "current_available",
+        "historical_available",
+        "coverage_available",
+        "health_available",
+        "jurisdiction_available",
+    ],
+)
+def test_risk_assess_reader_failures_are_independent(
+    monkeypatch: pytest.MonkeyPatch,
+    availability_field: str,
+) -> None:
+    data = replace(_route_data(), **{availability_field: False})
+    _install_route_data(monkeypatch, data)
 
     response = client.post(
         "/v1/risk/assess",
         json={
-            "point": {"lat": 23.038818, "lng": 120.213493},
-            "radius_m": 300,
+            "point": {"lat": 22.9997, "lng": 120.227},
+            "radius_m": 1000,
             "time_context": "now",
         },
     )
 
     assert response.status_code == 200
-    payload = response.json()
-    assert [item["source_id"] for item in payload["data_freshness"]][-1] == "db-evidence"
-    assert "已審核歷史資料" in payload["data_freshness"][-1]["message"]
-    assert payload["data_freshness"][-1]["feature_count"] == 1
-    assert payload["evidence"][0]["id"] == "b3f22a36-7316-4e2a-92b6-c6f6443c8528"
-    assert payload["evidence"][0]["source_type"] == "news"
-    assert not any("甇瑕" in source for source in payload["explanation"]["missing_sources"])
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
+    assert response.json()["data_status"]["missing"]
 
 
-def test_risk_assess_uses_curated_history_when_db_only_has_flood_potential(
-    monkeypatch,
+@pytest.mark.parametrize(
+    ("admin_code", "admin_name", "gap"),
+    [
+        ("67000000", "臺南市", "臺南市地方淹水感測器尚未可用"),
+        ("64000000", "高雄市", "高雄市地方政府機器介面尚未核准"),
+        ("10013000", "屏東縣", "屏東縣地方政府機器介面尚未核准"),
+    ],
+)
+def test_risk_assess_exposes_server_resolved_local_feed_gaps(
+    monkeypatch: pytest.MonkeyPatch,
+    admin_code: str,
+    admin_name: str,
+    gap: str,
 ) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (_flood_potential_record(),),
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.65646, "lng": 120.32574},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "三民區本和里大豐一路",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "高"
-    assert any("本和里" in item["title"] for item in payload["evidence"])
-    assert any(item["event_type"] == "flood_potential" for item in payload["evidence"])
-    assert not any(
-        "尚未匯入實際歷史淹水事件" in source
-        for source in payload["explanation"]["missing_sources"]
-    )
-    assert payload["data_freshness"][-1]["source_id"] == "db-evidence"
-    assert payload["data_freshness"][-1]["health_status"] == "healthy"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_attempts_on_demand_news_when_db_only_has_flood_potential(
-    monkeypatch,
-) -> None:
-    now = datetime.fromisoformat("2026-05-04T03:00:00+00:00")
-    enrichment_record = EvidenceUpsert(
-        id="b495328e-994b-5430-9bda-7a701494d966",
-        adapter_key="news.public_web.gdelt_backfill",
-        source_id="gdelt-on-demand:test-sanmin",
-        source_type="news",
-        event_type="flood_report",
-        title="高雄三民區大豐一路淹水 地下室災情嚴重",
-        summary="公開新聞索引標題與查詢地點及淹水關鍵字相符。",
-        url="https://example.test/news/sanmin-flood",
-        occurred_at=now,
-        observed_at=now,
-        ingested_at=now,
-        lat=22.65646,
-        lng=120.32574,
-        distance_to_query_m=0.0,
-        confidence=0.9,
-        freshness_score=0.95,
-        source_weight=1.0,
-        privacy_level="public",
-        raw_ref="gdelt-doc:test-sanmin",
-        properties={"full_text_stored": False},
-    )
-    calls: list[str | None] = []
-
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (_flood_potential_record(),),
-    )
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-
-    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
-        calls.append(kwargs.get("location_text"))
-        return public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="已從公開新聞索引補查並整理 1 筆候選淹水事件。",
-            records=(enrichment_record,),
-        )
-
-    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
-    monkeypatch.setattr(public_routes, "upsert_public_evidence", lambda **_kwargs: ())
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.65646, "lng": 120.32574},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "三民區本和里大豐一路",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert calls == ["三民區本和里大豐一路"]
-    assert any("大豐一路" in item["title"] for item in payload["evidence"])
-    assert any(item["event_type"] == "flood_potential" for item in payload["evidence"])
-    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
-    assert payload["data_freshness"][-1]["health_status"] == "healthy"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_attempts_on_demand_news_when_official_history_has_no_news(
-    monkeypatch,
-) -> None:
-    now = datetime.fromisoformat("2026-05-13T02:00:00+00:00")
-    official_record = HistoricalFloodRecord(
-        source_id="official-flood-disaster-points:test",
-        source_name="官方資料：淹水災點快照",
-        source_type="official",
-        event_type="flood_report",
-        title="2025 官方淹水災害情資點位",
-        summary="官方資料命中，但沒有新聞連結。",
-        url="https://data.gov.tw/dataset/130016",
-        occurred_at=datetime.fromisoformat("2025-12-31T12:00:00+08:00"),
-        ingested_at=now,
-        lat=25.068,
-        lng=121.628,
-        confidence=0.82,
-        freshness_score=0.95,
-        source_weight=1.0,
-        risk_factor=1.0,
-    )
-    enrichment_record = EvidenceUpsert(
-        id="fd3615cf-849f-5e52-a2f3-9ce4a6a9f96b",
-        adapter_key="news.public_web.gdelt_backfill",
-        source_id="gdelt-on-demand:test-official-cross-check",
-        source_type="news",
-        event_type="flood_report",
-        title="新北汐止區康寧街水淹 住戶清理積水",
-        summary="公開新聞索引 metadata 與查詢地點及淹水關鍵字相符。",
-        url="https://example.test/news/xizhi-flood",
-        occurred_at=now,
-        observed_at=now,
-        ingested_at=now,
-        lat=25.068,
-        lng=121.628,
-        distance_to_query_m=0.0,
-        confidence=0.88,
-        freshness_score=0.95,
-        source_weight=1.0,
-        privacy_level="public",
-        raw_ref="gdelt-doc:test-official-cross-check",
-        properties={"full_text_stored": False},
-    )
-    calls: list[str | None] = []
-
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (_flood_potential_record(),),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "_official_flood_disaster_lookup",
-        lambda *_args, **_kwargs: OfficialFloodDisasterLookup(
-            attempted=True,
-            source_id="official-flood-disaster-points",
-            name="官方資料：淹水災點快照（2025）",
-            health_status="degraded",
-            message="官方淹水災點快照命中 1 筆；本地快照涵蓋 2025；",
-            records=((official_record, 80.0),),
-            observed_at=official_record.occurred_at,
-            ingested_at=now,
-        ),
-    )
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-
-    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
-        calls.append(kwargs.get("location_text"))
-        return public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="已從公開新聞索引補查並整理 1 筆候選淹水事件。",
-            records=(enrichment_record,),
-        )
-
-    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
-    monkeypatch.setattr(public_routes, "upsert_public_evidence", lambda **_kwargs: ())
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 25.068, "lng": 121.628},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "新北汐止康寧街",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert calls == ["新北汐止康寧街"]
-    assert any(item["source_type"] == "official" for item in payload["evidence"])
-    assert any(item["source_type"] == "news" for item in payload["evidence"])
-    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
-    assert payload["data_freshness"][-1]["health_status"] == "healthy"
-    assert payload["data_freshness"][-1]["feature_count"] == 1
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_attempts_on_demand_news_for_map_click_with_nearby_village(
-    monkeypatch,
-) -> None:
-    calls: list[str | None] = []
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (_flood_potential_record(),),
-    )
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-
-    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
-        calls.append(kwargs.get("location_text"))
-        return public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="公開新聞索引暫時沒有可採用候選事件。",
-            records=(),
-        )
-
-    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.65646, "lng": 120.32574},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": None,
-        },
-    )
-
-    assert response.status_code == 200
-    assert calls == ["高雄市三民區本和里"]
-
-
-def test_risk_assess_attempts_on_demand_news_when_history_store_is_unavailable(
-    monkeypatch,
-) -> None:
-    calls: list[str | None] = []
-    monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
-    get_settings.cache_clear()
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-    monkeypatch.setattr(
-        public_routes,
-        "_official_flood_disaster_lookup",
-        lambda *_args, **_kwargs: OfficialFloodDisasterLookup(
-            attempted=True,
-            source_id="official-flood-disaster-points",
-            name="官方資料：淹水災點快照（2018-2022）",
-            health_status="degraded",
-            message="官方淹水災點快照已查詢；本地快照涵蓋 2018-2022；此單一官方快照來源半徑內 0 筆命中。",
-            records=(),
-        ),
-    )
-
-    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
-        calls.append(kwargs.get("location_text"))
-        return public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="公開新聞索引未找到可通過地點與淹水關鍵字比對的候選事件。",
-            records=(),
-        )
-
-    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
-
-    try:
-        response = client.post(
-            "/v1/risk/assess",
-            json={
-                "point": {"lat": 24.676, "lng": 121.77},
-                "radius_m": 500,
-                "time_context": "now",
-                "location_text": "宜蘭羅東中正路",
-            },
-        )
-    finally:
-        get_settings.cache_clear()
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert calls == ["宜蘭羅東中正路"]
-    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
-    assert payload["data_freshness"][-1]["health_status"] == "unknown"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_marks_flood_potential_only_history_as_limited(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (_flood_potential_record(),),
-    )
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-    monkeypatch.setattr(
-        public_routes,
-        "search_public_flood_news",
-        lambda **_kwargs: public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="公開新聞索引暫時沒有可採用候選事件。",
-            records=(),
+    _install_route_data(
+        monkeypatch,
+        _route_data(
+            resolved_admin_code=admin_code,
+            resolved_admin_name=admin_name,
+            local_machine_feed_missing=(gap,),
         ),
     )
 
     response = client.post(
         "/v1/risk/assess",
         json={
-            "point": {"lat": 22.65646, "lng": 120.32574},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "三民區本和里大豐一路",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    db_status = next(item for item in payload["data_freshness"] if item["source_id"] == "db-evidence")
-    assert db_status["health_status"] == "degraded"
-    assert "不是實際歷史淹水事件" in db_status["message"]
-    assert any(
-        "尚未匯入實際歷史淹水事件" in source
-        for source in payload["explanation"]["missing_sources"]
-    )
-    assert any(
-        "不代表該地點沒有淹水紀錄" in source
-        for source in payload["explanation"]["missing_sources"]
-    )
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_uses_db_query_heat_when_available(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_query_heat_snapshot",
-        lambda **_kwargs: QueryHeatSnapshot(
-            period="P7D",
-            query_count=17,
-            unique_approx_count=6,
-            query_count_bucket="10-49",
-            unique_approx_count_bucket="1-9",
-            updated_at=datetime.fromisoformat("2026-04-30T03:00:00+00:00"),
-        ),
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.038818, "lng": 120.213493},
-            "radius_m": 300,
+            "point": {"lat": 22.9997, "lng": 120.227},
+            "radius_m": 1000,
             "time_context": "now",
         },
     )
 
     assert response.status_code == 200
-    payload = response.json()
-    assert payload["query_heat"]["period"] == "P7D"
-    assert payload["query_heat"]["query_count_bucket"] == "10-49"
-    assert payload["query_heat"]["unique_approx_count_bucket"] == "1-9"
-    assert payload["query_heat"]["updated_at"] == "2026-04-30T03:00:00Z"
+    assert gap in response.json()["data_status"]["missing"]
 
 
-def test_risk_assess_persists_before_query_heat_snapshot(monkeypatch) -> None:
-    persisted: list[object] = []
-
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-
-    def persist(**kwargs: object) -> None:
-        persisted.append(kwargs["assessment"])
-
-    def heat(**_kwargs: object) -> QueryHeatSnapshot:
-        assert persisted
-        return QueryHeatSnapshot(
-            period="P7D",
-            query_count=1,
-            unique_approx_count=1,
-            query_count_bucket="1-9",
-            unique_approx_count_bucket="1-9",
-            updated_at=datetime.fromisoformat("2026-04-30T03:00:00+00:00"),
-        )
-
-    monkeypatch.setattr(public_routes, "persist_risk_assessment", persist)
-    monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", heat)
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.038818, "lng": 120.213493},
-            "radius_m": 300,
-            "time_context": "now",
-            "location_text": "Tainan Annan",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assessment = persisted[0]
-    assert getattr(assessment, "assessment_id") == payload["assessment_id"]
-    assert getattr(assessment, "lat") == 23.038818
-    assert getattr(assessment, "lng") == 120.213493
-    assert getattr(assessment, "radius_m") == 300
-    # ADR-0006: raw query text must not reach the persistence payload at all.
-    assert not hasattr(assessment, "location_text")
-    assert getattr(assessment, "explanation")["summary"]
-    assert getattr(assessment, "data_freshness")
-    # ADR-0006: the stored snapshot keeps only the ~1 km coarse location.
-    assert getattr(assessment, "result_snapshot")["location"] == {
-        "lat": 23.04,
-        "lng": 120.21,
+@pytest.mark.parametrize(
+    ("client_kind", "location_text"),
+    [
+        ("address", "臺南市東區大學路一號"),
+        ("landmark", "臺南火車站"),
+        ("map-click", None),
+    ],
+)
+def test_risk_assess_clients_do_not_send_admin_code(
+    monkeypatch: pytest.MonkeyPatch,
+    client_kind: str,
+    location_text: str | None,
+) -> None:
+    repository = _install_route_data(monkeypatch, _route_data())
+    request_json = {
+        "point": {"lat": 22.9997, "lng": 120.227},
+        "radius_m": 1000,
+        "time_context": "now",
     }
-    assert getattr(assessment, "result_snapshot")["location_text"] is None
-    assert getattr(assessment, "result_snapshot")["radius_m"] == 300
-    assert getattr(assessment, "result_snapshot")["levels"]["historical"]
-    assert payload["query_heat"]["query_count_bucket"] == "1-9"
+    if location_text is not None:
+        request_json["location_text"] = location_text
 
+    response = client.post("/v1/risk/assess", json=request_json)
 
-def test_risk_assess_marks_query_heat_limited_when_db_unavailable(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-
-    def unavailable(**_kwargs: object) -> QueryHeatSnapshot:
-        raise EvidenceRepositoryUnavailable("query heat unavailable")
-
-    monkeypatch.setattr(public_routes, "fetch_query_heat_snapshot", unavailable)
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.038818, "lng": 120.213493},
-            "radius_m": 300,
-            "time_context": "now",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["query_heat"]["query_count_bucket"] == "limited-db-unavailable"
-    assert payload["query_heat"]["unique_approx_count_bucket"] == "limited-db-unavailable"
-
-
-def test_risk_assess_skips_db_when_evidence_repository_is_disabled(monkeypatch) -> None:
-    monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
-    get_settings.cache_clear()
-
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: pytest.fail("query_nearby_evidence should not be called"),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_realtime_coverage_rows",
-        lambda **_kwargs: pytest.fail(
-            "query_nearby_realtime_coverage_rows should not be called"
-        ),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "persist_risk_assessment",
-        lambda **_kwargs: pytest.fail("persist_risk_assessment should not be called"),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_query_heat_snapshot",
-        lambda **_kwargs: pytest.fail("fetch_query_heat_snapshot should not be called"),
-    )
-
-    try:
-        response = client.post(
-            "/v1/risk/assess",
-            json={
-                "point": {"lat": 23.05753, "lng": 120.20144},
-                "radius_m": 500,
-                "time_context": "now",
-                "location_text": "台南市安南區長溪路二段410巷16弄1號",
-            },
-        )
-    finally:
-        get_settings.cache_clear()
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "中"
-    assert payload["query_heat"]["query_count_bucket"] == "limited-db-disabled"
-    assert payload["query_heat"]["unique_approx_count_bucket"] == "limited-db-disabled"
-    assert payload["nearby_realtime_coverage"]["overall_level"] == "unavailable"
-    assert set(payload["nearby_realtime_coverage"]["missing_signal_types"]) == {
-        "rainfall",
-        "water_level",
-        "flood_depth",
-        "sewer_water_level",
-    }
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_reuses_hosted_response_cache(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production-beta")
-    monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
-    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
-    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "120")
-    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_BACKEND", "memory")
-    get_settings.cache_clear()
-    public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
-
-    calls = {"realtime": 0}
-
-    def upstream_lookup(**_kwargs):
-        calls["realtime"] += 1
-        raise AssertionError("hosted risk assess must not hit official upstream")
-
-    monkeypatch.setattr(official_realtime, "_nearest_rainfall_observation", upstream_lookup)
-    monkeypatch.setattr(official_realtime, "_nearest_water_level_observation", upstream_lookup)
-
-    try:
-        payload = {
-            "point": {"lat": 23.05753, "lng": 120.20144},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "台南市安南區長溪路二段",
+    assert response.status_code == 200, client_kind
+    assert repository.loads == [
+        {
+            "lat": 22.9997,
+            "lng": 120.227,
+            "radius_m": 1000,
+            "as_of": ROUTE_NOW,
         }
-        first_response = client.post("/v1/risk/assess", json=payload)
-        second_response = client.post("/v1/risk/assess", json=payload)
-    finally:
-        public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
-        get_settings.cache_clear()
-
-    assert first_response.status_code == 200
-    assert second_response.status_code == 200
-    assert calls["realtime"] == 0
-    first_payload = first_response.json()
-    assert second_response.json()["assessment_id"] == first_payload["assessment_id"]
-    realtime_statuses = [
-        item for item in first_payload["data_freshness"]
-        if item["source_id"] in {"cwa-rainfall", "wra-water-level"}
     ]
-    assert {item["health_status"] for item in realtime_statuses} == {"degraded"}
-    messages = [item["message"] for item in realtime_statuses]
-    assert all("正式站採用背景工作保存" in message for message in messages)
-    assert all("不是直接呼叫" in message for message in messages)
-    assert all("worker-persisted" not in message for message in messages)
-    assert len(set(messages)) == 2
+    assert "admin_code" not in request_json
 
 
-def test_risk_assess_does_not_cache_repository_unavailable_fallback(monkeypatch) -> None:
-    monkeypatch.setenv("APP_ENV", "production-beta")
-    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
-    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "120")
-    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_BACKEND", "memory")
-    get_settings.cache_clear()
-    public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
+def test_risk_assess_does_not_call_legacy_or_request_time_upstreams(monkeypatch) -> None:
+    from app.api.services import public_response_cache
+    from app.api.services import public_risk as legacy_public_risk
+    from app.domain.history import news_enrichment
+    from app.domain.realtime import official as official_realtime_module
 
-    calls = {"query": 0}
+    def forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("legacy/request-time risk path was called")
 
-    def flaky_query(**_kwargs):
-        calls["query"] += 1
-        if calls["query"] == 1:
-            raise EvidenceRepositoryUnavailable("temporary timeout")
-        return (_db_evidence_record(),)
+    monkeypatch.setattr(legacy_public_risk, "assess_risk", forbidden)
+    monkeypatch.setattr(public_response_cache, "cached_response", forbidden)
+    monkeypatch.setattr(public_response_cache, "store_response", forbidden)
+    monkeypatch.setattr(official_realtime_module, "fetch_official_realtime_bundle", forbidden)
+    monkeypatch.setattr(news_enrichment, "search_public_flood_news", forbidden)
 
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", flaky_query)
-
-    try:
-        payload = {
-            "point": {"lat": 23.05753, "lng": 120.20144},
-            "radius_m": 500,
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.9997, "lng": 120.2270},
+            "radius_m": 1000,
             "time_context": "now",
-            "location_text": "台南市安南區長溪路二段",
-        }
-        first_response = client.post("/v1/risk/assess", json=payload)
-        second_response = client.post("/v1/risk/assess", json=payload)
-    finally:
-        public_routes._RISK_ASSESSMENT_RESPONSE_CACHE.clear()
-        get_settings.cache_clear()
-
-    assert first_response.status_code == 200
-    assert second_response.status_code == 200
-    assert calls["query"] == 2
-    assert not any(
-        item["source_id"] == "db-evidence"
-        for item in first_response.json()["data_freshness"]
-    )
-    assert any(item["source_id"] == "db-evidence" for item in second_response.json()["data_freshness"])
-
-
-def test_risk_assess_allows_hosted_realtime_diagnostic_fallback_when_explicit(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("APP_ENV", "production-beta")
-    monkeypatch.setenv("EVIDENCE_REPOSITORY_ENABLED", "false")
-    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
-    monkeypatch.setenv("REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED", "true")
-    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "0")
-    get_settings.cache_clear()
-
-    calls = {"realtime": 0}
-
-    def realtime_bundle(**_kwargs):
-        calls["realtime"] += 1
-        return _empty_realtime_bundle()
-
-    monkeypatch.setattr(public_routes, "fetch_official_realtime_bundle", realtime_bundle)
-
-    try:
-        response = client.post(
-            "/v1/risk/assess",
-            json={
-                "point": {"lat": 23.05753, "lng": 120.20144},
-                "radius_m": 500,
-                "time_context": "now",
-            },
-        )
-    finally:
-        get_settings.cache_clear()
-
-    assert response.status_code == 200
-    assert calls["realtime"] == 1
-
-
-def test_risk_assess_uses_persisted_official_realtime_freshness_in_hosted(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("APP_ENV", "production-beta")
-    monkeypatch.setenv("PUBLIC_RATE_LIMIT_ENABLED", "false")
-    monkeypatch.setenv("RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS", "0")
-    get_settings.cache_clear()
-
-    calls = {"realtime": 0}
-    observed_at = datetime.now(UTC).replace(microsecond=0)
-    rainfall_record = replace(
-        _db_evidence_record(),
-        id="870ae36d-28c9-4a08-8aa6-4b0cb4fa9bb4",
-        source_id="cwa-rainfall:test-station",
-        source_type="official",
-        event_type="rainfall",
-        title="CWA persisted rainfall near query point",
-        summary="Worker-promoted official rainfall evidence.",
-        url="https://data.gov.tw/dataset/9177",
-        occurred_at=None,
-        observed_at=observed_at,
-        ingested_at=observed_at,
-        freshness_score=0.95,
-        source_weight=1.0,
-        raw_ref="raw/cwa/rainfall/test-station.json",
+            "location_text": "臺南市東區",
+        },
     )
 
-    def upstream_lookup(**_kwargs):
-        calls["realtime"] += 1
-        raise AssertionError("hosted risk assess must not hit official upstream")
-
-    monkeypatch.setattr(official_realtime, "_nearest_rainfall_observation", upstream_lookup)
-    monkeypatch.setattr(official_realtime, "_nearest_water_level_observation", upstream_lookup)
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: (rainfall_record,))
-
-    try:
-        response = client.post(
-            "/v1/risk/assess",
-            json={
-                "point": {"lat": 23.038818, "lng": 120.213493},
-                "radius_m": 300,
-                "time_context": "now",
-            },
-        )
-    finally:
-        get_settings.cache_clear()
-
     assert response.status_code == 200
-    payload = response.json()
-    assert calls["realtime"] == 0
-    assert payload["realtime"]["level"] != "未知"
-    cwa_status = next(item for item in payload["data_freshness"] if item["source_id"] == "cwa-rainfall")
-    wra_status = next(item for item in payload["data_freshness"] if item["source_id"] == "wra-water-level")
-    assert cwa_status["health_status"] == "healthy"
-    assert cwa_status["feature_count"] == 1
-    assert "系統定期保存的中央氣象署即時雨量" in cwa_status["message"]
-    assert wra_status["health_status"] == "degraded"
-    assert "背景工作保存的水利署水位" in wra_status["message"]
-    assert "on-demand realtime API fallback" not in wra_status["message"]
 
 
-def test_risk_assess_uses_precomputed_profile_fast_path_for_cold_lookup(monkeypatch) -> None:
-    computed_at = datetime.fromisoformat("2026-05-08T03:00:00+00:00")
-    monkeypatch.setattr(
-        public_routes,
+def test_production_risk_route_has_no_legacy_or_sensitive_cache_wiring() -> None:
+    source = inspect.getsource(public_routes)
+    forbidden = (
+        "public_risk.assess_risk",
+        "RiskAssessmentDependencies",
         "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_realtime_coverage_rows",
-        lambda **_kwargs: (
-            NearbyCoverageRow(
-                adapter_key="official.cwa.rainfall",
-                source_id="cwa-rainfall:profile-fast-path",
-                event_type="rainfall",
-                station_id="profile-fast-path",
-                observed_at=computed_at,
-                ingested_at=computed_at,
-                distance_to_query_m=230.0,
-                freshness_state="fresh",
-            ),
-        ),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_best_profile_for_point",
-        lambda **_kwargs: RiskProfileRecord(
-            profile_kind="risk_grid",
-            profile_key="h3:842ab57ffffffff",
-            profile_scope="h3:8",
-            profile_radius_m=1000,
-            score_version="risk-v0.1.0",
-            realtime_level="unknown",
-            historical_level="high",
-            confidence_level="medium",
-            evidence_counts={"news:flood_report": 2, "official:flood_potential": 1},
-            top_evidence_ids=("b3f22a36-7316-4e2a-92b6-c6f6443c8528",),
-            latest_observed_at=None,
-            latest_occurred_at=computed_at,
-            latest_ingested_at=computed_at,
-            coverage_gaps=("historical_news_backfill_partial",),
-            missing_sources=("rainfall", "water_level"),
-            computed_at=computed_at,
-            expires_at=None,
-            status="healthy",
-            distance_to_query_m=88.0,
-        ),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_evidence_by_ids",
-        lambda **_kwargs: (
-            EvidenceRecord(
-                id="b3f22a36-7316-4e2a-92b6-c6f6443c8528",
-                source_id="news:kaohsiung-2024-flood",
-                source_type="news",
-                event_type="flood_report",
-                title="2024 representative flood news from profile top evidence",
-                summary="A reviewed top evidence row selected by the precomputed profile.",
-                url="https://example.test/profile-top-news",
-                occurred_at=computed_at,
-                observed_at=computed_at,
-                ingested_at=computed_at,
-                lat=22.65646,
-                lng=120.32574,
-                geometry={"type": "Point", "coordinates": [120.32574, 22.65646]},
-                distance_to_query_m=88.0,
-                confidence=0.9,
-                freshness_score=0.8,
-                source_weight=0.72,
-                privacy_level="public",
-                raw_ref="news:profile-top",
-            ),
-        ),
-    )
-    enqueued: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        public_routes,
-        "enqueue_profile_refresh_job",
-        lambda **kwargs: enqueued.append(kwargs) or "job-id",
-    )
-    monkeypatch.setattr(
-        public_routes,
         "search_public_flood_news",
-        lambda **_kwargs: pytest.fail("profile fast path should not trigger on-demand news"),
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.65646, "lng": 120.32574},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "高雄市三民區本和里",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "中"
-    assert payload["confidence"]["level"] == "中"
-    assert len(payload["evidence"]) == 2
-    profile_evidence_types = {
-        (item["source_type"], item["event_type"])
-        for item in payload["evidence"]
-    }
-    assert profile_evidence_types == {
-        ("news", "flood_report"),
-        ("official", "flood_potential"),
-    }
-    assert any(
-        item["title"] == "2024 representative flood news from profile top evidence"
-        for item in payload["evidence"]
-    )
-    assert any("profile 摘要" in item["title"] for item in payload["evidence"])
-    assert all(item["distance_to_query_m"] == 88.0 for item in payload["evidence"])
-    evidence_response = client.get(f"/v1/evidence/{payload['assessment_id']}")
-    assert evidence_response.status_code == 200
-    evidence_payload = evidence_response.json()
-    assert len(evidence_payload["items"]) == 2
-    source_ids = {item["source_id"] for item in evidence_payload["items"]}
-    assert "news:kaohsiung-2024-flood" in source_ids
-    assert "precomputed-risk-profile:official:flood_potential" in source_ids
-    profile_freshness = next(
-        item for item in payload["data_freshness"] if item["source_id"] == "precomputed-risk-profile"
-    )
-    assert profile_freshness["health_status"] == "healthy"
-    assert "預先計算" in profile_freshness["message"]
-    assert any("profile" in reason for reason in payload["explanation"]["main_reasons"])
-    assert "profile 未納入即時雨量來源；這會限制即時風險，不代表歷史參考沒有依據。" in payload["explanation"]["missing_sources"]
-    assert enqueued[0]["profile_kind"] == "risk_grid"
-    assert enqueued[0]["profile_key"] == "h3:842ab57ffffffff"
-    coverage = payload["nearby_realtime_coverage"]
-    assert coverage["overall_level"] == "low"
-    rainfall = next(
-        item for item in coverage["signal_breakdown"] if item["signal_type"] == "rainfall"
-    )
-    assert rainfall["nearest_source_id"] == "cwa-rainfall:profile-fast-path"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_skips_profile_fast_path_without_observed_history(monkeypatch) -> None:
-    computed_at = datetime.fromisoformat("2026-05-12T02:01:34+00:00")
-    monkeypatch.setenv("HISTORICAL_NEWS_ON_DEMAND_ENABLED", "false")
-    get_settings.cache_clear()
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-    monkeypatch.setattr(
-        public_routes,
         "fetch_best_profile_for_point",
-        lambda **_kwargs: RiskProfileRecord(
-            profile_kind="risk_grid",
-            profile_key="h3:8:flood-potential-only",
-            profile_scope="h3:8",
-            profile_radius_m=1000,
-            score_version="risk-v0.1.0",
-            realtime_level="low",
-            historical_level="severe",
-            confidence_level="high",
-            evidence_counts={"official:flood_potential": 58},
-            top_evidence_ids=(),
-            latest_observed_at=None,
-            latest_occurred_at=None,
-            latest_ingested_at=computed_at,
-            coverage_gaps=("historical_news_backfill_partial",),
-            missing_sources=("rainfall", "water_level"),
-            computed_at=computed_at,
-            expires_at=None,
-            status="healthy",
-            distance_to_query_m=0.0,
-        ),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_evidence_by_ids",
-        lambda **_kwargs: pytest.fail("flood-potential-only profile should not load top evidence"),
-    )
-    monkeypatch.setattr(
-        public_routes,
+        "fetch_query_heat_snapshot",
         "enqueue_profile_refresh_job",
-        lambda **_kwargs: pytest.fail("flood-potential-only profile should not be returned"),
+        "_risk_assessment_response_cache_key",
+        "_cached_risk_assessment_response",
+        "_cache_risk_assessment_response",
     )
 
-    try:
-        response = client.post(
-            "/v1/risk/assess",
-            json={
-                "point": {"lat": 23.908362, "lng": 120.781026},
-                "radius_m": 1000,
-                "time_context": "now",
-                "location_text": "profile flood-potential-only regression",
-            },
-        )
-    finally:
-        get_settings.cache_clear()
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "未知"
-    assert payload["evidence"] == []
-    assert not any(
-        item["source_id"] == "precomputed-risk-profile" for item in payload["data_freshness"]
-    )
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_skips_official_only_profile_to_try_public_news(monkeypatch) -> None:
-    computed_at = datetime.fromisoformat("2026-05-12T02:01:34+00:00")
-    enrichment_record = EvidenceUpsert(
-        id="66d18e99-0239-50bf-9fe2-7c68b4ca8b17",
-        adapter_key="news.public_web.gdelt_backfill",
-        source_id="gdelt-on-demand:test-profile-cross-check",
-        source_type="news",
-        event_type="flood_report",
-        title="彰化員林中山路水淹 店家清理積水",
-        summary="公開新聞索引 metadata 與查詢地點及淹水關鍵字相符。",
-        url="https://example.test/news/yuanlin-flood",
-        occurred_at=computed_at,
-        observed_at=computed_at,
-        ingested_at=computed_at,
-        lat=23.956,
-        lng=120.57,
-        distance_to_query_m=0.0,
-        confidence=0.88,
-        freshness_score=0.95,
-        source_weight=1.0,
-        privacy_level="public",
-        raw_ref="gdelt-doc:test-profile-cross-check",
-        properties={"full_text_stored": False},
-    )
-    calls: list[str | None] = []
-
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_best_profile_for_point",
-        lambda **_kwargs: RiskProfileRecord(
-            profile_kind="risk_grid",
-            profile_key="h3:8:official-history-only",
-            profile_scope="h3:8",
-            profile_radius_m=1000,
-            score_version="risk-v0.1.0",
-            realtime_level="unknown",
-            historical_level="high",
-            confidence_level="medium",
-            evidence_counts={"official:flood_report": 2, "official:flood_potential": 1},
-            top_evidence_ids=("official-profile-evidence",),
-            latest_observed_at=None,
-            latest_occurred_at=computed_at,
-            latest_ingested_at=computed_at,
-            coverage_gaps=("historical_news_backfill_partial",),
-            missing_sources=("rainfall", "water_level"),
-            computed_at=computed_at,
-            expires_at=None,
-            status="healthy",
-            distance_to_query_m=88.0,
-        ),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_evidence_by_ids",
-        lambda **_kwargs: pytest.fail("official-only profile should not short-circuit"),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "enqueue_profile_refresh_job",
-        lambda **_kwargs: pytest.fail("official-only profile should not be returned"),
-    )
-
-    def search(**kwargs: object) -> public_routes.OnDemandNewsSearchResult:
-        calls.append(kwargs.get("location_text"))
-        return public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="已從公開新聞索引補查並整理 1 筆候選淹水事件。",
-            records=(enrichment_record,),
-        )
-
-    monkeypatch.setattr(public_routes, "search_public_flood_news", search)
-    monkeypatch.setattr(public_routes, "upsert_public_evidence", lambda **_kwargs: ())
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.956, "lng": 120.57},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "彰化員林中山路",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert calls == ["彰化員林中山路"]
-    assert any(item["source_type"] == "news" for item in payload["evidence"])
-    assert not any(
-        item["source_id"] == "precomputed-risk-profile" for item in payload["data_freshness"]
-    )
-    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_keeps_exact_radius_evidence_ahead_of_profile_fast_path(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "query_nearby_evidence",
-        lambda **_kwargs: (_db_evidence_record(),),
-    )
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_best_profile_for_point",
-        lambda **_kwargs: pytest.fail("profile fast path must not run after exact evidence"),
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.65646, "lng": 120.32574},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "高雄市三民區本和里",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["evidence"][0]["title"] == "2025-08-02 accepted flood evidence near Annan"
-    assert not any(item["source_id"] == "precomputed-risk-profile" for item in payload["data_freshness"])
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_uses_local_historical_fallback_when_local_db_returns_empty(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.038818, "lng": 120.213493},
-            "radius_m": 300,
-            "time_context": "now",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "高"
-    assert any("2025-08-02" in item["title"] for item in payload["evidence"])
-    assert payload["data_freshness"][-1]["source_id"] == "historical-flood-records"
-    assert payload["data_freshness"][-1]["health_status"] == "healthy"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_does_not_use_local_fallback_when_gate_is_closed(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-    monkeypatch.setattr(
-        public_routes,
-        "nearest_public_news_location_text",
-        lambda **_kwargs: None,
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.038818, "lng": 120.213493},
-            "radius_m": 300,
-            "time_context": "now",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "未知"
-    assert payload["confidence"]["level"] == "未知"
-    assert payload["evidence"] == []
-    assert "資料不足" in payload["explanation"]["summary"]
-    assert "不能判定風險高低" in payload["explanation"]["main_reasons"][0]
-    assert any("資料不足" in item for item in payload["explanation"]["missing_sources"])
-    assert payload["data_freshness"][-1]["source_id"] == "db-evidence"
-    assert payload["data_freshness"][-1]["health_status"] == "unknown"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_on_demand_news_enrichment_writes_back_and_scores(
-    monkeypatch,
-) -> None:
-    now = datetime.fromisoformat("2026-05-04T03:00:00+00:00")
-    enrichment_record = EvidenceUpsert(
-        id="f442ec3f-f013-58d2-8fcb-93f62db8d51c",
-        adapter_key="news.public_web.gdelt_backfill",
-        source_id="gdelt-on-demand:test-okshan",
-        source_type="news",
-        event_type="flood_report",
-        title="高雄岡山嘉新東路豪雨淹水 地下道一度封閉",
-        summary="公開新聞索引標題與查詢地點及淹水關鍵字相符。",
-        url="https://example.test/news/okshan-flood",
-        occurred_at=now,
-        observed_at=now,
-        ingested_at=now,
-        lat=22.8052,
-        lng=120.3034,
-        distance_to_query_m=0.0,
-        confidence=0.9,
-        freshness_score=0.95,
-        source_weight=1.0,
-        privacy_level="public",
-        raw_ref="gdelt-doc:test-okshan",
-        properties={"full_text_stored": False},
-    )
-    persisted: list[EvidenceUpsert] = []
-
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-    monkeypatch.setattr(
-        public_routes,
-        "search_public_flood_news",
-        lambda **_kwargs: public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="已從公開新聞索引補查並整理 1 筆候選淹水事件。",
-            records=(enrichment_record,),
-        ),
-    )
-
-    def upsert(**kwargs: object) -> tuple[EvidenceRecord, ...]:
-        records = kwargs["records"]
-        assert isinstance(records, tuple)
-        persisted.extend(records)
-        return (_evidence_record_from_upsert(enrichment_record),)
-
-    monkeypatch.setattr(public_routes, "upsert_public_evidence", upsert)
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.8052, "lng": 120.3034},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "2024 高雄岡山嘉新東路 豪雨淹水",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert persisted == [enrichment_record]
-    assert payload["historical"]["level"] == "中"
-    assert any("嘉新東路" in item["title"] for item in payload["evidence"])
-    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
-    assert "公開新聞索引補查" in payload["data_freshness"][-1]["message"]
-    assert payload["data_freshness"][-1]["feature_count"] == 1
-    assert payload["explanation"]["missing_sources"] == [
-        "即時雨量來源正常，查詢半徑內未採用測站。",
-        "即時水位來源正常，查詢半徑內未採用測站。",
-    ]
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_surfaces_on_demand_news_gap_as_source_limitation(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-    monkeypatch.setattr(public_routes, "_use_local_historical_fallback", lambda _app_env: False)
-    monkeypatch.setattr(
-        public_routes,
-        "search_public_flood_news",
-        lambda **_kwargs: public_routes.OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="on-demand-public-news",
-            message="公開新聞索引暫時無法回應；保留既有資料，不阻塞風險查詢。",
-            records=(),
-        ),
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.8052, "lng": 120.3034},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "2024 高雄岡山嘉新東路 豪雨淹水",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "未知"
-    assert any(
-        "公開新聞補查未取得可用事件" in source
-        for source in payload["explanation"]["missing_sources"]
-    )
-    assert any(
-        "不代表該地點沒有淹水紀錄" in source
-        for source in payload["explanation"]["missing_sources"]
-    )
-    assert payload["data_freshness"][-1]["source_id"] == "on-demand-public-news"
-    assert payload["data_freshness"][-1]["health_status"] == "unknown"
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_surfaces_zuoying_taoziyuan_2024_flood_records(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-    monkeypatch.setattr(public_routes, "query_nearby_evidence", lambda **_kwargs: ())
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 22.6731, "lng": 120.2862},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "2024 高雄左營桃子園路 淹水",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["realtime"]["level"] == "未知"
-    assert payload["historical"]["level"] == "高"
-    assert any("桃子園路" in item["title"] for item in payload["evidence"])
-    assert any("2024-07-25" in item["title"] for item in payload["evidence"])
-    assert payload["data_freshness"][-1]["source_id"] == "historical-flood-records"
-    assert "2 筆" in payload["data_freshness"][-1]["message"]
-    assert_openapi_schema(payload, "RiskAssessmentResponse")
-
-
-def test_risk_assess_surfaces_changxi_road_historical_flood_records(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.04697, "lng": 120.20344},
-            "radius_m": 500,
-            "time_context": "now",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["realtime"]["level"] == "未知"
-    assert payload["historical"]["level"] == "高"
-    assert any("長溪路二段" in item["title"] for item in payload["evidence"])
-    assert payload["explanation"]["missing_sources"] == [
-        "即時雨量來源正常，查詢半徑內未採用測站。",
-        "即時水位來源正常，查詢半徑內未採用測站。",
-    ]
-    assert "3 筆" in payload["data_freshness"][-1]["message"]
-
-
-def test_risk_assess_matches_historical_records_by_location_text(monkeypatch) -> None:
-    monkeypatch.setattr(
-        public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
-    )
-
-    response = client.post(
-        "/v1/risk/assess",
-        json={
-            "point": {"lat": 23.05753, "lng": 120.20144},
-            "radius_m": 500,
-            "time_context": "now",
-            "location_text": "長溪路二段",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["historical"]["level"] == "中"
-    assert "歷史與淹水潛勢參考為中" in payload["explanation"]["summary"]
-    assert any("長溪路二段" in item["title"] for item in payload["evidence"])
+    assert [symbol for symbol in forbidden if symbol in source] == []
 
 
 def _db_evidence_record() -> EvidenceRecord:
     return EvidenceRecord(
         id="b3f22a36-7316-4e2a-92b6-c6f6443c8528",
-        source_id="news:tainan-annan:2025-08-02",
-        source_type="news",
+        source_id="persisted-assessment-evidence",
+        source_type="official",
         event_type="flood_report",
-        title="2025-08-02 accepted flood evidence near Annan",
-        summary="Accepted public evidence stored in the evidence table.",
-        url="https://example.test/news/tainan-flood",
-        occurred_at=datetime.fromisoformat("2025-08-02T08:00:00+08:00"),
-        observed_at=datetime.fromisoformat("2025-08-02T08:00:00+08:00"),
-        ingested_at=datetime.fromisoformat("2026-04-29T03:00:00+00:00"),
+        title="Persisted assessment evidence",
+        summary="Evidence loaded from the assessment relation.",
+        url=None,
+        occurred_at=ROUTE_NOW,
+        observed_at=ROUTE_NOW,
+        ingested_at=ROUTE_NOW,
         lat=23.038818,
         lng=120.213493,
         geometry={"type": "Point", "coordinates": [120.213493, 23.038818]},
-        distance_to_query_m=15.0,
-        confidence=0.86,
-        freshness_score=0.95,
+        distance_to_query_m=25.0,
+        confidence=0.9,
+        freshness_score=0.9,
         source_weight=1.0,
         privacy_level="public",
-        raw_ref="raw/news/accepted.json",
-    )
-
-
-def _flood_potential_record() -> EvidenceRecord:
-    return EvidenceRecord(
-        id="9497f7ec-cc75-4976-8b7a-80b3475adab8",
-        source_id="dprc-taiwan-flood-potential-139",
-        source_type="official",
-        event_type="flood_potential",
-        title="官方淹水潛勢規劃圖資",
-        summary="查詢範圍與官方淹水潛勢規劃圖資相交。",
-        url="https://www.dprcflood.org.tw/DPRC/02.html",
-        occurred_at=None,
-        observed_at=None,
-        ingested_at=datetime.fromisoformat("2026-05-05T11:13:39+00:00"),
-        lat=22.65646,
-        lng=120.32574,
-        geometry={"type": "Polygon", "coordinates": [[[120.325, 22.656], [120.326, 22.656], [120.326, 22.657], [120.325, 22.656]]]},
-        distance_to_query_m=0.0,
-        confidence=0.78,
-        freshness_score=0.8,
-        source_weight=0.9,
-        privacy_level="public",
-        raw_ref="raw/flood-potential/test.geojson",
-    )
-
-
-def _evidence_record_from_upsert(record: EvidenceUpsert) -> EvidenceRecord:
-    return EvidenceRecord(
-        id=record.id,
-        source_id=record.source_id,
-        source_type=record.source_type,
-        event_type=record.event_type,
-        title=record.title,
-        summary=record.summary,
-        url=record.url,
-        occurred_at=record.occurred_at,
-        observed_at=record.observed_at,
-        ingested_at=record.ingested_at,
-        lat=record.lat,
-        lng=record.lng,
-        geometry={"type": "Point", "coordinates": [record.lng, record.lat]},
-        distance_to_query_m=record.distance_to_query_m,
-        confidence=record.confidence,
-        freshness_score=record.freshness_score,
-        source_weight=record.source_weight,
-        privacy_level=record.privacy_level,
-        raw_ref=record.raw_ref,
-    )
-
-
-def _official_realtime_bundle() -> OfficialRealtimeBundle:
-    observed_at = datetime.fromisoformat("2026-04-29T03:00:00+00:00")
-    ingested_at = datetime.fromisoformat("2026-04-29T03:05:00+00:00")
-    return OfficialRealtimeBundle(
-        observations=(
-            OfficialRealtimeObservation(
-                source_id="cwa-rainfall:test",
-                source_name="中央氣象署即時雨量",
-                event_type="rainfall",
-                title="中央氣象署雨量站：測試站",
-                summary="最近雨量站「測試站」1 小時雨量 0.0 mm。",
-                observed_at=observed_at,
-                ingested_at=ingested_at,
-                lat=25.04776,
-                lng=121.51706,
-                distance_to_query_m=120,
-                confidence=0.92,
-                freshness_score=0.95,
-                source_weight=1.0,
-                risk_factor=0.0,
-            ),
-            OfficialRealtimeObservation(
-                source_id="wra-water-level:test",
-                source_name="經濟部水利署即時水位",
-                event_type="water_level",
-                title="水利署水位站：測試站",
-                summary="最近水位站「測試站」水位 1.20 m。",
-                observed_at=observed_at,
-                ingested_at=ingested_at,
-                lat=25.047,
-                lng=121.518,
-                distance_to_query_m=180,
-                confidence=0.88,
-                freshness_score=0.95,
-                source_weight=1.0,
-                risk_factor=0.0,
-            ),
-        ),
-        source_statuses=(
-            OfficialRealtimeSourceStatus(
-                source_id="cwa-rainfall",
-                name="中央氣象署即時雨量",
-                health_status="healthy",
-                observed_at=observed_at,
-                ingested_at=ingested_at,
-                message="採用最近雨量站「測試站」。",
-            ),
-            OfficialRealtimeSourceStatus(
-                source_id="wra-water-level",
-                name="經濟部水利署即時水位",
-                health_status="healthy",
-                observed_at=observed_at,
-                ingested_at=ingested_at,
-                message="採用最近水位站「測試站」。",
-            ),
-        ),
-    )
-
-
-def _empty_realtime_bundle() -> OfficialRealtimeBundle:
-    observed_at = datetime.fromisoformat("2026-04-29T03:00:00+00:00")
-    return OfficialRealtimeBundle(
-        observations=(),
-        source_statuses=(
-            OfficialRealtimeSourceStatus(
-                source_id="cwa-rainfall",
-                name="中央氣象署即時雨量",
-                health_status="healthy",
-                observed_at=observed_at,
-                ingested_at=observed_at,
-                message="即時雨量來源正常，查詢半徑內未採用測站。",
-            ),
-            OfficialRealtimeSourceStatus(
-                source_id="wra-water-level",
-                name="經濟部水利署即時水位",
-                health_status="healthy",
-                observed_at=observed_at,
-                ingested_at=observed_at,
-                message="即時水位來源正常，查詢半徑內未採用測站。",
-            ),
-        ),
+        raw_ref=None,
+        evidence_scope="historical",
+        location_precision="point",
     )
 
 
 def test_evidence_list_contract(monkeypatch) -> None:
     monkeypatch.setattr(
         public_routes,
-        "fetch_official_realtime_bundle",
-        lambda **_kwargs: _empty_realtime_bundle(),
+        "fetch_assessment_evidence",
+        lambda **_kwargs: (_db_evidence_record(),),
     )
 
     risk_response = client.post(
@@ -2853,6 +1242,8 @@ def test_evidence_list_contract(monkeypatch) -> None:
         "source_weight",
         "privacy_level",
         "raw_ref",
+        "location_precision",
+        "limitations",
     }
     assert UUID(evidence["id"])
     assert evidence["geometry"] == {"type": "Point", "coordinates": [120.213493, 23.038818]}
@@ -2861,7 +1252,6 @@ def test_evidence_list_contract(monkeypatch) -> None:
 
 def test_evidence_list_can_read_persisted_assessment_evidence(monkeypatch) -> None:
     assessment_id = "d315d0e6-9c1e-475a-9118-f299d12d5c62"
-    public_routes._ASSESSMENT_EVIDENCE_CACHE.clear()
     monkeypatch.setattr(
         public_routes,
         "fetch_assessment_evidence",
@@ -2891,7 +1281,12 @@ def test_layers_uses_db_records_when_available(monkeypatch) -> None:
         attribution="DB attribution",
         tilejson_url="/v1/layers/db-flood/tilejson",
         updated_at=layer_updated_at,
-        metadata={"tiles": ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]},
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
     )
     monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
 
@@ -2926,9 +1321,608 @@ def test_layers_falls_back_when_db_unavailable(monkeypatch) -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert [layer["id"] for layer in payload["layers"]] == ["flood-potential", "query-heat"]
-    assert all(layer["status"] == "disabled" for layer in payload["layers"])
+    assert payload["layers"] == []
     assert_openapi_schema(payload, "LayersResponse")
+
+
+def test_public_layers_hide_query_heat_and_local_tile_products(monkeypatch) -> None:
+    now = datetime.fromisoformat("2026-04-30T03:00:00+00:00")
+    records = (
+        LayerRecord(
+            id="query-heat",
+            name="Query heat",
+            description="Frozen query heat product.",
+            category="query_heat",
+            status="available",
+            minzoom=8,
+            maxzoom=14,
+            attribution="Flood Risk",
+            tilejson_url="/v1/layers/query-heat/tilejson",
+            updated_at=now,
+            metadata={"tiles": ["/v1/tiles/query-heat/{z}/{x}/{y}.mvt"]},
+        ),
+        LayerRecord(
+            id="official-flood",
+            name="Official flood potential",
+            description="Reviewed external official layer.",
+            category="flood_potential",
+            status="available",
+            minzoom=8,
+            maxzoom=18,
+            attribution="Official agency",
+            tilejson_url="/v1/layers/official-flood/tilejson",
+            updated_at=now,
+            metadata={
+                "tiles": [
+                    "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+                ],
+                "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+            },
+        ),
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: records)
+
+    response = client.get("/v1/layers")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["layers"]] == ["official-flood"]
+    serialized = response.text.lower()
+    assert "query_heat" not in serialized
+    assert "/v1/tiles/" not in serialized
+    assert "pmtiles" not in serialized
+
+
+@pytest.mark.parametrize(
+    "unsafe_tile_url",
+    [
+        "https://tiles.official.gov.tw/%2576%2531/%2574iles/local/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/archive%252epmtiles/metadata/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?source=archive%252epmtiles",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf#archive%2epmtiles",
+        "https://tiles.official.gov.tw/proxy?url=/v1/tiles/query-heat/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/catalog.json#source=%2576%2531%252ftiles/query-heat",
+        "https://tiles.official.gov.tw/proxy?source=v1%3atiles%2fquery-heat",
+        "https://tiles.official.gov.tw/catalog.json#source=%EF%BD%96%EF%BC%91%EF%BC%8F%EF%BD%94%EF%BD%89%EF%BD%8C%EF%BD%85%EF%BD%93/query-heat",
+        "https://user:secret@tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf",
+        "https://127.0.0.1/vector/{z}/{x}/{y}.pbf",
+        "https://127.1/vector/{z}/{x}/{y}.pbf",
+        "https://0x7f.0.0.1/vector/{z}/{x}/{y}.pbf",
+        "https://[::1/vector/{z}/{x}/{y}.pbf",
+        "https://tiles.local/vector/{z}/{x}/{y}.pbf",
+        "https://official.example.test/vector/{z}/{x}/{y}.pbf",
+        "https://unreviewed.gov.tw/vector/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/%255cv1%255ctiles%255clocal/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/%2525252525252576%2525252525252531/tiles/local/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf%09",
+        " https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf ",
+    ],
+)
+def test_layers_and_tilejson_fail_closed_for_unsafe_tile_templates(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_tile_url: str,
+) -> None:
+    reviewed_host = next(
+        (
+            candidate
+            for candidate in (
+                "127.0.0.1",
+                "127.1",
+                "0x7f.0.0.1",
+                "tiles.local",
+                "official.example.test",
+            )
+            if f"//{candidate}/" in unsafe_tile_url
+        ),
+        REVIEWED_TILE_HOST,
+    )
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [unsafe_tile_url],
+            "reviewed_external_tile_hosts": [reviewed_host],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert unsafe_tile_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+    assert unsafe_tile_url not in tilejson_response.text
+
+
+@pytest.mark.parametrize(
+    "unsafe_tile_url",
+    [
+        "https://tiles.official.gov.tw/v1/tiles/query-heat/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/proxy?url=/v1/tiles/query-heat/{z}/{x}/{y}.mvt",
+        "https://tiles.official.gov.tw/catalog.json#source=/v1/tiles/query-heat",
+        "https://tiles.official.gov.tw/proxy?url=v1%255ctiles%255cquery-heat",
+        "https://tiles.official.gov.tw/proxy?url=%2576%2531%252ftiles/query-heat",
+        "https://tiles.official.gov.tw/proxy?source=v1%3atiles%2fquery-heat",
+        "https://tiles.official.gov.tw/catalog.json#source=v1%EF%BC%8Ftiles/query-heat",
+        "https://tiles.official.gov.tw/catalog.json#source=%EF%BD%96%EF%BC%91%EF%BC%8F%EF%BD%94%EF%BD%89%EF%BD%8C%EF%BD%85%EF%BD%93/query-heat",
+    ],
+)
+def test_external_tile_predicate_rejects_canonicalized_local_product_references(
+    unsafe_tile_url: str,
+) -> None:
+    assert not public_layer_service.is_external_tile_url(
+        unsafe_tile_url,
+        reviewed_hosts=frozenset({REVIEWED_TILE_HOST}),
+    )
+
+
+@pytest.mark.parametrize(
+    "unsafe_nested_tile_url",
+    [
+        "https://tiles.official.gov.tw/proxy?url=http://127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://localhost/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://user:secret@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http%253A%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=ftp://unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw;@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%3B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%26@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%25253B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%252526@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Ftiles.official.gov.tw%253B@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//",
+        "https://tiles.official.gov.tw/proxy?url=+//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=+%2F%2F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=++//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=+//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=.//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=-//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=_//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=~//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+    ],
+)
+def test_external_tile_predicate_rejects_every_nested_network_reference(
+    unsafe_nested_tile_url: str,
+) -> None:
+    assert not public_layer_service.is_external_tile_url(
+        unsafe_nested_tile_url,
+        reviewed_hosts=frozenset({REVIEWED_TILE_HOST}),
+    )
+
+
+@pytest.mark.parametrize(
+    "safe_tile_url",
+    [
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?note=station-127.0.0.1",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?ratio=1//2",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?word=wordx//y",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?token=abc9//def",
+        "https://tiles.official.gov.tw/vector/{z}/{x}/{y}.pbf?note=https-colon-slash-slash",
+    ],
+)
+def test_external_tile_predicate_preserves_ordinary_non_authority_values(
+    safe_tile_url: str,
+) -> None:
+    assert public_layer_service.is_external_tile_url(
+        safe_tile_url,
+        reviewed_hosts=frozenset({REVIEWED_TILE_HOST}),
+    )
+
+
+@pytest.mark.parametrize(
+    "unsafe_nested_tile_url",
+    [
+        "https://tiles.official.gov.tw/proxy?url=http://127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://localhost/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http://user:secret@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=http%253A%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252F%252Funreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw;@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%3B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%26@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%25253B@127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%252526@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Ftiles.official.gov.tw%253B@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=+//127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=+%2F%2F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=++//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=+//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/catalog.json#source=%252B%252F%252F127.0.0.1/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=.//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=-//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=_//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+        "https://tiles.official.gov.tw/proxy?url=~//unreviewed.gov/private/{z}/{x}/{y}.pbf",
+    ],
+)
+def test_layers_and_tilejson_fail_closed_for_every_nested_network_reference(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_nested_tile_url: str,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [unsafe_nested_tile_url],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert unsafe_nested_tile_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+    assert unsafe_nested_tile_url not in tilejson_response.text
+
+
+@pytest.mark.parametrize(
+    "raw_tiles",
+    [
+        [],
+        "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf",
+        ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf", None],
+        ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf", ""],
+        ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf", 7],
+    ],
+)
+def test_layers_require_original_tiles_to_be_a_nonempty_all_string_list(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_tiles: object,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": raw_tiles,
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    assert client.get("/v1/layers").json()["layers"] == []
+    assert client.get("/v1/layers/official-flood/tilejson").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "unsafe_tilejson_url",
+    [
+        "/v1/tiles/private/0/0/0.mvt",
+        "/%2576%2531/%2574iles/private/0/0/0.mvt",
+        "/v1/layers/another-layer/tilejson",
+        "https://tiles.official.gov.tw/archive.pmtiles/metadata.json",
+        "https://tiles.official.gov.tw/catalog.json?source=archive%2epmtiles",
+        "https://tiles.official.gov.tw/catalog.json#archive%2epmtiles",
+        "https://user:secret@tiles.official.gov.tw/catalog.json",
+        "https://10.0.0.2/catalog.json",
+        "https://[::1/catalog.json",
+        "https://official.example.test/catalog.json",
+        "https://unreviewed.gov.tw/catalog.json",
+        "https://tiles.official.gov.tw/proxy?url=http://127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=http://user:secret@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Funreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw;@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%3B@127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw&@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw%26@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https%253A%252F%252Ftiles.official.gov.tw%252526@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=https%253A%252F%252Ftiles.official.gov.tw%253B@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=https://tiles.official.gov.tw&@unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https:%255C%255Ctiles.official.gov.tw/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=https:////tiles.official.gov.tw/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=+//127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=+%2F%2F127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=++//unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=%252B%252F%252F127.0.0.1/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=+//unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/catalog.json#source=%252B%252F%252Funreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=.//unreviewed.gov/private-tilejson.json",
+        "https://tiles.official.gov.tw/proxy?url=-//unreviewed.gov/private-tilejson.json",
+    ],
+)
+def test_layers_fail_closed_before_serializing_unsafe_tilejson_url(
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe_tilejson_url: str,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url=unsafe_tilejson_url,
+        updated_at=None,
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert unsafe_tilejson_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+
+
+def test_layers_require_every_tile_template_to_pass_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf",
+                "https://tiles.official.gov.tw/archive.pmtiles/metadata/{z}/{x}/{y}.pbf",
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    assert client.get("/v1/layers").json()["layers"] == []
+    assert client.get("/v1/layers/official-flood/tilejson").status_code == 404
+
+
+def test_layers_reject_partially_invalid_reviewed_host_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [
+                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST, "127.0.0.1"],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    assert client.get("/v1/layers").json()["layers"] == []
+    assert client.get("/v1/layers/official-flood/tilejson").status_code == 404
+
+
+def test_layers_serialize_only_explicitly_reviewed_external_tile_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tile_url = "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url="/v1/layers/official-flood/tilejson",
+        updated_at=None,
+        metadata={
+            "tiles": [tile_url],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert [item["id"] for item in layers_response.json()["layers"]] == [
+        "official-flood"
+    ]
+    assert tilejson_response.status_code == 200
+    assert tilejson_response.json()["tiles"] == [tile_url]
+
+
+def test_layers_reject_nested_urls_even_when_every_authority_is_reviewed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tile_url = (
+        "https://tiles.official.gov.tw/proxy"
+        "?url=https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
+    )
+    external_tilejson_url = (
+        "https://tiles.official.gov.tw/proxy"
+        "?url=https://tiles.official.gov.tw/flood/tilejson.json"
+    )
+    layer = LayerRecord(
+        id="official-flood",
+        name="Official flood potential",
+        description="Reviewed external official layer.",
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url=external_tilejson_url,
+        updated_at=None,
+        metadata={
+            "tiles": [tile_url],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
+        },
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    layers_response = client.get("/v1/layers")
+    tilejson_response = client.get("/v1/layers/official-flood/tilejson")
+
+    assert layers_response.status_code == 200
+    assert layers_response.json()["layers"] == []
+    assert external_tilejson_url not in layers_response.text
+    assert tilejson_response.status_code == 404
+    assert tile_url not in tilejson_response.text
+
+
+def test_static_openapi_hides_frozen_layer_products() -> None:
+    assert "/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt" not in OPENAPI_SPEC["paths"]
+    map_layer_categories = OPENAPI_SPEC["components"]["schemas"]["MapLayer"]["properties"][
+        "category"
+    ]["enum"]
+    tile_url_sources = OPENAPI_SPEC["components"]["schemas"]["TileJson"]["properties"][
+        "tile_url_source"
+    ]["enum"]
+
+    assert "query_heat" not in map_layer_categories
+    assert "local_vector_tile_endpoint" not in tile_url_sources
+
+
+def test_runtime_openapi_hides_frozen_layer_products() -> None:
+    runtime_spec = create_app().openapi()
+
+    assert "/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt" not in runtime_spec["paths"]
+    map_layer_categories = runtime_spec["components"]["schemas"]["MapLayer"][
+        "properties"
+    ]["category"]["enum"]
+    tile_url_source_schema = runtime_spec["components"]["schemas"]["TileJson"][
+        "properties"
+    ]["tile_url_source"]
+
+    assert "query_heat" not in map_layer_categories
+    assert "metadata" in json.dumps(tile_url_source_schema)
+    assert "local_vector_tile_endpoint" not in json.dumps(tile_url_source_schema)
+
+
+@pytest.mark.parametrize(
+    "layer_id,tiles",
+    [
+        ("local-flood", ["/v1/tiles/local-flood/{z}/{x}/{y}.mvt"]),
+        (
+            "absolute-local-flood",
+            ["https://api.example.test/v1/tiles/local-flood/{z}/{x}/{y}.mvt"],
+        ),
+        ("pmtiles-flood", ["https://official.example.test/flood.pmtiles"]),
+    ],
+)
+def test_tilejson_hides_local_and_pmtiles_products(
+    monkeypatch,
+    layer_id: str,
+    tiles: list[str],
+) -> None:
+    layer = LayerRecord(
+        id=layer_id,
+        name="Frozen tile product",
+        description=None,
+        category="flood_potential",
+        status="available",
+        minzoom=8,
+        maxzoom=18,
+        attribution="Official agency",
+        tilejson_url=f"/v1/layers/{layer_id}/tilejson",
+        updated_at=None,
+        metadata={"tiles": tiles},
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    response = client.get(f"/v1/layers/{layer_id}/tilejson")
+
+    assert response.status_code == 404
+
+
+def test_query_heat_tilejson_is_not_enumerable(monkeypatch) -> None:
+    layer = LayerRecord(
+        id="query-heat",
+        name="Query heat",
+        description=None,
+        category="query_heat",
+        status="available",
+        minzoom=8,
+        maxzoom=14,
+        attribution="Flood Risk",
+        tilejson_url="/v1/layers/query-heat/tilejson",
+        updated_at=None,
+        metadata={"tiles": ["https://official.example.test/query/{z}/{x}/{y}.pbf"]},
+    )
+    monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (layer,))
+    monkeypatch.setattr(public_routes, "fetch_map_layer", lambda **_kwargs: layer)
+
+    response = client.get("/v1/layers/query-heat/tilejson")
+
+    assert response.status_code == 404
 
 
 def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
@@ -2946,7 +1940,10 @@ def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
         metadata={
             "version": "db-v1",
             "scheme": "xyz",
-            "tiles": ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"],
+            "tiles": [
+                "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
+            ],
+            "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
             "bounds": [120.0, 22.0, 121.0, 23.0],
             "vector_layers": [
                 {
@@ -2967,7 +1964,9 @@ def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
     assert payload["version"] == "db-v1"
     assert payload["attribution"] == "DB attribution"
     assert payload["status"] == "available"
-    assert payload["tiles"] == ["https://tiles.local/db-flood/{z}/{x}/{y}.pbf"]
+    assert payload["tiles"] == [
+        "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
+    ]
     assert payload["tile_url_source"] == "metadata"
     assert "cache_control" not in payload
     assert payload["minzoom"] == 5
@@ -3004,13 +2003,8 @@ def test_tilejson_sanitizes_placeholder_tile_metadata(monkeypatch) -> None:
 
     response = client.get("/v1/layers/db-flood/tilejson")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["tiles"] == ["/v1/tiles/db-flood/{z}/{x}/{y}.mvt"]
-    assert payload["tile_url_source"] == "local_vector_tile_endpoint"
-    assert payload["cache_control"] == "public, max-age=60"
+    assert response.status_code == 404
     assert "tiles.placeholder.flood-risk.local" not in response.text
-    assert_openapi_schema(payload, "TileJson")
     get_settings.cache_clear()
 
 
@@ -3061,10 +2055,10 @@ def test_tilejson_returns_503_for_enabled_layer_without_tiles_in_hosted_env(
 
     response = client.get("/v1/layers/db-flood/tilejson")
 
-    assert response.status_code == 503
+    assert response.status_code == 404
     payload = response.json()
     assert_error_envelope(payload)
-    assert payload["error"]["code"] == "tiles_unavailable"
+    assert payload["error"]["code"] == "not_found"
     get_settings.cache_clear()
 
 
@@ -3074,26 +2068,7 @@ def test_layers_and_tilejson_contracts() -> None:
     assert layers_response.status_code == 200
     layers_payload = layers_response.json()
     assert set(layers_payload) == {"layers"}
-    assert layers_payload["layers"]
-    layer = layers_payload["layers"][0]
-    assert set(layer) == {
-        "id",
-        "name",
-        "description",
-        "category",
-        "status",
-        "minzoom",
-        "maxzoom",
-        "attribution",
-        "tilejson_url",
-        "updated_at",
-    }
-
-    tilejson_response = client.get(layer["tilejson_url"])
-    assert tilejson_response.status_code == 404
-    payload = tilejson_response.json()
-    assert_error_envelope(payload)
-    assert payload["error"]["code"] == "layer_disabled"
+    assert layers_payload["layers"] == []
     assert_openapi_schema(layers_payload, "LayersResponse")
 
 

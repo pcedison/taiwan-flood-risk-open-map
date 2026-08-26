@@ -198,10 +198,26 @@ paths:
                     score_version: "risk-v0.1.0"
                     created_at: "2026-04-28T13:00:00Z"
                     expires_at: "2026-04-28T13:10:00Z"
+                    as_of: "2026-04-28T13:00:00Z"
                     realtime:
                       level: "低"
+                      confidence: "未知"
+                      reasons: []
                     historical:
                       level: "高"
+                      confidence: "未知"
+                      reasons: []
+                    overall:
+                      level: "低"
+                      confidence: "中"
+                      reasons:
+                        - "此位置半徑 500 公尺內有歷史淹水相關證據。"
+                        - "目前附近雨量與水位資料未達警戒條件。"
+                    dominant_mode: realtime
+                    community:
+                      state: none
+                      level: "未知"
+                      reasons: []
                     confidence:
                       level: "中"
                     explanation:
@@ -222,6 +238,8 @@ paths:
                         ingested_at: "2026-04-28T12:55:00Z"
                         distance_to_query_m: 0
                         confidence: 0.9
+                        location_precision: polygon
+                        limitations: []
                     data_freshness:
                       - source_id: cwa-rainfall
                         name: "中央氣象署雨量資料"
@@ -314,6 +332,12 @@ paths:
                         - "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。"
                         - "附近沒有可用的即時感測資料。"
                       county_level_note: "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。"
+                    data_status:
+                      sources: []
+                      missing: []
+                    community_refresh:
+                      state: not_available
+                      last_completed_at: null
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -498,9 +522,8 @@ paths:
                     status: available
                     scheme: xyz
                     tiles:
-                      - "/v1/tiles/flood-potential/{z}/{x}/{y}.mvt"
-                    tile_url_source: local_vector_tile_endpoint
-                    cache_control: "public, max-age=60"
+                      - "https://official.example.gov.tw/flood/{z}/{x}/{y}.pbf"
+                    tile_url_source: metadata
                     minzoom: 8
                     maxzoom: 18
                     updated_at: "2026-04-28T12:00:00Z"
@@ -518,62 +541,6 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
-
-  /v1/tiles/{layer_id}/{z}/{x}/{y}.mvt:
-    get:
-      tags:
-        - Public
-      operationId: getVectorTile
-      summary: Return a Mapbox Vector Tile for a seeded map layer.
-      parameters:
-        - $ref: "#/components/parameters/LayerId"
-        - name: z
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 0
-            maximum: 24
-          description: Tile zoom.
-        - name: x
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 0
-          description: Tile x coordinate.
-        - name: y
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 0
-          description: Tile y coordinate.
-      responses:
-        "200":
-          description: Mapbox Vector Tile binary payload.
-          headers:
-            X-Tile-Layer:
-              description: Layer id used to produce the tile.
-              schema:
-                type: string
-            Cache-Control:
-              description: Tile cache policy.
-              schema:
-                type: string
-          content:
-            application/vnd.mapbox-vector-tile:
-              schema:
-                type: string
-                format: binary
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "503":
-          description: Tile storage unavailable.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/jobs:
     get:
@@ -1884,6 +1851,29 @@ components:
           $ref: "#/components/schemas/QueryHeat"
         nearby_realtime_coverage:
           $ref: "#/components/schemas/NearbyRealtimeCoverage"
+        as_of:
+          type:
+            - string
+            - "null"
+          format: date-time
+        dominant_mode:
+          type: string
+          enum:
+            - realtime
+            - historical_context
+            - community_warning
+            - unknown
+          default: unknown
+        community:
+          $ref: "#/components/schemas/CommunityRiskBlock"
+        overall:
+          anyOf:
+            - $ref: "#/components/schemas/RiskLevelBlock"
+            - type: "null"
+        data_status:
+          $ref: "#/components/schemas/DataStatus"
+        community_refresh:
+          $ref: "#/components/schemas/CommunityRefresh"
       additionalProperties: false
 
     RiskLevelBlock:
@@ -1893,6 +1883,103 @@ components:
       properties:
         level:
           $ref: "#/components/schemas/RiskLevel"
+        confidence:
+          $ref: "#/components/schemas/ConfidenceLevel"
+          default: "未知"
+        reasons:
+          type: array
+          items:
+            type: string
+          default: []
+      additionalProperties: false
+
+    CommunityRiskBlock:
+      type: object
+      properties:
+        state:
+          type: string
+          enum:
+            - none
+            - unverified
+            - community_corroborated
+            - officially_corroborated
+          default: none
+        level:
+          $ref: "#/components/schemas/RiskLevel"
+          default: "未知"
+        reasons:
+          type: array
+          items:
+            type: string
+          default: []
+      additionalProperties: false
+
+    PublicSourceStatus:
+      type: object
+      required:
+        - source_key
+        - signal_type
+        - state
+      properties:
+        source_key:
+          type: string
+        signal_type:
+          type: string
+        state:
+          type: string
+          enum:
+            - fresh
+            - degraded
+            - stale
+            - failed
+            - disabled
+            - not_applicable
+        observed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        checked_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        message:
+          type:
+            - string
+            - "null"
+      additionalProperties: false
+
+    DataStatus:
+      type: object
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicSourceStatus"
+          default: []
+        missing:
+          type: array
+          items:
+            type: string
+          default: []
+      additionalProperties: false
+
+    CommunityRefresh:
+      type: object
+      properties:
+        state:
+          type: string
+          enum:
+            - not_available
+            - idle
+            - prioritized
+          default: not_available
+        last_completed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
       additionalProperties: false
 
     ConfidenceBlock:
@@ -2003,6 +2090,23 @@ components:
             - string
             - "null"
           format: uri
+        location_precision:
+          type: string
+          enum:
+            - point
+            - road_or_lane
+            - poi
+            - admin_area
+            - polygon
+            - inferred
+            - map_click
+            - unknown
+          default: unknown
+        limitations:
+          type: array
+          items:
+            type: string
+          default: []
       additionalProperties: false
 
     EvidenceListResponse:
@@ -2105,6 +2209,23 @@ components:
           type:
             - string
             - "null"
+        location_precision:
+          type: string
+          enum:
+            - point
+            - road_or_lane
+            - poi
+            - admin_area
+            - polygon
+            - inferred
+            - map_click
+            - unknown
+          default: unknown
+        limitations:
+          type: array
+          items:
+            type: string
+          default: []
       additionalProperties: false
 
     SourceType:
@@ -2576,7 +2697,6 @@ components:
             - water_level
             - warning
             - evidence
-            - query_heat
         status:
           type: string
           enum:
@@ -2657,7 +2777,6 @@ components:
             - "null"
           enum:
             - metadata
-            - local_vector_tile_endpoint
             - null
         cache_control:
           type:

@@ -1,63 +1,63 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 from xml.etree.ElementTree import Element
 
 from defusedxml import ElementTree
 
-from app.adapters._helpers import optional_str, parse_observed_at_utc, stable_evidence_id
+from app.adapters._helpers import optional_str
 from app.adapters._taiwan_gov_tls import taiwan_gov_open_data_ssl_context
+from app.adapters.cap_identity import cap_message_digest, cap_source_id
+from app.adapters.cap_xml import (
+    MAX_CAP_BYTES,
+    CapDocumentError,
+    ParsedCapArea,
+    ParsedCapMessage,
+    parse_cap_document,
+)
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
-    EventType,
-    IngestionStatus,
-    NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    SourceRejection,
 )
 
+NcdrFetchJson = Callable[[str, Mapping[str, str], int], object]
+NcdrFetchText = Callable[[str, Mapping[str, str], int], str]
+FetchJson = NcdrFetchJson
+FetchText = NcdrFetchText
 
-FetchJson = Callable[[str, int], object]
-FetchText = Callable[[str, int], str]
-
-NCDR_CAP_API_URL = "https://alerts.ncdr.nat.gov.tw/RssAtomFeed.ashx"
+NCDR_DATASTORE_API_URL = "https://alerts.ncdr.nat.gov.tw/api/datastore"
+NCDR_DUMP_API_URL = "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
+DEFAULT_NCDR_MAX_CAP_IDS_PER_RUN = 50
 DEFAULT_NCDR_CAP_TIMEOUT_SECONDS = 8
-NCDR_CAP_ATTRIBUTION = "National Science and Technology Center for Disaster Reduction"
 NCDR_CAP_USER_AGENT = "FloodRiskTaiwan/0.1 worker-ncdr-cap"
+MAX_NCDR_AUDITED_ROWS = 256
 NCDR_CAP_METADATA = AdapterMetadata(
     key="official.ncdr.cap",
     family=SourceFamily.OFFICIAL,
     enabled_by_default=False,
-    display_name="NCDR CAP alert adapter",
-    resource_url=NCDR_CAP_API_URL,
-    update_frequency="NCDR Atom feed updates approximately every minute",
+    display_name="NCDR datastore-to-dump CAP audit adapter",
+    data_gov_dataset_id="NCDR-CAP",
+    data_gov_url="https://alerts.ncdr.nat.gov.tw/",
+    resource_url=NCDR_DATASTORE_API_URL,
+    update_frequency="as issued through the NCDR alert datastore",
     license="Government Open Data License, version 1.0",
     limitations=(
-        "CAP alerts can be area-level only and may include coarse areaDesc or geocode without a precise point.",
-        "Fallback centroids are inferred and should not be treated as precise alert coordinates.",
+        "Disabled by default and audit-only until exact administrative and Circle geometry is reviewed.",
+        "Unreviewed CAP areas never become normalized, staging, latest, or scoring rows.",
     ),
 )
-
-_FLOOD_KEYWORDS = ("淹水", "水災", "豪雨", "大雨", "flood", "heavy rain")
-_AREA_CENTROIDS = {
-    "taiwan": (120.9605, 23.6978),
-    "台灣": (120.9605, 23.6978),
-    "臺灣": (120.9605, 23.6978),
-    "tainan": (120.2270, 22.9999),
-    "tainan city": (120.2270, 22.9999),
-    "台南市": (120.2270, 22.9999),
-    "臺南市": (120.2270, 22.9999),
-    "kaohsiung": (120.3014, 22.6273),
-    "kaohsiung city": (120.3014, 22.6273),
-    "高雄市": (120.3014, 22.6273),
-}
-
 
 class NcdrCapAlertAdapterError(RuntimeError):
     """Base error for NCDR CAP adapter failures."""
@@ -66,9 +66,27 @@ class NcdrCapAlertAdapterError(RuntimeError):
 class NcdrCapAlertFetchError(NcdrCapAlertAdapterError):
     """Raised when fetching NCDR CAP payloads fails."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = _bounded_retry_after(retry_after_seconds)
+
 
 class NcdrCapAlertPayloadError(NcdrCapAlertAdapterError):
     """Raised when the NCDR CAP payload shape is not parseable."""
+
+
+class NcdrCapAlertConfigurationError(NcdrCapAlertAdapterError):
+    """Raised when the enabled NCDR adapter has no API credential."""
+
+
+class NcdrCapAlertRateLimitError(NcdrCapAlertFetchError):
+    def __init__(self, message: str, *, retry_after_seconds: int | None) -> None:
+        super().__init__(message, retry_after_seconds=retry_after_seconds)
 
 
 class NcdrCapAlertAdapter:
@@ -77,81 +95,503 @@ class NcdrCapAlertAdapter:
     def __init__(
         self,
         *,
-        api_url: str | None = None,
+        api_key: str | None,
+        datastore_url: str | None = None,
+        dump_url: str | None = None,
+        max_cap_ids_per_run: int = DEFAULT_NCDR_MAX_CAP_IDS_PER_RUN,
         timeout_seconds: int = DEFAULT_NCDR_CAP_TIMEOUT_SECONDS,
         fetched_at: datetime | None = None,
-        payload: object | None = None,
-        fetch_json: FetchJson | None = None,
-        fetch_text: FetchText | None = None,
+        fetch_json: NcdrFetchJson | None = None,
+        fetch_text: NcdrFetchText | None = None,
         raw_snapshot_key: str | None = None,
     ) -> None:
-        self._api_url = (api_url or NCDR_CAP_API_URL).strip()
+        self._api_key = api_key
+        self._datastore_url = _configured_public_url(
+            datastore_url or NCDR_DATASTORE_API_URL
+        )
+        self._dump_url = _configured_public_url(dump_url or NCDR_DUMP_API_URL)
+        self._max_cap_ids_per_run = min(200, max(1, max_cap_ids_per_run))
         self._timeout_seconds = max(1, timeout_seconds)
         self._fetched_at = fetched_at
-        self._payload = payload
-        self._fetch_json = fetch_json
-        self._fetch_text = fetch_text or _fetch_text
+        self._fetch_json_override = fetch_json
+        self._fetch_text_override = fetch_text
         self._raw_snapshot_key = raw_snapshot_key
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
-        parsed_records = parse_ncdr_cap_payload(
-            self._resolve_payload(),
-            source_url=self._api_url,
+        fetched, _rejections, selected_count, successful_dump_count, retry_after = (
+            self._fetch_audited_rows()
         )
-        fetched_at = self._fetched_at or datetime.now(UTC)
-        prepared_records = tuple(_prepare_record(record, fetched_at=fetched_at) for record in parsed_records)
-        return tuple(
-            RawSourceItem(
-                source_id=str(record["identifier"]),
-                source_url=str(record["source_url"]),
-                fetched_at=fetched_at,
-                payload=record,
-                raw_snapshot_key=self._raw_snapshot_key,
+        if selected_count > 0 and successful_dump_count == 0:
+            raise NcdrCapAlertFetchError(
+                "all selected NCDR CAP dumps failed",
+                retry_after_seconds=retry_after,
             )
-            for record in prepared_records
-        )
+        return fetched
 
-    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
-        return _normalize_cap_alert(self.metadata, raw_item)
+    def normalize(self, raw_item: RawSourceItem) -> None:
+        del raw_item
 
     def run(self) -> AdapterRunResult:
-        fetched = self.fetch()
-        normalized: list[NormalizedEvidence] = []
-        rejected: list[str] = []
-
-        for raw_item in fetched:
-            evidence = self.normalize(raw_item)
-            if evidence is None:
-                rejected.append(raw_item.source_id)
-            else:
-                normalized.append(evidence)
+        fetched, source_rejections, selected_count, successful_dump_count, retry_after = (
+            self._fetch_audited_rows()
+        )
+        if selected_count > 0 and successful_dump_count == 0:
+            raise NcdrCapAlertFetchError(
+                "all selected NCDR CAP dumps failed",
+                retry_after_seconds=retry_after,
+            )
+        rejected = tuple(rejection.source_id for rejection in source_rejections)
 
         return AdapterRunResult(
             adapter_key=self.metadata.key,
             fetched=fetched,
-            normalized=tuple(normalized),
-            rejected=tuple(rejected),
+            normalized=(),
+            rejected=rejected,
+            source_rejections=source_rejections,
+            no_active_event=selected_count == 0 or (not fetched and successful_dump_count > 0),
         )
 
-    def _resolve_payload(self) -> object:
-        if self._payload is not None:
-            return self._payload
-        if self._fetch_json is not None:
+    def _fetch_audited_rows(
+        self,
+    ) -> tuple[
+        tuple[RawSourceItem, ...],
+        tuple[SourceRejection, ...],
+        int,
+        int,
+        int | None,
+    ]:
+        api_key = (self._api_key or "").strip()
+        if not api_key:
+            raise NcdrCapAlertConfigurationError(
+                "NCDR_ALERTS_API_KEY is required when the NCDR CAP adapter is enabled"
+            )
+        if api_key in self._datastore_url or api_key in self._dump_url:
+            raise NcdrCapAlertConfigurationError(
+                "NCDR endpoint contained [REDACTED] credential material"
+            )
+        fetched_at = self._fetched_at or datetime.now(UTC)
+        index_params = {
+            "apikey": api_key,
+            "format": "json",
+            "limit": str(self._max_cap_ids_per_run),
+        }
+        index_payload = self._call_json_fetcher(
+            self._datastore_url,
+            index_params,
+            fetched_at=fetched_at,
+        )
+        cap_ids = _parse_datastore_cap_ids(
+            index_payload,
+            api_key=api_key,
+            limit=self._max_cap_ids_per_run,
+        )
+        if not cap_ids:
+            return (), (), 0, 0, None
+
+        fetched: list[RawSourceItem] = []
+        rejections: list[SourceRejection] = []
+        seen_source_ids: set[str] = set()
+        successful_dump_count = 0
+        audited_row_count = 0
+        max_retry_after_seconds: int | None = None
+        for cap_id in cap_ids:
+            dump_params = {
+                "apikey": api_key,
+                "capid": cap_id,
+                "format": "xml",
+            }
+            dump_failed = False
+            dump_retry_after_seconds: int | None = None
+            xml_text = ""
+            messages: tuple[ParsedCapMessage, ...] = ()
             try:
-                payload = self._fetch_json(self._api_url, self._timeout_seconds)
-            except NcdrCapAlertAdapterError:
-                raise
-            except Exception as exc:
-                raise NcdrCapAlertFetchError(f"NCDR CAP JSON fetcher failed: {exc}") from exc
-            if isinstance(payload, (Mapping, list, str)):
-                return payload
-            raise NcdrCapAlertPayloadError("NCDR CAP JSON fetcher returned an unsupported payload")
+                xml_text = self._call_text_fetcher(
+                    self._dump_url,
+                    dump_params,
+                    fetched_at=fetched_at,
+                )
+                if api_key in xml_text:
+                    raise NcdrCapAlertPayloadError(
+                        "NCDR CAP dump contained [REDACTED] credential material"
+                    )
+                messages = parse_cap_document(xml_text)
+            except NcdrCapAlertRateLimitError as exc:
+                dump_failed = True
+                dump_retry_after_seconds = exc.retry_after_seconds
+                if dump_retry_after_seconds is not None:
+                    max_retry_after_seconds = max(
+                        max_retry_after_seconds or 0,
+                        dump_retry_after_seconds,
+                    )
+            except (NcdrCapAlertAdapterError, CapDocumentError):
+                dump_failed = True
+            finally:
+                xml_text = ""
+
+            row_count = sum(len(message.areas) or 1 for message in messages)
+            if not dump_failed and audited_row_count + row_count > MAX_NCDR_AUDITED_ROWS:
+                raise NcdrCapAlertPayloadError(
+                    "NCDR CAP exceeds the 256 audited-row limit"
+                )
+            prepared: list[tuple[RawSourceItem, str]] = []
+            if not dump_failed:
+                try:
+                    prepared = [
+                        _prepare_audit_row(
+                            message,
+                            area,
+                            transport_capid=cap_id,
+                            fetched_at=fetched_at,
+                            source_url=self._dump_url,
+                            raw_snapshot_key=self._raw_snapshot_key,
+                        )
+                        for message in messages
+                        for area in (message.areas or (None,))
+                    ]
+                except CapDocumentError:
+                    dump_failed = True
+                    prepared = []
+
+            if dump_failed:
+                audited_row_count += 1
+                if audited_row_count > MAX_NCDR_AUDITED_ROWS:
+                    raise NcdrCapAlertPayloadError(
+                        "NCDR CAP exceeds the 256 audited-row limit"
+                    )
+                transport_id = _transport_source_id(cap_id)
+                failure_payload: dict[str, Any] = {
+                    "transport_capid": cap_id,
+                    "error": "NCDR CAP dump fetch failed",
+                }
+                if dump_retry_after_seconds is not None:
+                    failure_payload["retry_after_seconds"] = dump_retry_after_seconds
+                failure_raw = RawSourceItem(
+                    source_id=transport_id,
+                    source_url=self._dump_url,
+                    fetched_at=fetched_at,
+                    payload=failure_payload,
+                    raw_snapshot_key=self._raw_snapshot_key,
+                )
+                _reject_secret_bearing_raw(failure_raw, secret=api_key)
+                fetched.append(failure_raw)
+                rejections.append(SourceRejection(transport_id, "ncdr_dump_fetch_failed"))
+                continue
+
+            for raw, _reason in prepared:
+                _reject_secret_bearing_raw(raw, secret=api_key)
+            successful_dump_count += 1
+            audited_row_count += row_count
+            for raw, reason in prepared:
+                if raw.source_id in seen_source_ids:
+                    continue
+                seen_source_ids.add(raw.source_id)
+                fetched.append(raw)
+                rejections.append(SourceRejection(raw.source_id, reason))
+
+        return (
+            tuple(fetched),
+            tuple(rejections),
+            len(cap_ids),
+            successful_dump_count,
+            max_retry_after_seconds,
+        )
+
+    def _call_json_fetcher(
+        self,
+        url: str,
+        params: Mapping[str, str],
+        *,
+        fetched_at: datetime,
+    ) -> object:
+        fetcher = self._fetch_json_override
+        if fetcher is None:
+            return _fetch_json(url, params, self._timeout_seconds, now=fetched_at)
+        failure: NcdrCapAlertFetchError | None = None
+        payload: object | None = None
         try:
-            return self._fetch_text(self._api_url, self._timeout_seconds)
-        except NcdrCapAlertAdapterError:
-            raise
-        except Exception as exc:
-            raise NcdrCapAlertFetchError(f"NCDR CAP text fetcher failed: {exc}") from exc
+            payload = fetcher(url, params, self._timeout_seconds)
+        except Exception as exc:  # noqa: BLE001 - sanitize untrusted injected boundary
+            if isinstance(exc, NcdrCapAlertRateLimitError):
+                failure = NcdrCapAlertRateLimitError(
+                    f"NCDR datastore fetcher failed at {url}: [REDACTED]",
+                    retry_after_seconds=_bounded_retry_after(exc.retry_after_seconds),
+                )
+            else:
+                failure = NcdrCapAlertFetchError(
+                    f"NCDR datastore fetcher failed at {url}: [REDACTED]"
+                )
+        if failure is not None:
+            raise failure
+        return payload
+
+    def _call_text_fetcher(
+        self,
+        url: str,
+        params: Mapping[str, str],
+        *,
+        fetched_at: datetime,
+    ) -> str:
+        fetcher = self._fetch_text_override
+        if fetcher is None:
+            return _fetch_text(url, params, self._timeout_seconds, now=fetched_at)
+        failure: NcdrCapAlertFetchError | None = None
+        xml_text: str | None = None
+        try:
+            xml_text = fetcher(url, params, self._timeout_seconds)
+        except Exception as exc:  # noqa: BLE001 - sanitize untrusted injected boundary
+            if isinstance(exc, NcdrCapAlertRateLimitError):
+                failure = NcdrCapAlertRateLimitError(
+                    f"NCDR CAP dump fetcher failed at {url}: [REDACTED]",
+                    retry_after_seconds=_bounded_retry_after(exc.retry_after_seconds),
+                )
+            else:
+                failure = NcdrCapAlertFetchError(
+                    f"NCDR CAP dump fetcher failed at {url}: [REDACTED]"
+                )
+        if failure is not None:
+            raise failure
+        if not isinstance(xml_text, str):
+            raise NcdrCapAlertPayloadError("NCDR CAP dump fetcher returned non-text data")
+        return xml_text
+
+
+def _parse_datastore_cap_ids(
+    payload: object,
+    *,
+    api_key: str,
+    limit: int,
+) -> tuple[str, ...]:
+    records: object
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, Mapping):
+        records = payload.get("data")
+        if isinstance(records, Mapping):
+            if "records" in records:
+                records = records["records"]
+            elif "items" in records:
+                records = records["items"]
+            else:
+                records = None
+    else:
+        raise NcdrCapAlertPayloadError("NCDR datastore payload must be a JSON object or list")
+    if not isinstance(records, list):
+        raise NcdrCapAlertPayloadError("NCDR datastore payload is missing a data list")
+
+    cap_ids: set[str] = set()
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise NcdrCapAlertPayloadError("NCDR datastore data entries must be objects")
+        raw_cap_id = record.get("capid")
+        if raw_cap_id is None:
+            continue
+        if not isinstance(raw_cap_id, str):
+            raise NcdrCapAlertPayloadError("NCDR datastore capid must be text")
+        cap_id = raw_cap_id.strip()
+        if not cap_id or len(cap_id) > 256:
+            continue
+        if api_key and api_key in cap_id:
+            raise NcdrCapAlertPayloadError(
+                "NCDR datastore capid contained [REDACTED] credential material"
+            )
+        cap_ids.add(cap_id)
+    if records and not cap_ids:
+        raise NcdrCapAlertPayloadError(
+            "NCDR datastore contained no usable capid values"
+        )
+    return tuple(sorted(cap_ids)[:limit])
+
+
+def _prepare_audit_row(
+    message: ParsedCapMessage,
+    area: ParsedCapArea | None,
+    *,
+    transport_capid: str,
+    fetched_at: datetime,
+    source_url: str,
+    raw_snapshot_key: str | None,
+) -> tuple[RawSourceItem, str]:
+    if message.message_type not in {"Alert", "Update", "Cancel"}:
+        raise CapDocumentError("NCDR CAP msgType must be Alert, Update, or Cancel")
+    if message.message_type in {"Update", "Cancel"} and not message.references:
+        raise CapDocumentError("NCDR CAP Update and Cancel messages require references")
+    active_from = message.onset or message.effective
+    if active_from is None or message.expires is None:
+        raise CapDocumentError("NCDR CAP lifecycle requires effective or onset and expires")
+    if message.expires <= active_from:
+        raise CapDocumentError("NCDR CAP expires must be later than active_from")
+
+    source_id = (
+        cap_source_id(
+            sender=message.sender,
+            identifier=message.identifier,
+            sent=message.sent,
+            admin_code=None,
+            message_level=True,
+        )
+        if area is None
+        else _unresolved_area_source_id(message, area)
+    )
+    payload: dict[str, object] = {
+        "evidence_scope": "current",
+        "location_precision": "admin_area",
+        "transport_capid": transport_capid,
+        "cap_sender": message.sender,
+        "cap_identifier": message.identifier,
+        "cap_sent": message.sent.isoformat(),
+        "cap_references": [
+            {
+                "sender": reference.sender,
+                "identifier": reference.identifier,
+                "sent": reference.sent.isoformat(),
+            }
+            for reference in message.references
+        ],
+        "cap_status": message.status,
+        "cap_message_type": message.message_type,
+        "cap_scope": message.scope,
+        "cap_event": message.event,
+        "headline": message.headline,
+        "description": message.description,
+        "active_from": active_from.isoformat(),
+        "active_until": message.expires.isoformat(),
+        "areaDesc": area.area_desc if area is not None else None,
+        "source_geocodes": (
+            [
+                {"valueName": name, "value": value}
+                for name, value in area.geocodes
+            ]
+            if area is not None
+            else []
+        ),
+    }
+    if area is not None and area.polygon is not None:
+        payload["polygon"] = [
+            {"latitude": latitude, "longitude": longitude}
+            for latitude, longitude in area.polygon
+        ]
+    if area is not None and area.circle is not None:
+        latitude, longitude, radius_km = area.circle
+        payload["circle"] = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "radius_km": radius_km,
+        }
+    return (
+        RawSourceItem(
+            source_id=source_id,
+            source_url=source_url,
+            fetched_at=fetched_at,
+            payload=payload,
+            raw_snapshot_key=raw_snapshot_key,
+        ),
+        _audit_rejection_reason(
+            message,
+            area,
+            active_from=active_from,
+            fetched_at=fetched_at,
+        ),
+    )
+
+
+def _unresolved_area_source_id(message: ParsedCapMessage, area: ParsedCapArea) -> str:
+    message_id = cap_message_digest(
+        sender=message.sender,
+        identifier=message.identifier,
+        sent=message.sent,
+    )
+    area_json = json.dumps(
+        [area.area_desc, sorted(area.geocodes), area.polygon, area.circle],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    area_id = hashlib.sha256(area_json.encode("utf-8")).hexdigest()[:24]
+    return f"cap:{message_id}:unresolved-area:{area_id}"
+
+
+def _audit_rejection_reason(
+    message: ParsedCapMessage,
+    area: ParsedCapArea | None,
+    *,
+    active_from: datetime,
+    fetched_at: datetime,
+) -> str:
+    if message.status != "Actual":
+        return "ncdr_inactive_status"
+    if message.scope != "Public":
+        return "ncdr_inactive_scope"
+    if message.message_type == "Cancel":
+        return "ncdr_inactive_cancel"
+    if active_from > fetched_at:
+        return "ncdr_inactive_future"
+    if message.expires is not None and message.expires <= fetched_at:
+        return "ncdr_inactive_expired"
+    if area is None:
+        return "ncdr_unreviewed_message_geometry"
+    if area.circle is not None:
+        return "ncdr_circle_geometry_unreviewed"
+    if area.polygon is not None:
+        return "ncdr_polygon_geometry_unreviewed"
+    return "ncdr_unreviewed_admin_geometry"
+
+
+def _transport_source_id(cap_id: str) -> str:
+    digest = hashlib.sha256(cap_id.encode("utf-8")).hexdigest()[:24]
+    return f"ncdr-transport:{digest}"
+
+
+def _reject_secret_bearing_raw(raw: RawSourceItem, *, secret: str) -> None:
+    raw_fields = (
+        raw.source_id,
+        raw.source_url,
+        raw.raw_snapshot_key,
+        raw.payload,
+    )
+    if any(_contains_exact_secret(value, secret=secret) for value in raw_fields):
+        raise NcdrCapAlertPayloadError(
+            "NCDR CAP raw audit contained [REDACTED] credential material"
+        )
+
+
+def _contains_exact_secret(value: object, *, secret: str) -> bool:
+    if isinstance(value, str):
+        return secret in value
+    if isinstance(value, Mapping):
+        return any(
+            _contains_exact_secret(key, secret=secret)
+            or _contains_exact_secret(item, secret=secret)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_contains_exact_secret(item, secret=secret) for item in value)
+    return False
+
+
+def _public_url(url: str) -> str:
+    parts = urlsplit(url.strip())
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("NCDR endpoint URL must not contain userinfo")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _configured_public_url(url: str) -> str:
+    public_url: str | None = None
+    failed = False
+    try:
+        public_url = _public_url(url)
+    except Exception:  # noqa: BLE001 - sanitize configured URL parsing failures
+        failed = True
+    if failed or public_url is None:
+        raise NcdrCapAlertConfigurationError(
+            "NCDR endpoint URL is invalid: [REDACTED]"
+        )
+    return public_url
+
+
+def _bounded_retry_after(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return min(3600, max(0, value))
 
 
 def parse_ncdr_cap_payload(
@@ -201,85 +641,6 @@ def _parse_json_string_payload(payload: str) -> object | None:
         return json.loads(text)
     except json.JSONDecodeError:
         return None
-
-
-def _prepare_record(
-    record: Mapping[str, Any],
-    *,
-    fetched_at: datetime,
-) -> Mapping[str, Any]:
-    prepared = dict(record)
-    expires_at = parse_observed_at_utc(prepared.get("expires"))
-    prepared["expired"] = expires_at is not None and expires_at < fetched_at
-    station_id = _station_id(prepared)
-    if station_id is not None:
-        prepared["station_id"] = station_id
-
-    geometry, location_inferred = _resolve_geometry(prepared)
-    if geometry is not None:
-        prepared["geometry"] = geometry
-    prepared["quality_flags"] = {"location_inferred": location_inferred}
-    return prepared
-
-
-def _normalize_cap_alert(
-    metadata: AdapterMetadata,
-    raw_item: RawSourceItem,
-) -> NormalizedEvidence | None:
-    payload = raw_item.payload
-    identifier = optional_str(payload.get("identifier"))
-    sent_at = parse_observed_at_utc(payload.get("sent"))
-    effective_at = parse_observed_at_utc(payload.get("effective"))
-    expires_at = parse_observed_at_utc(payload.get("expires"))
-    area_desc = optional_str(payload.get("areaDesc"))
-    summary_text = " ".join(
-        part
-        for part in (
-            optional_str(payload.get("event")),
-            optional_str(payload.get("headline")),
-            optional_str(payload.get("description")),
-            area_desc,
-        )
-        if part
-    )
-    if (
-        identifier is None
-        or sent_at is None
-        or effective_at is None
-        or expires_at is None
-        or area_desc is None
-        or expires_at < raw_item.fetched_at
-        or not _is_flood_related(summary_text)
-    ):
-        return None
-
-    location_inferred = bool(_quality_flags(payload).get("location_inferred"))
-    summary = f"NCDR CAP flood warning affecting {area_desc}"
-    if location_inferred:
-        summary = f"{summary}; location inferred from CAP area metadata"
-
-    headline = optional_str(payload.get("headline")) or optional_str(payload.get("event")) or identifier
-    tags = ["official", "ncdr", "cap", "flood_warning"]
-    if location_inferred:
-        tags.append("location_inferred")
-
-    return NormalizedEvidence(
-        evidence_id=stable_evidence_id(metadata.key, raw_item.source_id),
-        adapter_key=metadata.key,
-        source_family=metadata.family,
-        event_type=EventType.FLOOD_WARNING,
-        source_id=identifier,
-        source_url=raw_item.source_url,
-        source_title=f"NCDR CAP alert: {headline}",
-        source_timestamp=effective_at,
-        fetched_at=raw_item.fetched_at,
-        summary=summary,
-        location_text=area_desc,
-        confidence=0.95,
-        status=IngestionStatus.NORMALIZED,
-        attribution=NCDR_CAP_ATTRIBUTION,
-        tags=tuple(tags),
-    )
 
 
 def _parse_xml_payload(xml_text: str, *, source_url: str) -> tuple[Mapping[str, Any], ...]:
@@ -440,130 +801,6 @@ def _build_record(
     }
 
 
-def _resolve_geometry(record: Mapping[str, Any]) -> tuple[Mapping[str, Any] | None, bool]:
-    polygon = optional_str(record.get("polygon"))
-    if polygon:
-        centroid = _polygon_centroid(polygon)
-        if centroid is not None:
-            return _point_geometry(*centroid), False
-
-    circle = optional_str(record.get("circle"))
-    if circle:
-        center = _circle_center(circle)
-        if center is not None:
-            return _point_geometry(*center), False
-
-    coordinate = _coordinate_center(record.get("coordinate"))
-    if coordinate is not None:
-        return _point_geometry(*coordinate), False
-
-    area_desc = optional_str(record.get("areaDesc"))
-    if area_desc is None:
-        return None, True
-    return _point_geometry(*_fallback_centroid(area_desc)), True
-
-
-def _station_id(record: Mapping[str, Any]) -> str | None:
-    geocode = record.get("geocode")
-    if isinstance(geocode, list):
-        for item in geocode:
-            if not isinstance(item, Mapping):
-                continue
-            value = optional_str(item.get("value"))
-            if value:
-                return value
-    return optional_str(record.get("identifier"))
-
-
-def _quality_flags(record: Mapping[str, Any]) -> Mapping[str, Any]:
-    quality_flags = record.get("quality_flags")
-    if isinstance(quality_flags, Mapping):
-        return quality_flags
-    return {}
-
-
-def _is_flood_related(text: str) -> bool:
-    haystack = text.casefold()
-    return any(keyword in haystack for keyword in _FLOOD_KEYWORDS)
-
-
-def _fallback_centroid(area_desc: str) -> tuple[float, float]:
-    normalized = area_desc.casefold()
-    for key, centroid in _AREA_CENTROIDS.items():
-        if key in normalized:
-            return centroid
-    return _AREA_CENTROIDS["taiwan"]
-
-
-def _point_geometry(longitude: float, latitude: float) -> Mapping[str, Any]:
-    return {"type": "Point", "coordinates": [round(longitude, 6), round(latitude, 6)]}
-
-
-def _polygon_centroid(polygon: str) -> tuple[float, float] | None:
-    coordinates: list[tuple[float, float]] = []
-    for part in polygon.split():
-        lat_lon = part.split(",")
-        if len(lat_lon) != 2:
-            continue
-        try:
-            lat = float(lat_lon[0])
-            lon = float(lat_lon[1])
-        except ValueError:
-            continue
-        coordinates.append((lon, lat))
-
-    if len(coordinates) >= 2 and coordinates[0] == coordinates[-1]:
-        coordinates.pop()
-    if not coordinates:
-        return None
-    lon = sum(point[0] for point in coordinates) / len(coordinates)
-    lat = sum(point[1] for point in coordinates) / len(coordinates)
-    return lon, lat
-
-
-def _circle_center(circle: str) -> tuple[float, float] | None:
-    parts = circle.split()
-    if not parts:
-        return None
-    lat_lon = parts[0].split(",")
-    if len(lat_lon) != 2:
-        return None
-    try:
-        lat = float(lat_lon[0])
-        lon = float(lat_lon[1])
-    except ValueError:
-        return None
-    return lon, lat
-
-
-def _coordinate_center(value: object) -> tuple[float, float] | None:
-    if isinstance(value, Mapping):
-        longitude = _float(value.get("longitude")) or _float(value.get("lon")) or _float(value.get("x"))
-        latitude = _float(value.get("latitude")) or _float(value.get("lat")) or _float(value.get("y"))
-        if longitude is not None and latitude is not None:
-            return longitude, latitude
-    if isinstance(value, (list, tuple)) and len(value) >= 2:
-        longitude = _float(value[0])
-        latitude = _float(value[1])
-        if longitude is not None and latitude is not None:
-            return longitude, latitude
-    if isinstance(value, str):
-        parts = [part.strip() for part in value.split(",")]
-        if len(parts) >= 2:
-            longitude = _float(parts[0])
-            latitude = _float(parts[1])
-            if longitude is not None and latitude is not None:
-                return longitude, latitude
-    return None
-
-
-def _float(value: object) -> float | None:
-    try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
 def _first_info(item: Mapping[str, Any]) -> Mapping[str, Any]:
     info = item.get("info")
     if isinstance(info, list):
@@ -640,36 +877,122 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def _fetch_text(url: str, timeout_seconds: int) -> str:
-    request = Request(
+def _fetch_json(
+    url: str,
+    params: Mapping[str, str],
+    timeout_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> object:
+    body = _fetch_bytes(
         url,
-        headers={
-            "Accept": "application/atom+xml, application/xml, text/xml, application/json",
-            "User-Agent": NCDR_CAP_USER_AGENT,
-        },
-        method="GET",
+        params,
+        timeout_seconds,
+        accept="application/json",
+        now=now,
     )
     try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise NcdrCapAlertPayloadError(
+            f"NCDR datastore JSON could not be parsed at {_public_url(url)}"
+        ) from None
+
+
+def _fetch_text(
+    url: str,
+    params: Mapping[str, str],
+    timeout_seconds: int,
+    *,
+    now: datetime | None = None,
+) -> str:
+    body = _fetch_bytes(
+        url,
+        params,
+        timeout_seconds,
+        accept="application/xml, text/xml",
+        now=now,
+    )
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        raise NcdrCapAlertPayloadError(
+            f"NCDR CAP dump could not be decoded at {_public_url(url)}"
+        ) from None
+
+
+def _fetch_bytes(
+    url: str,
+    params: Mapping[str, str],
+    timeout_seconds: int,
+    *,
+    accept: str,
+    now: datetime | None,
+) -> bytes:
+    public_url = "[invalid NCDR URL]"
+    body: bytes | None = None
+    failure: NcdrCapAlertFetchError | None = None
+    try:
+        public_url = _public_url(url)
+        request_url = f"{public_url}?{urlencode(tuple(params.items()))}"
+        request = Request(
+            request_url,
+            headers={
+                "Accept": accept,
+                "User-Agent": NCDR_CAP_USER_AGENT,
+            },
+            method="GET",
+        )
         with urlopen(
             request,
             timeout=timeout_seconds,
             context=taiwan_gov_open_data_ssl_context(),
         ) as response:
-            body = response.read()
+            body = response.read(MAX_CAP_BYTES + 1)
     except HTTPError as exc:
-        raise NcdrCapAlertFetchError(f"NCDR CAP returned HTTP {exc.code}") from exc
-    except (URLError, TimeoutError, OSError) as exc:
-        raise NcdrCapAlertFetchError(f"NCDR CAP request failed: {exc}") from exc
-
-    content_type = response.headers.get("Content-Type", "")
-    if "json" in content_type:
         try:
-            payload: object = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise NcdrCapAlertPayloadError(f"NCDR CAP JSON could not be parsed: {exc}") from exc
-        return json.dumps(payload)
+            if exc.code == 429:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                failure = NcdrCapAlertRateLimitError(
+                    f"NCDR request returned HTTP 429 at {public_url}",
+                    retry_after_seconds=_retry_after_seconds(
+                        retry_after,
+                        now=now or datetime.now(UTC),
+                    ),
+                )
+            else:
+                failure = NcdrCapAlertFetchError(
+                    f"NCDR request returned HTTP {exc.code} at {public_url}"
+                )
+        except Exception:  # noqa: BLE001 - sanitize malformed HTTP error metadata
+            failure = NcdrCapAlertFetchError(
+                f"NCDR request failed at {public_url}"
+            )
+    except Exception:  # noqa: BLE001 - complete untrusted transport boundary
+        failure = NcdrCapAlertFetchError(f"NCDR request failed at {public_url}")
+    if failure is not None:
+        raise failure
+    if type(body) is not bytes:
+        raise NcdrCapAlertFetchError(f"NCDR request failed at {public_url}")
+    if len(body) > MAX_CAP_BYTES:
+        raise NcdrCapAlertFetchError(
+            f"NCDR response exceeds the 2 MiB limit at {public_url}"
+        )
+    return body
 
+
+def _retry_after_seconds(value: str | None, *, now: datetime) -> int | None:
+    if value is None:
+        return None
+    stripped = value.strip()
     try:
-        return body.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise NcdrCapAlertPayloadError(f"NCDR CAP response could not be decoded: {exc}") from exc
+        seconds = int(stripped)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(stripped)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at.tzinfo is None or retry_at.utcoffset() is None:
+            retry_at = retry_at.replace(tzinfo=UTC)
+        seconds = math.ceil((retry_at.astimezone(UTC) - now.astimezone(UTC)).total_seconds())
+    return min(3600, max(0, seconds))

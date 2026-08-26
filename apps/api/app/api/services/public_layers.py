@@ -1,16 +1,41 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
+from ipaddress import ip_address
 from typing import Any, Protocol, cast
+from unicodedata import normalize
+from urllib.parse import SplitResult, unquote, urlsplit
 
 from app.api.schemas import MapLayer, TileJson, TileJsonVectorLayer
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
-from app.domain.tiles import VECTOR_TILE_CACHE_CONTROL
-
 
 PLACEHOLDER_TILE_URL_MARKERS = (
     "tiles.placeholder.flood-risk.local",
     "tiles.example.test",
+)
+REVIEWED_EXTERNAL_TILE_HOSTS_KEY = "reviewed_external_tile_hosts"
+MAX_PERCENT_DECODE_PASSES = 5
+NESTED_NETWORK_REFERENCE_PATTERN = re.compile(
+    r"//",
+)
+UNSAFE_EXTERNAL_HOST_SUFFIXES = (
+    ".example",
+    ".home",
+    ".internal",
+    ".invalid",
+    ".lan",
+    ".local",
+    ".localdomain",
+    ".localhost",
+    ".test",
+)
+RESERVED_PLACEHOLDER_HOSTS = frozenset(
+    {
+        "example.com",
+        "example.net",
+        "example.org",
+    }
 )
 
 
@@ -44,18 +69,6 @@ def legacy_static_layers(now: datetime) -> list[MapLayer]:
             tilejson_url="/v1/layers/flood-potential/tilejson",
             updated_at=now,
         ),
-        MapLayer(
-            id="query-heat",
-            name="查詢關注度",
-            description="去識別化後的區域查詢關注度。",
-            category="query_heat",
-            status="available",
-            minzoom=8,
-            maxzoom=14,
-            attribution="Flood Risk 去識別化統計",
-            tilejson_url="/v1/layers/query-heat/tilejson",
-            updated_at=now,
-        ),
     ]
 
 
@@ -83,32 +96,13 @@ def static_layer_records(now: datetime) -> tuple[LayerRecord, ...]:
                 ],
             },
         ),
-        LayerRecord(
-            id="query-heat",
-            name="查詢關注度",
-            description="去識別化區域查詢密度的靜態備援圖層。",
-            category="query_heat",
-            status="disabled",
-            minzoom=8,
-            maxzoom=14,
-            attribution="本服務去識別化統計",
-            tilejson_url="/v1/layers/query-heat/tilejson",
-            updated_at=now,
-            metadata={
-                "version": "static-fallback",
-                "bounds": [119.3, 21.8, 122.1, 25.4],
-                "vector_layers": [
-                    {
-                        "id": "query_heat",
-                        "fields": {"query_count_bucket": "String", "period": "String"},
-                    }
-                ],
-            },
-        ),
     )
 
 
 def map_layer_from_record(record: LayerRecord) -> MapLayer:
+    tilejson_url = public_tilejson_url(record)
+    if tilejson_url is None:
+        raise LayerTileJsonDisabled(record.id)
     return MapLayer(
         id=record.id,
         name=localized_layer_name(record),
@@ -118,7 +112,7 @@ def map_layer_from_record(record: LayerRecord) -> MapLayer:
         minzoom=record.minzoom,
         maxzoom=record.maxzoom,
         attribution=localized_layer_attribution(record),
-        tilejson_url=record.tilejson_url,
+        tilejson_url=tilejson_url,
         updated_at=record.updated_at,
     )
 
@@ -154,12 +148,14 @@ def layer_records(
     try:
         records = fetch_layers(database_url=database_url)
     except LayerRepositoryUnavailable:
-        return static_layer_records(now)
-    return records or static_layer_records(now)
+        records = static_layer_records(now)
+    resolved_records = records or static_layer_records(now)
+    return tuple(record for record in resolved_records if is_public_external_tile_layer(record))
 
 
 def static_layer_by_id(layer_id: str, now: datetime) -> LayerRecord | None:
-    return {layer.id: layer for layer in static_layer_records(now)}.get(layer_id)
+    record = {layer.id: layer for layer in static_layer_records(now)}.get(layer_id)
+    return record if record is not None and is_public_external_tile_layer(record) else None
 
 
 def layer_record(
@@ -170,6 +166,8 @@ def layer_record(
     fetch_layers: FetchMapLayers,
     fetch_layer: FetchMapLayer,
 ) -> LayerRecord | None:
+    if layer_id == "query-heat":
+        return None
     try:
         records = fetch_layers(database_url=database_url)
     except LayerRepositoryUnavailable:
@@ -177,9 +175,10 @@ def layer_record(
     if not records:
         return static_layer_by_id(layer_id, now)
     try:
-        return fetch_layer(database_url=database_url, layer_id=layer_id)
+        record = fetch_layer(database_url=database_url, layer_id=layer_id)
     except LayerRepositoryUnavailable:
         return static_layer_by_id(layer_id, now)
+    return record if record is not None and is_public_external_tile_layer(record) else None
 
 
 def layers(
@@ -196,7 +195,7 @@ def tilejson_from_layer_record(
     *,
     allow_local_tile_fallback: bool = False,
 ) -> TileJson:
-    if record.status == "disabled":
+    if record.status == "disabled" or not is_public_external_tile_layer(record):
         raise LayerTileJsonDisabled(record.id)
 
     metadata = record.metadata
@@ -213,7 +212,7 @@ def tilejson_from_layer_record(
         scheme=cast(Any, metadata.get("scheme", "xyz")),
         tiles=tile_templates,
         tile_url_source=cast(Any, tile_url_source),
-        cache_control=tile_cache_control(metadata, tile_url_source),
+        cache_control=tile_cache_control(metadata),
         minzoom=_optional_int(metadata.get("minzoom")) if "minzoom" in metadata else record.minzoom,
         maxzoom=_optional_int(metadata.get("maxzoom")) if "maxzoom" in metadata else record.maxzoom,
         bounds=_number_list(metadata.get("bounds"), expected_length=4),
@@ -228,26 +227,233 @@ def tile_templates_for_layer(
     *,
     allow_local_tile_fallback: bool,
 ) -> tuple[list[str], str]:
-    metadata_tiles = _string_list(record.metadata.get("tiles"), fallback=[])
-    safe_tiles = [tile for tile in metadata_tiles if not is_placeholder_tile_url(tile)]
-    if safe_tiles:
-        return safe_tiles, "metadata"
-    if allow_local_tile_fallback:
-        return [f"/v1/tiles/{record.id}/{{z}}/{{x}}/{{y}}.mvt"], "local_vector_tile_endpoint"
-    raise LayerTileJsonUnavailable(record.id)
+    del allow_local_tile_fallback
+    metadata_tiles = _validated_raw_tile_templates(record.metadata)
+    if metadata_tiles is None:
+        raise LayerTileJsonDisabled(record.id)
+    reviewed_hosts = reviewed_external_tile_hosts(record.metadata)
+    if all(
+        is_external_tile_url(tile, reviewed_hosts=reviewed_hosts)
+        for tile in metadata_tiles
+    ):
+        return metadata_tiles, "metadata"
+    raise LayerTileJsonDisabled(record.id)
+
+
+def is_public_external_tile_layer(record: LayerRecord) -> bool:
+    if record.id == "query-heat" or record.category == "query_heat":
+        return False
+    reviewed_hosts = reviewed_external_tile_hosts(record.metadata)
+    if not reviewed_hosts or public_tilejson_url(record) is None:
+        return False
+    metadata_tiles = _validated_raw_tile_templates(record.metadata)
+    return metadata_tiles is not None and all(
+        is_external_tile_url(tile, reviewed_hosts=reviewed_hosts)
+        for tile in metadata_tiles
+    )
+
+
+def _validated_raw_tile_templates(metadata: dict[str, Any]) -> list[str] | None:
+    raw_tiles = metadata.get("tiles")
+    if not isinstance(raw_tiles, list) or not raw_tiles:
+        return None
+    if any(not isinstance(tile, str) or not tile for tile in raw_tiles):
+        return None
+    return raw_tiles
+
+
+def public_tilejson_url(record: LayerRecord) -> str | None:
+    decoded = _fully_percent_decoded_url(record.tilejson_url)
+    if decoded is None:
+        return None
+    parsed = _safe_urlsplit(decoded)
+    if parsed is None:
+        return None
+    if not parsed.scheme and not parsed.netloc:
+        if parsed.query or parsed.fragment or not _has_safe_product_path(parsed):
+            return None
+        expected_path = f"/v1/layers/{record.id}/tilejson"
+        return record.tilejson_url.strip() if parsed.path == expected_path else None
+    reviewed_hosts = reviewed_external_tile_hosts(record.metadata)
+    if is_external_tile_url(record.tilejson_url, reviewed_hosts=reviewed_hosts):
+        return record.tilejson_url.strip()
+    return None
+
+
+def reviewed_external_tile_hosts(metadata: dict[str, Any]) -> frozenset[str]:
+    raw_hosts = metadata.get(REVIEWED_EXTERNAL_TILE_HOSTS_KEY)
+    if not isinstance(raw_hosts, list) or not raw_hosts:
+        return frozenset()
+    normalized_hosts: set[str] = set()
+    for raw_host in raw_hosts:
+        if not isinstance(raw_host, str):
+            return frozenset()
+        host = _normalized_public_host(raw_host)
+        if host is None:
+            return frozenset()
+        normalized_hosts.add(host)
+    return frozenset(normalized_hosts)
+
+
+def is_external_tile_url(
+    value: str,
+    *,
+    reviewed_hosts: frozenset[str] | tuple[str, ...] = (),
+) -> bool:
+    parsed = _safe_external_url(value)
+    if parsed is None:
+        return False
+    host = _normalized_public_host(parsed.hostname or "")
+    normalized_reviewed_hosts = {
+        normalized
+        for candidate in reviewed_hosts
+        if (normalized := _normalized_public_host(candidate)) is not None
+    }
+    return (
+        host is not None
+        and host in normalized_reviewed_hosts
+        and not _has_nested_network_reference(parsed)
+    )
+
+
+def _has_nested_network_reference(parsed: SplitResult) -> bool:
+    """Reject explicit nested URI and network-path references after decoding."""
+    for component in (parsed.path, parsed.query, parsed.fragment):
+        for match in NESTED_NETWORK_REFERENCE_PATTERN.finditer(component):
+            if match.start() == 0 or not component[match.start() - 1].isalnum():
+                return True
+    return False
+
+
+def _safe_external_url(value: str) -> SplitResult | None:
+    decoded = _fully_percent_decoded_url(value)
+    if decoded is None:
+        return None
+    parsed = _safe_urlsplit(decoded)
+    if parsed is None:
+        return None
+    if parsed.scheme.casefold() not in {"http", "https"} or not parsed.netloc:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is not None and port != (443 if parsed.scheme.casefold() == "https" else 80):
+        return None
+    if _normalized_public_host(parsed.hostname or "") is None:
+        return None
+    if is_placeholder_tile_url(decoded) or not _has_safe_product_path(parsed):
+        return None
+    return parsed
+
+
+def _safe_urlsplit(value: str) -> SplitResult | None:
+    try:
+        return urlsplit(value)
+    except ValueError:
+        return None
+
+
+def _fully_percent_decoded_url(value: str) -> str | None:
+    current = value.strip()
+    if not current or current != value:
+        return None
+    for _pass in range(MAX_PERCENT_DECODE_PASSES):
+        canonical = normalize("NFKC", current)
+        if re.search(r"%(?![0-9a-fA-F]{2})", canonical):
+            return None
+        try:
+            decoded = unquote(canonical, errors="strict")
+        except UnicodeDecodeError:
+            return None
+        if decoded == current:
+            return None if _has_unsafe_url_characters(current) else current
+        current = decoded
+    canonical = normalize("NFKC", current)
+    if re.search(r"%(?![0-9a-fA-F]{2})", canonical):
+        return None
+    try:
+        if unquote(canonical, errors="strict") != current:
+            return None
+        return None if _has_unsafe_url_characters(current) else current
+    except UnicodeDecodeError:
+        return None
+
+
+def _has_unsafe_url_characters(value: str) -> bool:
+    return any(
+        character.isspace() or ord(character) < 32 or ord(character) == 127
+        for character in value
+    )
+
+
+def _has_safe_product_path(parsed: SplitResult) -> bool:
+    decoded_url = parsed.geturl()
+    if _has_unsafe_url_characters(decoded_url):
+        return False
+    if "\\" in decoded_url:
+        return False
+    if "//" in parsed.path:
+        return False
+    path_segments = [segment.casefold() for segment in parsed.path.split("/") if segment]
+    if any(segment in {".", ".."} for segment in path_segments):
+        return False
+    product_components = f"{parsed.path}?{parsed.query}#{parsed.fragment}".casefold()
+    if re.search(r"(?<![a-z0-9])v1[^a-z0-9]+tiles(?![a-z0-9])", product_components):
+        return False
+    return "pmtiles" not in product_components
+
+
+def _normalized_public_host(value: str) -> str | None:
+    candidate = value.strip().rstrip(".").casefold()
+    if not candidate or any(character.isspace() for character in candidate):
+        return None
+    try:
+        host = candidate.encode("idna").decode("ascii")
+    except UnicodeError:
+        return None
+    try:
+        address = ip_address(host)
+    except ValueError:
+        if re.fullmatch(r"[0-9.]+", host) or any(
+            label.startswith("0x") for label in host.split(".")
+        ):
+            return None
+        if "." not in host:
+            return None
+        if any(
+            not label
+            or len(label) > 63
+            or label.startswith("-")
+            or label.endswith("-")
+            or re.fullmatch(r"[a-z0-9-]+", label) is None
+            for label in host.split(".")
+        ):
+            return None
+    else:
+        return host if address.is_global else None
+    if host in RESERVED_PLACEHOLDER_HOSTS or any(
+        host.endswith(f".{reserved}") for reserved in RESERVED_PLACEHOLDER_HOSTS
+    ):
+        return None
+    if any(host == suffix[1:] or host.endswith(suffix) for suffix in UNSAFE_EXTERNAL_HOST_SUFFIXES):
+        return None
+    if any(marker in host for marker in PLACEHOLDER_TILE_URL_MARKERS):
+        return None
+    return host
 
 
 def is_placeholder_tile_url(value: str) -> bool:
-    normalized = value.lower()
+    normalized = value.casefold()
     return any(marker in normalized for marker in PLACEHOLDER_TILE_URL_MARKERS)
 
 
-def tile_cache_control(metadata: dict[str, Any], tile_url_source: str) -> str | None:
+def tile_cache_control(metadata: dict[str, Any]) -> str | None:
     configured = _optional_str(metadata.get("cache_control"))
     if configured:
         return configured
-    if tile_url_source == "local_vector_tile_endpoint":
-        return VECTOR_TILE_CACHE_CONTROL
     return None
 
 
@@ -286,14 +492,6 @@ def _optional_int(value: object) -> int | None:
         return int(cast(Any, value))
     except (TypeError, ValueError):
         return None
-
-
-def _string_list(value: object, *, fallback: list[str]) -> list[str]:
-    if isinstance(value, list):
-        items = [str(item) for item in value if item]
-        if items:
-            return items
-    return fallback
 
 
 def _number_list(value: object, *, expected_length: int) -> list[float] | None:

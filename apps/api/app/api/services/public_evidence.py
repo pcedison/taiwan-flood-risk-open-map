@@ -16,7 +16,6 @@ from app.domain.history import HistoricalFloodRecord
 from app.domain.realtime import OfficialRealtimeObservation
 from app.domain.risk import RiskEvidenceSignal
 
-
 OFFICIAL_DATA_GOV_URLS = {
     "rainfall": "https://data.gov.tw/dataset/9177",
     "water_level": "https://data.gov.tw/dataset/25768",
@@ -168,6 +167,8 @@ def evidence_from_record(record: EvidenceRecord) -> Evidence:
         privacy_level=cast(Any, record.privacy_level),
         raw_ref=record.raw_ref,
         realtime_risk_factor=_evidence_realtime_risk_factor(record),
+        location_precision=record.location_precision,
+        limitations=list(record.limitations),
     )
 
 
@@ -175,8 +176,10 @@ def localized_evidence_text(record: EvidenceRecord) -> tuple[str, str]:
     if record.event_type == "flood_potential":
         return (
             "官方淹水潛勢規劃圖資",
-            "此筆資料表示查詢範圍與官方淹水潛勢規劃圖資相交，屬於歷史與情境參考；"
-            "不代表目前正在淹水，也不是即時災害警報。",
+            (
+                "此筆資料表示查詢範圍與官方淹水潛勢規劃圖資相交，屬於歷史與情境參考；"
+                "不代表目前正在淹水，也不是即時災害警報。"
+            ),
         )
     return (record.title, record.summary)
 
@@ -218,15 +221,11 @@ def list_assessment_evidence(
     backend: str = "memory",
     redis_url: str | None = None,
 ) -> EvidenceListResponse:
-    cached_items = public_evidence_cache.cached_evidence(
-        assessment_id,
-        backend=backend,
-        redis_url=redis_url,
-    )
-    if cached_items is None:
-        items = list(fetch_db_evidence(assessment_id, page_size=page_size))
-    else:
-        items = cached_items[:page_size]
+    # The persisted association and current source gates are the authorization
+    # boundary. Legacy memory/Redis entries can outlive source enablement and
+    # therefore must never authorize the v1 detail response.
+    del backend, redis_url
+    items = list(fetch_db_evidence(assessment_id, page_size=page_size))
     return EvidenceListResponse(
         assessment_id=assessment_id,
         items=items,
@@ -328,6 +327,8 @@ def evidence_preview(evidence: Evidence) -> EvidencePreview:
         distance_to_query_m=evidence.distance_to_query_m,
         confidence=evidence.confidence,
         url=evidence.url,
+        location_precision=evidence.location_precision,
+        limitations=list(evidence.limitations),
     )
 
 

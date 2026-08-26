@@ -8,11 +8,30 @@
   "score_version": "risk-v0.1.0",
   "created_at": "2026-04-28T13:00:00Z",
   "expires_at": "2026-04-28T13:10:00Z",
+  "as_of": "2026-04-28T13:00:00Z",
   "realtime": {
-    "level": "低"
+    "level": "低",
+    "confidence": "未知",
+    "reasons": []
   },
   "historical": {
-    "level": "高"
+    "level": "高",
+    "confidence": "未知",
+    "reasons": []
+  },
+  "overall": {
+    "level": "低",
+    "confidence": "中",
+    "reasons": [
+      "此位置半徑 500 公尺內有歷史淹水相關證據。",
+      "目前附近雨量與水位資料未達警戒條件。"
+    ]
+  },
+  "dominant_mode": "realtime",
+  "community": {
+    "state": "none",
+    "level": "未知",
+    "reasons": []
   },
   "confidence": {
     "level": "中"
@@ -141,5 +160,13 @@
       "附近沒有可用的即時感測資料。"
     ],
     "county_level_note": "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。"
+  },
+  "data_status": {
+    "sources": [],
+    "missing": []
+  },
+  "community_refresh": {
+    "state": "not_available",
+    "last_completed_at": null
   }
 }

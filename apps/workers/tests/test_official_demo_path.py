@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.adapters.wra.water_level import WraWaterLevelAdapter
@@ -13,9 +13,8 @@ from app.pipelines.promotion import (
 )
 from app.pipelines.staging import build_staging_batch
 
-
 FIXTURES = Path(__file__).parent / "fixtures"
-FETCHED_AT = datetime(2026, 4, 28, 10, 0, tzinfo=timezone.utc)
+FETCHED_AT = datetime(2026, 4, 28, 10, 0, tzinfo=UTC)
 
 
 def test_wra_official_demo_path_raw_snapshot_to_staging_to_promotion_payload() -> None:
@@ -163,6 +162,6 @@ class _MemoryPromotionWriter:
         del limit, adapter_keys
         return self._candidates
 
-    def write_evidence(self, payload: object) -> str:
+    def write_evidence(self, payload: object) -> str | None:
         del payload
         return "evidence-1"

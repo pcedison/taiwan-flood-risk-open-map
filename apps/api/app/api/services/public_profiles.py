@@ -7,7 +7,6 @@ so tests can monkeypatch them; this module receives their results.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
@@ -19,8 +18,8 @@ from app.api.schemas import (
     GeoJsonGeometry,
     NearbyRealtimeCoverage,
     QueryHeat,
-    RiskAssessRequest,
     RiskAssessmentResponse,
+    RiskAssessRequest,
     RiskLevelBlock,
 )
 from app.api.services import public_evidence, public_freshness
@@ -88,9 +87,6 @@ def profile_backed_response(
     created_at: datetime,
     top_evidence_items: tuple[Evidence, ...],
     query_heat: QueryHeat,
-    cache_assessment_evidence: Callable[
-        [str, list[Evidence]], None
-    ] = public_evidence.cache_assessment_evidence,
 ) -> RiskAssessmentResponse:
     realtime_scoring = score_risk(
         tuple(
@@ -120,7 +116,6 @@ def profile_backed_response(
         created_at=created_at,
         top_evidence_items=top_evidence_items,
     )
-    cache_assessment_evidence(assessment_id, profile_items)
     explanation = Explanation(
         summary=(
             "此結果先使用預先計算的區域風險 profile 回應，"

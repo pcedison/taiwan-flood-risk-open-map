@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>NCDR-CAP-CIRCLE-001</identifier>
+  <sender>ncdr@example.test</sender>
+  <sent>2026-06-15T10:40:00+08:00</sent>
+  <status>Actual</status>
+  <msgType>Alert</msgType>
+  <scope>Public</scope>
+  <info>
+    <event>FloodSensor</event>
+    <headline>臺南市積淹水感測警戒</headline>
+    <description>FloodSensor HighWater alert</description>
+    <effective>2026-06-15T10:40:00+08:00</effective>
+    <expires>2026-06-15T15:00:00+08:00</expires>
+    <area>
+      <areaDesc>臺南市中西區</areaDesc>
+      <circle>22.9997,120.2270 1.5</circle>
+      <geocode>
+        <valueName>TOWNCODE</valueName>
+        <value>6703700</value>
+      </geocode>
+    </area>
+  </info>
+</alert>

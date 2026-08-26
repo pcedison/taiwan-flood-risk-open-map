@@ -2,9 +2,9 @@
 
 import json
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -25,7 +25,6 @@ from app.adapters.contracts import (
     RawSourceItem,
     SourceFamily,
 )
-
 
 FetchJson = Callable[[str, int], Any]
 
@@ -122,7 +121,7 @@ class WraWaterLevelApiAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in records
@@ -171,7 +170,7 @@ class WraWaterLevelAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=self._fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in self._records
