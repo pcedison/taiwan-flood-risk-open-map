@@ -372,3 +372,59 @@ pipeline 故障；絕不能降級成 `no_station_in_range`。
 
 完成資料庫審核不代表來源授權、正式環境 egress、scheduler cadence、告警或
 部署 SHA 已驗證；這些仍須依部署與 production readiness runbook 分別驗收。
+
+
+## 匯入與啟用腳本（2026-08-27 新增）
+
+本節記錄實際可執行的兩支腳本。它們刻意分開：匯入安全且可逆，啟用會改變每一位
+使用者看到的內容。
+
+### 匯入
+
+```bash
+python infra/scripts/import_jurisdiction_boundaries.py <村里界SHP.zip> \
+  --database-url "$DBURL" --source-revision 1150817 --dry-run
+```
+
+縣市界是由村里 polygon 依 `COUNTYCODE` 聚合而成，不另尋縣市界檔。村里界是
+geocoder 使用的同一份權威幾何，聚合可保證兩層一致、且來源改版時同步移動。
+
+5 碼 `COUNTYCODE` 補 `000` 對應資料庫的 8 碼 canonical code。此規則已對照
+migration 0035 seed 的 22 筆代碼驗證，完全吻合。
+
+`manifest_sha256` 由 PostgreSQL 計算，因為 runbook 把 `jsonb_agg` 的文字序列化
+形式訂為資料庫契約的一部分，Python 的 serializer 不保證相同。
+
+**離島領土必須保留。** 官方資料把東沙島、太平島放在高雄市旗津區，釣魚台列嶼放在
+宜蘭縣頭城鎮大溪里。曾有一版以台灣本島 bounding box 過濾，靜默丟棄這三筆；其中
+大溪里是本島沿海村里，整筆被丟會在宜蘭縣界留下破洞，該地查詢點無法解析縣市，
+而程式仍回報「22 個縣市、全部有效」。現行腳本改為驗證座標落在地球範圍內，並將
+離島部分「列出」而非丟棄。
+
+### 啟用
+
+```bash
+python infra/scripts/activate_jurisdiction_boundary_snapshot.py \
+  --database-url "$DBURL" --review-ref "<誰、何時、如何審核>" --dry-run
+```
+
+單一交易，並在下列任一條件不成立時拒絕提交：
+
+- `imported_count` 不等於 `expected_count`
+- 沒有 `manifest_sha256`
+- 任何一筆幾何的 `ST_AsEWKB` 重算 checksum 與 `geom_sha256` 不符
+- 最後不是恰好一筆 `is_active = true`
+
+先停用其他快照再啟用目標快照，因此中途失敗會落在「零筆 active」的 fail-closed
+狀態，而不是兩筆並存。
+
+**回滾**：
+
+```sql
+UPDATE realtime_jurisdiction_boundary_snapshots SET is_active = false;
+```
+
+### 啟用之後仍未完成的事
+
+啟用只解決轄區解析。地方感測器要真正出現，還需要各來源的 catalog row 與 runtime
+gate 分別開啟，那是另一個逐來源的決定。
