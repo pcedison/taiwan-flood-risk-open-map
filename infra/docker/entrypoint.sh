@@ -152,7 +152,7 @@ case "${role}" in
     setup_ingestion_env
     cd /app/apps/workers
     echo "[start] launching official ingestion scheduler loop (first tick runs immediately)"
-    exec python -m app.main --run-enabled-adapters --persist --scheduler
+    exec python -m app.main --run-v1-baseline-adapters --scheduler
     ;;
   all)
     ;;
@@ -215,7 +215,7 @@ if truthy "${ingestion_enabled}"; then
   echo "[start] launching official ingestion scheduler"
   cd /app/apps/workers
   echo "[start] launching official ingestion scheduler loop (first tick runs immediately)"
-  python -m app.main --run-enabled-adapters --persist --scheduler &
+  python -m app.main --run-v1-baseline-adapters --scheduler &
   scheduler_pid=$!
 else
   echo "[start] official ingestion scheduler disabled"
