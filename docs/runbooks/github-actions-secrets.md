@@ -28,7 +28,7 @@
 
 ## 逐 workflow 盤點
 
-### `hosted-monitoring.yml`（Hosted Monitoring，排程 `7,37 * * * *`，每小時兩次）
+### `hosted-monitoring.yml`（Hosted Monitoring，排程 `7 */6 * * *`，每 6 小時一次）
 
 引用的 secrets：
 
@@ -40,19 +40,23 @@
 | `HOSTED_MONITORING_EVIDENCE_MANIFEST_B64` | base64 編碼的私有 manifest，餵給 `hosted_monitoring_evidence.py`，涵蓋告警路由與 worker/scheduler ownership 證據。 |
 | `LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64` | base64 編碼的私有 manifest，餵給 `local-source-request-followups.py`，追蹤向地方政府/官方單位申請資料來源的後續進度。 |
 
-**這些 secrets 目前全部未設定時的行為**：排程會把來源 freshness 當成硬性門檻；其他私有證據仍採優雅降級（graceful degradation）。
+**這些 secrets 目前全部未設定時的行為**：全部採優雅降級（graceful degradation），排程不會因為 secret 缺席而失敗。
 
 - 不需要任何 secret 的步驟（公開 API 冒煙、hosted deployment smoke、hosted 公開風險證據冒煙、signal-gap 探索/派工就緒檢查、request packet bundle、hosted 私有證據就緒/範本 bundle）**仍會照常執行**，因為它們打的是公開端點（`floodrisk.cc`）或純本地腳本。
 - 每個依賴上述 5 個 secrets 的步驟都有對應的 `if: secrets.X != ''` 判斷式；secret 缺席時，該步驟會被**跳過**（不是失敗），並在 `GITHUB_STEP_SUMMARY` 寫一行「因為 `X` 未設定，所以某項證據沒有被收集」。
-- 來源 freshness 是排程監控的硬性門檻：排程觸發（`schedule`）一律要求 `ADMIN_BEARER_TOKEN`；若未設定，workflow 會 **失敗**（`exit 1`），避免即時資料管線已停滯但監控仍顯示綠燈。手動觸發時則可用 `require_admin_source_freshness=true` 啟用同一門檻。
+- 來源 freshness **不再是排程的硬性門檻**。先前排程觸發（`schedule`）一律要求 `ADMIN_BEARER_TOKEN`，在該 secret 未設定的情況下，等於把「一個選用的私有證據 secret 沒設」變成每次排程都紅燈，而這無法反映 hosted 服務本身是否健康。現在任何觸發方式都可用 `require_admin_source_freshness=true` 手動啟用同一門檻（發版與稽核用），未啟用時該步驟會被跳過並留下 summary 說明。
 
-**修復後的預期行為**：`ADMIN_BEARER_TOKEN` 未設定時，排程會失敗並留下明確錯誤；設定後則會實際檢查 `/admin/v1/sources` freshness。其餘 4 個 manifest secret 缺席時，對應的 worker policy、monitoring 與地方來源派工私有證據仍會被跳過，公開端點冒煙則照常執行。
+**設定 secrets 後的預期行為**：`ADMIN_BEARER_TOKEN` 設定後，`hosted_source_freshness_smoke.py` 會實際檢查 `/admin/v1/sources` freshness；其餘 4 個 manifest secret 設定後，對應的 worker、worker policy、monitoring 與地方來源派工私有證據會實際收集。任何一個缺席時，該步驟被跳過而非失敗，公開端點冒煙照常執行。
 
-### `hosted-monitoring-schedule-watchdog.yml`（Hosted Monitoring Schedule Watchdog，排程 `17,47 * * * *`）
+**官方即時來源尚未啟用時的預期行為**：`hosted_public_risk_evidence_smoke.py` 預設以 `--data-source-mode degraded-ok` 執行。公開 API 契約（`/health`、`/v1/risk/assess` 形狀、`nearby_realtime_coverage` 結構）不通過一律失敗；但當部署端所有官方即時來源都回報 `source_not_configured`、且沒有任何 worker source health 紀錄時，freshness 與 coverage 斷言會標記為 `degraded` 並 `exit 0`，同時**不**產生 completion evidence（gate 記為 `blocked`）。已啟用但停擺的來源（`pipeline_stalled`）仍然會失敗。等 CWA 雨量與 WRA 水位在 production 啟用後，再把排程預設切成 `strict`。
+
+### `hosted-monitoring-schedule-watchdog.yml`（Hosted Monitoring Schedule Watchdog，排程 `47 16 * * *`，每天一次）
 
 引用的 secrets：**無**。這個 workflow 只使用 GitHub 內建的 `${{ github.token }}`（作業階段自動核發，不是 repo secret），用來查詢 `hosted-monitoring.yml` 過去排程執行的紀錄，並在必要時用 GitHub API 手動派工重跑一次 `hosted-monitoring.yml`。
 
-**2026-07-06 現況的結論**：不受 secrets 空清單影響，會完全正常運作——它檢查的是「`hosted-monitoring.yml` 有沒有準時跑」，而不是後者內部的私有證據是否收集完整。
+**現況的結論**：不受 secrets 空清單影響——它檢查的是「`hosted-monitoring.yml` 有沒有準時跑」，而不是後者內部的私有證據是否收集完整。
+
+自動補派（`dispatch_hosted_monitoring_on_failure`）**預設關閉**。先前預設開啟時，只要 Hosted Monitoring 持續失敗，watchdog 就會每 30 分鐘再派一次，形成無止境的重跑迴圈；現在即使手動開啟，也只在 readiness 為 `stale` 或 `missing`（也就是 GitHub 排程本身沒觸發）時才補派，不會為了「準時跑但失敗」的監控再派一次。
 
 ### `github-actions-secret-readiness-watchdog.yml`（GitHub Actions Secret Readiness Watchdog，排程 `23 16 * * *`，每天一次）
 

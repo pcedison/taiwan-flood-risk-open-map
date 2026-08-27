@@ -37,7 +37,17 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "default": "false",
         "type": "boolean",
     }
-    assert triggers["schedule"][0]["cron"] == "7,37 * * * *"
+    assert workflow_dispatch_inputs["data_source_mode"]["default"] == "degraded-ok"
+    assert workflow_dispatch_inputs["data_source_mode"]["options"] == [
+        "degraded-ok",
+        "strict",
+    ]
+    # Every 6 hours instead of every 30 minutes: 4 scheduled runs a day.
+    assert triggers["schedule"][0]["cron"] == "7 */6 * * *"
+    assert workflow["concurrency"] == {
+        "group": "hosted-monitoring",
+        "cancel-in-progress": "false",
+    }
 
     job = workflow["jobs"]["hosted-monitoring"]
     assert job["permissions"] == {"contents": "read", "issues": "write"}
@@ -54,9 +64,13 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert job["env"]["LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64"] == (
         "${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}"
     )
+    # Scheduled runs must not fail merely because an optional private-evidence
+    # secret is unset; opting in stays available through workflow_dispatch.
     assert job["env"]["REQUIRE_ADMIN_SOURCE_FRESHNESS"] == (
-        "${{ github.event_name == 'schedule' || "
-        "github.event.inputs.require_admin_source_freshness || false }}"
+        "${{ github.event.inputs.require_admin_source_freshness || 'false' }}"
+    )
+    assert job["env"]["DATA_SOURCE_MODE"] == (
+        "${{ github.event.inputs.data_source_mode || 'degraded-ok' }}"
     )
     assert job["env"]["FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS"] == (
         "${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}"
@@ -67,6 +81,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/public-api-contract-probe.py" in step_text
     assert "scripts/hosted_deployment_smoke.py" in step_text
     assert "scripts/hosted_public_risk_evidence_smoke.py" in step_text
+    assert '--data-source-mode "${DATA_SOURCE_MODE}"' in step_text
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
     assert "scripts/hosted_worker_evidence.py" in step_text
     assert "scripts/hosted_worker_policy_evidence.py" in step_text
@@ -306,7 +321,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         schedule_evidence_step["run"]
     )
     assert "--event-name \"${GITHUB_EVENT_NAME}\"" in schedule_evidence_step["run"]
-    assert "--cron \"${{ github.event.schedule || '7,37 * * * *' }}\"" in (
+    assert "--cron \"${{ github.event.schedule || '7 */6 * * *' }}\"" in (
         schedule_evidence_step["run"]
     )
     assert "--evidence-output artifacts/hosted-monitoring-schedule-evidence.json" in (
@@ -335,15 +350,22 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
     )
     assert alert_routing_step["with"]["retries"] == "3"
-    assert "hosted-monitoring-alert" in alert_routing_step["with"]["script"]
-    assert "Hosted Monitoring failure" in alert_routing_step["with"]["script"]
-    assert "github.rest.issues.create" in alert_routing_step["with"]["script"]
-    assert "github.rest.issues.createComment" in alert_routing_step["with"]["script"]
-    assert "process.env.GITHUB_RUN_ID" in alert_routing_step["with"]["script"]
-    assert "artifacts/hosted-deployment-smoke.json" in alert_routing_step["with"]["script"]
-    assert "expected deployment SHA" in alert_routing_step["with"]["script"]
-    assert "health deployment SHA" in alert_routing_step["with"]["script"]
-    assert "ready deployment SHA" in alert_routing_step["with"]["script"]
+    alert_script = alert_routing_step["with"]["script"]
+    assert "hosted-monitoring-alert" in alert_script
+    assert "Hosted Monitoring failure" in alert_script
+    # Alert routing is deduplicated through the shared helper instead of
+    # appending a comment on every failing run.
+    assert "scripts/ci/route-alert-issue.js" in alert_script
+    assert "routeAlertIssue" in alert_script
+    assert "alertSignature" in alert_script
+    assert "backoffHours" in alert_script
+    assert "process.env.GITHUB_RUN_ID" in alert_script
+    assert "artifacts/hosted-deployment-smoke.json" in alert_script
+    assert "artifacts/hosted-public-risk-evidence-smoke.json" in alert_script
+    assert "expected deployment SHA" in alert_script
+    assert "health deployment SHA" in alert_script
+    assert "ready deployment SHA" in alert_script
+    assert "official source state" in alert_script
 
     resolve_step = next(
         step
@@ -359,6 +381,5 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "hosted-monitoring-alert" in resolve_script
     assert "Hosted Monitoring failure" in resolve_script
     assert "Hosted Monitoring failure resolved" in resolve_script
-    assert "github.rest.issues.createComment" in resolve_script
-    assert "github.rest.issues.update" in resolve_script
-    assert "state_reason" in resolve_script
+    assert "scripts/ci/route-alert-issue.js" in resolve_script
+    assert "closeAlertIssue" in resolve_script

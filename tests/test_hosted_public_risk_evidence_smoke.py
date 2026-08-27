@@ -150,7 +150,10 @@ def test_check_risk_payload_requires_nearby_coverage_and_worker_evidence() -> No
     del payload["nearby_realtime_coverage"]
     payload["evidence"] = []
 
-    failures = smoke.check_risk_payload(payload, radius_m=500)
+    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+    failures = contract_failures + data_source_failures
 
     assert "risk response missing nearby_realtime_coverage" in failures
     assert (
@@ -172,7 +175,10 @@ def test_check_risk_payload_accepts_zero_radius_counts_without_nearest_sensor() 
         signal["fresh_count"] = 0
         signal["missing_reason"] = "no nearby fixture"
 
-    failures = smoke.check_risk_payload(payload, radius_m=500)
+    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+    failures = contract_failures + data_source_failures
 
     assert (
         "nearby_realtime_coverage did not include nearest sensor context or radius counts"
@@ -189,7 +195,10 @@ def test_check_risk_payload_requires_counts_when_nearest_sensor_missing() -> Non
         signal["nearest_distance_m"] = None
         signal.pop("counts_by_radius_m", None)
 
-    failures = smoke.check_risk_payload(payload, radius_m=500)
+    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+    failures = contract_failures + data_source_failures
 
     assert (
         "nearby_realtime_coverage did not include nearest sensor context or radius counts"
@@ -203,7 +212,10 @@ def test_check_risk_payload_rejects_unchecked_worker_source_health() -> None:
     coverage["source_health_checked"] = False
     coverage["source_health"] = []
 
-    failures = smoke.check_risk_payload(payload, radius_m=500)
+    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+    failures = contract_failures + data_source_failures
 
     assert (
         "nearby_realtime_coverage did not verify worker source health; "
@@ -220,7 +232,10 @@ def test_check_risk_payload_rejects_stalled_required_worker_source() -> None:
         reason_code="pipeline_stalled",
     )
 
-    failures = smoke.check_risk_payload(payload, radius_m=500)
+    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+    failures = contract_failures + data_source_failures
 
     assert (
         "required worker source cwa-source health is failed (pipeline_stalled)"
@@ -328,3 +343,172 @@ def _signal(
         "status_only_count": 0,
         "missing_reason": None if count_5000m else "missing fixture",
     }
+
+
+def _unconfigured_risk_payload() -> dict:
+    """A hosted response from a deployment with no official realtime source enabled.
+
+    Mirrors the live https://floodrisk.cc response observed on 2026-08-27: the
+    public contract is intact, but every official signal reports
+    ``source_not_configured`` and no worker source health record exists.
+    """
+
+    payload = _risk_payload()
+    payload["evidence"] = []
+    payload["data_freshness"] = [
+        {
+            "source_id": "persisted-current-official",
+            "name": "已保存官方即時資料",
+            "health_status": "healthy",
+            "observed_at": None,
+            "ingested_at": None,
+            "feature_count": 0,
+            "message": None,
+        },
+        {
+            "source_id": "persisted-historical",
+            "name": "已保存歷史資料",
+            "health_status": "healthy",
+            "observed_at": None,
+            "ingested_at": None,
+            "feature_count": 0,
+            "message": None,
+        },
+    ]
+    coverage = payload["nearby_realtime_coverage"]
+    coverage["overall_level"] = "no_local_sensor"
+    coverage["source_health"] = []
+    coverage["source_health_status"] = "unknown"
+    coverage["source_health_checked"] = True
+    for signal in coverage["signal_breakdown"]:
+        signal["coverage_level"] = "no_local_sensor"
+        signal["nearest_source_id"] = None
+        signal["nearest_distance_m"] = None
+        signal["nearest_observed_at"] = None
+        signal["counts_by_radius_m"] = {"500": 0, "1000": 0, "3000": 0, "5000": 0}
+        signal["fresh_count"] = 0
+        signal["source_count"] = 0
+        signal["failed_source_count"] = 0
+        signal["source_health_status"] = "unknown"
+        signal["missing_cause"] = "source_not_configured"
+        signal["missing_reason"] = "雨量來源目前未啟用"
+    return payload
+
+
+def _run_smoke(tmp_path: Path, monkeypatch, payload: dict, *extra_args: str):
+    evidence_output = tmp_path / "hosted-risk-smoke.json"
+    completion_output = tmp_path / "completion-evidence.json"
+
+    def fake_request_json(method, url, body=None, *, timeout_seconds):
+        if url.endswith("/health"):
+            return smoke.JsonResponse(
+                status_code=200,
+                payload={
+                    "status": "ok",
+                    "service": "flood-risk-api",
+                    "version": "public-beta-mvp-2026-05-04",
+                    "deployment_sha": "abc123",
+                },
+            )
+        if url.endswith("/v1/risk/assess"):
+            return smoke.JsonResponse(status_code=200, payload=payload)
+        raise AssertionError(f"unexpected request {method} {url} {body}")
+
+    monkeypatch.setattr(smoke, "request_json", fake_request_json)
+    exit_code = smoke.main(
+        [
+            "--base-url",
+            "https://example.test",
+            "--captured-at",
+            "2026-08-27T04:00:00+00:00",
+            "--evidence-output",
+            str(evidence_output),
+            "--completion-evidence-output",
+            str(completion_output),
+            *extra_args,
+        ]
+    )
+    evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
+    return exit_code, evidence, completion_output
+
+
+def test_unconfigured_official_sources_are_reported_as_not_configured() -> None:
+    assert (
+        smoke.resolve_official_source_state(_unconfigured_risk_payload())
+        == "not_configured"
+    )
+
+
+def test_enabled_official_sources_are_reported_as_configured() -> None:
+    assert smoke.resolve_official_source_state(_risk_payload()) == "configured"
+
+
+def test_degraded_ok_mode_does_not_fail_when_official_sources_are_off(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    exit_code, evidence, completion_output = _run_smoke(
+        tmp_path, monkeypatch, _unconfigured_risk_payload()
+    )
+
+    assert exit_code == 0
+    assert evidence["status"] == "degraded"
+    assert evidence["official_source_state"] == "not_configured"
+    assert evidence["data_source_mode"] == "degraded-ok"
+    assert evidence["contract_failures"] == []
+    assert evidence["failures"] == []
+    assert evidence["degraded_notes"]
+    # A degraded run must never claim the production gate is satisfied.
+    assert evidence["completion_evidence_targets"][0]["status"] == "blocked"
+    assert not completion_output.exists()
+
+
+def test_strict_mode_still_fails_when_official_sources_are_off(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    exit_code, evidence, completion_output = _run_smoke(
+        tmp_path,
+        monkeypatch,
+        _unconfigured_risk_payload(),
+        "--data-source-mode",
+        "strict",
+    )
+
+    assert exit_code == 1
+    assert evidence["status"] == "failed"
+    assert evidence["degraded_notes"] == []
+    assert evidence["data_source_failures"]
+    assert not completion_output.exists()
+
+
+def test_degraded_ok_mode_still_fails_when_a_configured_source_stalls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"][0].update(
+        health_status="failed",
+        reason_code="pipeline_stalled",
+    )
+
+    exit_code, evidence, _completion_output = _run_smoke(tmp_path, monkeypatch, payload)
+
+    assert exit_code == 1
+    assert evidence["status"] == "failed"
+    assert evidence["official_source_state"] == "configured"
+    assert any("pipeline_stalled" in failure for failure in evidence["failures"])
+
+
+def test_contract_regression_fails_even_when_official_sources_are_off(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    payload = _unconfigured_risk_payload()
+    payload.pop("assessment_id")
+
+    exit_code, evidence, _completion_output = _run_smoke(tmp_path, monkeypatch, payload)
+
+    assert exit_code == 1
+    assert evidence["status"] == "failed"
+    assert "risk response missing assessment_id" in evidence["contract_failures"]

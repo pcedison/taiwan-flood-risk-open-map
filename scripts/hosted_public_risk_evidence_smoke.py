@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Mapping
@@ -28,7 +29,18 @@ PUBLIC_RISK_REQUIREMENT_EVIDENCE_PATHS = {
 }
 OFFICIAL_REALTIME_EVENT_TYPES = {"rainfall", "water_level"}
 OFFICIAL_REALTIME_FRESHNESS_SOURCE_IDS = {"cwa-rainfall", "wra-water-level"}
+OFFICIAL_REALTIME_SIGNAL_TYPES = {"rainfall", "water_level"}
 ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES = {"healthy", "degraded"}
+# A deployment that has never enabled the official realtime adapters reports these
+# causes for every official signal. That is a deployment configuration state, not a
+# regression of the public contract, so scheduled monitoring reports it as degraded
+# instead of failing on every run.
+SOURCE_NOT_CONFIGURED_CAUSES = {
+    "source_not_configured",
+    "source_disabled",
+    "source_not_enabled",
+}
+DATA_SOURCE_MODES = ("strict", "degraded-ok")
 REQUIRED_NEARBY_SIGNALS = {
     "rainfall",
     "water_level",
@@ -52,6 +64,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--location-text", default=DEFAULT_LOCATION_TEXT)
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument(
+        "--data-source-mode",
+        choices=DATA_SOURCE_MODES,
+        default="degraded-ok",
+        help=(
+            "strict: official realtime data-source assertions always fail the run. "
+            "degraded-ok (default): when the deployment has not enabled any official "
+            "realtime source, report those assertions as degraded and exit 0. Public "
+            "API contract assertions always fail the run in both modes."
+        ),
+    )
+    parser.add_argument(
         "--captured-at",
         help="Optional ISO 8601 timestamp for reproducible evidence artifacts.",
     )
@@ -70,7 +93,9 @@ def main(argv: list[str] | None = None) -> int:
 
     base_url = args.base_url.rstrip("/")
     captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
-    failures: list[str] = []
+    contract_failures: list[str] = []
+    data_source_failures: list[str] = []
+    official_source_state = "unknown"
 
     health = request_json("GET", f"{base_url}/health", timeout_seconds=args.timeout_seconds)
     health_evidence = {
@@ -80,9 +105,11 @@ def main(argv: list[str] | None = None) -> int:
         "deployment_sha": health.payload.get("deployment_sha"),
     }
     if health.status_code != 200:
-        failures.append(f"/health returned HTTP {health.status_code}: {health.error or health.payload}")
+        contract_failures.append(
+            f"/health returned HTTP {health.status_code}: {health.error or health.payload}"
+        )
     elif not health.payload.get("deployment_sha"):
-        failures.append("/health did not expose deployment_sha")
+        contract_failures.append("/health did not expose deployment_sha")
     else:
         print(
             "PASS health | "
@@ -103,11 +130,32 @@ def main(argv: list[str] | None = None) -> int:
         timeout_seconds=args.timeout_seconds,
     )
     if risk.status_code != 200:
-        failures.append(f"/v1/risk/assess returned HTTP {risk.status_code}: {risk.error or risk.payload}")
+        contract_failures.append(
+            f"/v1/risk/assess returned HTTP {risk.status_code}: {risk.error or risk.payload}"
+        )
     else:
-        failures.extend(check_risk_payload(risk.payload, radius_m=args.radius_m))
+        payload_contract, payload_data_source, official_source_state = check_risk_payload(
+            risk.payload, radius_m=args.radius_m
+        )
+        contract_failures.extend(payload_contract)
+        data_source_failures.extend(payload_data_source)
 
-    status = "failed" if failures else "passed"
+    degraded_notes: list[str] = []
+    if (
+        args.data_source_mode == "degraded-ok"
+        and official_source_state == "not_configured"
+        and data_source_failures
+    ):
+        degraded_notes = data_source_failures
+        data_source_failures = []
+
+    failures = contract_failures + data_source_failures
+    if failures:
+        status = "failed"
+    elif degraded_notes:
+        status = "degraded"
+    else:
+        status = "passed"
     completion_evidence_ref = args.evidence_output or _default_completion_evidence_ref(
         base_url,
         health_evidence,
@@ -117,6 +165,11 @@ def main(argv: list[str] | None = None) -> int:
         captured_at=captured_at,
         completion_evidence_ref=completion_evidence_ref,
         status=status,
+        data_source_mode=args.data_source_mode,
+        official_source_state=official_source_state,
+        contract_failures=contract_failures,
+        data_source_failures=data_source_failures,
+        degraded_notes=degraded_notes,
         health=health_evidence,
         request={
             "lat": args.lat,
@@ -135,6 +188,30 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {failure}")
         return 1
 
+    if degraded_notes:
+        print("HOSTED_PUBLIC_RISK_EVIDENCE_SMOKE degraded")
+        print(
+            "- the public API contract passed; official realtime sources are not "
+            "enabled on this deployment (official_source_state=not_configured)"
+        )
+        for note in degraded_notes:
+            print(f"- deferred: {note}")
+        print(
+            "- no completion evidence was emitted; run with --data-source-mode strict "
+            "once the official realtime sources are enabled"
+        )
+        _append_step_summary(
+            [
+                "### Hosted public risk evidence degraded",
+                "",
+                "- Public API contract assertions passed.",
+                "- Official realtime sources are not enabled on this deployment, so "
+                "worker freshness and coverage evidence was deferred, not failed.",
+                *(f"- deferred: {note}" for note in degraded_notes),
+            ]
+        )
+        return 0
+
     if args.completion_evidence_output:
         _write_json(
             args.completion_evidence_output,
@@ -152,33 +229,91 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def check_risk_payload(payload: Mapping[str, Any], *, radius_m: int) -> list[str]:
-    failures: list[str] = []
+def check_risk_payload(
+    payload: Mapping[str, Any], *, radius_m: int
+) -> tuple[list[str], list[str], str]:
+    """Split risk payload assertions into contract and data-source classes.
+
+    Returns ``(contract_failures, data_source_failures, official_source_state)``.
+
+    Contract failures mean the public API shape or the hosted service itself
+    regressed; they always fail the run. Data-source failures mean the response
+    shape is fine but no official realtime observation reached it; whether they
+    fail the run depends on ``--data-source-mode`` and on whether the deployment
+    has any official realtime source enabled at all.
+    """
+
+    contract_failures: list[str] = []
+    data_source_failures: list[str] = []
     if not payload.get("assessment_id"):
-        failures.append("risk response missing assessment_id")
+        contract_failures.append("risk response missing assessment_id")
     if not _non_empty_string(_nested_get(payload, "explanation", "summary")):
-        failures.append("risk response missing explanation summary")
+        contract_failures.append("risk response missing explanation summary")
 
     freshness_source_ids = _valid_worker_freshness_source_ids(payload.get("data_freshness"))
     if not freshness_source_ids:
-        failures.append(
+        data_source_failures.append(
             "risk response did not include healthy official realtime freshness with observed_at and ingested_at"
         )
 
     official_events = _valid_official_evidence_event_types(payload.get("evidence"))
     if not official_events:
-        failures.append(
+        data_source_failures.append(
             "risk response did not include official rainfall or water_level evidence "
             "with observed_at and ingested_at"
         )
 
     coverage = payload.get("nearby_realtime_coverage")
     if not isinstance(coverage, Mapping):
-        failures.append("risk response missing nearby_realtime_coverage")
+        contract_failures.append("risk response missing nearby_realtime_coverage")
     else:
-        failures.extend(_check_nearby_coverage(coverage, radius_m=radius_m))
-        failures.extend(_check_worker_source_health(coverage))
-    return failures
+        contract_failures.extend(_check_nearby_coverage(coverage, radius_m=radius_m))
+        data_source_failures.extend(_check_worker_source_health(coverage))
+    return contract_failures, data_source_failures, resolve_official_source_state(payload)
+
+
+def resolve_official_source_state(payload: Mapping[str, Any]) -> str:
+    """Report whether the deployment has any official realtime source enabled.
+
+    ``not_configured`` means every official signal reports a "source is off"
+    cause and no worker source health record exists, i.e. the deployment never
+    tried to ingest official realtime data. ``configured`` means at least one
+    official source is switched on, so an absent or stale observation is a real
+    regression worth failing on. ``unknown`` is the conservative fallback and is
+    treated like ``configured``.
+    """
+
+    if _valid_worker_freshness_source_ids(payload.get("data_freshness")):
+        return "configured"
+
+    coverage = payload.get("nearby_realtime_coverage")
+    if not isinstance(coverage, Mapping):
+        return "unknown"
+
+    source_health = coverage.get("source_health")
+    if isinstance(source_health, list) and source_health:
+        return "configured"
+
+    signals = coverage.get("signal_breakdown")
+    if not isinstance(signals, list) or not signals:
+        return "unknown"
+
+    official_signals = [
+        signal
+        for signal in signals
+        if isinstance(signal, Mapping)
+        and signal.get("signal_type") in OFFICIAL_REALTIME_SIGNAL_TYPES
+    ]
+    if not official_signals:
+        return "unknown"
+
+    for signal in official_signals:
+        source_count = signal.get("source_count")
+        if isinstance(source_count, int) and source_count > 0:
+            return "configured"
+        if signal.get("missing_cause") not in SOURCE_NOT_CONFIGURED_CAUSES:
+            return "configured"
+    return "not_configured"
 
 
 def build_evidence_artifact(
@@ -187,30 +322,47 @@ def build_evidence_artifact(
     captured_at: str,
     completion_evidence_ref: str,
     status: str,
+    data_source_mode: str,
+    official_source_state: str,
+    contract_failures: list[str],
+    data_source_failures: list[str],
+    degraded_notes: list[str],
     health: Mapping[str, Any],
     request: Mapping[str, Any],
     risk_payload: Mapping[str, Any],
     failures: list[str],
 ) -> dict[str, Any]:
+    gate_accepted = status == "passed"
     return {
         "schema_version": EVIDENCE_SCHEMA_VERSION,
         "captured_at": captured_at,
         "base_url": base_url,
         "status": status,
+        "data_source_mode": data_source_mode,
+        "official_source_state": official_source_state,
         "health": dict(health),
         "request": dict(request),
         "risk_assessment": _risk_assessment_summary(risk_payload),
         "completion_evidence_targets": [
             {
                 "gate_key": PUBLIC_RISK_GATE_KEY,
-                "status": "accepted",
-                "satisfied_requirements": PUBLIC_RISK_REQUIREMENTS,
-                "requirement_evidence": _requirement_evidence(
-                    captured_at=captured_at,
-                    evidence_ref=completion_evidence_ref,
+                "status": "accepted" if gate_accepted else "blocked",
+                "satisfied_requirements": (
+                    PUBLIC_RISK_REQUIREMENTS if gate_accepted else []
+                ),
+                "requirement_evidence": (
+                    _requirement_evidence(
+                        captured_at=captured_at,
+                        evidence_ref=completion_evidence_ref,
+                    )
+                    if gate_accepted
+                    else []
                 ),
             }
         ],
+        "contract_failures": list(contract_failures),
+        "data_source_failures": list(data_source_failures),
+        "degraded_notes": list(degraded_notes),
         "failures": failures,
     }
 
@@ -420,6 +572,19 @@ def _requirement_evidence(*, captured_at: str, evidence_ref: str) -> list[dict[s
         }
         for requirement, path in PUBLIC_RISK_REQUIREMENT_EVIDENCE_PATHS.items()
     ]
+
+
+def _append_step_summary(lines: list[str]) -> None:
+    """Best-effort append to the GitHub step summary; a no-op outside Actions."""
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    try:
+        with open(summary_path, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        return
 
 
 def _write_json(output_path: str | None, payload: Mapping[str, Any]) -> None:

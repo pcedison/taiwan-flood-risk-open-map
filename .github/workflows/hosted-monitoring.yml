@@ -17,8 +17,23 @@ on:
         required: false
         default: false
         type: boolean
+      data_source_mode:
+        description: "strict fails when official realtime sources produce no evidence. degraded-ok reports that as degraded while still failing on public API contract regressions."
+        required: false
+        default: "degraded-ok"
+        type: choice
+        options:
+          - degraded-ok
+          - strict
+  # Every 6 hours. The previous 7,37 * * * * cadence produced 48 scheduled runs a
+  # day (plus 48 watchdog fallback dispatches) against a deployment whose state
+  # changes far more slowly than that.
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "7 */6 * * *"
+
+concurrency:
+  group: hosted-monitoring
+  cancel-in-progress: false
 
 jobs:
   hosted-monitoring:
@@ -33,8 +48,13 @@ jobs:
       HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_WORKER_POLICY_EVIDENCE_MANIFEST_B64 }}
       HOSTED_MONITORING_EVIDENCE_MANIFEST_B64: ${{ secrets.HOSTED_MONITORING_EVIDENCE_MANIFEST_B64 }}
       LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64: ${{ secrets.LOCAL_SOURCE_REQUEST_DISPATCH_EVIDENCE_B64 }}
-      REQUIRE_ADMIN_SOURCE_FRESHNESS: ${{ github.event_name == 'schedule' || github.event.inputs.require_admin_source_freshness || false }}
+      # Scheduled runs no longer force this on. ADMIN_BEARER_TOKEN is an optional
+      # private-evidence secret; forcing it made every scheduled run fail on a
+      # missing secret rather than on a real hosted regression. Release and audit
+      # runs opt in through the workflow_dispatch input.
+      REQUIRE_ADMIN_SOURCE_FRESHNESS: ${{ github.event.inputs.require_admin_source_freshness || 'false' }}
       FAIL_ON_OVERDUE_LOCAL_SOURCE_FOLLOWUPS: ${{ github.event.inputs.fail_on_overdue_local_source_followups || 'false' }}
+      DATA_SOURCE_MODE: ${{ github.event.inputs.data_source_mode || 'degraded-ok' }}
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -88,6 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/hosted_public_risk_evidence_smoke.py \
+            --data-source-mode "${DATA_SOURCE_MODE}" \
             --evidence-output artifacts/hosted-public-risk-evidence-smoke.json \
             --completion-evidence-output artifacts/hosted-public-risk-completion-evidence.json
 
@@ -253,7 +274,7 @@ jobs:
             --workflow-name "${GITHUB_WORKFLOW}" \
             --run-id "${GITHUB_RUN_ID}" \
             --run-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            --cron "${{ github.event.schedule || '7,37 * * * *' }}" \
+            --cron "${{ github.event.schedule || '7 */6 * * *' }}" \
             --captured-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --evidence-output artifacts/hosted-monitoring-schedule-evidence.json \
             --completion-evidence-output artifacts/hosted-monitoring-schedule-completion-evidence.json
@@ -291,6 +312,10 @@ jobs:
           retries: 3
           script: |
             const fs = require("fs");
+            const {
+              alertSignature,
+              routeAlertIssue,
+            } = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/route-alert-issue.js`);
             const marker = "[hosted-monitoring-alert]";
             const title = `${marker} Hosted Monitoring failure`;
             const runUrl = [
@@ -299,33 +324,63 @@ jobs:
               "actions/runs",
               process.env.GITHUB_RUN_ID,
             ].join("/");
-            function hostedDeploymentSmokeLines() {
-              const smokePath = "artifacts/hosted-deployment-smoke.json";
-              if (!fs.existsSync(smokePath)) {
-                return [];
+            function readJson(path) {
+              if (!fs.existsSync(path)) {
+                return null;
               }
               try {
-                const smoke = JSON.parse(fs.readFileSync(smokePath, "utf8"));
-                const failures = Array.isArray(smoke.failures) && smoke.failures.length > 0
-                  ? smoke.failures.slice(0, 5).map(String).join("; ")
-                  : "none";
-                return [
-                  "Hosted deployment smoke:",
-                  `- status: ${smoke.status || "unknown"}`,
-                  `- expected deployment SHA: ${smoke.expected_deployment_sha || "unknown"}`,
-                  `- health deployment SHA: ${smoke.health?.deployment_sha || "unknown"}`,
-                  `- ready deployment SHA: ${smoke.ready?.deployment_sha || "unknown"}`,
-                  `- failures: ${failures.slice(0, 1200)}`,
-                  "",
-                ];
+                return JSON.parse(fs.readFileSync(path, "utf8"));
               } catch (error) {
-                return [
-                  "Hosted deployment smoke:",
-                  `- read error: ${error.message}`,
-                  "",
-                ];
+                return { _readError: error.message };
               }
             }
+            const smoke = readJson("artifacts/hosted-deployment-smoke.json");
+            const publicRisk = readJson("artifacts/hosted-public-risk-evidence-smoke.json");
+            function hostedDeploymentSmokeLines() {
+              if (!smoke) {
+                return [];
+              }
+              if (smoke._readError) {
+                return ["Hosted deployment smoke:", `- read error: ${smoke._readError}`, ""];
+              }
+              const failures = Array.isArray(smoke.failures) && smoke.failures.length > 0
+                ? smoke.failures.slice(0, 5).map(String).join("; ")
+                : "none";
+              return [
+                "Hosted deployment smoke:",
+                `- status: ${smoke.status || "unknown"}`,
+                `- expected deployment SHA: ${smoke.expected_deployment_sha || "unknown"}`,
+                `- health deployment SHA: ${smoke.health?.deployment_sha || "unknown"}`,
+                `- ready deployment SHA: ${smoke.ready?.deployment_sha || "unknown"}`,
+                `- failures: ${failures.slice(0, 1200)}`,
+                "",
+              ];
+            }
+            function publicRiskLines() {
+              if (!publicRisk || publicRisk._readError) {
+                return [];
+              }
+              return [
+                "Hosted public risk evidence smoke:",
+                `- status: ${publicRisk.status || "unknown"}`,
+                `- official source state: ${publicRisk.official_source_state || "unknown"}`,
+                `- data source mode: ${publicRisk.data_source_mode || "unknown"}`,
+                `- contract failures: ${(publicRisk.contract_failures || []).join("; ") || "none"}`,
+                `- data source failures: ${(publicRisk.data_source_failures || []).join("; ") || "none"}`,
+                "",
+              ];
+            }
+            // The signature deliberately excludes run id, sha and timestamps so a
+            // recurring failure keeps updating one issue instead of adding a comment
+            // on every run.
+            const signature = alertSignature([
+              process.env.GITHUB_WORKFLOW,
+              smoke?.status,
+              ...(Array.isArray(smoke?.failures) ? smoke.failures.map(String) : []),
+              publicRisk?.status,
+              ...(publicRisk?.contract_failures || []),
+              ...(publicRisk?.data_source_failures || []),
+            ]);
             const body = [
               "Hosted Monitoring failure detected.",
               "",
@@ -333,34 +388,22 @@ jobs:
               `- workflow: ${process.env.GITHUB_WORKFLOW}`,
               `- event: ${process.env.GITHUB_EVENT_NAME}`,
               `- sha: ${process.env.GITHUB_SHA}`,
+              `- failure signature: ${signature}`,
               "",
               ...hostedDeploymentSmokeLines(),
+              ...publicRiskLines(),
               "Artifacts, if uploaded, are attached to the workflow run.",
               "This issue route is public-safe and does not include tokens, manifests, or private evidence refs.",
             ].join("\n");
-            const { owner, repo } = context.repo;
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner,
-              repo,
-              state: "open",
-              per_page: 100,
+            await routeAlertIssue({
+              github,
+              context,
+              core,
+              title,
+              body,
+              signature,
+              backoffHours: Number(process.env.ALERT_BACKOFF_HOURS || 24),
             });
-            const existing = issues.find((issue) => issue.title === title);
-            if (existing) {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: existing.number,
-                body,
-              });
-            } else {
-              await github.rest.issues.create({
-                owner,
-                repo,
-                title,
-                body,
-              });
-            }
 
       - name: Close resolved hosted monitoring failure issue
         if: ${{ success() }}
@@ -368,6 +411,9 @@ jobs:
         with:
           retries: 3
           script: |
+            const {
+              closeAlertIssue,
+            } = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/route-alert-issue.js`);
             const marker = "[hosted-monitoring-alert]";
             const title = `${marker} Hosted Monitoring failure`;
             const runUrl = [
@@ -386,26 +432,4 @@ jobs:
               "",
               "Closing the stale hosted monitoring failure issue.",
             ].join("\n");
-            const { owner, repo } = context.repo;
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner,
-              repo,
-              state: "open",
-              per_page: 100,
-            });
-            const existing = issues.find((issue) => issue.title === title);
-            if (existing) {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: existing.number,
-                body,
-              });
-              await github.rest.issues.update({
-                owner,
-                repo,
-                issue_number: existing.number,
-                state: "closed",
-                state_reason: "completed",
-              });
-            }
+            await closeAlertIssue({ github, context, core, title, body });

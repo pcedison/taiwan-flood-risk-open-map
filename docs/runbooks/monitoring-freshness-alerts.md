@@ -260,10 +260,14 @@ The repository also has a scheduled hosted monitoring workflow:
 .github/workflows/hosted-monitoring.yml
 ```
 
-It runs twice per hour at `7,37 * * * *` and can also be started manually from
-GitHub Actions. The offset avoids the high-load top-of-hour and half-hour
-GitHub Actions schedule windows while preserving the 30-minute cadence. Each
-run executes:
+It runs every six hours at `7 */6 * * *` and can also be started manually from
+GitHub Actions. The minute offset avoids the high-load top-of-hour GitHub
+Actions schedule window. The cadence was reduced from the earlier
+`7,37 * * * *` (48 scheduled runs a day, plus one watchdog fallback dispatch
+per failing run) because the hosted deployment state it observes changes far
+more slowly than that, and a permanently failing monitor at that cadence spends
+Actions minutes without adding information. A `concurrency` group keeps a slow
+run from overlapping the next scheduled one. Each run executes:
 
 - `scripts/public-api-contract-probe.py` before hosted deployment smoke, so the
   public API contract-review queue is refreshed even when the deployed SHA is
@@ -273,7 +277,26 @@ run executes:
   completion evidence.
 - `scripts/hosted_deployment_smoke.py` against `https://floodrisk.cc`.
 - `scripts/hosted_public_risk_evidence_smoke.py` against the hosted public
-  risk API.
+  risk API. Its assertions are split into two classes:
+  - **Public API contract** — `/health`, the `/v1/risk/assess` status code,
+    `assessment_id`, the explanation summary, and the shape of
+    `nearby_realtime_coverage` (radius, buckets, signal breakdown, query-point
+    context). These always fail the run.
+  - **Official realtime data source** — worker freshness entries, official
+    rainfall/water-level evidence, and worker source health records. Whether
+    these fail depends on `--data-source-mode`:
+    - `degraded-ok` (default, used by scheduled runs): when the deployment has
+      no official realtime source enabled at all — every official signal
+      reports `source_not_configured` and there are no worker source health
+      records — the run reports `status: degraded`, prints the deferred
+      assertions, exits 0, and emits **no** completion evidence. The gate is
+      recorded as `blocked`, never `accepted`.
+    - `strict`: those assertions fail the run. Use this for release and audit
+      runs, and switch the scheduled default once CWA rainfall and WRA water
+      level are enabled in production.
+  - A source that *is* enabled but stalled (`reason_code: pipeline_stalled`, or
+    an unhealthy required source) still fails the run in both modes. Degrading
+    only covers "the source was never switched on", not "the source broke".
 - `scripts/local-source-signal-gap-discovery-refresh.py` against the
   data.gov.tw dataset export for every current signal-gap group.
 - `scripts/local-source-signal-gap-dispatch-readiness.py` to turn the latest
@@ -308,19 +331,26 @@ run executes:
   expected main SHA within the accepted freshness window, and it writes a
   public-safe JSON/Markdown report without reading secrets.
 - `.github/workflows/hosted-monitoring-schedule-watchdog.yml` runs that same
-  schedule-readiness watchdog at `17,47 * * * *`, ten minutes after the main
-  Hosted Monitoring cron. It uploads public-safe JSON/Markdown artifacts and opens or
-  comments on `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready`
-  when the latest real schedule run is missing, failed, stale, or on the wrong
-  SHA. When readiness fails, it can also dispatch Hosted Monitoring as a
-  fallback and upload
-  `hosted-monitoring-schedule-fallback-dispatch.json` so the hosted freshness
-  smoke still gets a remediation attempt. That fallback dispatch is operational
+  schedule-readiness watchdog once a day at `47 16 * * *`. It uploads
+  public-safe JSON/Markdown artifacts and opens or updates
+  `[hosted-schedule-watchdog] Hosted Monitoring schedule not ready` when the
+  latest real schedule run is missing, failed, or stale. Its accepted age
+  (`max_age_minutes`, default `480`) must stay above the Hosted Monitoring
+  cadence plus headroom. `expected_head_sha` is unset by default so a fresh
+  merge does not look like a watchdog failure until the next scheduled monitor
+  runs; pass it explicitly for a strict release audit.
+
+  The automatic fallback dispatch is **off by default**
+  (`dispatch_hosted_monitoring_on_failure`). While Hosted Monitoring was failing
+  on every run, the watchdog re-dispatched it every 30 minutes forever, which
+  doubled the workflow's Actions usage and produced two identical failures per
+  cycle without ever changing the outcome. When it is switched on, it now only
+  fires for `stale` or `missing` readiness — the cases where the GitHub
+  `schedule` path itself stopped firing — never for a monitor that ran on time
+  and failed on its own merits. That fallback dispatch remains operational
   recovery evidence, not `scheduled_freshness_checks` completion evidence. On a
   successful readiness run, the watchdog comments on and closes that stable
-  issue if it is still open. This catches the case where manual Hosted
-  Monitoring dispatches pass but the true GitHub `schedule` path still has not
-  recovered, while also clearing stale alerts after recovery.
+  issue if it is still open.
 - `scripts/hosted_source_freshness_smoke.py` when the repository secret
   `ADMIN_BEARER_TOKEN` is configured.
 - `scripts/hosted_worker_evidence.py` when the repository secret
@@ -344,11 +374,16 @@ ownership, scheduled source freshness evidence, and worker/scheduler alert
 ownership recorded through
 `scripts/hosted_monitoring_evidence.py`.
 
-When Hosted Monitoring fails, the workflow now routes a public-safe GitHub issue
+When Hosted Monitoring fails, the workflow routes a public-safe GitHub issue
 under the stable title `[hosted-monitoring-alert] Hosted Monitoring failure`.
-The route creates the issue once and adds comments on later failures, including
-only the run URL, workflow, event, SHA, and the public hosted deployment smoke
-summary when that artifact exists. The deployment summary includes the expected
+Routing goes through `scripts/ci/route-alert-issue.js`, which deduplicates
+alerts: it hashes the failure content into a short signature, always refreshes
+the issue body with the newest state and an occurrence count, and only adds a
+comment when the signature changes or the backoff window (24 hours by default)
+has elapsed. Before this, a workflow that failed every scheduled run appended
+one comment per run indefinitely. The body and comments include only the run
+URL, workflow, event, SHA, failure signature, the public hosted deployment smoke
+summary, and the public risk smoke status when those artifacts exist. The deployment summary includes the expected
 deployment SHA, the `/health` deployment SHA, the `/ready` deployment SHA, and
 the first bounded failure messages so a Zeabur lag is visible directly in the
 issue body. It intentionally omits secrets, private manifests, and private
@@ -373,9 +408,10 @@ Manual workflow dispatch accepts an optional `expected_deployment_sha`. Omit it
 for the workflow commit SHA, or provide the exact deployed SHA while verifying a
 specific release. The hosted deployment smoke retries for a bounded window so
 scheduled runs do not fail simply because Zeabur is still catching up to a fresh
-main push. Scheduled monitoring always requires `/admin/v1/sources` freshness
-evidence and therefore fails fast when the repository secret
-`ADMIN_BEARER_TOKEN` is missing. Manual runs can opt into the same gate with
+main push. Scheduled monitoring no longer forces the `/admin/v1/sources`
+freshness gate: `ADMIN_BEARER_TOKEN` is an optional private-evidence secret, and
+requiring it on every scheduled run turned "an optional secret is unset" into a
+red build. Any run can opt into the strict gate with
 `require_admin_source_freshness=true`; otherwise the admin freshness check is
 skipped when the token is unavailable and the public smokes still run with a
 notice rather than a leaked token or failed secret lookup. The public risk
