@@ -500,6 +500,34 @@ def test_degraded_ok_mode_still_fails_when_a_configured_source_stalls(
     assert any("pipeline_stalled" in failure for failure in evidence["failures"])
 
 
+def test_strict_mode_also_fails_when_a_configured_source_stalls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"][0].update(
+        health_status="failed",
+        reason_code="pipeline_stalled",
+    )
+
+    exit_code, evidence, _completion_output = _run_smoke(
+        tmp_path,
+        monkeypatch,
+        payload,
+        "--data-source-mode",
+        "strict",
+    )
+
+    # A stalled source is a real outage, not a not-yet-enabled source. Neither
+    # mode may excuse it, so degraded-ok is never the reason the run failed.
+    assert exit_code == 1
+    assert evidence["status"] == "failed"
+    assert evidence["data_source_mode"] == "strict"
+    assert evidence["official_source_state"] == "configured"
+    assert evidence["degraded_notes"] == []
+    assert any("pipeline_stalled" in failure for failure in evidence["failures"])
+
+
 def test_contract_regression_fails_even_when_official_sources_are_off(
     tmp_path: Path,
     monkeypatch,
