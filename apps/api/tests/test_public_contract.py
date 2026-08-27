@@ -564,6 +564,7 @@ def test_nearby_source_health_contract_is_public_safe_and_documented() -> None:
         "source_failed",
         "update_pipeline_stalled",
         "source_not_configured",
+        "jurisdiction_mapping_missing",
         "jurisdiction_unverified",
         "health_unknown",
     }

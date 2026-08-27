@@ -84,6 +84,7 @@ function missingRainfallCoverage(input: {
     | "source_failed"
     | "update_pipeline_stalled"
     | "source_not_configured"
+    | "jurisdiction_mapping_missing"
     | "inventory_unverified"
     | "health_unknown";
   sourceHealth?: PublicRealtimeSourceHealth;
@@ -1356,4 +1357,23 @@ test("risk and evidence formatting helpers produce display-ready strings", () =>
   assert.equal(formatDistance(null), "未提供");
   assert.match(formatDateTime("2026-04-30T01:30:00+08:00", { timeZone: "Asia/Taipei" }), /04\/30/);
   assert.equal(formatDateTime(null), "未提供");
+});
+
+test("jurisdiction mapping gaps are not described as sources being switched off", () => {
+  // The server reports this when a verified county resolves to zero reviewed
+  // source mappings.  Telling the reader the sources are "not yet enabled" blames
+  // an operator choice for a catalog fault, and hides that the data exists.
+  const coverage = missingRainfallCoverage({
+    availabilityState: "source_unavailable",
+    missingCause: "jurisdiction_mapping_missing",
+    sourceHealthChecked: true,
+  });
+
+  const state = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+
+  assert.doesNotMatch(state.note, /尚未啟用/);
+  assert.match(state.note, /來源對應/);
+  assert.equal(state.tone, "warn");
 });

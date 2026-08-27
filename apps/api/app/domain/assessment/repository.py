@@ -152,6 +152,11 @@ class PostgresAssessmentRepository:
             source_health_checked=health_available,
             jurisdiction_status=jurisdiction.resolution_status,
             jurisdiction_checked=jurisdiction_available,
+            # Only the verified branch can yield an empty key set; the national
+            # fallback is a non-empty constant.  So an empty set here means the
+            # resolved jurisdiction produced no reviewed source mapping, and every
+            # read below was filtered against nothing rather than answered.
+            jurisdiction_mapping_missing=not applicable_keys,
             jurisdiction_complete_signal_types=_complete_signal_types(jurisdiction),
             home_jurisdiction=jurisdiction.home_jurisdiction_name,
             considered_jurisdictions=tuple(
