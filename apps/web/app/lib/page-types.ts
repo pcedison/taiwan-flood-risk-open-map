@@ -125,6 +125,7 @@ export type NearbyRealtimeCoverage = {
       | "source_failed"
       | "update_pipeline_stalled"
       | "source_not_configured"
+      | "jurisdiction_mapping_missing"
       | "jurisdiction_unverified"
       | "health_unknown";
     missing_reason: string | null;

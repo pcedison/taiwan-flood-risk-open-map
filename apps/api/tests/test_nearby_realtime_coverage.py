@@ -1517,3 +1517,43 @@ def test_nearby_coverage_unavailable_when_repository_unavailable() -> None:
     assert "無法" in coverage.summary or "unavailable" in coverage.summary
     assert coverage.county_level_note
     assert set(coverage.missing_signal_types) == set(REQUIRED_SIGNAL_TYPES)
+
+
+def test_verified_jurisdiction_without_source_mappings_is_not_source_not_configured() -> None:
+    # A verified jurisdiction that resolves to zero adapter keys never reached the
+    # database, so its empty source health says nothing about whether the operator
+    # enabled the sources.  Reporting "not configured" there asserts a benign cause
+    # for what is a catalog fault, and monitoring exempts that cause from failing.
+    coverage = build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=500,
+        evaluated_at=NOW,
+        source_health=(),
+        source_health_unavailable=False,
+        source_health_checked=True,
+        jurisdiction_status="verified",
+        jurisdiction_checked=True,
+        jurisdiction_mapping_missing=True,
+    )
+
+    rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
+    assert rainfall.missing_cause == "jurisdiction_mapping_missing"
+
+
+def test_empty_source_health_without_mapping_fault_still_reports_not_configured() -> None:
+    # Guard the narrow scope: an empty health table with mappings present is still
+    # the deployment-configuration state the degraded path is allowed to excuse.
+    coverage = build_nearby_realtime_coverage(
+        rows=(),
+        query_radius_m=500,
+        evaluated_at=NOW,
+        source_health=(),
+        source_health_unavailable=False,
+        source_health_checked=True,
+        jurisdiction_status="verified",
+        jurisdiction_checked=True,
+        jurisdiction_mapping_missing=False,
+    )
+
+    rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
+    assert rainfall.missing_cause == "source_not_configured"

@@ -77,6 +77,7 @@ type SourceIssueCause = Extract<
   | "source_failed"
   | "update_pipeline_stalled"
   | "source_not_configured"
+  | "jurisdiction_mapping_missing"
   | "inventory_unverified"
   | "jurisdiction_unverified"
   | "health_unknown"
@@ -166,6 +167,9 @@ function nearbySensingCoverageSummary(
     if (diagnosis.sourceIssue === "source_not_configured") {
       return "必要的即時資料來源尚未啟用，無法確認附近是否真的沒有測站。";
     }
+    if (diagnosis.sourceIssue === "jurisdiction_mapping_missing") {
+      return "本轄區的即時來源對應清單缺失，系統這次沒有讀取任何來源，無法確認附近是否真的沒有測站。";
+    }
     if (diagnosis.sourceIssue === "jurisdiction_unverified") {
       return "縣市邊界或管轄來源清單尚未完成審核，不能確認附近真的沒有測站。";
     }
@@ -223,6 +227,9 @@ function nearbyCoverageNote(
   }
   if (diagnosis.sourceIssue === "source_not_configured") {
     return "必要來源尚未啟用；這是系統覆蓋缺口，不代表現地安全。";
+  }
+  if (diagnosis.sourceIssue === "jurisdiction_mapping_missing") {
+    return "本轄區的來源對應清單缺失，這是系統故障而非來源關閉；缺資料不代表現地安全。";
   }
   if (diagnosis.sourceIssue === "jurisdiction_unverified") {
     return "縣市邊界或管轄來源清單尚未驗證；目前沒找到觀測不等於附近真的沒有測站。";
@@ -338,6 +345,10 @@ function strongestSourceIssue(causes: SourceIssueCause[]): SourceIssueCause | nu
     return "source_failed";
   }
   if (causes.includes("source_degraded")) return "source_degraded";
+  // A catalog fault outranks a disabled source: it means nothing was read at all.
+  if (causes.includes("jurisdiction_mapping_missing")) {
+    return "jurisdiction_mapping_missing";
+  }
   if (causes.includes("source_not_configured")) return "source_not_configured";
   if (causes.includes("jurisdiction_unverified")) return "jurisdiction_unverified";
   if (causes.includes("inventory_unverified")) return "inventory_unverified";
@@ -402,6 +413,7 @@ function diagnoseCoverage(coverage: NearbyRealtimeCoverage): CoverageDiagnosis {
         "source_failed",
         "update_pipeline_stalled",
         "source_not_configured",
+        "jurisdiction_mapping_missing",
         "jurisdiction_unverified",
         "inventory_unverified",
         "health_unknown",

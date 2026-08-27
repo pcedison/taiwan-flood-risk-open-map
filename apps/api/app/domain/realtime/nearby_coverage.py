@@ -277,6 +277,7 @@ def build_nearby_realtime_coverage(
         "unavailable",
     ] = "unavailable",
     jurisdiction_checked: bool = False,
+    jurisdiction_mapping_missing: bool = False,
     jurisdiction_complete_signal_types: tuple[NearbyCoverageSignalType, ...] = (),
     home_jurisdiction: str | None = None,
     considered_jurisdictions: tuple[str, ...] = (),
@@ -328,6 +329,7 @@ def build_nearby_realtime_coverage(
             source_health=source_health_by_signal.get(signal_type, ()),
             source_health_unavailable=source_health_unavailable,
             source_health_checked=source_health_checked,
+            jurisdiction_mapping_missing=jurisdiction_mapping_missing,
             jurisdiction_verified=(
                 jurisdiction_checked
                 and signal_type in jurisdiction_complete_signal_types
@@ -417,6 +419,7 @@ def _evaluate_signal(
     source_health: tuple[NearbySourceHealth, ...],
     source_health_unavailable: bool,
     source_health_checked: bool,
+    jurisdiction_mapping_missing: bool,
     jurisdiction_verified: bool,
 ) -> _SignalEvaluation:
     in_range_rows = tuple(row for row in rows if row.distance_to_query_m <= RADIUS_BUCKETS_M[-1])
@@ -442,6 +445,7 @@ def _evaluate_signal(
         source_health=source_health,
         source_health_unavailable=source_health_unavailable,
         source_health_checked=source_health_checked,
+        jurisdiction_mapping_missing=jurisdiction_mapping_missing,
         jurisdiction_verified=jurisdiction_verified,
     )
     availability_state = _availability_state(
@@ -592,6 +596,7 @@ def _missing_cause(
     source_health: tuple[NearbySourceHealth, ...],
     source_health_unavailable: bool,
     source_health_checked: bool,
+    jurisdiction_mapping_missing: bool,
     jurisdiction_verified: bool,
 ) -> NearbyMissingCause:
     if nearest_usable_row is not None:
@@ -604,6 +609,12 @@ def _missing_cause(
     if source_health_unavailable:
         return "health_unknown"
     if not source_health:
+        # An empty health set only means "the operator never switched the sources
+        # on" when the source catalog actually resolved.  When the jurisdiction
+        # resolved to zero adapter keys the database was never queried, so this
+        # is a catalog fault and must not borrow the benign cause.
+        if jurisdiction_mapping_missing:
+            return "jurisdiction_mapping_missing"
         if source_health_checked:
             return "source_not_configured"
         return "health_unknown"

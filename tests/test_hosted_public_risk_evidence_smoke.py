@@ -540,3 +540,26 @@ def test_contract_regression_fails_even_when_official_sources_are_off(
     assert exit_code == 1
     assert evidence["status"] == "failed"
     assert "risk response missing assessment_id" in evidence["contract_failures"]
+
+
+def test_degraded_ok_mode_fails_when_the_jurisdiction_mapping_is_missing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # This is the state the live deployment was actually in: the sources are
+    # switched on and ingesting, but a verified county resolves to zero reviewed
+    # source mappings, so the API never reads the health table. Excusing that as
+    # "sources are off" is exactly the masking the degraded path must not do.
+    payload = _unconfigured_risk_payload()
+    for signal in payload["nearby_realtime_coverage"]["signal_breakdown"]:
+        signal["missing_cause"] = "jurisdiction_mapping_missing"
+        signal["missing_reason"] = "本轄區的即時來源對應清單缺失"
+
+    exit_code, evidence, completion_output = _run_smoke(tmp_path, monkeypatch, payload)
+
+    assert exit_code == 1
+    assert evidence["status"] == "failed"
+    assert evidence["official_source_state"] != "not_configured"
+    assert evidence["degraded_notes"] == []
+    assert evidence["data_source_failures"]
+    assert not completion_output.exists()

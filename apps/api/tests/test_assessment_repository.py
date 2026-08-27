@@ -548,3 +548,34 @@ def test_disabled_repository_reports_every_read_unavailable(
             data.jurisdiction_available,
         )
     )
+
+
+def test_verified_jurisdiction_without_mappings_reports_mapping_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # This is the production state: the boundary snapshot activates, so the point
+    # resolves to a home county, but no source mapping matches the revision the
+    # query demands.  applicable_keys is then empty, every evidence row is filtered
+    # out and the health table is never read.  Calling that "source not configured"
+    # blames the operator for a catalog fault and lets monitoring excuse it.
+    empty_context = RealtimeJurisdictionContext(
+        resolution_status="verified",
+        home_jurisdiction_code="63000000",
+        home_jurisdiction_name="臺北市",
+        considered_jurisdictions=(("63000000", "臺北市"),),
+        signal_contracts=(),
+        source_mappings=(),
+    )
+    repository = _repository(
+        monkeypatch,
+        query_realtime_jurisdiction_context=lambda **_: empty_context,
+    )
+
+    data = repository.load(**POINT)
+
+    rainfall = next(
+        item
+        for item in data.nearby_coverage.signal_breakdown
+        if item.signal_type == "rainfall"
+    )
+    assert rainfall.missing_cause == "jurisdiction_mapping_missing"
