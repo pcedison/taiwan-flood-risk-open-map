@@ -16,12 +16,19 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
 
     assert workflow["name"] == "Hosted Monitoring Schedule Watchdog"
     triggers = workflow["on"]
-    assert triggers["schedule"][0]["cron"] == "17,47 * * * *"
+    # Once daily. The old 17,47 cadence re-dispatched Hosted Monitoring every
+    # 30 minutes for as long as it kept failing.
+    assert triggers["schedule"][0]["cron"] == "47 16 * * *"
+    assert workflow["concurrency"] == {
+        "group": "hosted-monitoring-schedule-watchdog",
+        "cancel-in-progress": "false",
+    }
 
     workflow_dispatch_inputs = triggers["workflow_dispatch"]["inputs"]
     assert workflow_dispatch_inputs["expected_head_sha"]["required"] == "false"
     assert workflow_dispatch_inputs["expected_head_sha"]["description"] == (
-        "Expected Hosted Monitoring schedule run SHA. Defaults to this workflow SHA."
+        "Expected Hosted Monitoring schedule run SHA. Unset by default, which "
+        "skips the head-SHA comparison."
     )
     assert workflow_dispatch_inputs["expected_deployment_sha"] == {
         "description": (
@@ -34,7 +41,7 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert workflow_dispatch_inputs["max_age_minutes"] == {
         "description": "Maximum accepted age for the latest Hosted Monitoring schedule run.",
         "required": "false",
-        "default": "90",
+        "default": "480",
         "type": "number",
     }
     assert workflow_dispatch_inputs["fail_on_not_ready"] == {
@@ -47,9 +54,13 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         "type": "boolean",
     }
     assert workflow_dispatch_inputs["dispatch_hosted_monitoring_on_failure"] == {
-        "description": "Dispatch Hosted Monitoring as a fallback when schedule readiness fails.",
+        "description": (
+            "Dispatch Hosted Monitoring as a fallback when schedule readiness "
+            "fails. Off by default: a persistently failing Hosted Monitoring run "
+            "made this an unbounded re-dispatch loop."
+        ),
         "required": "false",
-        "default": "true",
+        "default": "false",
         "type": "boolean",
     }
 
@@ -61,16 +72,16 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     }
     assert job["env"]["GH_TOKEN"] == "${{ github.token }}"
     assert job["env"]["EXPECTED_HEAD_SHA"] == (
-        "${{ github.event.inputs.expected_head_sha || github.sha }}"
+        "${{ github.event.inputs.expected_head_sha || '' }}"
     )
     assert job["env"]["MAX_AGE_MINUTES"] == (
-        "${{ github.event.inputs.max_age_minutes || '90' }}"
+        "${{ github.event.inputs.max_age_minutes || '480' }}"
     )
     assert job["env"]["FAIL_ON_NOT_READY"] == (
         "${{ github.event.inputs.fail_on_not_ready || 'false' }}"
     )
     assert job["env"]["DISPATCH_HOSTED_MONITORING_ON_FAILURE"] == (
-        "${{ github.event.inputs.dispatch_hosted_monitoring_on_failure || 'true' }}"
+        "${{ github.event.inputs.dispatch_hosted_monitoring_on_failure || 'false' }}"
     )
 
     steps = job["steps"]
@@ -104,8 +115,12 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
         for step in steps
         if step.get("name") == "Dispatch fallback Hosted Monitoring"
     )
+    # A fallback dispatch only makes sense when the schedule itself stopped
+    # firing, never when the monitor ran on time and failed on its own merits.
     assert fallback_step["if"] == (
-        "${{ always() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' && steps.readiness-status.outputs.status != 'passed' }}"
+        "${{ always() && env.DISPATCH_HOSTED_MONITORING_ON_FAILURE == 'true' && "
+        "(steps.readiness-status.outputs.status == 'stale' || "
+        "steps.readiness-status.outputs.status == 'missing') }}"
     )
     assert (
         fallback_step["uses"]
@@ -136,8 +151,10 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert "fallback dispatch status" in alert_script
     assert "hosted-schedule-watchdog" in alert_script
     assert "Hosted Monitoring schedule not ready" in alert_script
-    assert "github.rest.issues.create" in alert_script
-    assert "github.rest.issues.createComment" in alert_script
+    assert "scripts/ci/route-alert-issue.js" in alert_script
+    assert "routeAlertIssue" in alert_script
+    assert "alertSignature" in alert_script
+    assert "backoffHours" in alert_script
 
     resolve_step = next(
         step
@@ -156,6 +173,6 @@ def test_hosted_monitoring_schedule_watchdog_routes_stale_schedule_failures() ->
     assert 'report.status !== "passed"' in resolve_script
     assert "hosted-schedule-watchdog" in resolve_script
     assert "Hosted Monitoring schedule not ready" in resolve_script
-    assert "github.rest.issues.createComment" in resolve_script
-    assert "github.rest.issues.update" in resolve_script
+    assert "scripts/ci/route-alert-issue.js" in resolve_script
+    assert "closeAlertIssue" in resolve_script
     assert "resolved" in resolve_script
