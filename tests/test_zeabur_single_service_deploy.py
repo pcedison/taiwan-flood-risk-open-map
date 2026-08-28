@@ -40,8 +40,21 @@ def test_zeabur_single_service_autostarts_backbone_when_database_is_attached() -
     )
     assert 'realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"' in dockerfile
     assert 'realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"' in dockerfile
+    assert 'realtime_backbone_emergency_stop="${REALTIME_BACKBONE_EMERGENCY_STOP:-false}"' in dockerfile
     assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor"' in dockerfile
     assert 'if [ -n "${worker_database_url}" ]; then' in dockerfile
+
+
+def test_force_mode_supersedes_legacy_stop_but_not_emergency_stop() -> None:
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
+    startup_gate_block = entrypoint.split(
+        'if truthy "${realtime_backbone_force_ingestion}"', 1
+    )[1].split("apply_migrations() {", 1)[0]
+
+    assert 'if truthy "${realtime_backbone_emergency_stop}"; then' in startup_gate_block
+    assert 'elif truthy "${realtime_backbone_ingestion_disabled}"' in startup_gate_block
+    assert 'truthy "${realtime_backbone_force_ingestion}"' in startup_gate_block
+    assert "legacy ingestion stop ignored because force mode is active" in startup_gate_block
 
 
 def test_zeabur_single_service_applies_migrations_before_startup() -> None:
