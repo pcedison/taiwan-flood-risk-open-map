@@ -15,6 +15,11 @@ test("next rewrites fall back to the local API when INTERNAL_API_BASE_URL is bla
   const rewrites = await loadRewritesWithInternalApiBaseUrl("   ");
 
   assertRewrite(rewrites, "/v1/:path*", "http://127.0.0.1:8000/v1/:path*");
+  assertRewrite(
+    rewrites,
+    "/admin/v1/:path*",
+    "http://127.0.0.1:8000/admin/v1/:path*",
+  );
   assertRewrite(rewrites, "/health", "http://127.0.0.1:8000/health");
   assertRewrite(rewrites, "/ready", "http://127.0.0.1:8000/ready");
 });
@@ -22,6 +27,11 @@ test("next rewrites fall back to the local API when INTERNAL_API_BASE_URL is bla
 test("next rewrites trim explicit INTERNAL_API_BASE_URL values", async () => {
   const rewrites = await loadRewritesWithInternalApiBaseUrl("  https://api.example.test///  ");
 
+  assertRewrite(
+    rewrites,
+    "/admin/v1/:path*",
+    "https://api.example.test/admin/v1/:path*",
+  );
   assertRewrite(rewrites, "/health", "https://api.example.test/health");
 });
 

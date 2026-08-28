@@ -94,6 +94,13 @@ const nextConfig = {
         source: "/v1/:path*",
         destination: `${internalApiBaseUrl}/v1/:path*`,
       },
+      // Release-gate monitoring calls bearer-protected admin diagnostics through
+      // the same public origin. Keep auth enforcement in FastAPI; this rewrite
+      // only makes the already protected route reachable in the combined image.
+      {
+        source: "/admin/v1/:path*",
+        destination: `${internalApiBaseUrl}/admin/v1/:path*`,
+      },
       {
         source: "/health",
         destination: `${internalApiBaseUrl}/health`,
