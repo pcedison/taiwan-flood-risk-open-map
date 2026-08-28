@@ -298,6 +298,7 @@ def test_managed_no_active_retirement_runs_after_summary_persistence() -> None:
         )
     ]
     assert timeline.index("summary") < timeline.index("retire")
+    assert promotion_writer.fetch_calls == 0
 
 
 @pytest.mark.parametrize(
@@ -576,6 +577,7 @@ def test_managed_runtime_cycle_persists_enabled_adapters_and_promotes() -> None:
     ]
     assert promotion_writer.requested_limit == 25
     assert promotion_writer.requested_adapter_keys == ("news.public_web.sample",)
+    assert promotion_writer.requested_raw_refs == (result.summaries[0].raw_ref,)
     assert promotion_writer.payloads[0].source_id == "sample-news-001"
 
 
@@ -1173,6 +1175,7 @@ class _MemoryPromotionWriter:
         self._candidates = tuple(candidates)
         self.requested_limit: int | None = None
         self.requested_adapter_keys: tuple[str, ...] | None = None
+        self.requested_raw_refs: tuple[str, ...] | None = None
         self.fetch_calls = 0
         self.payloads: list[EvidencePromotionPayload] = []
         self.retired_no_active: list[tuple[str, datetime, datetime]] = []
@@ -1183,10 +1186,12 @@ class _MemoryPromotionWriter:
         *,
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
         self.fetch_calls += 1
         self.requested_limit = limit
         self.requested_adapter_keys = adapter_keys
+        self.requested_raw_refs = raw_refs
         return self._candidates
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
@@ -1218,9 +1223,11 @@ class _StagingBackedWarningPromotionWriter(_MemoryPromotionWriter):
         *,
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
         self.requested_limit = limit
         self.requested_adapter_keys = adapter_keys
+        self.requested_raw_refs = raw_refs
         if not self._staging_writer.batches:
             return ()
         staged = self._staging_writer.batches[0].accepted[0]
@@ -1273,8 +1280,9 @@ class _FailingPromotionWriter:
         *,
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
-        del limit, adapter_keys
+        del limit, adapter_keys, raw_refs
         raise RuntimeError("promotion storage unavailable")
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:

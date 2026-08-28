@@ -53,14 +53,34 @@ def test_promote_accepted_staging_uses_writer_protocol() -> None:
         writer,
         limit=10,
         adapter_keys=("news.public_web.sample",),
+        raw_refs=(
+            "raw/news-public-web/sample.json",
+            "raw/news-public-web/sample.json",
+        ),
     )
 
     assert result.promoted == 1
     assert result.evidence_ids == ("evidence-1",)
     assert writer.requested_limit == 10
     assert writer.requested_adapter_keys == ("news.public_web.sample",)
+    assert writer.requested_raw_refs == ("raw/news-public-web/sample.json",)
     assert len(writer.payloads) == 1
     assert writer.payloads[0].source_id == "sample-news-001"
+
+
+@pytest.mark.parametrize(
+    "raw_refs",
+    ((), ("",), ("   ",), (" raw/news-public-web/sample.json",)),
+)
+def test_promote_accepted_staging_rejects_invalid_raw_ref_filter(
+    raw_refs: tuple[str, ...],
+) -> None:
+    writer = _MemoryPromotionWriter([_candidate()])
+
+    with pytest.raises(ValueError, match="raw_refs"):
+        promote_accepted_staging(writer, raw_refs=raw_refs)
+
+    assert writer.requested_raw_refs is None
 
 
 def test_promote_accepted_staging_deduplicates_duplicate_source_raw_ref_candidates() -> None:
@@ -2049,6 +2069,26 @@ def test_postgres_promotion_writer_can_filter_accepted_rows_by_adapter_key() -> 
     assert select_params == (["official.cwa.rainfall", "official.wra.water_level"], 5)
 
 
+def test_postgres_promotion_writer_filters_by_adapter_raw_ref_and_limit() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    candidates = writer.fetch_accepted_staging(
+        limit=5,
+        adapter_keys=("official.cwa.rainfall",),
+        raw_refs=("raw/current-cwa.json",),
+    )
+
+    assert candidates == ()
+    select_sql, select_params = connection.cursor_instance.executions[0]
+    assert "rs.raw_ref = ANY(%s)" in select_sql
+    assert select_params == (
+        ["official.cwa.rainfall"],
+        ["raw/current-cwa.json"],
+        5,
+    )
+
+
 def test_postgres_promotion_writer_requires_database_url_or_connection_factory() -> None:
     try:
         PostgresEvidencePromotionWriter()
@@ -2197,6 +2237,7 @@ class _MemoryPromotionWriter:
         self._terminal_source_ids = terminal_source_ids or set()
         self.requested_limit: int | None = None
         self.requested_adapter_keys: tuple[str, ...] | None = None
+        self.requested_raw_refs: tuple[str, ...] | None = None
         self.payloads: list[EvidencePromotionPayload] = []
 
     def fetch_accepted_staging(
@@ -2204,9 +2245,11 @@ class _MemoryPromotionWriter:
         *,
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
         self.requested_limit = limit
         self.requested_adapter_keys = adapter_keys
+        self.requested_raw_refs = raw_refs
         return self._candidates
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:

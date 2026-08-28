@@ -66,6 +66,7 @@ class EvidencePromotionWriter(Protocol):
         *,
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
         """Load staging rows that are ready to become evidence records."""
 
@@ -112,10 +113,15 @@ def promote_accepted_staging(
     *,
     limit: int | None = None,
     adapter_keys: tuple[str, ...] | None = None,
+    raw_refs: tuple[str, ...] | None = None,
 ) -> PromotionResult:
+    normalized_raw_refs = _normalized_raw_refs(raw_refs)
     evidence_ids: list[str] = []
     seen_keys: set[tuple[str, str | None]] = set()
-    for candidate in writer.fetch_accepted_staging(limit=limit, adapter_keys=adapter_keys):
+    fetch_kwargs: dict[str, Any] = {"limit": limit, "adapter_keys": adapter_keys}
+    if normalized_raw_refs is not None:
+        fetch_kwargs["raw_refs"] = normalized_raw_refs
+    for candidate in writer.fetch_accepted_staging(**fetch_kwargs):
         promotion_key = (candidate.source_id, candidate.raw_ref)
         if promotion_key in seen_keys:
             continue
@@ -144,11 +150,21 @@ class PostgresEvidencePromotionWriter:
         *,
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
+        normalized_raw_refs = _normalized_raw_refs(raw_refs)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                _accepted_staging_sql(limit=limit, adapter_keys=adapter_keys),
-                _accepted_staging_params(limit=limit, adapter_keys=adapter_keys),
+                _accepted_staging_sql(
+                    limit=limit,
+                    adapter_keys=adapter_keys,
+                    raw_refs=normalized_raw_refs,
+                ),
+                _accepted_staging_params(
+                    limit=limit,
+                    adapter_keys=adapter_keys,
+                    raw_refs=normalized_raw_refs,
+                ),
             )
             return tuple(_candidate_from_row(row) for row in cursor.fetchall())
 
@@ -1252,12 +1268,14 @@ def _accepted_staging_sql(
     *,
     limit: int | None,
     adapter_keys: tuple[str, ...] | None,
+    raw_refs: tuple[str, ...] | None,
 ) -> str:
     adapter_filter = (
         "AND COALESCE(se.payload ->> 'adapter_key', rs.adapter_key) = ANY(%s)"
         if adapter_keys is not None
         else ""
     )
+    raw_ref_filter = "AND rs.raw_ref = ANY(%s)" if raw_refs is not None else ""
     limit_clause = "LIMIT %s" if limit is not None else ""
     return f"""
         SELECT DISTINCT ON (se.source_id, rs.raw_ref)
@@ -1281,6 +1299,7 @@ def _accepted_staging_sql(
         LEFT JOIN data_sources ds ON ds.adapter_key = COALESCE(se.payload ->> 'adapter_key', rs.adapter_key)
         WHERE se.validation_status = 'accepted'
             {adapter_filter}
+            {raw_ref_filter}
             AND NOT EXISTS (
                 SELECT 1
                 FROM evidence e
@@ -1296,18 +1315,39 @@ def _accepted_staging_params(
     *,
     limit: int | None,
     adapter_keys: tuple[str, ...] | None,
+    raw_refs: tuple[str, ...] | None,
 ) -> tuple[object, ...]:
     params: list[object] = []
     if adapter_keys is not None:
         if not adapter_keys:
             raise ValueError("adapter_keys must contain at least one key when provided")
         params.append(list(adapter_keys))
+    if raw_refs is not None:
+        params.append(list(_normalized_raw_refs(raw_refs) or ()))
     if limit is None:
         return tuple(params)
     if limit < 1:
         raise ValueError("limit must be greater than 0")
     params.append(limit)
     return tuple(params)
+
+
+def _normalized_raw_refs(raw_refs: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    if raw_refs is None:
+        return None
+    if not raw_refs:
+        raise ValueError("raw_refs must contain at least one reference when provided")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_ref in raw_refs:
+        if not isinstance(raw_ref, str) or not raw_ref or raw_ref != raw_ref.strip():
+            raise ValueError("raw_refs must contain trimmed non-empty strings")
+        if raw_ref in seen:
+            continue
+        seen.add(raw_ref)
+        normalized.append(raw_ref)
+    return tuple(normalized)
 
 
 def _candidate_from_row(row: tuple[Any, ...]) -> PromotionCandidate:
