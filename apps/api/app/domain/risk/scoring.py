@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 
-
 PublicRiskLevel = Literal["低", "中", "高", "極高", "未知"]
 PublicConfidenceLevel = Literal["低", "中", "高", "未知"]
 
@@ -291,7 +290,7 @@ def _missing_sources(signals: tuple[RiskEvidenceSignal, ...]) -> tuple[str, ...]
     }
     missing = []
     if "rainfall" not in event_types:
-        missing.append("尚未接入即時雨量資料。")
+        missing.append("本次查詢未取得可採用的即時雨量觀測。")
     has_official_current_flood_sensor = any(
         signal.source_type == "official"
         and signal.event_type == "flood_report"
@@ -299,7 +298,7 @@ def _missing_sources(signals: tuple[RiskEvidenceSignal, ...]) -> tuple[str, ...]
         for signal in signals
     )
     if "water_level" not in event_types and not has_official_current_flood_sensor:
-        missing.append("尚未接入即時水位資料。")
+        missing.append("本次查詢未取得可採用的即時水位或淹水感測觀測。")
     return tuple(missing)
 
 

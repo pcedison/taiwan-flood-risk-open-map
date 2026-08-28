@@ -28,7 +28,7 @@
     "historical_level": "中",
     "confidence_level": "中",
     "missing_sources": [
-      "尚未接入即時水位資料。"
+      "本次查詢未取得可採用的即時水位或淹水感測觀測。"
     ]
   }
 }

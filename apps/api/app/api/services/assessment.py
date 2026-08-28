@@ -102,7 +102,6 @@ class AssessmentService:
                 dict.fromkeys(
                     (
                         *current_scoring.missing_sources,
-                        *historical_scoring.missing_sources,
                         *data_status.missing,
                     )
                 )
@@ -266,7 +265,9 @@ def _data_status(data: AssessmentData) -> DataStatus:
     missing = [
         state.message
         for state in data.source_states
-        if state.state not in {"fresh", "not_applicable"} and state.message
+        if state.source_key in data.required_realtime_source_keys
+        and state.state not in {"fresh", "not_applicable"}
+        and state.message
     ]
     missing.extend(data.local_machine_feed_missing)
     availability_messages = (
