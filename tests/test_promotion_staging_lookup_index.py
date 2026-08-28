@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -18,5 +19,6 @@ def test_latest_schema_indexes_the_per_candidate_staging_lookup() -> None:
     assert "((properties ->> 'staging_evidence_id'))" in migration
     assert "WHERE properties ? 'staging_evidence_id'" in migration
     assert "properties ? 'staging_evidence_id'" in promotion
-    assert 'REQUIRED_SCHEMA_VERSION = 42' in health
-    assert 'REQUIRED_SCHEMA_FILENAME = "0042_evidence_staging_lookup_index.sql"' in health
+    required_version = re.search(r"^REQUIRED_SCHEMA_VERSION = (\d+)$", health, re.MULTILINE)
+    assert required_version is not None
+    assert int(required_version.group(1)) >= 42

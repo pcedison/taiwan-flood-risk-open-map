@@ -88,6 +88,7 @@ def _prepare_latest_schema(database_url: str) -> None:
                 confidence numeric(6,3),
                 freshness_score numeric(6,3),
                 source_weight numeric(6,3),
+                ingestion_status text NOT NULL DEFAULT 'accepted',
                 properties jsonb NOT NULL DEFAULT '{}'::jsonb
             );
             CREATE TABLE official_realtime_latest (
@@ -166,6 +167,7 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
     raw_b = f"raw/official/wra/historical_flood/{'b' * 64}.json"
     history_source_id = uuid4()
     ordinary_source_id = uuid4()
+    tainan_source_id = uuid4()
     a_shared_id, a_removed_id, b_shared_id, ordinary_id, disabled_id = (
         uuid4(),
         uuid4(),
@@ -183,12 +185,14 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                     id, adapter_key, is_enabled, metadata, runtime_pipeline_status
                 ) VALUES
                     (%s, 'official.wra.historical_flood', true, %s::jsonb, 'succeeded'),
-                    (%s, 'official.test.ordinary', true, '{}'::jsonb, 'succeeded')
+                    (%s, 'official.test.ordinary', true, '{}'::jsonb, 'succeeded'),
+                    (%s, 'local.tainan.flood_sensor', true, '{}'::jsonb, 'succeeded')
                 """,
                 (
                     history_source_id,
                     Jsonb({"active_snapshot_raw_ref": raw_a}),
                     ordinary_source_id,
+                    tainan_source_id,
                 ),
             )
             for evidence_id, data_source_id, source_id, raw_ref, title, properties in (
@@ -226,14 +230,11 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                 ),
                 (
                     disabled_id,
-                    ordinary_source_id,
+                    tainan_source_id,
                     "disabled-station",
                     None,
-                    "Disabled station",
-                    {
-                        "evidence_scope": "current",
-                        "realtime_station_enabled": False,
-                    },
+                    "Disabled station (停用)",
+                    {"evidence_scope": "current"},
                 ),
             ):
                 connection.execute(
@@ -846,7 +847,7 @@ def test_latest_reader_rejects_dirty_or_missing_scope_and_honors_depth_lookback(
     now = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
     with _isolated_schema(database_url) as isolated_url:
         _prepare_latest_schema(isolated_url)
-        adapter_key = "test.task3.scope"
+        adapter_key = "local.tainan.flood_sensor"
         with psycopg.connect(isolated_url) as connection:
             _insert_latest_source(connection, adapter_key)
             expected_ids = []
@@ -870,6 +871,13 @@ def test_latest_reader_rejects_dirty_or_missing_scope_and_honors_depth_lookback(
                     now,
                     {"metadata_station_enabled": False},
                 ),
+                (
+                    "disabled-legacy-title",
+                    "flood_report",
+                    "current",
+                    now,
+                    {},
+                ),
             ):
                 evidence_id = uuid4()
                 properties = {} if scope is None else {"evidence_scope": scope}
@@ -890,6 +898,11 @@ def test_latest_reader_rejects_dirty_or_missing_scope_and_honors_depth_lookback(
                     observed_at=observed_at,
                     evidence_id=evidence_id,
                 )
+                if station_id == "disabled-legacy-title":
+                    connection.execute(
+                        "UPDATE evidence SET title = title || ' (停用)' WHERE id = %s",
+                        (evidence_id,),
+                    )
                 if station_id in {"current", "depth-recent"}:
                     expected_ids.append(str(evidence_id))
             _insert_latest_row(

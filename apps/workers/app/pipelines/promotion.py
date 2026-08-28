@@ -255,6 +255,12 @@ class PostgresEvidencePromotionWriter:
                         cursor, payload
                     )
                 if current_rejection_reason is not None:
+                    if (
+                        current_rejection_reason == "inactive_station"
+                        and staging_authorization is True
+                    ):
+                        _lock_realtime_decision(cursor, payload)
+                        _retire_inactive_station_latest(cursor, payload)
                     _terminally_reject_staging(
                         cursor,
                         payload,
@@ -1741,6 +1747,8 @@ def _current_candidate_rejection_reason(
 ) -> str | None:
     if not _is_reviewed_current_candidate(payload):
         return None
+    if _is_metadata_inactive_station_candidate(payload):
+        return "inactive_station"
     if not _is_aware_datetime(payload.observed_at) or (
         payload.occurred_at is not None and not _is_aware_datetime(payload.occurred_at)
     ):
@@ -1753,7 +1761,75 @@ def _current_candidate_rejection_reason(
     assert reference_time is not None
     if payload.observed_at > reference_time + timedelta(minutes=15):
         return "future_observation"
+    if _is_realtime_inactive_station_candidate(payload):
+        return "inactive_station"
     return _explicit_geometry_rejection_reason(payload)
+
+
+def _is_metadata_inactive_station_candidate(payload: EvidencePromotionPayload) -> bool:
+    return (
+        payload.adapter_key == "local.tainan.flood_sensor"
+        and payload.event_type == "flood_report"
+        and payload.properties.get("metadata_station_enabled") is False
+    )
+
+
+def _is_realtime_inactive_station_candidate(payload: EvidencePromotionPayload) -> bool:
+    return (
+        payload.adapter_key == "local.tainan.flood_sensor"
+        and payload.event_type == "flood_report"
+        and payload.properties.get("realtime_station_enabled") is False
+    )
+
+
+def _retire_inactive_station_latest(cursor: Any, payload: EvidencePromotionPayload) -> None:
+    station_id = _official_realtime_station_id(payload)
+    if station_id is None:
+        return
+    metadata_inactive = _is_metadata_inactive_station_candidate(payload)
+    candidate_generation = parse_datetime(
+        payload.properties.get("ingestion_generation_started_at")
+    )
+    if metadata_inactive and not _is_aware_datetime(candidate_generation):
+        return
+    cursor.execute(
+        """
+        /* retire-inactive-station-latest */
+        DELETE FROM official_realtime_latest
+        WHERE adapter_key = %s
+            AND event_type = %s
+            AND station_id = %s
+            AND (
+                (
+                    %s
+                    AND CASE
+                        WHEN pg_input_is_valid(
+                            quality_flags ->> 'ingestion_generation_started_at',
+                            'timestamptz'
+                        )
+                            THEN (
+                                quality_flags
+                                    ->> 'ingestion_generation_started_at'
+                            )::timestamptz <= %s
+                        ELSE true
+                    END
+                )
+                OR (
+                    NOT %s
+                    AND observed_at <= %s
+                )
+            )
+        """,
+        (
+            payload.adapter_key,
+            payload.event_type,
+            station_id,
+            metadata_inactive,
+            candidate_generation,
+            metadata_inactive,
+            payload.observed_at,
+        ),
+    )
 
 
 def _is_reviewed_current_candidate(payload: EvidencePromotionPayload) -> bool:

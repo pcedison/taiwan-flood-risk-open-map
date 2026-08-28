@@ -295,13 +295,51 @@ def test_tainan_records_missing_coordinates_keep_quality_flag_and_are_not_normal
 
 
 @pytest.mark.parametrize(
+    "disabled_field",
+    ["realtime_station_enabled", "metadata_station_enabled"],
+)
+def test_tainan_inactive_station_without_coordinates_still_becomes_a_tombstone(
+    disabled_field: str,
+) -> None:
+    def fetch_json(url: str, timeout_seconds: int) -> dict:
+        del timeout_seconds
+        if url == TAINAN_FLOOD_SENSOR_METADATA_API_URL:
+            payload = _metadata_payload()
+            if disabled_field == "metadata_station_enabled":
+                payload["data"][1]["IsEnabled"] = False
+            return payload
+        payload = _realtime_payload()
+        if disabled_field == "realtime_station_enabled":
+            payload["data"][1]["IsEnabled"] = False
+        return payload
+
+    result = TainanFloodSensorApiAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+    ).run()
+
+    source_id = "f002:2026-06-27T03:26:03+00:00"
+    raw = next(item for item in result.fetched if item.source_id == source_id)
+    assert raw.payload[disabled_field] is False
+    assert raw.payload["quality_flags"]["missing_station_coordinates"] is True
+    assert "geometry" not in raw.payload
+    assert source_id in {item.source_id for item in result.normalized}
+    assert source_id not in result.rejected
+
+    staging = build_staging_batch(result)
+    tombstone = next(item for item in staging.accepted if item.source_id == source_id)
+    assert tombstone.payload[disabled_field] is False
+    assert "location_payload" not in tombstone.payload
+
+
+@pytest.mark.parametrize(
     ("disabled_field", "enabled_field"),
     [
         ("realtime_station_enabled", "metadata_station_enabled"),
         ("metadata_station_enabled", "realtime_station_enabled"),
     ],
 )
-def test_tainan_disabled_station_is_fetched_but_not_normalized(
+def test_tainan_disabled_station_becomes_a_lifecycle_tombstone(
     disabled_field: str,
     enabled_field: str,
 ) -> None:
@@ -323,8 +361,13 @@ def test_tainan_disabled_station_is_fetched_but_not_normalized(
     assert result.fetched[0].source_id == disabled_source_id
     assert result.fetched[0].payload[disabled_field] is False
     assert result.fetched[0].payload[enabled_field] is True
-    assert disabled_source_id not in {item.source_id for item in result.normalized}
-    assert disabled_source_id in result.rejected
+    assert disabled_source_id in {item.source_id for item in result.normalized}
+    assert disabled_source_id not in result.rejected
+
+    staging = build_staging_batch(result)
+    tombstone = next(item for item in staging.accepted if item.source_id == disabled_source_id)
+    assert tombstone.payload[disabled_field] is False
+    assert tombstone.payload[enabled_field] is True
 
 
 def test_tainan_adapter_registry_and_config_are_default_off() -> None:
