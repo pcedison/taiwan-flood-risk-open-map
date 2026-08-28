@@ -386,6 +386,36 @@ def display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
     return collapse_flood_potential_items(evidence_items)
 
 
+def select_evidence_preview_items(
+    evidence_items: list[Evidence],
+    *,
+    limit: int,
+) -> list[Evidence]:
+    """Reserve one item per scope/signal family before filling the preview."""
+
+    if limit <= 0:
+        return []
+    reserved_indices: list[int] = []
+    seen_families: set[tuple[str, str]] = set()
+    for index, item in enumerate(evidence_items):
+        family = (item.evidence_scope, item.event_type)
+        if family in seen_families:
+            continue
+        seen_families.add(family)
+        reserved_indices.append(index)
+        if len(reserved_indices) == limit:
+            return [evidence_items[index] for index in reserved_indices]
+
+    reserved = set(reserved_indices)
+    selected = [evidence_items[index] for index in reserved_indices]
+    selected.extend(
+        item
+        for index, item in enumerate(evidence_items)
+        if index not in reserved
+    )
+    return selected[:limit]
+
+
 def collapse_flood_potential_items(evidence_items: list[Evidence]) -> list[Evidence]:
     flood_potential_items = [
         item for item in evidence_items if item.event_type == "flood_potential"
