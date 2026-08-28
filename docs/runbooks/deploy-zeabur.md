@@ -338,7 +338,7 @@ var each:
 |---|---|---|---|
 | `api` | `SERVICE_ROLE=api` | yes (or internal-only behind web) | Listens on `$PORT`; applies migrations on start (`RUN_DATABASE_MIGRATIONS_ON_START`); set `UVICORN_FORWARDED_ALLOW_IPS` if the direct peer is the platform ingress. |
 | `web` | `SERVICE_ROLE=web` | yes | Set `INTERNAL_API_BASE_URL` to the api service URL so `/v1` rewrites reach it (the entrypoint warns if it still points at loopback). |
-| `scheduler` | `SERVICE_ROLE=scheduler` | no | Exactly one replica; expects migrations already applied by `api`; needs `WORKER_DATABASE_URL`/`DATABASE_URL`. |
+| `scheduler` | `SERVICE_ROLE=scheduler` | no | Exactly one replica; expects migrations already applied by `api`; needs `WORKER_DATABASE_URL`/`DATABASE_URL`. Resolved maintenance/emergency stops record disabled source state and keep the service idle instead of entering a restart loop. |
 
 Deploy order on first split: `api` (migrations) → `web` → `scheduler`.
 The startup contract lives in `infra/docker/entrypoint.sh`.

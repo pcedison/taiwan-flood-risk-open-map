@@ -82,6 +82,9 @@ explicit `false`. To control individual gates, first set force mode to `false`;
 the legacy `REALTIME_BACKBONE_INGESTION_DISABLED=true` value is also ignored
 while force mode is active. `REALTIME_BACKBONE_EMERGENCY_STOP=true` is the
 unconditional all-source emergency stop and always overrides force mode.
+The same resolved stop state is honored by a dedicated `SERVICE_ROLE=scheduler`
+service: it records the intentional disable and stays idle until redeployed with
+the stop removed.
 
 | Variable | Zeabur value |
 |---|---|

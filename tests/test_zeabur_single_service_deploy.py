@@ -57,6 +57,18 @@ def test_force_mode_supersedes_legacy_stop_but_not_emergency_stop() -> None:
     assert "legacy ingestion stop ignored because force mode is active" in startup_gate_block
 
 
+def test_split_scheduler_honors_resolved_ingestion_stop_without_restart_loop() -> None:
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
+    scheduler_block = entrypoint.split("  scheduler)", 1)[1].split("  all)", 1)[0]
+
+    assert 'if ! truthy "${ingestion_enabled}"; then' in scheduler_block
+    assert "python -m app.main --record-runtime-sources-disabled" in scheduler_block
+    assert "exec sleep infinity" in scheduler_block
+    assert scheduler_block.index("--record-runtime-sources-disabled") < scheduler_block.index(
+        "--run-v1-baseline-adapters --scheduler"
+    )
+
+
 def test_zeabur_single_service_applies_migrations_before_startup() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
