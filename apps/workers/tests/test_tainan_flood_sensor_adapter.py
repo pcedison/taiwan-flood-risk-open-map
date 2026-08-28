@@ -185,7 +185,7 @@ def test_tainan_adapter_registry_and_config_are_default_off() -> None:
     assert TAINAN_FLOOD_SENSOR_METADATA.enabled_by_default is False
     assert settings.source_tainan_flood_sensor_enabled is None
     assert settings.source_tainan_flood_sensor_api_enabled is False
-    assert settings.source_tainan_flood_sensor_timeout_seconds == 8
+    assert settings.source_tainan_flood_sensor_timeout_seconds == 20
     assert "local.tainan.flood_sensor" not in enabled_adapter_keys(settings)
     assert TAINAN_FLOOD_SENSOR_API_URL == (
         "https://soa.tainan.gov.tw/Api/Service/Get/21b31a27-3e61-48b8-8259-83c2001bec8c"

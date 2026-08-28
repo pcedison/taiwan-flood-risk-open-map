@@ -718,7 +718,7 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_tainan_flood_sensor_timeout_seconds=env_int(
             values,
             "SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS",
-            default=8,
+            default=20,
         ),
         new_taipei_water_level_api_url=env_str(values, "NEW_TAIPEI_WATER_LEVEL_API_URL"),
         new_taipei_flood_sensor_api_url=env_str(values, "NEW_TAIPEI_FLOOD_SENSOR_API_URL"),
