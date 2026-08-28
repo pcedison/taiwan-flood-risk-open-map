@@ -67,19 +67,33 @@ def test_realtime_freshness_thresholds_progress_from_degraded_to_stale_to_failed
     assert failed.is_alert()
 
 
-def test_wra_iow_flood_depth_uses_realtime_freshness_cadence() -> None:
+@pytest.mark.parametrize(
+    ("age", "expected_status", "expected_alert"),
+    (
+        (timedelta(minutes=67), "fresh", False),
+        (timedelta(minutes=100), "degraded", False),
+        (timedelta(minutes=150), "stale", True),
+        (timedelta(minutes=190), "failed", True),
+    ),
+)
+def test_wra_iow_flood_depth_uses_hourly_source_freshness_thresholds(
+    age: timedelta,
+    expected_status: str,
+    expected_alert: bool,
+) -> None:
     check = check_summary_freshness(
         _summary(
             adapter_key="official.wra_iow.flood_depth",
-            source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+            source_timestamp_max=CHECKED_AT - age,
         ),
         checked_at=CHECKED_AT,
         max_age_seconds=6 * 60 * 60,
     )
 
     assert check.cadence == "realtime"
-    assert check.status == "stale"
-    assert check.reason == "source data is older than stale freshness threshold"
+    assert check.status == expected_status
+    assert check.max_age_seconds == 3 * 60 * 60
+    assert check.is_alert() is expected_alert
 
 
 def test_civil_iot_water_level_sources_use_realtime_freshness_cadence() -> None:

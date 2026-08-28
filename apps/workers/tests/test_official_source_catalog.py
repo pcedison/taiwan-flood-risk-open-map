@@ -35,6 +35,9 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
     )
     assert sources["official.wra.water_level"]["data_gov_dataset_id"] == "25768"
     assert sources["official.wra_iow.flood_depth"]["data_gov_dataset_id"] == "142980"
+    assert sources["official.wra_iow.flood_depth"]["update_frequency"] == (
+        "data.gov.tw metadata: every 1 hour"
+    )
     assert sources["official.wra.historical_flood"]["data_gov_dataset_id"] == "25770"
     assert sources["official.wra.historical_flood"]["resource_url"] == (
         "https://opendata.wra.gov.tw/api/v2/"

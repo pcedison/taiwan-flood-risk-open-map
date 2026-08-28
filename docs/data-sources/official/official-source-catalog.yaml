@@ -116,11 +116,12 @@ sources:
     station_metadata_url: "https://opendata.wra.gov.tw/api/v2/21c50be1-7c4a-4fdf-a386-790625e984e7"
     station_metadata_dataset_id: "142979"
     resource_format: "JSON API"
-    update_frequency: "sensor telemetry; validate from each timestamp"
+    update_frequency: "data.gov.tw metadata: every 1 hour"
     license: "Government Open Data License, version 1.0"
     integration_decision: "Use as the canonical WRA IoW road flood-depth source, joined with dataset 142979 station metadata for coordinates and county/town attribution."
     limitations:
       - "Latest values are raw IoW telemetry and may be affected by sensor or transmission faults."
+      - "Freshness evaluation allows publication headroom for the documented hourly update cadence."
       - "Rows without joined station coordinates are rejected from normalization."
   - key: official.wra.historical_flood
     need: observed_historical_flood_footprints
