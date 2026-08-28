@@ -23,6 +23,25 @@ EXPECTED_BACKBONE_ADAPTERS = (
 )
 
 
+def test_zeabur_build_avoids_shared_docker_hub_rate_limits() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+    assert (
+        "ARG DOCKER_OFFICIAL_IMAGE_REGISTRY=public.ecr.aws/docker/library"
+        in dockerfile
+    )
+    assert (
+        "FROM ${DOCKER_OFFICIAL_IMAGE_REGISTRY}/node:22-bookworm-slim AS web-builder"
+        in dockerfile
+    )
+    assert (
+        "FROM ${DOCKER_OFFICIAL_IMAGE_REGISTRY}/python:3.12-slim AS runtime"
+        in dockerfile
+    )
+    assert "FROM node:22-bookworm-slim" not in dockerfile
+    assert "FROM python:3.12-slim" not in dockerfile
+
+
 def test_zeabur_single_service_scheduler_defaults_to_realtime_backbone() -> None:
     entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
 

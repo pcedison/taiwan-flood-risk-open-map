@@ -1,4 +1,8 @@
-﻿FROM node:22-bookworm-slim AS web-builder
+﻿# Zeabur's shared Docker Hub path can be rate-limited independently of the
+# application build. Pull Docker Official Images through AWS's public replica
+# by default, while keeping the registry overridable for disaster recovery.
+ARG DOCKER_OFFICIAL_IMAGE_REGISTRY=public.ecr.aws/docker/library
+FROM ${DOCKER_OFFICIAL_IMAGE_REGISTRY}/node:22-bookworm-slim AS web-builder
 
 WORKDIR /app/apps/web
 
@@ -41,7 +45,7 @@ RUN npm run build
 RUN npm prune --omit=dev --no-audit --no-fund --ignore-scripts \
   && npm cache clean --force
 
-FROM python:3.12-slim AS runtime
+FROM ${DOCKER_OFFICIAL_IMAGE_REGISTRY}/python:3.12-slim AS runtime
 
 WORKDIR /app
 
