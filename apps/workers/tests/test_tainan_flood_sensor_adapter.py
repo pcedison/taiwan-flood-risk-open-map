@@ -136,6 +136,60 @@ def test_tainan_fetch_classifies_wrapped_upstream_timeout(
         )
 
 
+def test_tainan_official_preview_extracts_html_encoded_json_without_waiting_for_eof() -> None:
+    response = _ChunkedResponse(
+        (
+            b'<html><pre v-show="sourceType === type.json">[{&quot;StationID&quot;:',
+            b'&quot;TN001&quot;,&quot;WaterDepth&quot;:0.0}]</pre><footer>',
+        )
+    )
+
+    payload = tainan_flood_sensor._read_official_preview_json_document(response)
+
+    assert payload == [{"StationID": "TN001", "WaterDepth": 0.0}]
+    assert response.read_count == 2
+
+
+def test_tainan_adapter_falls_back_to_same_resource_on_official_data_platform() -> None:
+    calls: list[tuple[str, str]] = []
+
+    def primary_fetch(url: str, timeout_seconds: int) -> object:
+        assert timeout_seconds == DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS
+        calls.append(("primary", url))
+        raise tainan_flood_sensor.TainanFloodSensorFetchError("primary unavailable")
+
+    def preview_fetch(url: str, timeout_seconds: int) -> object:
+        assert timeout_seconds == DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS
+        calls.append(("preview", url))
+        if url == tainan_flood_sensor.TAINAN_FLOOD_SENSOR_METADATA_PREVIEW_URL:
+            return _metadata_payload()["data"]
+        return _realtime_payload()["data"]
+
+    adapter = TainanFloodSensorApiAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_json=primary_fetch,
+        preview_fetch_json=preview_fetch,
+    )
+
+    result = adapter.run()
+
+    assert calls == [
+        ("primary", TAINAN_FLOOD_SENSOR_METADATA_API_URL),
+        ("preview", tainan_flood_sensor.TAINAN_FLOOD_SENSOR_METADATA_PREVIEW_URL),
+        ("primary", TAINAN_FLOOD_SENSOR_API_URL),
+        ("preview", tainan_flood_sensor.TAINAN_FLOOD_SENSOR_PREVIEW_URL),
+    ]
+    assert len(result.normalized) == 1
+    assert (
+        result.fetched[0].payload["resource_url"]
+        == tainan_flood_sensor.TAINAN_FLOOD_SENSOR_PREVIEW_URL
+    )
+    assert (
+        result.fetched[0].payload["station_metadata_url"]
+        == tainan_flood_sensor.TAINAN_FLOOD_SENSOR_METADATA_PREVIEW_URL
+    )
+
+
 def test_tainan_metadata_and_realtime_join_to_station_point() -> None:
     metadata = parse_tainan_flood_sensor_metadata_payload(_metadata_payload())
 
