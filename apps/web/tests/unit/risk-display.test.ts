@@ -305,11 +305,17 @@ test("evidence full-list selection falls back to preview items", () => {
   assert.deepEqual(selectEvidenceItems([previewEvidence], [], "loading"), [previewEvidence]);
   assert.deepEqual(selectEvidenceItems([previewEvidence], [], "error"), [previewEvidence]);
   assert.deepEqual(selectEvidenceItems([previewEvidence], [], "ready"), [previewEvidence]);
-  assert.deepEqual(selectEvidenceItems([previewEvidence], [fullEvidence], "ready"), [
-    previewEvidence,
+  assert.deepEqual(selectEvidenceItems([previewEvidence], [fullEvidence], "ready"), [fullEvidence]);
+  assert.deepEqual(selectEvidenceItems([fullEvidence], [fullEvidence], "ready"), [fullEvidence]);
+  const historicalPreview: EvidencePreview = {
+    ...previewEvidence,
+    evidence_scope: "historical",
+    id: "historical-preview",
+  };
+  assert.deepEqual(selectEvidenceItems([historicalPreview], [fullEvidence], "ready"), [
+    historicalPreview,
     fullEvidence,
   ]);
-  assert.deepEqual(selectEvidenceItems([fullEvidence], [fullEvidence], "ready"), [fullEvidence]);
   assert.equal(shouldFetchEvidenceList("assessment-123"), true);
   assert.equal(shouldFetchEvidenceList(""), false);
   assert.equal(shouldFetchEvidenceList(null), false);

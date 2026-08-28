@@ -286,12 +286,14 @@ export function selectEvidenceItems<T extends EvidencePreview>(
   status: EvidenceStatus,
 ) {
   if (status === "ready") {
-    const seen = new Set<string>();
-    return [...previewItems, ...fullListItems].filter((item) => {
-      if (seen.has(item.id)) return false;
-      seen.add(item.id);
-      return true;
-    });
+    if (!fullListItems.length) return previewItems;
+    const fullListIds = new Set(fullListItems.map((item) => item.id));
+    const missingContext = previewItems.filter(
+      (item) =>
+        !fullListIds.has(item.id) &&
+        (item.evidence_scope === "historical" || item.evidence_scope === "context"),
+    );
+    return [...missingContext, ...fullListItems];
   }
   return fullListItems.length ? fullListItems : previewItems;
 }
