@@ -75,7 +75,7 @@ def score_risk(signals: tuple[RiskEvidenceSignal, ...], *, now: datetime) -> Ris
     realtime_score = _weighted_score(signals, REALTIME_WEIGHTS, now=now, max_age=timedelta(hours=6))
     historical_score = _weighted_score(signals, HISTORICAL_WEIGHTS)
     confidence_score = _confidence_score(signals)
-    missing_sources = _missing_sources(signals)
+    missing_sources = _missing_sources(signals, now=now)
     has_historical_evidence = _has_weighted_evidence(signals, HISTORICAL_WEIGHTS)
 
     if missing_sources and confidence_score > 0.74:
@@ -282,12 +282,20 @@ def _confidence_level(score: float, *, has_evidence: bool) -> PublicConfidenceLe
     return "低"
 
 
-def _missing_sources(signals: tuple[RiskEvidenceSignal, ...]) -> tuple[str, ...]:
-    event_types = {
-        signal.event_type
+def _missing_sources(
+    signals: tuple[RiskEvidenceSignal, ...], *, now: datetime
+) -> tuple[str, ...]:
+    usable_current_signals = tuple(
+        signal
         for signal in signals
-        if signal.evidence_scope not in {"historical", "context"}
-    }
+        if _is_weighted_signal_eligible(
+            signal,
+            REALTIME_WEIGHTS,
+            now=now,
+            max_age=timedelta(hours=6),
+        )
+    )
+    event_types = {signal.event_type for signal in usable_current_signals}
     missing = []
     if "rainfall" not in event_types:
         missing.append("本次查詢未取得可採用的即時雨量觀測。")
@@ -295,7 +303,7 @@ def _missing_sources(signals: tuple[RiskEvidenceSignal, ...]) -> tuple[str, ...]
         signal.source_type == "official"
         and signal.event_type == "flood_report"
         and signal.evidence_scope == "current"
-        for signal in signals
+        for signal in usable_current_signals
     )
     if "water_level" not in event_types and not has_official_current_flood_sensor:
         missing.append("本次查詢未取得可採用的即時水位或淹水感測觀測。")
