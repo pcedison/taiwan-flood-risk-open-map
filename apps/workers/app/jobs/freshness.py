@@ -13,6 +13,11 @@ FreshnessCadence = Literal["realtime", "event", "static", "legacy"]
 REALTIME_FRESH_SECONDS = 10 * 60
 REALTIME_DEGRADED_SECONDS = 30 * 60
 REALTIME_STALE_SECONDS = 60 * 60
+# Dataset 142980 is published hourly. Allow publication/ingestion headroom,
+# degrade after one missed cycle, alert after two, and fail after three.
+REALTIME_THRESHOLDS_BY_ADAPTER = {
+    "official.wra_iow.flood_depth": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
+}
 REALTIME_ADAPTER_KEYS = frozenset(
     {
         "official.cwa.rainfall",
@@ -287,13 +292,17 @@ def _realtime_freshness_check(
     source_timestamp_max: datetime,
     age_seconds: int,
 ) -> FreshnessCheck:
-    if age_seconds <= REALTIME_FRESH_SECONDS:
+    fresh_seconds, degraded_seconds, stale_seconds = REALTIME_THRESHOLDS_BY_ADAPTER.get(
+        adapter_key,
+        (REALTIME_FRESH_SECONDS, REALTIME_DEGRADED_SECONDS, REALTIME_STALE_SECONDS),
+    )
+    if age_seconds <= fresh_seconds:
         status: FreshnessStatus = "fresh"
         reason = None
-    elif age_seconds <= REALTIME_DEGRADED_SECONDS:
+    elif age_seconds <= degraded_seconds:
         status = "degraded"
         reason = "source data is older than fresh freshness threshold"
-    elif age_seconds <= REALTIME_STALE_SECONDS:
+    elif age_seconds <= stale_seconds:
         status = "stale"
         reason = "source data is older than stale freshness threshold"
     else:
@@ -304,7 +313,7 @@ def _realtime_freshness_check(
         adapter_key=adapter_key,
         status=status,
         checked_at=checked_at,
-        max_age_seconds=REALTIME_STALE_SECONDS,
+        max_age_seconds=stale_seconds,
         cadence="realtime",
         source_timestamp_max=source_timestamp_max,
         age_seconds=age_seconds,
