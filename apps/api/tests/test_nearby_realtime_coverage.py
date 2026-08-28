@@ -525,6 +525,29 @@ def test_recent_failed_source_is_not_reported_as_no_station() -> None:
     assert "private-token" not in coverage.model_dump_json()
 
 
+def test_configuration_failure_has_public_reason_without_leaking_error_code() -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.ncdr.cap",
+            latest_run_status="failed",
+            latest_run_error_code="NcdrCapAlertConfigurationError",
+            latest_run_delta_minutes=2,
+            observed_delta_minutes=None,
+            station_count=0,
+            runtime_enabled=True,
+            runtime_enabled_delta_minutes=1,
+            runtime_pipeline_status="failed",
+            runtime_pipeline_delta_minutes=1,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "failed"
+    assert health.reason_code == "source_misconfigured"
+    assert "必要設定" in health.message
+    assert "NcdrCapAlertConfigurationError" not in coverage.model_dump_json()
+
+
 def test_stalled_update_pipeline_has_distinct_missing_cause() -> None:
     coverage = _coverage_with_health(
         _health_row(

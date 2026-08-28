@@ -916,10 +916,9 @@ def _source_health_decision(
         and row.runtime_pipeline_checked_at is not None
         and _pipeline_outcome_matches_run(row, run_at)
     ):
-        return _source_decision(
-            "failed",
-            "pipeline_unavailable",
-            "資料取得後的處理或發布流程未完成。",
+        return _pipeline_failure_decision(
+            row,
+            fallback_message="資料取得後的處理或發布流程未完成。",
         )
     if status == "disabled" and not runtime_enabled_now:
         return _source_decision("disabled", "disabled", "此來源目前未啟用。")
@@ -982,10 +981,9 @@ def _source_health_decision(
             )
 
     if status == "failed":
-        return _source_decision(
-            "failed",
-            "pipeline_unavailable",
-            "最近一次背景更新未完成；不公開內部錯誤內容。",
+        return _pipeline_failure_decision(
+            row,
+            fallback_message="最近一次背景更新未完成；不公開內部錯誤內容。",
         )
     if status in {"queued", "running"}:
         return _source_decision("degraded", "delayed", "背景更新仍在進行或回報延遲。")
@@ -1034,6 +1032,27 @@ def _source_health_decision(
     if configured_disabled and not runtime_enabled_now:
         return _source_decision("disabled", "disabled", "此來源目前未啟用。")
     return _source_decision("unknown", "not_yet_observed", "尚無足夠紀錄判定來源健康。")
+
+
+def _pipeline_failure_decision(
+    row: RealtimeSourceHealthRow,
+    *,
+    fallback_message: str,
+) -> _SourceHealthDecision:
+    # Adapter error class names are already stored as a bounded operational
+    # code.  Collapse every present and future *ConfigurationError to one
+    # public-safe reason without exposing a credential name, URL, or secret.
+    if (row.latest_run_error_code or "").endswith("ConfigurationError"):
+        return _source_decision(
+            "failed",
+            "source_misconfigured",
+            "背景來源缺少必要設定或設定無效；未公開任何憑證內容。",
+        )
+    return _source_decision(
+        "failed",
+        "pipeline_unavailable",
+        fallback_message,
+    )
 
 
 def _observation_health_decision(

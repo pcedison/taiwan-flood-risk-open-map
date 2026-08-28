@@ -555,6 +555,22 @@ def test_nearby_source_health_contract_is_public_safe_and_documented() -> None:
     assert set(documented_schema["NearbySourceHealth"]["properties"]) == expected_fields
     assert forbidden_fields.isdisjoint(expected_fields)
     assert documented_schema["NearbySourceHealth"]["additionalProperties"] is False
+    expected_health_reasons = {
+        "operational",
+        "delayed",
+        "upstream_unavailable",
+        "pipeline_unavailable",
+        "pipeline_stalled",
+        "source_misconfigured",
+        "disabled",
+        "not_yet_observed",
+    }
+    assert set(runtime_schema["NearbySourceHealth"]["properties"]["reason_code"]["enum"]) == (
+        expected_health_reasons
+    )
+    assert set(
+        documented_schema["NearbySourceHealth"]["properties"]["reason_code"]["enum"]
+    ) == expected_health_reasons
     assert set(documented_schema["NearbyCoverageSignal"]["properties"]["missing_cause"]["enum"]) == {
         "none",
         "no_station_in_range",
