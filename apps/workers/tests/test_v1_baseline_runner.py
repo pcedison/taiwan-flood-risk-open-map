@@ -263,6 +263,7 @@ def test_tick_continues_when_first_adapter_builder_raises(
     assert writer.pipeline_statuses[0]["adapter_keys"] == (SOURCE_A,)
     assert writer.pipeline_statuses[0]["status"] == "failed"
     assert writer.pipeline_statuses[0]["complete"] is False
+    assert writer.timeline == [("selection", (SOURCE_A, SOURCE_B))]
     assert "private-builder-detail" not in repr(events)
     assert (
         "worker.runtime.v1_baseline.source_failed",
