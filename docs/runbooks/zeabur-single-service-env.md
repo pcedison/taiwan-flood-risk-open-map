@@ -73,26 +73,29 @@ public basemap.
 Use this after PostgreSQL migrations have been applied. The scheduler runs
 inside the same Zeabur service as API/Web so the public beta can receive
 official CWA/WRA, WRA IoW, NCDR CAP, and Civil IoT backbone snapshots before a
-dedicated worker service exists. Source gates default to `true` in the
-single-service scheduler, but each gate can still be set to `false` in Zeabur to
-disable that source.
+dedicated worker service exists. When
+`REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true`, the start script sets every
+reviewed backbone source gate to `true` even if Zeabur still contains a legacy
+explicit `false`. To control individual gates, first set force mode to `false`;
+`REALTIME_BACKBONE_INGESTION_DISABLED=true` remains the explicit all-source kill
+switch.
 
 | Variable | Zeabur value |
 |---|---|
 | `HOSTED_INGESTION_SCHEDULER_ENABLED` | Leave unset or set `auto`; legacy `false` is overridden by `REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true` |
 | `DATABASE_URL` | Zeabur Postgres connection URL |
 | `WORKER_DATABASE_URL` | Leave blank to reuse `DATABASE_URL`, or set the same Postgres URL |
-| `REALTIME_BACKBONE_FORCE_INGESTION_ON_START` | Leave unset or `true`; forces the realtime backbone on when DB is attached |
+| `REALTIME_BACKBONE_FORCE_INGESTION_ON_START` | Leave unset or `true`; forces the adapter list and every reviewed source gate on when DB is attached, overriding legacy explicit `false` gate values |
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | Leave unset or `false`; set `true` only as the explicit kill switch |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | Leave unset for the full backbone, or set the same full list below to override an old `WORKER_ENABLED_ADAPTER_KEYS` |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | Leave unset or `true`; use `false` only for an operator-managed migration window |
 | `MIGRATION_LOCK_TIMEOUT_MS` | Leave unset for the conservative `10000` ms PostgreSQL lock-wait limit |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | Leave unset for the conservative `300000` ms per-migration statement limit |
 | `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor` |
-| `SOURCE_CWA_ENABLED` | Leave unset or `true`; `false` disables CWA ingestion |
+| `SOURCE_CWA_ENABLED` | Leave unset or `true`; `false` takes effect only when force mode is disabled |
 | `SOURCE_CWA_API_ENABLED` | `true` |
 | `CWA_API_AUTHORIZATION` | Your CWA API authorization token |
-| `SOURCE_WRA_ENABLED` | Leave unset or `true`; `false` disables WRA ingestion |
+| `SOURCE_WRA_ENABLED` | Leave unset or `true`; `false` takes effect only when force mode is disabled |
 | `SOURCE_WRA_API_ENABLED` | `true` |
 | `SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED` | `true` |
 | `SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED` | `true` |
@@ -133,9 +136,10 @@ the hosted public-risk evidence smoke lists failed required worker sources.
 5. Set `REALTIME_OFFICIAL_DIAGNOSTIC_FALLBACK_ENABLED=false`. A diagnostic
    request-time observation is useful during an incident but is not proof that
    the background persistence path recovered.
-6. Confirm the source gates listed above are enabled and that the CWA credential
-   exists without printing its value. Keep public-news enrichment disabled
-   until its separate source/terms review is accepted.
+6. Confirm force mode is active and that the CWA credential exists without
+   printing its value. The entrypoint must override stale `false` values for the
+   reviewed source gates. Keep public-news enrichment disabled until its
+   separate source/terms review is accepted.
 7. Redeploy and verify the service logs contain both
    `launching official ingestion scheduler loop (first tick runs immediately)`
    and repeated `worker.runtime.managed_scheduler.tick_completed` events.

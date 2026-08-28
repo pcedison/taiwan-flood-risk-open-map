@@ -90,6 +90,44 @@ apply_migrations() {
   fi
 }
 
+configure_backbone_source_gates() {
+  local gate
+  local gates=(
+    SOURCE_CWA_ENABLED
+    SOURCE_CWA_API_ENABLED
+    SOURCE_WRA_ENABLED
+    SOURCE_WRA_API_ENABLED
+    SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED
+    SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED
+    SOURCE_NCDR_CAP_ENABLED
+    SOURCE_NCDR_CAP_API_ENABLED
+    SOURCE_FLOOD_SENSOR_ENABLED
+    SOURCE_FLOOD_SENSOR_API_ENABLED
+    SOURCE_FLOOD_SENSOR_USE_LIVE
+    SOURCE_CIVIL_IOT_SEWER_ENABLED
+    SOURCE_CIVIL_IOT_SEWER_API_ENABLED
+    SOURCE_CIVIL_IOT_PUMP_ENABLED
+    SOURCE_CIVIL_IOT_PUMP_API_ENABLED
+    SOURCE_CIVIL_IOT_GATE_ENABLED
+    SOURCE_CIVIL_IOT_GATE_API_ENABLED
+    SOURCE_TAINAN_FLOOD_SENSOR_ENABLED
+    SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED
+  )
+
+  for gate in "${gates[@]}"; do
+    if truthy "${realtime_backbone_force_ingestion}"; then
+      # Force mode is the production recovery contract: stale platform values
+      # such as an explicit "false" must not silently disable the reviewed
+      # backbone. Set REALTIME_BACKBONE_FORCE_INGESTION_ON_START=false to
+      # return control to the individual source gates.
+      printf -v "${gate}" "%s" "true"
+    elif [ -z "${!gate:-}" ]; then
+      printf -v "${gate}" "%s" "true"
+    fi
+    export "${gate}"
+  done
+}
+
 setup_ingestion_env() {
   local configured_adapter_keys="${WORKER_ENABLED_ADAPTER_KEYS:-}"
   local required_adapter_keys
@@ -106,25 +144,7 @@ setup_ingestion_env() {
   else
     export WORKER_ENABLED_ADAPTER_KEYS="${WORKER_ENABLED_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"
   fi
-  export SOURCE_CWA_ENABLED="${SOURCE_CWA_ENABLED:-true}"
-  export SOURCE_CWA_API_ENABLED="${SOURCE_CWA_API_ENABLED:-true}"
-  export SOURCE_WRA_ENABLED="${SOURCE_WRA_ENABLED:-true}"
-  export SOURCE_WRA_API_ENABLED="${SOURCE_WRA_API_ENABLED:-true}"
-  export SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED="${SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED:-true}"
-  export SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED="${SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED:-true}"
-  export SOURCE_NCDR_CAP_ENABLED="${SOURCE_NCDR_CAP_ENABLED:-true}"
-  export SOURCE_NCDR_CAP_API_ENABLED="${SOURCE_NCDR_CAP_API_ENABLED:-true}"
-  export SOURCE_FLOOD_SENSOR_ENABLED="${SOURCE_FLOOD_SENSOR_ENABLED:-true}"
-  export SOURCE_FLOOD_SENSOR_API_ENABLED="${SOURCE_FLOOD_SENSOR_API_ENABLED:-true}"
-  export SOURCE_FLOOD_SENSOR_USE_LIVE="${SOURCE_FLOOD_SENSOR_USE_LIVE:-true}"
-  export SOURCE_CIVIL_IOT_SEWER_ENABLED="${SOURCE_CIVIL_IOT_SEWER_ENABLED:-true}"
-  export SOURCE_CIVIL_IOT_SEWER_API_ENABLED="${SOURCE_CIVIL_IOT_SEWER_API_ENABLED:-true}"
-  export SOURCE_CIVIL_IOT_PUMP_ENABLED="${SOURCE_CIVIL_IOT_PUMP_ENABLED:-true}"
-  export SOURCE_CIVIL_IOT_PUMP_API_ENABLED="${SOURCE_CIVIL_IOT_PUMP_API_ENABLED:-true}"
-  export SOURCE_CIVIL_IOT_GATE_ENABLED="${SOURCE_CIVIL_IOT_GATE_ENABLED:-true}"
-  export SOURCE_CIVIL_IOT_GATE_API_ENABLED="${SOURCE_CIVIL_IOT_GATE_API_ENABLED:-true}"
-  export SOURCE_TAINAN_FLOOD_SENSOR_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_ENABLED:-true}"
-  export SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED:-true}"
+  configure_backbone_source_gates
   export SCHEDULER_INTERVAL_SECONDS="${SCHEDULER_INTERVAL_SECONDS:-300}"
   export SCHEDULER_LEASE_TTL_SECONDS="${SCHEDULER_LEASE_TTL_SECONDS:-600}"
   export WORKER_INSTANCE="${WORKER_INSTANCE:-zeabur-single-service-${HOSTNAME:-local}}"
