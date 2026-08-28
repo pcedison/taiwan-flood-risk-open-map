@@ -37,6 +37,13 @@ from app.scheduler import _execute_scheduled_ingestion_cycle
 
 ManagedRuntimeStatus = Literal["succeeded", "partial", "failed", "skipped"]
 RuntimeAdapterBuilder = Callable[[WorkerSettings], Mapping[str, DataSourceAdapter]]
+_TRANSIENT_PROMOTION_SQLSTATE_PREFIXES: Final[tuple[str, ...]] = ("08", "40")
+_TRANSIENT_PROMOTION_SQLSTATES: Final[frozenset[str]] = frozenset(
+    {"53300", "55P03", "57014", "57P01", "57P02", "57P03"}
+)
+_TRANSIENT_PSYCOPG_EXCEPTION_NAMES: Final[frozenset[str]] = frozenset(
+    {"InterfaceError", "OperationalError"}
+)
 # Adapters the v1 baseline runner may execute, one isolated cycle at a time.
 #
 # Membership does NOT enable a source: each still needs its own runtime gates and
@@ -467,7 +474,7 @@ def _execute_managed_runtime_ingestion_cycle(
                 )
             )
             if current_raw_refs:
-                promotion = promote_accepted_staging(
+                promotion = _promote_accepted_staging_with_retry(
                     promotion_writer_instance,
                     limit=promotion_limit,
                     adapter_keys=target_adapter_keys,
@@ -516,6 +523,58 @@ def _execute_managed_runtime_ingestion_cycle(
         promoted=promotion.promoted,
         evidence_ids=promotion.evidence_ids,
     )
+
+
+def _promote_accepted_staging_with_retry(
+    writer: EvidencePromotionWriter,
+    *,
+    limit: int | None,
+    adapter_keys: tuple[str, ...],
+    raw_refs: tuple[str, ...],
+) -> PromotionResult:
+    try:
+        return promote_accepted_staging(
+            writer,
+            limit=limit,
+            adapter_keys=adapter_keys,
+            raw_refs=raw_refs,
+        )
+    except Exception as exc:
+        if not _is_transient_promotion_error(exc):
+            raise
+        log_event(
+            "runtime.managed.promotion.retrying",
+            attempt=2,
+            max_attempts=2,
+            error_code=exc.__class__.__name__,
+        )
+    return promote_accepted_staging(
+        writer,
+        limit=limit,
+        adapter_keys=adapter_keys,
+        raw_refs=raw_refs,
+    )
+
+
+def _is_transient_promotion_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        sqlstate = getattr(current, "sqlstate", None)
+        if isinstance(sqlstate, str) and (
+            sqlstate in _TRANSIENT_PROMOTION_SQLSTATES
+            or sqlstate.startswith(_TRANSIENT_PROMOTION_SQLSTATE_PREFIXES)
+        ):
+            return True
+        exception_type = type(current)
+        if (
+            exception_type.__module__.startswith("psycopg")
+            and exception_type.__name__ in _TRANSIENT_PSYCOPG_EXCEPTION_NAMES
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _resolve_persistence_writers(

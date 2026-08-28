@@ -160,6 +160,12 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert "AS location_precision" in sql
     assert "AS limitations" in sql
     assert "jsonb_typeof(c.properties->'limitations') = 'array'" in sql
+    assert (
+        sql.count("e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'") == 3
+    )
+    assert (
+        sql.count("e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'") == 3
+    )
     # Without relevance arguments the realtime relevance collapses to the radius.
     assert params == (
         121.5654,
@@ -917,6 +923,8 @@ def test_query_nearby_latest_official_uses_selected_radius() -> None:
     assert "pg_input_is_valid" in sql
     assert "no_active_event" in sql
     assert "jsonb_typeof(ranked.evidence_limitations) = 'array'" in sql
+    assert "e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'" in sql
+    assert "e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'" in sql
     assert params == (
         121.5654,
         25.033,

@@ -993,6 +993,42 @@ def test_managed_runtime_cycle_records_safe_promotion_timeout_exception_class(
     )
 
 
+def test_managed_runtime_cycle_retries_one_transient_database_promotion_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+    adapter = _sample_adapter()
+    run_writer = _MemoryRunWriter()
+    promotion_writer = _RetryOncePromotionWriter([_candidate()])
+    monkeypatch.setattr(
+        runtime_managed_jobs,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=_settings("news.public_web.sample"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+        promote=True,
+    )
+
+    assert result.status == "succeeded"
+    assert result.promoted == 1
+    assert promotion_writer.fetch_calls == 2
+    assert (
+        "runtime.managed.promotion.retrying",
+        {
+            "attempt": 2,
+            "max_attempts": 2,
+            "error_code": "OperationalError",
+        },
+    ) in events
+    assert run_writer.pipeline_statuses[-1][1:3] == ("succeeded", True)
+
+
 def test_complete_replace_source_quality_partial_activates_only_after_full_promotion() -> None:
     adapter = _CompleteReplacePartialAdapter(valid_count=3, rejection_count=1)
     settings = replace(
@@ -1399,6 +1435,26 @@ class _TimeoutPromotionWriter(_FailingPromotionWriter):
     ) -> tuple[PromotionCandidate, ...]:
         del limit, adapter_keys, raw_refs
         raise QueryCanceled(_PRIVATE_DATABASE_ERROR)
+
+
+class _RetryOncePromotionWriter(_MemoryPromotionWriter):
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        if self.fetch_calls == 0:
+            self.fetch_calls += 1
+            import psycopg
+
+            raise psycopg.OperationalError(_PRIVATE_DATABASE_ERROR)
+        return super().fetch_accepted_staging(
+            limit=limit,
+            adapter_keys=adapter_keys,
+            raw_refs=raw_refs,
+        )
 
 
 class _ExplodingAdapter:
