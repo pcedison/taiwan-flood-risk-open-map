@@ -67,32 +67,43 @@ def test_zeabur_single_service_scheduler_loop_runs_the_initial_tick() -> None:
 
 
 def test_zeabur_single_service_sets_backbone_source_gates() -> None:
-    dockerfile = ENTRYPOINT.read_text(encoding="utf-8")
-    expected_exports = (
-        'export SOURCE_CWA_ENABLED="${SOURCE_CWA_ENABLED:-true}"',
-        'export SOURCE_WRA_ENABLED="${SOURCE_WRA_ENABLED:-true}"',
-        'export SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED="${SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED:-true}"',
-        'export SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED="${SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED:-true}"',
-        'export SOURCE_NCDR_CAP_ENABLED="${SOURCE_NCDR_CAP_ENABLED:-true}"',
-        'export SOURCE_NCDR_CAP_API_ENABLED="${SOURCE_NCDR_CAP_API_ENABLED:-true}"',
-        'export SOURCE_FLOOD_SENSOR_ENABLED="${SOURCE_FLOOD_SENSOR_ENABLED:-true}"',
-        'export SOURCE_FLOOD_SENSOR_API_ENABLED="${SOURCE_FLOOD_SENSOR_API_ENABLED:-true}"',
-        'export SOURCE_FLOOD_SENSOR_USE_LIVE="${SOURCE_FLOOD_SENSOR_USE_LIVE:-true}"',
-        'export SOURCE_CIVIL_IOT_SEWER_ENABLED="${SOURCE_CIVIL_IOT_SEWER_ENABLED:-true}"',
-        'export SOURCE_CIVIL_IOT_SEWER_API_ENABLED="${SOURCE_CIVIL_IOT_SEWER_API_ENABLED:-true}"',
-        'export SOURCE_CIVIL_IOT_PUMP_ENABLED="${SOURCE_CIVIL_IOT_PUMP_ENABLED:-true}"',
-        'export SOURCE_CIVIL_IOT_PUMP_API_ENABLED="${SOURCE_CIVIL_IOT_PUMP_API_ENABLED:-true}"',
-        'export SOURCE_CIVIL_IOT_GATE_ENABLED="${SOURCE_CIVIL_IOT_GATE_ENABLED:-true}"',
-        'export SOURCE_CIVIL_IOT_GATE_API_ENABLED="${SOURCE_CIVIL_IOT_GATE_API_ENABLED:-true}"',
-        'export SOURCE_TAINAN_FLOOD_SENSOR_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_ENABLED:-true}"',
-        'export SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED="${SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED:-true}"',
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
+    expected_gates = (
+        "SOURCE_CWA_ENABLED",
+        "SOURCE_CWA_API_ENABLED",
+        "SOURCE_WRA_ENABLED",
+        "SOURCE_WRA_API_ENABLED",
+        "SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED",
+        "SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED",
+        "SOURCE_NCDR_CAP_ENABLED",
+        "SOURCE_NCDR_CAP_API_ENABLED",
+        "SOURCE_FLOOD_SENSOR_ENABLED",
+        "SOURCE_FLOOD_SENSOR_API_ENABLED",
+        "SOURCE_FLOOD_SENSOR_USE_LIVE",
+        "SOURCE_CIVIL_IOT_SEWER_ENABLED",
+        "SOURCE_CIVIL_IOT_SEWER_API_ENABLED",
+        "SOURCE_CIVIL_IOT_PUMP_ENABLED",
+        "SOURCE_CIVIL_IOT_PUMP_API_ENABLED",
+        "SOURCE_CIVIL_IOT_GATE_ENABLED",
+        "SOURCE_CIVIL_IOT_GATE_API_ENABLED",
+        "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED",
+        "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED",
     )
 
-    for expected in expected_exports:
-        assert expected in dockerfile
+    force_block = entrypoint.split("configure_backbone_source_gates() {", 1)[1].split(
+        "setup_ingestion_env() {", 1
+    )[0]
+    assert 'if truthy "${realtime_backbone_force_ingestion}"; then' in force_block
+    assert 'printf -v "${gate}" "%s" "true"' in force_block
+    assert 'if [ -z "${!gate:-}" ]; then' in force_block
+    assert 'export "${gate}"' in force_block
+    for expected_gate in expected_gates:
+        assert expected_gate in force_block
 
-    assert 'required_adapter_keys="${REALTIME_BACKBONE_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"' in dockerfile
-    assert 'export WORKER_ENABLED_ADAPTER_KEYS="$(merge_adapter_keys "${required_adapter_keys}" "${configured_adapter_keys}")"' in dockerfile
+    assert "configure_backbone_source_gates" in entrypoint
+
+    assert 'required_adapter_keys="${REALTIME_BACKBONE_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"' in entrypoint
+    assert 'export WORKER_ENABLED_ADAPTER_KEYS="$(merge_adapter_keys "${required_adapter_keys}" "${configured_adapter_keys}")"' in entrypoint
 
 
 def test_zeabur_single_service_runbook_lists_realtime_backbone() -> None:
