@@ -78,6 +78,20 @@ manager when the owning operator has approved it."
 5. Save the service and let Zeabur build the container.
 6. Copy the generated Zeabur domain, for example `https://your-service.zeabur.app`.
 
+The root Dockerfile pulls the official Node and Python base images from AWS
+Public ECR's Docker Official Images replica by default. This avoids making a
+production deployment depend on Zeabur's shared Docker Hub rate-limit quota.
+`DOCKER_OFFICIAL_IMAGE_REGISTRY` is a build argument and defaults to
+`public.ecr.aws/docker/library`; change it only during a reviewed registry
+incident after verifying both required image tags at the replacement registry.
+
+If a build fails while resolving a base image, inspect the first failing
+`load metadata` line before retrying. Docker Hub `429 Too Many Requests` or a
+`dockerhub.zeabur.cloud` DNS error occurs before application code is built and
+must not be treated as an application regression. Do not repeatedly redeploy
+the same Docker Hub-backed build: verify the configured base-image registry,
+then perform one controlled retry.
+
 Do not add custom build or start commands for this mode. The root `Dockerfile`
 already builds the web app, installs the API and worker packages, starts
 FastAPI internally, and starts Next.js on Zeabur's public `$PORT`. When
