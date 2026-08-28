@@ -159,3 +159,7 @@ def test_preview_reserves_current_signal_families_and_historical_context() -> No
         "rainfall",
     }
     assert any(item.evidence_scope == "historical" for item in preview)
+
+    public_preview = public_evidence.evidence_preview(history)
+    assert public_preview.evidence_scope == "historical"
+    assert public_preview.model_dump(mode="json")["evidence_scope"] == "historical"

@@ -304,8 +304,12 @@ test("latestNewsEvidenceLinks returns newest linked news first", () => {
 test("evidence full-list selection falls back to preview items", () => {
   assert.deepEqual(selectEvidenceItems([previewEvidence], [], "loading"), [previewEvidence]);
   assert.deepEqual(selectEvidenceItems([previewEvidence], [], "error"), [previewEvidence]);
-  assert.deepEqual(selectEvidenceItems([previewEvidence], [], "ready"), []);
-  assert.deepEqual(selectEvidenceItems([previewEvidence], [fullEvidence], "ready"), [fullEvidence]);
+  assert.deepEqual(selectEvidenceItems([previewEvidence], [], "ready"), [previewEvidence]);
+  assert.deepEqual(selectEvidenceItems([previewEvidence], [fullEvidence], "ready"), [
+    previewEvidence,
+    fullEvidence,
+  ]);
+  assert.deepEqual(selectEvidenceItems([fullEvidence], [fullEvidence], "ready"), [fullEvidence]);
   assert.equal(shouldFetchEvidenceList("assessment-123"), true);
   assert.equal(shouldFetchEvidenceList(""), false);
   assert.equal(shouldFetchEvidenceList(null), false);
@@ -501,6 +505,48 @@ test("public evidence display hides historical news and keeps official signals f
     ]).map((item) => item.source_id),
     ["cwa-rainfall"],
   );
+});
+
+test("public evidence display keeps current families and one historical basis", () => {
+  const rainfall: EvidenceItem = {
+    ...fullEvidence,
+    evidence_scope: "current",
+    event_type: "rainfall",
+    id: "current-rainfall",
+    source_type: "official",
+  };
+  const water: EvidenceItem = {
+    ...fullEvidence,
+    evidence_scope: "current",
+    event_type: "water_level",
+    id: "current-water",
+    source_type: "official",
+  };
+  const anotherWater: EvidenceItem = {
+    ...water,
+    id: "current-water-2",
+  };
+  const history: EvidenceItem = {
+    ...fullEvidence,
+    evidence_scope: "historical",
+    event_type: "flood_report",
+    id: "historical-flood",
+    observed_at: "2016-09-27T00:00:00+08:00",
+    source_type: "official",
+  };
+
+  const displayed = publicEvidenceDisplayItems([water, anotherWater, history, rainfall]);
+  assert.equal(displayed.length, 3);
+  assert.deepEqual(
+    new Set(displayed.map((item) => item.id)),
+    new Set([water.id, rainfall.id, history.id]),
+  );
+  assert.equal(displayed[2], history);
+  assert.deepEqual(evidenceDisplayText(history), {
+    purpose: "用途：歷史淹水參考",
+    summary: "歷史淹水資料與本次查詢範圍相交，只代表過往背景，不代表目前正在淹水。",
+    title: "歷史淹水紀錄",
+  });
 });
 
 test("evidence display text normalizes official realtime raw titles", () => {

@@ -17,6 +17,7 @@ export type EvidencePreview = {
   source_url?: string | null;
   url?: string | null;
   distance_to_query_m: number | null;
+  evidence_scope?: "current" | "historical" | "context" | "unspecified";
 };
 
 export type EvidenceItem = EvidencePreview & {

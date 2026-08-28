@@ -2107,6 +2107,14 @@ components:
           items:
             type: string
           default: []
+        evidence_scope:
+          type: string
+          enum:
+            - current
+            - historical
+            - context
+            - unspecified
+          default: unspecified
       additionalProperties: false
 
     EvidenceListResponse:
@@ -2226,6 +2234,14 @@ components:
           items:
             type: string
           default: []
+        evidence_scope:
+          type: string
+          enum:
+            - current
+            - historical
+            - context
+            - unspecified
+          default: unspecified
       additionalProperties: false
 
     SourceType:

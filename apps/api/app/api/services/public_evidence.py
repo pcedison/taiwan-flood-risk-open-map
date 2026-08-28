@@ -330,6 +330,7 @@ def evidence_preview(evidence: Evidence) -> EvidencePreview:
         url=evidence.url,
         location_precision=evidence.location_precision,
         limitations=list(evidence.limitations),
+        evidence_scope=evidence.evidence_scope,
     )
 
 

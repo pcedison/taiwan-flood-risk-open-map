@@ -1266,6 +1266,7 @@ def test_evidence_list_contract(monkeypatch) -> None:
         "raw_ref",
         "location_precision",
         "limitations",
+        "evidence_scope",
     }
     assert UUID(evidence["id"])
     assert evidence["geometry"] == {"type": "Point", "coordinates": [120.213493, 23.038818]}
