@@ -166,6 +166,7 @@ def run_v1_baseline_adapter_cycle(
     adapter_by_key: Mapping[str, DataSourceAdapter],
     *,
     settings: WorkerSettings,
+    runtime_selection_adapter_keys: tuple[str, ...] | None = None,
     database_url: str | None = None,
     staging_writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
@@ -180,16 +181,29 @@ def run_v1_baseline_adapter_cycle(
     if len(adapter_keys) != 1:
         return _invalid_v1_baseline_scope_result()
     adapter_key = adapter_keys[0]
+    reporting_scope_is_valid = (
+        runtime_selection_adapter_keys is None
+        or (
+            bool(runtime_selection_adapter_keys)
+            and adapter_key in runtime_selection_adapter_keys
+            and all(
+                key in V1_BASELINE_ADAPTER_KEYS
+                for key in runtime_selection_adapter_keys
+            )
+        )
+    )
     if (
         adapter_key not in V1_BASELINE_ADAPTER_KEYS
         or settings.enabled_adapter_keys != (adapter_key,)
         or adapter_by_key[adapter_key].metadata.key != adapter_key
         or promotion_adapter_keys not in {None, (adapter_key,)}
+        or not reporting_scope_is_valid
     ):
         return _invalid_v1_baseline_scope_result()
     return _execute_managed_runtime_ingestion_cycle(
         adapter_by_key,
         settings=settings,
+        runtime_selection_adapter_keys=runtime_selection_adapter_keys,
         database_url=database_url,
         staging_writer=staging_writer,
         run_writer=run_writer,
@@ -214,6 +228,7 @@ def _execute_managed_runtime_ingestion_cycle(
     adapter_by_key: Mapping[str, DataSourceAdapter] | None = None,
     *,
     settings: WorkerSettings | None = None,
+    runtime_selection_adapter_keys: tuple[str, ...] | None = None,
     database_url: str | None = None,
     staging_writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
@@ -228,6 +243,11 @@ def _execute_managed_runtime_ingestion_cycle(
     cycle_started_at = datetime.now(UTC)
     resolved_settings = settings or load_worker_settings()
     selected_adapter_keys = enabled_adapter_keys(resolved_settings)
+    reported_adapter_keys = (
+        runtime_selection_adapter_keys
+        if runtime_selection_adapter_keys is not None
+        else selected_adapter_keys
+    )
     runtime_status_writer = _resolve_runtime_status_writer(
         resolved_settings,
         database_url=database_url,
@@ -236,7 +256,7 @@ def _execute_managed_runtime_ingestion_cycle(
     if not selected_adapter_keys:
         record_runtime_selection(
             runtime_status_writer,
-            enabled_adapter_keys=(),
+            enabled_adapter_keys=reported_adapter_keys,
             known_adapter_keys=tuple(ADAPTER_REGISTRY),
         )
         log_event("runtime.managed.ingestion.noop", reason="no_enabled_adapters")
@@ -266,7 +286,7 @@ def _execute_managed_runtime_ingestion_cycle(
     if not selected_adapter_keys:
         record_runtime_selection(
             runtime_status_writer,
-            enabled_adapter_keys=(),
+            enabled_adapter_keys=reported_adapter_keys,
             known_adapter_keys=tuple(ADAPTER_REGISTRY),
         )
         log_event("runtime.source_catalog.disabled")
@@ -292,7 +312,7 @@ def _execute_managed_runtime_ingestion_cycle(
     if persistence is None:
         record_runtime_selection(
             runtime_status_writer,
-            enabled_adapter_keys=selected_adapter_keys,
+            enabled_adapter_keys=reported_adapter_keys,
             known_adapter_keys=tuple(ADAPTER_REGISTRY),
         )
         log_event(
@@ -305,7 +325,7 @@ def _execute_managed_runtime_ingestion_cycle(
 
     record_runtime_selection(
         persistence.run_writer,
-        enabled_adapter_keys=selected_adapter_keys,
+        enabled_adapter_keys=reported_adapter_keys,
         known_adapter_keys=tuple(ADAPTER_REGISTRY),
     )
     try:
@@ -421,7 +441,6 @@ def _execute_managed_runtime_ingestion_cycle(
             log_event(
                 "runtime.managed.no_active_event_retirement.failed",
                 error_code=exc.__class__.__name__,
-                error_message=str(exc),
             )
             return ManagedRuntimeIngestionResult(
                 status="failed",
@@ -459,7 +478,6 @@ def _execute_managed_runtime_ingestion_cycle(
             log_event(
                 "runtime.managed.promotion.failed",
                 error_code=exc.__class__.__name__,
-                error_message=str(exc),
             )
             return ManagedRuntimeIngestionResult(
                 status="failed",
