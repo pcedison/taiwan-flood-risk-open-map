@@ -20,14 +20,14 @@
     "reasons": []
   },
   "overall": {
-    "level": "低",
+    "level": "高",
     "confidence": "中",
     "reasons": [
-      "此位置半徑 500 公尺內有歷史淹水相關證據。",
-      "目前附近雨量與水位資料未達警戒條件。"
+      "歷史參考風險（高）高於即時風險（低）；綜合等級採較高者，但不表示目前正在淹水。",
+      "此位置半徑 500 公尺內有歷史淹水相關證據。"
     ]
   },
-  "dominant_mode": "realtime",
+  "dominant_mode": "historical_context",
   "community": {
     "state": "none",
     "level": "未知",

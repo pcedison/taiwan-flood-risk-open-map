@@ -5,6 +5,7 @@ from app.domain.risk import RiskScoringResult
 
 _USABLE_LOCAL_STATES = frozenset({"fresh_nearby", "degraded_nearby"})
 _HYDROLOGY = frozenset({"water_level", "flood_depth", "sewer_water_level"})
+_RISK_LEVEL_RANK = {"未知": 0, "低": 1, "中": 2, "高": 3, "極高": 4}
 
 
 def _query_local_signal_types(data: AssessmentData) -> frozenset[str]:
@@ -57,19 +58,28 @@ def compose_base_overall(
     realtime_scoring: RiskScoringResult,
     historical_scoring: RiskScoringResult,
 ) -> OverallDecision:
+    realtime_level = realtime_scoring.realtime_level
+    historical_level = historical_scoring.historical_level
+    if _RISK_LEVEL_RANK[historical_level] > _RISK_LEVEL_RANK[realtime_level]:
+        if realtime_level == "未知":
+            context_reason = "目前缺少可採用的即時證據；此等級只代表歷史背景風險。"
+        else:
+            context_reason = (
+                f"歷史參考風險（{historical_level}）高於即時風險（{realtime_level}）；"
+                "綜合等級採較高者，但不表示目前正在淹水。"
+            )
+        return OverallDecision(
+            historical_level,
+            historical_scoring.confidence_level,
+            "historical_context",
+            tuple(dict.fromkeys((context_reason, *historical_scoring.main_reasons))),
+        )
     if realtime_scoring.realtime_level != "未知":
         return OverallDecision(
-            realtime_scoring.realtime_level,
+            realtime_level,
             realtime_scoring.confidence_level,
             "realtime",
             realtime_scoring.main_reasons,
-        )
-    if historical_scoring.historical_level != "未知":
-        return OverallDecision(
-            historical_scoring.historical_level,
-            historical_scoring.confidence_level,
-            "historical_context",
-            ("目前缺少可採用的即時證據；此等級只代表歷史背景風險。",),
         )
     return OverallDecision(
         "未知",

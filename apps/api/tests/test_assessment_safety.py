@@ -157,6 +157,10 @@ def medium_history_scoring() -> RiskScoringResult:
     return _scoring(realtime_level="未知", historical_level="中")
 
 
+def extreme_history_scoring() -> RiskScoringResult:
+    return _scoring(realtime_level="未知", historical_level="極高")
+
+
 def test_fresh_station_outside_query_local_radius_cannot_support_low() -> None:
     data = assessment_data(
         coverage=coverage_with(
@@ -211,9 +215,17 @@ def test_failed_required_source_changes_only_low_to_unknown() -> None:
     assert apply_realtime_safety(high_scoring(), data).realtime_level == "高"
 
 
-def test_core_composer_uses_realtime_before_history() -> None:
+def test_core_composer_uses_higher_realtime_risk() -> None:
     decision = compose_base_overall(high_scoring(), medium_history_scoring())
     assert (decision.level, decision.dominant_mode) == ("高", "realtime")
+
+
+def test_core_composer_uses_higher_history_as_conservative_context() -> None:
+    decision = compose_base_overall(low_scoring(), extreme_history_scoring())
+
+    assert (decision.level, decision.dominant_mode) == ("極高", "historical_context")
+    assert decision.confidence == extreme_history_scoring().confidence_level
+    assert "不表示目前正在淹水" in " ".join(decision.reasons)
 
 
 def test_core_composer_labels_history_only_as_context() -> None:
