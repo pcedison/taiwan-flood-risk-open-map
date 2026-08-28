@@ -1301,6 +1301,25 @@ def test_latest_reader_deduplicates_canonical_warning_origin_before_limit() -> N
     assert "official.ncdr.cap" in sql
 
 
+def test_latest_reader_reserves_nearest_row_from_each_signal_family_before_limit() -> None:
+    connection = _FakeConnection(rows=[])
+    query_nearby_latest_official(
+        database_url="postgresql://example.test/flood",
+        lat=25.033,
+        lng=121.5654,
+        radius_m=5000,
+        as_of=datetime(2026, 8, 24, tzinfo=UTC),
+        connection_factory=lambda: connection,
+    )
+    sql = connection.cursor_instance.executions[0][0]
+
+    assert "family_ranked_latest AS (" in sql
+    assert "PARTITION BY candidate.event_type" in sql
+    assert "CASE WHEN candidate.signal_family_rank = 1 THEN 0 ELSE 1 END" in sql
+    assert sql.index("family_ranked_latest AS (") < sql.rindex("LIMIT %s")
+    assert sql.index("selected_latest AS (") < sql.index("FROM selected_latest ranked")
+
+
 def test_latest_and_coverage_queries_apply_catalog_kill_switch() -> None:
     connection = _FakeConnection(rows=[])
     query_nearby_realtime_coverage_rows(

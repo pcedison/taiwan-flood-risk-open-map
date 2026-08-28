@@ -212,6 +212,61 @@ def test_correlated_nearby_station_count_cannot_inflate_signal_family_score() ->
     assert result.historical_level == "未知"
 
 
+def test_correlated_station_family_uses_strongest_observation_not_station_count() -> None:
+    now = datetime.fromisoformat("2026-08-29T02:00:00+00:00")
+
+    def rainfall_signal() -> RiskEvidenceSignal:
+        return RiskEvidenceSignal(
+            source_type="official",
+            event_type="rainfall",
+            confidence=1.0,
+            distance_to_query_m=50.0,
+            freshness_score=1.0,
+            source_weight=1.0,
+            risk_factor=0.25,
+            observed_at=now,
+            evidence_scope="current",
+        )
+
+    one_station = score_risk((rainfall_signal(),), now=now)
+    four_stations = score_risk(tuple(rainfall_signal() for _ in range(4)), now=now)
+
+    assert one_station.realtime_score == 10.0
+    assert four_stations.realtime_score == one_station.realtime_score
+
+
+def test_current_sensor_does_not_reduce_historical_potential_context_cap() -> None:
+    now = datetime.fromisoformat("2026-08-29T02:00:00+00:00")
+    result = score_risk(
+        (
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_potential",
+                confidence=1.0,
+                distance_to_query_m=0.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+                evidence_scope="historical",
+            ),
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_report",
+                confidence=1.0,
+                distance_to_query_m=100.0,
+                freshness_score=1.0,
+                source_weight=1.0,
+                risk_factor=0.0,
+                observed_at=now,
+                evidence_scope="current",
+            ),
+        ),
+        now=now,
+    )
+
+    assert result.historical_score == 40.0
+    assert result.historical_level == "中"
+
+
 def test_high_realtime_reason_names_the_signal_mix_without_implying_rain_only() -> None:
     observed_at = datetime.fromisoformat("2026-06-29T00:00:00+00:00")
     result = score_risk(

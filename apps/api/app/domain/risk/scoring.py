@@ -32,6 +32,7 @@ EVENT_SCORE_CAPS = {
     # overlapping polygons should not stack into an "active disaster" signal.
     "flood_potential": 40.0,
 }
+CORRELATED_REALTIME_EVENT_TYPES = frozenset({"rainfall", "water_level", "flood_warning"})
 FLOOD_POTENTIAL_CONTEXT_CAP_WITH_OBSERVED_HISTORY = 20.0
 OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM = 25.0
 REQUIRED_REALTIME_EVENTS = {"rainfall", "water_level"}
@@ -128,7 +129,12 @@ def _weighted_score(
     totals_by_event: dict[str, float] = {}
     has_observed_history = any(
         signal.event_type in {"flood_report", "road_closure"}
-        and weights.get(signal.event_type, 0.0) > 0
+        and _is_weighted_signal_eligible(
+            signal,
+            weights,
+            now=now,
+            max_age=max_age,
+        )
         for signal in signals
     )
     for signal in signals:
@@ -148,7 +154,12 @@ def _weighted_score(
             and signal.distance_to_query_m <= 1000
         ):
             contribution = max(contribution, OBSERVED_HISTORY_MIN_SCORE_WITHIN_1KM)
-        event_total = totals_by_event.get(signal.event_type, 0.0) + contribution
+        previous_total = totals_by_event.get(signal.event_type, 0.0)
+        event_total = (
+            max(previous_total, contribution)
+            if signal.event_type in CORRELATED_REALTIME_EVENT_TYPES
+            else previous_total + contribution
+        )
         event_cap = _event_score_cap(
             signal.event_type,
             has_observed_history=has_observed_history,
