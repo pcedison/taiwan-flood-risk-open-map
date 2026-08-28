@@ -181,6 +181,11 @@ case "${role}" in
     echo "[start] role=scheduler (expects migrations applied by the api service)"
     setup_ingestion_env
     cd /app/apps/workers
+    if ! truthy "${ingestion_enabled}"; then
+      echo "[start] dedicated ingestion scheduler intentionally disabled; recording state and idling"
+      python -m app.main --record-runtime-sources-disabled
+      exec sleep infinity
+    fi
     echo "[start] launching official ingestion scheduler loop (first tick runs immediately)"
     exec python -m app.main --run-v1-baseline-adapters --scheduler
     ;;
