@@ -167,6 +167,7 @@ def run_v1_baseline_adapter_cycle(
     *,
     settings: WorkerSettings,
     runtime_selection_adapter_keys: tuple[str, ...] | None = None,
+    write_runtime_selection_revision: bool = True,
     database_url: str | None = None,
     staging_writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
@@ -204,6 +205,7 @@ def run_v1_baseline_adapter_cycle(
         adapter_by_key,
         settings=settings,
         runtime_selection_adapter_keys=runtime_selection_adapter_keys,
+        write_runtime_selection_revision=write_runtime_selection_revision,
         database_url=database_url,
         staging_writer=staging_writer,
         run_writer=run_writer,
@@ -229,6 +231,7 @@ def _execute_managed_runtime_ingestion_cycle(
     *,
     settings: WorkerSettings | None = None,
     runtime_selection_adapter_keys: tuple[str, ...] | None = None,
+    write_runtime_selection_revision: bool = True,
     database_url: str | None = None,
     staging_writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
@@ -254,10 +257,10 @@ def _execute_managed_runtime_ingestion_cycle(
         run_writer=run_writer,
     )
     if not selected_adapter_keys:
-        record_runtime_selection(
+        _write_runtime_selection_revision(
             runtime_status_writer,
             enabled_adapter_keys=reported_adapter_keys,
-            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+            enabled=write_runtime_selection_revision,
         )
         log_event("runtime.managed.ingestion.noop", reason="no_enabled_adapters")
         return ManagedRuntimeIngestionResult(status="skipped", reason="no_enabled_adapters")
@@ -275,6 +278,7 @@ def _execute_managed_runtime_ingestion_cycle(
             runtime_status_writer,
             adapter_keys=selected_adapter_keys,
             run_at=cycle_started_at,
+            write_runtime_selection_revision=write_runtime_selection_revision,
         )
         log_event("runtime.source_catalog.unavailable")
         return ManagedRuntimeIngestionResult(
@@ -284,10 +288,10 @@ def _execute_managed_runtime_ingestion_cycle(
         )
 
     if not selected_adapter_keys:
-        record_runtime_selection(
+        _write_runtime_selection_revision(
             runtime_status_writer,
             enabled_adapter_keys=reported_adapter_keys,
-            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+            enabled=write_runtime_selection_revision,
         )
         log_event("runtime.source_catalog.disabled")
         return ManagedRuntimeIngestionResult(status="skipped", reason="source_catalog_disabled")
@@ -310,10 +314,10 @@ def _execute_managed_runtime_ingestion_cycle(
         promote=promote,
     )
     if persistence is None:
-        record_runtime_selection(
+        _write_runtime_selection_revision(
             runtime_status_writer,
             enabled_adapter_keys=reported_adapter_keys,
-            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+            enabled=write_runtime_selection_revision,
         )
         log_event(
             "runtime.managed.ingestion.noop",
@@ -323,10 +327,10 @@ def _execute_managed_runtime_ingestion_cycle(
         )
         return ManagedRuntimeIngestionResult(status="skipped", reason="no_database_url")
 
-    record_runtime_selection(
+    _write_runtime_selection_revision(
         persistence.run_writer,
         enabled_adapter_keys=reported_adapter_keys,
-        known_adapter_keys=tuple(ADAPTER_REGISTRY),
+        enabled=write_runtime_selection_revision,
     )
     try:
         adapters = _resolve_adapters(
@@ -374,6 +378,7 @@ def _execute_managed_runtime_ingestion_cycle(
         adapters,
         settings=resolved_settings,
         runtime_selection_adapter_keys=reported_adapter_keys,
+        write_runtime_selection_revision=False,
         job_key=job_key,
         writer=persistence.staging_writer,
         run_writer=persistence.run_writer,
@@ -554,17 +559,33 @@ def _resolve_persistence_writers(
     )
 
 
+def _write_runtime_selection_revision(
+    run_writer: IngestionRunSummaryWriter | None,
+    *,
+    enabled_adapter_keys: tuple[str, ...],
+    enabled: bool,
+) -> None:
+    if not enabled:
+        return
+    record_runtime_selection(
+        run_writer,
+        enabled_adapter_keys=enabled_adapter_keys,
+        known_adapter_keys=tuple(ADAPTER_REGISTRY),
+    )
+
+
 def _record_source_catalog_unavailable_audit(
     run_writer: IngestionRunSummaryWriter | None,
     *,
     adapter_keys: tuple[str, ...],
     run_at: datetime,
+    write_runtime_selection_revision: bool = True,
 ) -> None:
     try:
-        record_runtime_selection(
+        _write_runtime_selection_revision(
             run_writer,
             enabled_adapter_keys=adapter_keys,
-            known_adapter_keys=tuple(ADAPTER_REGISTRY),
+            enabled=write_runtime_selection_revision,
         )
         record_pipeline_status(
             run_writer,
