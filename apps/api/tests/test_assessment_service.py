@@ -253,6 +253,49 @@ def test_recent_context_is_ordered_after_current_and_before_historical(
     assert ordered.index(POLICE_CONTEXT_ID) < ordered.index(HISTORY_ID)
 
 
+def test_response_preview_is_not_crowded_out_by_dense_flood_sensors(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    flood_sensors = tuple(
+        _record(
+            f"00000000-0000-0000-0000-{index:012d}",
+            event_type="flood_report",
+            evidence_scope="current",
+            adapter_key="local.tainan.flood_sensor",
+        )
+        for index in range(1, 13)
+    )
+    water = _record(
+        "00000000-0000-0000-0000-000000000101",
+        event_type="water_level",
+        evidence_scope="current",
+        adapter_key="official.wra.water_level",
+    )
+    rainfall = _record(
+        "00000000-0000-0000-0000-000000000102",
+        event_type="rainfall",
+        evidence_scope="current",
+    )
+    crowded = replace(
+        data,
+        current_official=(*flood_sensors, water, rainfall),
+    )
+
+    response = AssessmentService(FakeRepository(crowded), score_risk).assess(
+        risk_request, now=now
+    )
+
+    assert len(response.evidence) == 10
+    assert {item.event_type for item in response.evidence} >= {
+        "flood_report",
+        "water_level",
+        "rainfall",
+        "flood_potential",
+    }
+
+
 def test_core_service_never_calls_a_community_composer() -> None:
     source = inspect.getsource(AssessmentService.assess)
     assert "compose_base_overall" in source

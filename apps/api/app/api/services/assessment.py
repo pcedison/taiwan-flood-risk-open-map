@@ -22,6 +22,7 @@ from app.api.services.public_evidence import (
     display_evidence_items,
     evidence_from_record,
     evidence_preview,
+    select_evidence_preview_items,
     signal_from_evidence,
 )
 from app.domain.assessment import (
@@ -128,7 +129,10 @@ class AssessmentService:
             ),
             confidence=ConfidenceBlock(level=overall.confidence),
             explanation=explanation,
-            evidence=[evidence_preview(item) for item in display_items[:10]],
+            evidence=[
+                evidence_preview(item)
+                for item in select_evidence_preview_items(display_items, limit=10)
+            ],
             data_freshness=data_freshness,
             query_heat=QueryHeat(
                 period="frozen",

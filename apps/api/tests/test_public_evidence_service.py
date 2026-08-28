@@ -102,3 +102,60 @@ def test_display_evidence_collapses_official_disaster_points_stably() -> None:
     assert reversed_collapsed[0].id == summary.id
     assert reversed_collapsed[0].source_id == summary.source_id
     assert reversed_collapsed[0].title == summary.title
+
+
+def test_preview_reserves_current_signal_families_and_historical_context() -> None:
+    observed_at = datetime(2026, 8, 29, tzinfo=UTC)
+    flood_sensors = [
+        public_evidence.evidence_from_record(
+            _record(
+                evidence_id=f"current-flood:{index}",
+                source_id=f"sensor:{index}",
+                event_type="flood_report",
+                occurred_at=observed_at,
+                observed_at=observed_at,
+                distance_to_query_m=float(index + 1),
+            )
+        ).model_copy(update={"evidence_scope": "current"})
+        for index in range(12)
+    ]
+    water = public_evidence.evidence_from_record(
+        _record(
+            evidence_id="current-water",
+            source_id="water:1",
+            event_type="water_level",
+            occurred_at=observed_at,
+            observed_at=observed_at,
+        )
+    ).model_copy(update={"evidence_scope": "current"})
+    rainfall = public_evidence.evidence_from_record(
+        _record(
+            evidence_id="current-rainfall",
+            source_id="rainfall:1",
+            event_type="rainfall",
+            occurred_at=observed_at,
+            observed_at=observed_at,
+        )
+    ).model_copy(update={"evidence_scope": "current"})
+    history = public_evidence.evidence_from_record(
+        _record(
+            evidence_id="history-flood",
+            source_id="history:1",
+            event_type="flood_report",
+            occurred_at=datetime(2020, 8, 1, tzinfo=UTC),
+        )
+    ).model_copy(update={"evidence_scope": "historical"})
+
+    preview = public_evidence.select_evidence_preview_items(
+        [*flood_sensors, water, rainfall, history],
+        limit=10,
+    )
+
+    assert len(preview) == 10
+    assert preview[:4] == [flood_sensors[0], water, rainfall, history]
+    assert {item.event_type for item in preview} >= {
+        "flood_report",
+        "water_level",
+        "rainfall",
+    }
+    assert any(item.evidence_scope == "historical" for item in preview)
