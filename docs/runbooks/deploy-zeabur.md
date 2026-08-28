@@ -87,7 +87,10 @@ official-ingestion scheduler that persists CWA/WRA, WRA IoW, NCDR CAP, and
 Civil IoT backbone snapshots to Postgres. The production beta start script
 forces this realtime backbone on when a database URL is present, so a legacy
 `HOSTED_INGESTION_SCHEDULER_ENABLED=false` value does not keep it disabled. Set
-`REALTIME_BACKBONE_INGESTION_DISABLED=true` only as the explicit kill switch.
+`REALTIME_BACKBONE_FORCE_INGESTION_ON_START=false` before using the legacy
+`REALTIME_BACKBONE_INGESTION_DISABLED=true` maintenance stop. Use
+`REALTIME_BACKBONE_EMERGENCY_STOP=true` for an unconditional current emergency
+stop; it always overrides force mode and must be removed after the incident.
 When a database URL is present, the start script applies unrecorded
 `infra/migrations/*.sql` files before launching API/Web; set
 `RUN_DATABASE_MIGRATIONS_ON_START=false` only if an operator is applying
@@ -159,7 +162,8 @@ Official ingestion scheduler for the single-service beta:
 | `HOSTED_INGESTION_SCHEDULER_ENABLED` | leave unset or `auto` | Starts the in-container managed ingestion loop when Postgres is attached; legacy `false` is overridden by `REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true`. |
 | `DATABASE_URL` | Zeabur Postgres URL | Required for persisted official evidence. |
 | `REALTIME_BACKBONE_FORCE_INGESTION_ON_START` | leave unset or `true` | Forces the realtime backbone on when DB is attached. |
-| `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Set `true` only as the explicit kill switch. |
+| `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Legacy maintenance stop; honored only when force mode is also `false`. |
+| `REALTIME_BACKBONE_EMERGENCY_STOP` | leave unset or `false` | Unconditional current emergency stop; always overrides force mode and must be removed after the incident. |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional override that replaces old `WORKER_ENABLED_ADAPTER_KEYS` values during forced backbone startup. |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
 | `MIGRATION_LOCK_TIMEOUT_MS` | leave unset or `10000` | Maximum PostgreSQL lock wait per migration statement, including contention with another startup runner. Increase only for a reviewed maintenance window. |

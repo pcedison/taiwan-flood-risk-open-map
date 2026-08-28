@@ -22,8 +22,10 @@ worker managed-ingestion path, persists official snapshots to Postgres,
 promotes them to evidence, and guards repeated runs with the Postgres scheduler
 lease. The production beta start script forces the realtime backbone on when a
 database URL is present, so legacy `HOSTED_INGESTION_SCHEDULER_ENABLED=false`
-does not keep the backbone disabled. Set
-`REALTIME_BACKBONE_INGESTION_DISABLED=true` as the explicit kill switch. A
+does not keep the backbone disabled. Force mode also retires a legacy
+`REALTIME_BACKBONE_INGESTION_DISABLED=true` maintenance stop. Set
+`REALTIME_BACKBONE_EMERGENCY_STOP=true` for an unconditional current emergency
+stop and remove it after the incident. A
 separate worker/scheduler topology is still the preferred production operating
 model once alerting, scaling, and incident ownership are accepted.
 
@@ -77,8 +79,9 @@ dedicated worker service exists. When
 `REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true`, the start script sets every
 reviewed backbone source gate to `true` even if Zeabur still contains a legacy
 explicit `false`. To control individual gates, first set force mode to `false`;
-`REALTIME_BACKBONE_INGESTION_DISABLED=true` remains the explicit all-source kill
-switch.
+the legacy `REALTIME_BACKBONE_INGESTION_DISABLED=true` value is also ignored
+while force mode is active. `REALTIME_BACKBONE_EMERGENCY_STOP=true` is the
+unconditional all-source emergency stop and always overrides force mode.
 
 | Variable | Zeabur value |
 |---|---|
@@ -86,7 +89,8 @@ switch.
 | `DATABASE_URL` | Zeabur Postgres connection URL |
 | `WORKER_DATABASE_URL` | Leave blank to reuse `DATABASE_URL`, or set the same Postgres URL |
 | `REALTIME_BACKBONE_FORCE_INGESTION_ON_START` | Leave unset or `true`; forces the adapter list and every reviewed source gate on when DB is attached, overriding legacy explicit `false` gate values |
-| `REALTIME_BACKBONE_INGESTION_DISABLED` | Leave unset or `false`; set `true` only as the explicit kill switch |
+| `REALTIME_BACKBONE_INGESTION_DISABLED` | Leave unset or `false`; this legacy maintenance stop is ignored while force mode is active |
+| `REALTIME_BACKBONE_EMERGENCY_STOP` | Leave unset or `false`; set `true` only for a current unconditional emergency stop, then remove it after the incident |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | Leave unset for the full backbone, or set the same full list below to override an old `WORKER_ENABLED_ADAPTER_KEYS` |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | Leave unset or `true`; use `false` only for an operator-managed migration window |
 | `MIGRATION_LOCK_TIMEOUT_MS` | Leave unset for the conservative `10000` ms PostgreSQL lock-wait limit |
@@ -129,7 +133,7 @@ the hosted public-risk evidence smoke lists failed required worker sources.
    blank or exactly the same database. Never copy either value into logs or an
    incident ticket.
 3. Set `REALTIME_BACKBONE_FORCE_INGESTION_ON_START=true`,
-   `REALTIME_BACKBONE_INGESTION_DISABLED=false`, and leave
+   `REALTIME_BACKBONE_EMERGENCY_STOP=false`, and leave
    `HOSTED_INGESTION_SCHEDULER_ENABLED` unset or `auto`.
 4. Remove `SCHEDULER_MAX_TICKS`, set `SCHEDULER_INTERVAL_SECONDS=300`, and set
    `SCHEDULER_LEASE_TTL_SECONDS=600`.
