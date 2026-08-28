@@ -171,3 +171,11 @@ is configured. It records the feed's one-minute refresh cadence and keeps the me
 datastore/dump endpoints as optional compatibility metadata. The migration
 does not enable a source, change warning geometry approval, or weaken the
 audit-only promotion policy.
+
+`0045_current_snapshot_staging_lookup_index.sql` adds the partial staging index
+used by managed ingestion after it resolves the current raw snapshot by the
+snapshot's unique `raw_ref`. This prevents a current WRA or Civil IoT cycle from
+scanning all historical accepted staging rows before promotion. The worker's
+unscoped maintenance path retains orphan-staging compatibility; the migration
+changes no staging status, evidence row, source gate, scoring rule, or public
+response contract.
