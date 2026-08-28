@@ -23,6 +23,23 @@ DEFAULT_PROMOTION_STATEMENT_TIMEOUT_MS = 30_000
 REVIEWED_WARNING_ADAPTER_KEYS = frozenset(
     {"official.cwa.heavy_rain_warning", "official.ncdr.cap"}
 )
+REVIEWED_OFFICIAL_REALTIME_ADAPTER_EVENTS = frozenset(
+    {
+        ("official.cwa.rainfall", "rainfall"),
+        ("official.cwa.tide_level", "water_level"),
+        ("official.wra.water_level", "water_level"),
+        ("official.wra_iow.flood_depth", "flood_report"),
+        ("official.civil_iot.flood_sensor", "flood_report"),
+        ("official.civil_iot.river_water_level", "water_level"),
+        ("official.civil_iot.pond_water_level", "water_level"),
+        ("official.civil_iot.sewer_water_level", "water_level"),
+        ("official.civil_iot.pump_water_level", "water_level"),
+        ("official.civil_iot.gate_water_level", "water_level"),
+        ("local.tainan.flood_sensor", "flood_report"),
+        ("official.cwa.heavy_rain_warning", "flood_warning"),
+        ("official.ncdr.cap", "flood_warning"),
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -2000,14 +2017,10 @@ def _should_upsert_official_realtime_latest(payload: EvidencePromotionPayload) -
         return False
     if payload.properties.get("evidence_scope") != "current":
         return False
-    if (payload.adapter_key, payload.event_type) not in {
-        ("official.cwa.rainfall", "rainfall"),
-        ("official.wra.water_level", "water_level"),
-        ("official.wra_iow.flood_depth", "flood_report"),
-        ("local.tainan.flood_sensor", "flood_report"),
-        ("official.cwa.heavy_rain_warning", "flood_warning"),
-        ("official.ncdr.cap", "flood_warning"),
-    }:
+    if (
+        payload.adapter_key,
+        payload.event_type,
+    ) not in REVIEWED_OFFICIAL_REALTIME_ADAPTER_EVENTS:
         return False
     return payload.observed_at is not None
 
@@ -2107,14 +2120,7 @@ def _is_reviewed_current_candidate(payload: EvidencePromotionPayload) -> bool:
         payload.source_type == "official"
         and payload.properties.get("evidence_scope") == "current"
         and (payload.adapter_key, payload.event_type)
-        in {
-            ("official.cwa.rainfall", "rainfall"),
-            ("official.wra.water_level", "water_level"),
-            ("official.wra_iow.flood_depth", "flood_report"),
-            ("local.tainan.flood_sensor", "flood_report"),
-            ("official.cwa.heavy_rain_warning", "flood_warning"),
-            ("official.ncdr.cap", "flood_warning"),
-        }
+        in REVIEWED_OFFICIAL_REALTIME_ADAPTER_EVENTS
     )
 
 

@@ -307,6 +307,7 @@ def _normalize(
 
 def _raw_payload_with_water_level_metric(record: Mapping[str, Any]) -> Mapping[str, Any]:
     payload = dict(record)
+    payload["evidence_scope"] = "current"
     water_level_m = optional_float(payload.get("water_level_m"))
     if water_level_m is None:
         water_level_m = optional_float(payload.get("value"))

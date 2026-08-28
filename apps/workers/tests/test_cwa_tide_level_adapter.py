@@ -79,6 +79,7 @@ def test_cwa_tide_level_api_adapter_joins_matsu_station_metadata() -> None:
     assert raw.payload["town"] == "Nangan Township"
     assert raw.payload["water_level_m"] == 2.16
     assert raw.payload["station_type"] == "tide_level"
+    assert raw.payload["evidence_scope"] == "current"
     assert raw.payload["geometry"] == {
         "type": "Point",
         "coordinates": [119.9428, 26.1617],

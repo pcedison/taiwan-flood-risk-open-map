@@ -154,6 +154,7 @@ def test_hosted_source_freshness_smoke_writes_partial_evidence(
             "lag_seconds": 600,
             "latest_observed_at": "2026-06-30T04:50:00Z",
             "latest_ingested_at": "2026-06-30T04:56:00Z",
+            "upstream_status": "succeeded",
             "enabled_gates": ["data_sources.is_enabled", "SOURCE_CWA_API_ENABLED"],
         },
         {
@@ -164,6 +165,7 @@ def test_hosted_source_freshness_smoke_writes_partial_evidence(
             "lag_seconds": 1400,
             "latest_observed_at": "2026-06-30T04:40:00Z",
             "latest_ingested_at": "2026-06-30T04:56:00Z",
+            "upstream_status": "succeeded",
             "enabled_gates": ["data_sources.is_enabled", "SOURCE_WRA_API_ENABLED"],
         },
     ]
@@ -237,6 +239,18 @@ def test_check_sources_rejects_missing_or_stale_required_source() -> None:
     assert "required source missing.adapter was not returned by /admin/v1/sources" in failures
 
 
+def test_check_sources_accepts_fresh_empty_ncdr_event_feed() -> None:
+    source = _source_payload("official.ncdr.cap", row_count=0, lag_seconds=None)
+    source["latest_observed_at"] = None
+
+    failures = smoke.check_sources(
+        {"sources": [source]},
+        required_adapter_keys=("official.ncdr.cap",),
+    )
+
+    assert failures == []
+
+
 def _sources_payload() -> dict:
     return {
         "sources": [
@@ -265,8 +279,8 @@ def _source_payload(
     health_status: str = "healthy",
     freshness_state: str = "fresh",
     row_count: int = 5,
-    lag_seconds: int = 600,
-    observed_at: str = "2026-06-30T04:50:00Z",
+    lag_seconds: int | None = 600,
+    observed_at: str | None = "2026-06-30T04:50:00Z",
     enabled_gates: list[str] | None = None,
 ) -> dict:
     return {
