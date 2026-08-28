@@ -15,7 +15,11 @@ import pytest
 from app.adapters.cap_identity import cap_message_digest
 from app.jobs.ingestion import AdapterBatchRunSummary
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
-from app.pipelines.promotion import EvidencePromotionPayload, PostgresEvidencePromotionWriter
+from app.pipelines.promotion import (
+    EvidencePromotionPayload,
+    PostgresEvidencePromotionWriter,
+    promote_accepted_staging,
+)
 
 DATABASE_URL_ENV = "PROMOTION_TEST_DATABASE_URL"
 REQUIRED_ENV = "OFFICIAL_DB_ACCEPTANCE_REQUIRED"
@@ -41,6 +45,40 @@ def database_url() -> str:
             pytest.fail(f"required PostGIS database is unreachable: {exc}")
         pytest.skip(f"PostGIS database is unreachable: {exc}")
     return url
+
+
+def test_postgres_batch_uses_bounded_connections_for_1311_candidates(
+    database_url: str,
+) -> None:
+    import psycopg
+
+    suffix = uuid4().hex
+    fixtures = _insert_staging_candidates(database_url, suffix, 1_311)
+    connection_count = 0
+
+    def connect() -> Any:
+        nonlocal connection_count
+        connection_count += 1
+        return psycopg.connect(database_url, connect_timeout=10)
+
+    writer = PostgresEvidencePromotionWriter(connection_factory=connect)
+    started_at = monotonic()
+    try:
+        result = promote_accepted_staging(
+            writer,
+            adapter_keys=("official.wra.water_level",),
+            raw_refs=tuple(fixture["raw_ref"] for fixture in fixtures),
+        )
+        elapsed_seconds = monotonic() - started_at
+
+        assert result.promoted == 1_311
+        assert connection_count <= 15
+        print(
+            "promotion_1311 "
+            f"elapsed_seconds={elapsed_seconds:.3f} connections={connection_count}"
+        )
+    finally:
+        _cleanup_race(database_url, suffix, f"unused-{suffix}", fixtures)
 
 
 def test_complete_replace_marker_preserves_lkg_across_failure_and_older_runs(

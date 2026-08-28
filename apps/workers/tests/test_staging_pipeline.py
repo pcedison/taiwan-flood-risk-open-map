@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -708,6 +709,110 @@ def test_persist_staging_batch_uses_writer_protocol() -> None:
     assert writer.batches == [batch]
 
 
+def test_promote_uses_batch_writer_in_chunks_of_one_hundred() -> None:
+    writer = _BatchSyntheticPromotionWriter(_synthetic_promotion_candidates(201))
+
+    result = promote_accepted_staging(writer)
+
+    assert tuple(len(batch) for batch in writer.batches) == (100, 100, 1)
+    assert writer.single_write_calls == 0
+    assert result.promoted == 201
+
+
+def test_promote_keeps_legacy_single_write_writer_compatible() -> None:
+    writer = _SyntheticPromotionWriter(_synthetic_promotion_candidates(3))
+
+    result = promote_accepted_staging(writer)
+
+    assert [payload.source_id for payload in writer.payloads] == [
+        "synthetic-0",
+        "synthetic-1",
+        "synthetic-2",
+    ]
+    assert result.evidence_ids == ("evidence-1", "evidence-2", "evidence-3")
+
+
+def test_promote_keeps_duplicate_suppression_across_chunk_boundaries() -> None:
+    unique = _synthetic_promotion_candidates(101)
+    writer = _BatchSyntheticPromotionWriter((*unique[:100], unique[0], unique[100]))
+
+    result = promote_accepted_staging(writer)
+
+    assert tuple(len(batch) for batch in writer.batches) == (100, 1)
+    assert result.promoted == 101
+    assert [
+        payload.source_id for batch in writer.batches for payload in batch
+    ].count("synthetic-0") == 1
+
+
+def test_promote_preserves_none_results_and_evidence_id_order() -> None:
+    writer = _BatchSyntheticPromotionWriter(
+        _synthetic_promotion_candidates(4),
+        terminal_source_ids={"synthetic-1", "synthetic-3"},
+    )
+
+    result = promote_accepted_staging(writer)
+
+    assert result.promoted == 2
+    assert result.evidence_ids == ("evidence-synthetic-0", "evidence-synthetic-2")
+
+
+def test_promotion_lifecycle_logs_are_public_safe(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    writer = _BatchSyntheticPromotionWriter(_synthetic_promotion_candidates(2))
+
+    promote_accepted_staging(
+        writer,
+        adapter_keys=("official.cwa.rainfall",),
+        raw_refs=("raw/private/current.json",),
+    )
+
+    captured = capsys.readouterr().out
+    events = tuple(json.loads(line) for line in captured.splitlines())
+    assert [event["event"] for event in events] == [
+        "worker.promotion.started",
+        "worker.promotion.chunk_completed",
+        "worker.promotion.completed",
+    ]
+    assert events[0]["adapter_count"] == 1
+    assert events[0]["raw_ref_count"] == 1
+    assert events[0]["candidate_count"] == 2
+    assert events[0]["chunk_count"] == 1
+    assert events[1]["chunk_index"] == 1
+    assert events[1]["promoted_count"] == 2
+    assert set(events[2]) == {
+        "event",
+        "timestamp",
+        "candidate_count",
+        "promoted_count",
+        "elapsed_ms",
+    }
+    assert "raw/private" not in captured
+
+
+def test_promotion_failure_log_uses_only_exception_class(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    writer = _FailingBatchSyntheticPromotionWriter(_synthetic_promotion_candidates(1))
+
+    with pytest.raises(RuntimeError, match="postgresql"):
+        promote_accepted_staging(writer)
+
+    events = tuple(json.loads(line) for line in capsys.readouterr().out.splitlines())
+    failed = events[-1]
+    assert failed["event"] == "worker.promotion.failed"
+    assert failed["exception_class"] == "RuntimeError"
+    assert set(failed) == {
+        "event",
+        "timestamp",
+        "chunk_index",
+        "exception_class",
+        "elapsed_ms",
+    }
+    assert "postgresql://operator:secret" not in json.dumps(events)
+
+
 class _MemoryWriter:
     def __init__(self) -> None:
         self.batches: list[AdapterStagingBatch] = []
@@ -726,13 +831,75 @@ class _SyntheticPromotionWriter:
         *,
         limit: int | None = None,
         adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
-        del limit, adapter_keys
+        del limit, adapter_keys, raw_refs
         return self.candidates
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str:
         self.payloads.append(payload)
         return f"evidence-{len(self.payloads)}"
+
+
+class _BatchSyntheticPromotionWriter(_SyntheticPromotionWriter):
+    def __init__(
+        self,
+        candidates: tuple[PromotionCandidate, ...],
+        *,
+        terminal_source_ids: set[str] | None = None,
+    ) -> None:
+        super().__init__(candidates)
+        self.terminal_source_ids = terminal_source_ids or set()
+        self.batches: list[tuple[EvidencePromotionPayload, ...]] = []
+        self.single_write_calls = 0
+
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str:
+        self.single_write_calls += 1
+        raise AssertionError(f"single writer called for {payload.source_id}")
+
+    def write_evidence_batch(
+        self,
+        payloads: tuple[EvidencePromotionPayload, ...],
+    ) -> tuple[str | None, ...]:
+        self.batches.append(payloads)
+        return tuple(
+            None
+            if payload.source_id in self.terminal_source_ids
+            else f"evidence-{payload.source_id}"
+            for payload in payloads
+        )
+
+
+class _FailingBatchSyntheticPromotionWriter(_BatchSyntheticPromotionWriter):
+    def write_evidence_batch(
+        self,
+        payloads: tuple[EvidencePromotionPayload, ...],
+    ) -> tuple[str | None, ...]:
+        del payloads
+        raise RuntimeError("postgresql://operator:secret@example.test/flood")
+
+
+def _synthetic_promotion_candidates(count: int) -> tuple[PromotionCandidate, ...]:
+    return tuple(
+        PromotionCandidate(
+            staging_evidence_id=f"staging-{index}",
+            raw_snapshot_id=f"snapshot-{index}",
+            raw_ref=f"raw/synthetic/{index}.json",
+            data_source_id="data-source-id",
+            source_id=f"synthetic-{index}",
+            source_type="official",
+            event_type="rainfall",
+            title=f"Synthetic candidate {index}",
+            summary="Synthetic bounded promotion candidate.",
+            url=None,
+            occurred_at=FETCHED_AT,
+            observed_at=FETCHED_AT,
+            confidence=0.9,
+            validation_status="accepted",
+            payload={"adapter_key": "official.cwa.rainfall"},
+        )
+        for index in range(count)
+    )
 
 
 def _complete_replace_result(

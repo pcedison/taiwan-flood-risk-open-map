@@ -2089,6 +2089,85 @@ def test_postgres_promotion_writer_filters_by_adapter_raw_ref_and_limit() -> Non
     )
 
 
+def test_postgres_batch_reuses_one_connection_for_the_chunk() -> None:
+    connections: list[_FakeConnection] = []
+
+    def connect() -> _FakeConnection:
+        connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+        connections.append(connection)
+        return connection
+
+    writer = PostgresEvidencePromotionWriter(connection_factory=connect)
+
+    result = writer.write_evidence_batch(_batch_payloads(3))
+
+    assert result == ("evidence-id", "evidence-id", "evidence-id")
+    assert len(connections) == 1
+
+
+def test_postgres_batch_commits_every_candidate() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    writer.write_evidence_batch(_batch_payloads(3))
+
+    assert connection.commit_count == 3
+    assert connection.rollback_count == 0
+
+
+def test_postgres_batch_rolls_back_the_failed_candidate() -> None:
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        fail_timeout_on_call=2,
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    with pytest.raises(_QueryCanceled, match="private database detail"):
+        writer.write_evidence_batch(_batch_payloads(3))
+
+    assert connection.commit_count == 1
+    assert connection.rollback_count == 1
+    assert connection.cursor_instance.timeout_setup_count == 2
+
+
+def test_postgres_batch_sets_lock_and_statement_timeouts_per_candidate() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    writer.write_evidence_batch(_batch_payloads(3))
+
+    assert connection.cursor_instance.timeout_executions == [
+        ("5000ms", "30000ms"),
+        ("5000ms", "30000ms"),
+        ("5000ms", "30000ms"),
+    ]
+
+
+def test_postgres_connect_uses_ten_second_connect_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import psycopg
+
+    captured: dict[str, object] = {}
+    sentinel = object()
+
+    def connect(database_url: str, **kwargs: object) -> object:
+        captured["database_url"] = database_url
+        captured["kwargs"] = kwargs
+        return sentinel
+
+    monkeypatch.setattr(psycopg, "connect", connect)
+    writer = PostgresEvidencePromotionWriter(
+        database_url="postgresql://operator:private@example.test/flood"
+    )
+
+    connection = writer._connect()
+
+    assert connection is sentinel
+    assert captured["kwargs"] == {"connect_timeout": 10}
+
+
 def test_postgres_promotion_writer_requires_database_url_or_connection_factory() -> None:
     try:
         PostgresEvidencePromotionWriter()
@@ -2126,6 +2205,19 @@ def _candidate(
             "adapter_key": "news.public_web.sample",
             "location_text": "Riverside District",
         },
+    )
+
+
+def _batch_payloads(count: int) -> tuple[EvidencePromotionPayload, ...]:
+    return tuple(
+        build_evidence_promotion_payload(
+            _candidate(
+                staging_evidence_id=f"00000000-0000-4000-8000-{index:012d}",
+                raw_ref=f"raw/news-public-web/{index}.json",
+                source_id=f"sample-news-{index}",
+            )
+        )
+        for index in range(count)
     )
 
 
@@ -2226,6 +2318,10 @@ def _cap_payload(
     )
 
 
+class _QueryCanceled(RuntimeError):
+    pass
+
+
 class _MemoryPromotionWriter:
     def __init__(
         self,
@@ -2278,6 +2374,7 @@ class _FakeConnection:
         cap_identity_exists: bool = False,
         explicit_geometry_valid: bool = True,
         max_no_active_generation: datetime | None = None,
+        fail_timeout_on_call: int | None = None,
     ) -> None:
         self.cursor_instance = _FakeCursor(
             rows=rows,
@@ -2295,8 +2392,11 @@ class _FakeConnection:
             cap_identity_exists=cap_identity_exists,
             explicit_geometry_valid=explicit_geometry_valid,
             max_no_active_generation=max_no_active_generation,
+            fail_timeout_on_call=fail_timeout_on_call,
         )
         self.committed = False
+        self.commit_count = 0
+        self.rollback_count = 0
 
     def __enter__(self) -> Self:
         return self
@@ -2309,6 +2409,10 @@ class _FakeConnection:
 
     def commit(self) -> None:
         self.committed = True
+        self.commit_count += 1
+
+    def rollback(self) -> None:
+        self.rollback_count += 1
 
 
 class _FakeCursor:
@@ -2330,6 +2434,7 @@ class _FakeCursor:
         cap_identity_exists: bool,
         explicit_geometry_valid: bool,
         max_no_active_generation: datetime | None,
+        fail_timeout_on_call: int | None,
     ) -> None:
         self._rows = tuple(rows)
         self._evidence_id = evidence_id
@@ -2340,7 +2445,10 @@ class _FakeCursor:
         self._cap_identity_exists = cap_identity_exists
         self._explicit_geometry_valid = explicit_geometry_valid
         self._max_no_active_generation = max_no_active_generation
+        self._fail_timeout_on_call = fail_timeout_on_call
         self.executions: list[tuple[str, tuple[object, ...]]] = []
+        self.timeout_executions: list[tuple[str, str]] = []
+        self.timeout_setup_count = 0
         self._existing_latest_observed_at = existing_latest_observed_at
         self._existing_latest_row = existing_latest_row
         self._same_staging_used = same_staging_used
@@ -2359,6 +2467,12 @@ class _FakeCursor:
         return None
 
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        if "set_config('lock_timeout'" in sql:
+            self.timeout_setup_count += 1
+            self.timeout_executions.append((str(params[0]), str(params[1])))
+            if self.timeout_setup_count == self._fail_timeout_on_call:
+                raise _QueryCanceled("private database detail")
+            return
         self.executions.append((sql, params))
         if "UPDATE staging_evidence" in sql:
             self.terminal_rejections.append((str(params[1]), str(params[0])))
