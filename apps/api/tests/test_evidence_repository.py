@@ -166,6 +166,8 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert (
         sql.count("e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'") == 3
     )
+    assert "ds.adapter_key = 'local.tainan.flood_sensor'" in sql
+    assert "e.title LIKE '%%(停用)%%'" in sql
     # Without relevance arguments the realtime relevance collapses to the radius.
     assert params == (
         121.5654,
@@ -764,6 +766,23 @@ def test_yilan_mobile_pump_migration_registers_source_and_jurisdiction() -> None
     assert "SOURCE_YILAN_MOBILE_PUMP_STATUS" not in migration
 
 
+def test_inactive_tainan_station_migration_retires_public_rows_but_keeps_audit() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    migration = (
+        repository_root
+        / "infra"
+        / "migrations"
+        / "0043_retire_inactive_tainan_stations.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "DELETE FROM official_realtime_latest" in migration
+    assert "UPDATE evidence" in migration
+    assert "ingestion_status = 'rejected'" in migration
+    assert "local.tainan.flood_sensor" in migration
+    assert "official_source_marked_disabled" in migration
+    assert "e.title LIKE '%(停用)%'" in migration
+
+
 def test_query_realtime_source_health_rows_keeps_newer_skipped_job_authoritative() -> None:
     connection = _FakeConnection(
         rows=[
@@ -925,6 +944,9 @@ def test_query_nearby_latest_official_uses_selected_radius() -> None:
     assert "jsonb_typeof(ranked.evidence_limitations) = 'array'" in sql
     assert "e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'" in sql
     assert "e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'" in sql
+    assert "e.ingestion_status = 'accepted'" in sql
+    assert "latest.adapter_key = 'local.tainan.flood_sensor'" in sql
+    assert "e.title LIKE '%%(停用)%%'" in sql
     assert params == (
         121.5654,
         25.033,

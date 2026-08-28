@@ -437,6 +437,8 @@ _STAGING_PAYLOAD_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "authority",
     "station_type",
     "station_attribute",
+    "realtime_station_enabled",
+    "metadata_station_enabled",
     "alarm_state",
     "status_only",
     "source_url",

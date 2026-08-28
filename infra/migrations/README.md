@@ -154,3 +154,13 @@ by per-candidate promotion idempotency checks. Without it, each accepted staging
 row scans the growing public `evidence` table for its `staging_evidence_id`,
 which can delay ingestion and contend with public risk requests. The migration
 changes no evidence rows, source gates, scoring rule, or public response shape.
+
+`0043_retire_inactive_tainan_stations.sql` repairs Tainan sensor observations
+written before the worker persisted the official realtime/metadata `IsEnabled`
+flags. It removes matching rows from `official_realtime_latest` and preserves
+their audit evidence as `rejected` with a public-safe lifecycle reason. The
+worker handles later active-to-inactive transitions through authenticated
+staging tombstones. A stale realtime tombstone cannot replace a newer active
+observation, while the separately fetched current metadata can retire the row
+immediately. This migration is only a backward-data repair; it does not delete
+audit history or change any source gate.

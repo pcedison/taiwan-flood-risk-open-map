@@ -433,6 +433,10 @@ def query_nearby_evidence(
                     AND e.geom IS NOT NULL
                     AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
                     AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
+                    AND NOT (
+                        ds.adapter_key = 'local.tainan.flood_sensor'
+                        AND e.title LIKE '%%(停用)%%'
+                    )
                     AND (
                         ds.adapter_key <> 'official.wra.historical_flood'
                         OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
@@ -960,8 +964,13 @@ def query_nearby_latest_official(
                     'flood_warning'
                 )
                 AND e.properties->>'evidence_scope' = 'current'
+                AND e.ingestion_status = 'accepted'
                 AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
                 AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
+                AND NOT (
+                    latest.adapter_key = 'local.tainan.flood_sensor'
+                    AND e.title LIKE '%%(停用)%%'
+                )
                 AND COALESCE(e.geom, latest.geom) IS NOT NULL
                 AND NOT ST_IsEmpty(COALESCE(e.geom, latest.geom))
                 AND ST_IsValid(COALESCE(e.geom, latest.geom))

@@ -859,6 +859,113 @@ def test_live_central_local_negative_controls_keep_both_latest_rows(
         _cleanup_depth_race(database_url, suffix, central, local)
 
 
+def test_live_inactive_tainan_tombstone_retires_existing_latest(
+    database_url: str,
+) -> None:
+    import psycopg
+
+    suffix = uuid4().hex
+    station_id = f"TN-INACTIVE-{suffix}"
+    active = _depth_payload(
+        suffix=suffix,
+        adapter_key="local.tainan.flood_sensor",
+        station_id=station_id,
+        observed_at=NOW,
+        value=0.0,
+        longitude=120.2195,
+        latitude=22.9160,
+    )
+    inactive = _depth_payload(
+        suffix=f"{suffix}-inactive",
+        adapter_key="local.tainan.flood_sensor",
+        station_id=station_id,
+        observed_at=NOW - timedelta(minutes=1),
+        value=0.0,
+        longitude=120.2195,
+        latitude=22.9160,
+    )
+    inactive.properties["realtime_station_enabled"] = False
+    inactive.properties["metadata_station_enabled"] = True
+    inactive, staging_fixture = _insert_staged_payload(database_url, inactive)
+    metadata_inactive = _depth_payload(
+        suffix=f"{suffix}-metadata-inactive",
+        adapter_key="local.tainan.flood_sensor",
+        station_id=station_id,
+        observed_at=NOW - timedelta(minutes=2),
+        value=0.0,
+        longitude=120.2195,
+        latitude=22.9160,
+    )
+    metadata_inactive.properties["realtime_station_enabled"] = True
+    metadata_inactive.properties["metadata_station_enabled"] = False
+    metadata_inactive, metadata_staging_fixture = _insert_staged_payload(
+        database_url,
+        metadata_inactive,
+    )
+    writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    try:
+        assert writer.write_evidence(active) is not None
+        assert writer.write_evidence(inactive) is None
+
+        with psycopg.connect(database_url) as connection:
+            latest_before_metadata_retirement = connection.execute(
+                """
+                SELECT count(*)
+                FROM official_realtime_latest
+                WHERE adapter_key = 'local.tainan.flood_sensor'
+                    AND event_type = 'flood_report'
+                    AND station_id = %s
+                """,
+                (station_id,),
+            ).fetchone()
+        assert latest_before_metadata_retirement == (1,)
+
+        assert writer.write_evidence(metadata_inactive) is None
+
+        with psycopg.connect(database_url) as connection:
+            latest_count = connection.execute(
+                """
+                SELECT count(*)
+                FROM official_realtime_latest
+                WHERE adapter_key = 'local.tainan.flood_sensor'
+                    AND event_type = 'flood_report'
+                    AND station_id = %s
+                """,
+                (station_id,),
+            ).fetchone()
+            staging_state = connection.execute(
+                """
+                SELECT validation_status, rejection_reason
+                FROM staging_evidence
+                WHERE id = %s::uuid
+                """,
+                (staging_fixture["staging_id"],),
+            ).fetchone()
+            metadata_staging_state = connection.execute(
+                """
+                SELECT validation_status, rejection_reason
+                FROM staging_evidence
+                WHERE id = %s::uuid
+                """,
+                (metadata_staging_fixture["staging_id"],),
+            ).fetchone()
+        assert latest_count == (0,)
+        assert staging_state == ("rejected", "inactive_station")
+        assert metadata_staging_state == ("rejected", "inactive_station")
+    finally:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                "DELETE FROM official_realtime_latest WHERE station_id = %s",
+                (station_id,),
+            )
+            connection.execute(
+                "DELETE FROM evidence WHERE source_id LIKE %s",
+                (f"task8-depth-{suffix}-%",),
+            )
+        _cleanup_staged_payload(database_url, staging_fixture)
+        _cleanup_staged_payload(database_url, metadata_staging_fixture)
+
+
 def test_reviewed_snapshot_resolves_real_multipolygon_and_point_on_surface(
     database_url: str,
 ) -> None:

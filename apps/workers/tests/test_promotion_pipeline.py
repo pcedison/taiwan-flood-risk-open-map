@@ -690,6 +690,64 @@ def test_current_observation_beyond_worker_generation_future_skew_is_terminal() 
     )
 
 
+@pytest.mark.parametrize(
+    "inactive_field",
+    ["realtime_station_enabled", "metadata_station_enabled"],
+)
+def test_inactive_tainan_station_retires_latest_and_terminally_rejects_tombstone(
+    inactive_field: str,
+) -> None:
+    staging_id = "34343434-3434-4434-8434-343434343434"
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    base = _reviewed_realtime_payload()
+    properties = {
+        **base.properties,
+        "adapter_key": "local.tainan.flood_sensor",
+        "station_id": "TAINAN-001",
+        "flood_depth_cm": 0.0,
+        "staging_evidence_id": staging_id,
+        "raw_snapshot_id": "56565656-5656-4656-8656-565656565656",
+        "realtime_station_enabled": True,
+        "metadata_station_enabled": True,
+        inactive_field: False,
+    }
+    payload = EvidencePromotionPayload(
+        **{
+            **base.__dict__,
+            "adapter_key": "local.tainan.flood_sensor",
+            "event_type": "flood_report",
+            "properties": properties,
+        }
+    )
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "inactive_station")
+    ]
+    statements = [statement for statement, _params in connection.cursor_instance.executions]
+    retire_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if "/* retire-inactive-station-latest */" in statement
+    )
+    lock_index = next(
+        index for index, statement in enumerate(statements) if "pg_advisory_xact_lock" in statement
+    )
+    assert lock_index < retire_index
+    assert connection.cursor_instance.executions[retire_index][1] == (
+        "local.tainan.flood_sensor",
+        "flood_report",
+        "TAINAN-001",
+        inactive_field == "metadata_station_enabled",
+        payload.observed_at,
+    )
+    assert not any("INSERT INTO evidence" in statement for statement in statements)
+    assert connection.committed is True
+
+
 @pytest.mark.parametrize("naive_field", ["observed_at", "occurred_at"])
 def test_naive_current_observation_timestamp_is_terminal(naive_field: str) -> None:
     staging_id = "12121212-1212-4212-8212-121212121212"
