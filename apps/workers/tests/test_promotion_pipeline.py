@@ -2194,12 +2194,26 @@ def test_postgres_promotion_writer_filters_by_adapter_raw_ref_and_limit() -> Non
 
     assert candidates == ()
     select_sql, select_params = connection.cursor_instance.executions[0]
+    assert "FROM raw_snapshots rs" in select_sql
+    assert "JOIN staging_evidence se ON se.raw_snapshot_id = rs.id" in select_sql
+    assert "LEFT JOIN raw_snapshots" not in select_sql
     assert "rs.raw_ref = ANY(%s)" in select_sql
     assert select_params == (
         ["official.cwa.rainfall"],
         ["raw/current-cwa.json"],
         5,
     )
+
+
+def test_postgres_unscoped_promotion_keeps_orphan_staging_compatibility() -> None:
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    assert writer.fetch_accepted_staging(limit=1) == ()
+
+    select_sql, _ = connection.cursor_instance.executions[0]
+    assert "FROM staging_evidence se" in select_sql
+    assert "LEFT JOIN raw_snapshots rs ON rs.id = se.raw_snapshot_id" in select_sql
 
 
 def test_postgres_batch_reuses_one_connection_for_the_chunk() -> None:

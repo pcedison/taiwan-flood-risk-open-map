@@ -1376,6 +1376,13 @@ def _accepted_staging_sql(
     adapter_keys: tuple[str, ...] | None,
     raw_refs: tuple[str, ...] | None,
 ) -> str:
+    staging_source = (
+        """FROM raw_snapshots rs
+        JOIN staging_evidence se ON se.raw_snapshot_id = rs.id"""
+        if raw_refs is not None
+        else """FROM staging_evidence se
+        LEFT JOIN raw_snapshots rs ON rs.id = se.raw_snapshot_id"""
+    )
     adapter_filter = (
         "AND COALESCE(se.payload ->> 'adapter_key', rs.adapter_key) = ANY(%s)"
         if adapter_keys is not None
@@ -1400,8 +1407,7 @@ def _accepted_staging_sql(
             se.confidence,
             se.validation_status,
             se.payload
-        FROM staging_evidence se
-        LEFT JOIN raw_snapshots rs ON rs.id = se.raw_snapshot_id
+        {staging_source}
         LEFT JOIN data_sources ds ON ds.adapter_key = COALESCE(se.payload ->> 'adapter_key', rs.adapter_key)
         WHERE se.validation_status = 'accepted'
             {adapter_filter}
