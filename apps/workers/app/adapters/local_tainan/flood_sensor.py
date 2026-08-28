@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import json
+import re
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
@@ -30,6 +32,14 @@ TAINAN_FLOOD_SENSOR_API_URL = (
 TAINAN_FLOOD_SENSOR_METADATA_API_URL = (
     "https://soa.tainan.gov.tw/Api/Service/Get/cdc1ead4-d56a-4092-8e1c-e1f2fa9ee864"
 )
+TAINAN_FLOOD_SENSOR_PREVIEW_URL = (
+    "https://data.tainan.gov.tw/Resource/"
+    "21b31a27-3e61-48b8-8259-83c2001bec8c?handler=GoJson"
+)
+TAINAN_FLOOD_SENSOR_METADATA_PREVIEW_URL = (
+    "https://data.tainan.gov.tw/Resource/"
+    "cdc1ead4-d56a-4092-8e1c-e1f2fa9ee864?handler=GoJson"
+)
 TAINAN_FLOOD_SENSOR_ATTRIBUTION = "臺南市政府水利局 / 臺南市政府資料開放平台"
 # The realtime payload is roughly 90 KiB. Local requests regularly need 7-8
 # seconds, while production hosted egress has exceeded 20 seconds. Keep this as
@@ -38,6 +48,10 @@ TAINAN_FLOOD_SENSOR_ATTRIBUTION = "臺南市政府水利局 / 臺南市政府資
 DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS = 45
 TAINAN_FLOOD_SENSOR_READ_CHUNK_BYTES = 16 * 1024
 TAINAN_FLOOD_SENSOR_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+TAINAN_JSON_PREVIEW_PATTERN = re.compile(
+    rb'<pre\b[^>]*v-show="sourceType\s*===\s*type\.json"[^>]*>(.*?)</pre>',
+    re.IGNORECASE | re.DOTALL,
+)
 TAINAN_LOCAL_TZ = timezone(timedelta(hours=8))
 
 TAINAN_FLOOD_SENSOR_METADATA = AdapterMetadata(
@@ -103,14 +117,21 @@ class TainanFloodSensorApiAdapter:
         *,
         api_url: str | None = None,
         metadata_api_url: str | None = None,
+        preview_url: str | None = None,
+        metadata_preview_url: str | None = None,
         timeout_seconds: int = DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
         fetched_at: datetime | None = None,
         fetch_json: FetchJson | None = None,
+        preview_fetch_json: FetchJson | None = None,
         raw_snapshot_key: str | None = None,
     ) -> None:
         self._api_url = (api_url or TAINAN_FLOOD_SENSOR_API_URL).strip()
         self._metadata_api_url = (
             metadata_api_url or TAINAN_FLOOD_SENSOR_METADATA_API_URL
+        ).strip()
+        self._preview_url = (preview_url or TAINAN_FLOOD_SENSOR_PREVIEW_URL).strip()
+        self._metadata_preview_url = (
+            metadata_preview_url or TAINAN_FLOOD_SENSOR_METADATA_PREVIEW_URL
         ).strip()
         self._timeout_seconds = max(
             DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
@@ -118,12 +139,19 @@ class TainanFloodSensorApiAdapter:
         )
         self._fetched_at = fetched_at
         self._fetch_json = fetch_json or fetch_tainan_json
+        self._preview_fetch_json = preview_fetch_json or fetch_tainan_preview_json
         self._raw_snapshot_key = raw_snapshot_key
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         try:
-            metadata_payload = self._fetch_json(self._metadata_api_url, self._timeout_seconds)
-            realtime_payload = self._fetch_json(self._api_url, self._timeout_seconds)
+            metadata_payload, metadata_resource_url = self._fetch_with_official_preview(
+                self._metadata_api_url,
+                self._metadata_preview_url,
+            )
+            realtime_payload, realtime_resource_url = self._fetch_with_official_preview(
+                self._api_url,
+                self._preview_url,
+            )
         except TainanFloodSensorAdapterError:
             raise
         except Exception as exc:
@@ -135,9 +163,9 @@ class TainanFloodSensorApiAdapter:
         records = parse_tainan_flood_sensor_realtime_payload(
             realtime_payload,
             source_url=TAINAN_FLOOD_SENSOR_DATA_GOV_URL,
-            resource_url=self._api_url,
+            resource_url=realtime_resource_url,
             station_metadata=station_metadata,
-            station_metadata_url=self._metadata_api_url,
+            station_metadata_url=metadata_resource_url,
         )
         fetched_at = self._fetched_at or datetime.now(UTC)
         return tuple(
@@ -150,6 +178,24 @@ class TainanFloodSensorApiAdapter:
             )
             for record in records
         )
+
+    def _fetch_with_official_preview(
+        self,
+        primary_url: str,
+        preview_url: str,
+    ) -> tuple[Any, str]:
+        try:
+            return self._fetch_json(primary_url, self._timeout_seconds), primary_url
+        except (TainanFloodSensorFetchError, TainanFloodSensorPayloadError):
+            try:
+                return (
+                    self._preview_fetch_json(preview_url, self._timeout_seconds),
+                    preview_url,
+                )
+            except (TainanFloodSensorFetchError, TainanFloodSensorPayloadError) as preview_error:
+                raise TainanFloodSensorFetchError(
+                    "Tainan primary API and official data-platform preview both failed"
+                ) from preview_error
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         return _normalize_tainan_flood_sensor_record(self.metadata, raw_item)
@@ -195,6 +241,31 @@ def fetch_tainan_json(url: str, timeout_seconds: int) -> Any:
         raise TainanFloodSensorFetchError(f"Failed to fetch Tainan API {url}: {exc}") from exc
 
 
+def fetch_tainan_preview_json(url: str, timeout_seconds: int) -> Any:
+    request = Request(
+        url,
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "FloodRiskTaiwan/0.1 worker-local-tainan-flood-sensor",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            return _read_official_preview_json_document(response)
+    except HTTPError as exc:
+        raise TainanFloodSensorHttpError(
+            f"Tainan official preview returned HTTP {exc.code} for {url}"
+        ) from exc
+    except (URLError, TimeoutError) as exc:
+        if _is_timeout_failure(exc):
+            raise TainanFloodSensorTimeoutError(
+                f"Tainan official preview response timed out for {url}"
+            ) from exc
+        raise TainanFloodSensorFetchError(
+            f"Failed to fetch Tainan official preview {url}: {exc}"
+        ) from exc
+
+
 def _read_complete_json_document(response: Any) -> Any:
     """Return once one complete JSON document arrives, without waiting for EOF.
 
@@ -230,6 +301,37 @@ def _read_complete_json_document(response: Any) -> Any:
 
     raise TainanFloodSensorPayloadError(
         "Tainan API response ended before a complete JSON document was available"
+    )
+
+
+def _read_official_preview_json_document(response: Any) -> Any:
+    """Extract the platform's explicit JSON preview without waiting for page EOF."""
+
+    payload = bytearray()
+    read_chunk = getattr(response, "read1", response.read)
+
+    while True:
+        chunk = read_chunk(TAINAN_FLOOD_SENSOR_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        payload.extend(chunk)
+        if len(payload) > TAINAN_FLOOD_SENSOR_MAX_RESPONSE_BYTES:
+            raise TainanFloodSensorPayloadError(
+                "Tainan official preview exceeded the reviewed payload limit"
+            )
+        match = TAINAN_JSON_PREVIEW_PATTERN.search(payload)
+        if match is None:
+            continue
+        try:
+            preview = html.unescape(match.group(1).decode("utf-8"))
+            return json.loads(preview)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise TainanFloodSensorPayloadError(
+                "Tainan official preview did not contain valid JSON"
+            ) from exc
+
+    raise TainanFloodSensorPayloadError(
+        "Tainan official preview did not contain the documented JSON block"
     )
 
 

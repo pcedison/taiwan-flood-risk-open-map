@@ -121,7 +121,7 @@ the stop removed.
 | `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` |
 | `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` |
 | `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` |
-| `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | Leave unset or `45`; the adapter clamps lower stale overrides to 45 seconds and completes chunked responses as soon as the JSON document is readable instead of waiting for the terminal chunk |
+| `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | Leave unset or `45`; lower stale overrides are clamped, chunked JSON completes without waiting for EOF, and an SOA failure falls back to the same resource's official data-platform JSON preview with provenance preserved |
 | `WRA_STATION_API_URL` | Leave blank unless overriding the WRA station metadata endpoint |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` for a 5-minute beta cadence |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` |

@@ -188,7 +188,7 @@ Official ingestion scheduler for the single-service beta:
 | `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` | Enables Civil IoT gate water-level ingestion. |
 | `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` | Enables the reviewed Tainan local flood-sensor fallback. |
 | `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` | Enables live Tainan flood-sensor ingestion. |
-| `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | leave unset or `45` | Allows the reviewed Tainan government JSON endpoint enough hosted-egress headroom. The adapter clamps lower stale platform overrides to 45 seconds because production egress has exceeded 20 seconds. The endpoint uses chunked transfer encoding, so the reader returns as soon as one complete JSON document arrives instead of waiting for a delayed terminal chunk. |
+| `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | leave unset or `45` | Allows the reviewed Tainan government JSON endpoint enough hosted-egress headroom. The adapter clamps lower stale platform overrides to 45 seconds and returns as soon as chunked JSON is complete. If the SOA endpoint fails, it reads the same resource's explicit JSON preview from the official Tainan data platform and records that effective resource URL in evidence provenance. |
 | `WRA_STATION_API_URL` | leave blank | Optional override for the WRA station metadata endpoint used to add coordinates to realtime water-level rows. |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` | Five-minute beta cadence. |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` | Postgres scheduler lease TTL. |
