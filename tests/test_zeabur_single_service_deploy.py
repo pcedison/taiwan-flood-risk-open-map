@@ -102,6 +102,7 @@ def test_zeabur_single_service_sets_backbone_source_gates() -> None:
         "SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED",
         "SOURCE_NCDR_CAP_ENABLED",
         "SOURCE_NCDR_CAP_API_ENABLED",
+        "SOURCE_NCDR_CAP_CONTRACT_ENABLED",
         "SOURCE_FLOOD_SENSOR_ENABLED",
         "SOURCE_FLOOD_SENSOR_API_ENABLED",
         "SOURCE_FLOOD_SENSOR_USE_LIVE",
@@ -136,6 +137,8 @@ def test_zeabur_single_service_runbook_lists_realtime_backbone() -> None:
 
     for adapter_key in EXPECTED_BACKBONE_ADAPTERS:
         assert adapter_key in runbook
+    assert "SOURCE_NCDR_CAP_CONTRACT_ENABLED" in runbook
+    assert "NCDR_ALERTS_API_KEY" in runbook
 
 
 def test_image_runs_as_non_root_with_role_dispatch() -> None:
