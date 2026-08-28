@@ -38,6 +38,12 @@ def test_civil_iot_sta_defaults_use_colife_endpoint() -> None:
     )
     assert "$count=true" in (FLOOD_SENSOR_METADATA.resource_url or "")
     assert "$count=true" in (RIVER_WATER_LEVEL_METADATA.resource_url or "")
+    flood_url = FLOOD_SENSOR_METADATA.resource_url or ""
+    assert "/Datastreams?" in flood_url
+    assert "$expand=Thing,Thing/Locations,Observations(" in flood_url
+    assert "Datastream_Category_type=淹水感測器" in flood_url
+    assert "Datastream_Category=淹水深度" in flood_url
+    assert "substringof('淹水',Datastreams/name)" not in flood_url
 
 
 def test_fetch_sta_json_encodes_odata_url_before_request(monkeypatch) -> None:

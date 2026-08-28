@@ -12,6 +12,7 @@ from app.adapters.contracts import (
     RawSourceItem,
     SourceFamily,
     SourceRejection,
+    StationInventoryProof,
 )
 from app.adapters.news import SamplePublicWebNewsAdapter
 from app.config import load_worker_settings
@@ -280,6 +281,31 @@ def test_station_empty_result_cannot_use_no_active_event_branch() -> None:
 
     assert summary.status == "skipped"
     assert summary.error_code == "empty_fetch"
+
+
+def test_complete_nonempty_station_collection_without_observations_fails_precisely() -> None:
+    proof = StationInventoryProof(
+        upstream_total=2,
+        pages_fetched=1,
+        pagination_complete=True,
+        source_items_seen=2,
+        missing_station_id_count=0,
+        duplicate_station_id_count=1,
+        station_ids=("station-1",),
+    )
+    result = AdapterRunResult(
+        adapter_key="official.civil_iot.flood_sensor",
+        fetched=(),
+        normalized=(),
+        station_inventory_proof=proof,
+    )
+
+    summary = run_adapter_batch(_StaticResultAdapter(result))
+
+    assert summary.status == "failed"
+    assert summary.error_code == "upstream_observations_empty"
+    assert summary.station_inventory_proof is proof
+    assert summary.station_inventory_proof.inventory_complete is False
 
 
 def test_adapter_result_key_mismatch_fails_under_trusted_configured_key() -> None:

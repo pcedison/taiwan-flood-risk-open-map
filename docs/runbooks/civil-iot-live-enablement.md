@@ -34,6 +34,18 @@ Pair this with:
    Civil IoT `@iot.nextLink` URLs are emitted as already-encoded OData URLs; live
    smoke should include at least one multi-page source so pagination keeps `+`
    spacing intact and does not fail with HTTP 400 on page 2.
+   Flood depth is the exception to the shared `Things` query shape: follow the
+   official Civil IoT tutorial and query `Datastreams`, expanding `Thing`,
+   `Thing/Locations`, and the newest `Observations` row while filtering both
+   `Datastream_Category_type=淹水感測器` and
+   `Datastream_Category=淹水深度` from `description`. A broad `Things` name
+   filter also selects camera/photo streams and overstates the usable inventory.
+   On 2026-08-28 the two-page production probe returned 1,806 matching flood-
+   depth Datastreams, 1,777 unique station IDs (29 duplicates), and zero
+   Observations. The station manifest therefore also remains unapproved. Keep
+   that source fail-closed with `upstream_observations_empty`; do not interpret
+   it as zero flooding. The working WRA IoW flood-depth source remains the
+   current observed-depth path.
 5. **Baseline.** Record current RSS per container (`kubectl top pods` or
    `docker stats`) and the current `/health` `deployment_sha` before enabling.
 
@@ -196,14 +208,15 @@ this project. Before and after 2026-12-01, run a short live probe for each
 enabled source during deploy:
 
 ```powershell
-curl.exe -f "https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/Things?$top=1"
-curl.exe -f "https://sta.colife.org.tw/STA_RainSewer/v1.0/Things?$top=1"
+curl.exe -f 'https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/Things?$top=1'
+curl.exe -f 'https://sta.colife.org.tw/STA_RainSewer/v1.0/Things?$top=1'
+curl.exe -f 'https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/Datastreams?$filter=substringof(%27Datastream_Category_type=%E6%B7%B9%E6%B0%B4%E6%84%9F%E6%B8%AC%E5%99%A8%27,description)%20and%20substringof(%27Datastream_Category=%E6%B7%B9%E6%B0%B4%E6%B7%B1%E5%BA%A6%27,description)&$top=1&$count=true'
 ```
 
 If either probe fails while the official data portal announces a replacement
 host, set the matching `CIVIL_IOT_*_URL` override to the new full `Things?...`
-query, redeploy one source at a time, and record the incident in the source
-matrix.
+query (or the documented flood-sensor `Datastreams?...` query), redeploy one
+source at a time, and record the incident in the source matrix.
 
 ## Rollback (per source)
 

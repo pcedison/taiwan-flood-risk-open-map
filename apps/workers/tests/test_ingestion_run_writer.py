@@ -26,19 +26,27 @@ def _civil_iot_inventory_payload(*, with_observation: bool = True) -> dict:
         "@iot.count": 1,
         "value": [
             {
-                "@iot.id": 101,
-                "name": "Inventory station",
-                "properties": {"stationID": "FS-INVENTORY-1"},
-                "Locations": [
-                    {"location": {"type": "Point", "coordinates": [120.2, 23.0]}}
-                ],
-                "Datastreams": [
-                    {
-                        "name": "淹水深度",
-                        "unitOfMeasurement": {"symbol": "cm"},
-                        "Observations": observations,
-                    }
-                ],
+                "@iot.id": 501,
+                "name": "淹水深度",
+                "description": (
+                    "Datastream_Category_type=淹水感測器,"
+                    "Datastream_Category=淹水深度"
+                ),
+                "unitOfMeasurement": {"symbol": "cm"},
+                "Observations": observations,
+                "Thing": {
+                    "@iot.id": 101,
+                    "name": "Inventory station",
+                    "properties": {"stationID": "FS-INVENTORY-1"},
+                    "Locations": [
+                        {
+                            "location": {
+                                "type": "Point",
+                                "coordinates": [120.2, 23.0],
+                            }
+                        }
+                    ],
+                },
             }
         ],
     }
@@ -368,7 +376,7 @@ def test_civil_iot_inventory_proof_flows_to_run_snapshot_and_safe_metrics() -> N
     assert "station_ids" not in metrics["station_inventory_proof"]
 
 
-def test_empty_civil_iot_observations_stay_skipped_but_preserve_inventory_proof() -> None:
+def test_empty_civil_iot_observations_fail_with_precise_code_and_inventory_proof() -> None:
     adapter = FloodSensorStaApiAdapter(
         fetched_at=STARTED_AT,
         fetch_json=lambda url, timeout: _civil_iot_inventory_payload(
@@ -384,14 +392,22 @@ def test_empty_civil_iot_observations_stay_skipped_but_preserve_inventory_proof(
         job_key="ingest.official.civil_iot.flood_sensor",
     )
 
-    assert summary.status == "skipped"
+    assert summary.status == "failed"
+    assert summary.error_code == "upstream_observations_empty"
+    assert summary.error_message == (
+        "upstream returned a complete nonempty station collection "
+        "but no usable observations"
+    )
     assert summary.items_fetched == 0
     assert summary.station_inventory_proof is not None
     assert summary.station_inventory_proof.inventory_complete is True
-    assert not any(
-        "INSERT INTO adapter_runs" in sql
-        for sql, _params in connection.cursor_instance.executions
+    run_sql, run_params = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "INSERT INTO adapter_runs" in execution[0]
     )
+    assert "INSERT INTO adapter_runs" in run_sql
+    assert run_params[4] == "failed"
     snapshot_sql, snapshot_params = next(
         execution
         for execution in connection.cursor_instance.executions
@@ -400,6 +416,9 @@ def test_empty_civil_iot_observations_stay_skipped_but_preserve_inventory_proof(
     assert "INSERT INTO station_inventory_snapshots" in snapshot_sql
     assert json.loads(str(snapshot_params[11])) == ["FS-INVENTORY-1"]
     assert snapshot_params[12] is True
+    source_sql, source_params = connection.cursor_instance.executions[-1]
+    assert "UPDATE data_sources" in source_sql
+    assert source_params[6] == "failed"
 
 
 def test_run_adapter_batch_surfaces_operational_summary_write_failure() -> None:

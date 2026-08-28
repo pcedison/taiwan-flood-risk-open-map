@@ -213,6 +213,7 @@ sources:
     resource_url: "https://www.tgos.tw/tgos/VirtualDir/Product/a04697c8-64db-450a-a105-3eb471c45abd/%E6%9D%91(%E9%87%8C)%E7%95%8C(TWD97%E7%B6%93%E7%B7%AF%E5%BA%A6).zip"
     resource_url_note: "Canonical undated link. The previously recorded 1150407 version-pinned URL is dead (connection failure); NLSC rotates the dated filename on each release."
     current_source_revision: "1150817"
+    resource_sha256: "c6cc09589cfdc073df6ca85b84be5f76a92c268774a44744fda341766479ef62"
     alternate_download_url: "https://whgis-nlsc.moi.gov.tw/Opendata/Files.aspx"
     alternate_download_note: "NLSC open-data portal. data.gov.tw dataset 7438 carries the agency reply of 2025-12-02 documenting the TGOS malfunction and directing users here."
     shapefile_fields: "VILLCODE, COUNTYNAME, TOWNNAME, VILLNAME, VILLENG, COUNTYID, COUNTYCODE, TOWNID, TOWNCODE, NOTE"
