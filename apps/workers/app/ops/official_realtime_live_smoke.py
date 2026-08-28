@@ -138,15 +138,12 @@ def default_official_smoke_sources() -> tuple[SmokeSource, ...]:
         ),
         SmokeSource(
             adapter_key="official.wra_iow.flood_depth",
-            build_adapter=lambda env, timeout: WraIowFloodDepthApiAdapter(
-                timeout_seconds=timeout
-            ),
+            build_adapter=lambda env, timeout: WraIowFloodDepthApiAdapter(timeout_seconds=timeout),
         ),
         SmokeSource(
             adapter_key="official.ncdr.cap",
-            required_env="NCDR_ALERTS_API_KEY",
             build_adapter=lambda env, timeout: NcdrCapAlertAdapter(
-                api_key=env["NCDR_ALERTS_API_KEY"],
+                api_key=env.get("NCDR_ALERTS_API_KEY"),
                 timeout_seconds=timeout,
             ),
             minimum_fetched_count=0,

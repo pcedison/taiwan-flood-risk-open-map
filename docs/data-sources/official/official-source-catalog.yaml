@@ -61,16 +61,17 @@ sources:
     status: disabled_by_default
     data_gov_dataset_id: "NCDR-CAP"
     data_gov_url: "https://alerts.ncdr.nat.gov.tw/"
-    title: "NCDR datastore and CAP dump alerts"
+    title: "NCDR public active-warning Atom and CAP alerts"
     provider: "National Science and Technology Center for Disaster Reduction"
-    resource_url: "https://alerts.ncdr.nat.gov.tw/api/datastore"
+    resource_url: "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx"
     dump_url: "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
-    resource_format: "JSON datastore index to CAP XML dump"
-    update_frequency: "as issued through the NCDR alert datastore"
+    resource_format: "public active-warning Atom index to CAP XML; member datastore remains supported when an API key is configured"
+    update_frequency: "public active-warning Atom feed refreshed every minute by NCDR"
     license: "Government Open Data License, version 1.0"
     integration_decision: "Retain bounded raw CAP snapshots and source-rejection audits only; do not normalize until administrative and Circle geometry is reviewed."
     limitations:
-      - "The source, API, contract, credential, and persisted catalog gates are independently fail-closed and disabled by default."
+      - "The source, API, contract, and persisted catalog gates are independently fail-closed and disabled by default."
+      - "The public active-warning Atom route does not require a member API key; configured member API credentials continue to use the datastore route."
       - "Datastore capid values are transport metadata only; canonical identities come from CAP sender, identifier, sent, and area semantics."
       - "Unreviewed administrative, polygon, Circle, and message-level geometry never enters staging, latest, promotion, or scoring."
   - key: official.npa.police_radio_traffic

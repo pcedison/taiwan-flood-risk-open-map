@@ -43,17 +43,15 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
     assert sources["official.wra.historical_flood"]["status"] == "disabled_by_default"
     assert sources["official.ncdr.cap"]["status"] == "disabled_by_default"
     assert sources["official.ncdr.cap"]["resource_url"] == (
-        "https://alerts.ncdr.nat.gov.tw/api/datastore"
+        "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx"
     )
     assert sources["official.ncdr.cap"]["dump_url"] == (
         "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
     )
     assert sources["official.ncdr.cap"]["resource_format"] == (
-        "JSON datastore index to CAP XML dump"
+        "public active-warning Atom index to CAP XML; member datastore remains supported when an API key is configured"
     )
-    assert sources["official.npa.police_radio_traffic"]["status"] == (
-        "disabled_by_default"
-    )
+    assert sources["official.npa.police_radio_traffic"]["status"] == ("disabled_by_default")
     assert sources["official.npa.police_radio_traffic"]["data_gov_dataset_id"] == "15221"
     assert sources["official.npa.police_radio_traffic"]["data_gov_url"] == (
         "https://data.gov.tw/dataset/15221"
@@ -118,10 +116,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
 
 def test_migration_0038_registered_keys_stay_disabled_in_catalog_and_registry() -> None:
     migration = (
-        REPO_ROOT
-        / "infra"
-        / "migrations"
-        / "0038_official_incident_context_sources.sql"
+        REPO_ROOT / "infra" / "migrations" / "0038_official_incident_context_sources.sql"
     ).read_text(encoding="utf-8")
     registered_keys = {
         "official.cwa.heavy_rain_warning",

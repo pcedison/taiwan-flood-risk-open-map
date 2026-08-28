@@ -109,7 +109,7 @@ the stop removed.
 | `SOURCE_NCDR_CAP_ENABLED` | `true` |
 | `SOURCE_NCDR_CAP_API_ENABLED` | `true` |
 | `SOURCE_NCDR_CAP_CONTRACT_ENABLED` | Leave unset or `true`; force mode sets this reviewed contract gate to `true` so NCDR cannot be silently omitted |
-| `NCDR_ALERTS_API_KEY` | NCDR alert API key; required for the reviewed NCDR CAP adapter to fetch upstream data |
+| `NCDR_ALERTS_API_KEY` | Optional NCDR member API key. Leave unset to use the official public active-warning Atom feed. |
 | `SOURCE_FLOOD_SENSOR_ENABLED` | `true` |
 | `SOURCE_FLOOD_SENSOR_API_ENABLED` | `true` |
 | `SOURCE_FLOOD_SENSOR_USE_LIVE` | `true` |

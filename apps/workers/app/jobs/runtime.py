@@ -425,9 +425,7 @@ def build_runtime_adapters(
             fetch_json=wra_flood_warning_fetch_json,
             fetch_text=wra_flood_warning_fetch_text,
         )
-        live_adapters[wra_flood_warning_adapter.metadata.key] = (
-            wra_flood_warning_adapter
-        )
+        live_adapters[wra_flood_warning_adapter.metadata.key] = wra_flood_warning_adapter
 
     if (
         settings.source_flood_potential_geojson_enabled
@@ -1315,9 +1313,7 @@ def work_runtime_queue_once(
         adapter_settings = replace(
             resolved_settings,
             enabled_adapter_keys=tuple(
-                key
-                for key in enabled_adapter_keys(resolved_settings)
-                if key == adapter_key
+                key for key in enabled_adapter_keys(resolved_settings) if key == adapter_key
             ),
         )
 

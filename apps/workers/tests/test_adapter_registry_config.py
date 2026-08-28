@@ -55,9 +55,7 @@ def test_official_registry_metadata_uses_data_gov_primary_catalog() -> None:
     assert ADAPTER_REGISTRY["official.cwa.tide_level"].data_gov_dataset_id == "O-B0075-001"
     assert "coastal" in " ".join(ADAPTER_REGISTRY["official.cwa.tide_level"].limitations)
     assert ADAPTER_REGISTRY["official.wra.water_level"].data_gov_dataset_id == "25768"
-    assert "quality checked" in " ".join(
-        ADAPTER_REGISTRY["official.wra.water_level"].limitations
-    )
+    assert "quality checked" in " ".join(ADAPTER_REGISTRY["official.wra.water_level"].limitations)
     assert ADAPTER_REGISTRY["official.flood_potential.geojson"].data_gov_url == (
         "https://data.gov.tw/dataset/25766"
     )
@@ -201,14 +199,9 @@ def test_wra_flood_warning_requires_all_three_independent_gates() -> None:
 
     def fetch_text(url: str, timeout_seconds: int) -> str:
         text_calls.append((url, timeout_seconds))
-        return (
-            '<?xml version="1.0"?>'
-            '<kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>'
-        )
+        return '<?xml version="1.0"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document/></kml>'
 
-    settings = load_worker_settings(
-        {**required, "WRA_FLOOD_WARNING_TIMEOUT_SECONDS": "5"}
-    )
+    settings = load_worker_settings({**required, "WRA_FLOOD_WARNING_TIMEOUT_SECONDS": "5"})
     assert enabled_adapter_keys(settings) == ("official.wra.flood_warning",)
     adapters = build_runtime_adapters(
         settings,
@@ -228,10 +221,8 @@ def test_wra_flood_warning_registry_metadata_is_context_only_and_default_off() -
     assert metadata.data_gov_dataset_id == "5982"
     assert metadata.data_gov_url == "https://data.gov.tw/dataset/5982"
     assert metadata.resource_url == WRA_FLOOD_WARNING_INDEX_URL
-    assert any(
-        "active_fixture_reviewed=false" in limitation
-        for limitation in metadata.limitations
-    )
+    assert any("active_fixture_reviewed=false" in limitation for limitation in metadata.limitations)
+
 
 def test_ncdr_runtime_config_reads_two_stage_settings() -> None:
     settings = load_worker_settings(
@@ -310,17 +301,20 @@ def test_reconstructed_heavy_rain_metadata_cannot_bypass_key_based_gates() -> No
     )
 
     assert adapter_is_enabled(reconstructed, load_worker_settings({})) is False
-    assert adapter_is_enabled(
-        reconstructed,
-        load_worker_settings(
-            {
-                "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
-                "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
-                "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
-                "CWA_API_AUTHORIZATION": "fixture-authorization-value",
-            }
-        ),
-    ) is True
+    assert (
+        adapter_is_enabled(
+            reconstructed,
+            load_worker_settings(
+                {
+                    "SOURCE_CWA_HEAVY_RAIN_WARNING_ENABLED": "true",
+                    "SOURCE_CWA_HEAVY_RAIN_WARNING_API_ENABLED": "true",
+                    "SOURCE_CWA_HEAVY_RAIN_WARNING_CONTRACT_ENABLED": "true",
+                    "CWA_API_AUTHORIZATION": "fixture-authorization-value",
+                }
+            ),
+        )
+        is True
+    )
 
 
 def test_cwa_heavy_rain_warning_registry_metadata_is_audit_only_and_default_off() -> None:
@@ -408,9 +402,7 @@ def test_wra_historical_flood_config_is_independent_from_water_level() -> None:
 
     assert settings.source_wra_historical_flood_enabled is False
     assert settings.source_wra_historical_flood_api_enabled is True
-    assert settings.wra_historical_flood_index_url == (
-        "https://example.test/history-index"
-    )
+    assert settings.wra_historical_flood_index_url == ("https://example.test/history-index")
     assert settings.wra_historical_flood_timeout_seconds == 7
     assert "official.wra.historical_flood" not in enabled_adapter_keys(settings)
 
@@ -425,9 +417,7 @@ def test_flood_potential_geojson_runtime_client_config_reads_env() -> None:
     )
 
     assert settings.source_flood_potential_geojson_enabled is True
-    assert settings.flood_potential_geojson_url == (
-        "https://example.test/flood-potential.geojson"
-    )
+    assert settings.flood_potential_geojson_url == ("https://example.test/flood-potential.geojson")
     assert settings.flood_potential_geojson_timeout_seconds == 10
 
 
@@ -884,9 +874,7 @@ def test_source_flags_can_disable_allowlisted_adapters() -> None:
 def test_unknown_adapter_allowlist_key_raises() -> None:
     settings = load_worker_settings(
         {
-            "WORKER_ENABLED_ADAPTER_KEYS": (
-                "official.cwa.rainfall,official.unknown.sensor"
-            ),
+            "WORKER_ENABLED_ADAPTER_KEYS": ("official.cwa.rainfall,official.unknown.sensor"),
         }
     )
 
@@ -921,7 +909,5 @@ def test_enabling_only_the_source_flag_never_builds_an_incident_adapter() -> Non
         ("SOURCE_NPA_POLICE_RADIO_ENABLED", "official.npa.police_radio_traffic"),
         ("SOURCE_WRA_FLOOD_WARNING_ENABLED", "official.wra.flood_warning"),
     ):
-        settings = load_worker_settings(
-            {flag: "true", "WORKER_ENABLED_ADAPTER_KEYS": key}
-        )
+        settings = load_worker_settings({flag: "true", "WORKER_ENABLED_ADAPTER_KEYS": key})
         assert build_runtime_adapters(settings) == {}, key

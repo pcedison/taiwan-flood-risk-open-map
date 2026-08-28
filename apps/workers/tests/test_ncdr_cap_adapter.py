@@ -43,6 +43,36 @@ def _index(name: str = "ncdr_datastore_active.json") -> object:
     return json.loads(_fixture(name))
 
 
+def _active_feed(*entries: str) -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<feed xmlns="http://www.w3.org/2005/Atom" '
+        'xmlns:cap="urn:oasis:names:tc:emergency:cap:1.1">'
+        "<id>https://alerts.ncdr.nat.gov.tw/RSS.aspx</id>"
+        "<updated>2026-06-15T11:00:00+08:00</updated>"
+        f"{''.join(entries)}"
+        "</feed>"
+    )
+
+
+def _feed_entry(
+    *,
+    cap_id: str = "WRA_FloodWarn_20260615103000_0000",
+    category: str = "淹水",
+    href: str = (
+        "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/"
+        "WRA_FloodWarn_20260615103000_0000.cap"
+    ),
+) -> str:
+    return (
+        "<entry>"
+        f"<id>{cap_id}</id>"
+        f'<link rel="alternate" href="{href}" />'
+        f'<category term="{category}" />'
+        "</entry>"
+    )
+
+
 def _assert_secret_free_exception(exc: BaseException, *, secret: str) -> None:
     assert secret not in str(exc)
     assert secret not in repr(exc)
@@ -97,9 +127,7 @@ def _entity_encoded_secret_cap(field_name: str) -> str:
         else "Public description"
     )
     area_desc = (
-        f"decoded-{encoded_secret}-area"
-        if field_name == "area_desc"
-        else "Administrative area"
+        f"decoded-{encoded_secret}-area" if field_name == "area_desc" else "Administrative area"
     )
     geocode = encoded_secret if field_name == "geocode" else "6703500"
     references = (
@@ -301,9 +329,7 @@ def test_ncdr_mixed_dump_failure_is_partial_and_uses_digest_transport_identity()
     }
     result = _adapter(dumps=dumps).run()
     summary = run_adapter_batch(_adapter(dumps=dumps))
-    transport_id = "ncdr-transport:" + hashlib.sha256(
-        failed_capid.encode("utf-8")
-    ).hexdigest()[:24]
+    transport_id = "ncdr-transport:" + hashlib.sha256(failed_capid.encode("utf-8")).hexdigest()[:24]
 
     assert transport_id in result.rejected
     failed = next(item for item in result.fetched if item.source_id == transport_id)
@@ -339,9 +365,7 @@ def test_ncdr_mixed_injected_dump_429_preserves_bounded_cooldown_in_raw_audit() 
     )
 
     result = adapter.run()
-    failed = next(
-        item for item in result.fetched if item.payload.get("error") is not None
-    )
+    failed = next(item for item in result.fetched if item.payload.get("error") is not None)
 
     assert attempts == ["CAP-001", "CAP-002"]
     assert failed.payload["retry_after_seconds"] == 3600
@@ -505,12 +529,8 @@ def test_ncdr_recursive_raw_guard_rejects_secret_bearing_snapshot_metadata() -> 
         api_key=secret,
         fetched_at=FETCHED_AT,
         raw_snapshot_key=f"snapshot/{secret}/raw",
-        fetch_json=lambda _url, _params, _timeout: {
-            "data": [{"capid": "CAP-ENTITY"}]
-        },
-        fetch_text=lambda _url, _params, _timeout: _entity_encoded_secret_cap(
-            "none"
-        ),
+        fetch_json=lambda _url, _params, _timeout: {"data": [{"capid": "CAP-ENTITY"}]},
+        fetch_text=lambda _url, _params, _timeout: _entity_encoded_secret_cap("none"),
     )
 
     with pytest.raises(NcdrCapAlertPayloadError) as raised:
@@ -529,9 +549,7 @@ def test_ncdr_recursive_raw_guard_applies_to_failed_dump_audit_rows() -> None:
         api_key=secret,
         fetched_at=FETCHED_AT,
         raw_snapshot_key=f"snapshot/{secret}/raw",
-        fetch_json=lambda _url, _params, _timeout: {
-            "data": [{"capid": "CAP-ENTITY"}]
-        },
+        fetch_json=lambda _url, _params, _timeout: {"data": [{"capid": "CAP-ENTITY"}]},
         fetch_text=fail_text,
     )
 
@@ -601,11 +619,7 @@ def test_ncdr_builtin_transport_invalid_url_is_sanitized_across_index_and_dump(
         if fetch_name == "index"
         else {"apikey": "test-secret", "capid": "CAP-001", "format": "xml"}
     )
-    fetcher = (
-        ncdr_cap_module._fetch_json
-        if fetch_name == "index"
-        else ncdr_cap_module._fetch_text
-    )
+    fetcher = ncdr_cap_module._fetch_json if fetch_name == "index" else ncdr_cap_module._fetch_text
 
     with pytest.raises(NcdrCapAlertFetchError) as raised:
         fetcher(url, params, 1, now=FETCHED_AT)
@@ -683,11 +697,7 @@ def test_ncdr_direct_builtin_fetch_rejects_url_userinfo_without_request(
             "format": "xml",
         }
     )
-    fetcher = (
-        ncdr_cap_module._fetch_json
-        if fetch_name == "index"
-        else ncdr_cap_module._fetch_text
-    )
+    fetcher = ncdr_cap_module._fetch_json if fetch_name == "index" else ncdr_cap_module._fetch_text
 
     with pytest.raises(NcdrCapAlertFetchError) as raised:
         fetcher(endpoint, params, 8, now=FETCHED_AT)
@@ -724,9 +734,7 @@ def test_ncdr_injected_fetchers_cannot_create_success_or_failure_raw_with_userin
     with pytest.raises(ncdr_cap_module.NcdrCapAlertConfigurationError) as raised:
         NcdrCapAlertAdapter(
             api_key="different-api-key",
-            dump_url=(
-                f"https://audit-user:{userinfo_secret}@example.test/dump?trace=private"
-            ),
+            dump_url=(f"https://audit-user:{userinfo_secret}@example.test/dump?trace=private"),
             fetch_json=fetch_json,
             fetch_text=fetch_text,
         ).run()
@@ -887,9 +895,7 @@ def test_ncdr_geocode_area_is_raw_audited_with_canonical_cap_identity() -> None:
     ]
     assert raw.payload["active_from"] == "2026-06-15T02:35:00+00:00"
     assert raw.payload["active_until"] == "2026-06-15T07:00:00+00:00"
-    assert raw.payload["source_geocodes"] == [
-        {"valueName": "TOWNCODE", "value": "6703500"}
-    ]
+    assert raw.payload["source_geocodes"] == [{"valueName": "TOWNCODE", "value": "6703500"}]
     assert "geometry" not in raw.payload
     assert build_staging_batch(result).accepted == ()
 
@@ -948,10 +954,7 @@ def test_ncdr_namespaced_alerts_collection_preserves_every_unreviewed_area() -> 
     assert len(result.source_rejections) == 4
     assert len({item.source_id for item in result.fetched}) == 4
     assert all(item.source_id.startswith("cap:") for item in result.fetched)
-    assert all(
-        item.payload["transport_capid"] == "TRANSPORT-001"
-        for item in result.fetched
-    )
+    assert all(item.payload["transport_capid"] == "TRANSPORT-001" for item in result.fetched)
     assert {item.reason_code for item in result.source_rejections} == {
         "ncdr_polygon_geometry_unreviewed",
         "ncdr_circle_geometry_unreviewed",
@@ -997,9 +1000,7 @@ def test_ncdr_audit_rows_over_256_across_successful_dumps_fail_closed() -> None:
         )
 
     adapter = _adapter(
-        index_payload={
-            "data": [{"capid": "CAP-A"}, {"capid": "CAP-B"}, {"capid": "CAP-C"}]
-        },
+        index_payload={"data": [{"capid": "CAP-A"}, {"capid": "CAP-B"}, {"capid": "CAP-C"}]},
         dumps={
             "CAP-A": cap("A", 128),
             "CAP-B": cap("B", 128),
@@ -1028,9 +1029,7 @@ def test_ncdr_mixed_transport_and_success_rows_share_256_row_audit_budget() -> N
         f"<expires>2026-06-15T15:00:00+08:00</expires>{areas}</info></alert>"
     )
     adapter = _adapter(
-        index_payload={
-            "data": [{"capid": cap_id} for cap_id in [*failed_ids, "SUCCESS"]]
-        },
+        index_payload={"data": [{"capid": cap_id} for cap_id in [*failed_ids, "SUCCESS"]]},
         dumps={
             **{cap_id: RuntimeError("failed") for cap_id in failed_ids},
             "SUCCESS": successful_cap,
@@ -1065,9 +1064,7 @@ def test_ncdr_duplicate_prepared_rows_conservatively_consume_audit_budget() -> N
         "<area><areaDesc>third</areaDesc></area>",
     )
     adapter = _adapter(
-        index_payload={
-            "data": [{"capid": "CAP-A"}, {"capid": "CAP-B"}, {"capid": "CAP-C"}]
-        },
+        index_payload={"data": [{"capid": "CAP-A"}, {"capid": "CAP-B"}, {"capid": "CAP-C"}]},
         dumps={"CAP-A": duplicate_cap, "CAP-B": duplicate_cap, "CAP-C": one_row_cap},
     )
 
@@ -1202,15 +1199,18 @@ def test_ncdr_registry_gates_are_key_based_source_plus_contract() -> None:
     assert ADAPTER_REGISTRY[NCDR_CAP_METADATA.key] is NCDR_CAP_METADATA
     assert NCDR_CAP_METADATA.family is SourceFamily.OFFICIAL
     assert NCDR_CAP_METADATA.enabled_by_default is False
-    assert adapter_is_enabled(
-        type(NCDR_CAP_METADATA)(
-            key="official.ncdr.cap",
-            family=SourceFamily.OFFICIAL,
-            enabled_by_default=True,
-            display_name="reconstructed",
-        ),
-        load_worker_settings({}),
-    ) is False
+    assert (
+        adapter_is_enabled(
+            type(NCDR_CAP_METADATA)(
+                key="official.ncdr.cap",
+                family=SourceFamily.OFFICIAL,
+                enabled_by_default=True,
+                display_name="reconstructed",
+            ),
+            load_worker_settings({}),
+        )
+        is False
+    )
 
     for values in (
         {"SOURCE_NCDR_CAP_ENABLED": "true"},
@@ -1237,7 +1237,7 @@ def test_ncdr_registry_gates_are_key_based_source_plus_contract() -> None:
     assert build_runtime_adapters(selected) == {}
 
 
-def test_ncdr_runtime_adapter_requires_api_gate_and_surfaces_missing_key() -> None:
+def test_ncdr_runtime_adapter_requires_gates_and_uses_public_feed_without_key() -> None:
     complete = {
         "SOURCE_NCDR_CAP_ENABLED": "true",
         "SOURCE_NCDR_CAP_API_ENABLED": "true",
@@ -1254,18 +1254,25 @@ def test_ncdr_runtime_adapter_requires_api_gate_and_surfaces_missing_key() -> No
         values.pop(missing)
         assert build_runtime_adapters(load_worker_settings(values)) == {}
 
+    def empty_feed_fetcher(_url: str, _params: dict[str, str], _timeout: int) -> str:
+        return _active_feed()
+
     missing_key = dict(complete)
     missing_key.pop("NCDR_ALERTS_API_KEY")
-    missing_key_adapters = build_runtime_adapters(load_worker_settings(missing_key))
+    missing_key_adapters = build_runtime_adapters(
+        load_worker_settings(missing_key),
+        ncdr_cap_fetch_text=empty_feed_fetcher,
+    )
     assert tuple(missing_key_adapters) == ("official.ncdr.cap",)
-    with pytest.raises(NcdrCapAlertConfigurationError):
-        missing_key_adapters["official.ncdr.cap"].run()
+    assert missing_key_adapters["official.ncdr.cap"].run().no_active_event is True
 
     blank_key = {**complete, "NCDR_ALERTS_API_KEY": "   "}
-    blank_key_adapters = build_runtime_adapters(load_worker_settings(blank_key))
+    blank_key_adapters = build_runtime_adapters(
+        load_worker_settings(blank_key),
+        ncdr_cap_fetch_text=empty_feed_fetcher,
+    )
     assert tuple(blank_key_adapters) == ("official.ncdr.cap",)
-    with pytest.raises(NcdrCapAlertConfigurationError):
-        blank_key_adapters["official.ncdr.cap"].run()
+    assert blank_key_adapters["official.ncdr.cap"].run().no_active_event is True
 
 
 def test_ncdr_default_runtime_builder_uses_two_stage_contract() -> None:
@@ -1301,6 +1308,113 @@ def test_ncdr_default_runtime_builder_uses_two_stage_contract() -> None:
     assert dump_calls[0][0] == ncdr_cap_module.NCDR_DUMP_API_URL
 
 
+def test_ncdr_public_active_feed_needs_no_api_key_and_fetches_flood_cap() -> None:
+    calls: list[tuple[str, dict[str, str], int]] = []
+
+    def fetch_text(url: str, params: dict[str, str], timeout: int) -> str:
+        calls.append((url, dict(params), timeout))
+        if url == ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL:
+            return _active_feed(_feed_entry())
+        return _fixture("ncdr_dump_flood_cap.xml")
+
+    result = NcdrCapAlertAdapter(
+        fetched_at=FETCHED_AT,
+        timeout_seconds=6,
+        fetch_text=fetch_text,
+    ).run()
+
+    assert len(result.fetched) == 1
+    assert result.normalized == ()
+    assert result.no_active_event is False
+    assert result.source_rejections[0].reason_code == "ncdr_unreviewed_admin_geometry"
+    assert calls == [
+        (ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL, {}, 6),
+        (
+            "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/"
+            "WRA_FloodWarn_20260615103000_0000.cap",
+            {},
+            6,
+        ),
+    ]
+
+
+def test_ncdr_public_active_feed_without_flood_is_healthy_empty_poll() -> None:
+    calls: list[str] = []
+
+    def fetch_text(url: str, _params: dict[str, str], _timeout: int) -> str:
+        calls.append(url)
+        return _active_feed(_feed_entry(category="河川高水位"))
+
+    adapter = NcdrCapAlertAdapter(fetched_at=FETCHED_AT, fetch_text=fetch_text)
+    result = adapter.run()
+    summary = run_adapter_batch(adapter)
+
+    assert result.fetched == ()
+    assert result.source_rejections == ()
+    assert result.no_active_event is True
+    assert summary.status == "succeeded"
+    assert summary.error_code == "no_active_event"
+    assert calls == [
+        ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL,
+        ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL,
+    ]
+
+
+@pytest.mark.parametrize(
+    "href",
+    (
+        "https://example.test/Capstorage/WRA/Flood.cap",
+        "http://alerts.ncdr.nat.gov.tw/Capstorage/WRA/Flood.cap",
+        "https://alerts.ncdr.nat.gov.tw/not-cap-storage/Flood.cap",
+        "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/Flood.xml",
+        "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/Flood.cap?token=secret",
+    ),
+)
+def test_ncdr_public_active_feed_rejects_untrusted_flood_cap_links(href: str) -> None:
+    adapter = NcdrCapAlertAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_text=lambda _url, _params, _timeout: _active_feed(_feed_entry(href=href)),
+    )
+
+    with pytest.raises(NcdrCapAlertPayloadError, match="untrusted CAP link"):
+        adapter.run()
+
+
+def test_ncdr_public_active_feed_fails_instead_of_silently_truncating() -> None:
+    entries = tuple(
+        _feed_entry(
+            cap_id=f"CAP-{index}",
+            href=(f"https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/CAP-{index}.cap"),
+        )
+        for index in range(3)
+    )
+    adapter = NcdrCapAlertAdapter(
+        fetched_at=FETCHED_AT,
+        max_cap_ids_per_run=2,
+        fetch_text=lambda _url, _params, _timeout: _active_feed(*entries),
+    )
+
+    with pytest.raises(NcdrCapAlertPayloadError, match="exceeds the configured run limit"):
+        adapter.run()
+
+
+@pytest.mark.parametrize(
+    "feed_url",
+    (
+        "http://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx",
+        "https://example.test/RssAtomFeeds.ashx",
+        "https://alerts.ncdr.nat.gov.tw:444/RssAtomFeeds.ashx",
+        "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx?apikey=secret",
+        "https://alerts.ncdr.nat.gov.tw/other-feed.atom",
+    ),
+)
+def test_ncdr_public_active_feed_configuration_is_pinned_to_official_https(
+    feed_url: str,
+) -> None:
+    with pytest.raises(NcdrCapAlertConfigurationError, match=r"\[REDACTED\]"):
+        NcdrCapAlertAdapter(active_feed_url=feed_url)
+
+
 def test_ncdr_config_defaults_are_fail_closed() -> None:
     defaults = load_worker_settings({})
 
@@ -1314,15 +1428,15 @@ def test_ncdr_config_defaults_are_fail_closed() -> None:
     assert defaults.ncdr_cap_timeout_seconds == 8
 
 
-def test_production_builder_has_no_legacy_or_ambiguous_ncdr_endpoint_contract() -> None:
+def test_production_builder_uses_explicit_public_active_feed_contract() -> None:
     adapter_source = Path(ncdr_cap_module.__file__).read_text(encoding="utf-8")
     builder_source = Path(build_runtime_adapters.__code__.co_filename).read_text(encoding="utf-8")
     config_source = Path(load_worker_settings.__code__.co_filename).read_text(encoding="utf-8")
     production = f"{builder_source}\n{config_source}"
 
-    assert "RssAtomFeed.ashx" not in production
+    assert "NCDR_ACTIVE_ATOM_FEED_URL" in adapter_source
+    assert "api_key=settings.ncdr_alerts_api_key" in builder_source
+    assert "RssAtomFeeds.ashx" in adapter_source
     assert "NCDR_CAP_API_URL" not in production
     assert '"key"' not in adapter_source
-    assert "NCDR_DUMP_API_URL = \"https://alerts.ncdr.nat.gov.tw/api/dump\"" not in (
-        adapter_source
-    )
+    assert 'NCDR_DUMP_API_URL = "https://alerts.ncdr.nat.gov.tw/api/dump"' not in (adapter_source)

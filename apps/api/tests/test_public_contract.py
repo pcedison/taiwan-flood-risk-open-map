@@ -46,7 +46,9 @@ client = TestClient(create_app())
 RISK_LEVELS = {"低", "中", "高", "極高", "未知"}
 CONFIDENCE_LEVELS = {"低", "中", "高", "未知"}
 REPO_ROOT = Path(__file__).resolve().parents[3]
-OPENAPI_SPEC = yaml.safe_load((REPO_ROOT / "docs" / "api" / "openapi.yaml").read_text(encoding="utf-8"))
+OPENAPI_SPEC = yaml.safe_load(
+    (REPO_ROOT / "docs" / "api" / "openapi.yaml").read_text(encoding="utf-8")
+)
 
 
 ROUTE_NOW = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
@@ -64,9 +66,7 @@ class RouteRepository:
     def load(self, **kwargs: object) -> AssessmentData:
         self.loads.append(kwargs)
         radius_m = int(kwargs["radius_m"])
-        coverage = self.data.nearby_coverage.model_copy(
-            update={"query_radius_m": radius_m}
-        )
+        coverage = self.data.nearby_coverage.model_copy(update={"query_radius_m": radius_m})
         return replace(self.data, nearby_coverage=coverage)
 
     def persist(self, _assessment: object) -> None:
@@ -104,9 +104,7 @@ def _route_record(
         realtime_risk_factor=realtime_risk_factor,
         evidence_scope=evidence_scope,  # type: ignore[arg-type]
         adapter_key=(
-            "official.wra.water_level"
-            if event_type == "water_level"
-            else "official.cwa.rainfall"
+            "official.wra.water_level" if event_type == "water_level" else "official.cwa.rainfall"
         ),
         location_precision="map_click",
     )
@@ -331,7 +329,9 @@ def test_ready_contract_when_dependencies_are_healthy(monkeypatch) -> None:
 def test_ready_returns_503_when_dependency_fails(monkeypatch) -> None:
     checked_at = datetime.fromisoformat("2026-04-29T03:00:00+00:00")
     healthy = DependencyReadiness(status="healthy", checked_at=checked_at, message=None)
-    failed = DependencyReadiness(status="failed", checked_at=checked_at, message="connection refused")
+    failed = DependencyReadiness(
+        status="failed", checked_at=checked_at, message="connection refused"
+    )
     monkeypatch.setattr(health_routes, "_check_database", lambda _url: healthy)
     monkeypatch.setattr(health_routes, "_check_redis", lambda _url: failed)
 
@@ -361,10 +361,10 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        43,
-        "0043_retire_inactive_tainan_stations.sql",
-        "c8297d452255b13b0d7bdbdf4a044ce42b0a5e4296abd66e266c3c90b05f87c0",
-        43,
+        44,
+        "0044_ncdr_public_active_feed_source.sql",
+        "356f2f68eb534e145de249df9a29d9b7b8fbe324ba22864ef80cfafc5e1b9fb6",
+        44,
         "public.station_inventory_snapshots",
         "public.realtime_jurisdiction_boundary_snapshots",
         "public.realtime_jurisdiction_boundaries",
@@ -381,15 +381,13 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
         def fetchone(self) -> tuple[bool, ...]:
             return (True, True, True, True, False, True, True)
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0043 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0044 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 
 def test_required_schema_checksum_matches_migration_loader_algorithm() -> None:
     repository_root = Path(__file__).resolve().parents[3]
-    migration = (
-        repository_root / "infra" / "migrations" / health_routes.REQUIRED_SCHEMA_FILENAME
-    )
+    migration = repository_root / "infra" / "migrations" / health_routes.REQUIRED_SCHEMA_FILENAME
     normalized_sql = migration.read_text(encoding="utf-8").strip()
 
     assert sha256(normalized_sql.encode("utf-8")).hexdigest() == (
@@ -568,10 +566,13 @@ def test_nearby_source_health_contract_is_public_safe_and_documented() -> None:
     assert set(runtime_schema["NearbySourceHealth"]["properties"]["reason_code"]["enum"]) == (
         expected_health_reasons
     )
+    assert (
+        set(documented_schema["NearbySourceHealth"]["properties"]["reason_code"]["enum"])
+        == expected_health_reasons
+    )
     assert set(
-        documented_schema["NearbySourceHealth"]["properties"]["reason_code"]["enum"]
-    ) == expected_health_reasons
-    assert set(documented_schema["NearbyCoverageSignal"]["properties"]["missing_cause"]["enum"]) == {
+        documented_schema["NearbyCoverageSignal"]["properties"]["missing_cause"]["enum"]
+    ) == {
         "none",
         "no_station_in_range",
         "inventory_unverified",
@@ -870,7 +871,9 @@ def test_geocode_uses_wikimedia_poi_fallback_when_osm_misses(monkeypatch) -> Non
         limitations=["定位結果是地標座標，不代表門牌精準位置。"],
     )
     monkeypatch.setattr(public_routes, "_cached_nominatim_candidates", lambda *_args: ())
-    monkeypatch.setattr(public_routes, "_cached_wikimedia_candidates", lambda *_args: (wiki_candidate,))
+    monkeypatch.setattr(
+        public_routes, "_cached_wikimedia_candidates", lambda *_args: (wiki_candidate,)
+    )
 
     response = client.post(
         "/v1/geocode",
@@ -1299,9 +1302,7 @@ def test_layers_uses_db_records_when_available(monkeypatch) -> None:
         tilejson_url="/v1/layers/db-flood/tilejson",
         updated_at=layer_updated_at,
         metadata={
-            "tiles": [
-                "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
-            ],
+            "tiles": ["https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"],
             "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
         },
     )
@@ -1370,9 +1371,7 @@ def test_public_layers_hide_query_heat_and_local_tile_products(monkeypatch) -> N
             tilejson_url="/v1/layers/official-flood/tilejson",
             updated_at=now,
             metadata={
-                "tiles": [
-                    "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
-                ],
+                "tiles": ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"],
                 "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
             },
         ),
@@ -1706,9 +1705,7 @@ def test_layers_fail_closed_before_serializing_unsafe_tilejson_url(
         tilejson_url=unsafe_tilejson_url,
         updated_at=None,
         metadata={
-            "tiles": [
-                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
-            ],
+            "tiles": ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"],
             "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
         },
     )
@@ -1768,9 +1765,7 @@ def test_layers_reject_partially_invalid_reviewed_host_allowlist(
         tilejson_url="/v1/layers/official-flood/tilejson",
         updated_at=None,
         metadata={
-            "tiles": [
-                "https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
-            ],
+            "tiles": ["https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"],
             "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST, "127.0.0.1"],
         },
     )
@@ -1807,9 +1802,7 @@ def test_layers_serialize_only_explicitly_reviewed_external_tile_metadata(
     layers_response = client.get("/v1/layers")
     tilejson_response = client.get("/v1/layers/official-flood/tilejson")
 
-    assert [item["id"] for item in layers_response.json()["layers"]] == [
-        "official-flood"
-    ]
+    assert [item["id"] for item in layers_response.json()["layers"]] == ["official-flood"]
     assert tilejson_response.status_code == 200
     assert tilejson_response.json()["tiles"] == [tile_url]
 
@@ -1822,8 +1815,7 @@ def test_layers_reject_nested_urls_even_when_every_authority_is_reviewed(
         "?url=https://tiles.official.gov.tw/flood/{z}/{x}/{y}.pbf"
     )
     external_tilejson_url = (
-        "https://tiles.official.gov.tw/proxy"
-        "?url=https://tiles.official.gov.tw/flood/tilejson.json"
+        "https://tiles.official.gov.tw/proxy?url=https://tiles.official.gov.tw/flood/tilejson.json"
     )
     layer = LayerRecord(
         id="official-flood",
@@ -1871,12 +1863,12 @@ def test_runtime_openapi_hides_frozen_layer_products() -> None:
     runtime_spec = create_app().openapi()
 
     assert "/v1/tiles/{layer_id}/{z}/{x}/{y}.mvt" not in runtime_spec["paths"]
-    map_layer_categories = runtime_spec["components"]["schemas"]["MapLayer"][
-        "properties"
-    ]["category"]["enum"]
-    tile_url_source_schema = runtime_spec["components"]["schemas"]["TileJson"][
-        "properties"
-    ]["tile_url_source"]
+    map_layer_categories = runtime_spec["components"]["schemas"]["MapLayer"]["properties"][
+        "category"
+    ]["enum"]
+    tile_url_source_schema = runtime_spec["components"]["schemas"]["TileJson"]["properties"][
+        "tile_url_source"
+    ]
 
     assert "query_heat" not in map_layer_categories
     assert "metadata" in json.dumps(tile_url_source_schema)
@@ -1957,9 +1949,7 @@ def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
         metadata={
             "version": "db-v1",
             "scheme": "xyz",
-            "tiles": [
-                "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
-            ],
+            "tiles": ["https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"],
             "reviewed_external_tile_hosts": [REVIEWED_TILE_HOST],
             "bounds": [120.0, 22.0, 121.0, 23.0],
             "vector_layers": [
@@ -1981,9 +1971,7 @@ def test_tilejson_uses_layer_record_metadata(monkeypatch) -> None:
     assert payload["version"] == "db-v1"
     assert payload["attribution"] == "DB attribution"
     assert payload["status"] == "available"
-    assert payload["tiles"] == [
-        "https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"
-    ]
+    assert payload["tiles"] == ["https://tiles.official.gov.tw/db-flood/{z}/{x}/{y}.pbf"]
     assert payload["tile_url_source"] == "metadata"
     assert "cache_control" not in payload
     assert payload["minzoom"] == 5
@@ -2010,9 +1998,7 @@ def test_tilejson_sanitizes_placeholder_tile_metadata(monkeypatch) -> None:
         tilejson_url="/v1/layers/db-flood/tilejson",
         updated_at=None,
         metadata={
-            "tiles": [
-                "https://tiles.placeholder.flood-risk.local/db-flood/{z}/{x}/{y}.pbf"
-            ],
+            "tiles": ["https://tiles.placeholder.flood-risk.local/db-flood/{z}/{x}/{y}.pbf"],
         },
     )
     monkeypatch.setattr(public_routes, "fetch_map_layers", lambda **_kwargs: (db_layer,))
