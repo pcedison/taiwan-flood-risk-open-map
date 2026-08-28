@@ -375,7 +375,11 @@ def test_runtime_selection_override_cannot_widen_staging_or_promotion() -> None:
     )
 
     assert result.status == "succeeded"
-    assert run_writer.runtime_selections[0][0] == (adapter_key, peer_key)
+    assert run_writer.runtime_selections
+    assert {
+        enabled_adapter_keys
+        for enabled_adapter_keys, _known_adapter_keys in run_writer.runtime_selections
+    } == {(adapter_key, peer_key)}
     assert len(staging_writer.batches) == 1
     assert staging_writer.batches[0].adapter_key == adapter_key
     assert promotion_writer.requested_adapter_keys == (adapter_key,)

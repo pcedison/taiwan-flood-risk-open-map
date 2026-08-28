@@ -373,6 +373,7 @@ def _execute_managed_runtime_ingestion_cycle(
     cycle = _execute_scheduled_ingestion_cycle(
         adapters,
         settings=resolved_settings,
+        runtime_selection_adapter_keys=reported_adapter_keys,
         job_key=job_key,
         writer=persistence.staging_writer,
         run_writer=persistence.run_writer,
