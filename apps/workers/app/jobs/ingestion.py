@@ -240,6 +240,7 @@ def run_enabled_adapter_batches(
     adapter_by_key: Mapping[str, DataSourceAdapter],
     *,
     settings: WorkerSettings | None = None,
+    runtime_selection_adapter_keys: tuple[str, ...] | None = None,
     writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
     job_key: str = "ingest.enabled_adapters",
@@ -252,9 +253,14 @@ def run_enabled_adapter_batches(
         for key in selected_keys
         if key in adapter_by_key
     )
+    reported_keys = (
+        runtime_selection_adapter_keys
+        if runtime_selection_adapter_keys is not None
+        else selected_keys
+    )
     record_runtime_selection(
         run_writer,
-        enabled_adapter_keys=selected_keys,
+        enabled_adapter_keys=reported_keys,
         known_adapter_keys=tuple(ADAPTER_REGISTRY),
     )
     missing_adapter_keys = tuple(key for key in selected_keys if key not in adapter_by_key)

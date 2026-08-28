@@ -102,6 +102,7 @@ def _execute_scheduled_ingestion_cycle(
     adapter_by_key: Mapping[str, DataSourceAdapter],
     *,
     settings=None,
+    runtime_selection_adapter_keys: tuple[str, ...] | None = None,
     job_key: str = "scheduler.ingest.enabled_adapters",
     writer: StagingBatchWriter | None = None,
     run_writer: IngestionRunSummaryWriter | None = None,
@@ -111,6 +112,7 @@ def _execute_scheduled_ingestion_cycle(
     summaries = run_enabled_adapter_batches(
         adapter_by_key,
         settings=resolved_settings,
+        runtime_selection_adapter_keys=runtime_selection_adapter_keys,
         writer=writer,
         run_writer=run_writer,
         job_key=job_key,
