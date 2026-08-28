@@ -19,7 +19,14 @@ import pytest
 
 BASELINE_REVISION = "2026-08-24-v1-baseline"
 WARNING_REVISION = "2026-08-28-v1-warning-alignment"
-REVIEWED_SIGNAL_TYPES = ("rainfall", "water_level", "flood_depth", "flood_warning")
+SEWER_REVISION = "2026-08-29-sewer-publication"
+REVIEWED_SIGNAL_TYPES = (
+    "rainfall",
+    "water_level",
+    "flood_depth",
+    "flood_warning",
+    "sewer_water_level",
+)
 EXPECTED_FLOOD_WARNING_KEYS = {
     "official.cwa.heavy_rain_warning",
     "official.ncdr.cap",
@@ -29,10 +36,14 @@ EXPECTED_REVISIONS = {
     "water_level": BASELINE_REVISION,
     "flood_depth": BASELINE_REVISION,
     "flood_warning": WARNING_REVISION,
+    "sewer_water_level": SEWER_REVISION,
 }
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WARNING_MIGRATION = (
     REPO_ROOT / "infra" / "migrations" / "0041_v1_warning_source_requirement_alignment.sql"
+)
+SEWER_MIGRATION = (
+    REPO_ROOT / "infra" / "migrations" / "0048_civil_iot_sewer_publication_contract.sql"
 )
 
 # Recomputed exactly as query_realtime_jurisdiction_context does, so a drift in
@@ -206,14 +217,44 @@ def test_warning_alignment_is_append_only_and_matches_the_deployed_backbone() ->
     assert "official.cwa.heavy_rain_warning" not in backbone.split(",")
 
 
-def test_sewer_water_level_is_recorded_as_a_known_gap() -> None:
+def test_every_jurisdiction_gets_the_reviewed_sewer_publication_mapping() -> None:
     rows = [row for row in _rows() if row["signal_type"] == "sewer_water_level"]
 
-    assert rows, "no sewer_water_level contracts exist"
+    assert len(rows) == 22, f"expected 22 sewer_water_level contracts, got {len(rows)}"
     for row in rows:
-        assert row["catalog_status"] == "known_gap", row["jurisdiction_code"]
-        assert row["approved_mapping_count"] is None, row["jurisdiction_code"]
-        assert row["approved_mapping_manifest_sha256"] is None, row["jurisdiction_code"]
+        assert set(row["adapter_keys"]) == {"official.civil_iot.sewer_water_level"}
+        assert row["mapping_revision"] == SEWER_REVISION
+        assert row["catalog_status"] == "reviewed_complete"
+        assert row["approved_mapping_count"] == 1
+        assert row["approved_mapping_manifest_sha256"] == row["actual_sha256"]
+        assert row["mappings"] == [
+            {
+                "adapter_key": "official.civil_iot.sewer_water_level",
+                "requirement_role": "required",
+                "redundancy_of_adapter_key": None,
+                "mapping_revision": SEWER_REVISION,
+            }
+        ]
+
+
+def test_sewer_publication_contract_does_not_enable_unproven_sources() -> None:
+    migration = SEWER_MIGRATION.read_text(encoding="utf-8")
+
+    assert SEWER_REVISION in migration
+    assert "official.civil_iot.sewer_water_level" in migration
+    assert "reviewed_complete" in migration
+    assert "approved_mapping_manifest_sha256" in migration
+    assert "UPDATE data_sources" not in migration
+    assert "is_enabled =" not in migration
+    for unproven_adapter_key in (
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.civil_iot.river_water_level",
+        "official.cwa.tide_level",
+    ):
+        assert unproven_adapter_key not in migration
 
 
 def test_the_mapping_proof_gate_actually_opens_for_every_reviewed_contract() -> None:

@@ -14,6 +14,7 @@ from app.domain.assessment.repository import (
 from app.domain.evidence import (
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
+    NearbyCoverageRow,
     RealtimeJurisdictionContext,
     RealtimeJurisdictionSignalContract,
     RealtimeJurisdictionSourceMapping,
@@ -429,6 +430,61 @@ def test_redundant_warning_mapping_is_applicable_but_not_required_for_absence(
     assert {mapping.adapter_key for mapping in jurisdiction.source_mappings} >= {
         "official.ncdr.cap",
         "official.cwa.heavy_rain_warning",
+    }
+
+
+def test_reviewed_sewer_mapping_reaches_public_coverage_and_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_key = "official.civil_iot.sewer_water_level"
+    revision = "2026-08-29-sewer-publication"
+    mapping = _mapping(adapter_key, "sewer_water_level", revision=revision)
+    jurisdiction = _context(mappings=(mapping,))
+    nearby = NearbyCoverageRow(
+        adapter_key=adapter_key,
+        source_id="sewer-001:2026-08-24T03:58:00+00:00",
+        event_type="water_level",
+        station_id="sewer-001",
+        observed_at=NOW - timedelta(minutes=2),
+        ingested_at=NOW,
+        distance_to_query_m=6_144.5,
+        freshness_state="fresh",
+    )
+    health = RealtimeSourceHealthRow(
+        adapter_key=adapter_key,
+        name="Civil IoT sewer water level",
+        is_enabled=True,
+        configured_health_status="healthy",
+        last_success_at=NOW,
+        last_failure_at=None,
+        latest_run_status="succeeded",
+        latest_run_at=NOW,
+        latest_observed_at=NOW - timedelta(minutes=2),
+        latest_ingested_at=NOW,
+        station_count=2_033,
+        fresh_station_count=2_033,
+    )
+    health_query: dict[str, object] = {}
+
+    data = _repository(
+        monkeypatch,
+        query_realtime_jurisdiction_context=lambda **_: jurisdiction,
+        query_nearby_realtime_coverage_rows=lambda **_: (nearby,),
+        query_realtime_source_health_rows=lambda **kwargs: (
+            health_query.update(kwargs) or (health,)
+        ),
+    ).load(**POINT)
+
+    assert health_query["adapter_keys"] == (adapter_key,)
+    sewer = next(
+        item
+        for item in data.nearby_coverage.signal_breakdown
+        if item.signal_type == "sewer_water_level"
+    )
+    assert sewer.nearest_distance_m == 6_144.5
+    assert sewer.missing_cause != "source_not_configured"
+    assert {item.source_id for item in data.nearby_coverage.source_health} == {
+        "official-civil-iot-sewer-water-level"
     }
 
 
