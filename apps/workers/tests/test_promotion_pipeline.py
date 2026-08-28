@@ -1285,13 +1285,13 @@ def test_cap_area_uses_canonical_message_admin_key_and_reviewed_boundary(
     assert quality_flags["active_until"] == "2027-08-24T03:00:00+00:00"
 
 
-def test_unresolved_or_unreviewed_cap_boundary_remains_unlocated_audit() -> None:
+def test_unresolved_or_unreviewed_cap_boundary_fails_closed_before_evidence() -> None:
     connection = _FakeConnection(rows=[], evidence_id="evidence-id")
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
 
     evidence_id = writer.write_evidence(_cap_payload())
 
-    assert evidence_id == "evidence-id"
+    assert evidence_id is None
     boundary_sql = next(
         statement
         for statement, _ in connection.cursor_instance.executions
@@ -1301,6 +1301,10 @@ def test_unresolved_or_unreviewed_cap_boundary_remains_unlocated_audit() -> None
     assert "snapshot.reviewed_at IS NOT NULL" in boundary_sql
     assert "snapshot.manifest_sha256 = snapshot.approved_manifest_sha256" in boundary_sql
     assert "boundary_integrity.geom_sha256" in boundary_sql
+    assert not any(
+        "INSERT INTO evidence" in statement
+        for statement, _ in connection.cursor_instance.executions
+    )
     assert not any(
         "INSERT INTO official_realtime_latest" in statement
         for statement, _ in connection.cursor_instance.executions
@@ -1392,7 +1396,16 @@ def test_invalid_current_cap_mutation_cannot_insert_or_retire(
         "identifier": "alert-0",
         "sent": "2026-08-24T00:30:00+00:00",
     }
-    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    multipolygon = {
+        "type": "MultiPolygon",
+        "coordinates": [[[[120.0, 22.8], [120.4, 22.8], [120.4, 23.2], [120.0, 22.8]]]],
+    }
+    point = {"type": "Point", "coordinates": [120.2, 23.0]}
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        reviewed_boundary_row=(json.dumps(multipolygon), json.dumps(point)),
+    )
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
     payload = _cap_payload(
         message_type="Update",
@@ -1429,7 +1442,14 @@ def test_current_cap_mutation_retains_mixed_audit_list_but_effects_only_earlier(
             "sent": "2026-08-24T04:00:00+00:00",
         },
     ]
-    connection = _FakeConnection(rows=[], evidence_id="evidence-id")
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        reviewed_boundary_row=(
+            '{"type":"MultiPolygon","coordinates":[[[[120,22],[121,22],[121,23],[120,22]]]]}',
+            '{"type":"Point","coordinates":[120.5,22.5]}',
+        ),
+    )
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
 
     evidence_id = writer.write_evidence(
@@ -1605,6 +1625,52 @@ def test_canonical_cap_replay_across_raw_refs_is_terminal_idempotent(
             "/* retire-cap-references */",
             "INSERT INTO official_realtime_latest",
         )
+    )
+
+
+def test_canonical_ncdr_replay_rehydrates_latest_for_the_active_snapshot() -> None:
+    staging_id = "11111111-2222-4333-8444-555555555555"
+    multipolygon = {
+        "type": "MultiPolygon",
+        "coordinates": [[[[120.0, 22.8], [120.4, 22.8], [120.4, 23.2], [120.0, 22.8]]]],
+    }
+    point = {"type": "Point", "coordinates": [120.2, 23.0]}
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="unused",
+        cap_identity_exists=True,
+        reviewed_boundary_row=(json.dumps(multipolygon), json.dumps(point)),
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = _cap_payload(adapter_key="official.ncdr.cap")
+    payload = EvidencePromotionPayload(
+        **{**payload.__dict__, "raw_ref": "raw/ncdr/active-snapshot-2.xml"}
+    )
+    payload.properties["staging_evidence_id"] = staging_id
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "idempotent_existing_cap_message")
+    ]
+    latest_params = next(
+        params
+        for statement, params in connection.cursor_instance.executions
+        if "INSERT INTO official_realtime_latest" in statement
+    )
+    assert latest_params[18] == "1"
+    assert json.loads(str(latest_params[21]))["active_snapshot_raw_ref"] == payload.raw_ref
+    refresh_sql, refresh_params = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "/* refresh-ncdr-active-snapshot */" in execution[0]
+    )
+    assert "adapter_key = 'official.ncdr.cap'" in refresh_sql
+    assert refresh_params[0] == payload.raw_ref
+    assert not any(
+        "INSERT INTO evidence" in statement
+        for statement, _ in connection.cursor_instance.executions
     )
 
 
@@ -2441,6 +2507,19 @@ def _cap_payload(
             "active_from": "2026-08-24T00:00:00+00:00",
             "active_until": "2027-08-24T03:00:00+00:00",
             "ingestion_generation_started_at": "2026-08-24T01:05:00+00:00",
+            **(
+                {
+                    "ncdr_geocode_profile": "Taiwan_Geocode_103",
+                    "ncdr_geocode_name": "TOWNCODE",
+                    "ncdr_geocode": admin_code[:7],
+                }
+                if adapter_key == "official.ncdr.cap"
+                and admin_code is not None
+                and len(admin_code) == 8
+                and admin_code.isdigit()
+                and admin_code.endswith("0")
+                else {}
+            ),
         },
     )
 
@@ -2492,7 +2571,7 @@ class _FakeConnection:
         existing_latest_row: tuple[object, ...] | None = None,
         same_staging_used: bool = False,
         exact_duplicate_row: tuple[str, str] | None = None,
-        reviewed_boundary_row: tuple[str, str] | None = None,
+        reviewed_boundary_row: tuple[object, ...] | None = None,
         cap_tombstone_exists: bool = False,
         admin_area_row: tuple[str, str | None, str | None] | None = None,
         central_duplicate_row: tuple[str, str] | None = None,
@@ -2552,7 +2631,7 @@ class _FakeCursor:
         existing_latest_row: tuple[object, ...] | None,
         same_staging_used: bool,
         exact_duplicate_row: tuple[str, str] | None,
-        reviewed_boundary_row: tuple[str, str] | None,
+        reviewed_boundary_row: tuple[object, ...] | None,
         cap_tombstone_exists: bool,
         admin_area_row: tuple[str, str | None, str | None] | None,
         central_duplicate_row: tuple[str, str] | None,
@@ -2635,6 +2714,20 @@ class _FakeCursor:
         if self.executions and "/* exact-central-local-duplicate */" in self.executions[-1][0]:
             return self._exact_duplicate_row
         if self.executions and "/* reviewed-warning-boundary */" in self.executions[-1][0]:
+            return self._reviewed_boundary_row
+        if (
+            self.executions
+            and "/* reviewed-ncdr-warning-boundary */" in self.executions[-1][0]
+        ):
+            if self._reviewed_boundary_row is None:
+                return None
+            if len(self._reviewed_boundary_row) == 2:
+                return (
+                    *self._reviewed_boundary_row,
+                    "臺南市",
+                    "中西區",
+                    "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                )
             return self._reviewed_boundary_row
         if self.executions and "/* retained-cap-tombstone */" in self.executions[-1][0]:
             return ("1",) if self._cap_tombstone_exists else None

@@ -179,3 +179,11 @@ scanning all historical accepted staging rows before promotion. The worker's
 unscoped maintenance path retains orphan-staging compatibility; the migration
 changes no staging status, evidence row, source gate, scoring rule, or public
 response contract.
+
+`0046_ncdr_alert_area_boundaries.sql` adds a dedicated, immutable 368-township
+boundary snapshot for NCDR's `Taiwan_Geocode_103` CAP profile. It is deliberately
+separate from the 22-county jurisdiction boundary so a township warning can
+never be widened to its parent county. Activation requires exact archive and
+manifest checksums, a complete unique geocode set, valid PostGIS geometry, and
+an operator review reference. Until one reviewed snapshot is active, NCDR
+warning rows remain audit-only and fail closed before public evidence.

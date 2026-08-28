@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -27,6 +28,9 @@ from app.adapters.cap_xml import (
 from app.adapters.contracts import (
     AdapterMetadata,
     AdapterRunResult,
+    EventType,
+    IngestionStatus,
+    NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
     SourceRejection,
@@ -42,6 +46,8 @@ NCDR_DUMP_API_URL = "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
 NCDR_ACTIVE_ATOM_FEED_URL = "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx"
 NCDR_PUBLIC_HOST = "alerts.ncdr.nat.gov.tw"
 NCDR_FLOOD_CATEGORY = "淹水"
+NCDR_GEOCODE_PROFILE = "Taiwan_Geocode_103"
+NCDR_TOWNSHIP_GEOCODE_NAMES = frozenset({"towncode", "taiwan_geocode_103"})
 DEFAULT_NCDR_MAX_CAP_IDS_PER_RUN = 50
 DEFAULT_NCDR_CAP_TIMEOUT_SECONDS = 8
 NCDR_CAP_USER_AGENT = "FloodRiskTaiwan/0.1 worker-ncdr-cap"
@@ -50,16 +56,17 @@ NCDR_CAP_METADATA = AdapterMetadata(
     key="official.ncdr.cap",
     family=SourceFamily.OFFICIAL,
     enabled_by_default=False,
-    display_name="NCDR active-warning Atom/CAP audit adapter",
+    display_name="NCDR active-warning Atom/CAP adapter",
     data_gov_dataset_id="NCDR-CAP",
     data_gov_url="https://alerts.ncdr.nat.gov.tw/",
     resource_url=NCDR_ACTIVE_ATOM_FEED_URL,
     update_frequency="active-warning Atom feed refreshed every minute by NCDR",
     license="Government Open Data License, version 1.0",
+    snapshot_generation_mode="complete_replace",
     limitations=(
         "Uses the public active-warning Atom feed when no member API key is configured.",
-        "Disabled by default and audit-only until exact administrative and Circle geometry is reviewed.",
-        "Unreviewed CAP areas never become normalized, staging, latest, or scoring rows.",
+        "Disabled by default; only exact Taiwan_Geocode_103 areas with an active reviewed boundary snapshot can be published.",
+        "Polygon, Circle, ambiguous, and unreviewed CAP areas remain rejection-only audit rows.",
     ),
 )
 
@@ -125,7 +132,7 @@ class NcdrCapAlertAdapter:
         self._raw_snapshot_key = raw_snapshot_key
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
-        fetched, _rejections, selected_count, successful_dump_count, retry_after = (
+        fetched, _normalized, _rejections, selected_count, successful_dump_count, retry_after = (
             self._fetch_audited_rows()
         )
         if selected_count > 0 and successful_dump_count == 0:
@@ -135,11 +142,18 @@ class NcdrCapAlertAdapter:
             )
         return fetched
 
-    def normalize(self, raw_item: RawSourceItem) -> None:
-        del raw_item
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        return _normalize_reviewed_raw(raw_item)
 
     def run(self) -> AdapterRunResult:
-        fetched, source_rejections, selected_count, successful_dump_count, retry_after = (
+        (
+            fetched,
+            normalized,
+            source_rejections,
+            selected_count,
+            successful_dump_count,
+            retry_after,
+        ) = (
             self._fetch_audited_rows()
         )
         if selected_count > 0 and successful_dump_count == 0:
@@ -152,7 +166,7 @@ class NcdrCapAlertAdapter:
         return AdapterRunResult(
             adapter_key=self.metadata.key,
             fetched=fetched,
-            normalized=(),
+            normalized=normalized,
             rejected=rejected,
             source_rejections=source_rejections,
             no_active_event=selected_count == 0 or (not fetched and successful_dump_count > 0),
@@ -162,6 +176,7 @@ class NcdrCapAlertAdapter:
         self,
     ) -> tuple[
         tuple[RawSourceItem, ...],
+        tuple[NormalizedEvidence, ...],
         tuple[SourceRejection, ...],
         int,
         int,
@@ -213,9 +228,10 @@ class NcdrCapAlertAdapter:
                 (cap_id, cap_url, {}) for cap_id, cap_url in public_documents
             )
         if not selected_documents:
-            return (), (), 0, 0, None
+            return (), (), (), 0, 0, None
 
         fetched: list[RawSourceItem] = []
+        normalized: list[NormalizedEvidence] = []
         rejections: list[SourceRejection] = []
         seen_source_ids: set[str] = set()
         successful_dump_count = 0
@@ -253,7 +269,7 @@ class NcdrCapAlertAdapter:
             row_count = sum(len(message.areas) or 1 for message in messages)
             if not dump_failed and audited_row_count + row_count > MAX_NCDR_AUDITED_ROWS:
                 raise NcdrCapAlertPayloadError("NCDR CAP exceeds the 256 audited-row limit")
-            prepared: list[tuple[RawSourceItem, str]] = []
+            prepared: list[tuple[RawSourceItem, str | None]] = []
             if not dump_failed:
                 try:
                     prepared = [
@@ -306,10 +322,20 @@ class NcdrCapAlertAdapter:
                     continue
                 seen_source_ids.add(raw.source_id)
                 fetched.append(raw)
-                rejections.append(SourceRejection(raw.source_id, reason))
+                if reason is None:
+                    evidence = self.normalize(raw)
+                    if evidence is None:
+                        rejections.append(
+                            SourceRejection(raw.source_id, "ncdr_normalization_failed")
+                        )
+                    else:
+                        normalized.append(evidence)
+                else:
+                    rejections.append(SourceRejection(raw.source_id, reason))
 
         return (
             tuple(fetched),
+            tuple(normalized),
             tuple(rejections),
             len(selected_documents),
             successful_dump_count,
@@ -526,7 +552,7 @@ def _prepare_audit_row(
     fetched_at: datetime,
     source_url: str,
     raw_snapshot_key: str | None,
-) -> tuple[RawSourceItem, str]:
+) -> tuple[RawSourceItem, str | None]:
     if message.message_type not in {"Alert", "Update", "Cancel"}:
         raise CapDocumentError("NCDR CAP msgType must be Alert, Update, or Cancel")
     if message.message_type in {"Update", "Cancel"} and not message.references:
@@ -537,17 +563,26 @@ def _prepare_audit_row(
     if message.expires <= active_from:
         raise CapDocumentError("NCDR CAP expires must be later than active_from")
 
-    source_id = (
-        cap_source_id(
+    reviewed_geocode = _reviewed_township_geocode(area)
+    admin_code = f"{reviewed_geocode[1]}0" if reviewed_geocode is not None else None
+    if area is None:
+        source_id = cap_source_id(
             sender=message.sender,
             identifier=message.identifier,
             sent=message.sent,
             admin_code=None,
             message_level=True,
         )
-        if area is None
-        else _unresolved_area_source_id(message, area)
-    )
+    elif admin_code is not None and area.polygon is None and area.circle is None:
+        source_id = cap_source_id(
+            sender=message.sender,
+            identifier=message.identifier,
+            sent=message.sent,
+            admin_code=admin_code,
+            message_level=False,
+        )
+    else:
+        source_id = _unresolved_area_source_id(message, area)
     payload: dict[str, object] = {
         "evidence_scope": "current",
         "location_precision": "admin_area",
@@ -578,6 +613,16 @@ def _prepare_audit_row(
             else []
         ),
     }
+    if reviewed_geocode is not None:
+        source_geocode_name, geocode_value = reviewed_geocode
+        payload.update(
+            {
+                "admin_code": f"{geocode_value}0",
+                "ncdr_geocode_profile": NCDR_GEOCODE_PROFILE,
+                "ncdr_geocode_name": source_geocode_name,
+                "ncdr_geocode": geocode_value,
+            }
+        )
     if area is not None and area.polygon is not None:
         payload["polygon"] = [
             {"latitude": latitude, "longitude": longitude} for latitude, longitude in area.polygon
@@ -602,8 +647,82 @@ def _prepare_audit_row(
             area,
             active_from=active_from,
             fetched_at=fetched_at,
+            reviewed_geocode=reviewed_geocode,
         ),
     )
+
+
+def _reviewed_township_geocode(area: ParsedCapArea | None) -> tuple[str, str] | None:
+    if area is None:
+        return None
+    matches = tuple(
+        (name.strip(), value.strip())
+        for name, value in area.geocodes
+        if name.strip().lower() in NCDR_TOWNSHIP_GEOCODE_NAMES
+    )
+    values = {value for _name, value in matches}
+    if len(values) != 1:
+        return None
+    value = next(iter(values))
+    if re.fullmatch(r"[0-9]{7}", value) is None:
+        return None
+    source_name = min(name for name, _value in matches)
+    return source_name, value
+
+
+def _normalize_reviewed_raw(raw_item: RawSourceItem) -> NormalizedEvidence | None:
+    payload = raw_item.payload
+    message_type = optional_str(payload.get("cap_message_type"))
+    status = optional_str(payload.get("cap_status"))
+    if status != "Actual" or message_type not in {"Alert", "Update", "Cancel"}:
+        return None
+    if message_type in {"Alert", "Update"}:
+        admin_code = optional_str(payload.get("admin_code"))
+        geocode = optional_str(payload.get("ncdr_geocode"))
+        if (
+            re.fullmatch(r"[0-9]{8}", admin_code or "") is None
+            or re.fullmatch(r"[0-9]{7}", geocode or "") is None
+            or admin_code != f"{geocode}0"
+            or payload.get("ncdr_geocode_profile") != NCDR_GEOCODE_PROFILE
+        ):
+            return None
+    sent = _aware_datetime(payload.get("cap_sent"))
+    if sent is None:
+        return None
+    headline = optional_str(payload.get("headline"))
+    description = optional_str(payload.get("description"))
+    area_desc = optional_str(payload.get("areaDesc"))
+    title = headline or "NCDR 淹水警戒"
+    summary = description or headline or "NCDR 發布淹水警戒 CAP 訊息。"
+    return NormalizedEvidence(
+        evidence_id=f"{NCDR_CAP_METADATA.key}:{raw_item.source_id}",
+        adapter_key=NCDR_CAP_METADATA.key,
+        source_family=SourceFamily.OFFICIAL,
+        event_type=EventType.FLOOD_WARNING,
+        source_id=raw_item.source_id,
+        source_url=raw_item.source_url,
+        source_title=title,
+        source_timestamp=sent,
+        fetched_at=raw_item.fetched_at,
+        summary=summary,
+        location_text=area_desc,
+        confidence=0.95,
+        status=IngestionStatus.NORMALIZED,
+        attribution="國家災害防救科技中心（NCDR）",
+        tags=("official", "ncdr", "cap", "flood_warning"),
+    )
+
+
+def _aware_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
 
 
 def _unresolved_area_source_id(message: ParsedCapMessage, area: ParsedCapArea) -> str:
@@ -627,13 +746,16 @@ def _audit_rejection_reason(
     *,
     active_from: datetime,
     fetched_at: datetime,
-) -> str:
+    reviewed_geocode: tuple[str, str] | None,
+) -> str | None:
     if message.status != "Actual":
         return "ncdr_inactive_status"
     if message.scope != "Public":
         return "ncdr_inactive_scope"
     if message.message_type == "Cancel":
-        return "ncdr_inactive_cancel"
+        if area is None or reviewed_geocode is not None:
+            return None
+        return "ncdr_unreviewed_admin_geometry"
     if active_from > fetched_at:
         return "ncdr_inactive_future"
     if message.expires is not None and message.expires <= fetched_at:
@@ -644,7 +766,9 @@ def _audit_rejection_reason(
         return "ncdr_circle_geometry_unreviewed"
     if area.polygon is not None:
         return "ncdr_polygon_geometry_unreviewed"
-    return "ncdr_unreviewed_admin_geometry"
+    if reviewed_geocode is None:
+        return "ncdr_unreviewed_admin_geometry"
+    return None
 
 
 def _transport_source_id(cap_id: str) -> str:

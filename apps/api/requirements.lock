@@ -34,6 +34,8 @@ pydantic==2.13.4
     # via fastapi
 pydantic-core==2.46.4
     # via pydantic
+pyshp==2.4.2
+    # via flood-risk-api (apps/api/pyproject.toml)
 python-dotenv==1.2.2
     # via uvicorn
 pyyaml==6.0.3
