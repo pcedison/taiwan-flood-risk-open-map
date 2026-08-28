@@ -18,10 +18,16 @@ def test_forced_backbone_preserves_operator_configured_local_adapters() -> None:
 
 def test_tainan_flood_sensor_is_in_the_default_hosted_ingestion_path() -> None:
     script = _entrypoint()
+    force_block = script.split("configure_backbone_source_gates() {", 1)[1].split(
+        "setup_ingestion_env() {", 1
+    )[0]
 
     assert "local.tainan.flood_sensor" in script
-    assert 'SOURCE_TAINAN_FLOOD_SENSOR_ENABLED:-true' in script
-    assert 'SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED:-true' in script
+    assert "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED" in force_block
+    assert "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED" in force_block
+    assert 'if truthy "${realtime_backbone_force_ingestion}"; then' in force_block
+    assert 'printf -v "${gate}" "%s" "true"' in force_block
+    assert "configure_backbone_source_gates" in script
 
 
 def test_unified_service_shares_database_and_supervises_scheduler() -> None:
