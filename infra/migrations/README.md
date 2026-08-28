@@ -148,3 +148,9 @@ The migration advances only flood-warning contracts to
 `2026-08-28-v1-warning-alignment` and recomputes all 22 count/checksum proofs;
 rainfall, water-level, and flood-depth contracts retain their independently
 reviewed revisions.
+
+`0042_evidence_staging_lookup_index.sql` adds the bounded expression index used
+by per-candidate promotion idempotency checks. Without it, each accepted staging
+row scans the growing public `evidence` table for its `staging_evidence_id`,
+which can delay ingestion and contend with public risk requests. The migration
+changes no evidence rows, source gates, scoring rule, or public response shape.

@@ -385,7 +385,6 @@ def build_runtime_adapters(
         settings.source_ncdr_cap_enabled
         and settings.source_ncdr_cap_api_enabled
         and settings.source_ncdr_cap_contract_enabled
-        and bool((settings.ncdr_alerts_api_key or "").strip())
         and "official.ncdr.cap" in enabled_keys
     ):
         ncdr_cap_adapter = NcdrCapAlertAdapter(

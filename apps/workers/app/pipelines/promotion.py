@@ -911,7 +911,8 @@ def _staging_evidence_was_already_used(
         /* same-staging-evidence */
         SELECT 1
         FROM evidence
-        WHERE properties ->> 'staging_evidence_id' = %s
+        WHERE properties ? 'staging_evidence_id'
+            AND properties ->> 'staging_evidence_id' = %s
         LIMIT 1
         """,
         (staging_id,),
