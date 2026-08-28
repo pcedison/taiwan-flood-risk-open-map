@@ -548,6 +548,40 @@ def test_configuration_failure_has_public_reason_without_leaking_error_code() ->
     assert "NcdrCapAlertConfigurationError" not in coverage.model_dump_json()
 
 
+@pytest.mark.parametrize(
+    "error_code",
+    (
+        "TainanFloodSensorTimeoutError",
+        "TainanFloodSensorFetchError",
+        "TainanFloodSensorHttpError",
+        "TainanFloodSensorPayloadError",
+    ),
+)
+def test_upstream_response_failures_have_public_reason_without_leaking_error_code(
+    error_code: str,
+) -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="local.tainan.flood_sensor",
+            latest_run_status="failed",
+            latest_run_error_code=error_code,
+            latest_run_delta_minutes=2,
+            observed_delta_minutes=None,
+            station_count=0,
+            runtime_enabled=True,
+            runtime_enabled_delta_minutes=1,
+            runtime_pipeline_status="failed",
+            runtime_pipeline_delta_minutes=1,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "failed"
+    assert health.reason_code == "upstream_unavailable"
+    assert "背景來源" in health.message
+    assert error_code not in coverage.model_dump_json()
+
+
 def test_stalled_update_pipeline_has_distinct_missing_cause() -> None:
     coverage = _coverage_with_health(
         _health_row(

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from urllib.error import URLError
+
+import pytest
 
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.local_tainan import (
@@ -13,6 +16,7 @@ from app.adapters.local_tainan import (
     parse_tainan_flood_sensor_metadata_payload,
     parse_tainan_flood_sensor_realtime_payload,
 )
+from app.adapters.local_tainan import flood_sensor as tainan_flood_sensor
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.config import load_worker_settings
 from app.jobs.runtime import build_runtime_adapters
@@ -75,6 +79,61 @@ def _metadata_payload() -> dict:
             },
         ],
     }
+
+
+class _ChunkedResponse:
+    def __init__(self, chunks: tuple[bytes, ...]) -> None:
+        self._chunks = iter(chunks)
+        self.read_count = 0
+
+    def __enter__(self) -> _ChunkedResponse:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        del args
+
+    def read1(self, size: int) -> bytes:
+        assert size == tainan_flood_sensor.TAINAN_FLOOD_SENSOR_READ_CHUNK_BYTES
+        self.read_count += 1
+        try:
+            return next(self._chunks)
+        except StopIteration as exc:
+            raise AssertionError("fetch waited for a terminal chunk after complete JSON") from exc
+
+    def read(self, size: int) -> bytes:
+        del size
+        raise AssertionError("chunked responses must use read1 instead of EOF-bound read")
+
+
+def test_tainan_fetch_returns_when_chunked_json_is_complete_without_waiting_for_eof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _ChunkedResponse((b'{"contentType":"application/json",', b'"data":[]}'))
+    monkeypatch.setattr(tainan_flood_sensor, "urlopen", lambda *args, **kwargs: response)
+
+    payload = tainan_flood_sensor.fetch_tainan_json(
+        TAINAN_FLOOD_SENSOR_API_URL,
+        DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
+    )
+
+    assert payload == {"contentType": "application/json", "data": []}
+    assert response.read_count == 2
+
+
+def test_tainan_fetch_classifies_wrapped_upstream_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr(tainan_flood_sensor, "urlopen", timeout)
+
+    with pytest.raises(tainan_flood_sensor.TainanFloodSensorTimeoutError):
+        tainan_flood_sensor.fetch_tainan_json(
+            TAINAN_FLOOD_SENSOR_API_URL,
+            DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
+        )
 
 
 def test_tainan_metadata_and_realtime_join_to_station_point() -> None:

@@ -10,7 +10,9 @@ from app.adapters.local_tainan.flood_sensor import (
     TainanFloodSensorAdapterError,
     TainanFloodSensorApiAdapter,
     TainanFloodSensorFetchError,
+    TainanFloodSensorHttpError,
     TainanFloodSensorPayloadError,
+    TainanFloodSensorTimeoutError,
     parse_tainan_flood_sensor_metadata_payload,
     parse_tainan_flood_sensor_realtime_payload,
 )
@@ -25,7 +27,9 @@ __all__ = [
     "TainanFloodSensorAdapterError",
     "TainanFloodSensorApiAdapter",
     "TainanFloodSensorFetchError",
+    "TainanFloodSensorHttpError",
     "TainanFloodSensorPayloadError",
+    "TainanFloodSensorTimeoutError",
     "parse_tainan_flood_sensor_metadata_payload",
     "parse_tainan_flood_sensor_realtime_payload",
 ]

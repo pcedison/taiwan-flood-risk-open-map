@@ -36,6 +36,8 @@ TAINAN_FLOOD_SENSOR_ATTRIBUTION = "臺南市政府水利局 / 臺南市政府資
 # both the default and the safety floor: a stale platform override must not turn
 # a readable required source back into a failed pipeline.
 DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS = 45
+TAINAN_FLOOD_SENSOR_READ_CHUNK_BYTES = 16 * 1024
+TAINAN_FLOOD_SENSOR_MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TAINAN_LOCAL_TZ = timezone(timedelta(hours=8))
 
 TAINAN_FLOOD_SENSOR_METADATA = AdapterMetadata(
@@ -79,6 +81,14 @@ class TainanFloodSensorAdapterError(RuntimeError):
 
 class TainanFloodSensorFetchError(TainanFloodSensorAdapterError):
     """Raised when fetching Tainan flood sensor API payloads fails."""
+
+
+class TainanFloodSensorTimeoutError(TainanFloodSensorFetchError):
+    """Raised when a Tainan API response exceeds the upstream idle timeout."""
+
+
+class TainanFloodSensorHttpError(TainanFloodSensorFetchError):
+    """Raised when a Tainan API request returns an unsuccessful HTTP response."""
 
 
 class TainanFloodSensorPayloadError(TainanFloodSensorAdapterError):
@@ -172,9 +182,62 @@ def fetch_tainan_json(url: str, timeout_seconds: int) -> Any:
     )
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8-sig"))
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            return _read_complete_json_document(response)
+    except HTTPError as exc:
+        raise TainanFloodSensorHttpError(
+            f"Tainan API returned HTTP {exc.code} for {url}"
+        ) from exc
+    except (URLError, TimeoutError) as exc:
+        if _is_timeout_failure(exc):
+            raise TainanFloodSensorTimeoutError(
+                f"Tainan API response timed out for {url}"
+            ) from exc
         raise TainanFloodSensorFetchError(f"Failed to fetch Tainan API {url}: {exc}") from exc
+
+
+def _read_complete_json_document(response: Any) -> Any:
+    """Return once one complete JSON document arrives, without waiting for EOF.
+
+    The reviewed Tainan IIS endpoint uses chunked transfer encoding. Some hosted
+    egress paths can delay the terminal chunk even after the closing JSON byte is
+    available. ``HTTPResponse.read()`` waits for EOF in that case, so read one
+    available chunk at a time and stop as soon as the document is complete.
+    """
+
+    payload = bytearray()
+    decoder = json.JSONDecoder()
+    read_chunk = getattr(response, "read1", response.read)
+
+    while True:
+        chunk = read_chunk(TAINAN_FLOOD_SENSOR_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        payload.extend(chunk)
+        if len(payload) > TAINAN_FLOOD_SENSOR_MAX_RESPONSE_BYTES:
+            raise TainanFloodSensorPayloadError(
+                "Tainan API response exceeded the reviewed payload limit"
+            )
+        try:
+            decoded = payload.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            continue
+        try:
+            document, end = decoder.raw_decode(decoded)
+        except json.JSONDecodeError:
+            continue
+        if not decoded[end:].strip():
+            return document
+
+    raise TainanFloodSensorPayloadError(
+        "Tainan API response ended before a complete JSON document was available"
+    )
+
+
+def _is_timeout_failure(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    reason = getattr(exc, "reason", None)
+    return isinstance(reason, TimeoutError) or "timed out" in str(reason).lower()
 
 
 def parse_tainan_flood_sensor_metadata_payload(
