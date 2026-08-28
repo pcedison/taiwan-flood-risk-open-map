@@ -164,3 +164,10 @@ staging tombstones. A stale realtime tombstone cannot replace a newer active
 observation, while the separately fetched current metadata can retire the row
 immediately. This migration is only a backward-data repair; it does not delete
 audit history or change any source gate.
+
+`0044_ncdr_public_active_feed_source.sql` aligns the persisted NCDR catalog
+with the official public active-warning Atom feed used when no member API key
+is configured. It records the feed's one-minute refresh cadence and keeps the member
+datastore/dump endpoints as optional compatibility metadata. The migration
+does not enable a source, change warning geometry approval, or weaken the
+audit-only promotion policy.

@@ -39,6 +39,9 @@ FetchText = NcdrFetchText
 
 NCDR_DATASTORE_API_URL = "https://alerts.ncdr.nat.gov.tw/api/datastore"
 NCDR_DUMP_API_URL = "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
+NCDR_ACTIVE_ATOM_FEED_URL = "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx"
+NCDR_PUBLIC_HOST = "alerts.ncdr.nat.gov.tw"
+NCDR_FLOOD_CATEGORY = "淹水"
 DEFAULT_NCDR_MAX_CAP_IDS_PER_RUN = 50
 DEFAULT_NCDR_CAP_TIMEOUT_SECONDS = 8
 NCDR_CAP_USER_AGENT = "FloodRiskTaiwan/0.1 worker-ncdr-cap"
@@ -47,17 +50,19 @@ NCDR_CAP_METADATA = AdapterMetadata(
     key="official.ncdr.cap",
     family=SourceFamily.OFFICIAL,
     enabled_by_default=False,
-    display_name="NCDR datastore-to-dump CAP audit adapter",
+    display_name="NCDR active-warning Atom/CAP audit adapter",
     data_gov_dataset_id="NCDR-CAP",
     data_gov_url="https://alerts.ncdr.nat.gov.tw/",
-    resource_url=NCDR_DATASTORE_API_URL,
-    update_frequency="as issued through the NCDR alert datastore",
+    resource_url=NCDR_ACTIVE_ATOM_FEED_URL,
+    update_frequency="active-warning Atom feed refreshed every minute by NCDR",
     license="Government Open Data License, version 1.0",
     limitations=(
+        "Uses the public active-warning Atom feed when no member API key is configured.",
         "Disabled by default and audit-only until exact administrative and Circle geometry is reviewed.",
         "Unreviewed CAP areas never become normalized, staging, latest, or scoring rows.",
     ),
 )
+
 
 class NcdrCapAlertAdapterError(RuntimeError):
     """Base error for NCDR CAP adapter failures."""
@@ -81,7 +86,7 @@ class NcdrCapAlertPayloadError(NcdrCapAlertAdapterError):
 
 
 class NcdrCapAlertConfigurationError(NcdrCapAlertAdapterError):
-    """Raised when the enabled NCDR adapter has no API credential."""
+    """Raised when an enabled NCDR transport is configured unsafely."""
 
 
 class NcdrCapAlertRateLimitError(NcdrCapAlertFetchError):
@@ -95,9 +100,10 @@ class NcdrCapAlertAdapter:
     def __init__(
         self,
         *,
-        api_key: str | None,
+        api_key: str | None = None,
         datastore_url: str | None = None,
         dump_url: str | None = None,
+        active_feed_url: str | None = None,
         max_cap_ids_per_run: int = DEFAULT_NCDR_MAX_CAP_IDS_PER_RUN,
         timeout_seconds: int = DEFAULT_NCDR_CAP_TIMEOUT_SECONDS,
         fetched_at: datetime | None = None,
@@ -106,10 +112,11 @@ class NcdrCapAlertAdapter:
         raw_snapshot_key: str | None = None,
     ) -> None:
         self._api_key = api_key
-        self._datastore_url = _configured_public_url(
-            datastore_url or NCDR_DATASTORE_API_URL
-        )
+        self._datastore_url = _configured_public_url(datastore_url or NCDR_DATASTORE_API_URL)
         self._dump_url = _configured_public_url(dump_url or NCDR_DUMP_API_URL)
+        self._active_feed_url = _configured_active_feed_url(
+            active_feed_url or NCDR_ACTIVE_ATOM_FEED_URL
+        )
         self._max_cap_ids_per_run = min(200, max(1, max_cap_ids_per_run))
         self._timeout_seconds = max(1, timeout_seconds)
         self._fetched_at = fetched_at
@@ -161,31 +168,51 @@ class NcdrCapAlertAdapter:
         int | None,
     ]:
         api_key = (self._api_key or "").strip()
-        if not api_key:
-            raise NcdrCapAlertConfigurationError(
-                "NCDR_ALERTS_API_KEY is required when the NCDR CAP adapter is enabled"
-            )
-        if api_key in self._datastore_url or api_key in self._dump_url:
+        if api_key and (api_key in self._datastore_url or api_key in self._dump_url):
             raise NcdrCapAlertConfigurationError(
                 "NCDR endpoint contained [REDACTED] credential material"
             )
         fetched_at = self._fetched_at or datetime.now(UTC)
-        index_params = {
-            "apikey": api_key,
-            "format": "json",
-            "limit": str(self._max_cap_ids_per_run),
-        }
-        index_payload = self._call_json_fetcher(
-            self._datastore_url,
-            index_params,
-            fetched_at=fetched_at,
-        )
-        cap_ids = _parse_datastore_cap_ids(
-            index_payload,
-            api_key=api_key,
-            limit=self._max_cap_ids_per_run,
-        )
-        if not cap_ids:
+        selected_documents: tuple[tuple[str, str, Mapping[str, str]], ...]
+        if api_key:
+            index_params = {
+                "apikey": api_key,
+                "format": "json",
+                "limit": str(self._max_cap_ids_per_run),
+            }
+            index_payload = self._call_json_fetcher(
+                self._datastore_url,
+                index_params,
+                fetched_at=fetched_at,
+            )
+            cap_ids = _parse_datastore_cap_ids(
+                index_payload,
+                api_key=api_key,
+                limit=self._max_cap_ids_per_run,
+            )
+            selected_documents = tuple(
+                (
+                    cap_id,
+                    self._dump_url,
+                    {"apikey": api_key, "capid": cap_id, "format": "xml"},
+                )
+                for cap_id in cap_ids
+            )
+        else:
+            feed_xml = self._call_text_fetcher(
+                self._active_feed_url,
+                {},
+                fetched_at=fetched_at,
+            )
+            public_documents = _parse_public_active_feed(
+                feed_xml,
+                feed_url=self._active_feed_url,
+                limit=self._max_cap_ids_per_run,
+            )
+            selected_documents = tuple(
+                (cap_id, cap_url, {}) for cap_id, cap_url in public_documents
+            )
+        if not selected_documents:
             return (), (), 0, 0, None
 
         fetched: list[RawSourceItem] = []
@@ -194,23 +221,18 @@ class NcdrCapAlertAdapter:
         successful_dump_count = 0
         audited_row_count = 0
         max_retry_after_seconds: int | None = None
-        for cap_id in cap_ids:
-            dump_params = {
-                "apikey": api_key,
-                "capid": cap_id,
-                "format": "xml",
-            }
+        for cap_id, cap_url, dump_params in selected_documents:
             dump_failed = False
             dump_retry_after_seconds: int | None = None
             xml_text = ""
             messages: tuple[ParsedCapMessage, ...] = ()
             try:
                 xml_text = self._call_text_fetcher(
-                    self._dump_url,
+                    cap_url,
                     dump_params,
                     fetched_at=fetched_at,
                 )
-                if api_key in xml_text:
+                if api_key and api_key in xml_text:
                     raise NcdrCapAlertPayloadError(
                         "NCDR CAP dump contained [REDACTED] credential material"
                     )
@@ -230,9 +252,7 @@ class NcdrCapAlertAdapter:
 
             row_count = sum(len(message.areas) or 1 for message in messages)
             if not dump_failed and audited_row_count + row_count > MAX_NCDR_AUDITED_ROWS:
-                raise NcdrCapAlertPayloadError(
-                    "NCDR CAP exceeds the 256 audited-row limit"
-                )
+                raise NcdrCapAlertPayloadError("NCDR CAP exceeds the 256 audited-row limit")
             prepared: list[tuple[RawSourceItem, str]] = []
             if not dump_failed:
                 try:
@@ -242,7 +262,7 @@ class NcdrCapAlertAdapter:
                             area,
                             transport_capid=cap_id,
                             fetched_at=fetched_at,
-                            source_url=self._dump_url,
+                            source_url=cap_url,
                             raw_snapshot_key=self._raw_snapshot_key,
                         )
                         for message in messages
@@ -255,9 +275,7 @@ class NcdrCapAlertAdapter:
             if dump_failed:
                 audited_row_count += 1
                 if audited_row_count > MAX_NCDR_AUDITED_ROWS:
-                    raise NcdrCapAlertPayloadError(
-                        "NCDR CAP exceeds the 256 audited-row limit"
-                    )
+                    raise NcdrCapAlertPayloadError("NCDR CAP exceeds the 256 audited-row limit")
                 transport_id = _transport_source_id(cap_id)
                 failure_payload: dict[str, Any] = {
                     "transport_capid": cap_id,
@@ -267,18 +285,20 @@ class NcdrCapAlertAdapter:
                     failure_payload["retry_after_seconds"] = dump_retry_after_seconds
                 failure_raw = RawSourceItem(
                     source_id=transport_id,
-                    source_url=self._dump_url,
+                    source_url=cap_url,
                     fetched_at=fetched_at,
                     payload=failure_payload,
                     raw_snapshot_key=self._raw_snapshot_key,
                 )
-                _reject_secret_bearing_raw(failure_raw, secret=api_key)
+                if api_key:
+                    _reject_secret_bearing_raw(failure_raw, secret=api_key)
                 fetched.append(failure_raw)
                 rejections.append(SourceRejection(transport_id, "ncdr_dump_fetch_failed"))
                 continue
 
             for raw, _reason in prepared:
-                _reject_secret_bearing_raw(raw, secret=api_key)
+                if api_key:
+                    _reject_secret_bearing_raw(raw, secret=api_key)
             successful_dump_count += 1
             audited_row_count += row_count
             for raw, reason in prepared:
@@ -291,7 +311,7 @@ class NcdrCapAlertAdapter:
         return (
             tuple(fetched),
             tuple(rejections),
-            len(cap_ids),
+            len(selected_documents),
             successful_dump_count,
             max_retry_after_seconds,
         )
@@ -341,17 +361,17 @@ class NcdrCapAlertAdapter:
         except Exception as exc:  # noqa: BLE001 - sanitize untrusted injected boundary
             if isinstance(exc, NcdrCapAlertRateLimitError):
                 failure = NcdrCapAlertRateLimitError(
-                    f"NCDR CAP dump fetcher failed at {url}: [REDACTED]",
+                    f"NCDR XML resource fetcher failed at {url}: [REDACTED]",
                     retry_after_seconds=_bounded_retry_after(exc.retry_after_seconds),
                 )
             else:
                 failure = NcdrCapAlertFetchError(
-                    f"NCDR CAP dump fetcher failed at {url}: [REDACTED]"
+                    f"NCDR XML resource fetcher failed at {url}: [REDACTED]"
                 )
         if failure is not None:
             raise failure
         if not isinstance(xml_text, str):
-            raise NcdrCapAlertPayloadError("NCDR CAP dump fetcher returned non-text data")
+            raise NcdrCapAlertPayloadError("NCDR XML resource fetcher returned non-text data")
         return xml_text
 
 
@@ -396,10 +416,106 @@ def _parse_datastore_cap_ids(
             )
         cap_ids.add(cap_id)
     if records and not cap_ids:
-        raise NcdrCapAlertPayloadError(
-            "NCDR datastore contained no usable capid values"
-        )
+        raise NcdrCapAlertPayloadError("NCDR datastore contained no usable capid values")
     return tuple(sorted(cap_ids)[:limit])
+
+
+def _parse_public_active_feed(
+    xml_text: str,
+    *,
+    feed_url: str,
+    limit: int,
+) -> tuple[tuple[str, str], ...]:
+    """Return flood CAP documents from NCDR's public active-warning feed.
+
+    The official feed contains every active warning category.  Only entries
+    explicitly categorized as ``淹水`` belong to this adapter.  A malformed
+    flood entry fails the poll instead of being mistaken for a healthy empty
+    feed.
+    """
+
+    try:
+        root = ElementTree.fromstring(xml_text)
+    except ElementTree.ParseError as exc:
+        raise NcdrCapAlertPayloadError("NCDR active-warning Atom feed could not be parsed") from exc
+    if _local_name(root.tag) != "feed":
+        raise NcdrCapAlertPayloadError("NCDR active-warning payload root must be an Atom feed")
+
+    documents: list[tuple[str, str]] = []
+    seen_ids: set[str] = set()
+    seen_urls: set[str] = set()
+    for entry in root:
+        if _local_name(entry.tag) != "entry":
+            continue
+        categories = {
+            optional_str(element.attrib.get("term"))
+            for element in entry
+            if _local_name(element.tag) == "category"
+        }
+        if NCDR_FLOOD_CATEGORY not in categories:
+            continue
+
+        cap_id = _first_direct_xml_text(entry, "id")
+        if cap_id is None or len(cap_id) > 256:
+            raise NcdrCapAlertPayloadError("NCDR active-warning flood entry is missing a usable id")
+        cap_url = _active_feed_cap_url(entry, feed_url=feed_url)
+        if cap_id in seen_ids or cap_url in seen_urls:
+            raise NcdrCapAlertPayloadError(
+                "NCDR active-warning feed contains duplicate flood entries"
+            )
+        seen_ids.add(cap_id)
+        seen_urls.add(cap_url)
+        documents.append((cap_id, cap_url))
+
+    if len(documents) > limit:
+        raise NcdrCapAlertPayloadError(
+            "NCDR active-warning flood entry count exceeds the configured run limit"
+        )
+    return tuple(documents)
+
+
+def _active_feed_cap_url(entry: Element, *, feed_url: str) -> str:
+    href: str | None = None
+    for element in entry:
+        if _local_name(element.tag) != "link":
+            continue
+        rel = optional_str(element.attrib.get("rel"))
+        candidate = optional_str(element.attrib.get("href"))
+        if candidate is not None and rel in {None, "alternate"}:
+            href = candidate
+            break
+    if href is None:
+        raise NcdrCapAlertPayloadError("NCDR active-warning flood entry is missing a CAP link")
+
+    feed_parts = urlsplit(feed_url)
+    parts = urlsplit(href)
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise NcdrCapAlertPayloadError(
+            "NCDR active-warning flood entry has an invalid CAP link"
+        ) from exc
+    if (
+        parts.scheme != "https"
+        or (parts.hostname or "").lower() != NCDR_PUBLIC_HOST
+        or (feed_parts.hostname or "").lower() != NCDR_PUBLIC_HOST
+        or parts.username is not None
+        or parts.password is not None
+        or port not in {None, 443}
+        or not parts.path.startswith("/Capstorage/")
+        or not parts.path.lower().endswith(".cap")
+        or parts.query
+        or parts.fragment
+    ):
+        raise NcdrCapAlertPayloadError("NCDR active-warning flood entry has an untrusted CAP link")
+    return urlunsplit(("https", NCDR_PUBLIC_HOST, parts.path, "", ""))
+
+
+def _first_direct_xml_text(element: Element, local_name: str) -> str | None:
+    for child in element:
+        if _local_name(child.tag) == local_name:
+            return optional_str(child.text)
+    return None
 
 
 def _prepare_audit_row(
@@ -457,18 +573,14 @@ def _prepare_audit_row(
         "active_until": message.expires.isoformat(),
         "areaDesc": area.area_desc if area is not None else None,
         "source_geocodes": (
-            [
-                {"valueName": name, "value": value}
-                for name, value in area.geocodes
-            ]
+            [{"valueName": name, "value": value} for name, value in area.geocodes]
             if area is not None
             else []
         ),
     }
     if area is not None and area.polygon is not None:
         payload["polygon"] = [
-            {"latitude": latitude, "longitude": longitude}
-            for latitude, longitude in area.polygon
+            {"latitude": latitude, "longitude": longitude} for latitude, longitude in area.polygon
         ]
     if area is not None and area.circle is not None:
         latitude, longitude, radius_km = area.circle
@@ -582,9 +694,34 @@ def _configured_public_url(url: str) -> str:
     except Exception:  # noqa: BLE001 - sanitize configured URL parsing failures
         failed = True
     if failed or public_url is None:
+        raise NcdrCapAlertConfigurationError("NCDR endpoint URL is invalid: [REDACTED]")
+    return public_url
+
+
+def _configured_active_feed_url(url: str) -> str:
+    try:
+        configured_parts = urlsplit(url.strip())
+    except ValueError:
         raise NcdrCapAlertConfigurationError(
-            "NCDR endpoint URL is invalid: [REDACTED]"
-        )
+            "NCDR active-warning feed URL is invalid: [REDACTED]"
+        ) from None
+    if configured_parts.query or configured_parts.fragment:
+        raise NcdrCapAlertConfigurationError("NCDR active-warning feed URL is invalid: [REDACTED]")
+    public_url = _configured_public_url(url)
+    parts = urlsplit(public_url)
+    try:
+        port = parts.port
+    except ValueError:
+        raise NcdrCapAlertConfigurationError(
+            "NCDR active-warning feed URL is invalid: [REDACTED]"
+        ) from None
+    if (
+        parts.scheme != "https"
+        or (parts.hostname or "").lower() != NCDR_PUBLIC_HOST
+        or port not in {None, 443}
+        or parts.path != "/RssAtomFeeds.ashx"
+    ):
+        raise NcdrCapAlertConfigurationError("NCDR active-warning feed URL is invalid: [REDACTED]")
     return public_url
 
 
@@ -666,7 +803,11 @@ def _parse_xml_payload(xml_text: str, *, source_url: str) -> tuple[Mapping[str, 
 
 def _parse_xml_entry(entry: Element, *, source_url: str) -> Mapping[str, Any] | None:
     embedded_alert = next(
-        (element for element in entry.iter() if element is not entry and _local_name(element.tag) == "alert"),
+        (
+            element
+            for element in entry.iter()
+            if element is not entry and _local_name(element.tag) == "alert"
+        ),
         None,
     )
     if embedded_alert is not None:
@@ -965,9 +1106,7 @@ def _fetch_bytes(
                     f"NCDR request returned HTTP {exc.code} at {public_url}"
                 )
         except Exception:  # noqa: BLE001 - sanitize malformed HTTP error metadata
-            failure = NcdrCapAlertFetchError(
-                f"NCDR request failed at {public_url}"
-            )
+            failure = NcdrCapAlertFetchError(f"NCDR request failed at {public_url}")
     except Exception:  # noqa: BLE001 - complete untrusted transport boundary
         failure = NcdrCapAlertFetchError(f"NCDR request failed at {public_url}")
     if failure is not None:
@@ -975,9 +1114,7 @@ def _fetch_bytes(
     if type(body) is not bytes:
         raise NcdrCapAlertFetchError(f"NCDR request failed at {public_url}")
     if len(body) > MAX_CAP_BYTES:
-        raise NcdrCapAlertFetchError(
-            f"NCDR response exceeds the 2 MiB limit at {public_url}"
-        )
+        raise NcdrCapAlertFetchError(f"NCDR response exceeds the 2 MiB limit at {public_url}")
     return body
 
 

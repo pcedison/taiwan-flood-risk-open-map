@@ -177,6 +177,7 @@ Official ingestion scheduler for the single-service beta:
 | `SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED` | `true` | Enables WRA IoW realtime flood-depth observations. |
 | `SOURCE_NCDR_CAP_ENABLED` | `true` | Enables the NCDR CAP adapter selection. |
 | `SOURCE_NCDR_CAP_API_ENABLED` | `true` | Enables NCDR CAP alert ingestion. |
+| `NCDR_ALERTS_API_KEY` | leave unset or a valid member key | Without a key the worker uses NCDR's official public active-warning Atom feed; a configured key preserves the member datastore route. |
 | `SOURCE_FLOOD_SENSOR_ENABLED` | `true` | Enables Civil IoT flood-sensor adapter selection. |
 | `SOURCE_FLOOD_SENSOR_API_ENABLED` | `true` | Enables Civil IoT flood-sensor ingestion. |
 | `SOURCE_FLOOD_SENSOR_USE_LIVE` | `true` | Uses the Civil IoT live STA endpoint instead of fixture gating. |
