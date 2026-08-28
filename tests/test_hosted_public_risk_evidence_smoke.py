@@ -11,6 +11,24 @@ sys.path.insert(0, str(REPO_ROOT))
 from scripts import hosted_public_risk_evidence_smoke as smoke  # noqa: E402
 
 
+def test_default_radius_reaches_the_nearest_official_tainan_rainfall_station() -> None:
+    assert smoke.DEFAULT_RADIUS_M == 2000
+
+
+def test_canonical_production_freshness_source_ids_are_accepted() -> None:
+    payload = _risk_payload()
+    payload["data_freshness"][0]["source_id"] = "official.cwa.rainfall"
+    payload["data_freshness"][1]["source_id"] = "official.wra.water_level"
+
+    contract_failures, data_source_failures, state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+
+    assert contract_failures == []
+    assert data_source_failures == []
+    assert state == "configured"
+
+
 def test_hosted_public_risk_evidence_smoke_writes_artifacts(
     tmp_path: Path,
     monkeypatch,
@@ -491,6 +509,8 @@ def _run_smoke(tmp_path: Path, monkeypatch, payload: dict, *extra_args: str):
         [
             "--base-url",
             "https://example.test",
+            "--radius-m",
+            "500",
             "--captured-at",
             "2026-08-27T04:00:00+00:00",
             "--evidence-output",

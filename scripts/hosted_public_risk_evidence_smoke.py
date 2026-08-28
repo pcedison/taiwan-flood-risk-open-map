@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 DEFAULT_BASE_URL = "https://floodrisk.cc"
 DEFAULT_LAT = 23.01929
 DEFAULT_LNG = 120.18726
-DEFAULT_RADIUS_M = 500
+DEFAULT_RADIUS_M = 2000
 DEFAULT_LOCATION_TEXT = "Tainan hosted public risk evidence smoke"
 EVIDENCE_SCHEMA_VERSION = "hosted-public-risk-evidence-smoke/v1"
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
@@ -28,7 +28,14 @@ PUBLIC_RISK_REQUIREMENT_EVIDENCE_PATHS = {
     "query_point_nearby_coverage_smoke": "/risk_assessment/nearby_coverage",
 }
 OFFICIAL_REALTIME_EVENT_TYPES = {"rainfall", "water_level"}
-OFFICIAL_REALTIME_FRESHNESS_SOURCE_IDS = {"cwa-rainfall", "wra-water-level"}
+OFFICIAL_REALTIME_FRESHNESS_SOURCE_IDS = {
+    # Canonical source IDs returned by the production API.
+    "official.cwa.rainfall",
+    "official.wra.water_level",
+    # Retain the pre-canonical contract IDs for older evidence artifacts.
+    "cwa-rainfall",
+    "wra-water-level",
+}
 OFFICIAL_REALTIME_SIGNAL_TYPES = {"rainfall", "water_level"}
 ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES = {"healthy", "degraded"}
 # A deployment that has never enabled the official realtime adapters reports these

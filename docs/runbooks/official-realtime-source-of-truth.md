@@ -95,12 +95,14 @@ python scripts\hosted_public_risk_evidence_smoke.py `
   --base-url https://floodrisk.cc `
   --lat 23.01929 `
   --lng 120.18726 `
-  --radius-m 500 `
+  --radius-m 2000 `
   --location-text "Tainan hosted public risk evidence smoke" `
   --evidence-output docs\reviews\hosted-public-risk-evidence-smoke-YYYY-MM-DD-<sha>.json `
   --completion-evidence-output docs\reviews\hosted-public-risk-completion-evidence-YYYY-MM-DD-<sha>.json
 ```
 
+The 2 km radius includes the nearest reviewed CWA rainfall station at this
+Tainan probe point while remaining within the public API's accepted range.
 This smoke checks the public contract only: `data_freshness` for CWA/WRA
 official realtime sources, `official` rainfall or water-level evidence with
 `observed_at` and `ingested_at`, and a populated
