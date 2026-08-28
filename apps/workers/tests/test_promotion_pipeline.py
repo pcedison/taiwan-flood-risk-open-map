@@ -701,6 +701,8 @@ def test_inactive_tainan_station_retires_latest_and_terminally_rejects_tombstone
     connection = _FakeConnection(rows=[], evidence_id="unused")
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
     base = _reviewed_realtime_payload()
+    generation_started_at = base.observed_at
+    assert generation_started_at is not None
     properties = {
         **base.properties,
         "adapter_key": "local.tainan.flood_sensor",
@@ -708,6 +710,7 @@ def test_inactive_tainan_station_retires_latest_and_terminally_rejects_tombstone
         "flood_depth_cm": 0.0,
         "staging_evidence_id": staging_id,
         "raw_snapshot_id": "56565656-5656-4656-8656-565656565656",
+        "ingestion_generation_started_at": generation_started_at.isoformat(),
         "realtime_station_enabled": True,
         "metadata_station_enabled": True,
         inactive_field: False,
@@ -742,10 +745,62 @@ def test_inactive_tainan_station_retires_latest_and_terminally_rejects_tombstone
         "flood_report",
         "TAINAN-001",
         inactive_field == "metadata_station_enabled",
+        generation_started_at,
+        inactive_field == "metadata_station_enabled",
         payload.observed_at,
     )
     assert not any("INSERT INTO evidence" in statement for statement in statements)
     assert connection.committed is True
+
+
+def test_current_metadata_disablement_is_not_blocked_by_future_sensor_time() -> None:
+    staging_id = "45454545-4545-4454-8454-454545454545"
+    generation_started_at = datetime(2026, 8, 24, 2, 0, tzinfo=UTC)
+    future_sensor_time = generation_started_at + timedelta(minutes=16)
+    connection = _FakeConnection(rows=[], evidence_id="unused")
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    base = _reviewed_realtime_payload()
+    payload = EvidencePromotionPayload(
+        **{
+            **base.__dict__,
+            "adapter_key": "local.tainan.flood_sensor",
+            "event_type": "flood_report",
+            "occurred_at": future_sensor_time,
+            "observed_at": future_sensor_time,
+            "properties": {
+                **base.properties,
+                "adapter_key": "local.tainan.flood_sensor",
+                "station_id": "TAINAN-FUTURE-001",
+                "flood_depth_cm": 0.0,
+                "staging_evidence_id": staging_id,
+                "raw_snapshot_id": "67676767-6767-4676-8676-676767676767",
+                "ingestion_generation_started_at": generation_started_at.isoformat(),
+                "realtime_station_enabled": True,
+                "metadata_station_enabled": False,
+            },
+        }
+    )
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "inactive_station")
+    ]
+    retire = next(
+        execution
+        for execution in connection.cursor_instance.executions
+        if "/* retire-inactive-station-latest */" in execution[0]
+    )
+    assert retire[1] == (
+        "local.tainan.flood_sensor",
+        "flood_report",
+        "TAINAN-FUTURE-001",
+        True,
+        generation_started_at,
+        True,
+        future_sensor_time,
+    )
 
 
 @pytest.mark.parametrize("naive_field", ["observed_at", "occurred_at"])
