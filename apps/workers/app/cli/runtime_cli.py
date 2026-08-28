@@ -412,6 +412,7 @@ def _run_v1_baseline_tick(
                 {adapter_key: adapter},
                 settings=scoped_settings,
                 runtime_selection_adapter_keys=runtime_selection_keys,
+                write_runtime_selection_revision=False,
                 database_url=database_url,
                 promote=True,
                 promotion_adapter_keys=(adapter_key,),

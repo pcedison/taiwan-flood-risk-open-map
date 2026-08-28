@@ -151,6 +151,7 @@ def test_tick_reports_every_runnable_source_not_just_the_last_one(
 
     ran = ["official.cwa.rainfall", "official.wra.water_level"]
     recorded: list[dict[str, Any]] = []
+    cycle_selection_revision_flags: list[bool] = []
 
     class _Adapter:
         def __init__(self, key: str) -> None:
@@ -160,7 +161,10 @@ def test_tick_reports_every_runnable_source_not_just_the_last_one(
         key = settings.enabled_adapter_keys[0]
         return {key: _Adapter(key)} if key in ran else {}
 
-    def fake_cycle(adapter_by_key: Any, **_kwargs: Any) -> Any:
+    def fake_cycle(adapter_by_key: Any, **kwargs: Any) -> Any:
+        cycle_selection_revision_flags.append(
+            bool(kwargs.get("write_runtime_selection_revision", True))
+        )
         return type(
             "R",
             (),
@@ -188,10 +192,10 @@ def test_tick_reports_every_runnable_source_not_just_the_last_one(
     )
 
     assert failed is False
-    assert recorded, "the tick must record the authoritative runtime selection"
-    final = recorded[-1]
-    assert final["enabled"] == tuple(ran)
-    assert final["known"] == tuple(ADAPTER_REGISTRY)
+    assert recorded == [
+        {"enabled": tuple(ran), "known": tuple(ADAPTER_REGISTRY)}
+    ]
+    assert cycle_selection_revision_flags == [False, False]
 
 
 def test_tick_records_empty_selection_when_no_source_is_runnable(
