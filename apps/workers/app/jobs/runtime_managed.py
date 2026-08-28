@@ -432,11 +432,22 @@ def _execute_managed_runtime_ingestion_cycle(
                 error_message=str(exc),
             )
         try:
-            promotion = promote_accepted_staging(
-                promotion_writer_instance,
-                limit=promotion_limit,
-                adapter_keys=target_adapter_keys,
+            current_raw_refs = tuple(
+                dict.fromkeys(
+                    summary.raw_ref
+                    for summary in cycle.summaries
+                    if summary.adapter_key in target_adapter_keys
+                    and summary.status in {"succeeded", "partial"}
+                    and summary.raw_ref is not None
+                )
             )
+            if current_raw_refs:
+                promotion = promote_accepted_staging(
+                    promotion_writer_instance,
+                    limit=promotion_limit,
+                    adapter_keys=target_adapter_keys,
+                    raw_refs=current_raw_refs,
+                )
         except Exception as exc:  # noqa: BLE001 - persist adapter failure as a managed result
             _record_pipeline_status_for_adapter_keys(
                 persistence.run_writer,
