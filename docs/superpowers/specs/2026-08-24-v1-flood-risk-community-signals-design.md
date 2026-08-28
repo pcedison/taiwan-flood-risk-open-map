@@ -452,8 +452,10 @@ Assessment 必須同時輸出：
 
 `overall` 是可解釋的顯示摘要，不是把所有來源做不透明平均：
 
-1. 有 fresh qualifying official realtime 時，由 realtime 主導，再套用至多一次
-   community uplift。
+1. 有 fresh qualifying official realtime 時，仍分開保留 current risk；`overall` 採
+   realtime 與 historical 較高者。若 historical 較高，主導模式為
+   `historical_context`，且文案必須明示這不表示目前正在淹水；否則由 realtime
+   主導。後續 community uplift 至多套用一次。
 2. Official realtime 為 unknown、但 community 已交叉佐證時，overall 為
    `medium`、主導模式為 `community_warning`，並保留 official data gap。
 3. 沒有 current evidence、但 historical evidence 足夠時，overall 可採 historical

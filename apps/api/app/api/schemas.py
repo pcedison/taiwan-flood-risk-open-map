@@ -15,6 +15,13 @@ CommunityState = Literal[
     "community_corroborated",
     "officially_corroborated",
 ]
+_RISK_LEVEL_RANK: dict[RiskLevel, int] = {
+    "未知": 0,
+    "低": 1,
+    "中": 2,
+    "高": 3,
+    "極高": 4,
+}
 PublicSourceState = Literal[
     "fresh",
     "degraded",
@@ -800,20 +807,27 @@ class RiskAssessmentResponse(ContractModel):
         if self.as_of is None:
             self.as_of = self.created_at
         if self.overall is None:
-            if self.realtime.level != "未知":
+            if _RISK_LEVEL_RANK[self.historical.level] > _RISK_LEVEL_RANK[self.realtime.level]:
+                compatibility_overall = RiskLevelBlock(
+                    level=self.historical.level,
+                    confidence=(
+                        self.historical.confidence
+                        if self.historical.confidence != "未知"
+                        else self.confidence.level
+                    ),
+                    reasons=[
+                        "此相容結果採即時與歷史參考較高的等級；歷史背景不表示目前正在淹水。",
+                        *self.historical.reasons,
+                    ],
+                )
+                compatibility_mode: DominantMode = "historical_context"
+            elif self.realtime.level != "未知":
                 compatibility_overall = RiskLevelBlock(
                     level=self.realtime.level,
                     confidence=self.confidence.level,
                     reasons=list(self.explanation.main_reasons),
                 )
-                compatibility_mode: DominantMode = "realtime"
-            elif self.historical.level != "未知":
-                compatibility_overall = RiskLevelBlock(
-                    level=self.historical.level,
-                    confidence=self.confidence.level,
-                    reasons=["此相容結果只代表歷史背景風險。"],
-                )
-                compatibility_mode = "historical_context"
+                compatibility_mode = "realtime"
             else:
                 compatibility_overall = RiskLevelBlock(level="未知")
                 compatibility_mode = "unknown"

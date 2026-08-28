@@ -81,17 +81,17 @@ def test_legacy_constructor_gets_safe_additive_defaults() -> None:
 def test_omitted_mode_derives_legacy_fallback() -> None:
     response = _response()
 
-    assert response.dominant_mode == "realtime"
+    assert response.dominant_mode == "historical_context"
     assert response.overall is not None
-    assert response.overall.level == "低"
+    assert response.overall.level == "中"
 
 
 def test_matching_explicit_mode_without_overall_is_accepted() -> None:
-    response = _response(dominant_mode="realtime")
+    response = _response(dominant_mode="historical_context")
 
-    assert response.dominant_mode == "realtime"
+    assert response.dominant_mode == "historical_context"
     assert response.overall is not None
-    assert response.overall.level == "低"
+    assert response.overall.level == "中"
 
 
 def test_conflicting_explicit_mode_without_overall_is_rejected() -> None:

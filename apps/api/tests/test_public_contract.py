@@ -1014,6 +1014,41 @@ def test_risk_assess_current_high(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.json()["dominant_mode"] == "realtime"
 
 
+def test_risk_assess_uses_higher_history_for_conservative_overall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_route_data(
+        monkeypatch,
+        _route_data(
+            historical=(
+                _route_record(
+                    HISTORY_ID,
+                    event_type="flood_report",
+                    evidence_scope="historical",
+                    realtime_risk_factor=1.0,
+                ),
+            ),
+        ),
+    )
+
+    response = client.post(
+        "/v1/risk/assess",
+        json={
+            "point": {"lat": 22.9997, "lng": 120.227},
+            "radius_m": 1000,
+            "time_context": "now",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["realtime"]["level"] == "低"
+    assert payload["historical"]["level"] == "中"
+    assert payload["overall"]["level"] == "中"
+    assert payload["dominant_mode"] == "historical_context"
+    assert "不表示目前正在淹水" in " ".join(payload["overall"]["reasons"])
+
+
 def test_risk_assess_history_only_is_historical_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
