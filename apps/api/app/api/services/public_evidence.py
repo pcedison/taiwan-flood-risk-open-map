@@ -167,6 +167,7 @@ def evidence_from_record(record: EvidenceRecord) -> Evidence:
         privacy_level=cast(Any, record.privacy_level),
         raw_ref=record.raw_ref,
         realtime_risk_factor=_evidence_realtime_risk_factor(record),
+        evidence_scope=record.evidence_scope,
         location_precision=record.location_precision,
         limitations=list(record.limitations),
     )
@@ -376,6 +377,7 @@ def signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
             else 1.0
         ),
         observed_at=evidence.observed_at or evidence.occurred_at,
+        evidence_scope=evidence.evidence_scope,
     )
 
 

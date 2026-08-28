@@ -12,8 +12,6 @@ def _query_local_signal_types(data: AssessmentData) -> frozenset[str]:
         item.signal_type
         for item in data.nearby_coverage.signal_breakdown
         if item.availability_state in _USABLE_LOCAL_STATES
-        and item.nearest_distance_m is not None
-        and item.nearest_distance_m <= data.nearby_coverage.query_radius_m
     )
 
 

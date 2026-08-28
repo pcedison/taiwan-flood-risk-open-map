@@ -121,7 +121,13 @@ def check_summary_freshness(
             checked_at=resolved_checked_at,
         )
 
-    if cadence == "static" and summary.status != "succeeded":
+    static_snapshot_activated = (
+        cadence == "static"
+        and summary.snapshot_generation_mode == "complete_replace"
+        and summary.snapshot_activation_eligible
+        and summary.items_promoted > 0
+    )
+    if cadence == "static" and summary.status != "succeeded" and not static_snapshot_activated:
         failure_detail = summary.error_message or summary.error_code or summary.status
         return FreshnessCheck(
             adapter_key=summary.adapter_key,
@@ -147,7 +153,11 @@ def check_summary_freshness(
             cadence=cadence,
             source_timestamp_max=operational_timestamp,
             age_seconds=age_seconds,
-            reason="static/slow-cadence source is not evaluated against realtime thresholds",
+            reason=(
+                "static complete-replace snapshot activated with bounded source rejections"
+                if static_snapshot_activated
+                else "static/slow-cadence source is not evaluated against realtime thresholds"
+            ),
         )
 
     if summary.source_timestamp_max is None:

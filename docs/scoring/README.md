@@ -2,7 +2,7 @@
 
 Phase 3 starts with a pure scoring service in `apps/api/app/domain/risk/`. The first version is deliberately simple and fixture-locked:
 
-- `risk-v0.1.0` combines normalized evidence signals into realtime, historical, and confidence levels.
+- `risk-v0.2.0` separates current observations from historical context, caps correlated nearby station families, and combines normalized evidence signals into realtime, historical, and confidence levels.
 - `risk_factor` lets fixtures represent weak or normal observations without treating every evidence item as equally risky.
 - Query heat remains separate and is not an input to risk scoring.
 - Missing live rainfall or water-level evidence caps confidence until official adapters are connected end to end.

@@ -804,8 +804,8 @@ def query_nearby_latest_official(
     statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
-    if not 50 <= radius_m <= 2000:
-        raise ValueError("radius_m must be between 50 and 2000")
+    if not 50 <= radius_m <= 5000:
+        raise ValueError("radius_m must be between 50 and 5000")
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("as_of must be timezone-aware")
     bounded_limit = max(1, min(limit, 100))
@@ -1054,6 +1054,30 @@ def query_nearby_latest_official(
             SELECT warning.*
             FROM ranked_warnings warning
             WHERE warning.warning_origin_rank = 1
+        ),
+        family_ranked_latest AS (
+            SELECT
+                candidate.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY candidate.event_type
+                    ORDER BY
+                        candidate.distance_to_query_m ASC,
+                        candidate.observed_at DESC,
+                        candidate.updated_at DESC,
+                        candidate.id
+                ) AS signal_family_rank
+            FROM deduplicated_latest candidate
+        ),
+        selected_latest AS (
+            SELECT candidate.*
+            FROM family_ranked_latest candidate
+            ORDER BY
+                CASE WHEN candidate.signal_family_rank = 1 THEN 0 ELSE 1 END,
+                candidate.distance_to_query_m ASC,
+                candidate.observed_at DESC,
+                candidate.updated_at DESC,
+                candidate.id
+            LIMIT %s
         )
         SELECT
             ranked.id,
@@ -1109,12 +1133,11 @@ def query_nearby_latest_official(
                 ),
                 ARRAY[]::text[]
             ) AS limitations
-        FROM deduplicated_latest ranked
+        FROM selected_latest ranked
         ORDER BY
             ranked.distance_to_query_m ASC,
             ranked.observed_at DESC,
             ranked.updated_at DESC
-        LIMIT %s
     """
     try:
         with (

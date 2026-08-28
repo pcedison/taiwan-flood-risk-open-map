@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Self
 
-from app.jobs.source_catalog import PostgresSourceCatalogReader
+import pytest
+
+from app.jobs.source_catalog import (
+    PostgresSourceCatalogReader,
+    SourceCatalogUnavailable,
+    filter_catalog_enabled_adapter_keys,
+)
 
 
 def test_postgres_source_catalog_reader_excludes_missing_and_disabled_keys() -> None:
@@ -55,6 +61,40 @@ def test_postgres_source_catalog_reader_avoids_connection_for_no_keys() -> None:
 
     assert reader.enabled_keys(()) == frozenset()
     assert calls == 0
+
+
+def test_filter_catalog_gates_every_requested_adapter_not_only_incident_sources() -> None:
+    reader = type(
+        "Reader",
+        (),
+        {
+            "enabled_keys": lambda _self, keys: frozenset(
+                key for key in keys if key != "official.wra.historical_flood"
+            )
+        },
+    )()
+
+    enabled = filter_catalog_enabled_adapter_keys(
+        (
+            "official.cwa.rainfall",
+            "official.wra.historical_flood",
+            "local.tainan.flood_sensor",
+        ),
+        source_catalog_reader=reader,
+    )
+
+    assert enabled == (
+        "official.cwa.rainfall",
+        "local.tainan.flood_sensor",
+    )
+
+
+def test_filter_catalog_fails_closed_without_reader_for_any_adapter() -> None:
+    with pytest.raises(SourceCatalogUnavailable, match="reader is required"):
+        filter_catalog_enabled_adapter_keys(
+            ("official.cwa.rainfall",),
+            source_catalog_reader=None,
+        )
 
 
 class _FakeConnection:

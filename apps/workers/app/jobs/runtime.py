@@ -145,7 +145,6 @@ from app.jobs.queue import (
     RuntimeQueueUnavailable,
 )
 from app.jobs.source_catalog import (
-    OFFICIAL_INCIDENT_CATALOG_GATED_KEYS,
     SourceCatalogReader,
     SourceCatalogUnavailable,
     filter_catalog_enabled_adapter_keys,
@@ -966,22 +965,26 @@ def produce_enabled_runtime_adapter_jobs(
         else None
     )
     if enabled_keys:
-        try:
-            enabled_keys = filter_catalog_enabled_adapter_keys(
-                enabled_keys,
-                source_catalog_reader=resolve_source_catalog_reader(
-                    database_url=settings.database_url,
-                    source_catalog_reader=source_catalog_reader,
-                ),
-            )
-        except SourceCatalogUnavailable:
-            _record_source_catalog_unavailable_audit(
-                runtime_status_writer,
-                adapter_keys=enabled_keys,
-                run_at=attempt_started_at,
-            )
-            log_event("runtime.source_catalog.unavailable")
-            return RuntimeQueueProducerResult(status="skipped", reason="source_catalog_unavailable")
+        resolved_catalog_reader = resolve_source_catalog_reader(
+            database_url=settings.database_url,
+            source_catalog_reader=source_catalog_reader,
+        )
+        if resolved_catalog_reader is not None:
+            try:
+                enabled_keys = filter_catalog_enabled_adapter_keys(
+                    enabled_keys,
+                    source_catalog_reader=resolved_catalog_reader,
+                )
+            except SourceCatalogUnavailable:
+                _record_source_catalog_unavailable_audit(
+                    runtime_status_writer,
+                    adapter_keys=enabled_keys,
+                    run_at=attempt_started_at,
+                )
+                log_event("runtime.source_catalog.unavailable")
+                return RuntimeQueueProducerResult(
+                    status="skipped", reason="source_catalog_unavailable"
+                )
         if not enabled_keys:
             record_runtime_selection(
                 runtime_status_writer,
@@ -1261,14 +1264,15 @@ def work_runtime_queue_once(
         )
 
     adapter_settings = resolved_settings
-    if adapter_key in OFFICIAL_INCIDENT_CATALOG_GATED_KEYS:
+    resolved_catalog_reader = resolve_source_catalog_reader(
+        database_url=resolved_settings.database_url,
+        source_catalog_reader=source_catalog_reader,
+    )
+    if adapter_key and resolved_catalog_reader is not None:
         try:
             enabled_keys = filter_catalog_enabled_adapter_keys(
                 (adapter_key,),
-                source_catalog_reader=resolve_source_catalog_reader(
-                    database_url=resolved_settings.database_url,
-                    source_catalog_reader=source_catalog_reader,
-                ),
+                source_catalog_reader=resolved_catalog_reader,
             )
         except SourceCatalogUnavailable:
             return _fail_runtime_queue_job(
@@ -1328,7 +1332,7 @@ def work_runtime_queue_once(
                     for key, adapter in adapter_by_key.items()
                     if key in (adapter_settings.enabled_adapter_keys or ())
                 }
-                if adapter_key in OFFICIAL_INCIDENT_CATALOG_GATED_KEYS
+                if resolved_catalog_reader is not None
                 else adapter_by_key
             )
         else:

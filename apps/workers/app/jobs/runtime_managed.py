@@ -272,27 +272,29 @@ def _execute_managed_runtime_ingestion_cycle(
         log_event("runtime.managed.ingestion.noop", reason="no_enabled_adapters")
         return ManagedRuntimeIngestionResult(status="skipped", reason="no_enabled_adapters")
 
-    try:
-        selected_adapter_keys = filter_catalog_enabled_adapter_keys(
-            selected_adapter_keys,
-            source_catalog_reader=resolve_source_catalog_reader(
-                database_url=database_url or resolved_settings.database_url,
-                source_catalog_reader=source_catalog_reader,
-            ),
-        )
-    except SourceCatalogUnavailable:
-        _record_source_catalog_unavailable_audit(
-            runtime_status_writer,
-            adapter_keys=selected_adapter_keys,
-            run_at=cycle_started_at,
-            write_runtime_selection_revision=write_runtime_selection_revision,
-        )
-        log_event("runtime.source_catalog.unavailable")
-        return ManagedRuntimeIngestionResult(
-            status="failed",
-            reason="source_catalog_unavailable",
-            error_code="source_catalog_unavailable",
-        )
+    resolved_catalog_reader = resolve_source_catalog_reader(
+        database_url=database_url or resolved_settings.database_url,
+        source_catalog_reader=source_catalog_reader,
+    )
+    if resolved_catalog_reader is not None:
+        try:
+            selected_adapter_keys = filter_catalog_enabled_adapter_keys(
+                selected_adapter_keys,
+                source_catalog_reader=resolved_catalog_reader,
+            )
+        except SourceCatalogUnavailable:
+            _record_source_catalog_unavailable_audit(
+                runtime_status_writer,
+                adapter_keys=selected_adapter_keys,
+                run_at=cycle_started_at,
+                write_runtime_selection_revision=write_runtime_selection_revision,
+            )
+            log_event("runtime.source_catalog.unavailable")
+            return ManagedRuntimeIngestionResult(
+                status="failed",
+                reason="source_catalog_unavailable",
+                error_code="source_catalog_unavailable",
+            )
 
     if not selected_adapter_keys:
         _write_runtime_selection_revision(

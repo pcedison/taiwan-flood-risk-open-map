@@ -843,6 +843,11 @@ class Evidence(EvidencePreview):
     # Internal-only: intensity-aware realtime risk factor for official rainfall/
     # water_level evidence (None = use the default 1.0). Excluded from responses.
     realtime_risk_factor: float | None = Field(default=None, exclude=True)
+    # Internal-only: prevents current sensor observations from being described
+    # or scored as historical flood incidents. Excluded from public responses.
+    evidence_scope: Literal["current", "historical", "context", "unspecified"] = Field(
+        default="unspecified", exclude=True
+    )
 
 
 class EvidenceListResponse(ContractModel):

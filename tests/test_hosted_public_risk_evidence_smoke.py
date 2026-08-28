@@ -180,6 +180,22 @@ def test_check_risk_payload_requires_nearby_coverage_and_worker_evidence() -> No
     ) in failures
 
 
+def test_check_risk_payload_rejects_unknown_when_official_realtime_evidence_exists() -> None:
+    payload = _risk_payload()
+    payload["realtime"]["level"] = "未知"
+
+    contract_failures, data_source_failures, state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+
+    assert contract_failures == []
+    assert state == "configured"
+    assert data_source_failures == [
+        "risk response had usable official realtime evidence but still returned an unknown "
+        "realtime level"
+    ]
+
+
 def test_check_risk_payload_accepts_zero_radius_counts_without_nearest_sensor() -> None:
     payload = _risk_payload()
     coverage = payload["nearby_realtime_coverage"]

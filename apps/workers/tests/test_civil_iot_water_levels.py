@@ -273,7 +273,7 @@ def test_civil_iot_water_level_promotion_is_audit_only_with_metrics_retained() -
         if "INSERT INTO evidence" in execution[0]
     )
     assert "INSERT INTO evidence" in evidence_sql
-    properties = json.loads(str(evidence_params[14]))
+    properties = json.loads(str(evidence_params[13]))
     assert properties["water_level_m"] == 3.2
     assert properties["warning_level_m"] == 4.0
     assert not any(

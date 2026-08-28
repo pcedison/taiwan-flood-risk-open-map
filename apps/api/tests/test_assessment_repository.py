@@ -177,7 +177,9 @@ def test_repository_resolves_jurisdiction_from_point_not_client_input(
     }
 
 
-def test_current_reader_receives_the_selected_radius(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_current_reader_uses_reviewed_realtime_support_radius(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
     repository = _repository(
         monkeypatch,
@@ -186,7 +188,7 @@ def test_current_reader_receives_the_selected_radius(monkeypatch: pytest.MonkeyP
 
     repository.load(**POINT)
 
-    assert captured["radius_m"] == 750
+    assert captured["radius_m"] == 5_000
     assert captured["as_of"] == NOW
 
 

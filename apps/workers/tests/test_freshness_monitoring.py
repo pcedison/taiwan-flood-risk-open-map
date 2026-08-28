@@ -281,6 +281,29 @@ def test_unsuccessful_background_source_is_alerting_not_fresh(
     assert check.reason.startswith("static/slow-cadence batch did not succeed:")
 
 
+def test_partial_static_complete_replace_is_fresh_after_safe_snapshot_activation() -> None:
+    check = check_summary_freshness(
+        _summary(
+            adapter_key="official.wra.historical_flood",
+            status="partial",
+            items_fetched=1224,
+            items_promoted=1075,
+            items_rejected=157,
+            snapshot_generation_mode="complete_replace",
+            snapshot_activation_eligible=True,
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.status == "fresh"
+    assert check.cadence == "static"
+    assert not check.is_alert()
+    assert check.reason == (
+        "static complete-replace snapshot activated with bounded source rejections"
+    )
+
+
 def test_ncdr_cap_freshness_uses_effective_expires_window() -> None:
     fresh = check_ncdr_cap_freshness(
         adapter_key="official.ncdr.cap",
@@ -520,6 +543,9 @@ def _summary(
     event_active_until_max: datetime | None = None,
     items_fetched: int = 1,
     items_promoted: int = 1,
+    items_rejected: int = 0,
+    snapshot_generation_mode: str = "append",
+    snapshot_activation_eligible: bool = False,
 ) -> AdapterBatchRunSummary:
     return AdapterBatchRunSummary(
         adapter_key=adapter_key,
@@ -528,13 +554,15 @@ def _summary(
         finished_at=finished_at,
         items_fetched=items_fetched,
         items_promoted=items_promoted,
-        items_rejected=0,
+        items_rejected=items_rejected,
         error_code=error_code,
         error_message=error_message,
         source_timestamp_min=source_timestamp_min,
         source_timestamp_max=source_timestamp_max,
         event_active_from_min=event_active_from_min,
         event_active_until_max=event_active_until_max,
+        snapshot_generation_mode=snapshot_generation_mode,
+        snapshot_activation_eligible=snapshot_activation_eligible,
     )
 
 

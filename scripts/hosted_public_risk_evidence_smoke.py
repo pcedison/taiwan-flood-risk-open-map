@@ -269,6 +269,11 @@ def check_risk_payload(
             "risk response did not include official rainfall or water_level evidence "
             "with observed_at and ingested_at"
         )
+    elif _nested_get(payload, "realtime", "level") in {None, "unknown", "未知"}:
+        data_source_failures.append(
+            "risk response had usable official realtime evidence but still returned an unknown "
+            "realtime level"
+        )
 
     coverage = payload.get("nearby_realtime_coverage")
     if not isinstance(coverage, Mapping):
