@@ -136,7 +136,7 @@ class CwaTideLevelApiAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in records
@@ -185,7 +185,7 @@ class CwaTideLevelAdapter:
                 source_id=_source_id(record),
                 source_url=str(record["source_url"]),
                 fetched_at=self._fetched_at,
-                payload=record,
+                payload={**record, "evidence_scope": "current"},
                 raw_snapshot_key=self._raw_snapshot_key,
             )
             for record in self._records

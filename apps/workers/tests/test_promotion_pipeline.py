@@ -617,7 +617,7 @@ def test_non_current_scope_is_never_upserted_to_official_latest(
     )
 
 
-def test_unreviewed_civil_iot_pair_is_audit_only_even_with_current_scope() -> None:
+def test_reviewed_civil_iot_pair_updates_latest_with_current_scope() -> None:
     connection = _FakeConnection(rows=[], evidence_id="evidence-id")
     writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
     payload = _reviewed_realtime_payload()
@@ -632,18 +632,25 @@ def test_unreviewed_civil_iot_pair_is_audit_only_even_with_current_scope() -> No
     evidence_id = writer.write_evidence(payload)
 
     assert evidence_id == "evidence-id"
-    assert not any(
+    assert sum(
         "INSERT INTO official_realtime_latest" in statement
         for statement, _ in connection.cursor_instance.executions
-    )
+    ) == 1
 
 
 @pytest.mark.parametrize(
     ("adapter_key", "event_type"),
     [
         ("official.cwa.rainfall", "rainfall"),
+        ("official.cwa.tide_level", "water_level"),
         ("official.wra.water_level", "water_level"),
         ("official.wra_iow.flood_depth", "flood_report"),
+        ("official.civil_iot.flood_sensor", "flood_report"),
+        ("official.civil_iot.river_water_level", "water_level"),
+        ("official.civil_iot.pond_water_level", "water_level"),
+        ("official.civil_iot.sewer_water_level", "water_level"),
+        ("official.civil_iot.pump_water_level", "water_level"),
+        ("official.civil_iot.gate_water_level", "water_level"),
         ("local.tainan.flood_sensor", "flood_report"),
     ],
 )

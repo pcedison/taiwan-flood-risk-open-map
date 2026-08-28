@@ -795,7 +795,13 @@ def _data_source_from_row(row: dict) -> DataSource:
     health_status = cast(HealthStatus, row.get("health_status") or "unknown")
     if not is_enabled:
         health_status = "disabled"
-    latest_observed_at = row.get("latest_observed_at") or row.get("source_timestamp_max")
+    row_count = _optional_nonnegative_int(row.get("row_count"), default=0)
+    is_empty_event_feed = row["adapter_key"] == "official.ncdr.cap" and row_count == 0
+    latest_observed_at = (
+        None
+        if is_empty_event_feed
+        else row.get("latest_observed_at") or row.get("source_timestamp_max")
+    )
     latest_ingested_at = row.get("latest_ingested_at") or row.get("last_success_at")
     upstream_status = _upstream_status(row, is_enabled=is_enabled)
     covered_counties = _string_list(row.get("covered_counties"))
@@ -828,7 +834,7 @@ def _data_source_from_row(row: dict) -> DataSource:
             "latest_fetched_at": row.get("latest_fetched_at"),
             "latest_ingested_at": latest_ingested_at,
             "lag_seconds": _lag_seconds(latest_observed_at),
-            "row_count": row.get("row_count") or 0,
+            "row_count": row_count,
             "covered_counties": covered_counties,
             "covered_county_count": covered_county_count,
             "fresh_county_count": fresh_county_count,
@@ -845,6 +851,8 @@ def _data_source_from_row(row: dict) -> DataSource:
                 source_timestamp_max=row.get("source_timestamp_max"),
                 latest_observed_at=latest_observed_at,
                 upstream_status=upstream_status,
+                latest_ingested_at=latest_ingested_at,
+                row_count=row_count,
             ),
         }
     )
@@ -909,6 +917,8 @@ def _freshness_state(
     source_timestamp_max: datetime | None,
     latest_observed_at: datetime | None,
     upstream_status: str,
+    latest_ingested_at: datetime | None = None,
+    row_count: int = 0,
 ) -> FreshnessState:
     if not is_enabled:
         return "stale"
@@ -919,6 +929,8 @@ def _freshness_state(
             effective_at=source_timestamp_min,
             expires_at=source_timestamp_max,
             health_status=health_status,
+            latest_ingested_at=latest_ingested_at,
+            row_count=row_count,
         )
     if adapter_key in STATIC_SLOW_CADENCE_ADAPTER_KEYS:
         if latest_observed_at is not None or upstream_status == "succeeded":
@@ -949,7 +961,20 @@ def _ncdr_cap_freshness_state(
     effective_at: datetime | None,
     expires_at: datetime | None,
     health_status: HealthStatus,
+    latest_ingested_at: datetime | None,
+    row_count: int,
 ) -> FreshnessState:
+    if row_count == 0:
+        poll_age_seconds = _lag_seconds(latest_ingested_at)
+        if poll_age_seconds is None:
+            return "stale"
+        if poll_age_seconds <= REALTIME_FRESH_SECONDS:
+            return "fresh"
+        if poll_age_seconds <= REALTIME_DEGRADED_SECONDS:
+            return "degraded"
+        if poll_age_seconds <= REALTIME_STALE_SECONDS:
+            return "stale"
+        return "failed"
     if effective_at is None or expires_at is None:
         return "stale"
     resolved_effective_at = _aware_utc(effective_at)

@@ -263,17 +263,27 @@ def _check_required_source(adapter_key: str, source: Mapping[str, Any]) -> list[
     if freshness_state not in ACCEPTABLE_FRESHNESS_STATES:
         failures.append(f"required source {adapter_key} freshness_state is {freshness_state}")
 
-    if not _non_empty_string(source.get("latest_observed_at")):
-        failures.append(f"required source {adapter_key} missing latest_observed_at")
     if not _non_empty_string(source.get("latest_ingested_at")):
         failures.append(f"required source {adapter_key} missing latest_ingested_at")
 
     row_count = source.get("row_count")
-    if not isinstance(row_count, int) or row_count <= 0:
+    is_fresh_empty_event_feed = (
+        adapter_key == "official.ncdr.cap"
+        and row_count == 0
+        and source.get("upstream_status") == "succeeded"
+        and freshness_state in ACCEPTABLE_FRESHNESS_STATES
+    )
+    if not is_fresh_empty_event_feed and not _non_empty_string(
+        source.get("latest_observed_at")
+    ):
+        failures.append(f"required source {adapter_key} missing latest_observed_at")
+    if not is_fresh_empty_event_feed and (not isinstance(row_count, int) or row_count <= 0):
         failures.append(f"required source {adapter_key} row_count must be greater than 0")
 
     lag_seconds = source.get("lag_seconds")
-    if not isinstance(lag_seconds, int) or lag_seconds < 0:
+    if not is_fresh_empty_event_feed and (
+        not isinstance(lag_seconds, int) or lag_seconds < 0
+    ):
         failures.append(f"required source {adapter_key} lag_seconds must be a non-negative integer")
 
     enabled_gates = source.get("enabled_gates")
@@ -309,6 +319,7 @@ def _checked_source_summaries(
                 "lag_seconds": source.get("lag_seconds"),
                 "latest_observed_at": source.get("latest_observed_at"),
                 "latest_ingested_at": source.get("latest_ingested_at"),
+                "upstream_status": source.get("upstream_status"),
                 "enabled_gates": source.get("enabled_gates") or [],
             }
         )

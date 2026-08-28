@@ -326,6 +326,7 @@ def test_flood_sensor_api_adapter_keeps_zero_and_low_depth_readings_distinct() -
     assert "flood_sensor" in evidence.tags
     raw_payload = result.fetched[0].payload
     assert raw_payload["flood_depth_cm"] == 18.0
+    assert raw_payload["evidence_scope"] == "current"
     assert raw_payload["station_id"] == "FS-001"
     assert raw_payload["station_name"] == "中正路淹水感測器"
     assert raw_payload["authority"] == "水利署"

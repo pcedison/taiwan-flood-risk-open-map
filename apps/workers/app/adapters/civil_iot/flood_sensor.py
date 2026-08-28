@@ -240,6 +240,7 @@ def _normalize_raw_payload(
 ) -> dict[str, Any]:
     payload = dict(record)
     payload["source_url"] = source_url
+    payload["evidence_scope"] = "current"
     value = optional_float(payload.get("value"))
     if value is not None:
         payload["flood_depth_cm"] = float(value)

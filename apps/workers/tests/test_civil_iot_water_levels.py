@@ -190,6 +190,7 @@ def test_pond_and_sewer_adapters_normalize_water_level() -> None:
         assert evidence.source_family is SourceFamily.OFFICIAL
         assert "3.14 公尺" in evidence.summary
         assert result.fetched[0].payload["water_level_m"] == 3.14
+        assert result.fetched[0].payload["evidence_scope"] == "current"
 
 
 def test_water_level_api_adapter_fetches_paginated_sta_pages() -> None:
@@ -237,7 +238,7 @@ def test_river_water_level_adapter_exposes_water_level_metric_in_raw_payload() -
     assert result.fetched[0].payload["water_level_m"] == 4.21
 
 
-def test_civil_iot_water_level_promotion_is_audit_only_with_metrics_retained() -> None:
+def test_civil_iot_water_level_promotion_updates_latest_with_metrics_retained() -> None:
     records = tuple(
         {
             **record,
@@ -255,6 +256,7 @@ def test_civil_iot_water_level_promotion_is_audit_only_with_metrics_retained() -
 
     assert staging.accepted[0].payload["water_level_m"] == 3.2
     assert staging.accepted[0].payload["warning_level_m"] == 4.0
+    assert staging.accepted[0].payload["evidence_scope"] == "current"
 
     promotion_payload = build_evidence_promotion_payload(
         _candidate_from_staging_payload(
@@ -276,10 +278,10 @@ def test_civil_iot_water_level_promotion_is_audit_only_with_metrics_retained() -
     properties = json.loads(str(evidence_params[13]))
     assert properties["water_level_m"] == 3.2
     assert properties["warning_level_m"] == 4.0
-    assert not any(
+    assert sum(
         "INSERT INTO official_realtime_latest" in statement
         for statement, _ in connection.cursor_instance.executions
-    )
+    ) == 1
 
 
 def test_pump_adapter_prefers_external_water_level_and_falls_back_to_generic_water_level() -> None:
@@ -424,6 +426,8 @@ class _FakePromotionCursor:
         if self.executions and "/* authorize-staging-candidate */" in self.executions[-1][0]:
             return ("authorized",)
         if self.executions and "/* same-staging-evidence */" in self.executions[-1][0]:
+            return None
+        if self.executions and "/* latest-decision */" in self.executions[-1][0]:
             return None
         if self.executions and "FROM admin_area_profiles" in self.executions[-1][0]:
             return None

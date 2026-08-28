@@ -549,7 +549,7 @@ def test_admin_sources_marks_expired_ncdr_cap_window_stale_not_fresh(
                 "latest_observed_at": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
                 "latest_fetched_at": datetime.fromisoformat("2026-04-28T12:55:00+00:00"),
                 "latest_ingested_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
-                "row_count": 0,
+                "row_count": 1,
                 "upstream_status": "succeeded",
             },
         ]
@@ -578,6 +578,61 @@ def test_admin_sources_marks_expired_ncdr_cap_window_stale_not_fresh(
     assert source["latest_ingested_at"] == "2026-04-28T12:56:00Z"
     assert source["lag_seconds"] == 3600
     assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
+def test_admin_sources_treats_recent_empty_ncdr_poll_as_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-04-28T13:00:00+00:00"),
+    )
+    get_settings.cache_clear()
+    cursor = FakeCursor(
+        [
+            {
+                "id": "ncdr-cap",
+                "name": "NCDR CAP alert feed",
+                "adapter_key": "official.ncdr.cap",
+                "source_type": "official",
+                "license": "Government open data",
+                "update_frequency": "event_driven",
+                "last_success_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
+                "last_failure_at": None,
+                "health_status": "healthy",
+                "legal_basis": "L1",
+                "source_timestamp_min": datetime.fromisoformat("2026-04-28T11:00:00+00:00"),
+                "source_timestamp_max": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
+                "is_enabled": True,
+                "latest_observed_at": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
+                "latest_fetched_at": datetime.fromisoformat("2026-04-28T12:55:00+00:00"),
+                "latest_ingested_at": datetime.fromisoformat("2026-04-28T12:56:00+00:00"),
+                "row_count": 0,
+                "upstream_status": "succeeded",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        admin_route.psycopg,
+        "connect",
+        lambda *args, **kwargs: FakeConnection(cursor),
+    )
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/sources",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    source = response.json()["sources"][0]
+    assert source["freshness_state"] == "fresh"
+    assert source["latest_observed_at"] is None
+    assert source["latest_ingested_at"] == "2026-04-28T12:56:00Z"
+    assert source["lag_seconds"] is None
+    assert source["row_count"] == 0
 
 
 def test_admin_sources_disabled_filter_includes_disabled_rows_with_unknown_health(
