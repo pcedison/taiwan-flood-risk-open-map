@@ -431,6 +431,8 @@ def query_nearby_evidence(
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
                     AND e.geom IS NOT NULL
+                    AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
+                    AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
                     AND (
                         ds.adapter_key <> 'official.wra.historical_flood'
                         OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
@@ -461,6 +463,8 @@ def query_nearby_evidence(
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
                     AND e.geom IS NOT NULL
+                    AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
+                    AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
                     AND e.source_type = 'official'
                     AND e.event_type = 'rainfall'
                     AND (%s::timestamptz IS NULL OR e.observed_at >= %s::timestamptz)
@@ -486,6 +490,8 @@ def query_nearby_evidence(
                 WHERE e.ingestion_status = 'accepted'
                     AND e.privacy_level IN ('public', 'aggregated')
                     AND e.geom IS NOT NULL
+                    AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
+                    AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
                     AND e.source_type = 'official'
                     AND e.event_type = 'water_level'
                     AND (%s::timestamptz IS NULL OR e.observed_at >= %s::timestamptz)
@@ -954,6 +960,8 @@ def query_nearby_latest_official(
                     'flood_warning'
                 )
                 AND e.properties->>'evidence_scope' = 'current'
+                AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
+                AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
                 AND COALESCE(e.geom, latest.geom) IS NOT NULL
                 AND NOT ST_IsEmpty(COALESCE(e.geom, latest.geom))
                 AND ST_IsValid(COALESCE(e.geom, latest.geom))

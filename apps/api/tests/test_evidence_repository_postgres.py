@@ -166,7 +166,8 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
     raw_b = f"raw/official/wra/historical_flood/{'b' * 64}.json"
     history_source_id = uuid4()
     ordinary_source_id = uuid4()
-    a_shared_id, a_removed_id, b_shared_id, ordinary_id = (
+    a_shared_id, a_removed_id, b_shared_id, ordinary_id, disabled_id = (
+        uuid4(),
         uuid4(),
         uuid4(),
         uuid4(),
@@ -190,11 +191,50 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                     ordinary_source_id,
                 ),
             )
-            for evidence_id, data_source_id, source_id, raw_ref, title in (
-                (a_shared_id, history_source_id, "shared-record", raw_a, "A shared"),
-                (a_removed_id, history_source_id, "removed-in-b", raw_a, "A removed"),
-                (b_shared_id, history_source_id, "shared-record", raw_b, "B shared"),
-                (ordinary_id, ordinary_source_id, "ordinary", None, "Ordinary"),
+            for evidence_id, data_source_id, source_id, raw_ref, title, properties in (
+                (
+                    a_shared_id,
+                    history_source_id,
+                    "shared-record",
+                    raw_a,
+                    "A shared",
+                    {"evidence_scope": "historical"},
+                ),
+                (
+                    a_removed_id,
+                    history_source_id,
+                    "removed-in-b",
+                    raw_a,
+                    "A removed",
+                    {"evidence_scope": "historical"},
+                ),
+                (
+                    b_shared_id,
+                    history_source_id,
+                    "shared-record",
+                    raw_b,
+                    "B shared",
+                    {"evidence_scope": "historical"},
+                ),
+                (
+                    ordinary_id,
+                    ordinary_source_id,
+                    "ordinary",
+                    None,
+                    "Ordinary",
+                    {"evidence_scope": "current"},
+                ),
+                (
+                    disabled_id,
+                    ordinary_source_id,
+                    "disabled-station",
+                    None,
+                    "Disabled station",
+                    {
+                        "evidence_scope": "current",
+                        "realtime_station_enabled": False,
+                    },
+                ),
             ):
                 connection.execute(
                     """
@@ -207,8 +247,7 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                         %s, %s, %s, 'official', 'flood_report', %s, %s,
                         now(), now(),
                         ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326),
-                        0.9, 'public', %s, 'accepted',
-                        '{"evidence_scope":"historical"}'::jsonb
+                        0.9, 'public', %s, 'accepted', %s::jsonb
                     )
                     """,
                     (
@@ -218,6 +257,7 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                         title,
                         title,
                         raw_ref,
+                        Jsonb(properties),
                     ),
                 )
 
@@ -810,15 +850,30 @@ def test_latest_reader_rejects_dirty_or_missing_scope_and_honors_depth_lookback(
         with psycopg.connect(isolated_url) as connection:
             _insert_latest_source(connection, adapter_key)
             expected_ids = []
-            for station_id, event_type, scope, observed_at in (
-                ("current", "rainfall", "current", now),
-                ("context", "water_level", "context", now),
-                ("missing", "flood_report", None, now),
-                ("depth-recent", "flood_depth", "current", now),
-                ("depth-old", "flood_depth", "current", now - timedelta(hours=7)),
+            for station_id, event_type, scope, observed_at, enabled_properties in (
+                ("current", "rainfall", "current", now, {}),
+                ("context", "water_level", "context", now, {}),
+                ("missing", "flood_report", None, now, {}),
+                ("depth-recent", "flood_depth", "current", now, {}),
+                ("depth-old", "flood_depth", "current", now - timedelta(hours=7), {}),
+                (
+                    "disabled-realtime",
+                    "flood_report",
+                    "current",
+                    now,
+                    {"realtime_station_enabled": False},
+                ),
+                (
+                    "disabled-metadata",
+                    "flood_report",
+                    "current",
+                    now,
+                    {"metadata_station_enabled": False},
+                ),
             ):
                 evidence_id = uuid4()
                 properties = {} if scope is None else {"evidence_scope": scope}
+                properties.update(enabled_properties)
                 _insert_evidence(
                     connection,
                     evidence_id=evidence_id,

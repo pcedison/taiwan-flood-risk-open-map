@@ -294,6 +294,39 @@ def test_tainan_records_missing_coordinates_keep_quality_flag_and_are_not_normal
     assert staging.rejected_raw_source_ids == (missing_coordinate_source_id,)
 
 
+@pytest.mark.parametrize(
+    ("disabled_field", "enabled_field"),
+    [
+        ("realtime_station_enabled", "metadata_station_enabled"),
+        ("metadata_station_enabled", "realtime_station_enabled"),
+    ],
+)
+def test_tainan_disabled_station_is_fetched_but_not_normalized(
+    disabled_field: str,
+    enabled_field: str,
+) -> None:
+    def fetch_json(url: str, timeout_seconds: int) -> dict:
+        del timeout_seconds
+        if url == TAINAN_FLOOD_SENSOR_METADATA_API_URL:
+            payload = _metadata_payload()
+            payload["data"][0]["IsEnabled"] = disabled_field != "metadata_station_enabled"
+            return payload
+        payload = _realtime_payload()
+        payload["data"][0]["IsEnabled"] = disabled_field != "realtime_station_enabled"
+        return payload
+
+    adapter = TainanFloodSensorApiAdapter(fetched_at=FETCHED_AT, fetch_json=fetch_json)
+
+    result = adapter.run()
+
+    disabled_source_id = "f001:2026-06-27T03:25:03+00:00"
+    assert result.fetched[0].source_id == disabled_source_id
+    assert result.fetched[0].payload[disabled_field] is False
+    assert result.fetched[0].payload[enabled_field] is True
+    assert disabled_source_id not in {item.source_id for item in result.normalized}
+    assert disabled_source_id in result.rejected
+
+
 def test_tainan_adapter_registry_and_config_are_default_off() -> None:
     settings = load_worker_settings({})
 

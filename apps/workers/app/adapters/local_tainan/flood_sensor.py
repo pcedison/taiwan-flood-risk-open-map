@@ -483,6 +483,11 @@ def _normalize_tainan_flood_sensor_record(
     raw_item: RawSourceItem,
 ) -> NormalizedEvidence | None:
     payload = raw_item.payload
+    if (
+        payload.get("realtime_station_enabled") is False
+        or payload.get("metadata_station_enabled") is False
+    ):
+        return None
     quality_flags = payload.get("quality_flags")
     if (
         isinstance(quality_flags, Mapping)
