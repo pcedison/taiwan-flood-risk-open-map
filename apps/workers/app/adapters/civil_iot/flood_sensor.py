@@ -32,7 +32,7 @@ from app.adapters.civil_iot.sta_client import (
     DEFAULT_STA_TIMEOUT_SECONDS,
     STA_WATER_RESOURCE_BASE,
     StaFetchJson,
-    fetch_paginated_sta_things,
+    fetch_paginated_sta_datastreams,
     fetch_sta_json,
 )
 from app.adapters.contracts import (
@@ -46,13 +46,15 @@ from app.adapters.contracts import (
     StationInventoryProof,
 )
 
-# Default Civil IoT SensorThings query for the flood-sensor dataset. The exact
-# authority filter is configurable; this default selects flood-depth things with
-# their location and latest observation expanded.
+# Civil IoT's documented flood-sensor query starts from Datastreams so the
+# description category markers select only flood-depth telemetry. Starting from
+# Things with a broad name match also pulls camera/photo streams and overstates
+# the station inventory.
 FLOOD_SENSOR_STA_URL = (
-    f"{STA_WATER_RESOURCE_BASE}Things"
-    "?$expand=Locations,Datastreams($expand=Observations($orderby=phenomenonTime desc;$top=1))"
-    "&$filter=substringof('淹水',Datastreams/name)"
+    f"{STA_WATER_RESOURCE_BASE}Datastreams"
+    "?$expand=Thing,Thing/Locations,Observations($orderby=phenomenonTime desc;$top=1)"
+    "&$filter=substringof('Datastream_Category_type=淹水感測器',description)"
+    " and substringof('Datastream_Category=淹水深度',description)"
     "&$top=2000"
     "&$count=true"
 )
@@ -115,7 +117,7 @@ class FloodSensorStaApiAdapter:
     def fetch(self) -> tuple[RawSourceItem, ...]:
         self._station_inventory_proof = None
         try:
-            fetch_result = fetch_paginated_sta_things(
+            fetch_result = fetch_paginated_sta_datastreams(
                 self._sta_url,
                 timeout_seconds=self._timeout_seconds,
                 fetch_json=self._fetch_json,

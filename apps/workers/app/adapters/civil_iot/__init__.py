@@ -23,6 +23,7 @@ from app.adapters.civil_iot.sta_client import (
     CivilIotStaFetchError,
     CivilIotStaPayloadError,
     StaFetchJson,
+    fetch_paginated_sta_datastreams,
     fetch_sta_json,
     parse_sta_things_payload,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "CivilIotStaFetchError",
     "CivilIotStaPayloadError",
     "StaFetchJson",
+    "fetch_paginated_sta_datastreams",
     "fetch_sta_json",
     "parse_sta_things_payload",
     "FLOOD_SENSOR_METADATA",

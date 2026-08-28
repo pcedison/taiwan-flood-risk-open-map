@@ -316,6 +316,29 @@ def _summary_from_result(
                 error_message="valid warning poll returned no active event",
                 station_inventory_proof=result.station_inventory_proof,
             )
+        inventory_proof = result.station_inventory_proof
+        if (
+            inventory_proof is not None
+            and (inventory_proof.upstream_total or 0) > 0
+            and inventory_proof.pagination_complete
+            and inventory_proof.source_items_seen == inventory_proof.upstream_total
+        ):
+            return AdapterBatchRunSummary(
+                adapter_key=result.adapter_key,
+                status="failed",
+                started_at=started_at,
+                finished_at=_now(),
+                items_fetched=0,
+                items_promoted=0,
+                items_rejected=len(result.rejected),
+                snapshot_generation_mode=snapshot_generation_mode,
+                error_code="upstream_observations_empty",
+                error_message=(
+                    "upstream returned a complete nonempty station collection "
+                    "but no usable observations"
+                ),
+                station_inventory_proof=inventory_proof,
+            )
         return AdapterBatchRunSummary(
             adapter_key=result.adapter_key,
             status="skipped",

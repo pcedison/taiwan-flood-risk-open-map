@@ -216,6 +216,117 @@ def fetch_paginated_sta_things(
     )
 
 
+def fetch_paginated_sta_datastreams(
+    start_url: str,
+    *,
+    timeout_seconds: int,
+    fetch_json: StaFetchJson,
+    source_url: str,
+) -> StaThingsFetchResult:
+    """Fetch STA Datastream pages plus an exact Thing/station manifest.
+
+    Civil IoT's official flood-sensor example queries ``Datastreams`` rather
+    than ``Things`` so the category markers in ``description`` select only the
+    flood-depth stream.  Each Datastream must expand its owning ``Thing``, that
+    Thing's ``Locations``, and the latest ``Observations`` row.
+
+    The returned inventory counts matching flood-depth Datastreams, including
+    streams whose upstream ``Observations`` collection is empty.  This keeps a
+    readable-but-empty upstream distinct from a pagination or parser failure.
+    """
+
+    next_url: str | None = _with_count_query(start_url)
+    seen_urls: set[str] = set()
+    records: list[Mapping[str, Any]] = []
+    station_ids: set[str] = set()
+    source_items_seen = 0
+    missing_station_id_count = 0
+    duplicate_station_id_count = 0
+    pages_fetched = 0
+    pagination_complete = False
+    upstream_totals: set[int] = set()
+    upstream_count_invalid = False
+
+    while next_url is not None:
+        pagination_key = _with_count_query(next_url)
+        if pagination_key in seen_urls:
+            raise CivilIotStaPayloadError(
+                f"Civil IoT SensorThings payload repeated @iot.nextLink: {next_url}"
+            )
+        seen_urls.add(pagination_key)
+        payload = fetch_json(next_url, timeout_seconds)
+        pages_fetched += 1
+
+        count_present, upstream_total = _sta_upstream_total(payload)
+        if count_present:
+            if upstream_total is None:
+                upstream_count_invalid = True
+            else:
+                upstream_totals.add(upstream_total)
+
+        datastreams = tuple(_datastream_items(payload))
+        legacy_things_payload = bool(datastreams) and all(
+            isinstance(item, Mapping)
+            and "Datastreams" in item
+            and "Thing" not in item
+            for item in datastreams
+        )
+        for datastream in datastreams:
+            source_items_seen += 1
+            station_id = (
+                (
+                    _thing_station_id(datastream)
+                    if legacy_things_payload
+                    else _datastream_station_id(datastream)
+                )
+                if isinstance(datastream, Mapping)
+                else None
+            )
+            if station_id is None:
+                missing_station_id_count += 1
+            elif station_id in station_ids:
+                duplicate_station_id_count += 1
+            else:
+                station_ids.add(station_id)
+
+        if legacy_things_payload:
+            # Keep configured legacy Things URLs usable during the transition
+            # to Civil IoT's documented Datastreams query shape.
+            records.extend(
+                _parse_sta_things_items(
+                    datastreams,
+                    source_url=source_url,
+                    datastream_name_contains=None,
+                )
+            )
+        else:
+            records.extend(
+                _parse_sta_datastream_items(datastreams, source_url=source_url)
+            )
+        next_url = _sta_next_link(payload)
+        if next_url is None:
+            pagination_complete = True
+
+    resolved_upstream_total = (
+        next(iter(upstream_totals))
+        if not upstream_count_invalid and len(upstream_totals) == 1
+        else None
+    )
+    proof = StationInventoryProof(
+        upstream_total=resolved_upstream_total,
+        pages_fetched=pages_fetched,
+        pagination_complete=pagination_complete,
+        source_items_seen=source_items_seen,
+        missing_station_id_count=missing_station_id_count,
+        duplicate_station_id_count=duplicate_station_id_count,
+        station_ids=tuple(sorted(station_ids)),
+    )
+    return StaThingsFetchResult(
+        records=tuple(records),
+        station_inventory_proof=proof,
+    )
+
+
 def fetch_paginated_sta_things_records(
     start_url: str,
     *,
@@ -245,6 +356,19 @@ def _things_items(payload: object) -> Iterable[Any]:
                 return items
     raise CivilIotStaPayloadError(
         "Civil IoT SensorThings payload is missing a Things value list"
+    )
+
+
+def _datastream_items(payload: object) -> Iterable[Any]:
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, Mapping):
+        for key in ("value", "Datastreams", "datastreams"):
+            items = payload.get(key)
+            if isinstance(items, list):
+                return items
+    raise CivilIotStaPayloadError(
+        "Civil IoT SensorThings payload is missing a Datastreams value list"
     )
 
 
@@ -401,6 +525,33 @@ def _parse_thing(
         record["geometry"] = {"type": "Point", "coordinates": [lng, lat]}
 
     return record
+
+
+def _parse_sta_datastream_items(
+    datastreams: tuple[Any, ...],
+    *,
+    source_url: str,
+) -> tuple[Mapping[str, Any], ...]:
+    records: list[Mapping[str, Any]] = []
+    for datastream in datastreams:
+        if not isinstance(datastream, Mapping):
+            continue
+        thing = datastream.get("Thing")
+        if not isinstance(thing, Mapping):
+            continue
+        expanded_thing = dict(thing)
+        expanded_thing["Datastreams"] = [datastream]
+        record = _parse_thing(expanded_thing, source_url=source_url)
+        if record is not None:
+            records.append(record)
+    return tuple(records)
+
+
+def _datastream_station_id(datastream: Mapping[str, Any]) -> str | None:
+    thing = datastream.get("Thing")
+    if not isinstance(thing, Mapping):
+        return None
+    return _thing_station_id(thing) or _first_text(thing, "name")
 
 
 def _thing_station_id(thing: Mapping[str, Any]) -> str | None:

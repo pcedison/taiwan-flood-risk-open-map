@@ -141,11 +141,19 @@ curl.exe -L --output tmp\geocoder-data\roads-114.csv `
 curl.exe -L --output tmp\geocoder-data\shelters.csv `
   "https://opdadm.moi.gov.tw/api/v1/no-auth/resource/api/dataset/ED6CF735-6C03-4573-A882-72C1BEC799CB/resource/54550E2F-4567-4C8F-BD2E-E54E9D0386B8/download"
 
-curl.exe -L --output tmp\geocoder-data\villages-1150407.zip `
-  "https://www.tgos.tw/tgos/VirtualDir/Product/a04697c8-64db-450a-a105-3eb471c45abd/村(里)界(TWD97經緯度)1150407.zip"
+curl.exe -L --output tmp\geocoder-data\villages-current.zip `
+  "https://www.tgos.tw/tgos/VirtualDir/Product/a04697c8-64db-450a-a105-3eb471c45abd/%E6%9D%91(%E9%87%8C)%E7%95%8C(TWD97%E7%B6%93%E7%B7%AF%E5%BA%A6).zip"
+
+$expectedVillageSha256 = "c6cc09589cfdc073df6ca85b84be5f76a92c268774a44744fda341766479ef62"
+$actualVillageSha256 = (Get-FileHash `
+  tmp\geocoder-data\villages-current.zip `
+  -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualVillageSha256 -ne $expectedVillageSha256) {
+  throw "Village archive checksum changed; review the new NLSC revision before import."
+}
 
 python infra\scripts\extract_village_centroids.py `
-  tmp\geocoder-data\villages-1150407.zip `
+  tmp\geocoder-data\villages-current.zip `
   tmp\geocoder-data\villages-centroids.csv
 
 python infra\scripts\import_geocoder_open_data.py `
@@ -166,6 +174,12 @@ python infra\scripts\import_geocoder_open_data.py `
   --output-jsonl tmp\geocoder-data\villages.normalized.jsonl `
   --evidence-json tmp\geocoder-data\villages.evidence.json
 ```
+
+The TGOS download filename is intentionally undated because NLSC rotates dated
+filenames and the old `1150407` URL no longer resolves. The checksum above pins
+the reviewed `1150817` archive. If it changes, update both source manifests and
+the checksum only after reviewing the new archive fields, row counts, geometry,
+and license metadata.
 
 Apply to PostGIS after migration:
 

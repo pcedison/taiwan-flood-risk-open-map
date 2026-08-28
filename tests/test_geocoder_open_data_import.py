@@ -65,6 +65,18 @@ def test_geocoding_manifest_matches_official_source_catalog_for_primary_sources(
         assert dataset["data_gov_url"] == catalog_source["data_gov_url"]
         assert dataset["resource_url"] == catalog_source["resource_url"]
 
+    village_dataset = datasets_by_catalog_key["geocoder.moi.village_boundary"]
+    village_catalog = catalog_sources["geocoder.moi.village_boundary"]
+    assert village_dataset["current_source_revision"] == "1150817"
+    assert village_dataset["current_source_revision"] == village_catalog[
+        "current_source_revision"
+    ]
+    assert village_dataset["resource_sha256"] == village_catalog["resource_sha256"]
+    assert village_dataset["resource_sha256"] == (
+        "c6cc09589cfdc073df6ca85b84be5f76a92c268774a44744fda341766479ef62"
+    )
+    assert "1150407" not in village_dataset["resource_url"]
+
 
 def test_importer_normalizes_point_rows_with_manifest_defaults(tmp_path) -> None:
     manifest = load_manifest(DEFAULT_MANIFEST_PATH)
