@@ -39,6 +39,22 @@ _LOCAL_POLICY = {
     "10013000": (None, "屏東縣地方政府機器介面尚未核准"),
 }
 _REALTIME_SUPPORT_RADIUS_M = 5_000
+_SCORING_CURRENT_ADAPTER_EVENTS = frozenset(
+    {
+        ("official.cwa.rainfall", "rainfall"),
+        ("official.wra.water_level", "water_level"),
+        ("official.wra_iow.flood_depth", "flood_report"),
+        ("local.tainan.flood_sensor", "flood_report"),
+        ("official.cwa.heavy_rain_warning", "flood_warning"),
+        ("official.ncdr.cap", "flood_warning"),
+    }
+)
+_REVIEWED_SIGNAL_CONTRACT_REVISIONS = {
+    "rainfall": "2026-08-24-v1-baseline",
+    "water_level": "2026-08-24-v1-baseline",
+    "flood_depth": "2026-08-24-v1-baseline",
+    "sewer_water_level": "2026-08-29-sewer-publication",
+}
 
 
 class AssessmentRepository(Protocol):
@@ -289,7 +305,7 @@ def _official_current(records: tuple[EvidenceRecord, ...]) -> tuple[EvidenceReco
         for item in records
         if item.source_type == "official"
         and item.evidence_scope == "current"
-        and item.event_type in {"rainfall", "water_level", "flood_warning", "flood_report"}
+        and (item.adapter_key, item.event_type) in _SCORING_CURRENT_ADAPTER_EVENTS
     )
     output: list[EvidenceRecord] = []
     warning_index: dict[str, int] = {}
@@ -385,14 +401,14 @@ def _complete_signal_types(jurisdiction: RealtimeJurisdictionContext) -> tuple:
     if not considered_codes:
         return ()
     complete: list[str] = []
-    for signal_type in ("rainfall", "water_level", "flood_depth"):
+    for signal_type, reviewed_revision in _REVIEWED_SIGNAL_CONTRACT_REVISIONS.items():
         valid_codes = {
             contract.jurisdiction_code
             for contract in jurisdiction.signal_contracts
             if contract.signal_type == signal_type
             and contract.catalog_status == "reviewed_complete"
             and contract.mapping_proof_valid
-            and contract.mapping_revision == "2026-08-24-v1-baseline"
+            and contract.mapping_revision == reviewed_revision
         }
         if considered_codes <= valid_codes:
             complete.append(signal_type)

@@ -109,6 +109,7 @@ def _context(
     code: str = "67000000",
     name: str = "臺南市",
     mappings: tuple[RealtimeJurisdictionSourceMapping, ...] | None = None,
+    additional_contracts: tuple[RealtimeJurisdictionSignalContract, ...] = (),
 ) -> RealtimeJurisdictionContext:
     resolved_mappings = mappings or (
         _mapping("official.cwa.rainfall", "rainfall", jurisdiction_code=code),
@@ -125,7 +126,7 @@ def _context(
             mapping_proof_valid=True,
         )
         for signal_type in ("rainfall", "water_level", "flood_depth")
-    )
+    ) + additional_contracts
     return RealtimeJurisdictionContext(
         resolution_status="verified",
         home_jurisdiction_code=code,
@@ -439,7 +440,18 @@ def test_reviewed_sewer_mapping_reaches_public_coverage_and_health(
     adapter_key = "official.civil_iot.sewer_water_level"
     revision = "2026-08-29-sewer-publication"
     mapping = _mapping(adapter_key, "sewer_water_level", revision=revision)
-    jurisdiction = _context(mappings=(mapping,))
+    sewer_contract = RealtimeJurisdictionSignalContract(
+        jurisdiction_code="67000000",
+        jurisdiction_name="臺南市",
+        signal_type="sewer_water_level",
+        catalog_status="reviewed_complete",
+        mapping_revision=revision,
+        mapping_proof_valid=True,
+    )
+    jurisdiction = _context(
+        mappings=(mapping,),
+        additional_contracts=(sewer_contract,),
+    )
     nearby = NearbyCoverageRow(
         adapter_key=adapter_key,
         source_id="sewer-001:2026-08-24T03:58:00+00:00",
@@ -462,13 +474,20 @@ def test_reviewed_sewer_mapping_reaches_public_coverage_and_health(
         latest_observed_at=NOW - timedelta(minutes=2),
         latest_ingested_at=NOW,
         station_count=2_033,
+        inventory_complete=True,
         fresh_station_count=2_033,
+    )
+    sewer_current = _record(
+        "sewer-current",
+        adapter_key=adapter_key,
+        event_type="water_level",
     )
     health_query: dict[str, object] = {}
 
     data = _repository(
         monkeypatch,
         query_realtime_jurisdiction_context=lambda **_: jurisdiction,
+        query_nearby_latest_official=lambda **_: (sewer_current,),
         query_nearby_realtime_coverage_rows=lambda **_: (nearby,),
         query_realtime_source_health_rows=lambda **kwargs: (
             health_query.update(kwargs) or (health,)
@@ -476,6 +495,7 @@ def test_reviewed_sewer_mapping_reaches_public_coverage_and_health(
     ).load(**POINT)
 
     assert health_query["adapter_keys"] == (adapter_key,)
+    assert data.current_official == ()
     sewer = next(
         item
         for item in data.nearby_coverage.signal_breakdown
@@ -486,6 +506,21 @@ def test_reviewed_sewer_mapping_reaches_public_coverage_and_health(
     assert {item.source_id for item in data.nearby_coverage.source_health} == {
         "official-civil-iot-sewer-water-level"
     }
+
+    no_station = _repository(
+        monkeypatch,
+        query_realtime_jurisdiction_context=lambda **_: jurisdiction,
+        query_nearby_latest_official=lambda **_: (sewer_current,),
+        query_nearby_realtime_coverage_rows=lambda **_: (),
+        query_realtime_source_health_rows=lambda **_: (health,),
+    ).load(**POINT)
+    sewer_without_station = next(
+        item
+        for item in no_station.nearby_coverage.signal_breakdown
+        if item.signal_type == "sewer_water_level"
+    )
+    assert sewer_without_station.missing_cause == "no_station_in_range"
+    assert "sewer_water_level" not in no_station.nearby_coverage.jurisdiction_unverified_signal_types
 
 
 def test_kaohsiung_gap_comes_from_server_resolved_home_jurisdiction(
@@ -555,6 +590,32 @@ def test_completeness_requires_every_considered_jurisdiction_per_required_signal
     )
 
     assert _complete_signal_types(context) == ("flood_depth", "rainfall")
+
+
+def test_completeness_accepts_only_the_reviewed_sewer_revision() -> None:
+    reviewed = RealtimeJurisdictionSignalContract(
+        jurisdiction_code="67000000",
+        jurisdiction_name="臺南市",
+        signal_type="sewer_water_level",
+        catalog_status="reviewed_complete",
+        mapping_revision="2026-08-29-sewer-publication",
+        mapping_proof_valid=True,
+    )
+    stale_revision = RealtimeJurisdictionSignalContract(
+        jurisdiction_code="67000000",
+        jurisdiction_name="臺南市",
+        signal_type="sewer_water_level",
+        catalog_status="reviewed_complete",
+        mapping_revision="2026-08-24-v1-baseline",
+        mapping_proof_valid=True,
+    )
+
+    assert "sewer_water_level" in _complete_signal_types(
+        _context(additional_contracts=(reviewed,))
+    )
+    assert "sewer_water_level" not in _complete_signal_types(
+        _context(additional_contracts=(stale_revision,))
+    )
 
 
 def _persistence_record() -> RiskAssessmentPersistence:
