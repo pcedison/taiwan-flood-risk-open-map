@@ -169,6 +169,13 @@ export function evidenceDisplayText(item: EvidencePreview): EvidenceDisplayText 
   if (isHistoricalNewsEvidence(item)) {
     return { purpose: "用途：歷史新聞參考", summary: item.summary, title: item.title };
   }
+  if (item.evidence_scope === "historical") {
+    return {
+      purpose: "用途：歷史淹水參考",
+      summary: "歷史淹水資料與本次查詢範圍相交，只代表過往背景，不代表目前正在淹水。",
+      title: "歷史淹水紀錄",
+    };
+  }
 
   const eventText = evidenceEventDisplayText[item.event_type];
   if (
@@ -197,14 +204,44 @@ export function publicEvidenceDisplayItems<T extends EvidencePreview & { source_
   items: T[],
   limit = 3,
 ) {
-  return [...items]
+  const boundedLimit = Math.max(0, limit);
+  const candidates = [...items]
     .filter((item) => !isHistoricalNewsEvidence(item))
     .sort((left, right) => {
       const priorityDelta = evidenceDisplayPriority(left) - evidenceDisplayPriority(right);
       if (priorityDelta !== 0) return priorityDelta;
       return evidenceSortTime(right) - evidenceSortTime(left);
-    })
-    .slice(0, Math.max(0, limit));
+    });
+  if (boundedLimit === 0 || !candidates.some((item) => item.evidence_scope)) {
+    return candidates.slice(0, boundedLimit);
+  }
+
+  const historicalRepresentative =
+    candidates.find((item) => item.evidence_scope === "historical") ??
+    candidates.find((item) => item.evidence_scope === "context");
+  const currentLimit =
+    historicalRepresentative && boundedLimit > 1 ? boundedLimit - 1 : boundedLimit;
+  const selected: T[] = [];
+  const selectedIds = new Set<string>();
+  const currentFamilies = new Set<string>();
+  for (const item of candidates) {
+    if (item.evidence_scope !== "current" || currentFamilies.has(item.event_type)) continue;
+    selected.push(item);
+    selectedIds.add(item.id);
+    currentFamilies.add(item.event_type);
+    if (selected.length === currentLimit) break;
+  }
+  if (historicalRepresentative && selected.length < boundedLimit) {
+    selected.push(historicalRepresentative);
+    selectedIds.add(historicalRepresentative.id);
+  }
+  for (const item of candidates) {
+    if (selected.length === boundedLimit) break;
+    if (selectedIds.has(item.id)) continue;
+    selected.push(item);
+    selectedIds.add(item.id);
+  }
+  return selected;
 }
 
 export function publicDataFreshnessItems(items: DataFreshnessItem[]) {
@@ -248,7 +285,16 @@ export function selectEvidenceItems<T extends EvidencePreview>(
   fullListItems: T[],
   status: EvidenceStatus,
 ) {
-  if (status === "ready") return fullListItems;
+  if (status === "ready") {
+    if (!fullListItems.length) return previewItems;
+    const fullListIds = new Set(fullListItems.map((item) => item.id));
+    const missingContext = previewItems.filter(
+      (item) =>
+        !fullListIds.has(item.id) &&
+        (item.evidence_scope === "historical" || item.evidence_scope === "context"),
+    );
+    return [...missingContext, ...fullListItems];
+  }
   return fullListItems.length ? fullListItems : previewItems;
 }
 

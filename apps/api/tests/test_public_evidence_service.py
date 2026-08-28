@@ -4,6 +4,8 @@ import pytest
 
 from app.api.services import public_evidence
 from app.domain.evidence import EvidenceRecord
+from app.domain.history import HistoricalFloodRecord
+from app.domain.realtime import OfficialRealtimeObservation
 
 
 def _record(
@@ -61,6 +63,53 @@ def test_official_evidence_uses_canonical_data_gov_url(
     )
 
     assert evidence.url == expected_url
+
+
+def test_generated_realtime_and_historical_evidence_publish_explicit_scope() -> None:
+    observed_at = datetime(2026, 8, 29, tzinfo=UTC)
+    realtime = public_evidence.official_realtime_evidence(
+        OfficialRealtimeObservation(
+            source_id="cwa:rainfall:demo",
+            source_name="CWA rainfall",
+            event_type="rainfall",
+            title="Nearby rainfall",
+            summary="1-hour rainfall 0 mm",
+            observed_at=observed_at,
+            ingested_at=observed_at,
+            lat=23.0,
+            lng=120.2,
+            distance_to_query_m=400.0,
+            confidence=0.95,
+            freshness_score=1.0,
+            source_weight=1.0,
+            risk_factor=0.0,
+        )
+    )
+    historical = public_evidence.historical_record_evidence(
+        HistoricalFloodRecord(
+            source_id="history:demo",
+            source_name="Historical flood record",
+            source_type="official",
+            event_type="flood_report",
+            title="Historical flood",
+            summary="Reviewed historical flood record",
+            url="https://data.gov.tw/dataset/130016",
+            occurred_at=datetime(2020, 8, 1, tzinfo=UTC),
+            ingested_at=observed_at,
+            lat=23.0,
+            lng=120.2,
+            confidence=0.9,
+            freshness_score=1.0,
+            source_weight=1.0,
+            risk_factor=1.0,
+        ),
+        distance_to_query_m=500.0,
+    )
+
+    assert realtime.evidence_scope == "current"
+    assert public_evidence.evidence_preview(realtime).evidence_scope == "current"
+    assert historical.evidence_scope == "historical"
+    assert public_evidence.evidence_preview(historical).evidence_scope == "historical"
 
 
 def test_display_evidence_collapses_official_disaster_points_stably() -> None:
@@ -159,3 +208,7 @@ def test_preview_reserves_current_signal_families_and_historical_context() -> No
         "rainfall",
     }
     assert any(item.evidence_scope == "historical" for item in preview)
+
+    public_preview = public_evidence.evidence_preview(history)
+    assert public_preview.evidence_scope == "historical"
+    assert public_preview.model_dump(mode="json")["evidence_scope"] == "historical"

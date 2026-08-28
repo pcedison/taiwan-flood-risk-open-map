@@ -254,6 +254,7 @@ def official_realtime_evidence(observation: OfficialRealtimeObservation) -> Evid
         source_weight=observation.source_weight,
         privacy_level="public",
         raw_ref=f"official-realtime:{observation.source_id}",
+        evidence_scope="current",
     )
 
 
@@ -285,6 +286,7 @@ def historical_record_evidence(
         source_weight=record.source_weight,
         privacy_level="public",
         raw_ref=f"historical-record:{record.source_id}",
+        evidence_scope="historical",
     )
 
 
@@ -330,6 +332,7 @@ def evidence_preview(evidence: Evidence) -> EvidencePreview:
         url=evidence.url,
         location_precision=evidence.location_precision,
         limitations=list(evidence.limitations),
+        evidence_scope=evidence.evidence_scope,
     )
 
 
