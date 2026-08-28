@@ -1,11 +1,9 @@
 """Data invariants the v1 jurisdiction source proof depends on.
 
-``query_realtime_jurisdiction_context`` only emits a source mapping when the
-mapping sits at the revision the query hardcodes *and* the owning signal
-contract carries a valid proof at that same revision.  When either half is
-missing the query returns no mappings at all, ``adapter_keys`` is empty, every
-evidence read is filtered against nothing, and the public API reports the
-sources as switched off.
+``query_realtime_jurisdiction_context`` only emits a source mapping when its
+owning signal contract carries a valid proof at the same revision. When either
+half is missing, that signal's mappings must remain unavailable without
+blocking independently reviewed signal revisions.
 
 These assertions run against a database with every migration applied, so they
 fail when the migrations stop producing the state the query demands.
@@ -14,16 +12,28 @@ fail when the migrations stop producing the state the query demands.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import psycopg
 import pytest
 
 BASELINE_REVISION = "2026-08-24-v1-baseline"
+WARNING_REVISION = "2026-08-28-v1-warning-alignment"
 REVIEWED_SIGNAL_TYPES = ("rainfall", "water_level", "flood_depth", "flood_warning")
 EXPECTED_FLOOD_WARNING_KEYS = {
     "official.cwa.heavy_rain_warning",
     "official.ncdr.cap",
 }
+EXPECTED_REVISIONS = {
+    "rainfall": BASELINE_REVISION,
+    "water_level": BASELINE_REVISION,
+    "flood_depth": BASELINE_REVISION,
+    "flood_warning": WARNING_REVISION,
+}
+REPO_ROOT = Path(__file__).resolve().parents[1]
+WARNING_MIGRATION = (
+    REPO_ROOT / "infra" / "migrations" / "0041_v1_warning_source_requirement_alignment.sql"
+)
 
 # Recomputed exactly as query_realtime_jurisdiction_context does, so a drift in
 # either the ordering or the encoding shows up here rather than in production.
@@ -70,19 +80,49 @@ MANIFEST_SQL = """
         ) AS actual_sha256,
         array_remove(array_agg(mapping.adapter_key), NULL) AS adapter_keys,
         COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'adapter_key', mapping.adapter_key,
+                    'requirement_role', mapping.requirement_role,
+                    'redundancy_of_adapter_key', mapping.redundancy_of_adapter_key,
+                    'mapping_revision', mapping.mapping_revision
+                )
+                ORDER BY mapping.adapter_key
+            ) FILTER (WHERE mapping.adapter_key IS NOT NULL),
+            '[]'::jsonb
+        ) AS mappings,
+        COALESCE(
             bool_and(mapping.mapping_revision = contract.mapping_revision)
                 FILTER (WHERE mapping.adapter_key IS NOT NULL),
             false
         ) AS mapping_revision_consistent,
         COALESCE(
-            bool_and(mapping.requirement_role <> 'redundant_subset')
-                FILTER (WHERE mapping.adapter_key IS NOT NULL),
+            bool_and(
+                CASE
+                    WHEN mapping.requirement_role <> 'redundant_subset' THEN true
+                    ELSE EXISTS (
+                        SELECT 1
+                        FROM realtime_source_jurisdictions parent_mapping
+                        WHERE parent_mapping.adapter_key
+                                = mapping.redundancy_of_adapter_key
+                            AND parent_mapping.signal_type = mapping.signal_type
+                            AND parent_mapping.requirement_role = 'required'
+                            AND parent_mapping.mapping_revision = mapping.mapping_revision
+                            AND (
+                                parent_mapping.coverage_scope = 'national'
+                                OR parent_mapping.jurisdiction_code
+                                    = contract.jurisdiction_code
+                            )
+                    )
+                END
+            ) FILTER (WHERE mapping.adapter_key IS NOT NULL),
             false
         ) AS redundancy_valid,
         contract.mapping_manifest_version
     FROM realtime_jurisdiction_signal_contracts contract
     LEFT JOIN realtime_source_jurisdictions mapping
         ON mapping.signal_type = contract.signal_type
+        AND mapping.mapping_revision = contract.mapping_revision
         AND (
             mapping.coverage_scope = 'national'
             OR mapping.jurisdiction_code = contract.jurisdiction_code
@@ -113,7 +153,7 @@ def test_reviewed_signal_contracts_carry_a_valid_proof_at_the_query_revision() -
     for row in reviewed:
         where = f"{row['jurisdiction_code']}/{row['signal_type']}"
         assert row["catalog_status"] == "reviewed_complete", where
-        assert row["mapping_revision"] == BASELINE_REVISION, where
+        assert row["mapping_revision"] == EXPECTED_REVISIONS[row["signal_type"]], where
         assert row["reviewed_at"] is not None, where
         assert row["review_ref"], where
         assert row["actual_count"] > 0, where
@@ -130,6 +170,40 @@ def test_every_jurisdiction_gets_both_reviewed_flood_warning_keys() -> None:
         assert set(row["adapter_keys"]) == EXPECTED_FLOOD_WARNING_KEYS, (
             row["jurisdiction_code"]
         )
+        mappings = {mapping["adapter_key"]: mapping for mapping in row["mappings"]}
+        assert mappings["official.ncdr.cap"] == {
+            "adapter_key": "official.ncdr.cap",
+            "requirement_role": "required",
+            "redundancy_of_adapter_key": None,
+            "mapping_revision": WARNING_REVISION,
+        }
+        assert mappings["official.cwa.heavy_rain_warning"] == {
+            "adapter_key": "official.cwa.heavy_rain_warning",
+            "requirement_role": "redundant_subset",
+            "redundancy_of_adapter_key": "official.ncdr.cap",
+            "mapping_revision": WARNING_REVISION,
+        }
+        assert row["mapping_revision"] == WARNING_REVISION
+        assert row["approved_mapping_count"] == 2
+        assert row["approved_mapping_manifest_sha256"] == row["actual_sha256"]
+        assert row["redundancy_valid"] is True
+
+
+def test_warning_alignment_is_append_only_and_matches_the_deployed_backbone() -> None:
+    migration = WARNING_MIGRATION.read_text(encoding="utf-8")
+    entrypoint = (REPO_ROOT / "infra" / "docker" / "entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert WARNING_REVISION in migration
+    assert "official.ncdr.cap" in migration
+    assert "official.cwa.heavy_rain_warning" in migration
+    assert "redundant_subset" in migration
+    assert "UPDATE data_sources" not in migration
+    assert "is_enabled =" not in migration
+    backbone = entrypoint.split('realtime_backbone_adapter_keys="', 1)[1].split('"', 1)[0]
+    assert "official.ncdr.cap" in backbone.split(",")
+    assert "official.cwa.heavy_rain_warning" not in backbone.split(",")
 
 
 def test_sewer_water_level_is_recorded_as_a_known_gap() -> None:

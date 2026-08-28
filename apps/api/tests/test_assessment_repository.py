@@ -89,6 +89,8 @@ def _mapping(
     *,
     role: str = "required",
     jurisdiction_code: str = "67000000",
+    revision: str = "2026-08-24-v1-baseline",
+    redundancy_of_adapter_key: str | None = None,
 ) -> RealtimeJurisdictionSourceMapping:
     return RealtimeJurisdictionSourceMapping(
         adapter_key=adapter_key,
@@ -97,7 +99,8 @@ def _mapping(
         jurisdiction_code=jurisdiction_code,
         jurisdiction_name="臺南市",
         requirement_role=role,
-        mapping_revision="2026-08-24-v1-baseline",
+        mapping_revision=revision,
+        redundancy_of_adapter_key=redundancy_of_adapter_key,
     )
 
 
@@ -397,6 +400,34 @@ def test_missing_required_health_row_synthesizes_disabled_state(
     data = _repository(monkeypatch).load(**POINT)
     state = next(item for item in data.source_states if item.source_key == "official.cwa.rainfall")
     assert state.state == "disabled"
+
+
+def test_redundant_warning_mapping_is_applicable_but_not_required_for_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = "2026-08-28-v1-warning-alignment"
+    mappings = (
+        _mapping("official.ncdr.cap", "flood_warning", revision=revision),
+        _mapping(
+            "official.cwa.heavy_rain_warning",
+            "flood_warning",
+            role="redundant_subset",
+            revision=revision,
+            redundancy_of_adapter_key="official.ncdr.cap",
+        ),
+    )
+    jurisdiction = _context(mappings=mappings)
+
+    data = _repository(
+        monkeypatch,
+        query_realtime_jurisdiction_context=lambda **_: jurisdiction,
+    ).load(**POINT)
+
+    assert data.required_realtime_source_keys == frozenset({"official.ncdr.cap"})
+    assert {mapping.adapter_key for mapping in jurisdiction.source_mappings} >= {
+        "official.ncdr.cap",
+        "official.cwa.heavy_rain_warning",
+    }
 
 
 def test_kaohsiung_gap_comes_from_server_resolved_home_jurisdiction(

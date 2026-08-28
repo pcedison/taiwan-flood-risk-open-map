@@ -243,6 +243,78 @@ def test_check_risk_payload_rejects_stalled_required_worker_source() -> None:
     )
 
 
+def test_disabled_redundant_cwa_warning_does_not_fail_required_source_health() -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"] = [
+        {
+            "source_id": "official.ncdr.cap",
+            "name": "NCDR CAP",
+            "health_status": "healthy",
+            "reason_code": "operational",
+            "required_for_absence": True,
+        },
+        {
+            "source_id": "official.cwa.heavy_rain_warning",
+            "name": "CWA heavy-rain warning",
+            "health_status": "disabled",
+            "reason_code": "source_disabled",
+            "required_for_absence": False,
+        },
+    ]
+
+    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+
+    assert contract_failures == []
+    assert data_source_failures == []
+
+
+def test_degraded_ok_mode_still_fails_when_required_ncdr_stalls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"] = [
+        {
+            "source_id": "official.ncdr.cap",
+            "name": "NCDR CAP",
+            "health_status": "failed",
+            "reason_code": "pipeline_stalled",
+            "required_for_absence": True,
+        },
+        {
+            "source_id": "official.cwa.heavy_rain_warning",
+            "name": "CWA heavy-rain warning",
+            "health_status": "disabled",
+            "reason_code": "source_disabled",
+            "required_for_absence": False,
+        },
+    ]
+
+    exit_code, evidence, _completion_output = _run_smoke(tmp_path, monkeypatch, payload)
+
+    assert exit_code == 1
+    assert evidence["data_source_mode"] == "degraded-ok"
+    assert any("official.ncdr.cap" in failure for failure in evidence["failures"])
+    assert not any(
+        "official.cwa.heavy_rain_warning" in failure for failure in evidence["failures"]
+    )
+
+
+def test_jurisdiction_repository_has_no_global_revision_predicate() -> None:
+    repository = (
+        REPO_ROOT / "apps" / "api" / "app" / "domain" / "evidence" / "repository.py"
+    ).read_text(encoding="utf-8")
+    query = repository.split("def query_realtime_jurisdiction_context(", 1)[1].split(
+        "\ndef ", 1
+    )[0]
+
+    assert "proof.contract_mapping_revision = mapping.mapping_revision" in query
+    assert "mapping.mapping_revision = '2026-08-24-v1-baseline'" not in query
+    assert "proof.contract_mapping_revision\n                                = '" not in query
+
+
 def _risk_payload() -> dict:
     return {
         "assessment_id": "risk-1",
