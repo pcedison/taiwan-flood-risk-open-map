@@ -19,6 +19,7 @@ from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.cli.persistence import build_demo_persistence_writers
 from app.config import WorkerSettings
 from app.jobs.frozen_legacy import report_frozen_legacy
+from app.jobs.freshness import STATIC_SLOW_CADENCE_ADAPTER_KEYS
 from app.jobs.ingestion import (
     IngestionRunSummaryWriter,
     record_pipeline_status,
@@ -41,6 +42,8 @@ from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.promotion import PromotionResult, promote_accepted_staging
 from app.scheduler import _execute_scheduled_ingestion_cycle
+
+STATIC_SOURCE_INTERVAL_SECONDS = 24 * 60 * 60
 
 
 class _SchedulerLeaseHeartbeat:
@@ -307,6 +310,7 @@ def _run_v1_baseline_tick(
     settings: WorkerSettings,
     database_url: str,
     job_key: str,
+    adapter_keys_to_run: frozenset[str] | None = None,
 ) -> bool:
     """Run isolated v1 source cycles and continue after one source fails."""
 
@@ -356,12 +360,25 @@ def _run_v1_baseline_tick(
         )
         return True
 
+    execution_keys = tuple(
+        key
+        for key in catalog_enabled_keys
+        if adapter_keys_to_run is None or key in adapter_keys_to_run
+    )
+    deferred_keys = tuple(key for key in catalog_enabled_keys if key not in execution_keys)
+    for adapter_key in deferred_keys:
+        log_event(
+            "worker.runtime.v1_baseline.source_deferred",
+            adapter_key=adapter_key,
+            reason="static_slow_cadence_not_due",
+        )
+
     had_failure = False
     failed_count = 0
     gated_off_count = len(configured_keys) - len(catalog_enabled_keys)
-    reported_keys: list[str] = []
+    reported_keys: set[str] = set(deferred_keys)
     runnable: list[tuple[str, WorkerSettings, DataSourceAdapter]] = []
-    for adapter_key in catalog_enabled_keys:
+    for adapter_key in execution_keys:
         scoped_settings = replace(settings, enabled_adapter_keys=(adapter_key,))
         try:
             adapters = build_runtime_adapters(scoped_settings)
@@ -369,7 +386,7 @@ def _run_v1_baseline_tick(
             # This source passed both the runtime and catalog gates. Keep it in
             # the authoritative selection so the public API reports the
             # pipeline failure below instead of mislabeling the source disabled.
-            reported_keys.append(adapter_key)
+            reported_keys.add(adapter_key)
             had_failure = True
             failed_count += 1
             _record_v1_source_failure(
@@ -391,11 +408,13 @@ def _run_v1_baseline_tick(
                 adapter_key=adapter_key,
             )
             continue
-        reported_keys.append(adapter_key)
+        reported_keys.add(adapter_key)
         runnable.append((adapter_key, scoped_settings, adapter))
 
     runnable_keys = tuple(adapter_key for adapter_key, _settings, _adapter in runnable)
-    runtime_selection_keys = tuple(reported_keys)
+    runtime_selection_keys = tuple(
+        key for key in catalog_enabled_keys if key in reported_keys
+    )
     try:
         record_runtime_selection(
             run_writer,
@@ -608,6 +627,7 @@ def run_v1_baseline_enabled_adapters(
     had_failure = False
     tick = 0
     lease_acquired = False
+    last_static_attempt_at: float | None = None
 
     def acquire_or_renew_lease() -> bool | None:
         try:
@@ -652,11 +672,27 @@ def run_v1_baseline_enabled_adapters(
                 renew=acquire_or_renew_lease,
                 interval_seconds=heartbeat_interval_seconds,
             ) as heartbeat:
+                configured_keys = v1_baseline_eligible_adapter_keys(settings)
+                configured_static_keys = frozenset(configured_keys).intersection(
+                    STATIC_SLOW_CADENCE_ADAPTER_KEYS
+                )
+                now_monotonic = time.monotonic()
+                static_due = bool(configured_static_keys) and (
+                    last_static_attempt_at is None
+                    or now_monotonic - last_static_attempt_at
+                    >= STATIC_SOURCE_INTERVAL_SECONDS
+                )
+                adapter_keys_to_run = frozenset(configured_keys)
+                if configured_static_keys and not static_due:
+                    adapter_keys_to_run -= configured_static_keys
                 tick_failed = _run_v1_baseline_tick(
                     settings=settings,
                     database_url=resolved_database_url,
                     job_key="worker.runtime.v1_baseline.scheduler",
+                    adapter_keys_to_run=adapter_keys_to_run,
                 )
+                if static_due:
+                    last_static_attempt_at = now_monotonic
             if heartbeat.lost:
                 lease_acquired = False
                 log_event(

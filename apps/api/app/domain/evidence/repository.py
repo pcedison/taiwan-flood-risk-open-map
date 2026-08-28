@@ -804,8 +804,8 @@ def query_nearby_latest_official(
     statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
-    if not 50 <= radius_m <= 2000:
-        raise ValueError("radius_m must be between 50 and 2000")
+    if not 50 <= radius_m <= 5000:
+        raise ValueError("radius_m must be between 50 and 5000")
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("as_of must be timezone-aware")
     bounded_limit = max(1, min(limit, 100))

@@ -53,6 +53,17 @@ class _Adapter:
         self.metadata = SimpleNamespace(key=key)
 
 
+@pytest.fixture(autouse=True)
+def _catalog_passes_requested_test_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unit tick tests isolate scheduler behavior from a real PostgreSQL catalog."""
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "filter_catalog_enabled_adapter_keys",
+        lambda adapter_keys, **_kwargs: adapter_keys,
+    )
+
+
 class _RunWriter:
     def __init__(self, timeline: list[tuple[str, object]] | None = None) -> None:
         self.timeline = timeline if timeline is not None else []
@@ -199,6 +210,115 @@ def test_scheduler_sigterm_unwinds_and_releases_lease(
     assert isinstance(signal_calls, list)
     assert signal_calls[0] == (signal.SIGTERM, runtime_cli._exit_scheduler_on_sigterm)
     assert signal_calls[-1] == (signal.SIGTERM, previous_handler)
+
+
+def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_runs: list[frozenset[str]] = []
+    static_key = "official.wra.historical_flood"
+
+    class _Queue:
+        def __init__(self, *, database_url: str) -> None:
+            assert database_url == "postgresql://example.test/flood"
+
+        def acquire_scheduler_lease(self, **_fields: object) -> bool:
+            return True
+
+        def release_scheduler_lease(self, **_fields: object) -> bool:
+            return True
+
+    class _Heartbeat:
+        lost = False
+
+        def __init__(self, **_fields: object) -> None:
+            pass
+
+        def __enter__(self) -> "_Heartbeat":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    def fake_tick(**fields: object) -> bool:
+        captured_runs.append(fields["adapter_keys_to_run"])  # type: ignore[arg-type]
+        return False
+
+    monotonic_values = iter((0.0, 300.0))
+    monkeypatch.setattr(runtime_cli, "PostgresRuntimeQueue", _Queue)
+    monkeypatch.setattr(runtime_cli, "_SchedulerLeaseHeartbeat", _Heartbeat)
+    monkeypatch.setattr(runtime_cli, "_run_v1_baseline_tick", fake_tick)
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A, static_key),
+    )
+    monkeypatch.setattr(runtime_cli.time, "monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr(runtime_cli.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runtime_cli.signal, "signal", lambda _sig, _handler: object())
+
+    exit_code = runtime_cli.run_v1_baseline_enabled_adapters(
+        settings=replace(
+            load_worker_settings({}),
+            database_url="postgresql://example.test/flood",
+        ),
+        database_url=None,
+        scheduler=True,
+        once=False,
+        max_ticks=2,
+    )
+
+    assert exit_code == 0
+    assert captured_runs == [
+        frozenset({SOURCE_A, static_key}),
+        frozenset({SOURCE_A}),
+    ]
+
+
+def test_deferred_static_source_stays_in_authoritative_runtime_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    static_key = "official.wra.historical_flood"
+    built: list[str] = []
+    writer = _install_tick_writer(monkeypatch)
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A, static_key),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "filter_catalog_enabled_adapter_keys",
+        lambda keys, **_kwargs: keys,
+    )
+
+    def fake_build(settings: Any) -> dict[str, _Adapter]:
+        key = settings.enabled_adapter_keys[0]
+        built.append(key)
+        return {key: _Adapter(key)}
+
+    monkeypatch.setattr(runtime_cli, "build_runtime_adapters", fake_build)
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_v1_baseline_adapter_cycle",
+        lambda *_args, **_kwargs: _tick_result(),
+    )
+    monkeypatch.setattr(runtime_cli, "log_event", lambda *_args, **_kwargs: None)
+
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(
+            load_worker_settings({}),
+            enabled_adapter_keys=(SOURCE_A, static_key),
+        ),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+        adapter_keys_to_run=frozenset({SOURCE_A}),
+    )
+
+    assert failed is False
+    assert built == [SOURCE_A]
+    assert writer.timeline == [("selection", (SOURCE_A, static_key))]
 
 
 def test_tick_reports_every_runnable_source_not_just_the_last_one(

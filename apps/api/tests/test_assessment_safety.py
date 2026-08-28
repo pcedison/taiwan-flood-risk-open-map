@@ -179,6 +179,19 @@ def test_query_local_rainfall_and_hydrology_can_support_low() -> None:
     assert apply_realtime_safety(low_scoring(), data).realtime_level == "低"
 
 
+def test_reviewed_nearby_signals_can_support_low_outside_display_radius() -> None:
+    data = assessment_data(
+        coverage=coverage_with(
+            rainfall=("fresh_nearby", 4_000.0),
+            water_level=("degraded_nearby", 3_500.0),
+        ),
+        source_states=all_required_sources_fresh(),
+    )
+
+    assert data.nearby_coverage.query_radius_m == 2_000
+    assert apply_realtime_safety(low_scoring(), data).realtime_level == "低"
+
+
 def test_informational_local_gap_does_not_override_reviewed_required_mapping() -> None:
     data = assessment_data(
         coverage=coverage_with(

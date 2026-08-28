@@ -1,19 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Final, Protocol
+from typing import Any, Protocol
 
 ConnectionFactory = Callable[[], Any]
-
-OFFICIAL_INCIDENT_CATALOG_GATED_KEYS: Final[frozenset[str]] = frozenset(
-    {
-        "official.cwa.heavy_rain_warning",
-        "official.ncdr.cap",
-        "official.npa.police_radio_traffic",
-        "official.wra.flood_warning",
-    }
-)
-
 
 class SourceCatalogReader(Protocol):
     def enabled_keys(self, adapter_keys: tuple[str, ...]) -> frozenset[str]: ...
@@ -65,20 +55,16 @@ def filter_catalog_enabled_adapter_keys(
     *,
     source_catalog_reader: SourceCatalogReader | None,
 ) -> tuple[str, ...]:
-    gated_keys = tuple(key for key in adapter_keys if key in OFFICIAL_INCIDENT_CATALOG_GATED_KEYS)
-    if not gated_keys:
+    normalized_keys = tuple(dict.fromkeys(adapter_keys))
+    if not normalized_keys:
         return adapter_keys
     if source_catalog_reader is None:
         raise SourceCatalogUnavailable("source catalog reader is required")
     try:
-        enabled_gated_keys = source_catalog_reader.enabled_keys(gated_keys)
+        enabled_catalog_keys = source_catalog_reader.enabled_keys(normalized_keys)
     except Exception as exc:
         raise SourceCatalogUnavailable("source catalog is unavailable") from exc
-    return tuple(
-        key
-        for key in adapter_keys
-        if key not in OFFICIAL_INCIDENT_CATALOG_GATED_KEYS or key in enabled_gated_keys
-    )
+    return tuple(key for key in adapter_keys if key in enabled_catalog_keys)
 
 
 def resolve_source_catalog_reader(

@@ -195,7 +195,7 @@ paths:
                       lat: 25.033
                       lng: 121.5654
                     radius_m: 500
-                    score_version: "risk-v0.1.0"
+                    score_version: "risk-v0.2.0"
                     created_at: "2026-04-28T13:00:00Z"
                     expires_at: "2026-04-28T13:10:00Z"
                     as_of: "2026-04-28T13:00:00Z"

@@ -38,6 +38,7 @@ _LOCAL_POLICY = {
     "64000000": (None, "高雄市地方政府機器介面尚未核准"),
     "10013000": (None, "屏東縣地方政府機器介面尚未核准"),
 }
+_REALTIME_SUPPORT_RADIUS_M = 5_000
 
 
 class AssessmentRepository(Protocol):
@@ -114,7 +115,7 @@ class PostgresAssessmentRepository:
         latest, current_available = self._load_latest(
             lat=lat,
             lng=lng,
-            radius_m=radius_m,
+            radius_m=max(radius_m, _REALTIME_SUPPORT_RADIUS_M),
             as_of=as_of,
         )
         history, historical_available = self._load_history(

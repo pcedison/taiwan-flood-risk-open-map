@@ -674,7 +674,9 @@ def test_disabled_catalog_key_never_builds_or_runs_managed_adapter() -> None:
         settings=_settings("official.cwa.heavy_rain_warning"),
         staging_writer=_MemoryStagingWriter(),
         run_writer=_MemoryRunWriter(),
-        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+        source_catalog_reader=_StaticCatalogReader(
+            enabled=frozenset({"news.public_web.sample"})
+        ),
         adapter_builder=adapter_builder,
     )
 
@@ -693,7 +695,9 @@ def test_missing_catalog_row_never_runs_supplied_managed_adapter() -> None:
         settings=_settings(adapter.metadata.key),
         staging_writer=_MemoryStagingWriter(),
         run_writer=_MemoryRunWriter(),
-        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+        source_catalog_reader=_StaticCatalogReader(
+            enabled=frozenset({"news.public_web.sample"})
+        ),
     )
 
     assert result.status == "skipped"
@@ -787,7 +791,9 @@ def test_catalog_gate_narrows_managed_promotion_targets() -> None:
         promotion_writer=promotion_writer,
         promote=True,
         promotion_adapter_keys=("news.public_web.sample", "official.cwa.heavy_rain_warning"),
-        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+        source_catalog_reader=_StaticCatalogReader(
+            enabled=frozenset({"news.public_web.sample"})
+        ),
     )
 
     assert result.status == "succeeded"
@@ -810,7 +816,9 @@ def test_catalog_gate_does_not_fall_back_when_explicit_promotion_targets_are_dis
         promotion_writer=promotion_writer,
         promote=True,
         promotion_adapter_keys=("official.cwa.heavy_rain_warning",),
-        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+        source_catalog_reader=_StaticCatalogReader(
+            enabled=frozenset({"news.public_web.sample"})
+        ),
     )
 
     assert result.status == "succeeded"

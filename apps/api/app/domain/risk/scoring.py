@@ -8,7 +8,7 @@ from typing import Literal
 PublicRiskLevel = Literal["低", "中", "高", "極高", "未知"]
 PublicConfidenceLevel = Literal["低", "中", "高", "未知"]
 
-SCORE_VERSION = "risk-v0.1.0"
+SCORE_VERSION = "risk-v0.2.0"
 
 REALTIME_WEIGHTS = {
     "rainfall": 40.0,
@@ -23,6 +23,11 @@ HISTORICAL_WEIGHTS = {
     "road_closure": 15.0,
 }
 EVENT_SCORE_CAPS = {
+    # Nearby stations are correlated measurements of the same weather event.
+    # A wider support search must not turn station density into higher risk.
+    "rainfall": REALTIME_WEIGHTS["rainfall"],
+    "water_level": REALTIME_WEIGHTS["water_level"],
+    "flood_warning": REALTIME_WEIGHTS["flood_warning"],
     # Flood-potential polygons are correlated planning/reference layers. Multiple
     # overlapping polygons should not stack into an "active disaster" signal.
     "flood_potential": 40.0,
@@ -49,6 +54,7 @@ class RiskEvidenceSignal:
     source_weight: float
     risk_factor: float = 1.0
     observed_at: datetime | None = None
+    evidence_scope: Literal["current", "historical", "context", "unspecified"] = "unspecified"
 
 
 @dataclass(frozen=True)
@@ -191,6 +197,10 @@ def _is_weighted_signal_eligible(
 ) -> bool:
     if weights.get(signal.event_type, 0.0) <= 0:
         return False
+    if weights is REALTIME_WEIGHTS and signal.evidence_scope in {"historical", "context"}:
+        return False
+    if weights is HISTORICAL_WEIGHTS and signal.evidence_scope in {"current", "context"}:
+        return False
     return now is None or max_age is None or _is_recent(signal, now, max_age)
 
 
@@ -263,11 +273,21 @@ def _confidence_level(score: float, *, has_evidence: bool) -> PublicConfidenceLe
 
 
 def _missing_sources(signals: tuple[RiskEvidenceSignal, ...]) -> tuple[str, ...]:
-    event_types = {signal.event_type for signal in signals}
+    event_types = {
+        signal.event_type
+        for signal in signals
+        if signal.evidence_scope not in {"historical", "context"}
+    }
     missing = []
     if "rainfall" not in event_types:
         missing.append("尚未接入即時雨量資料。")
-    if "water_level" not in event_types:
+    has_official_current_flood_sensor = any(
+        signal.source_type == "official"
+        and signal.event_type == "flood_report"
+        and signal.evidence_scope == "current"
+        for signal in signals
+    )
+    if "water_level" not in event_types and not has_official_current_flood_sensor:
         missing.append("尚未接入即時水位資料。")
     return tuple(missing)
 
@@ -283,7 +303,10 @@ def _main_reasons(
         return ("目前缺少可採用的即時或歷史資料，尚不能判定風險高低。",)
 
     observed_history_count = sum(
-        1 for signal in signals if signal.event_type in {"flood_report", "road_closure"}
+        1
+        for signal in signals
+        if signal.event_type in {"flood_report", "road_closure"}
+        and signal.evidence_scope != "current"
     )
     flood_potential_count = sum(1 for signal in signals if signal.event_type == "flood_potential")
     reasons = []

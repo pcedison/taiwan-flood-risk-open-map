@@ -187,3 +187,12 @@ never be widened to its parent county. Activation requires exact archive and
 manifest checksums, a complete unique geocode set, valid PostGIS geometry, and
 an operator review reference. Until one reviewed snapshot is active, NCDR
 warning rows remain audit-only and fail closed before public evidence.
+
+`0047_wra_historical_flood_source.sql` repairs the persisted catalog omission
+for the already reviewed `official.wra.historical_flood` complete-replace
+adapter. It enables the public official source row, records its GOL 1.0 and
+historical-only limitation, and deliberately preserves the ingestion-managed
+active snapshot marker on conflict. It also links pre-fix NULL-source evidence,
+activates the newest repaired complete snapshot, and terminally consumes the
+matching accepted staging backlog. Runtime gates and the catalog gate still
+apply independently; no credential is stored by this migration.

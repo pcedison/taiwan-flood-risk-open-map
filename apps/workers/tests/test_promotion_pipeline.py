@@ -230,7 +230,7 @@ def test_alert_not_newer_than_persisted_no_active_is_audit_only() -> None:
         for statement, params in connection.cursor_instance.executions
         if "INSERT INTO evidence" in statement
     )
-    assert json.loads(str(insert_params[14]))["evidence_scope"] == "historical"
+    assert json.loads(str(insert_params[13]))["evidence_scope"] == "historical"
 
 
 def test_update_blocked_by_no_active_is_audit_only_without_lifecycle_mutations() -> None:
@@ -297,7 +297,7 @@ def test_update_blocked_by_no_active_is_audit_only_without_lifecycle_mutations()
         for statement, params in connection.cursor_instance.executions
         if "INSERT INTO evidence" in statement
     )
-    properties = json.loads(str(insert_params[14]))
+    properties = json.loads(str(insert_params[13]))
     assert properties["evidence_scope"] == "historical"
     assert properties["historical_reason"] == "superseded_by_no_active_event"
 
@@ -355,13 +355,13 @@ def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() 
     assert "ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique" in insert_sql
     assert "DO NOTHING" in insert_sql
     assert "ST_GeomFromGeoJSON" in insert_sql
-    assert "SELECT id FROM data_sources WHERE adapter_key = %s" in insert_sql
+    assert "JOIN data_sources source" in insert_sql
+    assert "source_catalog_resolved" in insert_sql
     assert insert_params[1] == "news.public_web.sample"
     assert insert_params[2] == "sample-news-001"
     assert insert_params[11] is None
-    assert insert_params[12] is None
-    assert insert_params[13] == "raw/news-public-web/sample.json"
-    properties = json.loads(str(insert_params[14]))
+    assert insert_params[12] == "raw/news-public-web/sample.json"
+    properties = json.loads(str(insert_params[13]))
     assert properties["location_text"] == "Riverside District"
     assert properties["staging_evidence_id"] == "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
@@ -401,7 +401,30 @@ def test_postgres_promotion_writer_inserts_geojson_geometry_when_present() -> No
         if "INSERT INTO evidence" in statement
     )
     assert json.loads(str(insert_params[11]))["type"] == "Polygon"
-    assert insert_params[11] == insert_params[12]
+    assert insert_params[12] == "raw/news-public-web/sample.json"
+
+
+def test_postgres_promotion_rejects_staging_when_enabled_source_catalog_is_missing() -> None:
+    staging_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="unused",
+        source_catalog_resolved=False,
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+    payload = build_evidence_promotion_payload(_candidate(staging_evidence_id=staging_id))
+
+    result = writer.write_evidence(payload)
+
+    assert result is None
+    assert connection.cursor_instance.terminal_rejections == [
+        (staging_id, "source_catalog_missing")
+    ]
+    assert connection.committed is True
+    assert not any(
+        "INSERT INTO official_realtime_latest" in statement
+        for statement, _params in connection.cursor_instance.executions
+    )
 
 
 def test_generic_natural_key_conflict_is_idempotent_none() -> None:
@@ -1473,7 +1496,7 @@ def test_current_cap_mutation_retains_mixed_audit_list_but_effects_only_earlier(
         for statement, params in connection.cursor_instance.executions
         if "INSERT INTO evidence" in statement
     )
-    assert json.loads(str(insert_params[14]))["cap_references"] == references
+    assert json.loads(str(insert_params[13]))["cap_references"] == references
 
 
 @pytest.mark.parametrize("message_type", ["Update", "Cancel"])
@@ -1973,7 +1996,7 @@ def test_write_evidence_does_not_enrich_audit_only_civil_iot_geometry() -> None:
     assert evidence_id == "evidence-id"
     insert_sql, insert_params = connection.cursor_instance.executions[0]
     assert "INSERT INTO evidence" in insert_sql
-    properties = json.loads(str(insert_params[14]))
+    properties = json.loads(str(insert_params[13]))
     assert "county" not in properties
     assert not any(
         "INSERT INTO official_realtime_latest" in statement
@@ -2017,7 +2040,7 @@ def test_local_without_current_scope_remains_audit_only_without_fuzzy_dedupe() -
 
     assert evidence_id == "evidence-id"
     insert_sql, insert_params = connection.cursor_instance.executions[0]
-    properties = json.loads(str(insert_params[14]))
+    properties = json.loads(str(insert_params[13]))
     assert "duplicate_candidate" not in properties.get("quality_flags", {})
     assert "INSERT INTO evidence" in insert_sql
     assert not any(
@@ -2581,6 +2604,7 @@ class _FakeConnection:
         explicit_geometry_valid: bool = True,
         max_no_active_generation: datetime | None = None,
         fail_timeout_on_call: int | None = None,
+        source_catalog_resolved: bool = True,
     ) -> None:
         self.cursor_instance = _FakeCursor(
             rows=rows,
@@ -2599,6 +2623,7 @@ class _FakeConnection:
             explicit_geometry_valid=explicit_geometry_valid,
             max_no_active_generation=max_no_active_generation,
             fail_timeout_on_call=fail_timeout_on_call,
+            source_catalog_resolved=source_catalog_resolved,
         )
         self.committed = False
         self.commit_count = 0
@@ -2641,6 +2666,7 @@ class _FakeCursor:
         explicit_geometry_valid: bool,
         max_no_active_generation: datetime | None,
         fail_timeout_on_call: int | None,
+        source_catalog_resolved: bool,
     ) -> None:
         self._rows = tuple(rows)
         self._evidence_id = evidence_id
@@ -2652,6 +2678,7 @@ class _FakeCursor:
         self._explicit_geometry_valid = explicit_geometry_valid
         self._max_no_active_generation = max_no_active_generation
         self._fail_timeout_on_call = fail_timeout_on_call
+        self._source_catalog_resolved = source_catalog_resolved
         self.executions: list[tuple[str, tuple[object, ...]]] = []
         self.timeout_executions: list[tuple[str, str]] = []
         self.timeout_setup_count = 0
@@ -2747,7 +2774,10 @@ class _FakeCursor:
         if (
             self.executions
             and "INSERT INTO evidence" in self.executions[-1][0]
-            and self._evidence_insert_conflict
         ):
-            return None
+            if not self._source_catalog_resolved:
+                return (None, False)
+            if self._evidence_insert_conflict:
+                return (None, True)
+            return (self._evidence_id, True)
         return (self._evidence_id,)

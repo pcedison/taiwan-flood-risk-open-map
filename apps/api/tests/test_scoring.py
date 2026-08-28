@@ -164,6 +164,54 @@ def test_observed_flood_report_within_one_km_is_at_least_medium_history() -> Non
     assert result.historical_level == "中"
 
 
+def test_current_zero_depth_sensor_is_not_scored_or_described_as_history() -> None:
+    now = datetime.fromisoformat("2026-08-29T02:00:00+00:00")
+    result = score_risk(
+        (
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_report",
+                confidence=0.9,
+                distance_to_query_m=700.0,
+                freshness_score=0.9,
+                source_weight=1.0,
+                risk_factor=0.0,
+                observed_at=now,
+                evidence_scope="current",
+            ),
+        ),
+        now=now,
+    )
+
+    assert result.realtime_level == "低"
+    assert result.historical_level == "未知"
+    assert not any("官方災點" in reason for reason in result.main_reasons)
+
+
+def test_correlated_nearby_station_count_cannot_inflate_signal_family_score() -> None:
+    now = datetime.fromisoformat("2026-08-29T02:00:00+00:00")
+    signals = tuple(
+        RiskEvidenceSignal(
+            source_type="official",
+            event_type=event_type,
+            confidence=1.0,
+            distance_to_query_m=50.0,
+            freshness_score=1.0,
+            source_weight=1.0,
+            risk_factor=1.0,
+            observed_at=now,
+            evidence_scope="current",
+        )
+        for event_type in ("rainfall",) * 20 + ("water_level",) * 20
+    )
+
+    result = score_risk(signals, now=now)
+
+    assert result.realtime_score == 75.0
+    assert result.realtime_level == "高"
+    assert result.historical_level == "未知"
+
+
 def test_high_realtime_reason_names_the_signal_mix_without_implying_rain_only() -> None:
     observed_at = datetime.fromisoformat("2026-06-29T00:00:00+00:00")
     result = score_risk(

@@ -51,7 +51,7 @@ def _response(assessment_id: str = "assessment-1", **overrides: object) -> RiskA
         "assessment_id": assessment_id,
         "location": LatLng(lat=25.033, lng=121.5654),
         "radius_m": 500,
-        "score_version": "risk-v0.1.0",
+        "score_version": "risk-v0.2.0",
         "created_at": NOW,
         "expires_at": NOW + timedelta(hours=6),
         "realtime": RiskLevelBlock(level="低"),

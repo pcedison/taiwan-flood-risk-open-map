@@ -815,7 +815,9 @@ def test_catalog_disabled_producer_never_builds_or_enqueues_adapter(
     result = produce_enabled_runtime_adapter_jobs(
         settings,
         queue=queue,
-        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+        source_catalog_reader=_StaticCatalogReader(
+            enabled=frozenset({"official.cwa.rainfall"})
+        ),
     )
 
     assert result.status == "skipped"
@@ -852,7 +854,9 @@ def test_catalog_gate_narrows_mixed_producer_before_building_and_enqueueing(
     result = produce_enabled_runtime_adapter_jobs(
         settings,
         queue=queue,
-        source_catalog_reader=_StaticCatalogReader(enabled=frozenset()),
+        source_catalog_reader=_StaticCatalogReader(
+            enabled=frozenset({"official.cwa.rainfall"})
+        ),
     )
 
     assert captured == [("official.cwa.rainfall",)]

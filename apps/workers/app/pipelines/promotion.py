@@ -410,6 +410,39 @@ class PostgresEvidencePromotionWriter:
                 )
                 cursor.execute(
                     """
+                    WITH candidate AS (
+                        SELECT
+                            %s::uuid AS data_source_id,
+                            %s::text AS adapter_key,
+                            %s::text AS source_id,
+                            %s::text AS source_type,
+                            %s::text AS event_type,
+                            %s::text AS title,
+                            %s::text AS summary,
+                            %s::text AS url,
+                            %s::timestamptz AS occurred_at,
+                            %s::timestamptz AS observed_at,
+                            %s::numeric AS confidence,
+                            %s::text AS geometry,
+                            %s::text AS raw_ref,
+                            %s::jsonb AS properties
+                    ),
+                    resolved_candidate AS (
+                        SELECT source.id AS resolved_data_source_id, candidate.*
+                        FROM candidate
+                        JOIN data_sources source
+                            ON (
+                                (
+                                    candidate.data_source_id IS NOT NULL
+                                    AND source.id = candidate.data_source_id
+                                )
+                                OR (
+                                    candidate.data_source_id IS NULL
+                                    AND source.adapter_key = candidate.adapter_key
+                                )
+                            )
+                    ),
+                    inserted AS (
                     INSERT INTO evidence (
                         data_source_id,
                         source_id,
@@ -426,28 +459,32 @@ class PostgresEvidencePromotionWriter:
                         ingestion_status,
                         properties
                     )
-                    VALUES (
-                        COALESCE(%s, (SELECT id FROM data_sources WHERE adapter_key = %s)),
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
+                    SELECT
+                        resolved_data_source_id,
+                        source_id,
+                        source_type,
+                        event_type,
+                        title,
+                        summary,
+                        url,
+                        occurred_at,
+                        observed_at,
+                        confidence,
                         CASE
-                            WHEN %s::text IS NULL THEN NULL
-                            ELSE ST_SetSRID(ST_GeomFromGeoJSON(%s::text), 4326)
+                            WHEN geometry IS NULL THEN NULL
+                            ELSE ST_SetSRID(ST_GeomFromGeoJSON(geometry), 4326)
                         END,
-                        %s,
+                        raw_ref,
                         'accepted',
-                        %s::jsonb
-                    )
+                        properties
+                    FROM resolved_candidate
                     ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique
                     DO NOTHING
                     RETURNING id
+                    )
+                    SELECT
+                        (SELECT id FROM inserted LIMIT 1) AS evidence_id,
+                        EXISTS(SELECT 1 FROM resolved_candidate) AS source_catalog_resolved
                     """,
                     (
                         weighted_payload.data_source_id,
@@ -462,13 +499,24 @@ class PostgresEvidencePromotionWriter:
                         weighted_payload.observed_at,
                         weighted_payload.confidence,
                         _geojson_geometry(weighted_payload.properties),
-                        _geojson_geometry(weighted_payload.properties),
                         weighted_payload.raw_ref,
                         _json(weighted_payload.properties),
                     ),
                 )
                 row = cursor.fetchone()
-                if row is None:
+                source_catalog_resolved = (
+                    row is not None and (len(row) < 2 or bool(row[1]))
+                )
+                if not source_catalog_resolved:
+                    _terminally_reject_staging(
+                        cursor,
+                        payload,
+                        reason="source_catalog_missing",
+                        authorized=staging_authorization is True,
+                    )
+                    connection.commit()
+                    return None
+                if row[0] is None:
                     if staging_authorization is True:
                         _terminally_reject_staging(
                             cursor,

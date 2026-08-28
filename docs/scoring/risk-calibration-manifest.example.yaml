@@ -1,4 +1,4 @@
-# Template calibration manifest for risk-v0.1.0.
+# Template calibration manifest for risk-v0.2.0.
 #
 # This file documents the checked-in golden fixtures used to prevent scoring
 # regression. It is not a production calibration acceptance record. Private
@@ -10,7 +10,7 @@
 schema_version: risk-calibration-manifest/v1
 production_complete: false
 readiness_state: not-production-complete
-score_version: risk-v0.1.0
+score_version: risk-v0.2.0
 calibration_status: fixture-locked-baseline
 calibration_decision_ref: docs/scoring/README.md
 
