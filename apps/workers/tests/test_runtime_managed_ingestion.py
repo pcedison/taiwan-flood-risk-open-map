@@ -31,6 +31,7 @@ from app.pipelines.promotion import EvidencePromotionPayload, PromotionCandidate
 from app.pipelines.staging import AdapterStagingBatch
 
 FETCHED_AT = datetime.now(UTC)
+_PRIVATE_DATABASE_ERROR = "postgresql://operator:private@example.test/flood"
 EXPECTED_V1_BASELINE_ADAPTER_KEYS = (
     "official.civil_iot.flood_sensor",
     "official.civil_iot.gate_water_level",
@@ -344,6 +345,43 @@ def test_context_sources_are_fenced_out_of_the_managed_v1_baseline_cycle(
     assert staging_writer.batches == []
 
 
+def test_runtime_selection_override_cannot_widen_staging_or_promotion() -> None:
+    adapter_key = "official.wra.water_level"
+    peer_key = "official.cwa.rainfall"
+    raw_ref = "raw/test/wra-water-level.json"
+    adapter = _SuccessfulAdapter(
+        adapter_key,
+        family=SourceFamily.OFFICIAL,
+        event_type=EventType.WATER_LEVEL,
+        raw_ref=raw_ref,
+    )
+    staging_writer = _MemoryStagingWriter()
+    run_writer = _MemoryRunWriter()
+    promotion_writer = _MemoryPromotionWriter([_candidate()])
+    settings = replace(
+        load_worker_settings({}),
+        enabled_adapter_keys=(adapter_key,),
+    )
+
+    result = run_v1_baseline_adapter_cycle(
+        {adapter_key: adapter},
+        settings=settings,
+        runtime_selection_adapter_keys=(adapter_key, peer_key),
+        staging_writer=staging_writer,
+        run_writer=run_writer,
+        promotion_writer=promotion_writer,
+        promote=True,
+        promotion_adapter_keys=(adapter_key,),
+    )
+
+    assert result.status == "succeeded"
+    assert run_writer.runtime_selections[0][0] == (adapter_key, peer_key)
+    assert len(staging_writer.batches) == 1
+    assert staging_writer.batches[0].adapter_key == adapter_key
+    assert promotion_writer.requested_adapter_keys == (adapter_key,)
+    assert promotion_writer.requested_raw_refs == (raw_ref,)
+
+
 @pytest.mark.usefixtures("task9_synthetic_registry")
 def test_managed_no_active_retirement_is_not_called_when_promotion_disabled() -> None:
     adapter = _Task9EmptyWarningAdapter(
@@ -371,7 +409,10 @@ def test_managed_no_active_retirement_is_not_called_when_promotion_disabled() ->
 
 
 @pytest.mark.usefixtures("task9_synthetic_registry")
-def test_managed_no_active_retirement_failure_returns_failed_result() -> None:
+def test_managed_no_active_retirement_failure_returns_safe_failed_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
     adapter = _Task9EmptyWarningAdapter(
         "official.cwa.heavy_rain_warning",
         no_active_event=True,
@@ -379,6 +420,11 @@ def test_managed_no_active_retirement_failure_returns_failed_result() -> None:
     settings = replace(
         _settings(adapter.metadata.key),
         enabled_adapter_keys=(adapter.metadata.key,),
+    )
+    monkeypatch.setattr(
+        runtime_managed_jobs,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
     )
 
     result = run_v1_baseline_adapter_cycle(
@@ -394,6 +440,12 @@ def test_managed_no_active_retirement_failure_returns_failed_result() -> None:
     assert result.status == "failed"
     assert result.reason == "no_active_event_retirement_failed"
     assert result.error_code == "RuntimeError"
+    assert result.error_message == _PRIVATE_DATABASE_ERROR
+    assert _PRIVATE_DATABASE_ERROR not in repr(events)
+    assert (
+        "runtime.managed.no_active_event_retirement.failed",
+        {"error_code": "RuntimeError"},
+    ) in events
 
 
 @pytest.mark.parametrize(
@@ -898,9 +950,17 @@ def test_managed_runtime_cycle_records_promotion_failure_in_public_pipeline_stat
     )
 
 
-def test_managed_runtime_cycle_records_promotion_timeout_exception_class() -> None:
+def test_managed_runtime_cycle_records_safe_promotion_timeout_exception_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
     adapter = _sample_adapter()
     run_writer = _MemoryRunWriter()
+    monkeypatch.setattr(
+        runtime_managed_jobs,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
 
     result = _execute_managed_runtime_ingestion_cycle(
         {adapter.metadata.key: adapter},
@@ -914,6 +974,12 @@ def test_managed_runtime_cycle_records_promotion_timeout_exception_class() -> No
     assert result.status == "failed"
     assert result.reason == "promotion_failed"
     assert result.error_code == "QueryCanceled"
+    assert result.error_message == _PRIVATE_DATABASE_ERROR
+    assert _PRIVATE_DATABASE_ERROR not in repr(events)
+    assert (
+        "runtime.managed.promotion.failed",
+        {"error_code": "QueryCanceled"},
+    ) in events
     assert run_writer.pipeline_statuses[-1] == (
         ("news.public_web.sample",),
         "failed",
@@ -1295,7 +1361,7 @@ class _FailingNoActiveRetirementWriter(_MemoryPromotionWriter):
         completed_at: datetime,
     ) -> int:
         del adapter_key, generation_started_at, completed_at
-        raise RuntimeError("retirement storage unavailable")
+        raise RuntimeError(_PRIVATE_DATABASE_ERROR)
 
 
 class _FailingPromotionWriter:
@@ -1327,7 +1393,7 @@ class _TimeoutPromotionWriter(_FailingPromotionWriter):
         raw_refs: tuple[str, ...] | None = None,
     ) -> tuple[PromotionCandidate, ...]:
         del limit, adapter_keys, raw_refs
-        raise QueryCanceled("postgresql://operator:private@example.test/flood")
+        raise QueryCanceled(_PRIVATE_DATABASE_ERROR)
 
 
 class _ExplodingAdapter:

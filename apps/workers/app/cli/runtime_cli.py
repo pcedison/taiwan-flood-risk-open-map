@@ -8,15 +8,21 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self
 from uuid import uuid4
 
+from app.adapters.contracts import DataSourceAdapter
 from app.adapters.registry import ADAPTER_REGISTRY, enabled_adapter_keys
 from app.cli.persistence import build_demo_persistence_writers
 from app.config import WorkerSettings
 from app.jobs.frozen_legacy import report_frozen_legacy
-from app.jobs.ingestion import record_runtime_selection
+from app.jobs.ingestion import (
+    IngestionRunSummaryWriter,
+    record_pipeline_status,
+    record_runtime_selection,
+)
 from app.jobs.official_demo import build_official_demo_adapters
 from app.jobs.queue import PostgresRuntimeQueue, RuntimeQueueUnavailable
 from app.jobs.runtime import build_runtime_adapters
@@ -24,6 +30,11 @@ from app.jobs.runtime_managed import (
     V1_BASELINE_ADAPTER_KEYS,
     _execute_managed_runtime_ingestion_cycle,
     run_v1_baseline_adapter_cycle,
+)
+from app.jobs.source_catalog import (
+    SourceCatalogUnavailable,
+    filter_catalog_enabled_adapter_keys,
+    resolve_source_catalog_reader,
 )
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
@@ -286,64 +297,235 @@ def _run_v1_baseline_tick(
     database_url: str,
     job_key: str,
 ) -> bool:
-    """Run one isolated v1 cycle per eligible source. Return True on any failure.
+    """Run isolated v1 source cycles and continue after one source fails."""
 
-    `run_v1_baseline_adapter_cycle` deliberately accepts exactly one adapter and
-    requires the scoped settings to name only that adapter, so a source can never
-    reach another source's staging, promotion, or catalog decision. This wrapper
-    honors that contract by scoping settings per key rather than widening it.
-    """
-
-    eligible = v1_baseline_eligible_adapter_keys(settings)
-    if not eligible:
+    tick_started = time.monotonic()
+    configured_keys = v1_baseline_eligible_adapter_keys(settings)
+    if not configured_keys:
         log_event("worker.runtime.v1_baseline.noop", reason="no_eligible_adapter_keys")
+        _log_v1_tick_completed(
+            tick_started=tick_started,
+            configured_count=0,
+            runnable_count=0,
+            completed_count=0,
+            failed_count=0,
+            gated_off_count=0,
+        )
         return False
 
+    run_writer = PostgresIngestionRunWriter(database_url=database_url)
+    try:
+        catalog_enabled_keys = filter_catalog_enabled_adapter_keys(
+            configured_keys,
+            source_catalog_reader=resolve_source_catalog_reader(
+                database_url=database_url,
+                source_catalog_reader=None,
+            ),
+        )
+    except SourceCatalogUnavailable as exc:
+        run_at = datetime.now(UTC)
+        for adapter_key in configured_keys:
+            _record_v1_source_failure(
+                run_writer,
+                adapter_key=adapter_key,
+                run_at=run_at,
+            )
+            _log_v1_source_failed(
+                adapter_key=adapter_key,
+                phase="source_catalog",
+                exception_class=exc.__class__.__name__,
+            )
+        _log_v1_tick_completed(
+            tick_started=tick_started,
+            configured_count=len(configured_keys),
+            runnable_count=0,
+            completed_count=0,
+            failed_count=len(configured_keys),
+            gated_off_count=0,
+        )
+        return True
+
     had_failure = False
-    ran_keys: list[str] = []
-    for adapter_key in eligible:
+    failed_count = 0
+    gated_off_count = len(configured_keys) - len(catalog_enabled_keys)
+    runnable: list[tuple[str, WorkerSettings, DataSourceAdapter]] = []
+    for adapter_key in catalog_enabled_keys:
         scoped_settings = replace(settings, enabled_adapter_keys=(adapter_key,))
-        adapters = build_runtime_adapters(scoped_settings)
+        try:
+            adapters = build_runtime_adapters(scoped_settings)
+        except Exception as exc:  # noqa: BLE001 - isolate one source's builder
+            had_failure = True
+            failed_count += 1
+            _record_v1_source_failure(
+                run_writer,
+                adapter_key=adapter_key,
+                run_at=datetime.now(UTC),
+            )
+            _log_v1_source_failed(
+                adapter_key=adapter_key,
+                phase="adapter_construction",
+                exception_class=exc.__class__.__name__,
+            )
+            continue
         adapter = adapters.get(adapter_key)
         if adapter is None:
-            # A gate for this source is off. That is a normal disabled state, not
-            # a failure, and it must not stop the remaining sources.
+            gated_off_count += 1
             log_event(
                 "worker.runtime.v1_baseline.adapter_gated_off",
                 adapter_key=adapter_key,
             )
             continue
-        result = run_v1_baseline_adapter_cycle(
-            {adapter_key: adapter},
-            settings=scoped_settings,
-            database_url=database_url,
-            promote=True,
-            promotion_adapter_keys=(adapter_key,),
-            job_key=job_key,
+        runnable.append((adapter_key, scoped_settings, adapter))
+
+    runnable_keys = tuple(adapter_key for adapter_key, _settings, _adapter in runnable)
+    try:
+        record_runtime_selection(
+            run_writer,
+            enabled_adapter_keys=runnable_keys,
+            known_adapter_keys=tuple(ADAPTER_REGISTRY),
         )
-        ran_keys.append(adapter_key)
-        had_failure = had_failure or result.failed or result.has_alerts
+    except Exception as exc:  # noqa: BLE001 - selection audit must not strand sources
+        had_failure = True
+        log_event(
+            "worker.runtime.v1_baseline.audit_unavailable",
+            phase="runtime_selection",
+            exception_class=exc.__class__.__name__,
+        )
+
+    completed_count = 0
+    for adapter_key, scoped_settings, adapter in runnable:
+        source_started = time.monotonic()
+        source_started_at = datetime.now(UTC)
+        log_event(
+            "worker.runtime.v1_baseline.source_started",
+            adapter_key=adapter_key,
+        )
+        try:
+            result = run_v1_baseline_adapter_cycle(
+                {adapter_key: adapter},
+                settings=scoped_settings,
+                runtime_selection_adapter_keys=runnable_keys,
+                database_url=database_url,
+                promote=True,
+                promotion_adapter_keys=(adapter_key,),
+                job_key=job_key,
+            )
+        except Exception as exc:  # noqa: BLE001 - isolate one source cycle
+            had_failure = True
+            failed_count += 1
+            _record_v1_source_failure(
+                run_writer,
+                adapter_key=adapter_key,
+                run_at=source_started_at,
+            )
+            _log_v1_source_failed(
+                adapter_key=adapter_key,
+                phase="managed_cycle",
+                exception_class=exc.__class__.__name__,
+                elapsed_ms=_elapsed_ms(source_started),
+            )
+            continue
+
+        if result.failed or result.has_alerts:
+            had_failure = True
+            failed_count += 1
+            _record_v1_source_failure(
+                run_writer,
+                adapter_key=adapter_key,
+                run_at=source_started_at,
+            )
+            _log_v1_source_failed(
+                adapter_key=adapter_key,
+                phase="managed_cycle",
+                exception_class=result.error_code or "ManagedRuntimeFailure",
+                elapsed_ms=_elapsed_ms(source_started),
+            )
+            continue
+
+        completed_count += 1
         log_event(
             "worker.runtime.v1_baseline.source_completed",
             adapter_key=adapter_key,
             status=result.status,
-            reason=result.reason,
             promoted=result.promoted,
+            elapsed_ms=_elapsed_ms(source_started),
         )
 
-    # Each scoped cycle records the runtime selection with only its own key, and
-    # `write_runtime_selection` sets `runtime_enabled = false` for every other
-    # known adapter. Left alone, the last source of the tick would be the only one
-    # the public API reports as enabled, and every other live source would show
-    # "background worker recently reported this source as disabled". Re-record the
-    # real selection for the whole tick so the reported state matches reality.
-    if ran_keys:
-        record_runtime_selection(
-            PostgresIngestionRunWriter(database_url=database_url),
-            enabled_adapter_keys=tuple(ran_keys),
-            known_adapter_keys=tuple(ADAPTER_REGISTRY),
-        )
+    _log_v1_tick_completed(
+        tick_started=tick_started,
+        configured_count=len(configured_keys),
+        runnable_count=len(runnable_keys),
+        completed_count=completed_count,
+        failed_count=failed_count,
+        gated_off_count=gated_off_count,
+    )
     return had_failure
+
+
+def _record_v1_source_failure(
+    run_writer: IngestionRunSummaryWriter,
+    *,
+    adapter_key: str,
+    run_at: datetime,
+) -> None:
+    try:
+        record_pipeline_status(
+            run_writer,
+            adapter_keys=(adapter_key,),
+            status="failed",
+            complete=False,
+            run_at=run_at,
+        )
+    except Exception as exc:  # noqa: BLE001 - preserve source continuation
+        log_event(
+            "worker.runtime.v1_baseline.audit_unavailable",
+            adapter_key=adapter_key,
+            exception_class=exc.__class__.__name__,
+        )
+
+
+def _log_v1_source_failed(
+    *,
+    adapter_key: str,
+    phase: str,
+    exception_class: str,
+    elapsed_ms: int | None = None,
+) -> None:
+    fields: dict[str, object] = {
+        "adapter_key": adapter_key,
+        "phase": phase,
+        "exception_class": exception_class,
+    }
+    if elapsed_ms is not None:
+        fields["elapsed_ms"] = elapsed_ms
+    log_event(
+        "worker.runtime.v1_baseline.source_failed",
+        **fields,
+    )
+
+
+def _log_v1_tick_completed(
+    *,
+    tick_started: float,
+    configured_count: int,
+    runnable_count: int,
+    completed_count: int,
+    failed_count: int,
+    gated_off_count: int,
+) -> None:
+    log_event(
+        "worker.runtime.v1_baseline.tick_completed",
+        configured_count=configured_count,
+        runnable_count=runnable_count,
+        completed_count=completed_count,
+        failed_count=failed_count,
+        gated_off_count=gated_off_count,
+        elapsed_ms=_elapsed_ms(tick_started),
+    )
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int((time.monotonic() - started_at) * 1000))
 
 
 def run_v1_baseline_enabled_adapters(
@@ -454,7 +636,6 @@ def run_v1_baseline_enabled_adapters(
                     holder_id=lease_holder,
                 )
             had_failure = had_failure or tick_failed
-            log_event("worker.runtime.v1_baseline.tick_completed", failed=tick_failed)
             tick += 1
             if tick_limit is not None and tick >= tick_limit:
                 break
