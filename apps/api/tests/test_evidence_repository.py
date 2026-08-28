@@ -1302,7 +1302,9 @@ def test_jurisdiction_source_mapping_json_requires_valid_reviewed_proof() -> Non
     sql = connection.cursor_instance.executions[1][0]
     source_mapping_sql = sql[sql.index("AS source_mappings") - 4000 :]
     assert "mapping_proof_valid" in source_mapping_sql
-    assert "2026-08-24-v1-baseline" in source_mapping_sql
+    assert "proof.contract_mapping_revision = mapping.mapping_revision" in source_mapping_sql
+    assert "2026-08-24-v1-baseline" not in source_mapping_sql
+    assert "2026-08-28-v1-warning-alignment" not in source_mapping_sql
 
 
 def test_fetch_evidence_by_ids_preserves_requested_order() -> None:

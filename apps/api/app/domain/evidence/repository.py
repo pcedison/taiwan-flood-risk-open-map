@@ -1354,6 +1354,8 @@ def query_realtime_jurisdiction_context(
                                 = mapping.redundancy_of_adapter_key
                             AND parent_mapping.signal_type = mapping.signal_type
                             AND parent_mapping.requirement_role = 'required'
+                            AND parent_mapping.mapping_revision
+                                = mapping.mapping_revision
                             AND (
                                 parent_mapping.coverage_scope = 'national'
                                 OR parent_mapping.jurisdiction_code
@@ -1366,6 +1368,7 @@ def query_realtime_jurisdiction_context(
                 ON contract.jurisdiction_code = considered.jurisdiction_code
             LEFT JOIN realtime_source_jurisdictions mapping
                 ON mapping.signal_type = contract.signal_type
+                AND mapping.mapping_revision = contract.mapping_revision
                 AND (
                     mapping.coverage_scope = 'national'
                     OR mapping.jurisdiction_code = contract.jurisdiction_code
@@ -1522,13 +1525,11 @@ def query_realtime_jurisdiction_context(
                 FROM realtime_source_jurisdictions mapping
                 LEFT JOIN realtime_jurisdictions jurisdiction
                     ON jurisdiction.jurisdiction_code = mapping.jurisdiction_code
-                WHERE mapping.mapping_revision = '2026-08-24-v1-baseline'
-                    AND EXISTS (
+                WHERE EXISTS (
                         SELECT 1
                         FROM contract_mapping_proofs proof
                         WHERE proof.mapping_proof_valid = true
-                            AND proof.contract_mapping_revision
-                                = '2026-08-24-v1-baseline'
+                            AND proof.contract_mapping_revision = mapping.mapping_revision
                             AND proof.signal_type = mapping.signal_type
                             AND (
                                 mapping.coverage_scope = 'national'

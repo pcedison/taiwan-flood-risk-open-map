@@ -136,3 +136,15 @@ deliberately creates no `realtime_source_jurisdictions` mapping, so none of
 these sources can become a required realtime coverage signal. Operators must
 still enable each runtime gate and complete the fail-closed source review before
 enabling a row.
+
+`0041_v1_warning_source_requirement_alignment.sql` aligns the reviewed
+flood-warning absence contract with the deployed hosted backbone. NCDR CAP is
+the single required flood-warning mapping; the CWA heavy-rain warning remains
+applicable and reviewed as a `redundant_subset` of NCDR. Redundancy changes only
+which source is required before the API may confirm absence. It does not enable
+CWA, fetch warning data, alter credentials or runtime gates, lower NCDR
+freshness requirements, or allow an unhealthy required NCDR source to pass.
+The migration advances only flood-warning contracts to
+`2026-08-28-v1-warning-alignment` and recomputes all 22 count/checksum proofs;
+rainfall, water-level, and flood-depth contracts retain their independently
+reviewed revisions.

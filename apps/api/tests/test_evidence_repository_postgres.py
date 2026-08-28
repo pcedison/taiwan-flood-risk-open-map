@@ -549,6 +549,7 @@ def _warning_properties(
 def test_jurisdiction_proof_requires_every_considered_county_in_real_sql() -> None:
     database_url = _database_url()
     revision = "2026-08-24-v1-baseline"
+    warning_revision = "2026-08-28-v1-warning-alignment"
     now = datetime(2026, 8, 24, 4, 0, tzinfo=UTC)
     snapshot_id = uuid4()
     codes = ["67000000", "64000000"] + [f"9{index:07d}" for index in range(20)]
@@ -667,6 +668,52 @@ def test_jurisdiction_proof_requires_every_considered_county_in_real_sql() -> No
                     (adapter_key, signal_type, revision),
                 ).fetchone()[0]
 
+            connection.execute(
+                """
+                INSERT INTO realtime_source_jurisdictions VALUES
+                    (
+                        'official.ncdr.cap', 'flood_warning', 'national', 'TW',
+                        'required', NULL, %s
+                    ),
+                    (
+                        'official.cwa.heavy_rain_warning', 'flood_warning',
+                        'national', 'TW', 'redundant_subset', 'official.ncdr.cap', %s
+                    ),
+                    (
+                        'test.task4.warning.stale', 'flood_warning', 'national', 'TW',
+                        'required', NULL, %s
+                    )
+                """,
+                (warning_revision, warning_revision, revision),
+            )
+            warning_mapping_hash = connection.execute(
+                """
+                SELECT encode(
+                    digest(
+                        convert_to(
+                            jsonb_agg(
+                                jsonb_build_array(
+                                    adapter_key, signal_type, coverage_scope,
+                                    jurisdiction_code, requirement_role,
+                                    redundancy_of_adapter_key, mapping_revision
+                                )
+                                ORDER BY adapter_key, coverage_scope,
+                                    jurisdiction_code, requirement_role,
+                                    redundancy_of_adapter_key, mapping_revision
+                            )::text,
+                            'UTF8'
+                        ),
+                        'sha256'
+                    ),
+                    'hex'
+                )
+                FROM realtime_source_jurisdictions
+                WHERE signal_type = 'flood_warning'
+                    AND mapping_revision = %s
+                """,
+                (warning_revision,),
+            ).fetchone()[0]
+
             for code in ("67000000", "64000000"):
                 for signal_type in ("rainfall", "water_level", "flood_depth"):
                     status = (
@@ -696,6 +743,22 @@ def test_jurisdiction_proof_requires_every_considered_county_in_real_sql() -> No
                             now,
                         ),
                     )
+                connection.execute(
+                    """
+                    INSERT INTO realtime_jurisdiction_signal_contracts (
+                        jurisdiction_code, signal_type, catalog_status,
+                        mapping_revision, mapping_manifest_version,
+                        approved_mapping_count,
+                        approved_mapping_manifest_sha256,
+                        reviewed_at, review_ref
+                    ) VALUES (
+                        %s, 'flood_warning', 'reviewed_complete', %s,
+                        'jurisdiction-source-jsonb-v1', 2, %s, %s,
+                        'task-4-warning-revision-regression'
+                    )
+                    """,
+                    (code, warning_revision, warning_mapping_hash, now),
+                )
 
         context = query_realtime_jurisdiction_context(
             database_url=isolated_url,
@@ -717,6 +780,25 @@ def test_jurisdiction_proof_requires_every_considered_county_in_real_sql() -> No
         )
         assert kaohsiung_water.mapping_proof_valid is False
         assert _complete_signal_types(context) == ("flood_depth", "rainfall")
+        assert {
+            (contract.signal_type, contract.mapping_revision)
+            for contract in context.signal_contracts
+        } >= {
+            ("rainfall", revision),
+            ("water_level", revision),
+            ("flood_depth", revision),
+            ("flood_warning", warning_revision),
+        }
+        assert {mapping.adapter_key for mapping in context.source_mappings} >= {
+            "official.ncdr.cap",
+            "official.cwa.heavy_rain_warning",
+            "test.task3.rainfall",
+            "test.task3.water_level",
+            "test.task3.flood_depth",
+        }
+        assert "test.task4.warning.stale" not in {
+            mapping.adapter_key for mapping in context.source_mappings
+        }
 
 
 def test_latest_reader_rejects_dirty_or_missing_scope_and_honors_depth_lookback() -> None:
