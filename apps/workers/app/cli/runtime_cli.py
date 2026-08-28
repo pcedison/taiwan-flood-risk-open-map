@@ -437,15 +437,24 @@ def _run_v1_baseline_tick(
         if result.failed or result.has_alerts:
             had_failure = True
             failed_count += 1
-            _record_v1_source_failure(
-                run_writer,
-                adapter_key=adapter_key,
-                run_at=source_started_at,
+            pipeline_failed = (
+                result.error_code is not None
+                or result.reason is not None
+                or any(summary.status == "failed" for summary in result.summaries)
             )
+            if pipeline_failed:
+                _record_v1_source_failure(
+                    run_writer,
+                    adapter_key=adapter_key,
+                    run_at=source_started_at,
+                )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
-                phase="managed_cycle",
-                exception_class=result.error_code or "ManagedRuntimeFailure",
+                phase="managed_cycle" if pipeline_failed else "freshness",
+                exception_class=(
+                    result.error_code
+                    or ("FreshnessAlert" if result.has_alerts else "ManagedRuntimeFailure")
+                ),
                 elapsed_ms=_elapsed_ms(source_started),
             )
             continue

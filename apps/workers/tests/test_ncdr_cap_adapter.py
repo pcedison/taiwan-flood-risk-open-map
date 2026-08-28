@@ -14,6 +14,7 @@ from app.adapters.contracts import SourceFamily
 from app.adapters.ncdr import (
     NCDR_CAP_METADATA,
     NcdrCapAlertAdapter,
+    NcdrCapAlertConfigurationError,
     NcdrCapAlertFetchError,
     NcdrCapAlertPayloadError,
     parse_ncdr_cap_payload,
@@ -1236,7 +1237,7 @@ def test_ncdr_registry_gates_are_key_based_source_plus_contract() -> None:
     assert build_runtime_adapters(selected) == {}
 
 
-def test_ncdr_runtime_builder_requires_api_gate_and_nonempty_key() -> None:
+def test_ncdr_runtime_adapter_requires_api_gate_and_surfaces_missing_key() -> None:
     complete = {
         "SOURCE_NCDR_CAP_ENABLED": "true",
         "SOURCE_NCDR_CAP_API_ENABLED": "true",
@@ -1248,14 +1249,23 @@ def test_ncdr_runtime_builder_requires_api_gate_and_nonempty_key() -> None:
         "SOURCE_NCDR_CAP_ENABLED",
         "SOURCE_NCDR_CAP_API_ENABLED",
         "SOURCE_NCDR_CAP_CONTRACT_ENABLED",
-        "NCDR_ALERTS_API_KEY",
     ):
         values = dict(complete)
         values.pop(missing)
         assert build_runtime_adapters(load_worker_settings(values)) == {}
 
+    missing_key = dict(complete)
+    missing_key.pop("NCDR_ALERTS_API_KEY")
+    missing_key_adapters = build_runtime_adapters(load_worker_settings(missing_key))
+    assert tuple(missing_key_adapters) == ("official.ncdr.cap",)
+    with pytest.raises(NcdrCapAlertConfigurationError):
+        missing_key_adapters["official.ncdr.cap"].run()
+
     blank_key = {**complete, "NCDR_ALERTS_API_KEY": "   "}
-    assert build_runtime_adapters(load_worker_settings(blank_key)) == {}
+    blank_key_adapters = build_runtime_adapters(load_worker_settings(blank_key))
+    assert tuple(blank_key_adapters) == ("official.ncdr.cap",)
+    with pytest.raises(NcdrCapAlertConfigurationError):
+        blank_key_adapters["official.ncdr.cap"].run()
 
 
 def test_ncdr_default_runtime_builder_uses_two_stage_contract() -> None:

@@ -8,6 +8,7 @@ whole-tick selection without widening any scoped source operation.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,6 +18,7 @@ from app.adapters.registry import ADAPTER_REGISTRY
 from app.cli import runtime_cli
 from app.config import load_worker_settings
 from app.jobs import runtime_managed
+from app.jobs.freshness import FreshnessCheck
 from app.jobs.runtime_managed import (
     V1_BASELINE_ADAPTER_KEYS,
     ManagedRuntimeIngestionResult,
@@ -469,6 +471,49 @@ def test_tick_continues_when_first_source_returns_failed(
     assert failed_fields["exception_class"] == "TimeoutError"
     assert isinstance(failed_fields["elapsed_ms"], int)
     assert failed_fields["elapsed_ms"] >= 0
+
+
+def test_freshness_alert_does_not_overwrite_a_completed_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _install_tick_writer(monkeypatch)
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {SOURCE_A: _Adapter(SOURCE_A)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A,),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_v1_baseline_adapter_cycle",
+        lambda *_args, **_kwargs: ManagedRuntimeIngestionResult(
+            status="failed",
+            summaries=(SimpleNamespace(status="succeeded"),),
+            freshness_checks=(
+                FreshnessCheck(
+                    adapter_key=SOURCE_A,
+                    status="stale",
+                    checked_at=datetime(2026, 8, 28, 9, 0, tzinfo=UTC),
+                    max_age_seconds=600,
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(runtime_cli, "log_event", lambda *_args, **_kwargs: None)
+
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(load_worker_settings({}), enabled_adapter_keys=(SOURCE_A,)),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+
+    assert failed is True
+    assert writer.pipeline_statuses == []
 
 
 def test_tick_records_full_selection_before_first_source_starts(
