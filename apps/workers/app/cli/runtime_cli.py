@@ -348,12 +348,17 @@ def _run_v1_baseline_tick(
     had_failure = False
     failed_count = 0
     gated_off_count = len(configured_keys) - len(catalog_enabled_keys)
+    reported_keys: list[str] = []
     runnable: list[tuple[str, WorkerSettings, DataSourceAdapter]] = []
     for adapter_key in catalog_enabled_keys:
         scoped_settings = replace(settings, enabled_adapter_keys=(adapter_key,))
         try:
             adapters = build_runtime_adapters(scoped_settings)
         except Exception as exc:  # noqa: BLE001 - isolate one source's builder
+            # This source passed both the runtime and catalog gates. Keep it in
+            # the authoritative selection so the public API reports the
+            # pipeline failure below instead of mislabeling the source disabled.
+            reported_keys.append(adapter_key)
             had_failure = True
             failed_count += 1
             _record_v1_source_failure(
@@ -375,13 +380,15 @@ def _run_v1_baseline_tick(
                 adapter_key=adapter_key,
             )
             continue
+        reported_keys.append(adapter_key)
         runnable.append((adapter_key, scoped_settings, adapter))
 
     runnable_keys = tuple(adapter_key for adapter_key, _settings, _adapter in runnable)
+    runtime_selection_keys = tuple(reported_keys)
     try:
         record_runtime_selection(
             run_writer,
-            enabled_adapter_keys=runnable_keys,
+            enabled_adapter_keys=runtime_selection_keys,
             known_adapter_keys=tuple(ADAPTER_REGISTRY),
         )
     except Exception as exc:  # noqa: BLE001 - selection audit must not strand sources
@@ -404,7 +411,7 @@ def _run_v1_baseline_tick(
             result = run_v1_baseline_adapter_cycle(
                 {adapter_key: adapter},
                 settings=scoped_settings,
-                runtime_selection_adapter_keys=runnable_keys,
+                runtime_selection_adapter_keys=runtime_selection_keys,
                 database_url=database_url,
                 promote=True,
                 promotion_adapter_keys=(adapter_key,),
