@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import signal
 import socket
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-from types import TracebackType
+from types import FrameType, TracebackType
 from typing import Self
 from uuid import uuid4
 
@@ -90,6 +91,16 @@ class _SchedulerLeaseHeartbeat:
 
 def _process_unique_lease_holder(base: str) -> str:
     return f"{base}:{socket.gethostname()}:{os.getpid()}:{uuid4().hex}"
+
+
+def _exit_scheduler_on_sigterm(
+    signum: int,
+    frame: FrameType | None,
+) -> None:
+    """Turn container termination into normal unwinding for lease cleanup."""
+
+    del signum, frame
+    raise SystemExit(0)
 
 
 def record_runtime_sources_disabled(
@@ -612,6 +623,7 @@ def run_v1_baseline_enabled_adapters(
             )
             return None
 
+    previous_sigterm_handler = signal.signal(signal.SIGTERM, _exit_scheduler_on_sigterm)
     try:
         while tick_limit is None or tick < tick_limit:
             if not lease_acquired:
@@ -667,17 +679,20 @@ def run_v1_baseline_enabled_adapters(
                 continue
             time.sleep(settings.scheduler_interval_seconds)
     finally:
-        if lease_acquired:
-            try:
-                queue.release_scheduler_lease(
-                    lease_key=lease_key,
-                    holder_id=lease_holder,
-                )
-            except RuntimeQueueUnavailable:
-                log_event(
-                    "worker.runtime.v1_baseline.lease_release_failed",
-                    reason="runtime_queue_unavailable",
-                )
+        try:
+            if lease_acquired:
+                try:
+                    queue.release_scheduler_lease(
+                        lease_key=lease_key,
+                        holder_id=lease_holder,
+                    )
+                except RuntimeQueueUnavailable:
+                    log_event(
+                        "worker.runtime.v1_baseline.lease_release_failed",
+                        reason="runtime_queue_unavailable",
+                    )
+        finally:
+            signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
     return 1 if had_failure else 0
 
