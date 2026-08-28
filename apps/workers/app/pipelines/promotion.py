@@ -4,15 +4,22 @@ import json
 import math
 import re
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import Any, Protocol
 from uuid import UUID
 
 from app.adapters._helpers import parse_datetime
 from app.adapters.cap_identity import cap_message_digest
+from app.logging import log_event
 
 ConnectionFactory = Callable[[], Any]
+DEFAULT_PROMOTION_BATCH_SIZE = 100
+DEFAULT_PROMOTION_CONNECT_TIMEOUT_SECONDS = 10
+DEFAULT_PROMOTION_LOCK_TIMEOUT_MS = 5_000
+DEFAULT_PROMOTION_STATEMENT_TIMEOUT_MS = 30_000
 REVIEWED_WARNING_ADAPTER_KEYS = frozenset(
     {"official.cwa.heavy_rain_warning", "official.ncdr.cap"}
 )
@@ -83,6 +90,14 @@ class EvidencePromotionWriter(Protocol):
         """Retire eligible latest warning rows after a valid empty poll."""
 
 
+class BatchEvidencePromotionWriter(Protocol):
+    def write_evidence_batch(
+        self,
+        payloads: tuple[EvidencePromotionPayload, ...],
+    ) -> tuple[str | None, ...]:
+        """Persist one bounded chunk while keeping each candidate durable."""
+
+
 def build_evidence_promotion_payload(candidate: PromotionCandidate) -> EvidencePromotionPayload:
     if candidate.validation_status != "accepted":
         raise ValueError("only accepted staging evidence can be promoted")
@@ -115,21 +130,69 @@ def promote_accepted_staging(
     adapter_keys: tuple[str, ...] | None = None,
     raw_refs: tuple[str, ...] | None = None,
 ) -> PromotionResult:
+    started_at = monotonic()
     normalized_raw_refs = _normalized_raw_refs(raw_refs)
     evidence_ids: list[str] = []
     seen_keys: set[tuple[str, str | None]] = set()
     fetch_kwargs: dict[str, Any] = {"limit": limit, "adapter_keys": adapter_keys}
     if normalized_raw_refs is not None:
         fetch_kwargs["raw_refs"] = normalized_raw_refs
-    for candidate in writer.fetch_accepted_staging(**fetch_kwargs):
-        promotion_key = (candidate.source_id, candidate.raw_ref)
-        if promotion_key in seen_keys:
-            continue
-        seen_keys.add(promotion_key)
-        evidence_id = writer.write_evidence(build_evidence_promotion_payload(candidate))
-        if evidence_id is not None:
-            evidence_ids.append(evidence_id)
+    chunk_index = 0
+    try:
+        payloads: list[EvidencePromotionPayload] = []
+        for candidate in writer.fetch_accepted_staging(**fetch_kwargs):
+            promotion_key = (candidate.source_id, candidate.raw_ref)
+            if promotion_key in seen_keys:
+                continue
+            seen_keys.add(promotion_key)
+            payloads.append(build_evidence_promotion_payload(candidate))
 
+        chunk_count = math.ceil(len(payloads) / DEFAULT_PROMOTION_BATCH_SIZE)
+        log_event(
+            "worker.promotion.started",
+            adapter_count=_promotion_adapter_count(adapter_keys, payloads),
+            raw_ref_count=_promotion_raw_ref_count(normalized_raw_refs, payloads),
+            candidate_count=len(payloads),
+            chunk_count=chunk_count,
+        )
+        batch_write = getattr(writer, "write_evidence_batch", None)
+        for offset in range(0, len(payloads), DEFAULT_PROMOTION_BATCH_SIZE):
+            chunk_index += 1
+            chunk_started_at = monotonic()
+            chunk = tuple(payloads[offset : offset + DEFAULT_PROMOTION_BATCH_SIZE])
+            if callable(batch_write):
+                chunk_results = tuple(batch_write(chunk))
+            else:
+                chunk_results = tuple(writer.write_evidence(payload) for payload in chunk)
+            if len(chunk_results) != len(chunk):
+                raise ValueError("batch promotion writer returned an unexpected result count")
+            chunk_evidence_ids = tuple(
+                evidence_id for evidence_id in chunk_results if evidence_id is not None
+            )
+            evidence_ids.extend(chunk_evidence_ids)
+            log_event(
+                "worker.promotion.chunk_completed",
+                chunk_index=chunk_index,
+                chunk_count=chunk_count,
+                candidate_count=len(chunk),
+                promoted_count=len(chunk_evidence_ids),
+                elapsed_ms=_elapsed_milliseconds(chunk_started_at),
+            )
+    except Exception as exc:
+        log_event(
+            "worker.promotion.failed",
+            chunk_index=chunk_index,
+            exception_class=exc.__class__.__name__,
+            elapsed_ms=_elapsed_milliseconds(started_at),
+        )
+        raise
+
+    log_event(
+        "worker.promotion.completed",
+        candidate_count=len(payloads),
+        promoted_count=len(evidence_ids),
+        elapsed_ms=_elapsed_milliseconds(started_at),
+    )
     return PromotionResult(promoted=len(evidence_ids), evidence_ids=tuple(evidence_ids))
 
 
@@ -154,6 +217,7 @@ class PostgresEvidencePromotionWriter:
     ) -> tuple[PromotionCandidate, ...]:
         normalized_raw_refs = _normalized_raw_refs(raw_refs)
         with self._connect() as connection, connection.cursor() as cursor:
+            _apply_promotion_transaction_timeouts(cursor)
             cursor.execute(
                 _accepted_staging_sql(
                     limit=limit,
@@ -169,10 +233,21 @@ class PostgresEvidencePromotionWriter:
             return tuple(_candidate_from_row(row) for row in cursor.fetchall())
 
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
-        with self._connect() as connection:
+        return self._write_evidence_transaction(payload)
+
+    def _write_evidence_transaction(
+        self,
+        payload: EvidencePromotionPayload,
+        *,
+        _connection: Any | None = None,
+    ) -> str | None:
+        connection_context = self._connect() if _connection is None else nullcontext(_connection)
+        with connection_context as connection:
             with connection.cursor() as cursor:
+                _apply_promotion_transaction_timeouts(cursor)
                 staging_authorization = _authorize_staging_candidate(cursor, payload)
                 if staging_authorization is False:
+                    connection.rollback()
                     return None
                 current_rejection_reason = _current_candidate_rejection_reason(payload)
                 if current_rejection_reason is None:
@@ -195,6 +270,7 @@ class PostgresEvidencePromotionWriter:
                 if staging_authorization is True and _staging_evidence_was_already_used(
                     cursor, payload
                 ):
+                    connection.commit()
                     return None
                 cap_rejection_reason = (
                     _cap_rejection_reason(cursor, payload)
@@ -348,7 +424,7 @@ class PostgresEvidencePromotionWriter:
                             reason="idempotent_existing_evidence",
                             authorized=True,
                         )
-                        connection.commit()
+                    connection.commit()
                     return None
                 evidence_id = str(row[0])
                 if (
@@ -370,6 +446,25 @@ class PostgresEvidencePromotionWriter:
 
         return evidence_id
 
+    def write_evidence_batch(
+        self,
+        payloads: tuple[EvidencePromotionPayload, ...],
+    ) -> tuple[str | None, ...]:
+        if not payloads:
+            return ()
+
+        results: list[str | None] = []
+        with self._connect() as connection:
+            for payload in payloads:
+                try:
+                    results.append(
+                        self._write_evidence_transaction(payload, _connection=connection)
+                    )
+                except Exception:
+                    connection.rollback()
+                    raise
+        return tuple(results)
+
     def retire_warning_latest_for_no_active_event(
         self,
         *,
@@ -388,6 +483,7 @@ class PostgresEvidencePromotionWriter:
 
         with self._connect() as connection:
             with connection.cursor() as cursor:
+                _apply_promotion_transaction_timeouts(cursor)
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (warning_lifecycle_lock_key(adapter_key),),
@@ -424,7 +520,10 @@ class PostgresEvidencePromotionWriter:
         import psycopg
 
         assert self._database_url is not None
-        return psycopg.connect(self._database_url)
+        return psycopg.connect(
+            self._database_url,
+            connect_timeout=DEFAULT_PROMOTION_CONNECT_TIMEOUT_SECONDS,
+        )
 
     def _upsert_official_realtime_latest(
         self,
@@ -1348,6 +1447,44 @@ def _normalized_raw_refs(raw_refs: tuple[str, ...] | None) -> tuple[str, ...] | 
         seen.add(raw_ref)
         normalized.append(raw_ref)
     return tuple(normalized)
+
+
+def _promotion_adapter_count(
+    adapter_keys: tuple[str, ...] | None,
+    payloads: list[EvidencePromotionPayload],
+) -> int:
+    keys = adapter_keys if adapter_keys is not None else tuple(
+        payload.adapter_key for payload in payloads if payload.adapter_key is not None
+    )
+    return len(dict.fromkeys(keys))
+
+
+def _promotion_raw_ref_count(
+    raw_refs: tuple[str, ...] | None,
+    payloads: list[EvidencePromotionPayload],
+) -> int:
+    refs = raw_refs if raw_refs is not None else tuple(
+        payload.raw_ref for payload in payloads if payload.raw_ref is not None
+    )
+    return len(dict.fromkeys(refs))
+
+
+def _elapsed_milliseconds(started_at: float) -> int:
+    return max(0, round((monotonic() - started_at) * 1_000))
+
+
+def _apply_promotion_transaction_timeouts(cursor: Any) -> None:
+    cursor.execute(
+        """
+        SELECT
+            set_config('lock_timeout', %s, true),
+            set_config('statement_timeout', %s, true)
+        """,
+        (
+            f"{DEFAULT_PROMOTION_LOCK_TIMEOUT_MS}ms",
+            f"{DEFAULT_PROMOTION_STATEMENT_TIMEOUT_MS}ms",
+        ),
+    )
 
 
 def _candidate_from_row(row: tuple[Any, ...]) -> PromotionCandidate:

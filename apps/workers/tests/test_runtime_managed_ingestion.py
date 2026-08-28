@@ -898,6 +898,30 @@ def test_managed_runtime_cycle_records_promotion_failure_in_public_pipeline_stat
     )
 
 
+def test_managed_runtime_cycle_records_promotion_timeout_exception_class() -> None:
+    adapter = _sample_adapter()
+    run_writer = _MemoryRunWriter()
+
+    result = _execute_managed_runtime_ingestion_cycle(
+        {adapter.metadata.key: adapter},
+        settings=_settings("news.public_web.sample"),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_TimeoutPromotionWriter(),
+        promote=True,
+    )
+
+    assert result.status == "failed"
+    assert result.reason == "promotion_failed"
+    assert result.error_code == "QueryCanceled"
+    assert run_writer.pipeline_statuses[-1] == (
+        ("news.public_web.sample",),
+        "failed",
+        False,
+        result.summaries[0].started_at,
+    )
+
+
 def test_complete_replace_source_quality_partial_activates_only_after_full_promotion() -> None:
     adapter = _CompleteReplacePartialAdapter(valid_count=3, rejection_count=1)
     settings = replace(
@@ -1288,6 +1312,22 @@ class _FailingPromotionWriter:
     def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
         del payload
         raise AssertionError("write_evidence should not be reached")
+
+
+class QueryCanceled(RuntimeError):
+    pass
+
+
+class _TimeoutPromotionWriter(_FailingPromotionWriter):
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        del limit, adapter_keys, raw_refs
+        raise QueryCanceled("postgresql://operator:private@example.test/flood")
 
 
 class _ExplodingAdapter:
