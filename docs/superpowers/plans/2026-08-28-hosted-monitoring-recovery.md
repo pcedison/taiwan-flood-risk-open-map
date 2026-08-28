@@ -20,7 +20,7 @@
 - Production PostgreSQL connection establishment, lock waits, and statement execution must all be bounded. A timeout becomes a public-safe failed pipeline state and the scheduler continues with the next source.
 - Never log database URLs, credentials, CAP API keys, authorization headers, source response bodies, raw private evidence, or SQL parameter values. Log only adapter key, raw-ref count, candidate count, chunk index/count, elapsed milliseconds, status, and safe exception class.
 - Preserve one-source execution isolation in `run_v1_baseline_adapter_cycle()`. A whole-tick runtime-selection override must not widen the adapters fetched, staged, promoted, or catalog-filtered by a scoped cycle.
-- Do not rewrite deployed migration `0040_v1_official_baseline_source_mappings.sql`. Add `0041_v1_warning_source_requirement_alignment.sql` and update the migration README.
+- Do not rewrite deployed migration `0040_v1_official_baseline_source_mappings.sql`. Add `0041_v1_warning_source_requirement_alignment.sql`, update the migration README and schema-readiness sentinel, and make the API validate revision equality per reviewed contract instead of filtering every signal through one global revision literal.
 - Until separate activation evidence exists, keep `official.cwa.heavy_rain_warning` disabled and make it a `redundant_subset` of required `official.ncdr.cap`. Do not enable it merely to make monitoring green.
 - Keep the jurisdiction proof fail-closed: mapping revision, count, digest, reviewed timestamp, review reference, and redundancy-parent validity must all agree for every county.
 - Do not combine issues #71, #73, or Dependabot PRs #185–#189 with the P0 runtime commits.
@@ -52,8 +52,12 @@
 
 - Create `infra/migrations/0041_v1_warning_source_requirement_alignment.sql` — convert CWA heavy-rain warning to a reviewed redundant subset of NCDR and recompute all affected contract proofs at one new revision.
 - Modify `infra/migrations/README.md` — document migration intent, disabled-source semantics, and operator activation rules.
+- Modify `apps/api/app/domain/evidence/repository.py` — remove the global baseline-revision filter and emit mappings only when their revision equals the valid owning contract revision.
+- Modify `apps/api/app/api/routes/health.py` — advance the schema-readiness sentinel to migration 0041 with its checked-in checksum.
 - Modify `tests/test_v1_official_baseline_migration.py` — assert one required warning source, one valid redundant child, matching revision/digest, and all 22 county contracts.
 - Modify `apps/api/tests/test_assessment_repository.py` — assert the redundant CWA source remains applicable for evidence but is absent from `required_realtime_source_keys`.
+- Modify `apps/api/tests/test_evidence_repository.py` and `apps/api/tests/test_evidence_repository_postgres.py` — prove mixed signal-specific revisions remain visible only through a valid same-revision contract proof.
+- Modify `apps/api/tests/test_public_contract.py`, `tests/test_apply_migrations_script.py`, and `infra/scripts/verify_migration_upgrade_0032_to_0036.py` — keep the migration manifest and readiness sentinel locked to 0041.
 - Modify `tests/test_hosted_public_risk_evidence_smoke.py` — prove a disabled non-required redundant source does not fail absence health while a stalled required NCDR source still fails.
 - Modify `tests/test_zeabur_single_service_deploy.py` only if implementation chooses activation instead of redundancy. Under this plan's default decision, the entrypoint remains unchanged and the test must continue proving CWA heavy-rain warning is not silently activated.
 
@@ -374,12 +378,13 @@ def run_v1_baseline_adapter_cycle(
 ) -> ManagedRuntimeIngestionResult: ...
 ```
 
-Validation rules:
+Validation rules and trust boundary:
 
 - Scoped execution still contains exactly one adapter.
 - `runtime_selection_adapter_keys` must be non-empty when supplied.
 - It must contain the scoped adapter key.
-- Every reporting key must belong to `V1_BASELINE_ADAPTER_KEYS` and be enabled by the tick's original settings/catalog/gates.
+- Every reporting key must belong to `V1_BASELINE_ADAPTER_KEYS`.
+- `_run_v1_baseline_tick()` owns the full-tick settings/catalog/gate preflight and constructs the reporting tuple only from adapters that passed it. The scoped cycle does not attempt to re-prove peer gates from its deliberately single-key settings object; tests must instead prove the caller never includes a catalog-disabled, gate-off, or failed-construction key.
 - The override changes only `record_runtime_selection()` arguments; adapter resolution, catalog checks, staging, promotion keys, and raw refs remain scoped to one source.
 
 Preflight all eligible keys before ingestion: apply source catalog filtering once, build each gated adapter inside its own exception boundary, and collect `runnable`. Record the full runnable selection before executing the first source. Pass that same selection into each scoped cycle so a cycle cannot overwrite every peer as disabled.
@@ -413,6 +418,11 @@ Add:
 - `test_every_scoped_cycle_reports_the_same_full_tick_selection`
 - `test_runtime_selection_override_cannot_widen_staging_or_promotion`
 - `test_runtime_selection_override_rejects_unknown_or_gate_off_key`
+
+The last test is split across boundaries: the tick-level test proves gate-off
+and catalog-disabled keys never enter the preflight reporting tuple; the scoped
+cycle test proves an unknown/non-v1 key is rejected and that the scoped key is
+mandatory.
 
 Use one ordered timeline list. The first selection record must precede `source_started`. Assert only the scoped adapter reaches `_execute_scheduled_ingestion_cycle()` and promotion.
 
@@ -467,8 +477,15 @@ git commit -m "fix(worker): isolate v1 source failures"
 
 - Create: `infra/migrations/0041_v1_warning_source_requirement_alignment.sql`
 - Modify: `infra/migrations/README.md`
+- Modify: `apps/api/app/domain/evidence/repository.py`
+- Modify: `apps/api/app/api/routes/health.py`
 - Modify: `tests/test_v1_official_baseline_migration.py`
 - Modify: `apps/api/tests/test_assessment_repository.py`
+- Modify: `apps/api/tests/test_evidence_repository.py`
+- Modify: `apps/api/tests/test_evidence_repository_postgres.py`
+- Modify: `apps/api/tests/test_public_contract.py`
+- Modify: `tests/test_apply_migrations_script.py`
+- Modify: `infra/scripts/verify_migration_upgrade_0032_to_0036.py`
 - Modify: `tests/test_hosted_public_risk_evidence_smoke.py`
 - Verify unchanged: `infra/docker/entrypoint.sh`
 - Verify unchanged: `tests/test_zeabur_single_service_deploy.py`
@@ -483,6 +500,12 @@ official.cwa.heavy_rain_warning redundant_subset redundancy_of=official.ncdr.cap
 ```
 
 Both mappings remain applicable and reviewed. Only NCDR enters `required_realtime_source_keys`; the disabled CWA source may not fail required-source absence. If CWA is activated later, that is a separate operator-reviewed migration/configuration task and does not reverse this recovery automatically.
+
+The repository query must support signal-specific reviewed revisions. It may
+emit a mapping only when a valid proof exists for the same jurisdiction and
+signal and `mapping.mapping_revision = proof.contract_mapping_revision`. Do not
+replace the old literal with a new global literal: rainfall, water-level,
+flood-depth, and flood-warning contracts may legitimately advance separately.
 
 - [ ] **Step 1: Change static expectations first and run RED**
 
@@ -521,6 +544,8 @@ In `tests/test_hosted_public_risk_evidence_smoke.py`, add:
 
 - Disabled CWA with `required_for_absence=False` plus healthy NCDR passes required-source health.
 - Stalled NCDR with `required_for_absence=True` still fails in `degraded-ok` mode.
+- A repository SQL regression contains no global baseline revision predicate and requires mapping/contract revision equality.
+- A PostgreSQL read-path fixture with the warning contract at the new revision and other signals at the baseline revision returns both sets; a mismatched warning mapping is omitted.
 
 Run both files and record RED if repository fixtures currently mark both required.
 
@@ -538,24 +563,37 @@ Within one transaction:
 
 Do not change `data_sources.is_enabled`, runtime gates, credentials, or `infra/docker/entrypoint.sh`.
 
-- [ ] **Step 4: Document migration semantics**
+- [ ] **Step 4: Make revision validation contract-scoped and advance readiness**
+
+Remove both global revision literals from
+`query_realtime_jurisdiction_context()`. Join mappings to valid proof rows using
+the same jurisdiction/signal applicability rules plus exact mapping/contract
+revision equality. Advance the health schema sentinel, its checksum contract,
+the checked-in migration version, and the associated API/root tests to 0041 in
+the same commit.
+
+- [ ] **Step 5: Document migration semantics**
 
 Add a `0041` entry to `infra/migrations/README.md` explaining that redundancy changes absence requiredness only; it does not enable CWA, fetch data, lower NCDR freshness requirements, or let an unhealthy required NCDR source pass.
 
-- [ ] **Step 5: Run static GREEN**
+- [ ] **Step 6: Run static GREEN**
 
 ```bash
 .venv/workers/bin/python -m pytest \
   tests/test_v1_official_baseline_migration.py \
+  tests/test_apply_migrations_script.py \
   tests/test_hosted_public_risk_evidence_smoke.py \
   tests/test_zeabur_single_service_deploy.py -q
 cd apps/api
-../../.venv/api/bin/python -m pytest tests/test_assessment_repository.py -q
+../../.venv/api/bin/python -m pytest \
+  tests/test_assessment_repository.py \
+  tests/test_evidence_repository.py \
+  tests/test_public_contract.py -q
 ```
 
 Expected: all selected tests pass. The Zeabur deployment test must still prove that CWA heavy-rain warning is not silently added to the default backbone.
 
-- [ ] **Step 6: Run migration validation and PostgreSQL proof tests**
+- [ ] **Step 7: Run migration validation and PostgreSQL proof tests**
 
 ```bash
 .venv/workers/bin/python infra/scripts/validate_migrations.py
@@ -563,19 +601,27 @@ docker compose up -d postgres
 docker compose --profile tools run --rm migrate
 MIGRATION_TEST_DATABASE_URL=postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk \
   .venv/workers/bin/python -m pytest \
-  tests/test_v1_official_baseline_migration.py -q
+  tests/test_v1_official_baseline_migration.py \
+  apps/api/tests/test_evidence_repository_postgres.py -q
 ```
 
 Expected: migration validator exits `0`; PostgreSQL tests run without skips and all 22 contract proofs pass.
 
-- [ ] **Step 7: Commit requirement alignment**
+- [ ] **Step 8: Commit requirement alignment**
 
 ```bash
 git add \
   infra/migrations/0041_v1_warning_source_requirement_alignment.sql \
   infra/migrations/README.md \
+  apps/api/app/domain/evidence/repository.py \
+  apps/api/app/api/routes/health.py \
   tests/test_v1_official_baseline_migration.py \
   apps/api/tests/test_assessment_repository.py \
+  apps/api/tests/test_evidence_repository.py \
+  apps/api/tests/test_evidence_repository_postgres.py \
+  apps/api/tests/test_public_contract.py \
+  tests/test_apply_migrations_script.py \
+  infra/scripts/verify_migration_upgrade_0032_to_0036.py \
   tests/test_hosted_public_risk_evidence_smoke.py
 git commit -m "fix(db): align warning requiredness with runtime"
 ```
@@ -757,7 +803,28 @@ Post only public-safe references:
 
 Do not paste environment variables, raw logs containing credentials, database URLs, private manifests, or bearer tokens.
 
-### Task 7: Reduce alert noise only after recovery, if still necessary
+### Task 7: Add an explicit bounded promotion-backlog maintenance path
+
+This is P1 operational hardening and must be a separate PR after production
+recovery. Current-cycle scoping deliberately stops the realtime scheduler from
+draining unrelated accepted rows, so operators need a safe, observable path for
+rows left behind by a partial historical run or a failed old snapshot.
+
+Minimum contract:
+
+- Require an explicit adapter key and a positive limit no greater than 1,000.
+- Require either exact reviewed raw refs or a bounded age window; never provide
+  an unbounded "all backlog" mode.
+- Report backlog count plus oldest/newest accepted-row age before writing.
+- Reuse the same authorization, topology, lifecycle, idempotency, timeout, and
+  per-candidate durability rules as realtime promotion.
+- Persist an operator audit record containing requester, reason, adapter key,
+  bounds, candidate count, promoted count, and safe failure class.
+- Document dry-run, execute, retry, and cleanup behavior in an operator runbook.
+- Prove a failed chunk leaves the remaining rows visible and retryable without
+  making them eligible for the realtime scheduler.
+
+### Task 8: Reduce alert noise only after recovery, if still necessary
 
 This task is optional and must be a separate PR after Task 6 succeeds.
 
@@ -819,4 +886,5 @@ Do not use `continue-on-error`, remove step 8, or broaden `degraded-ok` to confi
 - [ ] Unique strict public-risk smoke passes.
 - [ ] Manual Hosted Monitoring run passes and closes #212.
 - [ ] Normal scheduled Hosted Monitoring run passes.
+- [ ] Historical accepted backlog has a bounded, audited maintenance path or is tracked as explicit P1 follow-up work.
 - [ ] Remaining issues #71 and #73 are tracked separately; Dependabot work remains separate.

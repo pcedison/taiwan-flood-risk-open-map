@@ -13,7 +13,6 @@
 - [Hosted Monitoring run 33121203759](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33121203759)
 - [Failed job, Hosted public risk evidence smoke](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33121203759/job/98688204783#step:8:34)
 - [Alert issue #212](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/212)
-- [PR #211 investigation handoff comment](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/211#issuecomment-5440510983)
 - [PR #207, alert-loop reduction](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/207)
 - [Current Hosted Monitoring workflow](https://github.com/pcedison/taiwan-flood-risk-open-map/blob/main/.github/workflows/hosted-monitoring.yml)
 
@@ -125,6 +124,12 @@ The existing `apps/workers/tests/test_v1_baseline_runner.py` covers the final-se
 The schema already supports `requirement_role='redundant_subset'` with `redundancy_of_adapter_key`. The fastest fail-closed correction is to keep NCDR CAP required and mark CWA heavy-rain warning as a reviewed redundant subset of NCDR until its credentials, active-event fixture, and operator activation evidence are complete. Enabling CWA instead is valid only after those readiness requirements are proven.
 
 Do not edit migration `0040` after it has been deployed. Add migration `0041` and recompute every affected contract digest at the new mapping revision.
+
+The API read query currently contains two global
+`2026-08-24-v1-baseline` literals. Migration `0041` must not move only the
+warning rows until the query is changed to accept each reviewed contract's own
+revision and require that its mappings match that revision. Otherwise the
+warning catalog will disappear from public reads again.
 
 ## What is still unproven
 
