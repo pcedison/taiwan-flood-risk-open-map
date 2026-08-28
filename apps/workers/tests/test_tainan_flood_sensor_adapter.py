@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 from app.adapters.contracts import EventType, SourceFamily
 from app.adapters.local_tainan import (
+    DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
     TAINAN_FLOOD_SENSOR_API_URL,
     TAINAN_FLOOD_SENSOR_DATA_GOV_URL,
     TAINAN_FLOOD_SENSOR_METADATA,
@@ -121,8 +122,11 @@ def test_tainan_api_adapter_outputs_local_flood_report_evidence() -> None:
     result = adapter.run()
 
     assert calls == [
-        (TAINAN_FLOOD_SENSOR_METADATA_API_URL, 5),
-        (TAINAN_FLOOD_SENSOR_API_URL, 5),
+        (
+            TAINAN_FLOOD_SENSOR_METADATA_API_URL,
+            DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
+        ),
+        (TAINAN_FLOOD_SENSOR_API_URL, DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS),
     ]
     assert result.adapter_key == "local.tainan.flood_sensor"
     assert len(result.fetched) == 2
@@ -185,7 +189,7 @@ def test_tainan_adapter_registry_and_config_are_default_off() -> None:
     assert TAINAN_FLOOD_SENSOR_METADATA.enabled_by_default is False
     assert settings.source_tainan_flood_sensor_enabled is None
     assert settings.source_tainan_flood_sensor_api_enabled is False
-    assert settings.source_tainan_flood_sensor_timeout_seconds == 20
+    assert settings.source_tainan_flood_sensor_timeout_seconds == 45
     assert "local.tainan.flood_sensor" not in enabled_adapter_keys(settings)
     assert TAINAN_FLOOD_SENSOR_API_URL == (
         "https://soa.tainan.gov.tw/Api/Service/Get/21b31a27-3e61-48b8-8259-83c2001bec8c"
@@ -256,6 +260,9 @@ def test_build_runtime_adapters_includes_tainan_only_when_both_gates_are_on() ->
     assert "local.tainan.flood_sensor" in adapters
     assert len(adapters["local.tainan.flood_sensor"].run().normalized) == 1
     assert calls == [
-        (TAINAN_FLOOD_SENSOR_METADATA_API_URL, 5),
-        (TAINAN_FLOOD_SENSOR_API_URL, 5),
+        (
+            TAINAN_FLOOD_SENSOR_METADATA_API_URL,
+            DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
+        ),
+        (TAINAN_FLOOD_SENSOR_API_URL, DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS),
     ]

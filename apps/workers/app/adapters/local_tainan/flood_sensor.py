@@ -31,10 +31,11 @@ TAINAN_FLOOD_SENSOR_METADATA_API_URL = (
     "https://soa.tainan.gov.tw/Api/Service/Get/cdc1ead4-d56a-4092-8e1c-e1f2fa9ee864"
 )
 TAINAN_FLOOD_SENSOR_ATTRIBUTION = "臺南市政府水利局 / 臺南市政府資料開放平台"
-# The realtime payload is roughly 90 KiB and the reviewed government endpoint
-# regularly needs 7-8 seconds to respond.  Keep enough headroom for hosted
-# egress jitter instead of treating a readable source as a failed pipeline.
-DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS = 20
+# The realtime payload is roughly 90 KiB. Local requests regularly need 7-8
+# seconds, while production hosted egress has exceeded 20 seconds. Keep this as
+# both the default and the safety floor: a stale platform override must not turn
+# a readable required source back into a failed pipeline.
+DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS = 45
 TAINAN_LOCAL_TZ = timezone(timedelta(hours=8))
 
 TAINAN_FLOOD_SENSOR_METADATA = AdapterMetadata(
@@ -101,7 +102,10 @@ class TainanFloodSensorApiAdapter:
         self._metadata_api_url = (
             metadata_api_url or TAINAN_FLOOD_SENSOR_METADATA_API_URL
         ).strip()
-        self._timeout_seconds = max(1, timeout_seconds)
+        self._timeout_seconds = max(
+            DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS,
+            timeout_seconds,
+        )
         self._fetched_at = fetched_at
         self._fetch_json = fetch_json or fetch_tainan_json
         self._raw_snapshot_key = raw_snapshot_key

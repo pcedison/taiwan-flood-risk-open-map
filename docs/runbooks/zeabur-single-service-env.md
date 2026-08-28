@@ -121,7 +121,7 @@ the stop removed.
 | `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` |
 | `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` |
 | `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` |
-| `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | Leave unset or `20`; the reviewed government JSON response is too close to the generic eight-second timeout for reliable hosted ingestion |
+| `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | Leave unset or `45`; the adapter clamps lower stale overrides to 45 seconds because production hosted egress has exceeded 20 seconds |
 | `WRA_STATION_API_URL` | Leave blank unless overriding the WRA station metadata endpoint |
 | `SCHEDULER_INTERVAL_SECONDS` | `300` for a 5-minute beta cadence |
 | `SCHEDULER_LEASE_TTL_SECONDS` | `600` |
