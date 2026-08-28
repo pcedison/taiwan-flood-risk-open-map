@@ -650,6 +650,7 @@ NearbySourceHealthReason = Literal[
     "upstream_unavailable",
     "pipeline_unavailable",
     "pipeline_stalled",
+    "source_misconfigured",
     "disabled",
     "not_yet_observed",
 ]
