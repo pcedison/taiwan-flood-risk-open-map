@@ -965,6 +965,11 @@ def query_nearby_latest_official(
                 )
                 AND e.properties->>'evidence_scope' = 'current'
                 AND e.ingestion_status = 'accepted'
+                AND (
+                    latest.adapter_key <> 'official.ncdr.cap'
+                    OR latest.quality_flags->>'active_snapshot_raw_ref'
+                        = NULLIF(data_sources.metadata->>'active_snapshot_raw_ref', '')
+                )
                 AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
                 AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
                 AND NOT (

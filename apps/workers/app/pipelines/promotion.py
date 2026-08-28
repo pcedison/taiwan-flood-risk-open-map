@@ -292,9 +292,43 @@ class PostgresEvidencePromotionWriter:
                     )
                     connection.commit()
                     return None
-                if cap_lifecycle_candidate and _canonical_cap_message_exists(
-                    cursor, payload
-                ):
+                existing_cap_evidence_id = (
+                    _canonical_cap_message_evidence_id(cursor, payload)
+                    if cap_lifecycle_candidate
+                    else None
+                )
+                if existing_cap_evidence_id is not None:
+                    if payload.adapter_key == "official.ncdr.cap":
+                        existing_enriched_payload = _with_admin_area_enrichment(
+                            cursor, payload
+                        )
+                        warning_boundary_rejection = _warning_boundary_rejection_reason(
+                            existing_enriched_payload
+                        )
+                        if warning_boundary_rejection is not None:
+                            _terminally_reject_staging(
+                                cursor,
+                                payload,
+                                reason=warning_boundary_rejection,
+                                authorized=staging_authorization is True,
+                            )
+                            connection.commit()
+                            return None
+                        if (
+                            existing_enriched_payload.properties.get("cap_message_type")
+                            in {"Alert", "Update"}
+                            and _should_upsert_official_realtime_latest(
+                                existing_enriched_payload
+                            )
+                        ):
+                            self._upsert_official_realtime_latest(
+                                cursor,
+                                payload=existing_enriched_payload,
+                                evidence_id=existing_cap_evidence_id,
+                            )
+                            _refresh_ncdr_latest_snapshot_marker(
+                                cursor, existing_enriched_payload
+                            )
                     _terminally_reject_staging(
                         cursor,
                         payload,
@@ -354,6 +388,18 @@ class PostgresEvidencePromotionWriter:
                 if decision == "historical_only":
                     promote_latest = False
                 enriched_payload = _with_admin_area_enrichment(cursor, payload)
+                warning_boundary_rejection = _warning_boundary_rejection_reason(
+                    enriched_payload
+                )
+                if warning_boundary_rejection is not None:
+                    _terminally_reject_staging(
+                        cursor,
+                        payload,
+                        reason=warning_boundary_rejection,
+                        authorized=staging_authorization is True,
+                    )
+                    connection.commit()
+                    return None
                 weighted_payload = (
                     _historical_warning_payload(
                         enriched_payload,
@@ -643,7 +689,16 @@ class PostgresEvidencePromotionWriter:
                 evidence_id,
                 _optional_text(payload.properties.get("source_url")),
                 _optional_text(payload.properties.get("attribution")),
-                _json(_quality_flags(payload.properties)),
+                _json(
+                    _quality_flags(
+                        payload.properties,
+                        raw_ref=(
+                            payload.raw_ref
+                            if payload.adapter_key == "official.ncdr.cap"
+                            else None
+                        ),
+                    )
+                ),
             ),
         )
 
@@ -762,23 +817,25 @@ def _cap_reference_triples(
     return tuple(sorted(canonical))
 
 
-def _canonical_cap_message_exists(cursor: Any, payload: EvidencePromotionPayload) -> bool:
+def _canonical_cap_message_evidence_id(
+    cursor: Any, payload: EvidencePromotionPayload
+) -> str | None:
     if payload.adapter_key is None:
-        return False
+        return None
     triple = _cap_triple(
         payload.properties.get("cap_sender"),
         payload.properties.get("cap_identifier"),
         payload.properties.get("cap_sent"),
     )
     if triple is None:
-        return False
+        return None
     sender, identifier, sent = triple
     admin_code = _optional_text(payload.properties.get("admin_code"))
     discriminator = "area" if admin_code is not None else "message"
     cursor.execute(
         """
         /* canonical-cap-idempotence */
-        SELECT 1
+        SELECT cap_evidence.id::text
         FROM evidence cap_evidence
         LEFT JOIN data_sources cap_source ON cap_source.id = cap_evidence.data_source_id
         WHERE COALESCE(
@@ -815,7 +872,36 @@ def _canonical_cap_message_exists(cursor: Any, payload: EvidencePromotionPayload
             admin_code,
         ),
     )
-    return cursor.fetchone() is not None
+    row = cursor.fetchone()
+    return str(row[0]) if row is not None else None
+
+
+def _refresh_ncdr_latest_snapshot_marker(
+    cursor: Any, payload: EvidencePromotionPayload
+) -> None:
+    if payload.adapter_key != "official.ncdr.cap" or payload.raw_ref is None:
+        return
+    station_id = _official_realtime_station_id(payload)
+    if station_id is None:
+        return
+    cursor.execute(
+        """
+        /* refresh-ncdr-active-snapshot */
+        UPDATE official_realtime_latest
+        SET
+            quality_flags = jsonb_set(
+                quality_flags,
+                '{active_snapshot_raw_ref}',
+                to_jsonb(%s::text),
+                true
+            ),
+            updated_at = now()
+        WHERE adapter_key = 'official.ncdr.cap'
+            AND event_type = 'flood_warning'
+            AND station_id = %s
+        """,
+        (payload.raw_ref, station_id),
+    )
 
 
 def _validated_staging_id(payload: EvidencePromotionPayload) -> str | None:
@@ -1580,6 +1666,8 @@ def _with_reviewed_warning_boundary(
 ) -> EvidencePromotionPayload:
     if _geojson_geometry(payload.properties) is not None:
         return payload
+    if payload.adapter_key == "official.ncdr.cap":
+        return _with_reviewed_ncdr_warning_boundary(cursor, payload)
     admin_code = _optional_text(payload.properties.get("admin_code"))
     if admin_code is None or re.fullmatch(r"[0-9]{8}", admin_code) is None:
         return payload
@@ -1674,6 +1762,134 @@ def _with_reviewed_warning_boundary(
     properties["latest_point_geometry"] = point
     properties["location_precision"] = "admin_area"
     return replace(payload, properties=properties)
+
+
+def _with_reviewed_ncdr_warning_boundary(
+    cursor: Any, payload: EvidencePromotionPayload
+) -> EvidencePromotionPayload:
+    geocode_profile = _optional_text(payload.properties.get("ncdr_geocode_profile"))
+    geocode_value = _optional_text(payload.properties.get("ncdr_geocode"))
+    admin_code = _optional_text(payload.properties.get("admin_code"))
+    if (
+        geocode_profile != "Taiwan_Geocode_103"
+        or geocode_value is None
+        or re.fullmatch(r"[0-9]{7}", geocode_value) is None
+        or admin_code != f"{geocode_value}0"
+    ):
+        return payload
+    cursor.execute(
+        """
+        /* reviewed-ncdr-warning-boundary */
+        WITH active_snapshot_candidates AS (
+            SELECT snapshot.id
+            FROM ncdr_alert_area_boundary_snapshots snapshot
+            WHERE snapshot.adapter_key = 'official.ncdr.cap'
+                AND snapshot.geocode_profile = 'Taiwan_Geocode_103'
+                AND snapshot.manifest_version = 'ncdr-alert-area-jsonb-v1'
+                AND snapshot.is_active
+                AND snapshot.is_complete
+                AND snapshot.expected_count = 368
+                AND snapshot.imported_count = snapshot.expected_count
+                AND snapshot.reviewed_at IS NOT NULL
+                AND length(btrim(snapshot.review_ref)) BETWEEN 1 AND 1024
+                AND snapshot.archive_sha256 = snapshot.approved_archive_sha256
+                AND snapshot.manifest_sha256 IS NOT NULL
+                AND snapshot.manifest_sha256 = snapshot.approved_manifest_sha256
+                AND (
+                    SELECT count(*)
+                    FROM ncdr_alert_area_boundaries boundary_count
+                    WHERE boundary_count.snapshot_id = snapshot.id
+                ) = snapshot.expected_count
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM ncdr_alert_area_boundaries boundary_integrity
+                    WHERE boundary_integrity.snapshot_id = snapshot.id
+                        AND (
+                            ST_IsEmpty(boundary_integrity.geom)
+                            OR NOT ST_IsValid(boundary_integrity.geom)
+                            OR boundary_integrity.geom_sha256 <> encode(
+                                digest(ST_AsEWKB(boundary_integrity.geom), 'sha256'),
+                                'hex'
+                            )
+                        )
+                )
+                AND snapshot.manifest_sha256 = (
+                    SELECT encode(
+                        digest(
+                            convert_to(
+                                jsonb_agg(
+                                    jsonb_build_array(
+                                        boundary_manifest.geocode_value,
+                                        boundary_manifest.county_name,
+                                        boundary_manifest.town_name,
+                                        boundary_manifest.english_name,
+                                        boundary_manifest.geom_sha256
+                                    )
+                                    ORDER BY boundary_manifest.geocode_value
+                                )::text,
+                                'UTF8'
+                            ),
+                            'sha256'
+                        ),
+                        'hex'
+                    )
+                    FROM ncdr_alert_area_boundaries boundary_manifest
+                    WHERE boundary_manifest.snapshot_id = snapshot.id
+                )
+        ),
+        active_snapshot AS (
+            SELECT candidate.id
+            FROM active_snapshot_candidates candidate
+            WHERE (SELECT count(*) FROM active_snapshot_candidates) = 1
+        )
+        SELECT
+            ST_AsGeoJSON(boundary.geom),
+            ST_AsGeoJSON(ST_PointOnSurface(boundary.geom)),
+            boundary.county_name,
+            boundary.town_name,
+            snapshot.id::text
+        FROM active_snapshot snapshot
+        JOIN ncdr_alert_area_boundaries boundary
+            ON boundary.snapshot_id = snapshot.id
+        WHERE boundary.geocode_value = %s
+            AND NOT ST_IsEmpty(boundary.geom)
+            AND ST_IsValid(boundary.geom)
+            AND GeometryType(boundary.geom) IN ('POLYGON', 'MULTIPOLYGON')
+        """,
+        (geocode_value,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return payload
+    try:
+        boundary = json.loads(str(row[0]))
+        point = json.loads(str(row[1]))
+    except (json.JSONDecodeError, TypeError):
+        return payload
+    if boundary.get("type") == "Polygon":
+        boundary = {"type": "MultiPolygon", "coordinates": [boundary.get("coordinates", [])]}
+    if boundary.get("type") != "MultiPolygon" or point.get("type") != "Point":
+        return payload
+    properties = dict(payload.properties)
+    properties["location_payload"] = {"geometry": boundary}
+    properties["latest_point_geometry"] = point
+    properties["location_precision"] = "admin_area"
+    properties["county"] = str(row[2])
+    properties["town"] = str(row[3])
+    properties["ncdr_boundary_snapshot_id"] = str(row[4])
+    return replace(payload, properties=properties)
+
+
+def _warning_boundary_rejection_reason(
+    payload: EvidencePromotionPayload,
+) -> str | None:
+    if not _is_current_cap_lifecycle_candidate(payload):
+        return None
+    if payload.properties.get("cap_message_type") not in {"Alert", "Update"}:
+        return None
+    if _geojson_geometry(payload.properties) is None:
+        return "unreviewed_warning_boundary"
+    return None
 
 
 def _needs_admin_area_enrichment(properties: dict[str, Any]) -> bool:
@@ -2156,7 +2372,9 @@ def _optional_float(value: Any) -> float | None:
     return result
 
 
-def _quality_flags(properties: dict[str, Any]) -> dict[str, Any]:
+def _quality_flags(
+    properties: dict[str, Any], *, raw_ref: str | None = None
+) -> dict[str, Any]:
     quality_flags = properties.get("quality_flags")
     result = dict(quality_flags) if isinstance(quality_flags, dict) else {}
     for key in (
@@ -2168,6 +2386,8 @@ def _quality_flags(properties: dict[str, Any]) -> dict[str, Any]:
         value = properties.get(key)
         if isinstance(value, str) and value:
             result[key] = value
+    if raw_ref is not None:
+        result["active_snapshot_raw_ref"] = raw_ref
     triple = _cap_triple(
         properties.get("cap_sender"),
         properties.get("cap_identifier"),

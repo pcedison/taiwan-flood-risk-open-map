@@ -83,6 +83,8 @@ RUN pip install --no-cache-dir "PyYAML>=6.0"
 
 COPY infra/migrations /app/infra/migrations
 COPY infra/scripts/apply_migrations.py /app/infra/scripts/apply_migrations.py
+COPY infra/scripts/import_ncdr_alert_area_boundaries.py /app/infra/scripts/import_ncdr_alert_area_boundaries.py
+COPY infra/scripts/activate_ncdr_alert_area_boundary_snapshot.py /app/infra/scripts/activate_ncdr_alert_area_boundary_snapshot.py
 
 COPY --from=web-builder /app/apps/web/package.json /app/apps/web/package-lock.json /app/apps/web/
 COPY --from=web-builder /app/apps/web/node_modules /app/apps/web/node_modules

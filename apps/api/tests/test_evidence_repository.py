@@ -936,6 +936,9 @@ def test_query_nearby_latest_official_uses_selected_radius() -> None:
     assert "THEN e.properties->>'location_precision'" in sql
     assert "JOIN data_sources" in sql
     assert "data_sources.is_enabled = true" in sql
+    assert "latest.adapter_key <> 'official.ncdr.cap'" in sql
+    assert "latest.quality_flags->>'active_snapshot_raw_ref'" in sql
+    assert "data_sources.metadata->>'active_snapshot_raw_ref'" in sql
     assert "cap_status" in sql
     assert "cap_message_type" in sql
     assert "active_until" in sql

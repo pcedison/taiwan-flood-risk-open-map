@@ -191,6 +191,16 @@ def _staging_metadata_errors(
     ):
         errors.append("admin_code must be a canonical 8-digit code")
 
+    ncdr_geocode_profile = raw_payload.get("ncdr_geocode_profile")
+    ncdr_geocode = raw_payload.get("ncdr_geocode")
+    if ncdr_geocode_profile is not None or ncdr_geocode is not None:
+        if ncdr_geocode_profile != "Taiwan_Geocode_103":
+            errors.append("ncdr_geocode_profile is not reviewed")
+        if not isinstance(ncdr_geocode, str) or re.fullmatch(r"[0-9]{7}", ncdr_geocode) is None:
+            errors.append("ncdr_geocode must be a canonical 7-digit code")
+        if isinstance(ncdr_geocode, str) and admin_code != f"{ncdr_geocode}0":
+            errors.append("admin_code does not match ncdr_geocode")
+
     limitations = raw_payload.get("limitations")
     if limitations is not None:
         if not isinstance(limitations, (list, tuple)):
@@ -469,6 +479,9 @@ _STAGING_PAYLOAD_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "network_link_source_url",
     "limitations",
     "admin_code",
+    "ncdr_geocode_profile",
+    "ncdr_geocode_name",
+    "ncdr_geocode",
     "dataset_revision",
 )
 

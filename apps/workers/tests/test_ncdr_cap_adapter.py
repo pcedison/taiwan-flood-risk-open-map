@@ -191,7 +191,8 @@ def test_ncdr_datastore_then_dump_uses_exact_separate_parameter_mappings() -> No
             8,
         )
     ]
-    assert result.normalized == ()
+    assert len(result.normalized) == 1
+    assert result.normalized[0].source_id == result.fetched[0].source_id
     assert result.fetched[0].payload["transport_capid"] == "CAP-001"
     assert "test-secret" not in result.fetched[0].source_url
     assert "test-secret" not in json.dumps(result.fetched[0].payload)
@@ -872,14 +873,14 @@ def test_ncdr_circle_is_raw_audited_without_center_point() -> None:
     assert build_staging_batch(result).accepted == ()
 
 
-def test_ncdr_geocode_area_is_raw_audited_with_canonical_cap_identity() -> None:
+def test_ncdr_geocode_area_is_normalized_with_canonical_cap_identity() -> None:
     result = _adapter(
         index_payload={"data": [{"capid": "CAP-001"}]},
         dumps={"CAP-001": _fixture("ncdr_dump_flood_cap.xml")},
     ).run()
 
-    assert result.normalized == ()
-    assert result.source_rejections[0].reason_code == "ncdr_unreviewed_admin_geometry"
+    assert len(result.normalized) == 1
+    assert result.source_rejections == ()
     raw = result.fetched[0]
     assert raw.source_id.startswith("cap:")
     assert raw.source_id != "CAP-001"
@@ -896,7 +897,73 @@ def test_ncdr_geocode_area_is_raw_audited_with_canonical_cap_identity() -> None:
     assert raw.payload["active_from"] == "2026-06-15T02:35:00+00:00"
     assert raw.payload["active_until"] == "2026-06-15T07:00:00+00:00"
     assert raw.payload["source_geocodes"] == [{"valueName": "TOWNCODE", "value": "6703500"}]
+    assert raw.payload["ncdr_geocode_profile"] == "Taiwan_Geocode_103"
+    assert raw.payload["ncdr_geocode"] == "6703500"
+    assert raw.payload["admin_code"] == "67035000"
     assert "geometry" not in raw.payload
+    staged = build_staging_batch(
+        result,
+        ingestion_generation_started_at=FETCHED_AT,
+        snapshot_generation_mode="complete_replace",
+    ).accepted
+    assert len(staged) == 1
+    assert staged[0].payload["ncdr_geocode"] == "6703500"
+
+
+def test_ncdr_metadata_declares_complete_active_snapshot_replacement() -> None:
+    assert NCDR_CAP_METADATA.snapshot_generation_mode == "complete_replace"
+
+
+def test_ncdr_official_taiwan_geocode_profile_alias_is_normalized() -> None:
+    xml_text = _fixture("ncdr_dump_flood_cap.xml").replace(
+        "<valueName>TOWNCODE</valueName>",
+        "<valueName>Taiwan_Geocode_103</valueName>",
+    )
+
+    result = _adapter(
+        index_payload={"data": [{"capid": "CAP-001"}]},
+        dumps={"CAP-001": xml_text},
+    ).run()
+
+    assert len(result.normalized) == 1
+    assert result.source_rejections == ()
+    assert result.fetched[0].payload["ncdr_geocode_name"] == "Taiwan_Geocode_103"
+    assert result.fetched[0].payload["ncdr_geocode"] == "6703500"
+
+
+def test_ncdr_conflicting_reviewed_geocodes_remain_audit_only() -> None:
+    xml_text = _fixture("ncdr_dump_flood_cap.xml").replace(
+        "      </geocode>",
+        "      </geocode>\n"
+        "      <geocode><valueName>Taiwan_Geocode_103</valueName>"
+        "<value>6703600</value></geocode>",
+    )
+
+    result = _adapter(
+        index_payload={"data": [{"capid": "CAP-001"}]},
+        dumps={"CAP-001": xml_text},
+    ).run()
+
+    assert result.normalized == ()
+    assert result.source_rejections[0].reason_code == "ncdr_unreviewed_admin_geometry"
+    assert "ncdr_geocode" not in result.fetched[0].payload
+    assert build_staging_batch(result).accepted == ()
+
+
+def test_ncdr_source_polygon_is_not_trusted_even_with_a_reviewed_geocode() -> None:
+    xml_text = _fixture("ncdr_dump_flood_cap.xml").replace(
+        "      <geocode>",
+        "      <polygon>22.90,120.10 22.91,120.11 22.90,120.10</polygon>\n"
+        "      <geocode>",
+    )
+
+    result = _adapter(
+        index_payload={"data": [{"capid": "CAP-001"}]},
+        dumps={"CAP-001": xml_text},
+    ).run()
+
+    assert result.normalized == ()
+    assert result.source_rejections[0].reason_code == "ncdr_polygon_geometry_unreviewed"
     assert build_staging_batch(result).accepted == ()
 
 
@@ -951,14 +1018,14 @@ def test_ncdr_namespaced_alerts_collection_preserves_every_unreviewed_area() -> 
     ).run()
 
     assert len(result.fetched) == 4
-    assert len(result.source_rejections) == 4
+    assert len(result.source_rejections) == 3
+    assert len(result.normalized) == 1
     assert len({item.source_id for item in result.fetched}) == 4
     assert all(item.source_id.startswith("cap:") for item in result.fetched)
     assert all(item.payload["transport_capid"] == "TRANSPORT-001" for item in result.fetched)
     assert {item.reason_code for item in result.source_rejections} == {
         "ncdr_polygon_geometry_unreviewed",
         "ncdr_circle_geometry_unreviewed",
-        "ncdr_unreviewed_admin_geometry",
         "ncdr_unreviewed_message_geometry",
     }
 
@@ -978,8 +1045,13 @@ def test_ncdr_namespaced_alerts_collection_preserves_every_unreviewed_area() -> 
     ]
     assert by_area[None]["cap_identifier"] == "NCDR-MULTI-002"
     assert by_area[None]["source_geocodes"] == []
-    assert result.normalized == ()
-    assert build_staging_batch(result).accepted == ()
+    assert len(result.normalized) == 1
+    staged = build_staging_batch(
+        result,
+        ingestion_generation_started_at=FETCHED_AT,
+        snapshot_generation_mode="complete_replace",
+    )
+    assert len(staged.accepted) == 1
 
 
 def test_ncdr_audit_rows_over_256_across_successful_dumps_fail_closed() -> None:
@@ -1303,7 +1375,7 @@ def test_ncdr_default_runtime_builder_uses_two_stage_contract() -> None:
     )
 
     assert tuple(adapters) == ("official.ncdr.cap",)
-    assert adapters["official.ncdr.cap"].run().normalized == ()
+    assert len(adapters["official.ncdr.cap"].run().normalized) == 1
     assert index_calls[0][0] == ncdr_cap_module.NCDR_DATASTORE_API_URL
     assert dump_calls[0][0] == ncdr_cap_module.NCDR_DUMP_API_URL
 
@@ -1324,14 +1396,16 @@ def test_ncdr_public_active_feed_needs_no_api_key_and_fetches_flood_cap() -> Non
     ).run()
 
     assert len(result.fetched) == 1
-    assert result.normalized == ()
+    assert len(result.normalized) == 1
     assert result.no_active_event is False
-    assert result.source_rejections[0].reason_code == "ncdr_unreviewed_admin_geometry"
+    assert result.source_rejections == ()
     assert calls == [
         (ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL, {}, 6),
         (
-            "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/"
-            "WRA_FloodWarn_20260615103000_0000.cap",
+            (
+                "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/"
+                "WRA_FloodWarn_20260615103000_0000.cap"
+            ),
             {},
             6,
         ),
