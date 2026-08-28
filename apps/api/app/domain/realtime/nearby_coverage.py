@@ -1048,6 +1048,20 @@ def _pipeline_failure_decision(
             "source_misconfigured",
             "背景來源缺少必要設定或設定無效；未公開任何憑證內容。",
         )
+    if (row.latest_run_error_code or "").endswith("TimeoutError"):
+        return _source_decision(
+            "failed",
+            "upstream_unavailable",
+            "背景來源在限定時間內未完成回應；未公開內部連線資訊。",
+        )
+    if (row.latest_run_error_code or "").endswith(
+        ("FetchError", "HttpError", "PayloadError")
+    ):
+        return _source_decision(
+            "failed",
+            "upstream_unavailable",
+            "背景來源目前未提供可讀取的有效回應；未公開內部連線資訊。",
+        )
     return _source_decision(
         "failed",
         "pipeline_unavailable",
