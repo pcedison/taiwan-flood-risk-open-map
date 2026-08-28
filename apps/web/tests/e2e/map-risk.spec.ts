@@ -145,7 +145,10 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
         expires_at: "2026-04-29T03:10:00Z",
         explanation: {
           main_reasons: ["查詢半徑內與淹水潛勢圖資相交。"],
-          missing_sources: ["尚未接入即時雨量資料。", "尚未接入即時水位資料。"],
+          missing_sources: [
+            "本次查詢未取得可採用的即時雨量觀測。",
+            "本次查詢未取得可採用的即時水位或淹水感測觀測。",
+          ],
           summary: "即時風險為低，歷史參考風險為中，資料可信度為中。",
         },
         historical: { level: "medium" },
@@ -347,9 +350,9 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByTestId("nearby-sensing")).toContainText("缺口");
   await expect(page.getByTestId("nearby-sensing")).toContainText("水位");
   await expect(page.getByText("資料限制")).toBeVisible();
-  await expect(page.getByText("尚未接入即時雨量資料。")).not.toBeVisible();
+  await expect(page.getByText("本次查詢未取得可採用的即時雨量觀測。")).not.toBeVisible();
   await page.getByTestId("evidence-limitations").getByText("資料限制").click();
-  await expect(page.getByText("尚未接入即時雨量資料。")).toBeVisible();
+  await expect(page.getByText("本次查詢未取得可採用的即時雨量觀測。")).toBeVisible();
   const evidencePanel = page.getByTestId("evidence-panel");
   await expect(evidencePanel).toContainText("回答：哪些來源支撐這次判讀？");
   await expect(evidencePanel).toContainText("來源可信度");

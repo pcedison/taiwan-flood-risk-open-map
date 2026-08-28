@@ -25,6 +25,9 @@
     "realtime_level": "\u672a\u77e5",
     "historical_level": "\u672a\u77e5",
     "confidence_level": "\u4e2d",
-    "missing_sources": []
+    "missing_sources": [
+      "本次查詢未取得可採用的即時雨量觀測。",
+      "本次查詢未取得可採用的即時水位或淹水感測觀測。"
+    ]
   }
 }

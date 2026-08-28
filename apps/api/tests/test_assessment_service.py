@@ -176,6 +176,60 @@ def test_service_scores_current_and_history_in_separate_calls(
     assert response.community.state == "none"
 
 
+def test_historical_scorer_missing_sources_do_not_leak_into_current_explanation(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    def scorer(
+        signals: tuple[RiskEvidenceSignal, ...], *, now: datetime
+    ) -> RiskScoringResult:
+        result = score_risk(signals, now=now)
+        marker = (
+            "目前即時資料缺口"
+            if any(signal.evidence_scope == "current" for signal in signals)
+            else "歷史評分器不應輸出的即時資料缺口"
+        )
+        return replace(result, missing_sources=(marker,))
+
+    response = AssessmentService(FakeRepository(data), scorer).assess(
+        risk_request, now=now
+    )
+
+    assert "目前即時資料缺口" in response.explanation.missing_sources
+    assert (
+        "歷史評分器不應輸出的即時資料缺口"
+        not in response.explanation.missing_sources
+    )
+
+
+def test_optional_disabled_source_is_diagnostic_not_a_required_limitation(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    optional_message = "選用來源目前未啟用"
+    optional_state = AssessmentSourceState(
+        source_key="official.cwa.heavy_rain_warning",
+        signal_type="flood_warning",
+        state="disabled",
+        observed_at=None,
+        checked_at=now,
+        message=optional_message,
+    )
+    response = AssessmentService(
+        FakeRepository(replace(data, source_states=(*data.source_states, optional_state))),
+        score_risk,
+    ).assess(risk_request, now=now)
+
+    assert any(
+        source.source_key == optional_state.source_key
+        for source in response.data_status.sources
+    )
+    assert optional_message not in response.data_status.missing
+    assert optional_message not in response.explanation.missing_sources
+
+
 def _context_records() -> tuple[EvidenceRecord, ...]:
     return (
         _record(
