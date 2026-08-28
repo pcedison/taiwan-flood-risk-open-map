@@ -31,7 +31,10 @@ TAINAN_FLOOD_SENSOR_METADATA_API_URL = (
     "https://soa.tainan.gov.tw/Api/Service/Get/cdc1ead4-d56a-4092-8e1c-e1f2fa9ee864"
 )
 TAINAN_FLOOD_SENSOR_ATTRIBUTION = "臺南市政府水利局 / 臺南市政府資料開放平台"
-DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS = 8
+# The realtime payload is roughly 90 KiB and the reviewed government endpoint
+# regularly needs 7-8 seconds to respond.  Keep enough headroom for hosted
+# egress jitter instead of treating a readable source as a failed pipeline.
+DEFAULT_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS = 20
 TAINAN_LOCAL_TZ = timezone(timedelta(hours=8))
 
 TAINAN_FLOOD_SENSOR_METADATA = AdapterMetadata(
