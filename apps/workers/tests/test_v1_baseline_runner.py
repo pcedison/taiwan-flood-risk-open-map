@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, datetime
+import signal
 from types import SimpleNamespace
 from typing import Any
 
@@ -138,6 +139,66 @@ def test_context_sources_stay_outside_the_v1_baseline_scope() -> None:
         "official.wra.flood_warning",
     ):
         assert adapter_key not in V1_BASELINE_ADAPTER_KEYS, adapter_key
+
+
+def test_scheduler_sigterm_unwinds_and_releases_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    previous_handler = object()
+
+    class _Queue:
+        def __init__(self, *, database_url: str) -> None:
+            captured["database_url"] = database_url
+
+        def acquire_scheduler_lease(self, **fields: object) -> bool:
+            captured["acquired"] = fields
+            return True
+
+        def release_scheduler_lease(self, **fields: object) -> None:
+            captured["released"] = fields
+
+    def fake_signal(sig: signal.Signals, handler: object) -> object:
+        calls = captured.setdefault("signal_calls", [])
+        assert isinstance(calls, list)
+        calls.append((sig, handler))
+        captured["active_handler"] = handler
+        return previous_handler
+
+    def terminate_tick(**_fields: object) -> bool:
+        handler = captured["active_handler"]
+        assert callable(handler)
+        handler(signal.SIGTERM, None)
+        raise AssertionError("SIGTERM handler returned")
+
+    monkeypatch.setattr(runtime_cli, "PostgresRuntimeQueue", _Queue)
+    monkeypatch.setattr(runtime_cli.signal, "signal", fake_signal)
+    monkeypatch.setattr(runtime_cli, "_run_v1_baseline_tick", terminate_tick)
+
+    settings = replace(
+        load_worker_settings({}),
+        database_url="postgresql://example.test/flood",
+    )
+    with pytest.raises(SystemExit) as raised:
+        runtime_cli.run_v1_baseline_enabled_adapters(
+            settings=settings,
+            database_url=None,
+            scheduler=True,
+            once=False,
+            max_ticks=None,
+        )
+
+    assert raised.value.code == 0
+    acquired = captured["acquired"]
+    released = captured["released"]
+    assert isinstance(acquired, dict)
+    assert isinstance(released, dict)
+    assert released["lease_key"] == acquired["lease_key"]
+    assert released["holder_id"] == acquired["holder_id"]
+    signal_calls = captured["signal_calls"]
+    assert isinstance(signal_calls, list)
+    assert signal_calls[0] == (signal.SIGTERM, runtime_cli._exit_scheduler_on_sigterm)
+    assert signal_calls[-1] == (signal.SIGTERM, previous_handler)
 
 
 def test_tick_reports_every_runnable_source_not_just_the_last_one(
