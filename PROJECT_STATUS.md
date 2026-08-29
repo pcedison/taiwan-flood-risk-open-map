@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-29 16:35 Asia/Taipei (08:35 UTC)
+Last verified: 2026-08-29 20:34 Asia/Taipei (12:34 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -25,16 +25,20 @@ the live verification sources listed below.
 
 ## Verified production checkpoint
 
-- Recovery baseline and deployed SHA: `5f31ff1b317d551ae026fbb8191cdeaada47c3d8`
-  (PR [#250](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/250)).
+- Current `origin/main` and deployed SHA:
+  `de65ec409a340a74a69f942377a71b2293511f1a` (PR
+  [#254](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/254)).
 - At the verification time, `origin/main`, `/health`, and `/ready` all reported
-  that SHA; PostgreSQL and Redis were healthy.
+  that SHA; PostgreSQL and Redis were healthy. CI and CodeQL completed
+  successfully for the same commit, with no open code-scanning, Dependabot, or
+  secret-scanning alerts.
 - Hosted Monitoring run
   [#33239203333](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33239203333)
   was a real `schedule` event and completed successfully. It closed the resolved
   schedule watchdog issue [#199](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/199).
 - Open pull requests: zero at the checkpoint.
-- The strict hosted public-risk smoke passed on the recovery baseline.
+- The deployment-identity smoke and strict hosted public-risk smoke both passed
+  against the current deployed SHA.
 - The required hosted backbone is CWA rainfall, WRA water level, NCDR CAP, WRA
   IoW flood depth, and Civil IoT sewer water level. Advisory sources remain
   distinguishable from required sources and cannot silently weaken the gate.
@@ -43,10 +47,18 @@ the live verification sources listed below.
   preserves the adapter-provided official dataset URL and presents current
   Tainan flood-depth evidence as current evidence instead of substituting a
   generic or historical provenance URL.
+- PR [#253](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/253)
+  makes the CWA tide adapter select the newest valid observation instead of
+  trusting response order. PR
+  [#254](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/254)
+  aligns tide freshness with the reviewed hourly source cadence.
 
-This SHA is a dated recovery checkpoint, not a permanent deployment pin. After
-any merge, the new full `origin/main` SHA becomes the expected deployment SHA
-and the deployment plus strict public-risk smokes must be rerun.
+The earlier schedule-recovery baseline was
+`5f31ff1b317d551ae026fbb8191cdeaada47c3d8` (PR
+[#250](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/250)). It is
+retained as historical evidence, not a permanent deployment pin. After any
+merge, the new full `origin/main` SHA becomes the expected deployment SHA and
+the deployment plus strict public-risk smokes must be rerun.
 
 ## Remaining open work
 
