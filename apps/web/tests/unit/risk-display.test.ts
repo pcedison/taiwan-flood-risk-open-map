@@ -874,7 +874,7 @@ test("contradictory no-station payload is downgraded when complementary sources 
   const observedState = nearbySensingState({
     assessment: { nearby_realtime_coverage: observedCoverage },
   });
-  assert.equal(observedState.badge, "附近觀測：部分來源異常");
+  assert.equal(observedState.badge, "附近觀測：可用但不完整");
   assert.equal(observedState.tone, "warn");
 });
 
@@ -1132,10 +1132,43 @@ test("nearby sensing state reports partial failure without hiding useful observa
     assessment: { nearby_realtime_coverage: coverage },
   });
 
-  assert.equal(state.badge, "附近觀測：部分來源異常");
-  assert.match(state.summary, /部分即時觀測/);
+  assert.equal(state.badge, "附近觀測：可用但不完整");
+  assert.match(state.summary, /另有來源或更新管線異常/);
   assert.match(state.items[0].detail, /320 公尺；新鮮/);
   assert.match(state.note, /不代表現地安全/);
+
+  const delayedCoverage: NearbyRealtimeCoverage = {
+    ...coverage,
+    source_health: coverage.source_health?.map((source) => ({
+      ...source,
+      health_status: "degraded",
+      reason_code: "delayed",
+    })),
+    source_health_status: "degraded",
+  };
+  const delayedState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: delayedCoverage },
+  });
+  assert.equal(delayedState.badge, "附近觀測：可用但更新不齊");
+  assert.match(delayedState.summary, /部分來源更新較慢或不完整/);
+  assert.doesNotMatch(delayedState.summary, /來源異常/);
+
+  const regionalOnlyCoverage: NearbyRealtimeCoverage = {
+    ...coverage,
+    overall_level: "no_local_sensor",
+    signal_breakdown: coverage.signal_breakdown.map((signal) => ({
+      ...signal,
+      availability_state: "regional_reference",
+      coverage_level: "no_local_sensor",
+      nearest_distance_m: 7_500,
+    })),
+  };
+  const regionalOnlyState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: regionalOnlyCoverage },
+  });
+  assert.equal(regionalOnlyState.badge, "附近觀測：僅區域參考且不完整");
+  assert.match(regionalOnlyState.summary, /區域參考觀測/);
+  assert.doesNotMatch(regionalOnlyState.summary, /可用即時觀測/);
 
   coverage.source_health = coverage.source_health?.map((source) => ({
     ...source,

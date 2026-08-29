@@ -561,6 +561,26 @@ def test_tainan_gap_clears_only_for_fresh_or_degraded_mapped_source(
     assert data.local_machine_feed_missing == ()
 
 
+def test_tainan_gap_describes_a_current_update_failure_not_a_missing_integration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mapping = _mapping("local.tainan.flood_sensor", "flood_depth")
+    data = _repository(
+        monkeypatch,
+        query_realtime_jurisdiction_context=lambda **_: _context(
+            "67000000",
+            "臺南市",
+            mappings=(mapping,),
+        ),
+        query_realtime_source_health_rows=lambda **_: (),
+    ).load(**POINT)
+
+    assert data.local_machine_feed_missing == (
+        "臺南市地方淹水感測目前暫無可用更新",
+    )
+    assert "尚未可用" not in data.local_machine_feed_missing[0]
+
+
 def test_completeness_requires_every_considered_jurisdiction_per_required_signal() -> None:
     contracts = tuple(
         RealtimeJurisdictionSignalContract(
