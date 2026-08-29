@@ -56,6 +56,12 @@ admin_bearer = HTTPBearer(auto_error=False)
 REALTIME_FRESH_SECONDS = 10 * 60
 REALTIME_DEGRADED_SECONDS = 30 * 60
 REALTIME_STALE_SECONDS = 60 * 60
+# Dataset 142980 publishes on an hourly cadence.  Keep the admin diagnostics
+# aligned with the worker freshness policy so a healthy hourly source is not
+# reported as failed by the hosted monitor after only 60 minutes.
+REALTIME_THRESHOLDS_BY_ADAPTER = {
+    "official.wra_iow.flood_depth": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
+}
 CENTRAL_BACKBONE_REQUIRED_FAMILIES = ("CWA", "WRA", "NCDR", "Civil IoT")
 CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS = (
     "official.cwa.rainfall",
@@ -942,11 +948,19 @@ def _freshness_state(
         age_seconds = _lag_seconds(latest_observed_at)
         if age_seconds is None:
             return "stale"
-        if age_seconds <= REALTIME_FRESH_SECONDS:
+        fresh_seconds, degraded_seconds, stale_seconds = REALTIME_THRESHOLDS_BY_ADAPTER.get(
+            adapter_key,
+            (
+                REALTIME_FRESH_SECONDS,
+                REALTIME_DEGRADED_SECONDS,
+                REALTIME_STALE_SECONDS,
+            ),
+        )
+        if age_seconds <= fresh_seconds:
             return "fresh"
-        if age_seconds <= REALTIME_DEGRADED_SECONDS:
+        if age_seconds <= degraded_seconds:
             return "degraded"
-        if age_seconds <= REALTIME_STALE_SECONDS:
+        if age_seconds <= stale_seconds:
             return "stale"
         return "failed"
     if health_status == "healthy":

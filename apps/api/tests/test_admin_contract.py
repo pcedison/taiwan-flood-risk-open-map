@@ -332,7 +332,6 @@ def test_admin_enabled_gates_include_flood_sensor_live_gate(
     "adapter_key",
     [
         "official.cwa.tide_level",
-        "official.wra_iow.flood_depth",
         "local.taipei.sewer_water_level",
         "local.taipei.river_water_level",
         "local.taipei.pump_station",
@@ -372,6 +371,29 @@ def test_admin_freshness_uses_realtime_cadence_for_new_backbone_sources(
             upstream_status="succeeded",
         )
         == "stale"
+    )
+
+
+def test_admin_freshness_uses_hourly_wra_iow_cadence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-04-28T13:00:00+00:00"),
+    )
+
+    assert (
+        admin_route._freshness_state(
+            adapter_key="official.wra_iow.flood_depth",
+            health_status="healthy",
+            is_enabled=True,
+            source_timestamp_min=None,
+            source_timestamp_max=datetime.fromisoformat("2026-04-28T12:15:00+00:00"),
+            latest_observed_at=datetime.fromisoformat("2026-04-28T12:15:00+00:00"),
+            upstream_status="succeeded",
+        )
+        == "fresh"
     )
 
 

@@ -11,20 +11,23 @@ sys.path.insert(0, str(REPO_ROOT))
 from scripts import hosted_source_freshness_smoke as smoke  # noqa: E402
 
 
-FULL_OFFICIAL_BACKBONE = [
+REQUIRED_OFFICIAL_BACKBONE = [
     "official.cwa.rainfall",
-    "official.cwa.tide_level",
     "official.wra.water_level",
     "official.ncdr.cap",
     "official.wra_iow.flood_depth",
-    "official.civil_iot.flood_sensor",
     "official.civil_iot.sewer_water_level",
+]
+ADVISORY_OFFICIAL_SOURCES = [
+    "official.cwa.tide_level",
+    "official.civil_iot.flood_sensor",
     "official.civil_iot.pump_water_level",
     "official.civil_iot.gate_water_level",
 ]
+FULL_OFFICIAL_BACKBONE = REQUIRED_OFFICIAL_BACKBONE + ADVISORY_OFFICIAL_SOURCES
 
 
-def test_hosted_source_freshness_smoke_defaults_to_full_official_backbone(
+def test_hosted_source_freshness_smoke_defaults_to_required_and_advisory_sources(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -74,10 +77,16 @@ def test_hosted_source_freshness_smoke_defaults_to_full_official_backbone(
 
     assert result == 0
     evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
-    assert evidence["required_adapter_keys"] == FULL_OFFICIAL_BACKBONE
+    assert evidence["required_adapter_keys"] == REQUIRED_OFFICIAL_BACKBONE
+    assert evidence["advisory_adapter_keys"] == ADVISORY_OFFICIAL_SOURCES
     assert [source["adapter_key"] for source in evidence["checked_sources"]] == (
         FULL_OFFICIAL_BACKBONE
     )
+    assert [source["monitoring_class"] for source in evidence["checked_sources"]] == (
+        ["required"] * len(REQUIRED_OFFICIAL_BACKBONE)
+        + ["advisory"] * len(ADVISORY_OFFICIAL_SOURCES)
+    )
+    assert evidence["advisory_findings"] == []
 
 
 def test_hosted_source_freshness_smoke_writes_partial_evidence(
@@ -145,9 +154,11 @@ def test_hosted_source_freshness_smoke_writes_partial_evidence(
         "official.cwa.rainfall",
         "official.wra.water_level",
     ]
+    assert evidence["advisory_adapter_keys"] == []
     assert evidence["checked_sources"] == [
         {
             "adapter_key": "official.cwa.rainfall",
+            "monitoring_class": "required",
             "health_status": "healthy",
             "freshness_state": "fresh",
             "row_count": 7,
@@ -159,6 +170,7 @@ def test_hosted_source_freshness_smoke_writes_partial_evidence(
         },
         {
             "adapter_key": "official.wra.water_level",
+            "monitoring_class": "required",
             "health_status": "degraded",
             "freshness_state": "degraded",
             "row_count": 3,
@@ -169,6 +181,7 @@ def test_hosted_source_freshness_smoke_writes_partial_evidence(
             "enabled_gates": ["data_sources.is_enabled", "SOURCE_WRA_API_ENABLED"],
         },
     ]
+    assert evidence["advisory_findings"] == []
     assert evidence["completion_evidence_targets"] == [
         {
             "gate_key": "hosted_worker_persisted_evidence",
@@ -249,6 +262,68 @@ def test_check_sources_accepts_fresh_empty_ncdr_event_feed() -> None:
     )
 
     assert failures == []
+
+
+def test_advisory_sources_remain_visible_without_failing_required_backbone() -> None:
+    advisory = _source_payload(
+        "official.civil_iot.flood_sensor",
+        health_status="failed",
+        freshness_state="failed",
+        row_count=0,
+        lag_seconds=None,
+        observed_at=None,
+    )
+    advisory["upstream_status"] = "failed"
+
+    required_failures = smoke.check_sources(
+        {"sources": [advisory]},
+        required_adapter_keys=(),
+    )
+    findings = smoke.check_advisory_sources(
+        {"sources": [advisory]},
+        advisory_adapter_keys=("official.civil_iot.flood_sensor",),
+    )
+
+    assert required_failures == []
+    assert findings
+    assert all("advisory source" in finding for finding in findings)
+    assert any("health_status is failed" in finding for finding in findings)
+
+
+def test_custom_source_policy_cannot_remove_every_required_source(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TEST_ADMIN_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        smoke,
+        "request_json",
+        lambda _method, url, **_kwargs: smoke.JsonResponse(
+            status_code=200,
+            payload=(
+                {
+                    "status": "ok",
+                    "version": "test",
+                    "deployment_sha": "abc123",
+                }
+                if url.endswith("/health")
+                else {"sources": [_source_payload("official.cwa.tide_level")]}
+            ),
+        ),
+    )
+
+    result = smoke.main(
+        [
+            "--admin-token-env",
+            "TEST_ADMIN_TOKEN",
+            "--advisory-adapter-key",
+            "official.cwa.tide_level",
+            "--evidence-output",
+            str(tmp_path / "evidence.json"),
+        ]
+    )
+
+    assert result == 1
 
 
 def _sources_payload() -> dict:
