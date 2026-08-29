@@ -266,6 +266,38 @@ def test_provider_chain_caps_house_number_to_lane_fallback_precision() -> None:
     assert candidates[0].requires_confirmation is False
 
 
+def test_taiwan_normalized_unknown_poi_uses_original_address_as_display_name() -> None:
+    def nominatim_lookup(query: str, *_args: object) -> tuple[PlaceCandidate, ...]:
+        if query != "臺南市北區北安路一段 台灣":
+            return ()
+        return (
+            PlaceCandidate(
+                place_id="nearby-lottery-poi",
+                name="台灣彩券",
+                type="address",
+                point=LatLng(lat=23.0165544, lng=120.2106295),
+                admin_code=None,
+                source="openstreetmap-nominatim",
+                confidence=0.9,
+                precision="unknown",
+            ),
+        )
+
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=nominatim_lookup,
+        wikimedia_lookup=lambda *_args: (),
+    )
+
+    candidates = geocoder.geocode(
+        GeocodeRequest(query="臺南市北區北安路一段", input_type="address", limit=1),
+    )
+
+    assert candidates[0].name == "臺南市北區北安路一段（由查詢文字萃取地名）"
+    assert candidates[0].matched_query == "臺南市北區北安路一段 台灣"
+    assert candidates[0].source == "openstreetmap-nominatim-taiwan-normalized"
+    assert candidates[0].point == LatLng(lat=23.0165544, lng=120.2106295)
+
+
 def test_provider_chain_falls_back_to_taiwan_admin_centroid_for_unknown_address() -> None:
     nominatim_calls: list[str] = []
     wikimedia_calls: list[str] = []
