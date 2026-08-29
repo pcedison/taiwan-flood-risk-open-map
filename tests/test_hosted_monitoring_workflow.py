@@ -383,3 +383,23 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "Hosted Monitoring failure resolved" in resolve_script
     assert "scripts/ci/route-alert-issue.js" in resolve_script
     assert "closeAlertIssue" in resolve_script
+
+    schedule_resolve_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Close resolved schedule watchdog issue"
+    )
+    assert schedule_resolve_step["if"] == (
+        "${{ success() && github.event_name == 'schedule' }}"
+    )
+    assert schedule_resolve_step["uses"] == (
+        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd"
+    )
+    assert schedule_resolve_step["with"]["retries"] == "3"
+    schedule_resolve_script = schedule_resolve_step["with"]["script"]
+    assert "hosted-schedule-watchdog" in schedule_resolve_script
+    assert "Hosted Monitoring schedule not ready" in schedule_resolve_script
+    assert "successful scheduled run" in schedule_resolve_script
+    assert "process.env.GITHUB_EVENT_NAME" in schedule_resolve_script
+    assert "scripts/ci/route-alert-issue.js" in schedule_resolve_script
+    assert "closeAlertIssue" in schedule_resolve_script
