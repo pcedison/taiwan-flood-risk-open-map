@@ -113,6 +113,41 @@ def test_cwa_tide_level_parser_requires_station_metadata_for_location() -> None:
     assert [record["station_id"] for record in records] == ["C4W01"]
 
 
+def test_cwa_tide_level_parser_selects_latest_valid_observation_by_timestamp() -> None:
+    station_metadata = parse_cwa_tide_station_metadata_payload(
+        _station_metadata_payload(),
+    )
+    payload = _tide_payload()
+    times = payload["Records"]["SeaSurfaceObs"]["Location"][0]["StationObsTimes"][
+        "StationObsTime"
+    ]
+    times[:] = [
+        {
+            "DateTime": "2026-06-29T21:00:00+08:00",
+            "WeatherElements": {"TideHeight": "1.25", "TideLevel": "rising"},
+        },
+        {
+            "DateTime": "2026-06-30T00:00:00+08:00",
+            "WeatherElements": {"TideHeight": "None", "TideLevel": "-"},
+        },
+        {
+            "DateTime": "2026-06-29T23:00:00+08:00",
+            "WeatherElements": {"TideHeight": "2.16", "TideLevel": "falling"},
+        },
+    ]
+
+    records = parse_cwa_tide_level_api_payload(
+        payload,
+        source_url=CWA_TIDE_LEVEL_DATASET_URL,
+        station_metadata=station_metadata,
+    )
+
+    assert len(records) == 1
+    assert records[0]["observed_at"] == "2026-06-29T15:00:00+00:00"
+    assert records[0]["water_level_m"] == 2.16
+    assert records[0]["tide_level_label"] == "falling"
+
+
 def test_cwa_tide_level_payload_shape_errors_are_explicit() -> None:
     with pytest.raises(CwaTideLevelPayloadError, match="Records"):
         parse_cwa_tide_level_api_payload(

@@ -318,17 +318,10 @@ def _parse_tide_location(
     if station_record is None:
         return None
 
-    latest = times[0]
-    if not isinstance(latest, Mapping):
+    latest = _latest_valid_tide_observation(times)
+    if latest is None:
         return None
-    elements = latest.get("WeatherElements")
-    if not isinstance(elements, Mapping):
-        return None
-
-    observed_at = parse_observed_at_utc(latest.get("DateTime"))
-    tide_height_m = optional_float(elements.get("TideHeight"))
-    if observed_at is None or tide_height_m is None:
-        return None
+    observed_at, tide_height_m, elements = latest
 
     record: dict[str, Any] = {
         **dict(station_record),
@@ -352,6 +345,28 @@ def _parse_tide_location(
     if station_metadata_url is not None:
         record["station_metadata_url"] = station_metadata_url
     return record
+
+
+def _latest_valid_tide_observation(
+    times: list[Any],
+) -> tuple[datetime, float, Mapping[str, Any]] | None:
+    """Select the newest usable reading without trusting upstream list order."""
+
+    candidates: list[tuple[datetime, float, Mapping[str, Any]]] = []
+    for item in times:
+        if not isinstance(item, Mapping):
+            continue
+        elements = item.get("WeatherElements")
+        if not isinstance(elements, Mapping):
+            continue
+        observed_at = parse_observed_at_utc(item.get("DateTime"))
+        tide_height_m = optional_float(elements.get("TideHeight"))
+        if observed_at is None or tide_height_m is None:
+            continue
+        candidates.append((observed_at, tide_height_m, elements))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: candidate[0])
 
 
 def _parse_station_metadata(
