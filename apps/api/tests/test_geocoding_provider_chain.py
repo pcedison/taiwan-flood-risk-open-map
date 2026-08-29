@@ -5,6 +5,7 @@ from app.api.schemas import GeocodeRequest, LatLng, PlaceCandidate
 from app.domain.geocoding import build_open_data_geocoder
 from app.domain.geocoding.providers import (
     load_taiwan_admin_areas,
+    local_geocode_precision,
     postgis_query_aliases,
     strip_admin_suffix,
 )
@@ -29,6 +30,12 @@ def test_provider_chain_uses_local_taiwan_provider_before_external_lookup() -> N
     assert calls == []
     assert candidates[0].source == "local-taiwan-gazetteer"
     assert candidates[0].precision == "poi"
+
+
+def test_local_geocode_precision_scans_numbered_addresses_without_regex() -> None:
+    assert local_geocode_precision("高雄市中正一路123號", "address") == "exact_address"
+    assert local_geocode_precision("高雄市中正一路１２之３號", "address") == "exact_address"
+    assert local_geocode_precision("高雄市中正一路之3號", "address") == "road_or_lane"
 
 
 def test_provider_chain_uses_file_backed_open_data_before_bundled_fixtures(

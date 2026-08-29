@@ -687,11 +687,39 @@ def _best_precision_sort_order(candidates: tuple[PlaceCandidate, ...]) -> int:
     return min((precision_sort_order(candidate.precision) for candidate in candidates), default=99)
 
 
+def _contains_numbered_address(query: str) -> bool:
+    """Return whether query contains a numeric Taiwan house number.
+
+    Scan backwards from the house-number marker instead of using an unbounded
+    regular expression on user input. Both ASCII and full-width decimal digits
+    are accepted, including the common ``12之3號`` form.
+    """
+    for marker_index, character in enumerate(query):
+        if character != "號":
+            continue
+
+        cursor = marker_index - 1
+        if cursor < 0 or not query[cursor].isdecimal():
+            continue
+        while cursor >= 0 and query[cursor].isdecimal():
+            cursor -= 1
+
+        if cursor >= 0 and query[cursor] == "之":
+            cursor -= 1
+            if cursor < 0 or not query[cursor].isdecimal():
+                continue
+            while cursor >= 0 and query[cursor].isdecimal():
+                cursor -= 1
+
+        return True
+    return False
+
+
 def _should_continue_after_low_confidence(
     request: GeocodeRequest,
     candidates: tuple[PlaceCandidate, ...],
 ) -> bool:
-    if re.search(r"\d+(?:之\d+)?號", request.query):
+    if _contains_numbered_address(request.query):
         return False
     return any(candidate.precision == "road_or_lane" for candidate in candidates)
 
@@ -1199,7 +1227,7 @@ def local_geocode_precision(query: str, input_type: InputType) -> GeocodePrecisi
         return "poi"
     if input_type == "parcel":
         return "exact_address"
-    if re.search(r"\d+(?:之\d+)?號", query):
+    if _contains_numbered_address(query):
         return "exact_address"
     if re.search(r"(?:路|街|大道|巷)", query):
         return "road_or_lane"

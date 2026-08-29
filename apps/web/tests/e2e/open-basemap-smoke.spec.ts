@@ -3,6 +3,8 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 const BASEMAP_ATTRIBUTION = "Example Open Basemap Attribution";
 const BASEMAP_TILE_HOST = "https://basemap.example.test";
 const OSM_TILE_HOST = "https://tile.openstreetmap.org";
+const BASEMAP_TILE_ORIGIN = new URL(BASEMAP_TILE_HOST).origin;
+const OSM_TILE_ORIGIN = new URL(OSM_TILE_HOST).origin;
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? `http://localhost:${process.env.E2E_API_PORT ?? "8000"}`;
 
@@ -17,10 +19,11 @@ async function mockBasemapTiles(page: Page) {
   };
 
   page.on("request", (request) => {
-    const url = request.url().toLowerCase();
-    if (url.startsWith(BASEMAP_TILE_HOST)) requests.basemapTiles += 1;
-    if (url.startsWith(OSM_TILE_HOST)) requests.osmTiles += 1;
-    if (url.includes("tgos")) requests.tgos += 1;
+    const requestUrl = new URL(request.url());
+    const lowerUrl = requestUrl.href.toLowerCase();
+    if (requestUrl.origin === BASEMAP_TILE_ORIGIN) requests.basemapTiles += 1;
+    if (requestUrl.origin === OSM_TILE_ORIGIN) requests.osmTiles += 1;
+    if (lowerUrl.includes("tgos")) requests.tgos += 1;
   });
 
   await page.route(`${BASEMAP_TILE_HOST}/**`, async (route) => {
