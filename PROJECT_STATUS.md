@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-29 20:34 Asia/Taipei (12:34 UTC)
+Last verified: 2026-08-29 21:33 Asia/Taipei (13:33 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -23,15 +23,17 @@ the live verification sources listed below.
 - Work queue: open GitHub issues and pull requests. Do not infer completion from
   an old roadmap checkbox.
 
-## Verified production checkpoint
+## Recorded production checkpoint
 
-- Current `origin/main` and deployed SHA:
-  `de65ec409a340a74a69f942377a71b2293511f1a` (PR
-  [#254](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/254)).
-- At the verification time, `origin/main`, `/health`, and `/ready` all reported
-  that SHA; PostgreSQL and Redis were healthy. CI and CodeQL completed
-  successfully for the same commit, with no open code-scanning, Dependabot, or
-  secret-scanning alerts.
+- Latest functional release verified before this documentation edit:
+  `ba71b2bced74c9b6bbd953a4b819bc39af9a6365` (PR
+  [#258](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/258)).
+  This is an auditable historical checkpoint, not a permanent claim about the
+  current SHA. Always derive the live expected SHA with `git rev-parse
+  origin/main`, then compare it with `/health` and `/ready`.
+- At 2026-08-29 21:33 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported that functional-release SHA; PostgreSQL and Redis were healthy. CI
+  and CodeQL completed successfully, with no open pull requests.
 - Hosted Monitoring run
   [#33239203333](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33239203333)
   was a real `schedule` event and completed successfully. It closed the resolved
@@ -52,6 +54,15 @@ the live verification sources listed below.
   trusting response order. PR
   [#254](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/254)
   aligns tide freshness with the reviewed hourly source cadence.
+- PR [#256](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/256)
+  distinguishes delayed, incomplete, and regional-only observations instead of
+  collapsing every partial state into a generic source error.
+- PR [#257](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/257)
+  rejects external geocodes that conflict with an explicit Taiwan county or
+  district and adds a scheduled hosted canary for the reproduced Tainan-to-
+  Taipei error. PR
+  [#258](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/258)
+  keeps coarse road fallbacks from displaying an unrelated nearby POI name.
 
 The earlier schedule-recovery baseline was
 `5f31ff1b317d551ae026fbb8191cdeaada47c3d8` (PR
