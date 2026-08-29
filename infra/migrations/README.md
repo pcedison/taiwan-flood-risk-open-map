@@ -196,3 +196,9 @@ active snapshot marker on conflict. It also links pre-fix NULL-source evidence,
 activates the newest repaired complete snapshot, and terminally consumes the
 matching accepted staging backlog. Runtime gates and the catalog gate still
 apply independently; no credential is stored by this migration.
+
+`0049_cap_warning_lifecycle_indexes.sql` bounds the NCDR/CWA CAP lifecycle and
+idempotency lookups to the small set of current, actual official warning rows.
+This prevents high-volume rainfall, water-level, and sensor history in the
+shared `evidence` table from causing warning promotion statement timeouts. It
+adds indexes only; it changes no source gate, warning state, or scoring rule.
