@@ -3,10 +3,24 @@
 版本：0.1.0  
 狀態：正式工作進度規劃  
 來源規格：`docs/PROJECT_SDD.md`  
-最後更新：2026-05-08
+最後更新：2026-08-29
 專案授權決策：Apache-2.0  
 主要部署決策：GitHub repo -> Zeabur VPS auto deploy  
 語系決策：繁體中文 only
+
+---
+
+## 最新營運檢查點（2026-08-29）
+
+目前正式站、監控、open issue／PR 與外部來源缺口以
+[`PROJECT_STATUS.md`](../PROJECT_STATUS.md) 為單一交接入口。本文件後續的
+phase、work package 與舊 checkpoint 保留為實作契約及歷史紀錄，不應取代
+正式站 `/health`、`/ready`、GitHub Actions 與 strict hosted smoke 的即時證據。
+
+本次檢查點已確認正式站部署識別與恢復基線一致、PostgreSQL／Redis 健康、
+真實 `schedule` Hosted Monitoring 通過，且沒有 open PR。唯一 open issue
+#71 是外部官方資料／契約證據工作；中央與台南技術路徑已恢復，不能以程式碼
+修復、靜態地圖或未實際寄送的 request packet 假裝完成外部授權與回覆。
 
 ---
 
@@ -1197,9 +1211,10 @@ Integration target:
 
 ---
 
-## 10. Current Project Status
+## 10. Historical Project Status Checkpoint
 
-As of 2026-04-30:
+As of 2026-04-30. This section is retained as implementation history; see
+[`PROJECT_STATUS.md`](../PROJECT_STATUS.md) for the current operational state.
 
 - SDD：Done draft, accepted for planning.
 - Work plan：Created.
