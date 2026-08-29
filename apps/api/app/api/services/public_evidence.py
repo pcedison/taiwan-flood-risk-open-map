@@ -192,7 +192,14 @@ def public_evidence_url(
     fallback_url: str | None,
 ) -> str | None:
     if source_type == "official":
-        return OFFICIAL_DATA_GOV_URLS.get(event_type, fallback_url)
+        # Persisted official observations carry the reviewed landing page for
+        # the adapter that actually produced the row.  Preserve that
+        # provenance: mapping only by event type would relabel every local
+        # rainfall/water/flood sensor as the central CWA/WRA dataset and, most
+        # visibly, point current Tainan flood depth at the historical 130016
+        # dataset.  The generic catalog remains a compatibility fallback for
+        # older rows that have no source URL.
+        return fallback_url or OFFICIAL_DATA_GOV_URLS.get(event_type)
     return fallback_url
 
 

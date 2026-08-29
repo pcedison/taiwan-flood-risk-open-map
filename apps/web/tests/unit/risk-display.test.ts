@@ -555,6 +555,49 @@ test("public evidence display keeps current families and one historical basis", 
   });
 });
 
+test("current flood reports render and rank as realtime flood-depth evidence", () => {
+  const currentFloodDepth: EvidenceItem = {
+    ...fullEvidence,
+    evidence_scope: "current",
+    event_type: "flood_report",
+    id: "tainan-current-flood-depth",
+    observed_at: "2026-08-29T02:00:00Z",
+    occurred_at: "2026-08-29T02:00:00Z",
+    published_at: null,
+    source_type: "official",
+    url: "https://data.tainan.gov.tw/DataSet/Detail/03dd4536-3fe7-46ec-9920-a120cb5c502c",
+  };
+  const rainfall: EvidenceItem = {
+    ...fullEvidence,
+    evidence_scope: "current",
+    event_type: "rainfall",
+    id: "current-rainfall",
+    observed_at: "2026-08-29T01:50:00Z",
+    occurred_at: "2026-08-29T01:50:00Z",
+    published_at: null,
+    source_type: "official",
+  };
+  const history: EvidenceItem = {
+    ...fullEvidence,
+    evidence_scope: "historical",
+    event_type: "flood_report",
+    id: "historical-flood",
+    observed_at: "2016-09-27T00:00:00+08:00",
+    occurred_at: "2016-09-27T00:00:00+08:00",
+    source_type: "official",
+  };
+
+  const displayed = publicEvidenceDisplayItems([rainfall, history, currentFloodDepth]);
+
+  assert.equal(displayed[0], currentFloodDepth);
+  assert.deepEqual(evidenceDisplayText(currentFloodDepth), {
+    purpose: "用途：現地狀況",
+    summary: "附近淹水深度觀測可輔助確認現地積淹水狀況。",
+    title: "淹水深度觀測",
+  });
+  assert.equal(evidenceSourceUrl(currentFloodDepth), currentFloodDepth.url);
+});
+
 test("evidence display text normalizes official realtime raw titles", () => {
   const rainfallEvidence: EvidenceItem = {
     ...fullEvidence,
