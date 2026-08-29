@@ -8,6 +8,7 @@ from app.domain.geocoding.providers import (
     OpenStreetMapProvider,
     TaiwanAdminFallbackProvider,
     WikimediaPoiFallbackProvider,
+    admin_context_matches_query,
     build_open_data_geocoder,
     candidate_type_for_precision,
     geocode_limitations,
@@ -22,13 +23,14 @@ from app.domain.geocoding.taiwan import (
 )
 
 __all__ = [
-    "GeocoderChain",
     "FileBackedTaiwanOpenDataProvider",
+    "GeocoderChain",
     "LocalTaiwanAddressProvider",
     "NominatimDevelopmentFallbackProvider",
     "OpenStreetMapProvider",
     "TaiwanAdminFallbackProvider",
     "WikimediaPoiFallbackProvider",
+    "admin_context_matches_query",
     "build_open_data_geocoder",
     "build_taiwan_geocode_queries",
     "candidate_type_for_precision",

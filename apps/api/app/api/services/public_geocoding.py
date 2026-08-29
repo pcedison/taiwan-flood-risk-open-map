@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from app.api.schemas import LatLng, PlaceCandidate
 from app.api.services import public_geocode_cache
 from app.domain.geocoding import (
+    admin_context_matches_query,
     candidate_type_for_precision,
     geocode_limitations,
     nominatim_precision,
@@ -39,7 +40,7 @@ def cached_nominatim_candidates(
     backend: str = "memory",
     redis_url: str | None = None,
 ) -> tuple[PlaceCandidate, ...]:
-    cache_key = f"nominatim:{input_type}:{limit}:{query}"
+    cache_key = f"nominatim:v2:{input_type}:{limit}:{query}"
     cached = public_geocode_cache.cached_candidates(
         cache_key, backend=backend, redis_url=redis_url
     )
@@ -70,6 +71,7 @@ def fetch_nominatim_candidates(
             "viewbox": TAIWAN_VIEWBOX,
             "bounded": 1,
             "accept-language": "zh-TW,zh,en",
+            "addressdetails": 1,
         }
     )
     http_request = Request(
@@ -98,6 +100,20 @@ def fetch_nominatim_candidates(
         if lat is None or lng is None:
             continue
         display_name = item.get("display_name")
+        address = item.get("address")
+        address_values = address.values() if isinstance(address, dict) else ()
+        context_text = " ".join(
+            str(value)
+            for value in (display_name, *address_values)
+            if value is not None
+        )
+        if not admin_context_matches_query(
+            query,
+            lat=lat,
+            lng=lng,
+            context_text=context_text,
+        ):
+            continue
         precision = nominatim_precision(item, input_type)
         confidence = max(0.5, 0.9 - (index * 0.08))
         candidates.append(

@@ -298,6 +298,40 @@ def test_provider_chain_falls_back_to_taiwan_admin_centroid_for_unknown_address(
     assert "退回行政區代表點" in " ".join(candidates[0].limitations)
 
 
+def test_provider_chain_rejects_external_candidate_far_from_requested_admin_area() -> None:
+    queries: list[str] = []
+
+    def nominatim_lookup(query: str, *_args: object) -> tuple[PlaceCandidate, ...]:
+        queries.append(query)
+        return (
+            PlaceCandidate(
+                place_id="wrong-taipei-result",
+                name="泰安男士理髮",
+                type="address",
+                point=LatLng(lat=25.0404327, lng=121.5331645),
+                admin_code=None,
+                source="openstreetmap-nominatim",
+                confidence=0.9,
+                precision="unknown",
+            ),
+        )
+
+    geocoder = build_open_data_geocoder(
+        nominatim_lookup=nominatim_lookup,
+        wikimedia_lookup=lambda *_args: (),
+    )
+
+    candidates = geocoder.geocode(
+        GeocodeRequest(query="臺南市北區北安路一段", input_type="address", limit=1),
+    )
+
+    assert queries
+    assert candidates[0].source == "taiwan-admin-centroid-fallback"
+    assert candidates[0].name == "台南市北區（由地址退回行政區代表點）"
+    assert candidates[0].point == LatLng(lat=23.0101, lng=120.205518)
+    assert candidates[0].requires_confirmation is True
+
+
 def test_provider_chain_does_not_guess_ambiguous_town_name_without_county() -> None:
     geocoder = build_open_data_geocoder(
         nominatim_lookup=lambda *_args: (),
