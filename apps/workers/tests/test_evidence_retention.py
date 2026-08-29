@@ -177,6 +177,39 @@ def test_prune_location_queries_wraps_database_errors() -> None:
         job.prune_location_queries(retention_hours=720)
 
 
+def test_prune_expired_raw_snapshots_uses_persisted_policy_deadline() -> None:
+    connection = _FakeConnection((13,))
+    now = datetime(2026, 8, 29, 1, 0, tzinfo=UTC)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_expired_raw_snapshots(batch_limit=2_000, now=now)
+
+    assert summary.rows_deleted == 13
+    assert connection.commits == 1
+    sql, params = connection.cursor_instance.executions[0]
+    assert "DELETE FROM raw_snapshots" in sql
+    assert "retention_expires_at IS NOT NULL" in sql
+    assert "retention_expires_at < %s::timestamptz" in sql
+    assert params == (now, 2_000)
+
+
+def test_prune_expired_raw_snapshots_rejects_non_positive_limit() -> None:
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: _FakeConnection((0,)))
+
+    with pytest.raises(ValueError):
+        job.prune_expired_raw_snapshots(batch_limit=0)
+
+
+def test_prune_expired_raw_snapshots_wraps_database_errors() -> None:
+    def boom() -> object:
+        raise RuntimeError("connection refused")
+
+    job = PostgresEvidenceRetentionJob(connection_factory=boom)
+
+    with pytest.raises(EvidenceRetentionUnavailable):
+        job.prune_expired_raw_snapshots()
+
+
 def test_location_queries_retention_hours_config_default_and_env() -> None:
     assert load_worker_settings({}).location_queries_retention_hours == (
         DEFAULT_LOCATION_QUERY_RETENTION_HOURS

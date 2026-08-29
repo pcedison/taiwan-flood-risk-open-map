@@ -15,6 +15,7 @@ from app.jobs.evidence_retention import (
     EvidenceRetentionUnavailable,
     LocationQueryRetentionSummary,
     PostgresEvidenceRetentionJob,
+    RawSnapshotRetentionSummary,
 )
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.frozen_legacy import report_frozen_legacy
@@ -77,6 +78,7 @@ class MaintenanceCycleResult:
     query_heat_retention: QueryHeatRetentionSummary | None = None
     evidence_retention: EvidenceRetentionSummary | None = None
     location_query_retention: LocationQueryRetentionSummary | None = None
+    raw_snapshot_retention: RawSnapshotRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
 
@@ -267,6 +269,7 @@ def run_maintenance_once(
     query_heat_retention: QueryHeatRetentionSummary | None = None
     evidence_retention: EvidenceRetentionSummary | None = None
     location_query_retention: LocationQueryRetentionSummary | None = None
+    raw_snapshot_retention: RawSnapshotRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
     del retention_days, tile_feature_limit, tile_prune_limit, tile_expired_before
@@ -281,6 +284,7 @@ def run_maintenance_once(
         location_query_retention = retention_job.prune_location_queries(
             retention_hours=resolved_location_query_retention_hours
         )
+        raw_snapshot_retention = retention_job.prune_expired_raw_snapshots()
 
     except (
         EvidenceRetentionUnavailable,
@@ -299,6 +303,7 @@ def run_maintenance_once(
             query_heat_retention=query_heat_retention,
             evidence_retention=evidence_retention,
             location_query_retention=location_query_retention,
+            raw_snapshot_retention=raw_snapshot_retention,
             tile_refresh=tile_refresh,
             tile_prune=tile_prune,
         )
@@ -313,6 +318,9 @@ def run_maintenance_once(
         location_query_rows_pruned=(
             location_query_retention.rows_deleted if location_query_retention else 0
         ),
+        raw_snapshot_rows_pruned=(
+            raw_snapshot_retention.rows_deleted if raw_snapshot_retention else 0
+        ),
         frozen_query_heat=True,
         frozen_local_tiles=True,
     )
@@ -322,6 +330,7 @@ def run_maintenance_once(
         query_heat_retention=query_heat_retention,
         evidence_retention=evidence_retention,
         location_query_retention=location_query_retention,
+        raw_snapshot_retention=raw_snapshot_retention,
         tile_refresh=tile_refresh,
         tile_prune=tile_prune,
     )
