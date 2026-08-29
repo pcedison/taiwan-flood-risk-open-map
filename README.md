@@ -81,7 +81,7 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). As
-of 2026-08-29, the Zeabur deployment matches the verified recovery baseline,
+of 2026-08-29, the Zeabur deployment matches the current `origin/main` commit,
 PostgreSQL and Redis are healthy, strict hosted public-risk evidence smoke is
 passing, and a real scheduled Hosted Monitoring run has passed. The only open
 issue is the external local-source dispatch contract in #71; it must remain open
