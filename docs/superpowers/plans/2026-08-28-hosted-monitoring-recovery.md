@@ -1,5 +1,14 @@
 # Hosted Monitoring Production Recovery Implementation Plan
 
+> **Status (2026-08-29): completed for the P0 recovery scope.** Production ran
+> the recovered main SHA, strict public-risk smoke passed, and real scheduled
+> Hosted Monitoring run
+> [#33239203333](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33239203333)
+> succeeded and closed #199. The unchecked boxes below are the original
+> execution script, not the live tracker. See
+> [`PROJECT_STATUS.md`](../../../PROJECT_STATUS.md) for current state and #71's
+> separate external-evidence boundary.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Restore bounded official-realtime ingestion, keep later sources running when one source fails, align the flood-warning requirement contract with deployed gates, and obtain a successful manual plus scheduled Hosted Monitoring run without weakening the acceptance gate.

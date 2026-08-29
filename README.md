@@ -7,6 +7,7 @@ Public beta limitation statement: 本服務為公開資料與歷史/潛勢圖資
 
 The project follows a spec-first SDD workflow. The source of truth is:
 
+- [Current Project Status](PROJECT_STATUS.md)
 - [Project SDD](docs/PROJECT_SDD.md)
 - [Project Work Plan](docs/PROJECT_WORK_PLAN.md)
 
@@ -78,6 +79,16 @@ lint/typecheck commands, and contribution rules.
 - Local orchestration: Docker Compose.
 
 ## Development Status
+
+The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). As
+of 2026-08-29, the Zeabur deployment matches the verified recovery baseline,
+PostgreSQL and Redis are healthy, strict hosted public-risk evidence smoke is
+passing, and a real scheduled Hosted Monitoring run has passed. The only open
+issue is the external local-source dispatch contract in #71; it must remain open
+until accepted official replies, production/authorization-gated adapters, or
+reviewed official-unavailable evidence exist. The phase descriptions below are
+implementation history and boundaries, not a substitute for live production
+verification.
 
 The repository has moved beyond the Phase 0 skeleton. Phase 1 map-first query
 groundwork is in place, Phase 2 ingestion/adapters have tested groundwork, and
@@ -194,7 +205,8 @@ work packages, integration rules, and subagent handoff protocol.
 
 This status is current for the `codex/phase2-runtime-demo` branch as of
 2026-05-02. It is intentionally conservative: local smoke and groundwork are
-not production readiness.
+not production readiness. It is retained as a historical checkpoint; use
+[PROJECT_STATUS.md](PROJECT_STATUS.md) for current production state.
 
 | Area | Current status | Production boundary |
 |---|---|---|
