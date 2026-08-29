@@ -19,17 +19,22 @@ from app.ops.local_source.local_source_coverage import (  # noqa: E402
     list_local_source_coverage,
 )
 
-FULL_HOSTED_SOURCE_ADAPTER_KEYS = [
+REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS = [
     "official.cwa.rainfall",
-    "official.cwa.tide_level",
     "official.wra.water_level",
     "official.ncdr.cap",
     "official.wra_iow.flood_depth",
-    "official.civil_iot.flood_sensor",
     "official.civil_iot.sewer_water_level",
+]
+ADVISORY_HOSTED_SOURCE_ADAPTER_KEYS = [
+    "official.cwa.tide_level",
+    "official.civil_iot.flood_sensor",
     "official.civil_iot.pump_water_level",
     "official.civil_iot.gate_water_level",
 ]
+FULL_HOSTED_SOURCE_ADAPTER_KEYS = (
+    REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS + ADVISORY_HOSTED_SOURCE_ADAPTER_KEYS
+)
 
 
 def test_local_source_completion_audit_cli_reports_incomplete_by_default() -> None:
@@ -572,9 +577,17 @@ def test_local_source_completion_audit_cli_accepts_full_hosted_source_freshness_
             {
                 "schema_version": "hosted-source-freshness-smoke/v1",
                 "status": "passed",
-                "required_adapter_keys": FULL_HOSTED_SOURCE_ADAPTER_KEYS,
+                "required_adapter_keys": REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS,
+                "advisory_adapter_keys": ADVISORY_HOSTED_SOURCE_ADAPTER_KEYS,
                 "checked_sources": [
-                    {"adapter_key": adapter_key}
+                    {
+                        "adapter_key": adapter_key,
+                        "monitoring_class": (
+                            "required"
+                            if adapter_key in REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS
+                            else "advisory"
+                        ),
+                    }
                     for adapter_key in FULL_HOSTED_SOURCE_ADAPTER_KEYS
                 ],
             }

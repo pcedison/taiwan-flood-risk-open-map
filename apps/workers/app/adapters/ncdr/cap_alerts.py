@@ -486,8 +486,14 @@ def _parse_public_active_feed(
             raise NcdrCapAlertPayloadError("NCDR active-warning flood entry is missing a usable id")
         cap_url = _active_feed_cap_url(entry, feed_url=feed_url)
         if cap_id in seen_ids or cap_url in seen_urls:
+            if (cap_id, cap_url) in documents:
+                # The public feed occasionally repeats the exact same Atom entry.
+                # Treat only an identical transport identity as idempotent.  An ID
+                # reused for another URL (or a URL reused for another ID) remains
+                # a fail-closed conflict below.
+                continue
             raise NcdrCapAlertPayloadError(
-                "NCDR active-warning feed contains duplicate flood entries"
+                "NCDR active-warning feed contains conflicting flood entries"
             )
         seen_ids.add(cap_id)
         seen_urls.add(cap_url)

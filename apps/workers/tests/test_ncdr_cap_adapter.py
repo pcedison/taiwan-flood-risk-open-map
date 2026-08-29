@@ -1434,6 +1434,64 @@ def test_ncdr_public_active_feed_without_flood_is_healthy_empty_poll() -> None:
     ]
 
 
+def test_ncdr_public_active_feed_deduplicates_identical_flood_entry() -> None:
+    calls: list[str] = []
+
+    def fetch_text(url: str, _params: dict[str, str], _timeout: int) -> str:
+        calls.append(url)
+        if url == ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL:
+            entry = _feed_entry()
+            return _active_feed(entry, entry)
+        return _fixture("ncdr_dump_flood_cap.xml")
+
+    result = NcdrCapAlertAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_text=fetch_text,
+    ).run()
+
+    assert len(result.normalized) == 1
+    assert calls == [
+        ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL,
+        (
+            "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/"
+            "WRA_FloodWarn_20260615103000_0000.cap"
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    (
+        (
+            _feed_entry(),
+            _feed_entry(
+                href=(
+                    "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/"
+                    "same-id-different-url.cap"
+                )
+            ),
+        ),
+        (
+            _feed_entry(),
+            _feed_entry(
+                cap_id="DIFFERENT-ID",
+            ),
+        ),
+    ),
+)
+def test_ncdr_public_active_feed_rejects_conflicting_transport_identity(
+    first: str,
+    second: str,
+) -> None:
+    adapter = NcdrCapAlertAdapter(
+        fetched_at=FETCHED_AT,
+        fetch_text=lambda _url, _params, _timeout: _active_feed(first, second),
+    )
+
+    with pytest.raises(NcdrCapAlertPayloadError, match="conflicting flood entries"):
+        adapter.run()
+
+
 @pytest.mark.parametrize(
     "href",
     (

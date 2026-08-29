@@ -15,12 +15,20 @@ DEFAULT_BASE_URL = "https://floodrisk.cc"
 DEFAULT_ADMIN_TOKEN_ENV = "ADMIN_BEARER_TOKEN"
 DEFAULT_REQUIRED_ADAPTER_KEYS = (
     "official.cwa.rainfall",
-    "official.cwa.tide_level",
     "official.wra.water_level",
     "official.ncdr.cap",
     "official.wra_iow.flood_depth",
-    "official.civil_iot.flood_sensor",
     "official.civil_iot.sewer_water_level",
+)
+# These sources remain visible in every default hosted artifact, but they do not
+# decide whether the inland-flood query backbone is operational.  CWA tide is
+# coastal context; the three legacy WaterResource_v2 feeds currently expose
+# station/datastream metadata without usable observations.  Their degraded state
+# must stay auditable without making an upstream publication gap look like an
+# application deployment failure.
+DEFAULT_ADVISORY_ADAPTER_KEYS = (
+    "official.cwa.tide_level",
+    "official.civil_iot.flood_sensor",
     "official.civil_iot.pump_water_level",
     "official.civil_iot.gate_water_level",
 )
@@ -59,6 +67,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--advisory-adapter-key",
+        action="append",
+        dest="advisory_adapter_keys",
+        help=(
+            "Advisory adapter returned by /admin/v1/sources. Repeat to retain "
+            "diagnostics without making its upstream state fail the smoke."
+        ),
+    )
+    parser.add_argument(
         "--captured-at",
         help="Optional ISO 8601 timestamp for reproducible evidence artifacts.",
     )
@@ -79,8 +96,29 @@ def main(argv: list[str] | None = None) -> int:
 
     base_url = args.base_url.rstrip("/")
     captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
-    required_adapter_keys = tuple(args.required_adapter_keys or DEFAULT_REQUIRED_ADAPTER_KEYS)
+    custom_source_policy = (
+        args.required_adapter_keys is not None or args.advisory_adapter_keys is not None
+    )
+    required_adapter_keys = tuple(
+        (args.required_adapter_keys or ())
+        if custom_source_policy
+        else DEFAULT_REQUIRED_ADAPTER_KEYS
+    )
+    advisory_adapter_keys = tuple(
+        (args.advisory_adapter_keys or ())
+        if custom_source_policy
+        else DEFAULT_ADVISORY_ADAPTER_KEYS
+    )
     failures: list[str] = []
+    advisory_findings: list[str] = []
+    if not required_adapter_keys:
+        failures.append("source policy must classify at least one required adapter")
+    overlap = sorted(set(required_adapter_keys) & set(advisory_adapter_keys))
+    if overlap:
+        failures.append(
+            "source policy classifies adapters as both required and advisory: "
+            + ", ".join(overlap)
+        )
 
     admin_token = os.environ.get(args.admin_token_env)
     if not admin_token:
@@ -124,6 +162,12 @@ def main(argv: list[str] | None = None) -> int:
             failures.extend(
                 check_sources(sources_payload, required_adapter_keys=required_adapter_keys)
             )
+            advisory_findings.extend(
+                check_advisory_sources(
+                    sources_payload,
+                    advisory_adapter_keys=advisory_adapter_keys,
+                )
+            )
 
     status = "failed" if failures else "passed"
     completion_evidence_ref = args.evidence_output or _default_completion_evidence_ref(
@@ -137,10 +181,15 @@ def main(argv: list[str] | None = None) -> int:
         status=status,
         health=health_evidence,
         required_adapter_keys=required_adapter_keys,
+        advisory_adapter_keys=advisory_adapter_keys,
         sources_payload=sources_payload,
+        advisory_findings=advisory_findings,
         failures=failures,
     )
     _write_json(args.evidence_output, artifact)
+
+    for finding in advisory_findings:
+        print(f"ADVISORY_SOURCE_FRESHNESS | {finding}")
 
     if failures:
         print("HOSTED_SOURCE_FRESHNESS_SMOKE failed")
@@ -159,7 +208,8 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         "HOSTED_SOURCE_FRESHNESS_SMOKE passed | "
-        f"sources={','.join(required_adapter_keys)}"
+        f"required={','.join(required_adapter_keys)} | "
+        f"advisory={','.join(advisory_adapter_keys)}"
     )
     return 0
 
@@ -188,6 +238,35 @@ def check_sources(
     return failures
 
 
+def check_advisory_sources(
+    payload: Mapping[str, Any],
+    *,
+    advisory_adapter_keys: Sequence[str],
+) -> list[str]:
+    findings: list[str] = []
+    sources = payload.get("sources")
+    if not isinstance(sources, list):
+        return ["/admin/v1/sources response missing sources array"]
+
+    by_adapter_key = {
+        str(source.get("adapter_key")): source
+        for source in sources
+        if isinstance(source, Mapping) and source.get("adapter_key")
+    }
+    for adapter_key in advisory_adapter_keys:
+        source = by_adapter_key.get(adapter_key)
+        if source is None:
+            findings.append(
+                f"advisory source {adapter_key} was not returned by /admin/v1/sources"
+            )
+            continue
+        findings.extend(
+            finding.replace("required source", "advisory source", 1)
+            for finding in _check_required_source(adapter_key, source)
+        )
+    return findings
+
+
 def build_evidence_artifact(
     *,
     base_url: str,
@@ -196,7 +275,9 @@ def build_evidence_artifact(
     status: str,
     health: Mapping[str, Any],
     required_adapter_keys: Sequence[str],
+    advisory_adapter_keys: Sequence[str],
     sources_payload: Mapping[str, Any],
+    advisory_findings: list[str],
     failures: list[str],
 ) -> dict[str, Any]:
     return {
@@ -206,10 +287,13 @@ def build_evidence_artifact(
         "status": status,
         "health": dict(health),
         "required_adapter_keys": list(required_adapter_keys),
+        "advisory_adapter_keys": list(advisory_adapter_keys),
         "checked_sources": _checked_source_summaries(
             sources_payload,
             required_adapter_keys=required_adapter_keys,
+            advisory_adapter_keys=advisory_adapter_keys,
         ),
+        "advisory_findings": advisory_findings,
         "completion_evidence_targets": [
             {
                 "gate_key": HOSTED_WORKER_GATE_KEY,
@@ -296,6 +380,7 @@ def _checked_source_summaries(
     payload: Mapping[str, Any],
     *,
     required_adapter_keys: Sequence[str],
+    advisory_adapter_keys: Sequence[str],
 ) -> list[dict[str, Any]]:
     sources = payload.get("sources")
     if not isinstance(sources, list):
@@ -306,13 +391,18 @@ def _checked_source_summaries(
         if isinstance(source, Mapping) and source.get("adapter_key")
     }
     summaries: list[dict[str, Any]] = []
-    for adapter_key in required_adapter_keys:
+    classifications = (
+        *((adapter_key, "required") for adapter_key in required_adapter_keys),
+        *((adapter_key, "advisory") for adapter_key in advisory_adapter_keys),
+    )
+    for adapter_key, monitoring_class in classifications:
         source = by_adapter_key.get(adapter_key)
         if not isinstance(source, Mapping):
             continue
         summaries.append(
             {
                 "adapter_key": source.get("adapter_key"),
+                "monitoring_class": monitoring_class,
                 "health_status": source.get("health_status"),
                 "freshness_state": source.get("freshness_state"),
                 "row_count": source.get("row_count"),

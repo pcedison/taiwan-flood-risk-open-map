@@ -36,12 +36,14 @@ HOSTED_SOURCE_FRESHNESS_REQUIREMENTS = {
 }
 REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS = (
     "official.cwa.rainfall",
-    "official.cwa.tide_level",
     "official.wra.water_level",
     "official.ncdr.cap",
     "official.wra_iow.flood_depth",
-    "official.civil_iot.flood_sensor",
     "official.civil_iot.sewer_water_level",
+)
+ADVISORY_HOSTED_SOURCE_ADAPTER_KEYS = (
+    "official.cwa.tide_level",
+    "official.civil_iot.flood_sensor",
     "official.civil_iot.pump_water_level",
     "official.civil_iot.gate_water_level",
 )
@@ -280,18 +282,27 @@ def _validate_hosted_source_backbone_evidence(
         return
 
     required_keys = _adapter_key_set(payload.get("required_adapter_keys"))
+    advisory_keys = _adapter_key_set(payload.get("advisory_adapter_keys"))
     checked_keys = _checked_source_adapter_key_set(payload.get("checked_sources"))
-    expected_keys = set(REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS)
-    missing_required = sorted(expected_keys - required_keys)
-    missing_checked = sorted(expected_keys - checked_keys)
-    if not missing_required and not missing_checked:
+    expected_required = set(REQUIRED_HOSTED_SOURCE_ADAPTER_KEYS)
+    expected_advisory = set(ADVISORY_HOSTED_SOURCE_ADAPTER_KEYS)
+    expected_checked = expected_required | expected_advisory
+    missing_required = sorted(expected_required - required_keys)
+    missing_advisory = sorted(expected_advisory - advisory_keys)
+    missing_checked = sorted(expected_checked - checked_keys)
+    overlap = sorted(required_keys & advisory_keys)
+    if not missing_required and not missing_advisory and not missing_checked and not overlap:
         return
 
     details = []
     if missing_required:
         details.append(f"missing required_adapter_keys: {', '.join(missing_required)}")
+    if missing_advisory:
+        details.append(f"missing advisory_adapter_keys: {', '.join(missing_advisory)}")
     if missing_checked:
         details.append(f"missing checked_sources: {', '.join(missing_checked)}")
+    if overlap:
+        details.append(f"required/advisory overlap: {', '.join(overlap)}")
     raise SystemExit(
         "production_gate_evidence"
         f"[{evidence_index}].evidence_ref: hosted source freshness evidence "
