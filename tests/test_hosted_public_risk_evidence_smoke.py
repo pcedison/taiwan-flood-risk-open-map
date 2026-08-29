@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -55,6 +54,8 @@ def test_hosted_public_risk_evidence_smoke_writes_artifacts(
             )
         if url.endswith("/v1/risk/assess"):
             return smoke.JsonResponse(status_code=200, payload=_risk_payload())
+        if url.endswith("/v1/geocode"):
+            return smoke.JsonResponse(status_code=200, payload=_geocode_payload())
         raise AssertionError(f"unexpected request {method} {url} {payload}")
 
     monkeypatch.setattr(smoke, "request_json", fake_request_json)
@@ -85,6 +86,7 @@ def test_hosted_public_risk_evidence_smoke_writes_artifacts(
     assert evidence["schema_version"] == "hosted-public-risk-evidence-smoke/v1"
     assert evidence["status"] == "passed"
     assert evidence["health"]["deployment_sha"] == "abc123"
+    assert evidence["geocode_admin_canary"]["distance_from_expected_admin_center_km"] < 1
     assert evidence["request"] == {
         "lat": 23.01929,
         "lng": 120.18726,
@@ -178,6 +180,28 @@ def test_check_risk_payload_requires_nearby_coverage_and_worker_evidence() -> No
         "risk response did not include official rainfall or water_level evidence "
         "with observed_at and ingested_at"
     ) in failures
+
+
+def test_geocode_admin_canary_rejects_cross_county_candidate() -> None:
+    response = smoke.JsonResponse(
+        status_code=200,
+        payload={
+            "candidates": [
+                {
+                    "name": "泰安男士理髮",
+                    "source": "openstreetmap-nominatim",
+                    "precision": "unknown",
+                    "point": {"lat": 25.0404327, "lng": 121.5331645},
+                }
+            ]
+        },
+    )
+
+    failures, evidence = smoke.check_geocode_admin_canary(response)
+
+    assert len(failures) == 1
+    assert "escaped the requested Tainan admin area" in failures[0]
+    assert evidence["distance_from_expected_admin_center_km"] > 200
 
 
 def test_check_risk_payload_rejects_unknown_when_official_realtime_evidence_exists() -> None:
@@ -451,6 +475,19 @@ def _signal(
     }
 
 
+def _geocode_payload() -> dict:
+    return {
+        "candidates": [
+            {
+                "name": "臺南市北區北安路一段",
+                "source": "openstreetmap-nominatim-taiwan-normalized",
+                "precision": "road_or_lane",
+                "point": {"lat": 23.0165544, "lng": 120.2106295},
+            }
+        ]
+    }
+
+
 def _unconfigured_risk_payload() -> dict:
     """A hosted response from a deployment with no official realtime source enabled.
 
@@ -518,6 +555,8 @@ def _run_smoke(tmp_path: Path, monkeypatch, payload: dict, *extra_args: str):
             )
         if url.endswith("/v1/risk/assess"):
             return smoke.JsonResponse(status_code=200, payload=payload)
+        if url.endswith("/v1/geocode"):
+            return smoke.JsonResponse(status_code=200, payload=_geocode_payload())
         raise AssertionError(f"unexpected request {method} {url} {body}")
 
     monkeypatch.setattr(smoke, "request_json", fake_request_json)

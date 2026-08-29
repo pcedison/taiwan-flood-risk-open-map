@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import redis
 
@@ -164,3 +166,55 @@ def test_cached_nominatim_candidates_uses_cache_before_fetch(
 
     assert first == second
     assert fetch_calls == ["台北車站"]
+
+
+def test_fetch_nominatim_candidates_rejects_conflicting_admin_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_urls: list[str] = []
+    payload = [
+        {
+            "place_id": 229732723,
+            "osm_type": "node",
+            "osm_id": 123,
+            "lat": "25.0404327",
+            "lon": "121.5331645",
+            "name": "泰安男士理髮",
+            "display_name": "泰安男士理髮, 大安區, 臺北市, 臺灣",
+            "class": "shop",
+            "type": "hairdresser",
+            "addresstype": "shop",
+            "address": {
+                "shop": "泰安男士理髮",
+                "suburb": "大安區",
+                "city": "臺北市",
+                "country": "臺灣",
+            },
+        }
+    ]
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    def fake_urlopen(request, *, timeout: float):
+        assert timeout == 2.5
+        requested_urls.append(request.full_url)
+        return _Response()
+
+    monkeypatch.setattr(public_geocoding, "urlopen", fake_urlopen)
+
+    candidates = public_geocoding.fetch_nominatim_candidates(
+        "臺南市北區北安路一段",
+        "address",
+        5,
+    )
+
+    assert candidates == ()
+    assert "addressdetails=1" in requested_urls[0]

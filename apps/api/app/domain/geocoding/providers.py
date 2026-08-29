@@ -6,12 +6,17 @@ import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from math import asin, cos, radians, sin, sqrt
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol, TextIO, cast
 from uuid import NAMESPACE_URL, uuid5
 
 from app.api.schemas import GeocodePrecision, GeocodeRequest, LatLng, PlaceCandidate
-from app.domain.geocoding.normalization import compact_taiwan_query_key, normalized_aliases, taiwan_address_aliases
+from app.domain.geocoding.normalization import (
+    compact_taiwan_query_key,
+    normalized_aliases,
+    taiwan_address_aliases,
+)
 from app.domain.geocoding.taiwan import build_taiwan_geocode_queries
 
 InputType = Literal["address", "landmark", "parcel"]
@@ -389,7 +394,13 @@ class OpenStreetMapProvider:
     def search(self, request: GeocodeRequest) -> tuple[PlaceCandidate, ...]:
         if self.lookup is None:
             return ()
-        candidates = self.lookup(request.query.strip(), request.input_type, request.limit)
+        candidates = tuple(
+            candidate
+            for candidate in self.lookup(
+                request.query.strip(), request.input_type, request.limit
+            )
+            if candidate_matches_query_admin_area(request.query, candidate)
+        )
         return tuple(
             candidate_with_fallback_metadata(
                 candidate,
@@ -408,7 +419,11 @@ class NominatimDevelopmentFallbackProvider:
 
     def search(self, request: GeocodeRequest) -> tuple[PlaceCandidate, ...]:
         for geocode_query in geocode_candidate_queries(request.query):
-            candidates = self.lookup(geocode_query, request.input_type, request.limit)
+            candidates = tuple(
+                candidate
+                for candidate in self.lookup(geocode_query, request.input_type, request.limit)
+                if candidate_matches_query_admin_area(request.query, candidate)
+            )
             if candidates:
                 fallback_kind = geocode_fallback_kind(geocode_query, request.query)
                 return tuple(
@@ -1010,6 +1025,54 @@ def best_admin_area_match(query: str) -> tuple[TaiwanAdminArea, str] | None:
     matches.sort(key=lambda item: (item[0], item[1], item[2].name))
     _, _, area, alias = matches[0]
     return area, alias
+
+
+def admin_context_matches_query(
+    query: str,
+    *,
+    lat: float,
+    lng: float,
+    context_text: str | None = None,
+) -> bool:
+    """Reject external results that conflict with an explicit Taiwan admin area.
+
+    Textual context gives the strongest check when an upstream provider exposes
+    address details.  The deliberately generous distance guard also protects
+    cached or project-controlled candidates whose schema has no address fields.
+    """
+
+    match = best_admin_area_match(query)
+    if match is None:
+        return True
+    area, _ = match
+    max_distance_km = 100.0 if area.level == "town" else 180.0
+    if _haversine_km(lat, lng, area.lat, area.lng) > max_distance_km:
+        return False
+    if not context_text or not context_text.strip():
+        return True
+
+    normalized_context = normalize_query(context_text)
+    if normalize_query(area.county) not in normalized_context:
+        return False
+    return area.town is None or normalize_query(area.town) in normalized_context
+
+
+def candidate_matches_query_admin_area(query: str, candidate: PlaceCandidate) -> bool:
+    return admin_context_matches_query(
+        query,
+        lat=candidate.point.lat,
+        lng=candidate.point.lng,
+    )
+
+
+def _haversine_km(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:
+    earth_radius_km = 6371.0088
+    lat_a_rad = radians(lat_a)
+    lat_b_rad = radians(lat_b)
+    d_lat = radians(lat_b - lat_a)
+    d_lng = radians(lng_b - lng_a)
+    haversine = sin(d_lat / 2) ** 2 + cos(lat_a_rad) * cos(lat_b_rad) * sin(d_lng / 2) ** 2
+    return 2 * earth_radius_km * asin(sqrt(haversine))
 
 
 def admin_area_aliases(

@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, datetime
 import json
 import os
-from pathlib import Path
 import sys
+from datetime import UTC, datetime
+from math import asin, cos, radians, sin, sqrt
+from pathlib import Path
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-
 
 DEFAULT_BASE_URL = "https://floodrisk.cc"
 DEFAULT_LAT = 23.01929
 DEFAULT_LNG = 120.18726
 DEFAULT_RADIUS_M = 2000
 DEFAULT_LOCATION_TEXT = "Tainan hosted public risk evidence smoke"
+GEOCODE_ADMIN_CANARY_QUERY = "臺南市北區北安路一段"
+GEOCODE_ADMIN_CANARY_CENTER = (23.0101, 120.205518)
+GEOCODE_ADMIN_CANARY_MAX_DISTANCE_KM = 50.0
 EVIDENCE_SCHEMA_VERSION = "hosted-public-risk-evidence-smoke/v1"
 COMPLETION_EVIDENCE_SCHEMA_VERSION = "local-source-completion-evidence/v1"
 PUBLIC_RISK_GATE_KEY = "public_risk_worker_evidence_path"
@@ -124,6 +127,19 @@ def main(argv: list[str] | None = None) -> int:
             f"deployment_sha={health.payload.get('deployment_sha')}"
         )
 
+    geocode = request_json(
+        "POST",
+        f"{base_url}/v1/geocode",
+        {
+            "query": GEOCODE_ADMIN_CANARY_QUERY,
+            "input_type": "address",
+            "limit": 1,
+        },
+        timeout_seconds=args.timeout_seconds,
+    )
+    geocode_failures, geocode_evidence = check_geocode_admin_canary(geocode)
+    contract_failures.extend(geocode_failures)
+
     risk_request = {
         "point": {"lat": args.lat, "lng": args.lng},
         "radius_m": args.radius_m,
@@ -178,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
         data_source_failures=data_source_failures,
         degraded_notes=degraded_notes,
         health=health_evidence,
+        geocode_admin_canary=geocode_evidence,
         request={
             "lat": args.lat,
             "lng": args.lng,
@@ -284,6 +301,63 @@ def check_risk_payload(
     return contract_failures, data_source_failures, resolve_official_source_state(payload)
 
 
+def check_geocode_admin_canary(response: JsonResponse) -> tuple[list[str], dict[str, Any]]:
+    evidence: dict[str, Any] = {
+        "query": GEOCODE_ADMIN_CANARY_QUERY,
+        "status_code": response.status_code,
+    }
+    if response.status_code != 200:
+        return (
+            [
+                "geocode admin canary returned HTTP "
+                f"{response.status_code}: {response.error or response.payload}"
+            ],
+            evidence,
+        )
+
+    candidates = response.payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], Mapping):
+        return (["geocode admin canary returned no candidate"], evidence)
+
+    candidate = candidates[0]
+    point = candidate.get("point")
+    evidence.update(
+        {
+            "candidate_name": candidate.get("name"),
+            "source": candidate.get("source"),
+            "precision": candidate.get("precision"),
+            "point": point,
+        }
+    )
+    if not isinstance(point, Mapping):
+        return (["geocode admin canary candidate has no point"], evidence)
+    lat = point.get("lat")
+    lng = point.get("lng")
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        return (["geocode admin canary candidate point is not numeric"], evidence)
+
+    distance_km = _haversine_km(
+        float(lat),
+        float(lng),
+        *GEOCODE_ADMIN_CANARY_CENTER,
+    )
+    evidence["distance_from_expected_admin_center_km"] = round(distance_km, 3)
+    if distance_km > GEOCODE_ADMIN_CANARY_MAX_DISTANCE_KM:
+        return (
+            [
+                "geocode admin canary escaped the requested Tainan admin area: "
+                f"candidate={candidate.get('name')}, distance_km={distance_km:.1f}"
+            ],
+            evidence,
+        )
+
+    print(
+        "PASS geocode admin canary | "
+        f"source={candidate.get('source')} | distance_km={distance_km:.1f}"
+    )
+    return ([], evidence)
+
+
 def resolve_official_source_state(payload: Mapping[str, Any]) -> str:
     """Report whether the deployment has any official realtime source enabled.
 
@@ -340,6 +414,7 @@ def build_evidence_artifact(
     data_source_failures: list[str],
     degraded_notes: list[str],
     health: Mapping[str, Any],
+    geocode_admin_canary: Mapping[str, Any],
     request: Mapping[str, Any],
     risk_payload: Mapping[str, Any],
     failures: list[str],
@@ -353,6 +428,7 @@ def build_evidence_artifact(
         "data_source_mode": data_source_mode,
         "official_source_state": official_source_state,
         "health": dict(health),
+        "geocode_admin_canary": dict(geocode_admin_canary),
         "request": dict(request),
         "risk_assessment": _risk_assessment_summary(risk_payload),
         "completion_evidence_targets": [
@@ -568,6 +644,16 @@ def _unique(values: list[str]) -> list[str]:
         seen.add(value)
         unique.append(value)
     return unique
+
+
+def _haversine_km(lat_a: float, lng_a: float, lat_b: float, lng_b: float) -> float:
+    earth_radius_km = 6371.0088
+    lat_a_rad = radians(lat_a)
+    lat_b_rad = radians(lat_b)
+    d_lat = radians(lat_b - lat_a)
+    d_lng = radians(lng_b - lng_a)
+    haversine = sin(d_lat / 2) ** 2 + cos(lat_a_rad) * cos(lat_b_rad) * sin(d_lng / 2) ** 2
+    return 2 * earth_radius_km * asin(sqrt(haversine))
 
 
 def _default_completion_evidence_ref(base_url: str, health: Mapping[str, Any]) -> str:
