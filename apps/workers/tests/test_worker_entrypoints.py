@@ -1438,6 +1438,9 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
     class _LocationQueryRetentionSummary:
         rows_deleted = 2
 
+    class _RawSnapshotRetentionSummary:
+        rows_deleted = 1
+
     class FakeEvidenceRetentionJob:
         def __init__(self, *, database_url: str) -> None:
             calls.append(("evidence.init", database_url))
@@ -1451,6 +1454,10 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         ) -> _LocationQueryRetentionSummary:
             calls.append(("location_queries.retention", retention_hours))
             return _LocationQueryRetentionSummary()
+
+        def prune_expired_raw_snapshots(self) -> _RawSnapshotRetentionSummary:
+            calls.append(("raw_snapshots.retention", None))
+            return _RawSnapshotRetentionSummary()
 
     monkeypatch.setattr(
         scheduler_module,
@@ -1485,6 +1492,7 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         ("evidence.init", "postgresql://worker:test@localhost/flood"),
         ("evidence.retention", 48),
         ("location_queries.retention", 720),
+        ("raw_snapshots.retention", None),
     ]
 
 

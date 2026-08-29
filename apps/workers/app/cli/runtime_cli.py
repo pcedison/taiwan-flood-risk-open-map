@@ -41,7 +41,7 @@ from app.jobs.source_catalog import (
 from app.logging import log_event
 from app.pipelines.ingestion_runs import PostgresIngestionRunWriter
 from app.pipelines.promotion import PromotionResult, promote_accepted_staging
-from app.scheduler import _execute_scheduled_ingestion_cycle
+from app.scheduler import _execute_scheduled_ingestion_cycle, run_maintenance_once
 
 STATIC_SOURCE_INTERVAL_SECONDS = 24 * 60 * 60
 
@@ -693,6 +693,15 @@ def run_v1_baseline_enabled_adapters(
                 )
                 if static_due:
                     last_static_attempt_at = now_monotonic
+                maintenance = run_maintenance_once(
+                    settings=replace(settings, database_url=resolved_database_url)
+                )
+                if maintenance.failed:
+                    tick_failed = True
+                    log_event(
+                        "worker.runtime.v1_baseline.maintenance_failed",
+                        reason=maintenance.reason,
+                    )
             if heartbeat.lost:
                 lease_acquired = False
                 log_event(

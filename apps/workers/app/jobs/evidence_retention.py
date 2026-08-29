@@ -1,4 +1,4 @@
-"""Retention pruning for high-volume realtime official station evidence.
+"""Retention pruning for raw snapshots and high-volume realtime evidence.
 
 Live ingestion of CWA rainfall (~570 stations), WRA/Civil IoT water levels,
 and NCDR CAP alerts (``flood_warning``) each write a new ``evidence`` row per
@@ -88,6 +88,20 @@ class LocationQueryRetentionSummary:
         return {
             "retention_hours": self.retention_hours,
             "cutoff": self.cutoff,
+            "rows_deleted": self.rows_deleted,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+
+@dataclass(frozen=True)
+class RawSnapshotRetentionSummary:
+    rows_deleted: int
+    started_at: datetime
+    finished_at: datetime
+
+    def log_fields(self) -> dict[str, object]:
+        return {
             "rows_deleted": self.rows_deleted,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -196,6 +210,44 @@ class PostgresEvidenceRetentionJob:
         log_event("location_queries.retention.completed", **summary.log_fields())
         return summary
 
+    def prune_expired_raw_snapshots(
+        self,
+        *,
+        batch_limit: int = DEFAULT_EVIDENCE_PRUNE_BATCH_LIMIT,
+        now: datetime | None = None,
+    ) -> RawSnapshotRetentionSummary:
+        """Delete one bounded batch whose per-source-family policy has expired.
+
+        ``staging_evidence.raw_snapshot_id`` uses ``ON DELETE SET NULL`` so the
+        normalized validation audit remains available after the raw payload's
+        retention window ends.
+        """
+
+        if batch_limit < 1:
+            raise ValueError("batch_limit must be a positive integer")
+        resolved_now = (now or _now()).astimezone(UTC)
+        started_at = _now()
+
+        try:
+            with self._connect() as connection:
+                with connection.cursor() as cursor:
+                    rows_deleted = _prune_expired_raw_snapshots(
+                        cursor,
+                        expired_before=resolved_now,
+                        batch_limit=batch_limit,
+                    )
+                connection.commit()
+        except Exception as exc:
+            raise EvidenceRetentionUnavailable(str(exc)) from exc
+
+        summary = RawSnapshotRetentionSummary(
+            rows_deleted=rows_deleted,
+            started_at=started_at,
+            finished_at=_now(),
+        )
+        log_event("raw_snapshots.retention.completed", **summary.log_fields())
+        return summary
+
     def _connect(self) -> Any:
         if self._connection_factory is not None:
             return self._connection_factory()
@@ -267,6 +319,35 @@ def _prune_location_queries(
         FROM deleted
         """,
         (cutoff, batch_limit),
+    )
+    return _row_count(cursor.fetchone())
+
+
+def _prune_expired_raw_snapshots(
+    cursor: Any,
+    *,
+    expired_before: datetime,
+    batch_limit: int,
+) -> int:
+    cursor.execute(
+        """
+        WITH stale AS (
+            SELECT id
+            FROM raw_snapshots
+            WHERE retention_expires_at IS NOT NULL
+                AND retention_expires_at < %s::timestamptz
+            ORDER BY retention_expires_at ASC
+            LIMIT %s
+        ),
+        deleted AS (
+            DELETE FROM raw_snapshots
+            WHERE id IN (SELECT id FROM stale)
+            RETURNING id
+        )
+        SELECT COUNT(*)::integer AS rows_deleted
+        FROM deleted
+        """,
+        (expired_before, batch_limit),
     )
     return _row_count(cursor.fetchone())
 

@@ -202,3 +202,12 @@ idempotency lookups to the small set of current, actual official warning rows.
 This prevents high-volume rainfall, water-level, and sensor history in the
 shared `evidence` table from causing warning promotion statement timeouts. It
 adds indexes only; it changes no source gate, warning state, or scoring rule.
+
+`0050_retention_cleanup_indexes.sql` adds the bounded lookup paths used by the
+deployed scheduler's official realtime-evidence and raw-snapshot retention
+passes. Raw snapshots are selected by the per-source-family expiry deadline
+already persisted during staging; deleting an expired raw row leaves the
+normalized staging audit in place through `ON DELETE SET NULL`. The migration
+also covers that foreign-key update across every staging status so one expiry
+does not scan the full staging audit table. It adds indexes only and changes no
+retained row by itself.

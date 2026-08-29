@@ -216,6 +216,7 @@ def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_inte
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured_runs: list[frozenset[str]] = []
+    maintenance_databases: list[str | None] = []
     static_key = "official.wra.historical_flood"
 
     class _Queue:
@@ -244,10 +245,20 @@ def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_inte
         captured_runs.append(fields["adapter_keys_to_run"])  # type: ignore[arg-type]
         return False
 
+    def fake_maintenance(**fields: object) -> SimpleNamespace:
+        settings = fields["settings"]
+        maintenance_databases.append(getattr(settings, "database_url", None))
+        return SimpleNamespace(failed=False, reason=None)
+
     monotonic_values = iter((0.0, 300.0))
     monkeypatch.setattr(runtime_cli, "PostgresRuntimeQueue", _Queue)
     monkeypatch.setattr(runtime_cli, "_SchedulerLeaseHeartbeat", _Heartbeat)
     monkeypatch.setattr(runtime_cli, "_run_v1_baseline_tick", fake_tick)
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_maintenance_once",
+        fake_maintenance,
+    )
     monkeypatch.setattr(
         runtime_cli,
         "v1_baseline_eligible_adapter_keys",
@@ -272,6 +283,10 @@ def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_inte
     assert captured_runs == [
         frozenset({SOURCE_A, static_key}),
         frozenset({SOURCE_A}),
+    ]
+    assert maintenance_databases == [
+        "postgresql://example.test/flood",
+        "postgresql://example.test/flood",
     ]
 
 

@@ -32,6 +32,10 @@ class RecordingEvidenceRetentionJob:
         self.calls.append(("prune_location_queries", retention_hours))
         return SimpleNamespace(rows_deleted=3)
 
+    def prune_expired_raw_snapshots(self) -> object:
+        self.calls.append(("prune_expired_raw_snapshots", 0))
+        return SimpleNamespace(rows_deleted=4)
+
 
 def test_scheduler_maintenance_keeps_privacy_retention_only(
     monkeypatch: pytest.MonkeyPatch,
@@ -59,6 +63,7 @@ def test_scheduler_maintenance_keeps_privacy_retention_only(
     assert retention.calls == [
         ("prune_realtime", SETTINGS.evidence_realtime_retention_hours),
         ("prune_location_queries", SETTINGS.location_queries_retention_hours),
+        ("prune_expired_raw_snapshots", 0),
     ]
 
 
@@ -86,6 +91,7 @@ def test_scheduler_maintenance_loop_never_constructs_generic_runtime_queue(
     assert retention.calls == [
         ("prune_realtime", SETTINGS.evidence_realtime_retention_hours),
         ("prune_location_queries", SETTINGS.location_queries_retention_hours),
+        ("prune_expired_raw_snapshots", 0),
     ]
 
 
