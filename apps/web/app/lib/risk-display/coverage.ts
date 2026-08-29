@@ -145,25 +145,28 @@ function nearbySensingCoverageSummary(
 
   if (diagnosis.sourceIssue) {
     if (diagnosis.isPartial) {
+      const observationScope = diagnosis.hasUsableObservation
+        ? "附近仍有可用即時觀測"
+        : "附近仍有區域參考觀測";
       if (diagnosis.sourceIssue === "jurisdiction_unverified") {
-        return "附近仍有部分即時觀測，但縣市邊界或管轄來源清單尚未完成審核。";
+        return `${observationScope}，但縣市邊界或管轄來源清單尚未完成審核。`;
       }
       if (diagnosis.sourceIssue === "inventory_unverified") {
-        return "附近仍有部分即時觀測，但另有來源的站點清冊完整性尚未驗證。";
+        return `${observationScope}，但另有來源的站點清冊完整性尚未驗證。`;
       }
       if (diagnosis.sourceIssue === "update_pipeline_stalled") {
-        return "附近仍有可用即時觀測，但另有來源的背景更新已停滯，覆蓋並不完整。";
+        return `${observationScope}，但另有來源的背景更新已停滯，覆蓋並不完整。`;
       }
       if (diagnosis.sourceIssue === "source_failed") {
-        return "附近仍有可用即時觀測，但另有來源或更新管線異常，覆蓋並不完整。";
+        return `${observationScope}，但另有來源或更新管線異常，覆蓋並不完整。`;
       }
       if (diagnosis.sourceIssue === "source_degraded") {
-        return "附近仍有可用即時觀測，但部分來源更新較慢或不完整。";
+        return `${observationScope}，但部分來源更新較慢或不完整。`;
       }
       if (diagnosis.sourceIssue === "source_not_configured") {
-        return "附近仍有可用即時觀測，但另有必要來源尚未啟用，覆蓋並不完整。";
+        return `${observationScope}，但另有必要來源尚未啟用，覆蓋並不完整。`;
       }
-      return "附近仍有可用即時觀測，但另有來源狀態不明，覆蓋並不完整。";
+      return `${observationScope}，但另有來源狀態不明，覆蓋並不完整。`;
     }
     if (diagnosis.sourceIssue === "update_pipeline_stalled") {
       return "即時來源的背景更新已停滯，目前無法確認附近是否真的沒有測站。";
@@ -488,6 +491,9 @@ function coverageBadge(
   }
   if (diagnosis.sourceIssue) {
     if (diagnosis.isPartial) {
+      if (!diagnosis.hasUsableObservation && diagnosis.hasRegionalReference) {
+        return "附近觀測：僅區域參考且不完整";
+      }
       if (diagnosis.sourceIssue === "source_degraded") {
         return "附近觀測：可用但更新不齊";
       }

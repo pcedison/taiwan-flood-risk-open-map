@@ -1153,6 +1153,23 @@ test("nearby sensing state reports partial failure without hiding useful observa
   assert.match(delayedState.summary, /部分來源更新較慢或不完整/);
   assert.doesNotMatch(delayedState.summary, /來源異常/);
 
+  const regionalOnlyCoverage: NearbyRealtimeCoverage = {
+    ...coverage,
+    overall_level: "no_local_sensor",
+    signal_breakdown: coverage.signal_breakdown.map((signal) => ({
+      ...signal,
+      availability_state: "regional_reference",
+      coverage_level: "no_local_sensor",
+      nearest_distance_m: 7_500,
+    })),
+  };
+  const regionalOnlyState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: regionalOnlyCoverage },
+  });
+  assert.equal(regionalOnlyState.badge, "附近觀測：僅區域參考且不完整");
+  assert.match(regionalOnlyState.summary, /區域參考觀測/);
+  assert.doesNotMatch(regionalOnlyState.summary, /可用即時觀測/);
+
   coverage.source_health = coverage.source_health?.map((source) => ({
     ...source,
     required_for_absence: false,
