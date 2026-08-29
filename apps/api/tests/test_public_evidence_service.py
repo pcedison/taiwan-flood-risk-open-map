@@ -16,6 +16,7 @@ def _record(
     occurred_at: datetime,
     observed_at: datetime | None = None,
     distance_to_query_m: float = 100.0,
+    url: str | None = None,
 ) -> EvidenceRecord:
     return EvidenceRecord(
         id=evidence_id,
@@ -24,7 +25,7 @@ def _record(
         event_type=event_type,
         title=f"official {event_type}",
         summary=f"official {event_type} summary",
-        url="https://fallback.invalid/evidence",
+        url=url,
         occurred_at=occurred_at,
         observed_at=observed_at,
         ingested_at=datetime(2026, 8, 24, tzinfo=UTC),
@@ -63,6 +64,25 @@ def test_official_evidence_uses_canonical_data_gov_url(
     )
 
     assert evidence.url == expected_url
+
+
+def test_official_evidence_preserves_adapter_specific_source_url() -> None:
+    tainan_url = (
+        "https://data.tainan.gov.tw/DataSet/Detail/"
+        "03dd4536-3fe7-46ec-9920-a120cb5c502c"
+    )
+    evidence = public_evidence.evidence_from_record(
+        _record(
+            evidence_id="tainan-current-flood-depth",
+            source_id="362:2026-08-29T02:00:00Z",
+            event_type="flood_report",
+            occurred_at=datetime(2026, 8, 29, 2, tzinfo=UTC),
+            observed_at=datetime(2026, 8, 29, 2, tzinfo=UTC),
+            url=tainan_url,
+        )
+    )
+
+    assert evidence.url == tainan_url
 
 
 def test_generated_realtime_and_historical_evidence_publish_explicit_scope() -> None:

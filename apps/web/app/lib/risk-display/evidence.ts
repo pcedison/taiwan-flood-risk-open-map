@@ -177,6 +177,13 @@ export function evidenceDisplayText(item: EvidencePreview): EvidenceDisplayText 
     };
   }
 
+  // Current flood-depth adapters persist as `flood_report` because that is
+  // the scoring/storage event contract.  Present them as live depth evidence;
+  // historical flood reports were handled by the scope branch above.
+  if (item.evidence_scope === "current" && item.event_type === "flood_report") {
+    return evidenceEventDisplayText.flood_depth;
+  }
+
   const eventText = evidenceEventDisplayText[item.event_type];
   if (
     eventText &&
@@ -270,7 +277,10 @@ export const realtimeEventLabels: Record<string, string> = {
 };
 
 export function isRealtimeEvidence(item: EvidencePreview) {
-  return Object.prototype.hasOwnProperty.call(realtimeEventLabels, item.event_type);
+  return (
+    Object.prototype.hasOwnProperty.call(realtimeEventLabels, item.event_type) ||
+    (item.evidence_scope === "current" && item.event_type === "flood_report")
+  );
 }
 
 function evidenceSortTime(item: EvidencePreview) {
