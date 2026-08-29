@@ -112,6 +112,9 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "stepLines" in script
     assert "github.rest.issues.create" in script
     assert "github.rest.issues.createComment" in script
+    assert "github.rest.issues.update" in script
+    assert "issue_number: existing.number" in script
+    assert "body," in script
     assert "private evidence" in script
     assert "ADMIN_BEARER_TOKEN" not in step_text
 
