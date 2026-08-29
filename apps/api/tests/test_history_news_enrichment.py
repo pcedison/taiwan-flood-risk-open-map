@@ -415,7 +415,7 @@ def test_search_public_flood_news_rss_reaches_2023_queries() -> None:
         fetch_text=fetch_text,
     )
 
-    assert any("www.bing.com" in url for url in requested_feed_urls)
+    assert any(urlparse(url).hostname == "www.bing.com" for url in requested_feed_urls)
     assert any("2024" in query for query in requested_queries)
     assert any("2023" in query for query in requested_queries)
 
@@ -430,9 +430,10 @@ def test_search_public_flood_news_uses_wiki_public_metadata_fallback() -> None:
         params = parse_qs(urlparse(url).query)
         query = (params.get("q") or params.get("srsearch") or [""])[0]
         requested_wiki_queries.append(query)
+        is_wikimedia_api = urlparse(url).hostname == "api.wikimedia.org"
         if "2023" not in query:
-            return {"pages": []} if "api.wikimedia.org" in url else {"query": {"search": []}}
-        if "api.wikimedia.org" in url:
+            return {"pages": []} if is_wikimedia_api else {"query": {"search": []}}
+        if is_wikimedia_api:
             return {
                 "pages": [
                     {
