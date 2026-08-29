@@ -431,6 +431,12 @@ class NominatimDevelopmentFallbackProvider:
                         candidate,
                         fallback_kind=fallback_kind,
                         matched_query=geocode_query,
+                        display_query=(
+                            strip_taiwan_context(geocode_query)
+                            if fallback_kind == "taiwan-normalized"
+                            and candidate.precision in {"unknown", "poi"}
+                            else None
+                        ),
                     )
                     for candidate in candidates
                 )
@@ -1249,13 +1255,17 @@ def candidate_with_fallback_metadata(
     *,
     fallback_kind: str,
     matched_query: str,
+    display_query: str | None = None,
 ) -> PlaceCandidate:
     precision = precision_for_fallback(candidate.precision, fallback_kind)
     confidence = min(candidate.confidence, geocode_confidence_cap(fallback_kind))
     source = candidate.source if fallback_kind == "direct" else f"{candidate.source}-{fallback_kind}"
     return candidate.model_copy(
         update={
-            "name": fallback_candidate_name(candidate.name, fallback_kind),
+            "name": fallback_candidate_name(
+                display_query or candidate.name,
+                fallback_kind,
+            ),
             "source": source,
             "confidence": confidence,
             "precision": precision,
@@ -1344,6 +1354,15 @@ def fallback_candidate_name(name: str, fallback_kind: str) -> str:
     if fallback_kind == "taiwan-normalized":
         return f"{name}（由查詢文字萃取地名）"
     return name
+
+
+def strip_taiwan_context(query: str) -> str:
+    display_query = query.strip()
+    for prefix in ("臺灣 ", "台灣 "):
+        display_query = display_query.removeprefix(prefix)
+    for suffix in (" 臺灣", " 台灣"):
+        display_query = display_query.removesuffix(suffix)
+    return display_query.strip()
 
 
 def dedupe_texts(values: tuple[str, ...], *, limit: int) -> tuple[str, ...]:
