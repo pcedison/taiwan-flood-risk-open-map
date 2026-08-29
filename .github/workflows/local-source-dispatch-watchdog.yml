@@ -195,6 +195,12 @@ jobs:
             });
             const existing = issues.find((issue) => issue.title === title);
             if (existing) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
               await github.rest.issues.createComment({
                 owner,
                 repo,
