@@ -96,6 +96,22 @@ def test_wra_iow_flood_depth_uses_hourly_source_freshness_thresholds(
     assert check.is_alert() is expected_alert
 
 
+def test_cwa_tide_level_uses_hourly_source_freshness_thresholds() -> None:
+    check = check_summary_freshness(
+        _summary(
+            adapter_key="official.cwa.tide_level",
+            source_timestamp_max=CHECKED_AT - timedelta(minutes=69),
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.cadence == "realtime"
+    assert check.status == "fresh"
+    assert check.max_age_seconds == 3 * 60 * 60
+    assert not check.is_alert()
+
+
 def test_civil_iot_water_level_sources_use_realtime_freshness_cadence() -> None:
     for adapter_key in (
         "official.civil_iot.river_water_level",
