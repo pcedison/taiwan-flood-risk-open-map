@@ -433,3 +433,32 @@ jobs:
               "Closing the stale hosted monitoring failure issue.",
             ].join("\n");
             await closeAlertIssue({ github, context, core, title, body });
+
+      - name: Close resolved schedule watchdog issue
+        if: ${{ success() && github.event_name == 'schedule' }}
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          retries: 3
+          script: |
+            const {
+              closeAlertIssue,
+            } = require(`${process.env.GITHUB_WORKSPACE}/scripts/ci/route-alert-issue.js`);
+            const marker = "[hosted-schedule-watchdog]";
+            const title = `${marker} Hosted Monitoring schedule not ready`;
+            const runUrl = [
+              process.env.GITHUB_SERVER_URL,
+              process.env.GITHUB_REPOSITORY,
+              "actions/runs",
+              process.env.GITHUB_RUN_ID,
+            ].join("/");
+            const body = [
+              "Hosted Monitoring schedule readiness resolved by a successful scheduled run.",
+              "",
+              `- run: ${runUrl}`,
+              `- workflow: ${process.env.GITHUB_WORKFLOW}`,
+              `- event: ${process.env.GITHUB_EVENT_NAME}`,
+              `- sha: ${process.env.GITHUB_SHA}`,
+              "",
+              "Closing the stale schedule watchdog issue without waiting for the daily watchdog cadence.",
+            ].join("\n");
+            await closeAlertIssue({ github, context, core, title, body });
