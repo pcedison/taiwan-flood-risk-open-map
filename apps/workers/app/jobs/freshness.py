@@ -13,9 +13,10 @@ FreshnessCadence = Literal["realtime", "event", "static", "legacy"]
 REALTIME_FRESH_SECONDS = 10 * 60
 REALTIME_DEGRADED_SECONDS = 30 * 60
 REALTIME_STALE_SECONDS = 60 * 60
-# Dataset 142980 is published hourly. Allow publication/ingestion headroom,
+# These official datasets publish hourly. Allow publication/ingestion headroom,
 # degrade after one missed cycle, alert after two, and fail after three.
 REALTIME_THRESHOLDS_BY_ADAPTER = {
+    "official.cwa.tide_level": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
     "official.wra_iow.flood_depth": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
 }
 REALTIME_ADAPTER_KEYS = frozenset(

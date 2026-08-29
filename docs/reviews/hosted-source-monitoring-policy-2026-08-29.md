@@ -39,7 +39,7 @@ public upstream APIs on `2026-08-29`.
 
 | Adapter | Evidence | Classification reason |
 | --- | --- | --- |
-| `official.cwa.tide_level` | Fetch succeeded with 46 rows, but the newest usable observation was `2026-08-27T02:00:00Z`. | Coastal/marine context, not an inland flood absence signal. The official 48-hour marine observation feed was stalled and remains visible as an advisory failure. |
+| `official.cwa.tide_level` | The earlier parser trusted array position zero and misreported the oldest observation as newest. PR #253 changed it to select the newest valid `DateTime`; the first production run then parsed all 46 rows at `2026-08-29T09:00:00Z`. | Coastal/marine context, not an inland flood absence signal. It remains advisory, while actual observation age is now evaluated instead of the upstream array order. |
 | `official.civil_iot.flood_sensor` | The official service exposed 1,806 matching datastreams, while a complete adapter replay produced 0 usable observations. | The active national road-depth role is covered by WRA IoW; local direct sources such as Tainan remain separate. The legacy feed is retained for recovery detection. |
 | `official.civil_iot.pump_water_level` | The service exposed matching pump metadata (11 Things in the adapter query; 30 category datastreams in the migrated catalog query) but returned no observations. | Pump water level is infrastructure context, not a direct flood warning or low-risk proof. |
 | `official.civil_iot.gate_water_level` | The service exposed matching gate metadata (44 Things in the adapter query; 114 category datastreams in the migrated catalog query) but returned no observations. | Gate water level is infrastructure context, not a direct flood warning or low-risk proof. |
@@ -59,11 +59,13 @@ Official references:
 
 ## Cadence correction
 
-Dataset 142980 is evaluated with the already-reviewed worker thresholds of 90
-minutes fresh, 120 minutes degraded, and 180 minutes stale. The admin endpoint
-previously used the generic 10/30/60-minute thresholds, so the same 31-minute-old
-observation was healthy in the worker and stale in Hosted Monitoring. Admin and
-worker now use the same source-specific policy.
+Hourly datasets CWA O-B0075-001 and WRA 142980 are evaluated with the reviewed
+worker thresholds of 90 minutes fresh, 120 minutes degraded, and 180 minutes
+stale. This allows one publication/ingestion interval of headroom without
+calling a 69-minute-old hourly observation failed. Dataset 142980's admin
+endpoint previously used the generic 10/30/60-minute thresholds, so the same
+31-minute-old observation was healthy in the worker and stale in Hosted
+Monitoring; admin and worker now use the same source-specific policy there.
 
 ## Fail-closed guarantees
 
