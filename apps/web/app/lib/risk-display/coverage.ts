@@ -151,9 +151,19 @@ function nearbySensingCoverageSummary(
       if (diagnosis.sourceIssue === "inventory_unverified") {
         return "附近仍有部分即時觀測，但另有來源的站點清冊完整性尚未驗證。";
       }
-      return diagnosis.sourceIssue === "update_pipeline_stalled"
-        ? "附近仍有部分即時觀測，但另有來源的背景更新已停滯，覆蓋並不完整。"
-        : "附近仍有部分即時觀測，但另有來源異常或狀態受限，覆蓋並不完整。";
+      if (diagnosis.sourceIssue === "update_pipeline_stalled") {
+        return "附近仍有可用即時觀測，但另有來源的背景更新已停滯，覆蓋並不完整。";
+      }
+      if (diagnosis.sourceIssue === "source_failed") {
+        return "附近仍有可用即時觀測，但另有來源或更新管線異常，覆蓋並不完整。";
+      }
+      if (diagnosis.sourceIssue === "source_degraded") {
+        return "附近仍有可用即時觀測，但部分來源更新較慢或不完整。";
+      }
+      if (diagnosis.sourceIssue === "source_not_configured") {
+        return "附近仍有可用即時觀測，但另有必要來源尚未啟用，覆蓋並不完整。";
+      }
+      return "附近仍有可用即時觀測，但另有來源狀態不明，覆蓋並不完整。";
     }
     if (diagnosis.sourceIssue === "update_pipeline_stalled") {
       return "即時來源的背景更新已停滯，目前無法確認附近是否真的沒有測站。";
@@ -479,7 +489,7 @@ function coverageBadge(
   if (diagnosis.sourceIssue) {
     if (diagnosis.isPartial) {
       if (diagnosis.sourceIssue === "source_degraded") {
-        return "附近觀測：部分來源受限";
+        return "附近觀測：可用但更新不齊";
       }
       if (diagnosis.sourceIssue === "health_unknown") {
         return "附近觀測：部分來源狀態不明";
@@ -490,7 +500,7 @@ function coverageBadge(
       if (diagnosis.sourceIssue === "inventory_unverified") {
         return "附近觀測：部分清冊待驗證";
       }
-      return "附近觀測：部分來源異常";
+      return "附近觀測：可用但不完整";
     }
     if (diagnosis.sourceIssue === "update_pipeline_stalled") {
       return "附近觀測：更新管線停滯";

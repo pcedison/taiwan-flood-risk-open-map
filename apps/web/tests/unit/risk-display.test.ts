@@ -874,7 +874,7 @@ test("contradictory no-station payload is downgraded when complementary sources 
   const observedState = nearbySensingState({
     assessment: { nearby_realtime_coverage: observedCoverage },
   });
-  assert.equal(observedState.badge, "附近觀測：部分來源異常");
+  assert.equal(observedState.badge, "附近觀測：可用但不完整");
   assert.equal(observedState.tone, "warn");
 });
 
@@ -1132,10 +1132,26 @@ test("nearby sensing state reports partial failure without hiding useful observa
     assessment: { nearby_realtime_coverage: coverage },
   });
 
-  assert.equal(state.badge, "附近觀測：部分來源異常");
-  assert.match(state.summary, /部分即時觀測/);
+  assert.equal(state.badge, "附近觀測：可用但不完整");
+  assert.match(state.summary, /另有來源或更新管線異常/);
   assert.match(state.items[0].detail, /320 公尺；新鮮/);
   assert.match(state.note, /不代表現地安全/);
+
+  const delayedCoverage: NearbyRealtimeCoverage = {
+    ...coverage,
+    source_health: coverage.source_health?.map((source) => ({
+      ...source,
+      health_status: "degraded",
+      reason_code: "delayed",
+    })),
+    source_health_status: "degraded",
+  };
+  const delayedState = nearbySensingState({
+    assessment: { nearby_realtime_coverage: delayedCoverage },
+  });
+  assert.equal(delayedState.badge, "附近觀測：可用但更新不齊");
+  assert.match(delayedState.summary, /部分來源更新較慢或不完整/);
+  assert.doesNotMatch(delayedState.summary, /來源異常/);
 
   coverage.source_health = coverage.source_health?.map((source) => ({
     ...source,

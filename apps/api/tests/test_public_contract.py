@@ -1115,7 +1115,7 @@ def test_risk_assess_reader_failures_are_independent(
 @pytest.mark.parametrize(
     ("admin_code", "admin_name", "gap"),
     [
-        ("67000000", "臺南市", "臺南市地方淹水感測器尚未可用"),
+        ("67000000", "臺南市", "臺南市地方淹水感測目前暫無可用更新"),
         ("64000000", "高雄市", "高雄市地方政府機器介面尚未核准"),
         ("10013000", "屏東縣", "屏東縣地方政府機器介面尚未核准"),
     ],

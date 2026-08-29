@@ -34,7 +34,7 @@ _NATIONAL_FALLBACK_KEYS = frozenset(
     }
 )
 _LOCAL_POLICY = {
-    "67000000": ("local.tainan.flood_sensor", "臺南市地方淹水感測器尚未可用"),
+    "67000000": ("local.tainan.flood_sensor", "臺南市地方淹水感測目前暫無可用更新"),
     "64000000": (None, "高雄市地方政府機器介面尚未核准"),
     "10013000": (None, "屏東縣地方政府機器介面尚未核准"),
 }
