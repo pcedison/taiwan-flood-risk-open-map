@@ -83,6 +83,7 @@ documentation, and the open queue. A project-wide follow-up may stop only when:
 ## Operator verification
 
 ```powershell
+git fetch origin --prune
 $expectedSha = git rev-parse origin/main
 python scripts/hosted_deployment_smoke.py --expected-deployment-sha $expectedSha
 python scripts/hosted_public_risk_evidence_smoke.py --data-source-mode strict
