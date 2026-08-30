@@ -81,14 +81,17 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). As
-of 2026-08-29, the Zeabur deployment matches the current `origin/main` commit,
-PostgreSQL and Redis are healthy, strict hosted public-risk evidence smoke is
-passing, and a real scheduled Hosted Monitoring run has passed. The only open
-issue is the external local-source dispatch contract in #71; it must remain open
-until accepted official replies, production/authorization-gated adapters, or
-reviewed official-unavailable evidence exist. The phase descriptions below are
-implementation history and boundaries, not a substitute for live production
-verification.
+of 2026-08-30, the Zeabur deployment matches `origin/main` at
+`183482c2d95a9315ebb2e720ab9ca1829e767817`, PostgreSQL and Redis are healthy,
+and strict hosted deployment/public-risk smokes pass. A real scheduled Hosted
+Monitoring run has passed in production; the latest real schedule failed on an
+older NCDR lifecycle implementation, while the post-repair diagnostic run
+passed. Only the next `schedule` event can renew that scheduled-operation proof.
+The only open issue is the external local-source dispatch contract in #71; it
+must remain open until accepted official replies, production/authorization-
+gated adapters, or reviewed official-unavailable evidence exist. The phase
+descriptions below are implementation history and boundaries, not a substitute
+for live production verification.
 
 The repository has moved beyond the Phase 0 skeleton. Phase 1 map-first query
 groundwork is in place, Phase 2 ingestion/adapters have tested groundwork, and
@@ -110,26 +113,27 @@ Current placeholder boundaries:
 - API and Web placeholder servers remain only as fallback files; Docker Compose
   now points at the FastAPI and Next.js development runtimes. Keep these files
   only for last-resort diagnostics unless a follow-up explicitly removes them.
-- Worker scheduler and sample jobs are safe local runtime paths, not a
-  completed production queue/scheduler. Durable queue smoke exists for local
-  fixture jobs, active-job dedupe, final-failed row visibility, and audited
-  manual requeue. Replay audit/quarantine DB primitives exist, but a production
-  replay policy, poison-job routing/escalation, and deployed singleton
-  scheduling are still pending.
+- The hosted worker scheduler and its lease/monitoring path are deployed.
+  Sample jobs remain local diagnostics, and the broader durable-queue design is
+  not complete: replay audit/quarantine DB primitives exist, but production
+  replay policy and poison-job routing/escalation remain pending.
 - Official data currently has two different paths that should not be conflated:
   the API realtime bridge can fetch CWA/WRA observations for risk responses in
   local/dev runtimes only (hosted runtimes are gated to worker-persisted
   evidence; see [ADR-0010](docs/adr/0010-realtime-bridge-as-local-diagnostic.md)),
-  while the worker official-adapter path has demo persistence plus managed
-  persistence for gated CWA rainfall, WRA water-level, and flood-potential
-  GeoJSON clients. Flood-potential still needs reviewed upstream URL/license,
-  credential, cadence, and egress approval before production use.
+  while the hosted worker persists gated CWA, WRA, NCDR, Civil IoT, and Tainan
+  official observations through the managed ingestion path. Flood-potential
+  still needs reviewed upstream URL/license, credential, cadence, and egress
+  approval before production use.
 - Realtime source freshness now uses a four-state source model:
-  `fresh`, `degraded`, `stale`, and `failed`. CWA, WRA, Civil IoT, and reviewed
-  local realtime adapters start with 10-minute fresh, 30-minute degraded, and
-  60-minute stale/failed thresholds. NCDR CAP is evaluated by
-  `effective`/`expires`; flood-potential remains static/slow-cadence context
-  and is not treated as a realtime freshness failure.
+  `fresh`, `degraded`, `stale`, and `failed`. The default realtime policy is
+  10-minute fresh, 30-minute degraded, with failure after the 60-minute stale
+  ceiling. Hourly CWA tide and WRA IoW flood-depth datasets use 90-minute fresh,
+  2-hour degraded, and fail after the 3-hour stale ceiling. NCDR CAP is
+  evaluated by `effective`/`expires`
+  and an accepted `Cancel`-only snapshot is a successful no-active-warning
+  poll; flood-potential remains static/slow-cadence context and is not treated
+  as a realtime freshness failure.
 - `/admin/v1/sources` remains the source-health endpoint and now includes
   diagnostics for the latest observed, fetched, and ingested timestamps, lag
   seconds, latest-row count, upstream adapter/job status, freshness state,

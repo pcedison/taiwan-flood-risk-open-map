@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-30 16:34 Asia/Taipei (08:34 UTC)
+Last verified: 2026-08-30 21:15 Asia/Taipei (13:15 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -26,21 +26,36 @@ the live verification sources listed below.
 ## Recorded production checkpoint
 
 - Latest functional release verified before this documentation edit:
-  `62ccb2bef63f7c9d263a39bef3781a9864e54497` (PR
-  [#262](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/262)).
+  `183482c2d95a9315ebb2e720ab9ca1829e767817` (PR
+  [#267](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/267)).
   This is an auditable historical checkpoint, not a permanent claim about the
   current SHA. Always derive the live expected SHA with `git rev-parse
   origin/main`, then compare it with `/health` and `/ready`.
-- At 2026-08-30 16:34 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+- At 2026-08-30 21:15 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
   reported that functional-release SHA; PostgreSQL and Redis were healthy. CI
   and CodeQL completed successfully, with no open pull requests.
 - Hosted Monitoring run
   [#33293621016](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33293621016)
   was a real `schedule` event and completed successfully. It closed the resolved
   schedule watchdog issue [#199](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/199).
+- The later real-schedule run
+  [#33309605618](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33309605618)
+  failed on older SHA `bb9ea482242214790580422743a9e0127ba7f4c9`
+  because an NCDR `Cancel`-only snapshot left no current warning row. PRs
+  [#265](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/265) and
+  [#266](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/266)
+  now evaluate CAP active windows and recognize a fully accepted `Cancel`-only
+  poll as a successful no-active-warning lifecycle. Diagnostic dispatch
+  [#33312524320](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33312524320)
+  passed after deployment and auto-closed the repair issue; it is not recorded
+  as a substitute for the next real schedule.
 - Open pull requests: zero at the checkpoint.
 - The deployment-identity smoke and strict hosted public-risk smoke both passed
   against the current deployed SHA.
+- A Playwright production query for `臺南市安南區安中路一段` resolved to
+  `23.04230, 120.19689` and returned a complete risk result distinguishing
+  current low risk from very-high historical context instead of falling back to
+  an unknown/data-insufficient result.
 - The required hosted backbone is CWA rainfall, WRA water level, NCDR CAP, WRA
   IoW flood depth, and Civil IoT sewer water level. Advisory sources remain
   distinguishable from required sources and cannot silently weaken the gate.
@@ -66,7 +81,11 @@ the live verification sources listed below.
   makes the CWA tide adapter select the newest valid observation instead of
   trusting response order. PR
   [#254](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/254)
-  aligns tide freshness with the reviewed hourly source cadence.
+  aligns worker freshness with the reviewed hourly source cadence. PR
+  [#267](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/267)
+  applies the same 90-minute fresh threshold to API monitoring and public
+  evidence coverage, persists that threshold in source metadata, and labels the
+  production catalog row `hourly`.
 - PR [#256](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/256)
   distinguishes delayed, incomplete, and regional-only observations instead of
   collapsing every partial state into a generic source error.
