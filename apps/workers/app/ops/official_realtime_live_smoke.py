@@ -39,7 +39,6 @@ class SmokeSource:
 class SmokeSourceResult:
     adapter_key: str
     status: SmokeStatus
-    required_for_overall_health: bool = True
     fetched_count: int = 0
     normalized_count: int = 0
     rejected_count: int = 0
@@ -48,6 +47,7 @@ class SmokeSourceResult:
     lienchiang_count: int = 0
     county_counts_by_county: Mapping[str, int] = field(default_factory=dict)
     message: str | None = None
+    required_for_overall_health: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {

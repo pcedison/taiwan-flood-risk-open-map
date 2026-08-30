@@ -89,6 +89,35 @@ def test_realtime_source_gate_fails_on_failed_central_backbone_source() -> None:
     assert any("official.wra.water_level" in failure for failure in result.failures)
 
 
+def test_realtime_source_gate_reports_advisory_failures_without_failing() -> None:
+    result = evaluate_realtime_source_gate(
+        coverage_summary=_coverage_summary(),
+        smoke_result=OfficialRealtimeSmokeResult(
+            results=(
+                SmokeSourceResult(
+                    "official.civil_iot.flood_sensor",
+                    "failed",
+                    message="upstream published no observations",
+                    required_for_overall_health=False,
+                ),
+                SmokeSourceResult(
+                    "official.civil_iot.gate_water_level",
+                    "skipped",
+                    required_for_overall_health=False,
+                ),
+            )
+        ),
+        discovery_result=DiscoveryResult(target_counties=("金門縣",), candidates=()),
+        fail_on_skipped_smoke=True,
+    )
+
+    assert result.passed is True
+    assert result.failures == ()
+    serialized = result.to_dict()["official_live_smoke"]
+    assert serialized["results"][0]["status"] == "failed"
+    assert serialized["results"][0]["required_for_overall_health"] is False
+
+
 def test_realtime_source_gate_can_fail_when_new_live_candidates_are_found() -> None:
     result = evaluate_realtime_source_gate(
         coverage_summary=_coverage_summary(),
