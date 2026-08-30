@@ -1412,6 +1412,66 @@ def test_ncdr_public_active_feed_needs_no_api_key_and_fetches_flood_cap() -> Non
     ]
 
 
+def test_ncdr_public_cancel_only_snapshot_is_audited_no_active_event() -> None:
+    cancel_xml = _fixture("ncdr_dump_flood_cap.xml").replace(
+        "<msgType>Alert</msgType>",
+        "<msgType>Cancel</msgType>",
+    )
+
+    def fetch_text(url: str, _params: dict[str, str], _timeout: int) -> str:
+        if url == ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL:
+            return _active_feed(_feed_entry())
+        return cancel_xml
+
+    adapter = NcdrCapAlertAdapter(fetched_at=FETCHED_AT, fetch_text=fetch_text)
+    result = adapter.run()
+    summary = run_adapter_batch(adapter)
+
+    assert len(result.fetched) == 1
+    assert len(result.normalized) == 1
+    assert result.rejected == ()
+    assert result.no_active_event is True
+    assert result.normalized[0].source_timestamp == datetime(2026, 6, 15, 2, 30, tzinfo=UTC)
+    assert summary.status == "succeeded"
+    assert summary.error_code == "no_active_event"
+    assert summary.items_fetched == summary.items_promoted == 1
+    assert summary.snapshot_generation_mode == "complete_replace"
+    assert summary.snapshot_activation_eligible is True
+    assert summary.raw_ref is not None
+    assert summary.event_active_from_min is None
+    assert summary.event_active_until_max is None
+
+
+def test_ncdr_public_mixed_alert_and_cancel_snapshot_is_not_no_active_event() -> None:
+    alert_href = (
+        "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/active-alert.cap"
+    )
+    cancel_href = (
+        "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/cancel-alert.cap"
+    )
+    cancel_xml = _fixture("ncdr_dump_flood_cap.xml").replace(
+        "<msgType>Alert</msgType>",
+        "<msgType>Cancel</msgType>",
+    )
+
+    def fetch_text(url: str, _params: dict[str, str], _timeout: int) -> str:
+        if url == ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL:
+            return _active_feed(
+                _feed_entry(cap_id="ACTIVE", href=alert_href),
+                _feed_entry(cap_id="CANCEL", href=cancel_href),
+            )
+        if url == cancel_href:
+            return cancel_xml.replace("NCDR-CAP-001", "NCDR-CAP-CANCEL")
+        return _fixture("ncdr_dump_flood_cap.xml")
+
+    result = NcdrCapAlertAdapter(fetched_at=FETCHED_AT, fetch_text=fetch_text).run()
+
+    assert len(result.fetched) == 2
+    assert len(result.normalized) == 2
+    assert result.rejected == ()
+    assert result.no_active_event is False
+
+
 def test_ncdr_public_active_feed_default_capacity_covers_widespread_event() -> None:
     entry_count = 54
     entries = tuple(

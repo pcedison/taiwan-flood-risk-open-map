@@ -11,9 +11,9 @@ from app.config import WorkerSettings, load_worker_settings
 from app.jobs.freshness import FreshnessCheck
 from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.ingestion import (
-    WARNING_EVENT_ADAPTER_KEYS,
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
+    is_successful_no_active_warning_summary,
     record_pipeline_status,
     record_runtime_selection,
 )
@@ -431,12 +431,7 @@ def _execute_managed_runtime_ingestion_cycle(
         no_active_summaries = tuple(
             summary
             for summary in cycle.summaries
-            if summary.adapter_key in WARNING_EVENT_ADAPTER_KEYS
-            and summary.status == "succeeded"
-            and summary.error_code == "no_active_event"
-            and summary.items_fetched == 0
-            and summary.items_promoted == 0
-            and summary.items_rejected == 0
+            if is_successful_no_active_warning_summary(summary)
         )
         try:
             for summary in no_active_summaries:

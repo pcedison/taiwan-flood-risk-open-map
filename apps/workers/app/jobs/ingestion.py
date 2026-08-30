@@ -376,6 +376,17 @@ def _summary_from_result(
     if warning_window is not None:
         event_active_from_min, event_active_until_max = warning_window
 
+    snapshot_activation_eligible = _snapshot_activation_eligible(
+        batch,
+        snapshot_generation_mode=snapshot_generation_mode,
+    )
+    cancel_only_no_active_event = _is_valid_cancel_only_no_active_result(
+        result,
+        batch,
+        snapshot_generation_mode=snapshot_generation_mode,
+        snapshot_activation_eligible=snapshot_activation_eligible,
+    )
+
     return AdapterBatchRunSummary(
         adapter_key=result.adapter_key,
         status=status,
@@ -385,16 +396,52 @@ def _summary_from_result(
         items_promoted=len(batch.accepted),
         items_rejected=items_rejected,
         snapshot_generation_mode=snapshot_generation_mode,
-        snapshot_activation_eligible=_snapshot_activation_eligible(
-            batch,
-            snapshot_generation_mode=snapshot_generation_mode,
-        ),
+        snapshot_activation_eligible=snapshot_activation_eligible,
         raw_ref=batch.raw_snapshot.raw_ref,
+        error_code="no_active_event" if cancel_only_no_active_event else None,
+        error_message=(
+            "valid complete CAP snapshot contained cancellation lifecycle messages only"
+            if cancel_only_no_active_event
+            else None
+        ),
         source_timestamp_min=source_timestamp_min,
         source_timestamp_max=source_timestamp_max,
         station_inventory_proof=result.station_inventory_proof,
         event_active_from_min=event_active_from_min,
         event_active_until_max=event_active_until_max,
+    )
+
+
+def is_successful_no_active_warning_summary(summary: AdapterBatchRunSummary) -> bool:
+    """Validate the two audited shapes that may retire reviewed warning latest rows."""
+
+    common = (
+        summary.adapter_key in WARNING_EVENT_ADAPTER_KEYS
+        and summary.status == "succeeded"
+        and summary.error_code == "no_active_event"
+        and summary.items_rejected == 0
+        and summary.station_inventory_proof is None
+        and summary.event_active_from_min is None
+        and summary.event_active_until_max is None
+    )
+    if not common:
+        return False
+    if summary.items_fetched == 0:
+        return (
+            summary.items_promoted == 0
+            and summary.raw_ref is None
+            and summary.source_timestamp_min is None
+            and summary.source_timestamp_max is None
+        )
+    return (
+        summary.adapter_key == NCDR_CAP_ADAPTER_KEY
+        and summary.items_fetched == summary.items_promoted
+        and summary.items_promoted > 0
+        and summary.snapshot_generation_mode == "complete_replace"
+        and summary.snapshot_activation_eligible
+        and summary.raw_ref is not None
+        and summary.source_timestamp_min is not None
+        and summary.source_timestamp_max is not None
     )
 
 
@@ -413,6 +460,29 @@ def _snapshot_activation_eligible(
     return (
         len(batch.accepted) / source_outcome_count
         >= COMPLETE_REPLACE_MIN_VALID_FRACTION
+    )
+
+
+def _is_valid_cancel_only_no_active_result(
+    result: AdapterRunResult,
+    batch: AdapterStagingBatch,
+    *,
+    snapshot_generation_mode: SnapshotGenerationMode | None,
+    snapshot_activation_eligible: bool,
+) -> bool:
+    return (
+        result.adapter_key == NCDR_CAP_ADAPTER_KEY
+        and result.no_active_event is True
+        and not result.rejected
+        and not result.source_rejections
+        and result.station_inventory_proof is None
+        and snapshot_generation_mode == "complete_replace"
+        and snapshot_activation_eligible
+        and bool(batch.accepted)
+        and len(result.fetched) == len(batch.accepted)
+        and not batch.rejected
+        and not batch.rejected_raw_source_ids
+        and all(staged.payload.get("cap_message_type") == "Cancel" for staged in batch.accepted)
     )
 
 

@@ -133,6 +133,40 @@ def test_successful_no_active_summary_locks_warning_lifecycle_before_marker() ->
     assert marker_params[8] == "no_active_event"
 
 
+def test_cancel_only_no_active_summary_locks_and_persists_audit_metrics() -> None:
+    summary = AdapterBatchRunSummary(
+        adapter_key="official.ncdr.cap",
+        status="succeeded",
+        started_at=STARTED_AT,
+        finished_at=FINISHED_AT,
+        items_fetched=1,
+        items_promoted=1,
+        items_rejected=0,
+        snapshot_generation_mode="complete_replace",
+        snapshot_activation_eligible=True,
+        raw_ref="raw/official/ncdr/cap/cancel-only.json",
+        error_code="no_active_event",
+        source_timestamp_min=STARTED_AT,
+        source_timestamp_max=STARTED_AT,
+    )
+    connection = _FakeConnection(job_id="job-id")
+
+    PostgresIngestionRunWriter(connection_factory=lambda: connection).write_summary(
+        summary,
+        job_key="ingest.warning",
+    )
+
+    lock_sql, lock_params = connection.cursor_instance.executions[0]
+    _job_sql, _job_params = connection.cursor_instance.executions[1]
+    _run_sql, run_params = connection.cursor_instance.executions[2]
+    assert "pg_advisory_xact_lock" in lock_sql
+    assert lock_params == ("official-warning-lifecycle|official.ncdr.cap",)
+    assert json.loads(str(run_params[13])) == {
+        "no_active_event": True,
+        "raw_ref": "raw/official/ncdr/cap/cancel-only.json",
+    }
+
+
 def test_postgres_ingestion_run_writer_does_not_insert_adapter_run_for_skipped_summary() -> None:
     summary = AdapterBatchRunSummary(
         adapter_key="test.empty",

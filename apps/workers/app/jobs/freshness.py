@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from app.jobs.ingestion import WARNING_EVENT_ADAPTER_KEYS, AdapterBatchRunSummary
+from app.jobs.ingestion import (
+    WARNING_EVENT_ADAPTER_KEYS,
+    AdapterBatchRunSummary,
+    is_successful_no_active_warning_summary,
+)
 from app.logging import log_event
 
 FreshnessStatus = Literal["fresh", "degraded", "stale", "failed"]
@@ -96,15 +100,7 @@ def check_summary_freshness(
             reason=summary.error_message or summary.error_code or "adapter batch failed",
         )
 
-    if (
-        summary.adapter_key in WARNING_EVENT_ADAPTER_KEYS
-        and summary.status == "succeeded"
-        and summary.error_code == "no_active_event"
-        and summary.items_fetched == 0
-        and summary.items_promoted == 0
-        and summary.items_rejected == 0
-        and summary.source_timestamp_max is None
-    ):
+    if is_successful_no_active_warning_summary(summary):
         return FreshnessCheck(
             adapter_key=summary.adapter_key,
             status="fresh",

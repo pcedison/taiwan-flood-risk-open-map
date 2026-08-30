@@ -5,11 +5,11 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from app.jobs.ingestion import AdapterBatchRunSummary
-from app.pipelines.promotion import (
-    REVIEWED_WARNING_ADAPTER_KEYS,
-    warning_lifecycle_lock_key,
+from app.jobs.ingestion import (
+    AdapterBatchRunSummary,
+    is_successful_no_active_warning_summary,
 )
+from app.pipelines.promotion import warning_lifecycle_lock_key
 
 ConnectionFactory = Callable[[], Any]
 IngestionJobStatus = Literal["succeeded", "failed", "skipped"]
@@ -37,7 +37,7 @@ class PostgresIngestionRunWriter:
     ) -> None:
         with self._connect() as connection:
             with connection.cursor() as cursor:
-                if _is_successful_no_active_warning_summary(summary):
+                if is_successful_no_active_warning_summary(summary):
                     cursor.execute(
                         "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                         (warning_lifecycle_lock_key(summary.adapter_key),),
@@ -387,25 +387,6 @@ def _job_status(summary: AdapterBatchRunSummary) -> IngestionJobStatus:
     return summary.status
 
 
-def _is_successful_no_active_warning_summary(
-    summary: AdapterBatchRunSummary,
-) -> bool:
-    return (
-        summary.adapter_key in REVIEWED_WARNING_ADAPTER_KEYS
-        and summary.status == "succeeded"
-        and summary.error_code == "no_active_event"
-        and summary.items_fetched == 0
-        and summary.items_promoted == 0
-        and summary.items_rejected == 0
-        and summary.raw_ref is None
-        and summary.source_timestamp_min is None
-        and summary.source_timestamp_max is None
-        and summary.station_inventory_proof is None
-        and summary.event_active_from_min is None
-        and summary.event_active_until_max is None
-    )
-
-
 def _adapter_run_status(summary: AdapterBatchRunSummary) -> Literal["succeeded", "failed", "partial"]:
     if summary.status == "skipped":
         raise ValueError("skipped summaries do not create adapter_runs")
@@ -414,6 +395,8 @@ def _adapter_run_status(summary: AdapterBatchRunSummary) -> Literal["succeeded",
 
 def _adapter_run_metrics(summary: AdapterBatchRunSummary) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
+    if summary.error_code == "no_active_event":
+        metrics["no_active_event"] = True
     if summary.raw_ref:
         metrics["raw_ref"] = summary.raw_ref
     if summary.station_inventory_proof is not None:
