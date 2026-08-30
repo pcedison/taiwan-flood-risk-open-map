@@ -125,6 +125,46 @@ def test_run_smoke_sources_marks_low_volume_source_failed() -> None:
     assert result.healthy is False
 
 
+def test_advisory_source_failure_is_visible_without_failing_overall_health() -> None:
+    result = run_smoke_sources(
+        (
+            SmokeSource(
+                adapter_key="official.civil_iot.pump_water_level",
+                build_adapter=lambda env, timeout: _FakeAdapter(
+                    _result("official.civil_iot.pump_water_level", ())
+                ),
+                minimum_fetched_count=1,
+                minimum_normalized_count=0,
+                required_for_overall_health=False,
+            ),
+        ),
+        env={},
+        timeout_seconds=8,
+    )
+
+    source = result.results[0]
+    assert source.status == "failed"
+    assert source.required_for_overall_health is False
+    assert source.to_dict()["required_for_overall_health"] is False
+    assert "fetched 0" in (source.message or "")
+    assert result.healthy is True
+
+
+def test_default_smoke_policy_matches_required_and_advisory_hosted_backbone() -> None:
+    sources = {source.adapter_key: source for source in default_official_smoke_sources()}
+
+    advisory = {
+        key for key, source in sources.items() if not source.required_for_overall_health
+    }
+    assert advisory == {
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+    }
+    assert sources["official.civil_iot.sewer_water_level"].required_for_overall_health
+    assert sources["official.wra_iow.flood_depth"].required_for_overall_health
+
+
 def test_default_ncdr_smoke_uses_public_feed_without_api_key() -> None:
     source = next(
         item for item in default_official_smoke_sources() if item.adapter_key == "official.ncdr.cap"

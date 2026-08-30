@@ -95,6 +95,8 @@ def evaluate_realtime_source_gate(
 ) -> RealtimeSourceGateResult:
     failures: list[str] = []
     for item in smoke_result.results:
+        if not item.required_for_overall_health:
+            continue
         if item.status == "failed":
             failures.append(f"{item.adapter_key}: {item.message or 'live smoke failed'}")
         elif fail_on_skipped_smoke and item.status == "skipped":
