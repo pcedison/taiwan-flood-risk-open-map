@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-29 21:33 Asia/Taipei (13:33 UTC)
+Last verified: 2026-08-30 09:58 Asia/Taipei (01:58 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -26,12 +26,12 @@ the live verification sources listed below.
 ## Recorded production checkpoint
 
 - Latest functional release verified before this documentation edit:
-  `ba71b2bced74c9b6bbd953a4b819bc39af9a6365` (PR
-  [#258](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/258)).
+  `529900c68b5eeadeb6b52ecb239e7304506eafd7` (PR
+  [#260](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/260)).
   This is an auditable historical checkpoint, not a permanent claim about the
   current SHA. Always derive the live expected SHA with `git rev-parse
   origin/main`, then compare it with `/health` and `/ready`.
-- At 2026-08-29 21:33 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+- At 2026-08-30 09:58 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
   reported that functional-release SHA; PostgreSQL and Redis were healthy. CI
   and CodeQL completed successfully, with no open pull requests.
 - Hosted Monitoring run
@@ -44,6 +44,10 @@ the live verification sources listed below.
 - The required hosted backbone is CWA rainfall, WRA water level, NCDR CAP, WRA
   IoW flood depth, and Civil IoT sewer water level. Advisory sources remain
   distinguishable from required sources and cannot silently weaken the gate.
+  PR [#260](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/260)
+  applies that required/advisory distinction consistently to both the direct
+  live smoke and the aggregate realtime-source gate while retaining advisory
+  failures in serialized diagnostics.
 - The Tainan direct flood-sensor adapter is operational. PR
   [#249](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/249)
   preserves the adapter-provided official dataset URL and presents current
