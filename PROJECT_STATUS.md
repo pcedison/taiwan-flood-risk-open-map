@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-30 09:58 Asia/Taipei (01:58 UTC)
+Last verified: 2026-08-30 16:34 Asia/Taipei (08:34 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -26,16 +26,16 @@ the live verification sources listed below.
 ## Recorded production checkpoint
 
 - Latest functional release verified before this documentation edit:
-  `529900c68b5eeadeb6b52ecb239e7304506eafd7` (PR
-  [#260](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/260)).
+  `62ccb2bef63f7c9d263a39bef3781a9864e54497` (PR
+  [#262](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/262)).
   This is an auditable historical checkpoint, not a permanent claim about the
   current SHA. Always derive the live expected SHA with `git rev-parse
   origin/main`, then compare it with `/health` and `/ready`.
-- At 2026-08-30 09:58 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+- At 2026-08-30 16:34 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
   reported that functional-release SHA; PostgreSQL and Redis were healthy. CI
   and CodeQL completed successfully, with no open pull requests.
 - Hosted Monitoring run
-  [#33239203333](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33239203333)
+  [#33293621016](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33293621016)
   was a real `schedule` event and completed successfully. It closed the resolved
   schedule watchdog issue [#199](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/199).
 - Open pull requests: zero at the checkpoint.
@@ -48,6 +48,15 @@ the live verification sources listed below.
   applies that required/advisory distinction consistently to both the direct
   live smoke and the aggregate realtime-source gate while retaining advisory
   failures in serialized diagnostics.
+- At 2026-08-30 16:16 Asia/Taipei the public NCDR Atom feed contained 54 flood
+  warnings, exceeding the worker's former 50-document default even though the
+  official endpoint returned HTTP 200. PR
+  [#262](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/262)
+  raises the default to the existing hard ceiling of 200 while retaining the
+  256 audited-row bound and explicit lower operator limits. After deployment,
+  the automatic worker cycle returned NCDR to `healthy` / `operational`, the
+  realtime result returned from `未知` to `低`, and the strict hosted public-risk
+  smoke passed without a manual ingestion dispatch.
 - The Tainan direct flood-sensor adapter is operational. PR
   [#249](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/249)
   preserves the adapter-provided official dataset URL and presents current
