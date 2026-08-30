@@ -302,6 +302,41 @@ def test_managed_no_active_retirement_runs_after_summary_persistence() -> None:
     assert promotion_writer.fetch_calls == 0
 
 
+def test_managed_cancel_only_snapshot_retires_latest_and_keeps_audit_staging() -> None:
+    adapter = _Task9CancelOnlyNcdrAdapter()
+    staging_writer = _MemoryStagingWriter()
+    promotion_writer = _MemoryPromotionWriter([])
+    settings = replace(
+        _settings(adapter.metadata.key),
+        enabled_adapter_keys=(adapter.metadata.key,),
+        source_ncdr_cap_enabled=True,
+        source_ncdr_cap_contract_enabled=True,
+    )
+
+    result = run_v1_baseline_adapter_cycle(
+        {adapter.metadata.key: adapter},
+        settings=settings,
+        staging_writer=staging_writer,
+        run_writer=_MemoryRunWriter(),
+        promotion_writer=promotion_writer,
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({adapter.metadata.key})),
+        promote=True,
+    )
+
+    summary = result.summaries[0]
+    assert result.status == "succeeded"
+    assert summary.error_code == "no_active_event"
+    assert summary.items_fetched == summary.items_promoted == 1
+    assert summary.snapshot_activation_eligible is True
+    assert result.freshness_checks[0].status == "fresh"
+    assert promotion_writer.retired_no_active == [
+        (adapter.metadata.key, summary.started_at, summary.finished_at)
+    ]
+    assert len(staging_writer.batches) == 1
+    assert staging_writer.batches[0].accepted[0].payload["cap_message_type"] == "Cancel"
+    assert promotion_writer.requested_raw_refs == (summary.raw_ref,)
+
+
 @pytest.mark.parametrize(
     "adapter_key",
     ("official.npa.police_radio_traffic", "official.wra.flood_warning"),
@@ -1571,6 +1606,70 @@ class _Task9EmptyWarningAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         return None
+
+
+class _Task9CancelOnlyNcdrAdapter:
+    metadata = AdapterMetadata(
+        key="official.ncdr.cap",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="NCDR cancel-only fixture",
+        snapshot_generation_mode="complete_replace",
+    )
+
+    def run(self) -> AdapterRunResult:
+        reference_sent = FETCHED_AT - timedelta(minutes=10)
+        raw = RawSourceItem(
+            source_id="ncdr-cancel-only",
+            source_url="https://alerts.ncdr.nat.gov.tw/cancel-only.cap",
+            fetched_at=FETCHED_AT,
+            payload={
+                "evidence_scope": "current",
+                "location_precision": "admin_area",
+                "admin_code": "67035000",
+                "cap_sender": "ncdr@example.test",
+                "cap_identifier": "ncdr-cancel-only",
+                "cap_sent": FETCHED_AT.isoformat(),
+                "cap_references": [
+                    {
+                        "sender": "ncdr@example.test",
+                        "identifier": "ncdr-alert-before-cancel",
+                        "sent": reference_sent.isoformat(),
+                    }
+                ],
+                "cap_status": "Actual",
+                "cap_message_type": "Cancel",
+                "active_from": reference_sent.isoformat(),
+                "active_until": (FETCHED_AT + timedelta(hours=1)).isoformat(),
+            },
+        )
+        normalized = NormalizedEvidence(
+            evidence_id="official.ncdr.cap:ncdr-cancel-only",
+            adapter_key=self.metadata.key,
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.FLOOD_WARNING,
+            source_id=raw.source_id,
+            source_url=raw.source_url,
+            source_title="NCDR cancellation",
+            source_timestamp=FETCHED_AT,
+            fetched_at=FETCHED_AT,
+            summary="The previous CAP warning was cancelled.",
+            location_text="臺南市安南區",
+            confidence=0.95,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw,),
+            normalized=(normalized,),
+            no_active_event=True,
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return self.run().normalized[0]
 
 
 class _Task9MismatchedResultKeyAdapter(_Task9EmptyWarningAdapter):

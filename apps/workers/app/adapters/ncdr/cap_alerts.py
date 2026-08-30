@@ -173,7 +173,14 @@ class NcdrCapAlertAdapter:
             normalized=normalized,
             rejected=rejected,
             source_rejections=source_rejections,
-            no_active_event=selected_count == 0 or (not fetched and successful_dump_count > 0),
+            no_active_event=(
+                selected_count == 0
+                or (
+                    successful_dump_count > 0
+                    and not source_rejections
+                    and (not fetched or _is_cancel_only_snapshot(fetched))
+                )
+            ),
         )
 
     def _fetch_audited_rows(
@@ -733,6 +740,21 @@ def _aware_datetime(value: object) -> datetime | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         return None
     return parsed
+
+
+def _is_cancel_only_snapshot(fetched: tuple[RawSourceItem, ...]) -> bool:
+    """Recognize a successful CAP lifecycle snapshot that only cancels alerts.
+
+    Cancel messages remain in raw/staging evidence for audit. The marker only
+    describes the current warning state; malformed or mixed snapshots must not
+    retire latest warning rows.
+    """
+
+    return bool(fetched) and all(
+        item.payload.get("cap_status") == "Actual"
+        and item.payload.get("cap_message_type") == "Cancel"
+        for item in fetched
+    )
 
 
 def _unresolved_area_source_id(message: ParsedCapMessage, area: ParsedCapArea) -> str:

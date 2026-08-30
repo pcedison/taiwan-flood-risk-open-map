@@ -463,6 +463,28 @@ def test_successful_no_active_warning_poll_is_fresh_without_source_timestamp(
     assert check.source_timestamp_max is None
 
 
+def test_successful_cancel_only_complete_snapshot_is_fresh() -> None:
+    check = check_summary_freshness(
+        _summary(
+            adapter_key="official.ncdr.cap",
+            error_code="no_active_event",
+            source_timestamp_min=CHECKED_AT - timedelta(minutes=5),
+            source_timestamp_max=CHECKED_AT - timedelta(minutes=5),
+            items_fetched=1,
+            items_promoted=1,
+            snapshot_generation_mode="complete_replace",
+            snapshot_activation_eligible=True,
+            raw_ref="raw/official/ncdr/cap/cancel-only.json",
+        ),
+        checked_at=CHECKED_AT,
+        max_age_seconds=60 * 60,
+    )
+
+    assert check.status == "fresh"
+    assert check.cadence == "event"
+    assert check.reason == "warning source operational; no active event"
+
+
 def test_ncdr_cap_failed_batch_is_the_only_failed_no_active_alert_case() -> None:
     no_active_alert = check_summary_freshness(
         _summary(
@@ -562,6 +584,7 @@ def _summary(
     items_rejected: int = 0,
     snapshot_generation_mode: str = "append",
     snapshot_activation_eligible: bool = False,
+    raw_ref: str | None = None,
 ) -> AdapterBatchRunSummary:
     return AdapterBatchRunSummary(
         adapter_key=adapter_key,
@@ -579,6 +602,7 @@ def _summary(
         event_active_until_max=event_active_until_max,
         snapshot_generation_mode=snapshot_generation_mode,
         snapshot_activation_eligible=snapshot_activation_eligible,
+        raw_ref=raw_ref,
     )
 
 
