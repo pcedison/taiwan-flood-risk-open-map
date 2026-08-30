@@ -88,6 +88,7 @@ jobs:
             tests/test_ci_workflow.py \
             tests/test_hosted_monitoring_workflow.py \
             tests/test_hosted_monitoring_schedule_watchdog_workflow.py \
+            tests/test_hosted_source_freshness_smoke.py \
             tests/test_hosted_public_risk_evidence_smoke.py \
             tests/test_route_alert_issue_js.py \
             tests/test_zeabur_single_service_deploy.py \

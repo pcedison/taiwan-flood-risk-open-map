@@ -408,6 +408,7 @@ def _checked_source_summaries(
                 "row_count": source.get("row_count"),
                 "lag_seconds": source.get("lag_seconds"),
                 "latest_observed_at": source.get("latest_observed_at"),
+                "latest_fetched_at": source.get("latest_fetched_at"),
                 "latest_ingested_at": source.get("latest_ingested_at"),
                 "upstream_status": source.get("upstream_status"),
                 "enabled_gates": source.get("enabled_gates") or [],
