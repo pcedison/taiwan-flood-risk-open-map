@@ -80,13 +80,16 @@ lint/typecheck commands, and contribution rules.
 
 ## Development Status
 
-The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). As
-of 2026-08-30, the Zeabur deployment matches `origin/main` at
-`183482c2d95a9315ebb2e720ab9ca1829e767817`, PostgreSQL and Redis are healthy,
-and strict hosted deployment/public-risk smokes pass. A real scheduled Hosted
-Monitoring run has passed in production; the latest real schedule failed on an
-older NCDR lifecycle implementation, while the post-repair diagnostic run
-passed. Only the next `schedule` event can renew that scheduled-operation proof.
+The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
+the 2026-08-30 checkpoint, `origin/main`, production `/health`, and production
+`/ready` matched; PostgreSQL and Redis were healthy, and strict hosted
+deployment/public-risk smokes passed. Do not treat a SHA copied into status
+documentation as a permanent deployment pin: derive the current expected SHA
+only after `git fetch origin --prune`, then verify both health endpoints. A real
+scheduled Hosted Monitoring run has passed in production; the latest real
+schedule failed on an older NCDR lifecycle implementation, while the post-
+repair diagnostic run passed. Only the next `schedule` event can renew that
+scheduled-operation proof.
 The only open issue is the external local-source dispatch contract in #71; it
 must remain open until accepted official replies, production/authorization-
 gated adapters, or reviewed official-unavailable evidence exist. The phase
