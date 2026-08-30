@@ -700,6 +700,22 @@ def test_public_source_health_migration_indexes_jobs_and_registers_kinmen() -> N
     assert "KINMEN_KWIS_API_TOKEN" not in migration
 
 
+def test_cwa_tide_hourly_freshness_migration_aligns_public_coverage() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    migration = (
+        repository_root
+        / "infra"
+        / "migrations"
+        / "0051_cwa_tide_hourly_freshness.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "'official.cwa.tide_level'" in migration
+    assert "'{freshness_threshold_seconds}'" in migration
+    assert "to_jsonb(5400)" in migration
+    assert "update_frequency = 'hourly'" in migration
+    assert "metadata = jsonb_set" in migration
+
+
 def test_station_inventory_and_jurisdiction_migration_is_fail_closed() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     migration = (
