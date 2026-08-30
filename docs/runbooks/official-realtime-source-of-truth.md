@@ -132,13 +132,17 @@ python scripts\hosted_source_freshness_smoke.py `
 ```
 
 The smoke reads the admin token from the named environment variable and never
-writes the token into the artifact. By default it requires the full hosted
-realtime backbone: CWA rainfall/tide, WRA water level, NCDR CAP, WRA IoW flood
-depth, and Civil IoT flood/sewer/pump/gate water-level adapters. It checks that
-each required source is enabled, has `healthy` or `degraded` source health, has
-`fresh` or `degraded` freshness, includes latest observed and ingested
-timestamps, has a positive `row_count`, has non-negative `lag_seconds`, and
-reports the `data_sources.is_enabled` gate.
+writes the token into the artifact. By default the required hosted query
+backbone is CWA rainfall, WRA water level, NCDR CAP, WRA IoW flood depth, and
+Civil IoT sewer water level. CWA tide plus the legacy Civil IoT flood, pump, and
+gate water-level paths remain checked as advisory context: their findings stay
+visible, but an upstream publication gap does not fail the application gate.
+The smoke checks that each required source is enabled, has `healthy` or
+`degraded` source health, has `fresh` or `degraded` freshness, includes latest
+observed and ingested timestamps, has a positive `row_count`, has non-negative
+`lag_seconds`, and reports the `data_sources.is_enabled` gate. See
+`docs/reviews/hosted-source-monitoring-policy-2026-08-29.md` for the reviewed
+required/advisory split and promotion rule.
 
 An accepted artifact may satisfy only these
 `hosted_worker_persisted_evidence` requirements:

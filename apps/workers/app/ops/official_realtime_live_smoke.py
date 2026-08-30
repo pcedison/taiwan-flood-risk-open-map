@@ -32,12 +32,14 @@ class SmokeSource:
     required_env: str | None = None
     minimum_fetched_count: int = 1
     minimum_normalized_count: int = 1
+    required_for_overall_health: bool = True
 
 
 @dataclass(frozen=True)
 class SmokeSourceResult:
     adapter_key: str
     status: SmokeStatus
+    required_for_overall_health: bool = True
     fetched_count: int = 0
     normalized_count: int = 0
     rejected_count: int = 0
@@ -51,6 +53,7 @@ class SmokeSourceResult:
         return {
             "adapter_key": self.adapter_key,
             "status": self.status,
+            "required_for_overall_health": self.required_for_overall_health,
             "fetched_count": self.fetched_count,
             "normalized_count": self.normalized_count,
             "rejected_count": self.rejected_count,
@@ -68,7 +71,11 @@ class OfficialRealtimeSmokeResult:
 
     @property
     def healthy(self) -> bool:
-        return all(result.status in {"healthy", "skipped"} for result in self.results)
+        return all(
+            not result.required_for_overall_health
+            or result.status in {"healthy", "skipped"}
+            for result in self.results
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +159,7 @@ def default_official_smoke_sources() -> tuple[SmokeSource, ...]:
         SmokeSource(
             adapter_key="official.civil_iot.flood_sensor",
             build_adapter=lambda env, timeout: FloodSensorStaApiAdapter(timeout_seconds=timeout),
+            required_for_overall_health=False,
         ),
         SmokeSource(
             adapter_key="official.civil_iot.sewer_water_level",
@@ -166,6 +174,7 @@ def default_official_smoke_sources() -> tuple[SmokeSource, ...]:
                 PUMP_WATER_LEVEL,
                 timeout_seconds=timeout,
             ),
+            required_for_overall_health=False,
         ),
         SmokeSource(
             adapter_key="official.civil_iot.gate_water_level",
@@ -173,6 +182,7 @@ def default_official_smoke_sources() -> tuple[SmokeSource, ...]:
                 GATE_WATER_LEVEL,
                 timeout_seconds=timeout,
             ),
+            required_for_overall_health=False,
         ),
     )
 
@@ -186,6 +196,7 @@ def _run_smoke_source(
         return SmokeSourceResult(
             adapter_key=source.adapter_key,
             status="skipped",
+            required_for_overall_health=source.required_for_overall_health,
             message=f"{source.required_env} is not available",
         )
     try:
@@ -195,6 +206,7 @@ def _run_smoke_source(
         return SmokeSourceResult(
             adapter_key=source.adapter_key,
             status="failed",
+            required_for_overall_health=source.required_for_overall_health,
             message=f"{type(exc).__name__}: {exc}",
         )
     return _source_result_from_adapter_run(source, run_result)
@@ -229,6 +241,7 @@ def _source_result_from_adapter_run(
     return SmokeSourceResult(
         adapter_key=source.adapter_key,
         status=status,
+        required_for_overall_health=source.required_for_overall_health,
         fetched_count=fetched_count,
         normalized_count=normalized_count,
         rejected_count=rejected_count,
