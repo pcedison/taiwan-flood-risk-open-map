@@ -56,10 +56,11 @@ admin_bearer = HTTPBearer(auto_error=False)
 REALTIME_FRESH_SECONDS = 10 * 60
 REALTIME_DEGRADED_SECONDS = 30 * 60
 REALTIME_STALE_SECONDS = 60 * 60
-# Dataset 142980 publishes on an hourly cadence.  Keep the admin diagnostics
-# aligned with the worker freshness policy so a healthy hourly source is not
-# reported as failed by the hosted monitor after only 60 minutes.
+# These official datasets publish hourly. Keep the admin diagnostics aligned
+# with the worker freshness policy so healthy hourly sources are not reported
+# stale before the next expected observation has had time to arrive.
 REALTIME_THRESHOLDS_BY_ADAPTER = {
+    "official.cwa.tide_level": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
     "official.wra_iow.flood_depth": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
 }
 CENTRAL_BACKBONE_REQUIRED_FAMILIES = ("CWA", "WRA", "NCDR", "Civil IoT")
