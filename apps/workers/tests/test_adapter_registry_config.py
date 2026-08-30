@@ -106,7 +106,7 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.ncdr_alerts_api_key is None
     assert settings.ncdr_datastore_api_url is None
     assert settings.ncdr_dump_api_url is None
-    assert settings.ncdr_max_cap_ids_per_run == 50
+    assert settings.ncdr_max_cap_ids_per_run == 200
     assert settings.ncdr_cap_timeout_seconds == 8
     assert settings.source_npa_police_radio_enabled is False
     assert settings.source_npa_police_radio_api_enabled is False

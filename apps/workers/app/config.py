@@ -684,7 +684,7 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         ncdr_max_cap_ids_per_run=env_int(
             values,
             "NCDR_MAX_CAP_IDS_PER_RUN",
-            default=50,
+            default=200,
         ),
         ncdr_cap_timeout_seconds=env_int(values, "NCDR_CAP_TIMEOUT_SECONDS", default=8),
         npa_police_radio_traffic_url=env_str(values, "NPA_POLICE_RADIO_TRAFFIC_URL"),

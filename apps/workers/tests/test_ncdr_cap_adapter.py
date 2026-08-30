@@ -180,7 +180,7 @@ def test_ncdr_datastore_then_dump_uses_exact_separate_parameter_mappings() -> No
     assert index_calls == [
         (
             "https://alerts.ncdr.nat.gov.tw/api/datastore",
-            {"apikey": "test-secret", "format": "json", "limit": "50"},
+            {"apikey": "test-secret", "format": "json", "limit": "200"},
             8,
         )
     ]
@@ -1412,6 +1412,32 @@ def test_ncdr_public_active_feed_needs_no_api_key_and_fetches_flood_cap() -> Non
     ]
 
 
+def test_ncdr_public_active_feed_default_capacity_covers_widespread_event() -> None:
+    entry_count = 54
+    entries = tuple(
+        _feed_entry(
+            cap_id=f"CAP-{index}",
+            href=(
+                "https://alerts.ncdr.nat.gov.tw/Capstorage/WRA/2026/Flood/"
+                f"CAP-{index}.cap"
+            ),
+        )
+        for index in range(entry_count)
+    )
+    calls: list[str] = []
+
+    def fetch_text(url: str, _params: dict[str, str], _timeout: int) -> str:
+        calls.append(url)
+        if url == ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL:
+            return _active_feed(*entries)
+        return _fixture("ncdr_dump_flood_cap.xml")
+
+    NcdrCapAlertAdapter(fetched_at=FETCHED_AT, fetch_text=fetch_text).run()
+
+    assert calls[0] == ncdr_cap_module.NCDR_ACTIVE_ATOM_FEED_URL
+    assert len(calls) == entry_count + 1
+
+
 def test_ncdr_public_active_feed_without_flood_is_healthy_empty_poll() -> None:
     calls: list[str] = []
 
@@ -1556,7 +1582,7 @@ def test_ncdr_config_defaults_are_fail_closed() -> None:
     assert defaults.ncdr_alerts_api_key is None
     assert defaults.ncdr_datastore_api_url is None
     assert defaults.ncdr_dump_api_url is None
-    assert defaults.ncdr_max_cap_ids_per_run == 50
+    assert defaults.ncdr_max_cap_ids_per_run == 200
     assert defaults.ncdr_cap_timeout_seconds == 8
 
 
