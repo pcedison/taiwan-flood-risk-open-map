@@ -684,6 +684,8 @@ def _db_sources(*, health_status: HealthStatus | None) -> list[DataSource]:
             ds.legal_basis,
             ds.source_timestamp_min,
             ds.source_timestamp_max,
+            latest.event_active_from_min,
+            latest.event_active_until_max,
             ds.is_enabled,
             COALESCE(latest.latest_observed_at, ds.source_timestamp_max) AS latest_observed_at,
             raw.latest_fetched_at,
@@ -706,6 +708,28 @@ def _db_sources(*, health_status: HealthStatus | None) -> list[DataSource]:
                 adapter_key,
                 max(observed_at) AS latest_observed_at,
                 max(ingested_at) AS latest_ingested_at,
+                min(
+                    CASE
+                        WHEN adapter_key = 'official.ncdr.cap'
+                            AND pg_input_is_valid(
+                                quality_flags ->> 'active_from',
+                                'timestamptz'
+                            )
+                            THEN (quality_flags ->> 'active_from')::timestamptz
+                        ELSE NULL
+                    END
+                ) AS event_active_from_min,
+                max(
+                    CASE
+                        WHEN adapter_key = 'official.ncdr.cap'
+                            AND pg_input_is_valid(
+                                quality_flags ->> 'active_until',
+                                'timestamptz'
+                            )
+                            THEN (quality_flags ->> 'active_until')::timestamptz
+                        ELSE NULL
+                    END
+                ) AS event_active_until_max,
                 count(*) AS row_count
             FROM official_realtime_latest
             GROUP BY adapter_key
@@ -855,6 +879,8 @@ def _data_source_from_row(row: dict) -> DataSource:
                 is_enabled=is_enabled,
                 source_timestamp_min=row.get("source_timestamp_min"),
                 source_timestamp_max=row.get("source_timestamp_max"),
+                event_active_from_min=row.get("event_active_from_min"),
+                event_active_until_max=row.get("event_active_until_max"),
                 latest_observed_at=latest_observed_at,
                 upstream_status=upstream_status,
                 latest_ingested_at=latest_ingested_at,
@@ -925,6 +951,8 @@ def _freshness_state(
     upstream_status: str,
     latest_ingested_at: datetime | None = None,
     row_count: int = 0,
+    event_active_from_min: datetime | None = None,
+    event_active_until_max: datetime | None = None,
 ) -> FreshnessState:
     if not is_enabled:
         return "stale"
@@ -932,8 +960,8 @@ def _freshness_state(
         return "failed"
     if adapter_key == "official.ncdr.cap":
         return _ncdr_cap_freshness_state(
-            effective_at=source_timestamp_min,
-            expires_at=source_timestamp_max,
+            effective_at=event_active_from_min,
+            expires_at=event_active_until_max,
             health_status=health_status,
             latest_ingested_at=latest_ingested_at,
             row_count=row_count,

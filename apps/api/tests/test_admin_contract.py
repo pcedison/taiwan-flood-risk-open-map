@@ -567,6 +567,8 @@ def test_admin_sources_marks_expired_ncdr_cap_window_stale_not_fresh(
                 "legal_basis": "L1",
                 "source_timestamp_min": datetime.fromisoformat("2026-04-28T11:00:00+00:00"),
                 "source_timestamp_max": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
+                "event_active_from_min": datetime.fromisoformat("2026-04-28T11:00:00+00:00"),
+                "event_active_until_max": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
                 "is_enabled": True,
                 "latest_observed_at": datetime.fromisoformat("2026-04-28T12:00:00+00:00"),
                 "latest_fetched_at": datetime.fromisoformat("2026-04-28T12:55:00+00:00"),
@@ -600,6 +602,66 @@ def test_admin_sources_marks_expired_ncdr_cap_window_stale_not_fresh(
     assert source["latest_ingested_at"] == "2026-04-28T12:56:00Z"
     assert source["lag_seconds"] == 3600
     assert_openapi_schema(payload, "AdminSourcesResponse")
+
+
+def test_admin_sources_uses_persisted_ncdr_active_window_not_cap_sent_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ADMIN_BEARER_TOKEN", "test-admin-token")
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-08-30T11:43:00+00:00"),
+    )
+    get_settings.cache_clear()
+    cursor = FakeCursor(
+        [
+            {
+                "id": "ncdr-cap",
+                "name": "NCDR CAP alert feed",
+                "adapter_key": "official.ncdr.cap",
+                "source_type": "official",
+                "license": "Government open data",
+                "update_frequency": "event_driven",
+                "last_success_at": datetime.fromisoformat("2026-08-30T11:35:00+00:00"),
+                "last_failure_at": None,
+                "health_status": "healthy",
+                "legal_basis": "L1",
+                # CAP sent timestamps can remain unchanged throughout a long
+                # active warning. They are observation metadata, not its expiry.
+                "source_timestamp_min": datetime.fromisoformat("2026-08-30T08:57:30+00:00"),
+                "source_timestamp_max": datetime.fromisoformat("2026-08-30T08:57:30+00:00"),
+                "event_active_from_min": datetime.fromisoformat("2026-08-30T08:57:30+00:00"),
+                "event_active_until_max": datetime.fromisoformat("2026-08-30T14:37:30+00:00"),
+                "is_enabled": True,
+                "latest_observed_at": datetime.fromisoformat("2026-08-30T08:57:30+00:00"),
+                "latest_fetched_at": datetime.fromisoformat("2026-08-30T11:34:00+00:00"),
+                "latest_ingested_at": datetime.fromisoformat("2026-08-30T09:04:00+00:00"),
+                "row_count": 5,
+                "upstream_status": "succeeded",
+            },
+        ]
+    )
+    monkeypatch.setattr(
+        admin_route.psycopg,
+        "connect",
+        lambda *args, **kwargs: FakeConnection(cursor),
+    )
+    client = TestClient(create_app())
+
+    response = client.get(
+        "/admin/v1/sources",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+
+    assert response.status_code == 200
+    source = response.json()["sources"][0]
+    assert source["latest_observed_at"] == "2026-08-30T08:57:30Z"
+    assert source["lag_seconds"] == 9930
+    assert source["freshness_state"] == "fresh"
+    assert cursor.query is not None
+    assert "quality_flags ->> 'active_from'" in cursor.query
+    assert "quality_flags ->> 'active_until'" in cursor.query
 
 
 def test_admin_sources_treats_recent_empty_ncdr_poll_as_fresh(
