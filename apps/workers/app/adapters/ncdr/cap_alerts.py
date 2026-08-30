@@ -48,7 +48,11 @@ NCDR_PUBLIC_HOST = "alerts.ncdr.nat.gov.tw"
 NCDR_FLOOD_CATEGORY = "淹水"
 NCDR_GEOCODE_PROFILE = "Taiwan_Geocode_103"
 NCDR_TOWNSHIP_GEOCODE_NAMES = frozenset({"towncode", "taiwan_geocode_103"})
-DEFAULT_NCDR_MAX_CAP_IDS_PER_RUN = 50
+# The public active-warning feed can legitimately exceed 50 flood entries during
+# a widespread event (54 were observed on 2026-08-30). Keep the configured
+# default aligned with the adapter's existing hard ceiling so valid official
+# feeds are not reported as upstream failures exactly when warning volume rises.
+DEFAULT_NCDR_MAX_CAP_IDS_PER_RUN = 200
 DEFAULT_NCDR_CAP_TIMEOUT_SECONDS = 8
 NCDR_CAP_USER_AGENT = "FloodRiskTaiwan/0.1 worker-ncdr-cap"
 MAX_NCDR_AUDITED_ROWS = 256
