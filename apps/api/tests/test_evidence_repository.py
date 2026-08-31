@@ -9,6 +9,8 @@ import psycopg
 import pytest
 
 from app.domain.evidence.repository import (
+    OBSERVED_FLOOD_HISTORY_CURRENT_GRACE,
+    OBSERVED_FLOOD_HISTORY_WINDOW,
     RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE,
     RECENT_INCIDENT_CONTEXT_WINDOW,
     EvidenceRepositoryUnavailable,
@@ -20,6 +22,7 @@ from app.domain.evidence.repository import (
     fetch_query_heat_snapshot,
     persist_risk_assessment,
     query_nearby_evidence,
+    query_nearby_observed_flood_history,
     query_nearby_latest_official,
     query_nearby_realtime_coverage_rows,
     query_nearby_recent_context,
@@ -252,6 +255,84 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
         1,
         50,
     )
+
+
+def test_observed_flood_history_promotes_one_ended_positive_row_per_station() -> None:
+    as_of = datetime(2026, 8, 31, 2, 0, tzinfo=UTC)
+    observed_at = as_of - timedelta(days=14)
+    connection = _FakeConnection(
+        rows=[
+            {
+                "id": "b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+                "source_id": "FS-001:2026-08-17T02:00:00+00:00",
+                "source_type": "official",
+                "event_type": "flood_report",
+                "title": "北安路淹水感測",
+                "summary": "水深 40 公分",
+                "url": "https://example.test/flood-sensor",
+                "occurred_at": observed_at,
+                "observed_at": observed_at,
+                "ingested_at": observed_at + timedelta(minutes=1),
+                "lat": 23.0165,
+                "lng": 120.2106,
+                "geometry": '{"type":"Point","coordinates":[120.2106,23.0165]}',
+                "distance_to_query_m": 120.0,
+                "confidence": 0.9,
+                "freshness_score": 1.0,
+                "source_weight": 1.0,
+                "privacy_level": "public",
+                "raw_ref": "sensor:FS-001:2026-08-17T02:00:00+00:00",
+                "flood_depth_cm": 40.0,
+                "evidence_scope": "historical",
+                "adapter_key": "local.tainan.flood_sensor",
+                "location_precision": "point",
+                "limitations": ["測站當時讀值，不代表整個區域。"],
+            }
+        ]
+    )
+
+    records = query_nearby_observed_flood_history(
+        database_url="postgresql://example.test/flood",
+        lat=23.0165,
+        lng=120.2106,
+        radius_m=500,
+        as_of=as_of,
+        connection_factory=lambda: connection,
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert "nearby_positive AS MATERIALIZED" in sql
+    assert "(e.properties->>'flood_depth_cm')::double precision >= 3.0" in sql
+    assert "e.properties->>'evidence_scope' = 'current'" in sql
+    assert "PARTITION BY candidate.adapter_key, candidate.station_key" in sql
+    assert "WHERE c.station_rank = 1" in sql
+    assert "'historical'::text AS evidence_scope" in sql
+    assert params == (
+        120.2106,
+        23.0165,
+        120.2106,
+        23.0165,
+        500,
+        500,
+        as_of - OBSERVED_FLOOD_HISTORY_WINDOW,
+        as_of - OBSERVED_FLOOD_HISTORY_CURRENT_GRACE,
+        20,
+    )
+    assert records[0].evidence_scope == "historical"
+    assert records[0].flood_depth_cm == 40.0
+    assert records[0].adapter_key == "local.tainan.flood_sensor"
+
+
+def test_observed_flood_history_requires_timezone_aware_cutoff() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        query_nearby_observed_flood_history(
+            database_url="postgresql://example.test/flood",
+            lat=23.0,
+            lng=120.0,
+            radius_m=500,
+            as_of=datetime(2026, 8, 31, 2, 0),
+            connection_factory=lambda: _FakeConnection(rows=[]),
+        )
 
 
 def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
@@ -714,6 +795,22 @@ def test_cwa_tide_hourly_freshness_migration_aligns_public_coverage() -> None:
     assert "to_jsonb(5400)" in migration
     assert "update_frequency = 'hourly'" in migration
     assert "metadata = jsonb_set" in migration
+
+
+def test_observed_flood_history_migration_bounds_sensor_history_lookup() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    migration = (
+        repository_root
+        / "infra"
+        / "migrations"
+        / "0052_observed_flood_history_indexes.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "idx_evidence_observed_flood_history_geom" in migration
+    assert "idx_evidence_observed_flood_history_time" in migration
+    assert "event_type = 'flood_report'" in migration
+    assert "properties->>'evidence_scope' = 'current'" in migration
+    assert "observed_at DESC" in migration
 
 
 def test_station_inventory_and_jurisdiction_migration_is_fail_closed() -> None:

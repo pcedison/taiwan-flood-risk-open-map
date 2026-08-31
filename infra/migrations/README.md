@@ -211,3 +211,9 @@ normalized staging audit in place through `ON DELETE SET NULL`. The migration
 also covers that foreign-key update across every staging status so one expiry
 does not scan the full staging audit table. It adds indexes only and changes no
 retained row by itself.
+
+`0052_observed_flood_history_indexes.sql` bounds the spatial and time-window
+lookup that reuses retained positive flood-depth sensor observations as
+historical evidence after the realtime window ends. It adds indexes only: the
+query layer performs the historical projection, and stored current observations
+remain unchanged for audit and realtime use.

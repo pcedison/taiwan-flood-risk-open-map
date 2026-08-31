@@ -56,6 +56,7 @@ export {
   evidenceTimeSummary,
   getEvidenceDisplayState,
   hiddenHistoricalNewsCount,
+  historicalEvidenceVintage,
   isHistoricalNewsEvidence,
   isHistoricalNewsFreshness,
   isSafeLinkUrl,

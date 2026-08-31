@@ -1329,6 +1329,18 @@ button {
   text-wrap: balance;
 }
 
+.evidence-vintage {
+  width: fit-content;
+  color: #315d50;
+  font-size: 0.76rem;
+  font-weight: 850;
+  line-height: 1.3;
+}
+
+.evidence-vintage.is-old {
+  color: #9a4f16;
+}
+
 .evidence-card-link {
   justify-self: end;
   border: 1px solid rgba(20, 125, 100, 0.2);

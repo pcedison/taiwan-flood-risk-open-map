@@ -34,6 +34,8 @@ RealtimeJurisdictionResolutionStatus = Literal[
 QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
 RECENT_INCIDENT_CONTEXT_WINDOW = timedelta(hours=6)
 RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE = timedelta(minutes=5)
+OBSERVED_FLOOD_HISTORY_WINDOW = timedelta(days=365 * 5)
+OBSERVED_FLOOD_HISTORY_CURRENT_GRACE = timedelta(hours=6)
 RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS = (
     "official.npa.police_radio_traffic",
     "official.wra.flood_warning",
@@ -608,6 +610,165 @@ def query_nearby_evidence(
         connection_factory=connection_factory,
     )
 
+
+def query_nearby_observed_flood_history(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    as_of: datetime,
+    limit: int = 20,
+    statement_timeout_ms: int = 0,
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[EvidenceRecord, ...]:
+    """Return retained positive flood-depth observations as historical evidence.
+
+    Realtime flood-depth adapters write a new ``flood_report`` row for every
+    station cycle and retain positive observations for audit/history. The
+    realtime latest table intentionally exposes only the newest station value,
+    so this reader projects the latest ended positive observation per station
+    into the historical partition. The six-hour grace keeps one row from being
+    scored as both current and historical during an active event.
+    """
+
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("observed flood history as_of must be timezone-aware")
+
+    bounded_limit = max(1, min(limit, 100))
+    window_start = as_of - OBSERVED_FLOOD_HISTORY_WINDOW
+    history_cutoff = as_of - OBSERVED_FLOOD_HISTORY_CURRENT_GRACE
+    sql = """
+        WITH query_point AS (
+            SELECT
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+                %s::double precision AS radius_m,
+                (%s::double precision / 90000.0) AS degree_radius
+        ),
+        nearby_positive AS MATERIALIZED (
+            SELECT
+                e.*,
+                ds.adapter_key,
+                ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
+                COALESCE(
+                    NULLIF(e.properties->>'station_id', ''),
+                    e.source_id
+                ) AS station_key
+            FROM evidence e
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+            CROSS JOIN query_point qp
+            WHERE e.ingestion_status = 'accepted'
+                AND e.privacy_level IN ('public', 'aggregated')
+                AND e.source_type = 'official'
+                AND e.event_type = 'flood_report'
+                AND e.properties->>'evidence_scope' = 'current'
+                AND e.properties->>'flood_depth_cm' ~ '^[0-9]+([.][0-9]+)?$'
+                AND (e.properties->>'flood_depth_cm')::double precision >= 3.0
+                AND e.observed_at >= %s::timestamptz
+                AND e.observed_at <= %s::timestamptz
+                AND e.geom IS NOT NULL
+                AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
+                AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
+                AND NOT (
+                    ds.adapter_key = 'local.tainan.flood_sensor'
+                    AND e.title LIKE '%%(停用)%%'
+                )
+                AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
+                AND ST_DWithin(e.geom::geography, qp.geog, qp.radius_m)
+        ),
+        station_ranked AS (
+            SELECT
+                candidate.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY candidate.adapter_key, candidate.station_key
+                    ORDER BY
+                        candidate.observed_at DESC,
+                        candidate.ingested_at DESC,
+                        candidate.id DESC
+                ) AS station_rank
+            FROM nearby_positive candidate
+        )
+        SELECT
+            c.id::text AS id,
+            c.source_id,
+            c.source_type,
+            c.event_type,
+            c.title,
+            c.summary,
+            c.url,
+            COALESCE(c.occurred_at, c.observed_at) AS occurred_at,
+            c.observed_at,
+            c.ingested_at,
+            ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
+            ST_AsGeoJSON(c.geom) AS geometry,
+            c.computed_distance_to_query_m AS distance_to_query_m,
+            c.confidence,
+            COALESCE(c.freshness_score, 0.8) AS freshness_score,
+            COALESCE(c.source_weight, 1.0) AS source_weight,
+            c.privacy_level,
+            c.raw_ref,
+            NULL::double precision AS rainfall_mm_1h,
+            NULL::double precision AS water_level_m,
+            NULL::double precision AS warning_level_m,
+            (c.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor,
+            'historical'::text AS evidence_scope,
+            c.adapter_key,
+            NULL::text AS official_event_origin_key,
+            NULL::timestamptz AS active_from,
+            NULL::timestamptz AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN c.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN c.properties->>'location_precision'
+                ELSE 'point'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(c.properties->'limitations') = 'array'
+                                THEN c.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) || ARRAY[
+                '此為淹水感測器保留的正值觀測；代表測站當時讀值，不代表整個查詢範圍皆淹水。'
+            ]::text[] AS limitations
+        FROM station_ranked c
+        WHERE c.station_rank = 1
+        ORDER BY
+            c.observed_at DESC,
+            c.computed_distance_to_query_m ASC,
+            c.id DESC
+        LIMIT %s
+    """
+    return _fetch_records(
+        sql,
+        (
+            lng,
+            lat,
+            lng,
+            lat,
+            radius_m,
+            radius_m,
+            window_start,
+            history_cutoff,
+            bounded_limit,
+        ),
+        database_url=database_url,
+        statement_timeout_ms=statement_timeout_ms,
+        connection_factory=connection_factory,
+    )
 
 
 def query_nearby_recent_context(
