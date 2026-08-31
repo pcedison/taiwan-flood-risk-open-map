@@ -82,6 +82,18 @@ the live verification sources listed below.
   run without treating a manual dispatch as schedule proof. The later PR #283
   and #284 releases passed CI, CodeQL, deployment-identity smoke, and strict
   public-risk smoke; their next real schedule remains future evidence.
+- The next real-schedule Hosted Monitoring run
+  [#33396475311](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33396475311)
+  failed on 2026-08-31 21:23 Asia/Taipei because the required
+  `official.civil_iot.sewer_water_level` source could not refresh. The official
+  Civil IoT SensorThings service returned HTTP 500 and timed out from both the
+  hosted worker and an independent public probe; issue
+  [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289)
+  tracks the incident. Deployment identity, PostgreSQL, Redis, and strict
+  public-risk smoke still passed, but retained sewer rows remain fail-closed
+  rather than being represented as current. The Civil IoT client retries one
+  transient HTTP 5xx or transport failure; a sustained upstream outage still
+  fails freshness monitoring.
 - Open pull requests: zero at the checkpoint.
 - The deployment-identity smoke and strict hosted public-risk smoke both passed
   against the current deployed SHA.

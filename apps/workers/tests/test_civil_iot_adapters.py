@@ -4,6 +4,9 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from hashlib import sha256
 import json
+from urllib.error import HTTPError
+
+import pytest
 
 from app.adapters.civil_iot import (
     FLOOD_SENSOR_METADATA,
@@ -114,6 +117,87 @@ def test_fetch_sta_json_preserves_encoded_next_link_plus_spacing(monkeypatch) ->
     sta_client.fetch_sta_json(next_link, timeout_seconds=8)
 
     assert requested_urls == [next_link]
+
+
+def test_fetch_sta_json_retries_one_transient_timeout(monkeypatch) -> None:
+    from app.adapters.civil_iot import sta_client
+
+    calls = 0
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"value": []}'
+
+    def _fake_urlopen(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError("read timed out")
+        return _Response()
+
+    monkeypatch.setattr(sta_client, "urlopen", _fake_urlopen)
+
+    payload = sta_client.fetch_sta_json(
+        "https://sta.colife.org.tw/STA_RainSewer/v1.0/Things?$top=1",
+        timeout_seconds=8,
+    )
+
+    assert payload == {"value": []}
+    assert calls == 2
+
+
+def test_fetch_sta_json_retries_one_http_500_then_fails(monkeypatch) -> None:
+    from app.adapters.civil_iot import sta_client
+
+    calls = 0
+
+    def _fake_urlopen(request, timeout):
+        nonlocal calls
+        calls += 1
+        raise HTTPError(request.full_url, 500, "server error", {}, None)
+
+    monkeypatch.setattr(sta_client, "urlopen", _fake_urlopen)
+
+    with pytest.raises(
+        sta_client.CivilIotStaFetchError,
+        match="Civil IoT SensorThings API returned HTTP 500",
+    ):
+        sta_client.fetch_sta_json(
+            "https://sta.colife.org.tw/STA_RainSewer/v1.0/Things?$top=1",
+            timeout_seconds=8,
+        )
+
+    assert calls == 2
+
+
+def test_fetch_sta_json_does_not_retry_non_transient_http_error(monkeypatch) -> None:
+    from app.adapters.civil_iot import sta_client
+
+    calls = 0
+
+    def _fake_urlopen(request, timeout):
+        nonlocal calls
+        calls += 1
+        raise HTTPError(request.full_url, 400, "bad request", {}, None)
+
+    monkeypatch.setattr(sta_client, "urlopen", _fake_urlopen)
+
+    with pytest.raises(
+        sta_client.CivilIotStaFetchError,
+        match="Civil IoT SensorThings API returned HTTP 400",
+    ):
+        sta_client.fetch_sta_json(
+            "https://sta.colife.org.tw/STA_RainSewer/v1.0/Things?$top=1",
+            timeout_seconds=8,
+        )
+
+    assert calls == 1
 
 
 def _flood_sensor_payload() -> dict:

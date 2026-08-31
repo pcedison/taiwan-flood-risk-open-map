@@ -32,6 +32,8 @@ STA_RAIN_SEWER_BASE = "https://sta.colife.org.tw/STA_RainSewer/v1.0/"
 CIVIL_IOT_HOMEPAGE = "https://ci.taiwan.gov.tw/dsp/"
 CIVIL_IOT_USER_AGENT = "FloodRiskTaiwan/0.1 worker-civil-iot-sta"
 DEFAULT_STA_TIMEOUT_SECONDS = 8
+STA_TRANSIENT_HTTP_STATUS_CODES = frozenset({500, 502, 503, 504})
+STA_FETCH_ATTEMPTS = 2
 
 # Latest single observation per station, ordered newest first.
 DEFAULT_THINGS_EXPAND = (
@@ -700,25 +702,40 @@ def _first_value(item: Mapping[str, Any], *keys: str) -> object:
 
 
 def fetch_sta_json(url: str, timeout_seconds: int) -> Any:
-    request = Request(
-        _request_url(url),
-        headers={
-            "Accept": "application/json",
-            "User-Agent": CIVIL_IOT_USER_AGENT,
-        },
-        method="GET",
-    )
-    try:
-        with urlopen(request, timeout=timeout_seconds) as response:
-            payload: Any = json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        raise CivilIotStaFetchError(
-            f"Civil IoT SensorThings API returned HTTP {exc.code}"
-        ) from exc
-    except (URLError, TimeoutError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise CivilIotStaFetchError(
-            f"Civil IoT SensorThings API request failed: {exc}"
-        ) from exc
+    request_url = _request_url(url)
+    payload: Any = None
+    for attempt in range(STA_FETCH_ATTEMPTS):
+        request = Request(
+            request_url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": CIVIL_IOT_USER_AGENT,
+            },
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except HTTPError as exc:
+            if (
+                exc.code in STA_TRANSIENT_HTTP_STATUS_CODES
+                and attempt + 1 < STA_FETCH_ATTEMPTS
+            ):
+                continue
+            raise CivilIotStaFetchError(
+                f"Civil IoT SensorThings API returned HTTP {exc.code}"
+            ) from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            if attempt + 1 < STA_FETCH_ATTEMPTS:
+                continue
+            raise CivilIotStaFetchError(
+                f"Civil IoT SensorThings API request failed: {exc}"
+            ) from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CivilIotStaFetchError(
+                f"Civil IoT SensorThings API request failed: {exc}"
+            ) from exc
 
     if not isinstance(payload, (Mapping, list)):
         raise CivilIotStaPayloadError(
