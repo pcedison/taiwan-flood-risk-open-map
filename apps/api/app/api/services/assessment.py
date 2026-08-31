@@ -58,6 +58,9 @@ class RecentHistoryLookup(Protocol):
     ) -> tuple[EvidenceRecord, ...]: ...
 
 
+_RECENT_HISTORY_REFRESH_AFTER = timedelta(days=30)
+
+
 class AssessmentService:
     def __init__(
         self,
@@ -246,7 +249,7 @@ def _history_needs_refresh(
         if value.tzinfo is None and now.tzinfo is not None:
             value = value.replace(tzinfo=now.tzinfo)
         comparable.append(value)
-    return max(comparable) < now - timedelta(days=365)
+    return max(comparable) < now - _RECENT_HISTORY_REFRESH_AFTER
 
 
 def _data_freshness(data: AssessmentData) -> list[DataFreshness]:

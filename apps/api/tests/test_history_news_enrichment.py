@@ -119,6 +119,80 @@ def test_nationwide_official_citations_accept_other_counties_and_recent_years_on
     assert any("2026" in url and "2020" in url for url in requested_urls)
 
 
+def test_nationwide_official_citations_search_admin_area_before_exact_road() -> None:
+    requested_queries: list[str] = []
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel>
+    <item>
+      <title>安南區排水改善降低淹水風險</title>
+      <link>https://wrb1.tainan.gov.tw/archive/2021-drainage</link>
+      <pubDate>Mon, 24 Aug 2021 12:38:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>黃偉哲視察安南、仁德淹水災情</title>
+      <link>https://www.tainan.gov.tw/News_Content.aspx?n=13370&amp;s=8832256</link>
+      <pubDate>Mon, 24 Aug 2026 12:38:00 GMT</pubDate>
+    </item>
+    </channel></rss>"""
+
+    def fetch_text(url: str, _timeout: float) -> str:
+        query = parse_qs(urlparse(url).query)["q"][0]
+        requested_queries.append(query)
+        return payload
+
+    result = search_taiwan_official_flood_citations(
+        location_text="台南市安南區培安路",
+        lat=23.04477,
+        lng=120.21154,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        max_records=1,
+        fetch_text=fetch_text,
+    )
+
+    assert requested_queries
+    assert "安南區" in requested_queries[0]
+    assert "培安路" not in requested_queries[0]
+    assert len(result.records) == 1
+    assert result.records[0].occurred_at == datetime(
+        2026,
+        8,
+        24,
+        12,
+        38,
+        tzinfo=timezone.utc,
+    )
+    assert result.records[0].properties["location_precision"] == "admin_area"
+
+
+def test_nationwide_official_citations_rejects_preparedness_and_planning_pages() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel>
+    <item>
+      <title>巴威颱風逼近 安南區全面強化防災整備</title>
+      <link>https://www.tainan.gov.tw/preparation/2026-typhoon</link>
+      <pubDate>Thu, 09 Jul 2026 04:48:17 GMT</pubDate>
+    </item>
+    <item>
+      <title>新建雨水下水道降低安南區淹水潛勢</title>
+      <link>https://wrb1.tainan.gov.tw/planning/2026-drainage</link>
+      <pubDate>Thu, 09 Jul 2026 03:48:17 GMT</pubDate>
+    </item>
+    </channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="台南市安南區培安路",
+        lat=23.04477,
+        lng=120.21154,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        max_records=3,
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert result.records == ()
+
+
 def test_nationwide_official_citations_accepts_official_gov_taipei_domain() -> None:
     payload = """<?xml version="1.0" encoding="utf-8" ?>
     <rss version="2.0"><channel><item>
