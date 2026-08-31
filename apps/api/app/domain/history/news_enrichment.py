@@ -433,13 +433,19 @@ def search_taiwan_official_flood_citations(
             for article in _rss_articles(payload, feed_url=feed_url):
                 article_url = str(article.get("url") or "")
                 publisher_url = str(article.get("publisher_url") or "")
-                official_url = article_url if _is_official_taiwan_web_url(article_url) else publisher_url
-                if not _is_official_taiwan_web_url(official_url):
+                # A publisher tag can confirm who published an indexed item, but
+                # it cannot make an aggregator redirect a durable citation. Google
+                # News RSS article URLs currently return an empty shell instead of
+                # the government page, so fail closed unless the link users open is
+                # itself an approved government URL.
+                if not _is_official_taiwan_web_url(article_url):
                     continue
                 official_article = {
                     **article,
-                    "domain": _domain_from_url(official_url),
-                    "official_publisher_url": official_url,
+                    "domain": _domain_from_url(article_url),
+                    "official_publisher_url": (
+                        publisher_url if _is_official_taiwan_web_url(publisher_url) else article_url
+                    ),
                 }
                 published_at = _parse_public_news_datetime(article.get("published_at"))
                 if published_at is None:
@@ -1076,7 +1082,9 @@ def _is_official_taiwan_web_url(value: str) -> bool:
     if parsed.scheme != "https":
         return False
     host = (parsed.hostname or "").casefold().rstrip(".")
-    return host == "gov.tw" or any(host.endswith(suffix) for suffix in _OFFICIAL_TAIWAN_WEB_SUFFIXES)
+    return host == "gov.tw" or any(
+        host.endswith(suffix) for suffix in _OFFICIAL_TAIWAN_WEB_SUFFIXES
+    )
 
 
 def _rss_search_targets(location: str) -> tuple[_SearchTarget, ...]:
