@@ -9,5 +9,15 @@ updates:
       timezone: Asia/Taipei
     open-pull-requests-limit: 5
     versioning-strategy: increase-if-necessary
+    ignore:
+      # Major frontend-tool and map-renderer upgrades require an explicit
+      # migration branch plus production-browser verification. MapLibre 6.6.0
+      # passed unit/E2E checks but broke the production PMTiles rendering path.
+      - dependency-name: eslint
+        update-types:
+          - version-update:semver-major
+      - dependency-name: maplibre-gl
+        update-types:
+          - version-update:semver-major
     commit-message:
       prefix: "build(deps)"

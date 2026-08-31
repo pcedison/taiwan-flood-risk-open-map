@@ -81,6 +81,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/public-api-contract-probe.py" in step_text
     assert "scripts/hosted_deployment_smoke.py" in step_text
     assert "scripts/hosted_public_risk_evidence_smoke.py" in step_text
+    assert "npm run e2e:hosted" in step_text
     assert '--data-source-mode "${DATA_SOURCE_MODE}"' in step_text
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
     assert "scripts/hosted_worker_evidence.py" in step_text
@@ -100,6 +101,30 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
         "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"
         in step_text
     )
+
+    hosted_web_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Hosted Web UI basemap and query smoke"
+    )
+    assert hosted_web_step["env"] == {
+        "HOSTED_WEB_BASE_URL": "https://floodrisk.cc"
+    }
+    assert hosted_web_step["working-directory"] == "apps/web"
+    assert hosted_web_step["run"] == "npm run e2e:hosted"
+
+    install_browser_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Install hosted Web UI smoke browser"
+    )
+    assert steps.index(install_browser_step) < steps.index(hosted_web_step)
+    assert "playwright install --with-deps chromium" in install_browser_step["run"]
+
+    upload_step = next(
+        step for step in steps if step.get("name") == "Upload hosted monitoring artifacts"
+    )
+    assert "artifacts/hosted-web-ui/**" in upload_step["with"]["path"]
 
     required_admin_step = next(
         step for step in steps if step.get("name") == "Require admin source freshness token"
@@ -362,10 +387,12 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "process.env.GITHUB_RUN_ID" in alert_script
     assert "artifacts/hosted-deployment-smoke.json" in alert_script
     assert "artifacts/hosted-public-risk-evidence-smoke.json" in alert_script
+    assert "artifacts/hosted-web-ui-smoke.json" in alert_script
     assert "expected deployment SHA" in alert_script
     assert "health deployment SHA" in alert_script
     assert "ready deployment SHA" in alert_script
     assert "official source state" in alert_script
+    assert "unexpected tests" in alert_script
 
     resolve_step = next(
         step

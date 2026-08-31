@@ -6,6 +6,7 @@
     "dev": "next dev",
     "clean:next": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
     "e2e": "npm run clean:next && playwright test",
+    "e2e:hosted": "playwright test --config playwright.hosted.config.ts",
     "build": "next build",
     "start": "node scripts/start.mjs",
     "lint": "eslint . --max-warnings=0",

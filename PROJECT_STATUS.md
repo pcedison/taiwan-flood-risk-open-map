@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-30 21:15 Asia/Taipei (13:15 UTC)
+Last verified: 2026-08-31 09:39 Asia/Taipei (01:39 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -26,12 +26,13 @@ the live verification sources listed below.
 ## Recorded production checkpoint
 
 - Latest functional release verified before this documentation edit:
-  `183482c2d95a9315ebb2e720ab9ca1829e767817` (PR
-  [#267](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/267)).
+  `80a7fba4179fbfbfc941c54e17cffa4d26058200` (PRs
+  [#270](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/270) and
+  [#273](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/273)).
   This is an auditable historical checkpoint, not a permanent claim about the
   current SHA. Always derive the live expected SHA with `git rev-parse
   origin/main`, then compare it with `/health` and `/ready`.
-- At 2026-08-30 21:15 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+- At 2026-08-31 09:39 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
   reported that functional-release SHA; PostgreSQL and Redis were healthy. CI
   and CodeQL completed successfully, with no open pull requests.
 - Hosted Monitoring run
@@ -49,13 +50,38 @@ the live verification sources listed below.
   [#33312524320](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33312524320)
   passed after deployment and auto-closed the repair issue; it is not recorded
   as a substitute for the next real schedule.
+- The subsequent real-schedule Hosted Monitoring run
+  [#33334853634](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33334853634)
+  completed successfully on 2026-08-31 04:52 Asia/Taipei. This is the current
+  genuine schedule evidence; it supersedes the earlier failed lifecycle run
+  without treating a manual dispatch as schedule proof.
 - Open pull requests: zero at the checkpoint.
 - The deployment-identity smoke and strict hosted public-risk smoke both passed
   against the current deployed SHA.
-- A Playwright production query for `臺南市安南區安中路一段` resolved to
-  `23.04230, 120.19689` and returned a complete risk result distinguishing
-  current low risk from very-high historical context instead of falling back to
-  an unknown/data-insufficient result.
+- Desktop and 390-pixel mobile browser checks against production resolved
+  `台南市北區北安路一段` to `23.01655, 120.21063` and returned a complete result:
+  current risk `低`, historical context `中`, and three traceable evidence
+  sources. Neither viewport had horizontal overflow or browser console errors.
+- PR [#270](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/270)
+  prevents a transient failure of one redundant WRA hydrology adapter from
+  forcing an otherwise supported query-local result to `未知`. The exception is
+  deliberately narrow: an independent healthy/degraded hydrology source and
+  usable nearby hydrology coverage must both exist. Rainfall, pipeline-stall,
+  jurisdiction, and coverage failures remain fail-closed. Deployment and strict
+  public-risk smokes passed on both the functional SHA and the later dependency
+  checkpoint.
+- Dependabot PR
+  [#272](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/272)
+  upgraded MapLibre to 6.6.0 and passed the existing unit/E2E checks, but a
+  production browser check showed the PMTiles map stuck at `底圖載入中` and
+  rendered as a distorted polygon/grid. PR
+  [#273](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/273)
+  restored the verified MapLibre 5 dependency set; the deployed Taiwan map and
+  labels then rendered normally. Major MapLibre and ESLint updates are now
+  excluded from automatic Dependabot PRs until an explicit migration review.
+  Hosted Monitoring now runs real desktop and mobile browser checks for the
+  production basemap transition and a public location query, so this class of
+  client-only regression is no longer invisible to HTTP-only smokes.
 - The required hosted backbone is CWA rainfall, WRA water level, NCDR CAP, WRA
   IoW flood depth, and Civil IoT sewer water level. Advisory sources remain
   distinguishable from required sources and cannot silently weaken the gate.
