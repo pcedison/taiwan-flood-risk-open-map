@@ -13,7 +13,7 @@
     "test": "node --test --experimental-strip-types \"tests/unit/**/*.test.ts\""
   },
   "dependencies": {
-    "maplibre-gl": "^5.0.0",
+    "maplibre-gl": "^6.6.0",
     "next": "^16.2.12",
     "pmtiles": "^4.4.1",
     "react": "^19.0.0",
