@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-31 13:07 Asia/Taipei (05:07 UTC)
+Last verified: 2026-08-31 14:28 Asia/Taipei (06:28 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -38,14 +38,17 @@ the live verification sources listed below.
   and all three runtime gates are present. The upstream `Depth` schema has no
   declared unit, so its raw value is not converted to centimetres.
 - Latest functional release verified before this documentation edit:
-  `1dd018ab13755fa077312f57b9cdeb98d4904010` (PRs
+  `19bbaf6849713594d20dca7dc047af17368ad69d` (PRs
+  [#283](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/283) and
+  [#284](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/284), built
+  on the nationwide historical-evidence work in PRs
   [#279](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/279),
   [#280](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/280), and
   [#281](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/281)).
   This is an auditable historical checkpoint, not a permanent claim about the
   current SHA. Always derive the live expected SHA with `git rev-parse
   origin/main`, then compare it with `/health` and `/ready`.
-- At 2026-08-31 13:07 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+- At 2026-08-31 14:28 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
   reported that functional-release SHA; PostgreSQL and Redis were healthy. CI
   and CodeQL completed successfully, with no open pull requests.
 - Hosted Monitoring run
@@ -65,10 +68,12 @@ the live verification sources listed below.
   as a substitute for the next real schedule.
 - The subsequent real-schedule Hosted Monitoring run
   [#33359153356](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33359153356)
-  completed successfully on 2026-08-31 13:06 Asia/Taipei against the current
-  functional-release SHA. This is the current
-  genuine schedule evidence; it supersedes the earlier failed lifecycle run
-  without treating a manual dispatch as schedule proof.
+  completed successfully on 2026-08-31 13:06 Asia/Taipei against the
+  then-current `1dd018ab13755fa077312f57b9cdeb98d4904010` release. This is the
+  latest genuine schedule evidence; it supersedes the earlier failed lifecycle
+  run without treating a manual dispatch as schedule proof. The later PR #283
+  and #284 releases passed CI, CodeQL, deployment-identity smoke, and strict
+  public-risk smoke; their next real schedule remains future evidence.
 - Open pull requests: zero at the checkpoint.
 - The deployment-identity smoke and strict hosted public-risk smoke both passed
   against the current deployed SHA.
@@ -83,6 +88,15 @@ the live verification sources listed below.
   the UI now shows its distance as `未提供`; the persisted evidence endpoint
   likewise returns a null distance plus the explicit limitation that this is
   not an address-level flood-depth observation.
+- A browser-driven production query for `高雄市仁武區` exposed an unreadable
+  Google News RSS article URL even though its publisher metadata named an
+  official agency. PR #284 now requires the user-facing citation URL itself to
+  be a direct approved Taiwan government HTTPS URL. Migration 0055 retained
+  previous aggregator-only rows for audit but changed them to `rejected` so
+  they cannot appear as public evidence. After deployment, the same query
+  exposed only direct `data.gov.tw` links; the historical flood dataset page
+  `https://data.gov.tw/dataset/25770` rendered with readable metadata and CSV,
+  JSON, and XML resource links in the production browser check.
 - PR [#270](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/270)
   prevents a transient failure of one redundant WRA hydrology adapter from
   forcing an otherwise supported query-local result to `未知`. The exception is
