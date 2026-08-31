@@ -22,8 +22,12 @@ test("production basemap and public risk query remain usable", async ({ page }) 
       name: /^綜合風險：(低|中|高|極高|未知)$/,
     }),
   ).toBeVisible({ timeout: 45_000 });
-  await expect(page.getByText(/即時：(低|中|高|極高|未知)；歷史參考：(低|中|高|極高|未知)/)).toBeVisible();
-  await expect(page.getByTestId("evidence-panel")).toContainText(
-    "回答：哪些來源支撐這次判讀？",
-  );
+  const riskSummary = page.getByTestId("risk-summary");
+  await expect(riskSummary).toContainText(/即時\s*(低|中|高|極高|未知)/);
+  await expect(riskSummary).toContainText(/歷史參考\s*(低|中|高|極高|未知)/);
+  await expect(riskSummary).toContainText(/資料可信度\s*(低|中|高|極高|未知)/);
+
+  const evidencePanel = page.getByTestId("evidence-panel");
+  await expect(evidencePanel.getByText("判讀依據", { exact: true })).toBeVisible();
+  await expect(evidencePanel.locator(".evidence-card").first()).not.toBeVisible();
 });
