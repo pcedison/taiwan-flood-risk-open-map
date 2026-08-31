@@ -1,8 +1,9 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
+from http.client import IncompleteRead
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -33,6 +34,7 @@ CWA_RAINFALL_DATA_GOV_URL = "https://data.gov.tw/dataset/9177"
 CWA_RAINFALL_ATTRIBUTION = "Central Weather Administration"
 CWA_RAINFALL_USER_AGENT = "FloodRiskTaiwan/0.1 worker-cwa-rainfall"
 DEFAULT_CWA_RAINFALL_TIMEOUT_SECONDS = 8
+_CWA_RAINFALL_INCOMPLETE_READ_ATTEMPTS = 2
 
 CWA_RAINFALL_METADATA = AdapterMetadata(
     key="official.cwa.rainfall",
@@ -97,7 +99,7 @@ class CwaRainfallApiAdapter:
         request_url = _cwa_rainfall_request_url(self._api_url, authorization)
         resource_url = _cwa_rainfall_source_url(self._api_url)
         try:
-            payload = self._fetch_json(request_url, self._timeout_seconds)
+            payload = self._fetch_json_with_incomplete_read_retry(request_url)
         except CwaRainfallAdapterError:
             raise
         except Exception as exc:
@@ -119,6 +121,21 @@ class CwaRainfallApiAdapter:
             )
             for record in records
         )
+
+    def _fetch_json_with_incomplete_read_retry(self, request_url: str) -> Mapping[str, Any]:
+        """Retry one response that the upstream closes before its full body arrives."""
+
+        for attempt in range(_CWA_RAINFALL_INCOMPLETE_READ_ATTEMPTS):
+            try:
+                return self._fetch_json(request_url, self._timeout_seconds)
+            except IncompleteRead as exc:
+                if attempt + 1 >= _CWA_RAINFALL_INCOMPLETE_READ_ATTEMPTS:
+                    raise CwaRainfallFetchError(
+                        "CWA rainfall API response remained truncated after "
+                        f"{_CWA_RAINFALL_INCOMPLETE_READ_ATTEMPTS} attempts"
+                    ) from exc
+
+        raise AssertionError("unreachable CWA rainfall retry state")
 
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         return _normalize_rainfall_record(self.metadata, raw_item)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import ssl
 from datetime import UTC, datetime
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import Any, ClassVar, Self, cast
 from urllib.parse import parse_qs, urlsplit
@@ -79,8 +80,7 @@ def test_cwa_rainfall_api_adapter_fetches_and_normalizes_official_payload() -> N
     adapter = CwaRainfallApiAdapter(
         authorization="test-token",
         api_url=(
-            "https://example.test/cwa/rainfall?"
-            "Authorization=old-token&station=all&format=XML"
+            "https://example.test/cwa/rainfall?Authorization=old-token&station=all&format=XML"
         ),
         timeout_seconds=3,
         fetched_at=FETCHED_AT,
@@ -104,7 +104,9 @@ def test_cwa_rainfall_api_adapter_fetches_and_normalizes_official_payload() -> N
 
     raw = result.fetched[0]
     assert raw.source_url == "https://data.gov.tw/dataset/9177"
-    assert raw.payload["resource_url"] == "https://example.test/cwa/rainfall?station=all&format=JSON"
+    assert (
+        raw.payload["resource_url"] == "https://example.test/cwa/rainfall?station=all&format=JSON"
+    )
     assert "test-token" not in raw.source_url
     assert raw.payload["rainfall_mm_10m"] == 7.5
     assert raw.payload["evidence_scope"] == "current"
@@ -146,6 +148,52 @@ def test_cwa_rainfall_api_adapter_wraps_injected_fetch_errors() -> None:
 
     with pytest.raises(CwaRainfallFetchError, match="timed out"):
         adapter.run()
+
+
+def test_cwa_rainfall_api_adapter_retries_one_incomplete_response() -> None:
+    attempts = 0
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        nonlocal attempts
+        del url, timeout_seconds
+        attempts += 1
+        if attempts == 1:
+            raise IncompleteRead(b"truncated", 1024)
+        return _load_shared_mapping("cwa-rainfall.json")
+
+    adapter = CwaRainfallApiAdapter(
+        authorization="test-token",
+        api_url="https://example.test/cwa/rainfall",
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+    )
+
+    result = adapter.run()
+
+    assert attempts == 2
+    assert len(result.normalized) == 1
+
+
+def test_cwa_rainfall_api_adapter_fails_after_two_incomplete_responses() -> None:
+    attempts = 0
+
+    def fetch_json(url: str, timeout_seconds: int) -> dict[str, Any]:
+        nonlocal attempts
+        del url, timeout_seconds
+        attempts += 1
+        raise IncompleteRead(b"truncated", 1024)
+
+    adapter = CwaRainfallApiAdapter(
+        authorization="test-token",
+        api_url="https://example.test/cwa/rainfall",
+        fetched_at=FETCHED_AT,
+        fetch_json=fetch_json,
+    )
+
+    with pytest.raises(CwaRainfallFetchError, match="truncated after 2 attempts"):
+        adapter.run()
+
+    assert attempts == 2
 
 
 def test_wra_water_level_adapter_normalizes_fixture_records() -> None:
@@ -492,10 +540,7 @@ def test_flood_potential_geojson_api_adapter_fetches_and_sanitizes_source_url() 
     assert result.rejected == ()
 
     raw = result.fetched[0]
-    assert (
-        raw.source_url
-        == "https://example.test:8443/flood-potential.geojson?version=2026"
-    )
+    assert raw.source_url == "https://example.test:8443/flood-potential.geojson?version=2026"
     assert "operator" not in raw.source_url
     assert "secret" not in raw.source_url
     assert "old-token" not in raw.source_url
