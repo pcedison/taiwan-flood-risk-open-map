@@ -295,7 +295,12 @@ Adapter and source variables:
 | `SOURCE_WRA_ENABLED` | worker, scheduler | Optional override for `official.wra.water_level`; unset defaults to enabled, `false` disables it |
 | `SOURCE_WRA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker WRA water-level runtime adapter; keep `false` until cadence, egress, and operator ownership are ready |
 | `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Optional override for `official.flood_potential.geojson`; unset defaults to enabled, `false` disables it |
-| `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED` | api | Enables the reviewed metadata-only Tainan City Government recent flood-history lookup; hosted default `true`, `false` is the kill switch |
+| `OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED` | api | Enables rolling seven-year, citation-only recent-history recovery for all Taiwan locations; only official Taiwan government publisher domains are accepted |
+| `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED` | api | Deprecated and ignored by the active request path; keep `false` after migration 0054 |
+| `SOURCE_WRA_FLOOD_INCIDENT_ENABLED` | worker, scheduler | First of three fail-closed gates for nationwide WRA latest-event incident accumulation; keep `false` until approval |
+| `SOURCE_WRA_FLOOD_INCIDENT_API_ENABLED` | worker, scheduler | Network gate for the WRA incident endpoint; keep `false` until approval |
+| `SOURCE_WRA_FLOOD_INCIDENT_CONTRACT_ENABLED` | worker, scheduler | Records contract/license/operator approval; cannot be replaced by a key alone |
+| `WRA_FLOOD_INCIDENT_API_KEY` | worker, scheduler | Header-only deployment secret; never place it in source URLs, logs, or Git |
 | `SOURCE_NEWS_ENABLED` | worker, scheduler | Enables reviewed L2 news/public-web adapters only; default `false` |
 | `SOURCE_FORUM_ENABLED` | worker, scheduler | Family-level forum gate; must stay `false` until Phase 4 legal/source review |
 | `SOURCE_PTT_ENABLED` | worker, scheduler | Source-level PTT gate; also requires `SOURCE_FORUM_ENABLED=true`, terms acknowledgement, and candidate approval ack |

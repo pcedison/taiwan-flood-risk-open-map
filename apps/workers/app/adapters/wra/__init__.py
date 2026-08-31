@@ -1,5 +1,20 @@
 """WRA adapters."""
 
+from app.adapters.wra.flood_incident import (
+    DEFAULT_WRA_FLOOD_INCIDENT_TIMEOUT_SECONDS,
+    WRA_FLOOD_INCIDENT_API_URL,
+    WRA_FLOOD_INCIDENT_ATTRIBUTION,
+    WRA_FLOOD_INCIDENT_DOCS_URL,
+    WRA_FLOOD_INCIDENT_METADATA,
+    WraFloodIncidentAdapterError,
+    WraFloodIncidentApiAdapter,
+    WraFloodIncidentConfigurationError,
+    WraFloodIncidentFetchError,
+    WraFloodIncidentFetchJson,
+    WraFloodIncidentPayloadError,
+    parse_wra_flood_incident_payload,
+)
+
 from app.adapters.wra.flood_warning import (
     DEFAULT_WRA_FLOOD_WARNING_TIMEOUT_SECONDS,
     WRA_FLOOD_WARNING_ATTRIBUTION,
@@ -60,9 +75,14 @@ from app.adapters.wra.water_level import (
 )
 
 __all__ = [
+    "DEFAULT_WRA_FLOOD_INCIDENT_TIMEOUT_SECONDS",
     "DEFAULT_WRA_FLOOD_WARNING_TIMEOUT_SECONDS",
     "DEFAULT_WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS",
     "DEFAULT_WRA_WATER_LEVEL_TIMEOUT_SECONDS",
+    "WRA_FLOOD_INCIDENT_API_URL",
+    "WRA_FLOOD_INCIDENT_ATTRIBUTION",
+    "WRA_FLOOD_INCIDENT_DOCS_URL",
+    "WRA_FLOOD_INCIDENT_METADATA",
     "WRA_FLOOD_WARNING_ATTRIBUTION",
     "WRA_FLOOD_WARNING_DATA_GOV_DATASET_ID",
     "WRA_FLOOD_WARNING_DATA_GOV_DATASET_IDS",
@@ -83,6 +103,12 @@ __all__ = [
     "FetchJson",
     "HistoricalFetchJson",
     "HistoricalFetchText",
+    "WraFloodIncidentAdapterError",
+    "WraFloodIncidentApiAdapter",
+    "WraFloodIncidentConfigurationError",
+    "WraFloodIncidentFetchError",
+    "WraFloodIncidentFetchJson",
+    "WraFloodIncidentPayloadError",
     "WraFloodWarningAdapter",
     "WraFloodWarningAdapterError",
     "WraFloodWarningFetchError",
@@ -105,6 +131,7 @@ __all__ = [
     "fetch_wra_historical_json",
     "fetch_wra_historical_text",
     "parse_wra_flood_warning_kml",
+    "parse_wra_flood_incident_payload",
     "parse_wra_historical_flood_kml",
     "parse_wra_station_metadata_payload",
     "parse_wra_water_level_api_payload",

@@ -56,7 +56,8 @@ in `schema_migrations` and can be disabled only with
 | `HISTORICAL_NEWS_ON_DEMAND_WRITEBACK_ENABLED` | `false` until database writeback is enabled |
 | `SOURCE_NEWS_ENABLED` | `false` until source terms are reviewed |
 | `SOURCE_TERMS_REVIEW_ACK` | `false` until source terms are reviewed |
-| `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED` | `true`; citation-only L1 lookup of recent Tainan City Government flood news, with a 10-minute process cache and no article-body storage |
+| `OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED` | `true`; all-Taiwan rolling seven-year official-domain citation lookup with no article-body storage |
+| `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED` | `false`; superseded single-city request path |
 | `USER_REPORTS_ENABLED` | `false` until abuse controls and moderation owner are ready |
 
 ## Optional Variables
@@ -107,6 +108,10 @@ the stop removed.
 | `SOURCE_WRA_API_ENABLED` | `true` |
 | `SOURCE_WRA_IOW_FLOOD_DEPTH_ENABLED` | `true` |
 | `SOURCE_WRA_IOW_FLOOD_DEPTH_API_ENABLED` | `true` |
+| `SOURCE_WRA_FLOOD_INCIDENT_ENABLED` | `false` until API contract, credential, and operator approval are recorded |
+| `SOURCE_WRA_FLOOD_INCIDENT_API_ENABLED` | `false` until approval |
+| `SOURCE_WRA_FLOOD_INCIDENT_CONTRACT_ENABLED` | `false` until approval |
+| `WRA_FLOOD_INCIDENT_API_KEY` | Deployment secret only; leave unset until approval |
 | `SOURCE_NCDR_CAP_ENABLED` | `true` |
 | `SOURCE_NCDR_CAP_API_ENABLED` | `true` |
 | `SOURCE_NCDR_CAP_CONTRACT_ENABLED` | Leave unset or `true`; force mode sets this reviewed contract gate to `true` so NCDR cannot be silently omitted |

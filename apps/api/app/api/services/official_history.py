@@ -10,7 +10,7 @@ from app.domain.evidence import (
     EvidenceRepositoryUnavailable,
     upsert_public_evidence,
 )
-from app.domain.history.news_enrichment import search_tainan_official_flood_news
+from app.domain.history.news_enrichment import search_taiwan_official_flood_citations
 
 
 @dataclass(frozen=True)
@@ -30,7 +30,7 @@ class OfficialRecentHistoryLookup:
         del data
         if not self.enabled:
             return ()
-        result = search_tainan_official_flood_news(
+        result = search_taiwan_official_flood_citations(
             location_text=request.location_text,
             lat=request.point.lat,
             lng=request.point.lng,

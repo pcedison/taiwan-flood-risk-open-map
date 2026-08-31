@@ -78,13 +78,20 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
     )
 
     for source in catalog["sources"]:
-        assert source["data_gov_url"].startswith(
-            (
-                "https://data.gov.tw/",
-                "https://opendata.cwa.gov.tw/",
-                "https://alerts.ncdr.nat.gov.tw/",
+        data_gov_url = source["data_gov_url"]
+        if data_gov_url is None:
+            assert source["key"] in {
+                "official.gov_tw.flood_citation",
+                "official.wra.flood_incident",
+            }
+        else:
+            assert data_gov_url.startswith(
+                (
+                    "https://data.gov.tw/",
+                    "https://opendata.cwa.gov.tw/",
+                    "https://alerts.ncdr.nat.gov.tw/",
+                )
             )
-        )
         assert source["resource_url"].startswith("https://")
         assert source["license"]
         assert source["limitations"]
@@ -101,6 +108,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
         "official.wra.water_level",
         "official.wra_iow.flood_depth",
         "official.wra.historical_flood",
+        "official.wra.flood_incident",
         "official.ncdr.cap",
         "official.npa.police_radio_traffic",
         "official.wra.flood_warning",

@@ -225,3 +225,12 @@ publication date, URL, and location-match metadata (never the article body), and
 marks district-only matches as imprecise historical evidence. The independent
 `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED=false` kill switch stops request-time
 egress and writeback.
+
+`0054_nationwide_recent_flood_history.sql` supersedes and disables the
+Tainan-only request-time lookup, registers the rolling seven-year
+`official.gov_tw.flood_citation` source for all Taiwan locations, and registers
+the fail-closed `official.wra.flood_incident` worker source. The citation path
+stores official publisher metadata only and explicitly records incomplete
+coverage. The WRA path remains disabled until its credential and contract gates
+are approved; after activation it preserves successive latest-event responses
+instead of claiming an unavailable historical backfill.
