@@ -70,6 +70,13 @@ HISTORY = _record(
     event_type="water_level",
     evidence_scope="historical",
 )
+OBSERVED_FLOOD_HISTORY = _record(
+    "observed-flood-history",
+    adapter_key="local.tainan.flood_sensor",
+    event_type="flood_report",
+    evidence_scope="historical",
+    observed_at=NOW - timedelta(days=14),
+)
 POLICE_CONTEXT = _record(
     "police-context",
     adapter_key="official.npa.police_radio_traffic",
@@ -148,6 +155,7 @@ def _repository(monkeypatch: pytest.MonkeyPatch, **overrides) -> PostgresAssessm
         "query_realtime_jurisdiction_context": lambda **_: _context(),
         "query_nearby_latest_official": lambda **_: (LATEST,),
         "query_nearby_evidence": lambda **_: (HISTORY,),
+        "query_nearby_observed_flood_history": lambda **_: (),
         "query_nearby_realtime_coverage_rows": lambda **_: (),
         "query_realtime_source_health_rows": lambda **_: (),
         "query_nearby_recent_context": lambda **_: (POLICE_CONTEXT, WRA_CONTEXT),
@@ -206,6 +214,35 @@ def test_history_failure_keeps_current_result(monkeypatch: pytest.MonkeyPatch) -
     assert data.current_available is True
     assert data.historical_available is False
     assert data.current_official == (LATEST,)
+
+
+def test_retained_positive_sensor_observation_enters_historical_partition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    data = _repository(
+        monkeypatch,
+        query_nearby_observed_flood_history=(
+            lambda **kwargs: captured.update(kwargs) or (OBSERVED_FLOOD_HISTORY,)
+        ),
+    ).load(**POINT)
+
+    assert data.historical == (OBSERVED_FLOOD_HISTORY, HISTORY)
+    assert data.historical_available is True
+    assert captured["radius_m"] == 750
+    assert captured["as_of"] == NOW
+
+
+def test_observed_flood_history_failure_marks_history_incomplete_but_keeps_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = _repository(
+        monkeypatch,
+        query_nearby_observed_flood_history=_unavailable,
+    ).load(**POINT)
+
+    assert data.historical == (HISTORY,)
+    assert data.historical_available is False
 
 
 @pytest.mark.parametrize(

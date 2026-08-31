@@ -6,6 +6,7 @@ import {
   evidenceDisplayText,
   evidenceSourceUrl,
   evidenceTimeSummary,
+  historicalEvidenceVintage,
   formatConfidence,
   formatDistance,
 } from "../lib/risk-display";
@@ -68,6 +69,7 @@ export function EvidenceSection({
                 {displayedEvidence.map((item) => {
                   const displayText = evidenceDisplayText(item);
                   const sourceUrl = evidenceSourceUrl(item);
+                  const historicalVintage = historicalEvidenceVintage(item);
 
                   return (
                     <li key={item.id} className="evidence-card">
@@ -75,6 +77,17 @@ export function EvidenceSection({
                         <div>
                           <span>{sourceTypeLabel(item.source_type)}</span>
                           <strong>{displayText.title}</strong>
+                          {historicalVintage ? (
+                            <small
+                              className={
+                                historicalVintage.isOld
+                                  ? "evidence-vintage is-old"
+                                  : "evidence-vintage"
+                              }
+                            >
+                              {historicalVintage.label}
+                            </small>
+                          ) : null}
                         </div>
                         {sourceUrl ? (
                           <a
@@ -93,11 +106,19 @@ export function EvidenceSection({
                           <dd>{formatDistance(item.distance_to_query_m)}</dd>
                         </div>
                         <div>
-                          <dt>{text.evidenceTime}</dt>
+                          <dt>
+                            {item.evidence_scope === "historical"
+                              ? text.evidenceHistoricalTime
+                              : text.evidenceTime}
+                          </dt>
                           <dd>{evidenceTimeSummary(item)}</dd>
                         </div>
                         <div>
-                          <dt>{text.evidenceConfidence}</dt>
+                          <dt>
+                            {item.evidence_scope === "historical"
+                              ? text.evidenceHistoricalConfidence
+                              : text.evidenceConfidence}
+                          </dt>
                           <dd>{formatConfidence(item.confidence)}</dd>
                         </div>
                         {!sourceUrl ? (

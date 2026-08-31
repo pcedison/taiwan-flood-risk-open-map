@@ -1,6 +1,8 @@
 """Evidence query repositories."""
 
 from app.domain.evidence.repository import (
+    OBSERVED_FLOOD_HISTORY_CURRENT_GRACE,
+    OBSERVED_FLOOD_HISTORY_WINDOW,
     RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS,
     RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE,
     RECENT_INCIDENT_CONTEXT_WINDOW,
@@ -20,6 +22,7 @@ from app.domain.evidence.repository import (
     fetch_query_heat_snapshot,
     persist_risk_assessment,
     query_nearby_evidence,
+    query_nearby_observed_flood_history,
     query_nearby_latest_official,
     query_nearby_realtime_coverage_rows,
     query_nearby_recent_context,
@@ -29,6 +32,8 @@ from app.domain.evidence.repository import (
 )
 
 __all__ = [
+    "OBSERVED_FLOOD_HISTORY_CURRENT_GRACE",
+    "OBSERVED_FLOOD_HISTORY_WINDOW",
     "RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS",
     "RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE",
     "RECENT_INCIDENT_CONTEXT_WINDOW",
@@ -48,6 +53,7 @@ __all__ = [
     "fetch_query_heat_snapshot",
     "persist_risk_assessment",
     "query_nearby_evidence",
+    "query_nearby_observed_flood_history",
     "query_nearby_latest_official",
     "query_nearby_realtime_coverage_rows",
     "query_nearby_recent_context",

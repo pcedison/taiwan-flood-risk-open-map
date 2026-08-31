@@ -11,6 +11,7 @@ from app.domain.evidence import (
     RiskAssessmentPersistence,
     persist_risk_assessment,
     query_nearby_evidence,
+    query_nearby_observed_flood_history,
     query_nearby_latest_official,
     query_nearby_realtime_coverage_rows,
     query_nearby_recent_context,
@@ -139,6 +140,14 @@ class PostgresAssessmentRepository:
             lng=lng,
             radius_m=radius_m,
         )
+        observed_flood_history, observed_flood_history_available = (
+            self._load_observed_flood_history(
+                lat=lat,
+                lng=lng,
+                radius_m=radius_m,
+                as_of=as_of,
+            )
+        )
         coverage_rows, coverage_available = self._load_coverage(
             lat=lat,
             lng=lng,
@@ -183,7 +192,7 @@ class PostgresAssessmentRepository:
         )
         return AssessmentData(
             current_official=_official_current(latest),
-            historical=_historical_only(history),
+            historical=(*observed_flood_history, *_historical_only(history)),
             nearby_coverage=coverage,
             source_states=_source_states(
                 source_health=source_health,
@@ -192,7 +201,9 @@ class PostgresAssessmentRepository:
             ),
             required_realtime_source_keys=required_keys,
             current_available=current_available,
-            historical_available=historical_available,
+            historical_available=(
+                historical_available and observed_flood_history_available
+            ),
             coverage_available=coverage_available,
             health_available=health_available,
             jurisdiction_available=jurisdiction_available,
@@ -250,6 +261,23 @@ class PostgresAssessmentRepository:
                     lat=lat,
                     lng=lng,
                     radius_m=radius_m,
+                ),
+                True,
+            )
+        except EvidenceRepositoryUnavailable:
+            return (), False
+
+    def _load_observed_flood_history(
+        self, *, lat: float, lng: float, radius_m: int, as_of: datetime
+    ) -> tuple[tuple[EvidenceRecord, ...], bool]:
+        try:
+            return (
+                query_nearby_observed_flood_history(
+                    database_url=self._database_url,
+                    lat=lat,
+                    lng=lng,
+                    radius_m=radius_m,
+                    as_of=as_of,
                 ),
                 True,
             )

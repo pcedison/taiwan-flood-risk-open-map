@@ -37,10 +37,42 @@ export function evidenceTimeSummary(item: EvidencePreview) {
   const publishedAt = evidencePublishedAt(item);
 
   if (observedAt && publishedAt) {
+    const observedTime = Date.parse(observedAt);
+    const publishedTime = Date.parse(publishedAt);
+    if (
+      !Number.isNaN(observedTime) &&
+      !Number.isNaN(publishedTime) &&
+      observedTime === publishedTime
+    ) {
+      return formatDateTime(observedAt);
+    }
     return `${formatDateTime(observedAt)} / ${formatDateTime(publishedAt)}`;
   }
 
   return formatDateTime(observedAt ?? publishedAt ?? null);
+}
+
+export function historicalEvidenceVintage(item: EvidencePreview, now = new Date()) {
+  if (item.evidence_scope !== "historical") return null;
+  const timestamp =
+    item.occurred_at ?? item.observed_at ?? item.published_at ?? item.ingested_at;
+  if (!timestamp) return { isOld: true, label: "年代不明 · 涵蓋可能不完整" };
+
+  const recordedAt = new Date(timestamp);
+  if (Number.isNaN(recordedAt.getTime())) {
+    return { isOld: true, label: "年代不明 · 涵蓋可能不完整" };
+  }
+
+  const year = recordedAt.getUTCFullYear();
+  const ageMs = Math.max(0, now.getTime() - recordedAt.getTime());
+  const ageYears = Math.max(1, Math.round(ageMs / (365.2425 * 24 * 60 * 60 * 1000)));
+  if (ageMs < 365.2425 * 24 * 60 * 60 * 1000) {
+    return { isOld: false, label: `${year} 年 · 近 1 年內紀錄` };
+  }
+  if (ageYears >= 5) {
+    return { isOld: true, label: `${year} 年 · 約 ${ageYears} 年前 · 舊資料` };
+  }
+  return { isOld: false, label: `${year} 年 · 約 ${ageYears} 年前` };
 }
 
 const historicalFreshnessSourceIds = new Set([
@@ -172,7 +204,7 @@ export function evidenceDisplayText(item: EvidencePreview): EvidenceDisplayText 
   if (item.evidence_scope === "historical") {
     return {
       purpose: "用途：歷史淹水參考",
-      summary: "歷史淹水資料與本次查詢範圍相交，只代表過往背景，不代表目前正在淹水。",
+      summary: "只代表過往紀錄；來源更新頻率與涵蓋範圍不同，不能據此判定近年沒有淹水。",
       title: "歷史淹水紀錄",
     };
   }

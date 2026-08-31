@@ -17,6 +17,7 @@ from app.domain.evidence import (
     fetch_assessment_evidence,
     query_nearby_evidence,
     query_nearby_latest_official,
+    query_nearby_observed_flood_history,
     query_nearby_recent_context,
 )
 from app.domain.evidence.repository import (
@@ -73,7 +74,8 @@ def _prepare_latest_schema(database_url: str) -> None:
             """
             CREATE TABLE data_sources (
                 adapter_key text PRIMARY KEY,
-                is_enabled boolean NOT NULL
+                is_enabled boolean NOT NULL,
+                metadata jsonb NOT NULL DEFAULT '{}'::jsonb
             );
             CREATE TABLE evidence (
                 id uuid PRIMARY KEY,
@@ -433,9 +435,17 @@ def _prepare_jurisdiction_schema(database_url: str) -> None:
 
 
 def _insert_latest_source(connection: psycopg.Connection, adapter_key: str) -> None:
+    metadata = (
+        {"active_snapshot_raw_ref": "test-active-snapshot"}
+        if adapter_key == "official.ncdr.cap"
+        else {}
+    )
     connection.execute(
-        "INSERT INTO data_sources (adapter_key, is_enabled) VALUES (%s, true)",
-        (adapter_key,),
+        """
+        INSERT INTO data_sources (adapter_key, is_enabled, metadata)
+        VALUES (%s, true, %s::jsonb)
+        """,
+        (adapter_key, Jsonb(metadata)),
     )
 
 
@@ -452,10 +462,10 @@ def _insert_latest_row(
         """
         INSERT INTO official_realtime_latest (
             source_id, adapter_key, event_type, station_id,
-            observed_at, geom, evidence_id
+            observed_at, geom, evidence_id, quality_flags
         ) VALUES (
             %s, %s, %s, %s, %s,
-            ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326), %s
+            ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326), %s, %s::jsonb
         )
         """,
         (
@@ -465,6 +475,11 @@ def _insert_latest_row(
             station_id,
             observed_at,
             evidence_id,
+            Jsonb(
+                {"active_snapshot_raw_ref": "test-active-snapshot"}
+                if adapter_key == "official.ncdr.cap"
+                else {}
+            ),
         ),
     )
 
@@ -1388,6 +1403,96 @@ def test_generic_history_uses_exact_geography_radius_polygon_and_kill_switch() -
         with psycopg.connect(database_url) as connection:
             connection.execute("DELETE FROM evidence WHERE data_source_id = %s", (source_id,))
             connection.execute("DELETE FROM data_sources WHERE id = %s", (source_id,))
+
+
+def test_observed_flood_history_returns_latest_ended_positive_per_station() -> None:
+    database_url = _database_url()
+    data_source_id = uuid4()
+    adapter_key = f"test.observed-flood-history.{data_source_id}"
+    as_of = datetime(2026, 8, 31, 2, 0, tzinfo=UTC)
+    rows = (
+        (uuid4(), "station-a", as_of - timedelta(days=30), 12.0, {}, 120.0),
+        (uuid4(), "station-a", as_of - timedelta(days=14), 40.0, {}, 120.0),
+        (uuid4(), "station-b", as_of - timedelta(days=10), 0.0, {}, 120.0),
+        (uuid4(), "station-c", as_of - timedelta(hours=1), 25.0, {}, 120.0),
+        (
+            uuid4(),
+            "station-d",
+            as_of - timedelta(days=8),
+            18.0,
+            {"metadata_station_enabled": False},
+            120.0,
+        ),
+        (uuid4(), "station-e", as_of - timedelta(days=8), 18.0, {}, 120.01),
+    )
+    try:
+        with psycopg.connect(database_url) as connection:
+            _insert_migrated_source(
+                connection,
+                source_id=data_source_id,
+                adapter_key=adapter_key,
+            )
+            for evidence_id, station_id, observed_at, depth_cm, extra, lng in rows:
+                properties = {
+                    "evidence_scope": "current",
+                    "flood_depth_cm": depth_cm,
+                    "station_id": station_id,
+                    **extra,
+                }
+                connection.execute(
+                    """
+                    INSERT INTO evidence (
+                        id, data_source_id, source_id, source_type, event_type,
+                        title, summary, url, occurred_at, observed_at, ingested_at,
+                        geom, confidence, freshness_score, source_weight,
+                        privacy_level, ingestion_status, properties
+                    ) VALUES (
+                        %s, %s, %s, 'official', 'flood_report',
+                        %s, %s, 'https://example.test/flood-sensor', %s, %s, %s,
+                        ST_SetSRID(ST_MakePoint(%s, 23.0), 4326),
+                        0.9, 1.0, 1.0, 'public', 'accepted', %s::jsonb
+                    )
+                    """,
+                    (
+                        evidence_id,
+                        data_source_id,
+                        f"{station_id}:{observed_at.isoformat()}",
+                        station_id,
+                        f"水深 {depth_cm} 公分",
+                        observed_at,
+                        observed_at,
+                        observed_at + timedelta(minutes=1),
+                        lng,
+                        Jsonb(properties),
+                    ),
+                )
+
+        records = query_nearby_observed_flood_history(
+            database_url=database_url,
+            lat=23.0,
+            lng=120.0,
+            radius_m=500,
+            as_of=as_of,
+        )
+
+        selected = [item for item in records if item.adapter_key == adapter_key]
+        assert len(selected) == 1
+        assert selected[0].source_id.startswith("station-a:")
+        assert selected[0].observed_at == as_of - timedelta(days=14)
+        assert selected[0].flood_depth_cm == 40.0
+        assert selected[0].evidence_scope == "historical"
+        assert selected[0].location_precision == "point"
+        assert any("感測器保留" in item for item in selected[0].limitations)
+    finally:
+        with psycopg.connect(database_url) as connection:
+            connection.execute(
+                "DELETE FROM evidence WHERE data_source_id = %s",
+                (data_source_id,),
+            )
+            connection.execute(
+                "DELETE FROM data_sources WHERE id = %s",
+                (data_source_id,),
+            )
 
 
 def test_generic_reader_isolates_malformed_limitations_roots() -> None:

@@ -20,6 +20,7 @@ const {
   evidenceDisplayText,
   evidencePublishedAt,
   evidenceSourceUrl,
+  evidenceTimeSummary,
   formatConfidence,
   isSafeLinkUrl,
   formatCoordinate,
@@ -31,6 +32,7 @@ const {
   getProfilePreviewState,
   getUserReportSubmissionDisplayState,
   hiddenHistoricalNewsCount,
+  historicalEvidenceVintage,
   layerAvailabilityDisplayLabel,
   latestNewsEvidenceLinks,
   latestNewsLinksFreshnessSourceId,
@@ -538,6 +540,8 @@ test("public evidence display keeps current families and one historical basis", 
     event_type: "flood_report",
     id: "historical-flood",
     observed_at: "2016-09-27T00:00:00+08:00",
+    occurred_at: "2016-09-27T00:00:00+08:00",
+    published_at: null,
     source_type: "official",
   };
 
@@ -550,9 +554,41 @@ test("public evidence display keeps current families and one historical basis", 
   assert.equal(displayed[2], history);
   assert.deepEqual(evidenceDisplayText(history), {
     purpose: "用途：歷史淹水參考",
-    summary: "歷史淹水資料與本次查詢範圍相交，只代表過往背景，不代表目前正在淹水。",
+    summary: "只代表過往紀錄；來源更新頻率與涵蓋範圍不同，不能據此判定近年沒有淹水。",
     title: "歷史淹水紀錄",
   });
+  assert.deepEqual(
+    historicalEvidenceVintage(history, new Date("2026-08-31T00:00:00Z")),
+    { isOld: true, label: "2016 年 · 約 10 年前 · 舊資料" },
+  );
+});
+
+test("evidence time removes duplicate observation and publication timestamps", () => {
+  const sameInstant: EvidenceItem = {
+    ...fullEvidence,
+    observed_at: "2026-08-17T10:00:00+08:00",
+    occurred_at: "2026-08-17T02:00:00Z",
+    published_at: null,
+  };
+  assert.equal(
+    evidenceTimeSummary(sameInstant),
+    formatDateTime("2026-08-17T10:00:00+08:00"),
+  );
+});
+
+test("recent observed flood history is visibly distinguished from stale archives", () => {
+  const recentHistory: EvidenceItem = {
+    ...fullEvidence,
+    evidence_scope: "historical",
+    event_type: "flood_report",
+    observed_at: "2026-08-17T02:00:00Z",
+    occurred_at: "2026-08-17T02:00:00Z",
+    published_at: null,
+  };
+  assert.deepEqual(
+    historicalEvidenceVintage(recentHistory, new Date("2026-08-31T00:00:00Z")),
+    { isOld: false, label: "2026 年 · 近 1 年內紀錄" },
+  );
 });
 
 test("current flood reports render and rank as realtime flood-depth evidence", () => {
