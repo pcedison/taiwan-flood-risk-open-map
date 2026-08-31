@@ -9,10 +9,11 @@ from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summar
 
 router = APIRouter(tags=["health"])
 
-REQUIRED_SCHEMA_VERSION = 55
-REQUIRED_SCHEMA_FILENAME = "0055_require_direct_official_citation_urls.sql"
-REQUIRED_SCHEMA_CHECKSUM = "dc67f5cbd99c8cdce37c71223a06a6ee30d84d73506947d74e323f68b57288ee"
+REQUIRED_SCHEMA_VERSION = 56
+REQUIRED_SCHEMA_FILENAME = "0056_historical_coverage_ledger.sql"
+REQUIRED_SCHEMA_CHECKSUM = "7d55c56db7a1de2af26bf55c1336659419bf5606a850f1d18d5f2b9aaf07dea1"
 REQUIRED_SCHEMA_RELATIONS = (
+    "public.historical_coverage_cells",
     "public.station_inventory_snapshots",
     "public.realtime_jurisdiction_boundary_snapshots",
     "public.realtime_jurisdiction_boundaries",
