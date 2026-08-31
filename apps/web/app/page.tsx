@@ -32,7 +32,6 @@ import {
   publicDataFreshnessItems,
   publicEvidenceDisplayItems,
   riskOverlayPresentation,
-  riskSummaryBasis,
   riskSummaryTitle,
   selectEvidenceItems,
   shouldFetchEvidenceList,
@@ -117,9 +116,6 @@ export default function HomePage() {
       ? text.insufficientData
       : riskSummaryTitle(realtimeRiskLevel, historicalRiskLevel)
     : text.pendingData;
-  const riskSummaryBasisLine = assessment
-    ? riskSummaryBasis(realtimeRiskLevel, historicalRiskLevel)
-    : null;
   const currentSummary = useMemo(
     () => coordinateSummary(coordinate, locationLabel),
     [coordinate, locationLabel],
@@ -432,44 +428,51 @@ export default function HomePage() {
           combinedRisk={combinedRisk}
           riskOverlay={riskOverlay}
           riskSummaryHeading={riskSummaryHeading}
-          riskSummaryBasisLine={riskSummaryBasisLine}
           profileBasisText={profileBasisText}
           profilePreviewState={profilePreviewState}
         />
 
-        <NearbySensingSection assessment={assessment} evidenceItems={displayedEvidence} />
+        {assessment ? (
+          <NearbySensingSection assessment={assessment} evidenceItems={displayedEvidence} />
+        ) : null}
 
-        <EvidenceSection
-          assessment={assessment}
-          displayedEvidence={displayedEvidence}
-          evidenceDisplayState={evidenceDisplayState}
-          hiddenHistoricalNewsCount={hiddenNewsCount}
-          profileBasisText={profileBasisText}
-          profilePreviewState={profilePreviewState}
-        />
+        {assessment ? (
+          <EvidenceSection
+            assessment={assessment}
+            displayedEvidence={displayedEvidence}
+            evidenceDisplayState={evidenceDisplayState}
+            hiddenHistoricalNewsCount={hiddenNewsCount}
+            profileBasisText={profileBasisText}
+            profilePreviewState={profilePreviewState}
+          />
+        ) : null}
 
-        <UserReportSection
-          enabled={USER_REPORTS_PUBLIC_ENABLED}
-          coordinate={coordinate}
-          reportSummary={reportSummary}
-          reportStatus={reportStatus}
-          reportDisplayState={reportDisplayState}
-          isReportValid={userReportPayload.isValid}
-          isReportLoading={isReportLoading}
-          onSummaryChange={(value) => {
-            setReportSummary(value);
-            if (reportStatus !== "loading") setReportStatus("idle");
-          }}
-          onSubmit={handleUserReportSubmit}
-        />
+        {USER_REPORTS_PUBLIC_ENABLED ? (
+          <UserReportSection
+            enabled
+            coordinate={coordinate}
+            reportSummary={reportSummary}
+            reportStatus={reportStatus}
+            reportDisplayState={reportDisplayState}
+            isReportValid={userReportPayload.isValid}
+            isReportLoading={isReportLoading}
+            onSummaryChange={(value) => {
+              setReportSummary(value);
+              if (reportStatus !== "loading") setReportStatus("idle");
+            }}
+            onSubmit={handleUserReportSubmit}
+          />
+        ) : null}
 
-        <DiagnosticsSection
-          assessment={assessment}
-          coordinate={coordinate}
-          radius={radius}
-          currentSummary={currentSummary}
-          layerDisplayState={layerDisplayState}
-        />
+        {assessment ? (
+          <DiagnosticsSection
+            assessment={assessment}
+            coordinate={coordinate}
+            radius={radius}
+            currentSummary={currentSummary}
+            layerDisplayState={layerDisplayState}
+          />
+        ) : null}
       </aside>
     </main>
   );

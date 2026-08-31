@@ -29,17 +29,7 @@ export function NearbySensingSection({
         <span className="section-kicker">{text.nearbySensingKicker}</span>
         <h2>{state.badge}</h2>
       </div>
-      <p className="section-question">{text.nearbySensingQuestion}</p>
-      {coverage && searchRadiusM !== null ? (
-        <p className="nearby-sensing-scope">
-          紅圈是 {Math.round(assessment.radius_m ?? coverage.query_radius_m)} 公尺風險分析範圍；感測站另搜尋至{" "}
-          {searchRadiusM >= 1000
-            ? `${Math.round(searchRadiusM / 1000)} 公里`
-            : `${Math.round(searchRadiusM)} 公尺`}
-          {searchRadiusM > 5000 ? "，5 公里外僅供區域參考。" : "。"}
-        </p>
-      ) : null}
-      <p>{state.summary}</p>
+      {!state.items.length ? <p>{state.summary}</p> : null}
       {state.gaps.length ? (
         <div className="nearby-sensing-gaps" aria-label={text.nearbySensingGaps}>
           <span>{text.nearbySensingGaps}</span>
@@ -58,7 +48,19 @@ export function NearbySensingSection({
           ))}
         </ul>
       ) : null}
-      <p className="nearby-sensing-note">{state.note}</p>
+      <details className="nearby-sensing-details">
+        <summary>{text.nearbySensingDetails}</summary>
+        {coverage && searchRadiusM !== null ? (
+          <p>
+            風險圈 {Math.round(assessment.radius_m ?? coverage.query_radius_m)} 公尺；感測站搜尋至{" "}
+            {searchRadiusM >= 1000
+              ? `${Math.round(searchRadiusM / 1000)} 公里`
+              : `${Math.round(searchRadiusM)} 公尺`}
+            {searchRadiusM > 5000 ? "，5 公里外僅供區域參考。" : "。"}
+          </p>
+        ) : null}
+        <p>{state.note}</p>
+      </details>
     </section>
   );
 }

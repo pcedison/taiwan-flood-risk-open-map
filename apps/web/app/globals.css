@@ -274,6 +274,18 @@ button {
   line-height: 1.55;
 }
 
+.beta-limit-notice .beta-emergency-action {
+  margin-top: 6px;
+  border-top: 1px solid rgba(159, 93, 34, 0.16);
+  padding-top: 8px;
+}
+
+.beta-emergency-action a {
+  color: var(--accent-strong);
+  font-weight: 800;
+  text-underline-offset: 2px;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -567,20 +579,6 @@ button {
   font-weight: 700;
 }
 
-.section-question {
-  width: fit-content;
-  max-width: 100%;
-  border-left: 4px solid rgba(20, 125, 100, 0.28);
-  border-radius: 8px;
-  padding: 7px 9px;
-  color: #2b5146;
-  background: rgba(20, 125, 100, 0.045);
-  font-size: 0.8rem;
-  font-weight: 900;
-  line-height: 1.35;
-  text-wrap: pretty;
-}
-
 .risk-summary {
   background: linear-gradient(180deg, #ffffff 0%, #f7faf6 100%);
 }
@@ -784,68 +782,14 @@ button {
   box-shadow: 0 2px 8px rgba(27, 38, 33, 0.24);
 }
 
-.risk-summary-basis,
 .risk-overlay-note {
   margin: 8px 0 0;
   font-size: 0.86rem;
   font-weight: 800;
 }
 
-.risk-summary-basis {
-  color: #263b33;
-}
-
-.risk-decision-line {
-  border-left: 4px solid rgba(20, 125, 100, 0.36);
-  border-radius: 8px;
-  padding: 9px 10px;
-  color: #243b33;
-  background: rgba(20, 125, 100, 0.055);
-  font-size: 0.88rem;
-  font-weight: 800;
-  line-height: 1.45;
-  text-wrap: pretty;
-}
-
-.risk-emergency-notice {
-  margin: 10px 0 0;
-  border-left: 4px solid rgba(198, 106, 33, 0.45);
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: var(--muted);
-  background: rgba(198, 106, 33, 0.07);
-  font-size: 0.82rem;
-  font-weight: 700;
-  line-height: 1.5;
-  text-wrap: pretty;
-}
-
-.risk-emergency-notice a {
-  color: var(--accent-strong);
-  font-weight: 800;
-  text-decoration: underline;
-}
-
 .risk-overlay-note {
   color: var(--muted);
-}
-
-.risk-verdict-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.risk-verdict-strip span {
-  min-width: 0;
-  border-radius: 8px;
-  padding: 8px 9px;
-  color: #274039;
-  background: rgba(20, 125, 100, 0.08);
-  font-size: 0.78rem;
-  font-weight: 900;
-  line-height: 1.25;
-  text-align: center;
 }
 
 .risk-reasons {
@@ -995,13 +939,6 @@ button {
   text-wrap: pretty;
 }
 
-.nearby-sensing > .nearby-sensing-scope {
-  margin-top: -3px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
 .nearby-sensing-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1056,14 +993,31 @@ button {
   font-size: 0.84rem;
 }
 
-.nearby-sensing-list span,
-.nearby-sensing-note {
+.nearby-sensing-list span {
   border-top: 1px solid rgba(101, 115, 109, 0.12);
   padding-top: 10px;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
   line-height: 1.4;
+}
+
+.nearby-sensing-details {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.nearby-sensing-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 900;
+}
+
+.nearby-sensing-details p {
+  margin-top: 7px;
 }
 
 .nearby-sensing-good {
@@ -1103,8 +1057,7 @@ button {
   line-height: 1.45;
 }
 
-.evidence-panel ul,
-.evidence-placeholder-list {
+.evidence-panel ul {
   display: grid;
   gap: 8px;
   padding-left: 20px;
@@ -1413,6 +1366,27 @@ button {
   font-size: 0.76rem;
   font-weight: 900;
   line-height: 1.2;
+}
+
+.evidence-card-detail {
+  border-top: 1px solid rgba(101, 115, 109, 0.16);
+  padding-top: 8px;
+}
+
+.evidence-card-detail summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.evidence-card-detail p {
+  margin-top: 8px;
+}
+
+.evidence-card-detail .evidence-card-purpose {
+  margin-top: 8px;
 }
 
 .evidence-meta {
@@ -1741,7 +1715,6 @@ button {
   .freshness-strip,
   .coverage-detail-list dl,
   .nearby-sensing-list,
-  .risk-verdict-strip,
   .source-health-summary dl,
   .layer-list dl,
   .evidence-meta {

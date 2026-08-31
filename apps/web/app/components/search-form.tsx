@@ -2,7 +2,7 @@
 
 import type { FormEvent } from "react";
 import type { GeocodeCandidate } from "../lib/page-types";
-import { geocodePrecisionLabel, radiusOptions, text } from "../lib/ui-text";
+import { emergencyGuidance, geocodePrecisionLabel, radiusOptions, text } from "../lib/ui-text";
 
 type SearchFormProps = {
   query: string;
@@ -31,14 +31,6 @@ export function SearchForm({
 }: SearchFormProps) {
   return (
     <form className="panel-section query-panel" onSubmit={onSubmit}>
-      <details className="beta-limit-notice" role="note" open>
-        <summary>
-          <strong>{text.betaLimitTitle}</strong>
-          <span>{text.betaLimitAction}</span>
-        </summary>
-        <p>{text.betaLimitMessage}</p>
-      </details>
-
       <label className="field">
         <span>{text.searchPlace}</span>
         <input
@@ -99,6 +91,21 @@ export function SearchForm({
           ))}
         </div>
       ) : null}
+
+      <details className="beta-limit-notice" role="note">
+        <summary>
+          <strong>{text.betaLimitTitle}</strong>
+          <span>{text.betaLimitAction}</span>
+        </summary>
+        <p>{text.betaLimitMessage}</p>
+        <p className="beta-emergency-action">
+          {emergencyGuidance.callToAction}{" "}
+          <a href={emergencyGuidance.officialLinkUrl} target="_blank" rel="noopener noreferrer">
+            {emergencyGuidance.officialLinkLabel}
+          </a>
+          。
+        </p>
+      </details>
     </form>
   );
 }
