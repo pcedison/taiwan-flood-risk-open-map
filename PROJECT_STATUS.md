@@ -23,6 +23,17 @@ the live verification sources listed below.
 - Work queue: open GitHub issues and pull requests. Do not infer completion from
   an old roadmap checkbox.
 
+## Active nationwide data debt plan
+
+- The current engineering correction plan is
+  `docs/superpowers/plans/2026-08-31-nationwide-flood-data-debt-remediation.md`.
+  It replaces location-by-location history repair as the completion model with
+  22-county realtime signal coverage, a 2018–2026 county/year coverage ledger,
+  scheduled durable ingestion, DB-only public queries, and production evidence.
+- The plan is a read-only audit and implementation contract. Its presence does
+  not prove the listed source gates, credentials, backfill, scheduler cadence,
+  or production acceptance checks are complete.
+
 ## Recorded production checkpoint
 
 - Recent-history recovery is no longer a Tainan-only exception. The hosted API
