@@ -88,6 +88,15 @@ LocalSourceNextAction = Literal[
     "monitor_open_data_release",
     "continue_official_discovery",
 ]
+HistoricalCoverageStatus = Literal[
+    "unassessed",
+    "complete",
+    "partial",
+    "official_checked_empty",
+    "not_published",
+    "stale",
+    "failed",
+]
 
 
 class IngestionJob(ContractModel):
@@ -141,6 +150,43 @@ class DataSource(ContractModel):
 
 class AdminSourcesResponse(ContractModel):
     sources: list[DataSource]
+
+
+class HistoricalCoverageCell(ContractModel):
+    county_code: str = Field(pattern=r"^\d{8}$")
+    county: str
+    year: int = Field(ge=2018, le=2100)
+    status: HistoricalCoverageStatus
+    resolved: bool = False
+    persisted: bool = False
+    record_count: int = Field(ge=0)
+    checked_source_count: int = Field(ge=0)
+    successful_source_count: int = Field(ge=0)
+    source_adapter_keys: list[str] = Field(default_factory=list)
+    assessed_at: datetime | None = None
+    last_attempted_at: datetime | None = None
+    last_succeeded_at: datetime | None = None
+    status_reason: str
+    updated_at: datetime | None = None
+
+
+class HistoricalCoverageSummary(ContractModel):
+    start_year: int = Field(ge=2018, le=2100)
+    end_year: int = Field(ge=2018, le=2100)
+    expected_cell_count: int = Field(ge=0)
+    returned_cell_count: int = Field(ge=0)
+    resolved_cell_count: int = Field(ge=0)
+    unresolved_cell_count: int = Field(ge=0)
+    missing_persisted_cell_count: int = Field(ge=0)
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    coverage_complete: bool = False
+    absence_is_safety_evidence: Literal[False] = False
+
+
+class HistoricalCoverageResponse(ContractModel):
+    generated_at: datetime
+    summary: HistoricalCoverageSummary
+    cells: list[HistoricalCoverageCell]
 
 
 class LocalSourceCoverage(ContractModel):

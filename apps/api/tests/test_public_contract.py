@@ -31,6 +31,10 @@ from app.domain.evidence import (
     EvidenceRecord,
 )
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
+from app.domain.history import (
+    HistoricalCoverageRecord,
+    HistoricalCoverageRepositoryUnavailable,
+)
 from app.domain.realtime import (
     build_nearby_realtime_coverage,
 )
@@ -344,6 +348,157 @@ def test_ready_returns_503_when_dependency_fails(monkeypatch) -> None:
     assert_openapi_schema(payload, "ReadyResponse")
 
 
+def _historical_coverage_record(
+    *,
+    status: str = "complete",
+    persisted: bool = True,
+) -> HistoricalCoverageRecord:
+    now = datetime(2026, 8, 31, 14, 0, tzinfo=UTC)
+    resolved = status in {"complete", "official_checked_empty", "not_published"}
+    return HistoricalCoverageRecord(
+        county_code="67000000",
+        county="臺南市",
+        year=2026,
+        status=status,  # type: ignore[arg-type]
+        persisted=persisted,
+        record_count=2 if status == "complete" else 0,
+        checked_source_count=2 if resolved else 0,
+        successful_source_count=2 if status == "complete" else 0,
+        source_adapter_keys=("official.wra.flood_incident",) if resolved else (),
+        assessed_at=now if resolved else None,
+        last_attempted_at=now if resolved else None,
+        last_succeeded_at=now if status == "complete" else None,
+        status_reason=(
+            "Official sources completed."
+            if resolved
+            else "Coverage audit has not been run."
+        ),
+        updated_at=now if persisted else None,
+    )
+
+
+def test_history_coverage_contract_exposes_status_without_claiming_safety(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "list_historical_coverage",
+        lambda **kwargs: (_historical_coverage_record(),),
+    )
+
+    response = client.get(
+        "/v1/history-coverage",
+        params={"county_code": "67000000", "year": 2026},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == {
+        "start_year": 2026,
+        "end_year": 2026,
+        "expected_cell_count": 1,
+        "returned_cell_count": 1,
+        "resolved_cell_count": 1,
+        "unresolved_cell_count": 0,
+        "missing_persisted_cell_count": 0,
+        "status_counts": {
+            "complete": 1,
+            "failed": 0,
+            "not_published": 0,
+            "official_checked_empty": 0,
+            "partial": 0,
+            "stale": 0,
+            "unassessed": 0,
+        },
+        "coverage_complete": True,
+        "absence_is_safety_evidence": False,
+    }
+    assert payload["cells"][0]["county"] == "臺南市"
+    assert payload["cells"][0]["status"] == "complete"
+    assert payload["cells"][0]["resolved"] is True
+    assert_openapi_schema(payload, "HistoricalCoverageResponse")
+
+
+def test_history_coverage_marks_missing_persisted_cell_unassessed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "list_historical_coverage",
+        lambda **kwargs: (
+            _historical_coverage_record(status="unassessed", persisted=False),
+        ),
+    )
+
+    response = client.get(
+        "/v1/history-coverage",
+        params={"county_code": "67000000", "year": 2026},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["coverage_complete"] is False
+    assert payload["summary"]["unresolved_cell_count"] == 1
+    assert payload["summary"]["missing_persisted_cell_count"] == 1
+    assert payload["cells"][0]["status"] == "unassessed"
+    assert payload["cells"][0]["persisted"] is False
+    assert payload["summary"]["absence_is_safety_evidence"] is False
+
+
+def test_history_coverage_rejects_unknown_county_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "list_historical_coverage",
+        lambda **kwargs: (),
+    )
+
+    response = client.get(
+        "/v1/history-coverage",
+        params={"county_code": "00000000", "year": 2026},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_history_coverage_fails_closed_when_matrix_is_incomplete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "list_historical_coverage",
+        lambda **kwargs: (_historical_coverage_record(),),
+    )
+
+    response = client.get("/v1/history-coverage")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "coverage_matrix_incomplete"
+    assert response.json()["error"]["details"] == {
+        "expected_cell_count": 198,
+        "returned_cell_count": 1,
+    }
+
+
+def test_history_coverage_returns_503_when_repository_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(**kwargs: object) -> tuple[HistoricalCoverageRecord, ...]:
+        raise HistoricalCoverageRepositoryUnavailable("database unavailable")
+
+    monkeypatch.setattr(public_routes, "list_historical_coverage", unavailable)
+
+    response = client.get(
+        "/v1/history-coverage",
+        params={"county_code": "67000000", "year": 2026},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "repository_unavailable"
+
+
 def test_required_schema_readiness_checks_latest_migration_and_relations() -> None:
     captured: dict[str, object] = {}
 
@@ -353,7 +508,7 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
             captured["params"] = params
 
         def fetchone(self) -> tuple[bool, ...]:
-            return (True, True, True, True, True, True, True, True, True)
+            return (True, True, True, True, True, True, True, True, True, True)
 
     health_routes._check_required_schema(FakeCursor())
 
@@ -361,10 +516,11 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        55,
-        "0055_require_direct_official_citation_urls.sql",
-        "dc67f5cbd99c8cdce37c71223a06a6ee30d84d73506947d74e323f68b57288ee",
-        55,
+        56,
+        "0056_historical_coverage_ledger.sql",
+        "7d55c56db7a1de2af26bf55c1336659419bf5606a850f1d18d5f2b9aaf07dea1",
+        56,
+        "public.historical_coverage_cells",
         "public.station_inventory_snapshots",
         "public.realtime_jurisdiction_boundary_snapshots",
         "public.realtime_jurisdiction_boundaries",
@@ -381,9 +537,9 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
             return None
 
         def fetchone(self) -> tuple[bool, ...]:
-            return (True, True, True, True, False, True, True, True, True)
+            return (True, True, True, True, False, True, True, True, True, True)
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0055 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0056 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 

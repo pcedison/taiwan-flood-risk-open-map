@@ -240,3 +240,12 @@ request-time source so the user-facing citation itself must be an approved
 government HTTPS URL. Existing aggregator-only citations are retained for
 audit but moved to `rejected`; they can no longer appear as public evidence or
 make an unreadable Google/Bing redirect look like an official source page.
+
+`0056_historical_coverage_ledger.sql` creates the fail-closed county/year
+historical ingestion coverage ledger and seeds the first 22 × 9 review matrix
+for 2018–2026. Every cell starts as `unassessed`; this is an explicit work state,
+not evidence that no flood occurred. Resolved empty and unavailable states need
+review evidence, successful source checks remain distinct from failures, and
+`/v1/history-coverage` exposes only public-safe counts, source adapter keys,
+timestamps, and limitations. The migration does not backfill events or mark any
+cell complete.

@@ -33,6 +33,10 @@ the live verification sources listed below.
 - The plan is a read-only audit and implementation contract. Its presence does
   not prove the listed source gates, credentials, backfill, scheduler cadence,
   or production acceptance checks are complete.
+- The first implementation slice adds migration `0056`, the fail-closed
+  2018–2026 county/year ledger, and public-safe `GET /v1/history-coverage`.
+  All 198 cells start as `unassessed`; the schema and endpoint make the work
+  visible but do not by themselves backfill events or complete any cell.
 
 ## Recorded production checkpoint
 

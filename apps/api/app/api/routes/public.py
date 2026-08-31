@@ -14,6 +14,9 @@ from app.api.schemas import (
     GeocodeRequest,
     GeocodeResponse,
     GeoJsonGeometry,  # noqa: F401  (re-exported for tests)
+    HistoricalCoverageCell,
+    HistoricalCoverageResponse,
+    HistoricalCoverageSummary,
     LatLng,  # noqa: F401  (re-exported for tests building Evidence payloads)
     LayersResponse,
     MapLayer,
@@ -35,6 +38,15 @@ from app.domain.assessment import PostgresAssessmentRepository
 from app.domain.evidence import fetch_assessment_evidence
 from app.domain.geocoding import build_open_data_geocoder
 from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
+from app.domain.history import (
+    HISTORICAL_COVERAGE_END_YEAR,
+    HISTORICAL_COVERAGE_JURISDICTION_COUNT,
+    HISTORICAL_COVERAGE_START_YEAR,
+    HISTORICAL_COVERAGE_STATUSES,
+    HistoricalCoverageRecord,
+    HistoricalCoverageRepositoryUnavailable,
+    list_historical_coverage,
+)
 from app.domain.layers import (
     LayerRecord,
     fetch_map_layer,
@@ -264,6 +276,126 @@ def geocode(
         endpoint_name="Geocode",
     )
     return GeocodeResponse(candidates=_build_geocoder().geocode(request))
+
+
+@router.get(
+    "/history-coverage",
+    response_model=HistoricalCoverageResponse,
+    responses={
+        404: {"description": "The requested county code is not in the 22-county matrix."},
+        503: {"description": "Historical coverage storage or matrix is unavailable."},
+    },
+)
+def get_history_coverage(
+    county_code: str | None = Query(default=None, pattern=r"^\d{8}$"),
+    year: int | None = Query(
+        default=None,
+        ge=HISTORICAL_COVERAGE_START_YEAR,
+        le=HISTORICAL_COVERAGE_END_YEAR,
+    ),
+) -> HistoricalCoverageResponse:
+    settings = get_settings()
+    try:
+        records = list_historical_coverage(
+            database_url=settings.database_url,
+            county_code=county_code,
+            year=year,
+        )
+    except HistoricalCoverageRepositoryUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "repository_unavailable",
+                "Historical coverage storage is temporarily unavailable.",
+            )["error"],
+        ) from exc
+
+    if county_code is not None and not records:
+        raise HTTPException(
+            status_code=404,
+            detail=error_payload(
+                "not_found",
+                "The county code is not part of the canonical 22-county matrix.",
+            )["error"],
+        )
+
+    expected_count = (
+        1 if county_code is not None else HISTORICAL_COVERAGE_JURISDICTION_COUNT
+    ) * (
+        1
+        if year is not None
+        else HISTORICAL_COVERAGE_END_YEAR - HISTORICAL_COVERAGE_START_YEAR + 1
+    )
+    if len(records) != expected_count:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "coverage_matrix_incomplete",
+                "The canonical historical coverage matrix is incomplete.",
+                {"expected_cell_count": expected_count, "returned_cell_count": len(records)},
+            )["error"],
+        )
+
+    return _historical_coverage_response(
+        records,
+        expected_count=expected_count,
+        year=year,
+    )
+
+
+def _historical_coverage_response(
+    records: tuple[HistoricalCoverageRecord, ...],
+    *,
+    expected_count: int,
+    year: int | None,
+) -> HistoricalCoverageResponse:
+    status_counts = {status: 0 for status in sorted(HISTORICAL_COVERAGE_STATUSES)}
+    cells: list[HistoricalCoverageCell] = []
+    for record in records:
+        status_counts[record.status] += 1
+        cells.append(
+            HistoricalCoverageCell(
+                county_code=record.county_code,
+                county=record.county,
+                year=record.year,
+                status=record.status,
+                resolved=record.resolved,
+                persisted=record.persisted,
+                record_count=record.record_count,
+                checked_source_count=record.checked_source_count,
+                successful_source_count=record.successful_source_count,
+                source_adapter_keys=list(record.source_adapter_keys),
+                assessed_at=record.assessed_at,
+                last_attempted_at=record.last_attempted_at,
+                last_succeeded_at=record.last_succeeded_at,
+                status_reason=record.status_reason,
+                updated_at=record.updated_at,
+            )
+        )
+
+    resolved_cell_count = sum(1 for record in records if record.resolved)
+    missing_persisted_cell_count = sum(1 for record in records if not record.persisted)
+    unresolved_cell_count = len(records) - resolved_cell_count
+    start_year = year if year is not None else HISTORICAL_COVERAGE_START_YEAR
+    end_year = year if year is not None else HISTORICAL_COVERAGE_END_YEAR
+    return HistoricalCoverageResponse(
+        generated_at=_now(),
+        summary=HistoricalCoverageSummary(
+            start_year=start_year,
+            end_year=end_year,
+            expected_cell_count=expected_count,
+            returned_cell_count=len(records),
+            resolved_cell_count=resolved_cell_count,
+            unresolved_cell_count=unresolved_cell_count,
+            missing_persisted_cell_count=missing_persisted_cell_count,
+            status_counts=status_counts,
+            coverage_complete=(
+                unresolved_cell_count == 0 and missing_persisted_cell_count == 0
+            ),
+            absence_is_safety_evidence=False,
+        ),
+        cells=cells,
+    )
 
 
 @router.post("/risk/assess", response_model=RiskAssessmentResponse)

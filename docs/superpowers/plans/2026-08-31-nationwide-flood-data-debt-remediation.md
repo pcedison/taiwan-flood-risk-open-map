@@ -162,6 +162,7 @@ public API 只讀資料庫 → 網站
 第一個可驗收窗口固定為 2018–2026，共 `22 × 9 = 198` 個縣市年度格。每格必須有以下
 其中一種狀態，不能是未定義空白：
 
+- `unassessed`：尚未執行該縣市年度查核；這是初始 fail-closed 狀態，完成驗收時不得殘留；
 - `complete`：已跑完核准來源，資料與來源範圍相符；
 - `partial`：只完成部分官方來源或行政區；
 - `official_checked_empty`：核准來源成功回應且明確為空；
@@ -201,6 +202,7 @@ public API 只讀資料庫 → 網站
 - 將 22 縣市與 2018–2026 視為固定 contract fixture。
 
 退出條件：198 格都能被查詢且沒有 undefined；所有 adapter 都有一致 enablement decision。
+`unassessed` 只允許作為實作期間的明確初始狀態，不算完成。
 
 ### PR 2：中央即時骨幹正式排程與可觀測性
 

@@ -465,6 +465,50 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/history-coverage:
+    get:
+      tags:
+        - Public
+      operationId: getHistoryCoverage
+      summary: Read the public-safe 22-county historical ingestion coverage ledger.
+      description: >
+        Returns explicit county/year ingestion coverage for 2018 through 2026.
+        A missing, failed, stale, or unassessed cell is never evidence that
+        flooding did not occur or that a location is safe.
+      parameters:
+        - name: county_code
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: "^[0-9]{8}$"
+          description: Optional canonical eight-digit county/city code.
+        - name: year
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 2018
+            maximum: 2026
+          description: Optional year within the first reviewed baseline window.
+      responses:
+        "200":
+          description: Historical ingestion coverage cells and fail-closed summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoricalCoverageResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Historical coverage storage or the canonical matrix is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/layers:
     get:
       tags:
@@ -2960,6 +3004,156 @@ components:
           items:
             $ref: "#/components/schemas/LocalSourceCoverage"
       additionalProperties: false
+
+    HistoricalCoverageResponse:
+      type: object
+      required:
+        - generated_at
+        - summary
+        - cells
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        summary:
+          $ref: "#/components/schemas/HistoricalCoverageSummary"
+        cells:
+          type: array
+          items:
+            $ref: "#/components/schemas/HistoricalCoverageCell"
+      additionalProperties: false
+
+    HistoricalCoverageSummary:
+      type: object
+      required:
+        - start_year
+        - end_year
+        - expected_cell_count
+        - returned_cell_count
+        - resolved_cell_count
+        - unresolved_cell_count
+        - missing_persisted_cell_count
+        - status_counts
+        - coverage_complete
+        - absence_is_safety_evidence
+      properties:
+        start_year:
+          type: integer
+          minimum: 2018
+          maximum: 2100
+        end_year:
+          type: integer
+          minimum: 2018
+          maximum: 2100
+        expected_cell_count:
+          type: integer
+          minimum: 0
+        returned_cell_count:
+          type: integer
+          minimum: 0
+        resolved_cell_count:
+          type: integer
+          minimum: 0
+        unresolved_cell_count:
+          type: integer
+          minimum: 0
+        missing_persisted_cell_count:
+          type: integer
+          minimum: 0
+        status_counts:
+          type: object
+          additionalProperties:
+            type: integer
+            minimum: 0
+        coverage_complete:
+          type: boolean
+        absence_is_safety_evidence:
+          type: boolean
+          const: false
+      additionalProperties: false
+
+    HistoricalCoverageCell:
+      type: object
+      required:
+        - county_code
+        - county
+        - year
+        - status
+        - resolved
+        - persisted
+        - record_count
+        - checked_source_count
+        - successful_source_count
+        - source_adapter_keys
+        - assessed_at
+        - last_attempted_at
+        - last_succeeded_at
+        - status_reason
+        - updated_at
+      properties:
+        county_code:
+          type: string
+          pattern: "^[0-9]{8}$"
+        county:
+          type: string
+        year:
+          type: integer
+          minimum: 2018
+          maximum: 2100
+        status:
+          $ref: "#/components/schemas/HistoricalCoverageStatus"
+        resolved:
+          type: boolean
+        persisted:
+          type: boolean
+        record_count:
+          type: integer
+          minimum: 0
+        checked_source_count:
+          type: integer
+          minimum: 0
+        successful_source_count:
+          type: integer
+          minimum: 0
+        source_adapter_keys:
+          type: array
+          items:
+            type: string
+        assessed_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        last_attempted_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        last_succeeded_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        status_reason:
+          type: string
+          minLength: 1
+        updated_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+      additionalProperties: false
+
+    HistoricalCoverageStatus:
+      type: string
+      enum:
+        - unassessed
+        - complete
+        - partial
+        - official_checked_empty
+        - not_published
+        - stale
+        - failed
 
     AdminLocalSourceActionPlanResponse:
       type: object
