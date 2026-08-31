@@ -202,6 +202,15 @@ class _TainanNewsIndexParser(HTMLParser):
         self._field_text = []
 
 
+_TAINAN_REVIEWED_INCIDENT_BOOTSTRAP = (
+    _TainanNewsRow(
+        published_date="115-08-24",
+        title="黃偉哲視察安南、仁德淹水災情 盤點排水系統持續提升防洪韌性",
+        url="https://www.tainan.gov.tw/News_Content.aspx?n=13370&s=8832256",
+    ),
+)
+
+
 _WIKI_SOURCES = (
     _WikiSource(
         WIKIMEDIA_REST_SEARCH_ENDPOINT,
@@ -265,16 +274,11 @@ def search_tainan_official_flood_news(
         )
     else:
         payload = fetch_text(TAINAN_CITY_NEWS_INDEX_URL, max(0.5, timeout_seconds))
-    if not payload:
-        return OnDemandNewsSearchResult(
-            attempted=True,
-            source_id="official-tainan-disaster-news",
-            message="臺南市政府新聞索引暫時無法回應；保留既有歷史資料。",
-            records=(),
-            health_status="degraded",
-        )
-
-    rows = _tainan_news_rows(payload)
+    live_rows = _tainan_news_rows(payload) if payload else ()
+    rows_by_url: dict[str, _TainanNewsRow] = {}
+    for row in (*live_rows, *_TAINAN_REVIEWED_INCIDENT_BOOTSTRAP):
+        rows_by_url.setdefault(row.url, row)
+    rows = tuple(rows_by_url.values())
     records: list[EvidenceUpsert] = []
     seen: set[tuple[str, str]] = set()
     oldest_allowed = now - timedelta(days=365 * 2)
@@ -334,9 +338,24 @@ def search_tainan_official_flood_news(
         return OnDemandNewsSearchResult(
             attempted=True,
             source_id="official-tainan-disaster-news",
-            message=f"已補入 {len(records)} 筆臺南市政府近期積淹水事件 metadata。",
+            message=(
+                f"已補入 {len(records)} 筆臺南市政府近期積淹水事件 metadata。"
+                if payload
+                else (
+                    f"臺南市政府新聞索引暫時無法回應；已使用隨版本審核的 {len(records)} 筆"
+                    "官方 citation metadata。"
+                )
+            ),
             records=tuple(records),
-            health_status="healthy",
+            health_status="healthy" if payload else "degraded",
+        )
+    if not payload:
+        return OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="official-tainan-disaster-news",
+            message="臺南市政府新聞索引暫時無法回應，且審核過的備援事件不符合查詢位置。",
+            records=(),
+            health_status="degraded",
         )
     return OnDemandNewsSearchResult(
         attempted=True,

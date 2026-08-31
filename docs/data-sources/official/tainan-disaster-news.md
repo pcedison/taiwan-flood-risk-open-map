@@ -14,6 +14,11 @@ datasets.
 - Cadence: request-time only when the newest nearby observed flood event is
   more than one year old; the official index payload is cached for ten minutes
   per API process.
+- Egress fallback: a small, version-reviewed citation catalog may retain the
+  official title, publication date, and URL for a current major incident when
+  the official index rejects hosted data-center egress. The 2026-08-24 An-Nan
+  flood inspection is the initial bootstrap entry; it expires from lookup after
+  the same two-year event window and never includes article body text.
 - Spatial rule: a road match may be road-level evidence; a district-only match
   is labelled `admin_area`, has no point distance, and explicitly says it does
   not prove flooding or depth at the queried address.
