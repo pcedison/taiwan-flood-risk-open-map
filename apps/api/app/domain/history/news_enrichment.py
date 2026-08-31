@@ -1018,7 +1018,20 @@ def _official_history_search_targets(
     query_location: str,
     context_name: str,
 ) -> tuple[_SearchTarget, ...]:
-    candidates = [*_rss_search_targets(query_location), *_rss_search_targets(context_name)]
+    query_is_admin_only = _ROAD_PATTERN.search(_normalize(query_location)) is None
+    query_targets = tuple(
+        _SearchTarget(
+            target.term,
+            "admin_area" if query_is_admin_only else target.scope,
+            min(target.source_weight, 0.68) if query_is_admin_only else target.source_weight,
+        )
+        for target in _rss_search_targets(query_location)
+    )
+    context_targets = tuple(
+        _SearchTarget(target.term, "admin_area", min(target.source_weight, 0.68))
+        for target in _rss_search_targets(context_name)
+    )
+    candidates = [*query_targets, *context_targets]
     required_admin_terms = _official_specific_admin_terms(context_name)
     deduped: list[_SearchTarget] = []
     seen: set[str] = set()

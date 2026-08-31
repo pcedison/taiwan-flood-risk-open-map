@@ -157,6 +157,7 @@ sources:
       - "The endpoint returns the latest disaster event, not a complete historical archive."
       - "Multi-year coverage begins only after scheduled polling is activated; no backfill completeness claim is allowed."
       - "The published API schema does not specify the Depth unit, so the raw value is retained without conversion."
+      - "Rows without a valid WGS84 point remain raw audited rejections until a reviewed administrative geometry resolver exists."
       - "Production activation requires three explicit source gates and a header-only API key."
   - key: official.flood_potential.geojson
     need: planning_flood_potential

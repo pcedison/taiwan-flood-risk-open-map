@@ -60,6 +60,11 @@ The public API schema does not state a unit for `Depth`. The adapter therefore
 retains the raw numeric value with `upstream_schema_unspecified` and never
 converts it to centimetres.
 
+Rows without a valid WGS84 `Point` remain in the raw snapshot and audited
+rejection list. They are not promoted into public spatial evidence until a
+reviewed town/county geometry resolver is available; assigning the query point
+or a broad county centroid would overstate location precision.
+
 ## Acceptance standard
 
 A recent flood record is public evidence only when it has an official source,

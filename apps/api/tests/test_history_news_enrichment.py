@@ -164,6 +164,32 @@ def test_nationwide_official_citations_accepts_google_publisher_metadata() -> No
     assert record.properties["source_domain"] == "rwdo.kcg.gov.tw"
     assert record.properties["official_publisher_url"] == "https://rwdo.kcg.gov.tw/"
     assert record.properties["publisher_name"] == "高雄市政府水利局"
+    assert record.properties["location_precision"] == "admin_area"
+    assert record.distance_to_query_m is None
+
+
+def test_nationwide_official_citations_keep_village_context_at_admin_precision() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>臺北市文山區萬興里豪雨積淹水</title>
+      <link>https://water.gov.taipei/flood/wanxing</link>
+      <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text=None,
+        lat=25.006,
+        lng=121.573,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.properties["location_precision"] == "admin_area"
+    assert record.properties["location_match_scope"] == "admin_area"
+    assert record.distance_to_query_m is None
 
 
 def test_nationwide_official_citations_rejects_wrong_district_in_same_city() -> None:

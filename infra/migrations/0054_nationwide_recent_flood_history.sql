@@ -95,6 +95,7 @@ VALUES (
         'evidence_scope', 'historical',
         'coverage_is_complete', false,
         'depth_unit', 'upstream_schema_unspecified',
+        'pointless_row_policy', 'raw_audit_rejection_until_reviewed_geometry_resolver',
         'review_status', 'credential_and_contract_required',
         'required_gates', jsonb_build_array(
             'SOURCE_WRA_FLOOD_INCIDENT_ENABLED',

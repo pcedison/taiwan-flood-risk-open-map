@@ -45,6 +45,7 @@ WRA_FLOOD_INCIDENT_METADATA = AdapterMetadata(
         "The endpoint returns only the latest disaster event; durable multi-year coverage starts only after scheduled polling is enabled.",
         "Some rows originate from partner agencies, media, or public reports and retain their upstream source codes.",
         "Reported depth has no unit in the published API schema and is never converted or presented as a measured centimetre value.",
+        "Rows without a valid WGS84 point remain in raw audit storage and are not promoted until a reviewed administrative geometry resolver exists.",
     ),
 )
 
@@ -135,7 +136,7 @@ class WraFloodIncidentApiAdapter:
                     rejection_details.append(
                         SourceRejection(
                             source_id=raw_item.source_id,
-                            reason_code="invalid_incident_fields",
+                            reason_code=_rejection_reason(raw_item),
                         )
                     )
             else:
@@ -252,7 +253,13 @@ def _normalize_flood_incident(raw_item: RawSourceItem) -> NormalizedEvidence | N
     payload = raw_item.payload
     occurred_at = parse_datetime(payload.get("occurred_at"))
     location_text = optional_str(payload.get("location_text"))
-    if occurred_at is None or location_text is None:
+    geometry = payload.get("geometry")
+    if (
+        occurred_at is None
+        or location_text is None
+        or payload.get("location_precision") != "point"
+        or not isinstance(geometry, Mapping)
+    ):
         return None
 
     depth = optional_float(payload.get("reported_depth"))
@@ -270,9 +277,6 @@ def _normalize_flood_incident(raw_item: RawSourceItem) -> NormalizedEvidence | N
     source_code = optional_str(payload.get("source_code"))
     category_code = optional_str(payload.get("category_code"))
     confidence = 0.94 if _is_direct_official_category(category_code) else 0.78
-    if payload.get("location_precision") != "point":
-        confidence = min(confidence, 0.72)
-
     tags = ["official", "wra", "flood_incident", "historical"]
     tags.append(
         "receded"
@@ -301,6 +305,15 @@ def _normalize_flood_incident(raw_item: RawSourceItem) -> NormalizedEvidence | N
         attribution=WRA_FLOOD_INCIDENT_ATTRIBUTION,
         tags=tuple(tags),
     )
+
+
+def _rejection_reason(raw_item: RawSourceItem) -> str:
+    payload = raw_item.payload
+    if payload.get("location_precision") != "point" or not isinstance(
+        payload.get("geometry"), Mapping
+    ):
+        return "missing_reviewed_point_geometry"
+    return "invalid_incident_fields"
 
 
 def _parse_wra_datetime(value: object) -> datetime | None:
