@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from urllib.parse import parse_qs, quote, urlparse
 
 from app.domain.history.news_enrichment import (
+    _google_news_decode_params,
+    _google_news_decoded_url,
     search_public_flood_news,
     search_taiwan_official_flood_citations,
     search_tainan_official_flood_news,
@@ -193,6 +196,34 @@ def test_nationwide_official_citations_rejects_preparedness_and_planning_pages()
     assert result.records == ()
 
 
+def test_nationwide_official_citations_keeps_incident_that_mentions_follow_up_work() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>豪雨造成安南區淹水，市府加速改善淹水工程</title>
+      <link>https://www.tainan.gov.tw/incident-and-recovery/2026-flood</link>
+      <pubDate>Mon, 24 Aug 2026 12:38:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="台南市安南區培安路",
+        lat=23.04477,
+        lng=120.21154,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0].occurred_at == datetime(
+        2026,
+        8,
+        24,
+        12,
+        38,
+        tzinfo=timezone.utc,
+    )
+
+
 def test_nationwide_official_citations_accepts_official_gov_taipei_domain() -> None:
     payload = """<?xml version="1.0" encoding="utf-8" ?>
     <rss version="2.0"><channel><item>
@@ -230,10 +261,89 @@ def test_nationwide_official_citations_rejects_aggregator_link_with_official_pub
         radius_m=500,
         now=datetime(2026, 8, 31, tzinfo=timezone.utc),
         fetch_text=lambda _url, _timeout: payload,
+        resolve_url=lambda _url, _timeout: None,
     )
 
     assert result.records == ()
     assert result.health_status == "unknown"
+
+
+def test_nationwide_official_citations_retains_decoded_direct_government_url() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>高雄市仁武區道路積淹水</title>
+      <link>https://news.google.com/rss/articles/example</link>
+      <source url="https://rwdo.kcg.gov.tw/">高雄市政府水利局</source>
+      <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+    direct_url = "https://rwdo.kcg.gov.tw/News_Content.aspx?n=1&amp;s=2"
+
+    result = search_taiwan_official_flood_citations(
+        location_text="高雄市仁武區",
+        lat=22.701,
+        lng=120.36,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+        resolve_url=lambda _url, _timeout: direct_url.replace("&amp;", "&"),
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.url == "https://rwdo.kcg.gov.tw/News_Content.aspx?n=1&s=2"
+    assert record.properties["source_domain"] == "rwdo.kcg.gov.tw"
+    assert record.properties["official_publisher_url"] == "https://rwdo.kcg.gov.tw/"
+    assert record.properties["publisher_name"] == "高雄市政府水利局"
+
+
+def test_nationwide_official_citations_verifies_location_on_generic_official_page() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>災情詳情－積淹水災情</title>
+      <link>https://news.google.com/rss/articles/example</link>
+      <source url="https://ktc.kcg.gov.tw/">高雄數位市民</source>
+      <pubDate>Tue, 25 Aug 2026 05:48:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="高雄市仁武區",
+        lat=22.701,
+        lng=120.36,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+        resolve_url=lambda _url, _timeout: (
+            "https://ktc.kcg.gov.tw/disaster/detail?id=102026064754139"
+        ),
+        fetch_citation_text=lambda _url, _timeout: (
+            "積淹水災情：仁武區高楠公路路面積水。"
+        ),
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.url == "https://ktc.kcg.gov.tw/disaster/detail?id=102026064754139"
+    assert record.properties["location_precision"] == "admin_area"
+    assert record.properties["location_verification"] == "direct_official_page"
+    assert record.properties["full_text_stored"] is False
+
+
+def test_google_news_signed_redirect_metadata_is_parsed_without_article_content() -> None:
+    html = (
+        '<c-wiz data-n-a-id="example" data-n-a-sg="signed-value" '
+        'data-n-a-ts="1788134400"></c-wiz>'
+    )
+    assert _google_news_decode_params(html, article_id="example") == (
+        "signed-value",
+        "1788134400",
+    )
+
+    direct_url = "https://www.tainan.gov.tw/News_Content.aspx?n=13370&s=8832256"
+    rpc_payload = json.dumps(
+        [["wrb.fr", "Fbv4je", json.dumps([None, direct_url]), None]],
+        separators=(",", ":"),
+    )
+    assert _google_news_decoded_url(")]}'\n" + rpc_payload) == direct_url
 
 
 def test_nationwide_official_citations_keep_village_context_at_admin_precision() -> None:

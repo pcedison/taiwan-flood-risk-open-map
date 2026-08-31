@@ -30,14 +30,16 @@ the live verification sources listed below.
   flood history is over 30 days old: search the current and previous six
   calendar years, accept only direct HTTPS Taiwan government citation URLs,
   retain citation metadata rather than article bodies, and label road versus
-  administrative-area precision. Preparedness and drainage-planning pages do
-  not pass the observed-event language gate. The canonical district/town is
-  searched before road aliases and accepted candidates are sorted newest-first,
-  so an exact road query cannot spend its deadline before reaching the recent
-  district event. Retained positive official flood-depth observations use the
-  scorer's one-kilometre historical support radius. Search coverage is
-  explicitly incomplete; no result must never be presented as evidence that
-  flooding did not occur.
+  administrative-area precision. Google News index URLs are accepted only when
+  signed redirect metadata resolves to the direct government page; unresolved
+  aggregators remain rejected. Preparedness and drainage-planning pages do not
+  pass the observed-event language gate. The canonical district/town is searched
+  before road aliases and accepted candidates are sorted newest-first, so an
+  exact road query cannot spend its deadline before reaching the recent district
+  event. Retained positive official flood-depth observations use the scorer's
+  one-kilometre historical support radius. Search coverage is explicitly
+  incomplete; no result must never be presented as evidence that flooding did
+  not occur.
 - A separate `official.wra.flood_incident` adapter can accumulate successive
   all-county latest-event responses into durable cross-year history. It is
   intentionally disabled until the official API credential, contract review,

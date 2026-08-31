@@ -27,6 +27,7 @@ from app.domain.history.location_context import nearest_public_news_location_con
 
 FetchJson = Callable[[str, float], Mapping[str, Any]]
 FetchText = Callable[[str, float], str]
+ResolveUrl = Callable[[str, float], str | None]
 
 GDELT_DOC_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_ON_DEMAND_ADAPTER_KEY = "news.public_web.gdelt_backfill"
@@ -35,6 +36,9 @@ PUBLIC_WIKI_ON_DEMAND_ADAPTER_KEY = "news.public_web.wiki_search"
 TAINAN_OFFICIAL_HISTORY_ADAPTER_KEY = "official.tainan.disaster_news"
 TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY = "official.gov_tw.flood_citation"
 GOOGLE_NEWS_RSS_ENDPOINT = "https://news.google.com/rss/search"
+GOOGLE_NEWS_BATCH_EXECUTE_ENDPOINT = (
+    "https://news.google.com/_/DotsSplashUi/data/batchexecute"
+)
 BING_NEWS_RSS_ENDPOINT = "https://www.bing.com/news/search"
 BING_WEB_RSS_ENDPOINT = "https://www.bing.com/search"
 TAINAN_CITY_NEWS_INDEX_URL = (
@@ -202,6 +206,26 @@ class _TainanNewsIndexParser(HTMLParser):
         self._row = None
         self._field = None
         self._field_text = []
+
+
+class _GoogleNewsDecodeParser(HTMLParser):
+    """Extract Google's signed redirect metadata without reading article bodies."""
+
+    def __init__(self, article_id: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.article_id = article_id
+        self.signature: str | None = None
+        self.timestamp: str | None = None
+
+    def handle_starttag(self, _tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if attributes.get("data-n-a-id") != self.article_id:
+            return
+        signature = (attributes.get("data-n-a-sg") or "").strip()
+        timestamp = (attributes.get("data-n-a-ts") or "").strip()
+        if signature and timestamp.isdigit():
+            self.signature = signature
+            self.timestamp = timestamp
 
 
 _TAINAN_REVIEWED_INCIDENT_BOOTSTRAP = (
@@ -381,13 +405,17 @@ def search_taiwan_official_flood_citations(
     max_records: int = 3,
     timeout_seconds: float = 3.0,
     fetch_text: FetchText | None = None,
+    resolve_url: ResolveUrl | None = None,
+    fetch_citation_text: FetchText | None = None,
 ) -> OnDemandNewsSearchResult:
     """Find recent Taiwan-wide flood citations on official government sites.
 
     This is a bounded miss-recovery lookup, not a claim of complete historical
-    coverage. Only RSS/search citation metadata whose direct link or declared
-    publisher belongs to an official Taiwan government host is accepted.
-    Article bodies are never fetched or stored.
+    coverage. Every retained citation opens directly on an official Taiwan
+    government host. Google News index links are retained only when their signed
+    redirect metadata resolves to such a direct government page. When citation
+    metadata omits the place name, a bounded direct-page read must verify the
+    queried location. Article bodies are never stored.
     """
 
     context = nearest_public_news_location_context(
@@ -407,6 +435,8 @@ def search_taiwan_official_flood_citations(
     query_location = extract_taiwan_search_location(location_text or "") or context.name
     targets = _official_history_search_targets(query_location, context.name)
     text_client = fetch_text or _fetch_text
+    url_resolver = resolve_url or _resolve_google_news_url
+    citation_text_client = fetch_citation_text or _fetch_official_citation_text
     deadline = monotonic() + max(0.5, timeout_seconds)
     coverage_start_year = now.year - _OFFICIAL_HISTORY_LOOKBACK_YEARS + 1
     oldest_allowed = datetime(coverage_start_year, 1, 1, tzinfo=now.tzinfo)
@@ -433,23 +463,8 @@ def search_taiwan_official_flood_citations(
             for article in _rss_articles(payload, feed_url=feed_url):
                 article_url = str(article.get("url") or "")
                 publisher_url = str(article.get("publisher_url") or "")
-                # A publisher tag can confirm who published an indexed item, but
-                # it cannot make an aggregator redirect a durable citation. Google
-                # News RSS article URLs currently return an empty shell instead of
-                # the government page, so fail closed unless the link users open is
-                # itself an approved government URL.
-                if not _is_official_taiwan_web_url(article_url):
-                    continue
-                official_article = {
-                    **article,
-                    "domain": _domain_from_url(article_url),
-                    "official_publisher_url": (
-                        publisher_url if _is_official_taiwan_web_url(publisher_url) else article_url
-                    ),
-                }
-                if not _official_history_text_qualifies(
-                    _article_match_text(official_article)
-                ):
+                match_text = _article_match_text(article)
+                if not _official_history_text_qualifies(match_text):
                     continue
                 published_at = _parse_public_news_datetime(article.get("published_at"))
                 if published_at is None:
@@ -461,6 +476,80 @@ def search_taiwan_official_flood_citations(
                 )
                 if comparable < oldest_allowed or comparable > now + timedelta(days=1):
                     continue
+                metadata_location_match = _location_match(
+                    match_text,
+                    target.term,
+                    relaxed_location_terms=relaxed_terms,
+                )
+                needs_page_location_check = metadata_location_match is None
+
+                citation_url = article_url
+                if not _is_official_taiwan_web_url(citation_url):
+                    # Publisher metadata is only a precondition for decoding a
+                    # Google index item; it never authorizes the aggregator URL.
+                    # Fail closed unless Google's signed metadata yields a direct
+                    # Taiwan-government page that the user can open.
+                    if not (
+                        _is_google_news_article_url(article_url)
+                        and _is_official_taiwan_web_url(publisher_url)
+                    ):
+                        continue
+                    remaining_seconds = deadline - monotonic()
+                    if remaining_seconds <= 0:
+                        errors += 1
+                        break
+                    resolved_url = url_resolver(
+                        article_url,
+                        min(
+                            1.4 if needs_page_location_check else 1.8,
+                            max(
+                                0.45,
+                                remaining_seconds * 0.65
+                                if needs_page_location_check
+                                else remaining_seconds,
+                            ),
+                        ),
+                    )
+                    if not resolved_url or not _is_official_taiwan_web_url(resolved_url):
+                        continue
+                    citation_url = resolved_url
+
+                location_verification = "citation_metadata"
+                if needs_page_location_check:
+                    remaining_seconds = deadline - monotonic()
+                    if remaining_seconds <= 0:
+                        errors += 1
+                        break
+                    citation_payload = citation_text_client(
+                        citation_url,
+                        min(0.9, max(0.35, remaining_seconds)),
+                    )
+                    if not citation_payload:
+                        errors += 1
+                        continue
+                    if (
+                        _location_match(
+                            citation_payload,
+                            target.term,
+                            relaxed_location_terms=relaxed_terms,
+                        )
+                        is None
+                    ):
+                        continue
+                    location_verification = "direct_official_page"
+
+                official_article = {
+                    **article,
+                    "url": citation_url,
+                    "context": target.term if needs_page_location_check else "",
+                    "domain": _domain_from_url(citation_url),
+                    "official_publisher_url": (
+                        publisher_url
+                        if _is_official_taiwan_web_url(publisher_url)
+                        else citation_url
+                    ),
+                    "location_verification": location_verification,
+                }
                 record = _record_from_article(
                     official_article,
                     location=target.term,
@@ -856,6 +945,27 @@ def _fetch_text(url: str, timeout_seconds: float) -> str:
         return ""
 
 
+def _fetch_official_citation_text(url: str, timeout_seconds: float) -> str:
+    if not _is_official_taiwan_web_url(url):
+        return ""
+    request = Request(
+        url,
+        headers={
+            "Accept": "text/html, application/xhtml+xml",
+            "User-Agent": "FloodRiskTaiwan/0.1 official-citation-location-verifier",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(request, timeout=max(0.3, timeout_seconds)) as response:
+            payload = response.read(1_048_577)
+        if len(payload) > 1_048_576:
+            return ""
+        return payload.decode("utf-8", errors="replace")
+    except (HTTPError, URLError, TimeoutError, UnicodeDecodeError):
+        return ""
+
+
 @lru_cache(maxsize=4)
 def _cached_tainan_news_index(_ten_minute_bucket: int, timeout_seconds: float) -> str:
     return _fetch_text(TAINAN_CITY_NEWS_INDEX_URL, timeout_seconds)
@@ -1016,8 +1126,8 @@ def _official_history_rss_urls(
     year_clause = " OR ".join(str(year) for year in rolling_years)
     queries = _dedupe(
         (
-            f"{location} 淹水 site:gov.tw",
             f"{location} 積淹水 ({year_clause}) site:gov.tw",
+            f"{location} 淹水 site:gov.tw",
             f"{location} 淹水 政府 ({year_clause})",
         ),
         limit=3,
@@ -1066,6 +1176,11 @@ def _official_history_text_qualifies(text: str) -> bool:
         "防範淹水",
         "無淹水",
         "未淹水",
+        "汛期水患",
+        "防洪工程",
+        "排水工程",
+        "堤防工程",
+        "治理工程",
     )
     incident_phrases = (
         "災情",
@@ -1081,6 +1196,9 @@ def _official_history_text_qualifies(text: str) -> bool:
         "水淹",
         "道路積水",
         "積淹水",
+        "造成",
+        "發生",
+        "勘災",
     )
     event_markers = (
         *incident_phrases,
@@ -1088,10 +1206,7 @@ def _official_history_text_qualifies(text: str) -> bool:
         "暴雨",
         "大雨",
         "颱風",
-        "發生",
-        "造成",
         "多處",
-        "勘災",
         "視察",
     )
     if any(phrase in normalized for phrase in planning_phrases) and not any(
@@ -1201,6 +1316,189 @@ def _is_official_taiwan_web_url(value: str) -> bool:
     return host == "gov.tw" or any(
         host.endswith(suffix) for suffix in _OFFICIAL_TAIWAN_WEB_SUFFIXES
     )
+
+
+def _is_google_news_article_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or (parsed.hostname or "").casefold() != "news.google.com":
+        return False
+    return parsed.path.startswith(("/articles/", "/read/", "/rss/articles/"))
+
+
+def _google_news_article_id(value: str) -> str | None:
+    if not _is_google_news_article_url(value):
+        return None
+    try:
+        article_id = urlparse(value).path.rstrip("/").rsplit("/", 1)[-1]
+    except ValueError:
+        return None
+    if not article_id or len(article_id) > 4096:
+        return None
+    return article_id if re.fullmatch(r"[A-Za-z0-9_-]+", article_id) else None
+
+
+def _google_news_decode_params(
+    payload: str,
+    *,
+    article_id: str,
+) -> tuple[str, str] | None:
+    parser = _GoogleNewsDecodeParser(article_id)
+    try:
+        parser.feed(payload)
+        parser.close()
+    except (ValueError, AssertionError):
+        return None
+    if parser.signature is None or parser.timestamp is None:
+        return None
+    return parser.signature, parser.timestamp
+
+
+def _google_news_decoded_url(payload: str) -> str | None:
+    for line in payload.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(")]}'") or stripped.isdigit():
+            continue
+        try:
+            rows = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not (
+                isinstance(row, list)
+                and len(row) >= 3
+                and row[0] == "wrb.fr"
+                and row[1] == "Fbv4je"
+                and isinstance(row[2], str)
+            ):
+                continue
+            try:
+                decoded = json.loads(row[2])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, list) and len(decoded) >= 2 and isinstance(decoded[1], str):
+                return _canonical_public_news_url(decoded[1]) or None
+    return None
+
+
+def _resolve_google_news_url(value: str, timeout_seconds: float) -> str | None:
+    """Resolve a Google News citation to its publisher URL using signed metadata."""
+
+    article_id = _google_news_article_id(value)
+    if article_id is None:
+        return None
+    deadline = monotonic() + max(0.4, timeout_seconds)
+    shell_request = Request(
+        value,
+        headers={
+            "Accept": "text/html",
+            "User-Agent": "FloodRiskTaiwan/0.1 official-citation-link-resolver",
+        },
+        method="GET",
+    )
+    try:
+        with urlopen(
+            shell_request,
+            timeout=max(0.2, min(timeout_seconds / 2, deadline - monotonic())),
+        ) as response:
+            shell_payload = response.read(2_097_153)
+        if len(shell_payload) > 2_097_152:
+            return None
+        params = _google_news_decode_params(
+            shell_payload.decode("utf-8", errors="replace"),
+            article_id=article_id,
+        )
+        if params is None:
+            return None
+        signature, timestamp = params
+        inner_request = [
+            "garturlreq",
+            [
+                [
+                    "X",
+                    "X",
+                    ["X", "X"],
+                    None,
+                    None,
+                    1,
+                    1,
+                    "TW:zh-Hant",
+                    None,
+                    1,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    1,
+                ],
+                "X",
+                "X",
+                1,
+                [1, 1, 1],
+                1,
+                1,
+                None,
+                0,
+                0,
+                None,
+                0,
+            ],
+            article_id,
+            int(timestamp),
+            signature,
+        ]
+        rpc = [
+            "Fbv4je",
+            json.dumps(inner_request, ensure_ascii=False, separators=(",", ":")),
+            None,
+            "generic",
+        ]
+        body = urlencode(
+            {
+                "f.req": json.dumps(
+                    [[rpc]],
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            }
+        ).encode("utf-8")
+        remaining_seconds = deadline - monotonic()
+        if remaining_seconds <= 0:
+            return None
+        batch_request = Request(
+            GOOGLE_NEWS_BATCH_EXECUTE_ENDPOINT,
+            data=body,
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "User-Agent": "FloodRiskTaiwan/0.1 official-citation-link-resolver",
+            },
+            method="POST",
+        )
+        with urlopen(
+            batch_request,
+            timeout=max(0.2, remaining_seconds),
+        ) as response:
+            batch_payload = response.read(524_289)
+        if len(batch_payload) > 524_288:
+            return None
+        return _google_news_decoded_url(
+            batch_payload.decode("utf-8", errors="replace")
+        )
+    except (
+        HTTPError,
+        URLError,
+        TimeoutError,
+        UnicodeDecodeError,
+        ValueError,
+        OverflowError,
+    ):
+        return None
 
 
 def _rss_search_targets(location: str) -> tuple[_SearchTarget, ...]:
@@ -1686,7 +1984,18 @@ def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ..
                 "publisher_name": publisher_name,
             }
         )
-    return tuple(articles)
+    return tuple(sorted(articles, key=_rss_article_sort_time, reverse=True))
+
+
+def _rss_article_sort_time(article: Mapping[str, Any]) -> datetime:
+    published_at = _parse_public_news_datetime(article.get("published_at"))
+    if published_at is None:
+        return datetime.min.replace(tzinfo=UTC)
+    return (
+        published_at
+        if published_at.tzinfo is not None
+        else published_at.replace(tzinfo=UTC)
+    )
 
 
 def _xml_child_text(item: Element, child_name: str) -> str:
@@ -1790,6 +2099,9 @@ def _record_from_article(
             "source_domain": domain,
             "official_publisher_url": str(article.get("official_publisher_url") or "") or None,
             "publisher_name": str(article.get("publisher_name") or "") or None,
+            "location_verification": (
+                str(article.get("location_verification") or "citation_metadata")
+            ),
             "query_url": query_url,
             "search_window": search_window_label,
             "citation_only": True,

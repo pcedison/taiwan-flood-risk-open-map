@@ -297,7 +297,7 @@ def _assessment_service(settings: Settings) -> AssessmentService:
             ),
             timeout_seconds=min(
                 settings.historical_news_on_demand_timeout_seconds,
-                3.0,
+                4.0,
             ),
         ),
     )
