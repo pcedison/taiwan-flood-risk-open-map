@@ -81,15 +81,17 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-08-30 checkpoint, `origin/main`, production `/health`, and production
+the 2026-08-31 checkpoint, `origin/main`, production `/health`, and production
 `/ready` matched; PostgreSQL and Redis were healthy, and strict hosted
 deployment/public-risk smokes passed. Do not treat a SHA copied into status
 documentation as a permanent deployment pin: derive the current expected SHA
 only after `git fetch origin --prune`, then verify both health endpoints. A real
-scheduled Hosted Monitoring run has passed in production; the latest real
-schedule failed on an older NCDR lifecycle implementation, while the post-
-repair diagnostic run passed. Only the next `schedule` event can renew that
-scheduled-operation proof.
+scheduled Hosted Monitoring run passed after the NCDR lifecycle repair, so the
+current schedule evidence is a genuine `schedule` event rather than a manual
+diagnostic dispatch. Hosted Monitoring also exercises the production basemap
+and a real public location query in desktop and mobile Chromium; major MapLibre
+and ESLint upgrades require an explicit migration review instead of an
+automatic Dependabot PR.
 The only open issue is the external local-source dispatch contract in #71; it
 must remain open until accepted official replies, production/authorization-
 gated adapters, or reviewed official-unavailable evidence exist. The phase

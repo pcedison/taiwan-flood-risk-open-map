@@ -112,6 +112,27 @@ jobs:
             --evidence-output artifacts/hosted-public-risk-evidence-smoke.json \
             --completion-evidence-output artifacts/hosted-public-risk-completion-evidence.json
 
+      - name: Set up Node for hosted Web UI smoke
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install hosted Web UI smoke dependencies
+        run: npm ci --prefer-offline
+        working-directory: apps/web
+
+      - name: Install hosted Web UI smoke browser
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+
+      - name: Hosted Web UI basemap and query smoke
+        env:
+          HOSTED_WEB_BASE_URL: https://floodrisk.cc
+        run: npm run e2e:hosted
+        working-directory: apps/web
+
       - name: Local source signal-gap discovery refresh
         run: |
           set -euo pipefail
@@ -303,6 +324,7 @@ jobs:
           path: |
             artifacts/*.json
             artifacts/*.md
+            artifacts/hosted-web-ui/**
           if-no-files-found: warn
 
       - name: Route hosted monitoring failure issue
@@ -336,6 +358,7 @@ jobs:
             }
             const smoke = readJson("artifacts/hosted-deployment-smoke.json");
             const publicRisk = readJson("artifacts/hosted-public-risk-evidence-smoke.json");
+            const hostedWeb = readJson("artifacts/hosted-web-ui-smoke.json");
             function hostedDeploymentSmokeLines() {
               if (!smoke) {
                 return [];
@@ -370,6 +393,18 @@ jobs:
                 "",
               ];
             }
+            function hostedWebLines() {
+              if (!hostedWeb || hostedWeb._readError) {
+                return [];
+              }
+              return [
+                "Hosted Web UI smoke:",
+                `- expected tests: ${hostedWeb.stats?.expected ?? "unknown"}`,
+                `- unexpected tests: ${hostedWeb.stats?.unexpected ?? "unknown"}`,
+                `- flaky tests: ${hostedWeb.stats?.flaky ?? "unknown"}`,
+                "",
+              ];
+            }
             // The signature deliberately excludes run id, sha and timestamps so a
             // recurring failure keeps updating one issue instead of adding a comment
             // on every run.
@@ -380,6 +415,8 @@ jobs:
               publicRisk?.status,
               ...(publicRisk?.contract_failures || []),
               ...(publicRisk?.data_source_failures || []),
+              hostedWeb?.stats?.unexpected,
+              hostedWeb?.stats?.flaky,
             ]);
             const body = [
               "Hosted Monitoring failure detected.",
@@ -392,6 +429,7 @@ jobs:
               "",
               ...hostedDeploymentSmokeLines(),
               ...publicRiskLines(),
+              ...hostedWebLines(),
               "Artifacts, if uploaded, are attached to the workflow run.",
               "This issue route is public-safe and does not include tokens, manifests, or private evidence refs.",
             ].join("\n");
