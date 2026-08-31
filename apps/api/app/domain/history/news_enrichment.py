@@ -1196,6 +1196,9 @@ def _official_history_text_qualifies(text: str) -> bool:
         "水淹",
         "道路積水",
         "積淹水",
+        "造成",
+        "發生",
+        "勘災",
     )
     event_markers = (
         *incident_phrases,
@@ -1203,10 +1206,7 @@ def _official_history_text_qualifies(text: str) -> bool:
         "暴雨",
         "大雨",
         "颱風",
-        "發生",
-        "造成",
         "多處",
-        "勘災",
         "視察",
     )
     if any(phrase in normalized for phrase in planning_phrases) and not any(

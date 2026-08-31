@@ -196,6 +196,34 @@ def test_nationwide_official_citations_rejects_preparedness_and_planning_pages()
     assert result.records == ()
 
 
+def test_nationwide_official_citations_keeps_incident_that_mentions_follow_up_work() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>豪雨造成安南區淹水，市府加速改善淹水工程</title>
+      <link>https://www.tainan.gov.tw/incident-and-recovery/2026-flood</link>
+      <pubDate>Mon, 24 Aug 2026 12:38:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="台南市安南區培安路",
+        lat=23.04477,
+        lng=120.21154,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0].occurred_at == datetime(
+        2026,
+        8,
+        24,
+        12,
+        38,
+        tzinfo=timezone.utc,
+    )
+
+
 def test_nationwide_official_citations_accepts_official_gov_taipei_domain() -> None:
     payload = """<?xml version="1.0" encoding="utf-8" ?>
     <rss version="2.0"><channel><item>
