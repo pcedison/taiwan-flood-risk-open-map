@@ -16,16 +16,26 @@ observed flood history is older than 30 days.
   This prevents exact-address searches from exhausting the request deadline on
   road variants and falling back to an older archive point even when the same
   district has a recent official event.
-- Accepted publishers: HTTPS Taiwan government domains ending in `.gov.tw` or
-  `.gov.taipei`.
 - Event gate: the citation text must contain observed flooding language plus an
   event marker. General typhoon preparedness, drainage construction, and flood-
   potential/planning pages are rejected rather than mislabeled as past events.
+- Accepted citations: the URL opened by the user must itself be an HTTPS Taiwan
+  government URL ending in `.gov.tw` or `.gov.taipei`. A search index publisher
+  tag cannot authorize an aggregator redirect or an agency homepage as a
+  substitute for the cited page.
+- Google News handling: a result with an official publisher tag is considered
+  only after its signed redirect metadata resolves to a direct government page.
+  Resolution failures and non-government destinations are rejected; the Google
+  URL is never stored as the citation.
+- Location verification: when the index title and snippet omit the queried
+  district/town, the adapter performs a bounded read of the resolved government
+  page and requires that page to contain the location and flood terms. The page
+  body is used only for validation and is not persisted.
 - Stored data: title, citation URL, publication time, official publisher
   domain, and location-match metadata only.
-- Rejected data: article bodies, images, comments, non-government publishers,
-  undated results, future-dated results, and results older than the rolling
-  window.
+- Rejected data: article bodies, images, comments, non-government links,
+  aggregator-only redirects, undated results, future-dated results, and results
+  older than the rolling window.
 - Precision: road matches remain road-level; district/town matches are
   `admin_area`. Neither is a doorplate-level measured depth.
 - Completeness: search indexes are not official event registries. An empty
