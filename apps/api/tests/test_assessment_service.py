@@ -245,6 +245,37 @@ def test_service_skips_enrichment_when_recent_observed_history_exists(
     ).assess(risk_request, now=now)
 
 
+def test_service_refreshes_history_when_latest_event_is_over_30_days_old(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    previous_history = replace(
+        _record(HISTORY_ID, event_type="flood_report", evidence_scope="historical"),
+        occurred_at=now - timedelta(days=31),
+        observed_at=now - timedelta(days=31),
+    )
+    calls: list[RiskAssessRequest] = []
+
+    def lookup(
+        request: RiskAssessRequest,
+        _data: AssessmentData,
+        *,
+        now: datetime,
+    ) -> tuple[EvidenceRecord, ...]:
+        assert now == NOW
+        calls.append(request)
+        return ()
+
+    AssessmentService(
+        FakeRepository(replace(data, historical=(previous_history,))),
+        score_risk,
+        recent_history_lookup=lookup,
+    ).assess(risk_request, now=now)
+
+    assert calls == [risk_request]
+
+
 def test_historical_scorer_missing_sources_do_not_leak_into_current_explanation(
     now: datetime,
     risk_request: RiskAssessRequest,

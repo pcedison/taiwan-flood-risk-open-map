@@ -27,11 +27,17 @@ the live verification sources listed below.
 
 - Recent-history recovery is no longer a Tainan-only exception. The hosted API
   now applies one nationwide rule to Taiwan query points whose newest observed
-  flood history is over one year old: search the current and previous six
+  flood history is over 30 days old: search the current and previous six
   calendar years, accept only direct HTTPS Taiwan government citation URLs,
   retain citation metadata rather than article bodies, and label road versus
-  administrative-area precision. Search coverage is explicitly incomplete;
-  no result must never be presented as evidence that flooding did not occur.
+  administrative-area precision. Preparedness and drainage-planning pages do
+  not pass the observed-event language gate. The canonical district/town is
+  searched before road aliases and accepted candidates are sorted newest-first,
+  so an exact road query cannot spend its deadline before reaching the recent
+  district event. Retained positive official flood-depth observations use the
+  scorer's one-kilometre historical support radius. Search coverage is
+  explicitly incomplete; no result must never be presented as evidence that
+  flooding did not occur.
 - A separate `official.wra.flood_incident` adapter can accumulate successive
   all-county latest-event responses into durable cross-year history. It is
   intentionally disabled until the official API credential, contract review,

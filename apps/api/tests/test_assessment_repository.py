@@ -229,7 +229,7 @@ def test_retained_positive_sensor_observation_enters_historical_partition(
 
     assert data.historical == (OBSERVED_FLOOD_HISTORY, HISTORY)
     assert data.historical_available is True
-    assert captured["radius_m"] == 750
+    assert captured["radius_m"] == 1_000
     assert captured["as_of"] == NOW
 
 
