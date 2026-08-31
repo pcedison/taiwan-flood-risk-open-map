@@ -41,6 +41,8 @@ OFFICIAL_REALTIME_FRESHNESS_SOURCE_IDS = {
 }
 OFFICIAL_REALTIME_SIGNAL_TYPES = {"rainfall", "water_level"}
 ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES = {"healthy", "degraded"}
+HYDROLOGY_SIGNAL_TYPES = {"water_level", "flood_depth", "sewer_water_level"}
+USABLE_NEARBY_AVAILABILITY_STATES = {"fresh_nearby", "degraded_nearby"}
 # A deployment that has never enabled the official realtime adapters reports these
 # causes for every official signal. That is a deployment configuration state, not a
 # regression of the public contract, so scheduled monitoring reports it as degraded
@@ -529,11 +531,53 @@ def _check_worker_source_health(coverage: Mapping[str, Any]) -> list[str]:
             status not in ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES
             or reason == "pipeline_stalled"
         ):
+            if reason == "upstream_unavailable" and _has_hydrology_redundancy(
+                source,
+                source_health,
+                coverage,
+            ):
+                continue
             source_id = source.get("source_id") or source.get("name") or "unknown-source"
             failures.append(
                 f"required worker source {source_id} health is {status} ({reason})"
             )
     return failures
+
+
+def _has_hydrology_redundancy(
+    failed_source: Mapping[str, Any],
+    source_health: list[Any],
+    coverage: Mapping[str, Any],
+) -> bool:
+    failed_signal_types = {
+        str(signal_type)
+        for signal_type in failed_source.get("signal_types", [])
+        if str(signal_type) in HYDROLOGY_SIGNAL_TYPES
+    }
+    if not failed_signal_types:
+        return False
+
+    failed_source_id = failed_source.get("source_id")
+    has_independent_healthy_source = any(
+        isinstance(source, Mapping)
+        and source.get("source_id") != failed_source_id
+        and source.get("health_status") in ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES
+        and bool(
+            {str(signal_type) for signal_type in source.get("signal_types", [])}
+            & HYDROLOGY_SIGNAL_TYPES
+        )
+        for source in source_health
+    )
+    if not has_independent_healthy_source:
+        return False
+
+    signals = coverage.get("signal_breakdown")
+    return isinstance(signals, list) and any(
+        isinstance(signal, Mapping)
+        and signal.get("signal_type") in HYDROLOGY_SIGNAL_TYPES
+        and signal.get("availability_state") in USABLE_NEARBY_AVAILABILITY_STATES
+        for signal in signals
+    )
 
 
 def _risk_assessment_summary(payload: Mapping[str, Any]) -> dict[str, Any]:

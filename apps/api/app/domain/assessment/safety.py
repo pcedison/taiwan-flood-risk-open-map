@@ -4,6 +4,8 @@ from app.domain.assessment.models import AssessmentData, OverallDecision
 from app.domain.risk import RiskScoringResult
 
 _USABLE_LOCAL_STATES = frozenset({"fresh_nearby", "degraded_nearby"})
+_USABLE_SOURCE_STATES = frozenset({"fresh", "degraded"})
+_ACCEPTABLE_REQUIRED_STATES = frozenset({*_USABLE_SOURCE_STATES, "not_applicable"})
 _HYDROLOGY = frozenset({"water_level", "flood_depth", "sewer_water_level"})
 _RISK_LEVEL_RANK = {"未知": 0, "低": 1, "中": 2, "高": 3, "極高": 4}
 
@@ -14,6 +16,24 @@ def _query_local_signal_types(data: AssessmentData) -> frozenset[str]:
         for item in data.nearby_coverage.signal_breakdown
         if item.availability_state in _USABLE_LOCAL_STATES
     )
+
+
+def _required_sources_support_low(data: AssessmentData) -> bool:
+    state_by_key = {state.source_key: state for state in data.source_states}
+    for source_key in data.required_realtime_source_keys:
+        source_state = state_by_key.get(source_key)
+        if source_state is not None and source_state.state in _ACCEPTABLE_REQUIRED_STATES:
+            continue
+        if source_state is None or source_state.signal_type not in _HYDROLOGY:
+            return False
+        if not any(
+            alternative.source_key != source_key
+            and alternative.signal_type in _HYDROLOGY
+            and alternative.state in _USABLE_SOURCE_STATES
+            for alternative in data.source_states
+        ):
+            return False
+    return True
 
 
 def can_support_low_realtime(data: AssessmentData) -> bool:
@@ -29,11 +49,7 @@ def can_support_low_realtime(data: AssessmentData) -> bool:
         )
     ):
         return False
-    state_by_key = {state.source_key: state.state for state in data.source_states}
-    if any(
-        state_by_key.get(key) not in {"fresh", "degraded", "not_applicable"}
-        for key in data.required_realtime_source_keys
-    ):
+    if not _required_sources_support_low(data):
         return False
     local = _query_local_signal_types(data)
     return "rainfall" in local and bool(local & _HYDROLOGY)

@@ -301,6 +301,51 @@ def test_check_risk_payload_rejects_stalled_required_worker_source() -> None:
     )
 
 
+def test_transient_hydrology_failure_uses_query_local_redundancy() -> None:
+    payload = _risk_payload()
+    coverage = payload["nearby_realtime_coverage"]
+    for signal in coverage["signal_breakdown"]:
+        if signal["signal_type"] == "flood_depth":
+            signal["availability_state"] = "degraded_nearby"
+    coverage["source_health"] = [
+        {
+            "source_id": "official.wra.water_level",
+            "signal_types": ["water_level"],
+            "health_status": "failed",
+            "reason_code": "upstream_unavailable",
+            "required_for_absence": True,
+        },
+        {
+            "source_id": "official.wra_iow.flood_depth",
+            "signal_types": ["flood_depth"],
+            "health_status": "degraded",
+            "reason_code": "worker_delayed",
+            "required_for_absence": True,
+        },
+    ]
+
+    assert smoke._check_worker_source_health(coverage) == []
+
+
+def test_transient_hydrology_failure_without_redundancy_still_fails() -> None:
+    payload = _risk_payload()
+    coverage = payload["nearby_realtime_coverage"]
+    coverage["source_health"] = [
+        {
+            "source_id": "official.wra.water_level",
+            "signal_types": ["water_level"],
+            "health_status": "failed",
+            "reason_code": "upstream_unavailable",
+            "required_for_absence": True,
+        }
+    ]
+
+    assert smoke._check_worker_source_health(coverage) == [
+        "required worker source official.wra.water_level health is failed "
+        "(upstream_unavailable)"
+    ]
+
+
 def test_disabled_redundant_cwa_warning_does_not_fail_required_source_health() -> None:
     payload = _risk_payload()
     payload["nearby_realtime_coverage"]["source_health"] = [
