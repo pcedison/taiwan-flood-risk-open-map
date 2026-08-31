@@ -6,7 +6,7 @@ does not depend on a manually curated road or a single county.
 ## 1. Nationwide official citation recovery
 
 `official.gov_tw.flood_citation` is enabled for hosted API queries when nearby
-observed flood history is older than one year.
+observed flood history is older than 30 days.
 
 - Scope: all Taiwan query points supported by the bundled national village data.
 - Window: the current year plus the previous six calendar years on every
@@ -15,6 +15,14 @@ observed flood history is older than one year.
   government URL ending in `.gov.tw` or `.gov.taipei`. A search index publisher
   tag cannot authorize an aggregator redirect or an agency homepage as a
   substitute for the cited page.
+- Lookup order: the canonical district/town is searched before road aliases,
+  then candidates are sorted newest-first before the public limit is applied.
+  This prevents exact-address searches from exhausting the request deadline on
+  road variants and falling back to an older archive point even when the same
+  district has a recent official event.
+- Event gate: the citation text must contain observed flooding language plus an
+  event marker. General typhoon preparedness, drainage construction, and flood-
+  potential/planning pages are rejected rather than mislabeled as past events.
 - Stored data: title, citation URL, publication time, official publisher
   domain, and location-match metadata only.
 - Rejected data: article bodies, images, comments, non-government links,
@@ -25,6 +33,12 @@ observed flood history is older than one year.
 - Completeness: search indexes are not official event registries. An empty
   result is a visible coverage gap, never evidence that flooding did not occur.
 - Kill switch: `OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED=false`.
+
+Retained positive flood-depth observations from nationwide and reviewed local
+official sensor adapters are also read within a one-kilometre support radius.
+This matches the historical scorer's existing distance rule; the evidence
+keeps its measured station distance and does not claim that the selected
+doorplate itself flooded.
 
 The former `official.tainan.disaster_news` request path is superseded and
 disabled by migration 0054. Its previously stored citations remain available

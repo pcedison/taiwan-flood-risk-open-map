@@ -40,6 +40,12 @@ _LOCAL_POLICY = {
     "10013000": (None, "屏東縣地方政府機器介面尚未核准"),
 }
 _REALTIME_SUPPORT_RADIUS_M = 5_000
+# Historical flood-depth scoring already treats an official positive
+# observation within one kilometre as meaningful nearby evidence.  Use the
+# same support radius when reading retained station history; otherwise a
+# 500-metre query silently discards a 501-metre observed flood and falls back
+# to much older archive points.
+_OBSERVED_FLOOD_HISTORY_SUPPORT_RADIUS_M = 1_000
 _SCORING_CURRENT_ADAPTER_EVENTS = frozenset(
     {
         ("official.cwa.rainfall", "rainfall"),
@@ -144,7 +150,7 @@ class PostgresAssessmentRepository:
             self._load_observed_flood_history(
                 lat=lat,
                 lng=lng,
-                radius_m=radius_m,
+                radius_m=max(radius_m, _OBSERVED_FLOOD_HISTORY_SUPPORT_RADIUS_M),
                 as_of=as_of,
             )
         )

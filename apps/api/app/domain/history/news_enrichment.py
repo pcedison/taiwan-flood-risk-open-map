@@ -447,6 +447,10 @@ def search_taiwan_official_flood_citations(
                         publisher_url if _is_official_taiwan_web_url(publisher_url) else article_url
                     ),
                 }
+                if not _official_history_text_qualifies(
+                    _article_match_text(official_article)
+                ):
+                    continue
                 published_at = _parse_public_news_datetime(article.get("published_at"))
                 if published_at is None:
                     continue
@@ -489,22 +493,33 @@ def search_taiwan_official_flood_citations(
                         now=now,
                     )
                 )
-                if len(accepted) >= max(1, max_records):
-                    break
-            if len(accepted) >= max(1, max_records):
+            if len(accepted) >= max(1, max_records) and _has_recent_official_history(
+                accepted,
+                now=now,
+            ):
                 break
-        if len(accepted) >= max(1, max_records) or deadline - monotonic() <= 0:
+        if (
+            len(accepted) >= max(1, max_records)
+            and _has_recent_official_history(accepted, now=now)
+        ) or deadline - monotonic() <= 0:
             break
 
     if accepted:
+        selected = tuple(
+            sorted(
+                accepted,
+                key=_official_history_record_time,
+                reverse=True,
+            )[: max(1, max_records)]
+        )
         return OnDemandNewsSearchResult(
             attempted=True,
             source_id="official-taiwan-government-citations",
             message=(
-                f"已補入 {len(accepted)} 筆全臺政府機關近期積淹水 citation metadata；"
+                f"已補入 {len(selected)} 筆全臺政府機關近期積淹水 citation metadata；"
                 "此查找不代表完整歷史覆蓋。"
             ),
-            records=tuple(accepted),
+            records=selected,
             health_status="healthy",
         )
     return OnDemandNewsSearchResult(
@@ -1007,23 +1022,115 @@ def _official_history_rss_urls(
         ),
         limit=3,
     )
-    urls: list[str] = []
-    for query in queries:
-        urls.append(
+    google_urls = [
+        (
             f"{GOOGLE_NEWS_RSS_ENDPOINT}?"
             f"{urlencode({'q': query, 'hl': 'zh-TW', 'gl': 'TW', 'ceid': 'TW:zh-Hant'})}"
         )
-        urls.append(
+        for query in queries
+    ]
+    bing_urls = [
+        (
             f"{BING_WEB_RSS_ENDPOINT}?"
             f"{urlencode({'q': query, 'format': 'rss', 'setlang': 'zh-hant', 'cc': 'tw'})}"
         )
-    return _dedupe(urls, limit=6)
+        for query in queries
+    ]
+    # Google News exposes the publisher metadata used by the official-domain
+    # gate.  Try every reviewed Google query before the noisier Bing web RSS
+    # fallback so a slow/irrelevant Bing response cannot consume the deadline
+    # before the explicit rolling-year query runs.
+    return _dedupe([*google_urls, *bing_urls], limit=6)
+
+
+def _official_history_record_time(record: EvidenceUpsert) -> datetime:
+    value = record.observed_at or record.occurred_at
+    if value is None:
+        return datetime.min.replace(tzinfo=UTC)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _official_history_text_qualifies(text: str) -> bool:
+    normalized = _normalize(text)
+    if not any(_normalize(term) in normalized for term in PRIMARY_FLOOD_TERMS):
+        return False
+    planning_phrases = (
+        "淹水潛勢",
+        "降低淹水",
+        "改善淹水",
+        "避免淹水",
+        "預防淹水",
+        "防止淹水",
+        "防範淹水",
+        "無淹水",
+        "未淹水",
+    )
+    incident_phrases = (
+        "災情",
+        "受災",
+        "救助",
+        "慰助",
+        "災後",
+        "封閉",
+        "阻斷",
+        "退水",
+        "進水",
+        "泡水",
+        "水淹",
+        "道路積水",
+        "積淹水",
+    )
+    event_markers = (
+        *incident_phrases,
+        "豪雨",
+        "暴雨",
+        "大雨",
+        "颱風",
+        "發生",
+        "造成",
+        "多處",
+        "勘災",
+        "視察",
+    )
+    if any(phrase in normalized for phrase in planning_phrases) and not any(
+        phrase in normalized for phrase in incident_phrases
+    ):
+        return False
+    return any(marker in normalized for marker in event_markers)
+
+
+def _has_recent_official_history(
+    records: list[EvidenceUpsert],
+    *,
+    now: datetime,
+) -> bool:
+    cutoff = now - timedelta(days=30)
+    future_limit = now + timedelta(days=1)
+    return any(
+        cutoff <= _official_history_record_time(record) <= future_limit
+        for record in records
+    )
 
 
 def _official_history_search_targets(
     query_location: str,
     context_name: str,
 ) -> tuple[_SearchTarget, ...]:
+    # A precise road query can produce many increasingly broad road aliases.
+    # Searching those first used the entire on-demand deadline before the
+    # district fallback ran, so the same district could show a recent event for
+    # an administrative query but fall back to a decade-old point for an exact
+    # address.  Lead with one canonical township/district target: this is the
+    # minimum reliable nationwide recall layer, while road matches remain a
+    # higher-precision follow-up.
+    admin_area_term = _official_admin_area_term(context_name)
+    admin_area_targets = (
+        (_SearchTarget(admin_area_term, "admin_area", 0.68),)
+        if admin_area_term
+        else ()
+    )
     query_is_admin_only = _ROAD_PATTERN.search(_normalize(query_location)) is None
     query_targets = tuple(
         _SearchTarget(
@@ -1037,7 +1144,7 @@ def _official_history_search_targets(
         _SearchTarget(target.term, "admin_area", min(target.source_weight, 0.68))
         for target in _rss_search_targets(context_name)
     )
-    candidates = [*query_targets, *context_targets]
+    candidates = [*admin_area_targets, *query_targets, *context_targets]
     required_admin_terms = _official_specific_admin_terms(context_name)
     deduped: list[_SearchTarget] = []
     seen: set[str] = set()
@@ -1056,6 +1163,15 @@ def _official_history_search_targets(
         if len(deduped) >= 8:
             break
     return tuple(deduped)
+
+
+def _official_admin_area_term(context_name: str) -> str:
+    normalized = _normalize(context_name)
+    endpoints = [normalized.rfind(suffix) for suffix in ("區", "鄉", "鎮", "市")]
+    end = max(endpoints, default=-1)
+    if end < 0:
+        return normalized
+    return normalized[: end + 1]
 
 
 def _official_specific_admin_terms(context_name: str) -> tuple[str, ...]:
