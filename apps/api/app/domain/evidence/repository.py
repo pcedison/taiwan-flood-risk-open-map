@@ -524,7 +524,10 @@ def query_nearby_evidence(
             ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
             ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
             ST_AsGeoJSON(c.geom) AS geometry,
-            c.computed_distance_to_query_m AS distance_to_query_m,
+            CASE
+                WHEN c.properties->>'location_precision' = 'admin_area' THEN NULL
+                ELSE c.computed_distance_to_query_m
+            END AS distance_to_query_m,
             c.confidence,
             COALESCE(c.freshness_score, 0.8) AS freshness_score,
             COALESCE(c.source_weight, CASE WHEN c.source_type = 'official' THEN 1.0 ELSE 0.85 END)

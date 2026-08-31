@@ -29,6 +29,7 @@ from app.api.services import (
 )
 from app.api.services.assessment import AssessmentService
 from app.api.services.client_signal import resolve_client_signal
+from app.api.services.official_history import OfficialRecentHistoryLookup
 from app.core.config import Settings, get_settings
 from app.domain.assessment import PostgresAssessmentRepository
 from app.domain.evidence import fetch_assessment_evidence
@@ -288,6 +289,17 @@ def _assessment_service(settings: Settings) -> AssessmentService:
             enabled=settings.evidence_repository_enabled,
         ),
         score_risk,
+        recent_history_lookup=OfficialRecentHistoryLookup(
+            database_url=settings.database_url,
+            enabled=(
+                settings.evidence_repository_enabled
+                and settings.official_tainan_history_news_enabled
+            ),
+            timeout_seconds=min(
+                settings.historical_news_on_demand_timeout_seconds,
+                3.0,
+            ),
+        ),
     )
 
 
@@ -329,7 +341,9 @@ def list_layers() -> LayersResponse:
     return LayersResponse(layers=_layers(_now()))
 
 
-@router.get("/layers/{layer_id}/tilejson", response_model=TileJson, response_model_exclude_none=True)
+@router.get(
+    "/layers/{layer_id}/tilejson", response_model=TileJson, response_model_exclude_none=True
+)
 def get_layer_tilejson(layer_id: str) -> TileJson:
     layer = _layer_record(layer_id, _now())
     if layer is None:
@@ -342,9 +356,7 @@ def get_layer_tilejson(layer_id: str) -> TileJson:
     except public_layers.LayerTileJsonDisabled:
         raise HTTPException(
             status_code=404,
-            detail=error_payload("layer_disabled", f"Layer '{layer_id}' is disabled.")[
-                "error"
-            ],
+            detail=error_payload("layer_disabled", f"Layer '{layer_id}' is disabled.")["error"],
         ) from None
     except public_layers.LayerTileJsonUnavailable:
         raise HTTPException(

@@ -217,3 +217,11 @@ lookup that reuses retained positive flood-depth sensor observations as
 historical evidence after the realtime window ends. It adds indexes only: the
 query layer performs the historical projection, and stored current observations
 remain unchanged for audit and realtime use.
+
+`0053_tainan_official_disaster_news.sql` registers the reviewed L1,
+citation-only Tainan City Government disaster-news source. The public API uses
+it only when nearby observed flood history is older than one year, stores title,
+publication date, URL, and location-match metadata (never the article body), and
+marks district-only matches as imprecise historical evidence. The independent
+`OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED=false` kill switch stops request-time
+egress and writeback.

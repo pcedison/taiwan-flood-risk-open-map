@@ -1,9 +1,84 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlparse
+from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, quote, urlparse
 
-from app.domain.history.news_enrichment import search_public_flood_news
+from app.domain.history.news_enrichment import (
+    search_public_flood_news,
+    search_tainan_official_flood_news,
+)
+
+
+def test_tainan_official_news_recovers_recent_district_flood_without_claiming_point_depth() -> None:
+    payload = """
+    <html><body><table>
+      <tr>
+        <td data-title="刊登日期"><span>115-08-27</span></td>
+        <td data-title="標題"><a href="News_Content.aspx?n=13370&amp;s=1"
+          title="臺南豪雨農損救助">臺南豪雨農損救助</a></td>
+      </tr>
+      <tr>
+        <td data-title="刊登日期"><span>115-08-24</span></td>
+        <td data-title="標題"><a href="News_Content.aspx?n=13370&amp;s=2"
+          title="黃偉哲視察安南、仁德淹水災情">黃偉哲視察安南、仁德淹水災情</a></td>
+      </tr>
+    </table></body></html>
+    """
+
+    result = search_tainan_official_flood_news(
+        location_text="培安路305巷",
+        lat=23.03882,
+        lng=120.21349,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert result.attempted is True
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.title == "黃偉哲視察安南、仁德淹水災情"
+    assert record.source_type == "official"
+    assert record.adapter_key == "official.tainan.disaster_news"
+    assert record.occurred_at == datetime(2026, 8, 24, tzinfo=timezone(timedelta(hours=8)))
+    assert record.distance_to_query_m is None
+    assert record.properties["evidence_scope"] == "historical"
+    assert record.properties["location_precision"] == "admin_area"
+    assert "未提供查詢門牌" in record.properties["limitations"][0]
+    assert record.properties["full_text_stored"] is False
+
+
+def test_bing_rss_redirects_are_canonicalized_before_deduplication() -> None:
+    direct_url = "https://news.example.test/flood/peian"
+    encoded = quote(direct_url, safe="")
+    payload = f"""<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel>
+      <item>
+        <title>安南區培安路豪雨淹水</title>
+        <link>https://www.bing.com/news/apiclick.aspx?url={encoded}&amp;tid=one</link>
+        <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+      </item>
+      <item>
+        <title>安南區培安路豪雨淹水</title>
+        <link>https://www.bing.com/news/apiclick.aspx?url={encoded}&amp;tid=two</link>
+        <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+      </item>
+    </channel></rss>"""
+
+    result = search_public_flood_news(
+        location_text="臺南市安南區培安路",
+        lat=23.03882,
+        lng=120.21349,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        max_records=3,
+        timeout_seconds=2.5,
+        fetch_json=lambda _url, _timeout: {},
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0].url == direct_url
 
 
 def test_search_public_flood_news_builds_bounded_gdelt_metadata_query() -> None:
@@ -484,7 +559,10 @@ def test_search_public_flood_news_uses_wiki_public_metadata_fallback() -> None:
     assert record.adapter_key == "news.public_web.wiki_search"
     assert record.source_id.startswith("public-wiki:")
     assert record.title == "2023年9月嘉義暴雨"
-    assert record.url == "https://zh.wikipedia.org/wiki/2023%E5%B9%B49%E6%9C%88%E5%98%89%E7%BE%A9%E6%9A%B4%E9%9B%A8"
+    assert (
+        record.url
+        == "https://zh.wikipedia.org/wiki/2023%E5%B9%B49%E6%9C%88%E5%98%89%E7%BE%A9%E6%9A%B4%E9%9B%A8"
+    )
     assert record.occurred_at == datetime(2023, 9, 1, tzinfo=timezone.utc)
     assert record.properties["ingestion_mode"] == "on_demand_public_wiki"
     assert record.properties["location_match_scope"] == "exact"

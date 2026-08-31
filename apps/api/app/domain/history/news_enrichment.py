@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from functools import lru_cache
 from hashlib import sha256
 from html import unescape
+from html.parser import HTMLParser
 import json
 import re
 from time import monotonic
 from typing import Any, Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlparse
 from urllib.request import Request, urlopen
 from uuid import NAMESPACE_URL, uuid5
 from xml.etree.ElementTree import Element
@@ -20,6 +22,7 @@ from defusedxml import ElementTree
 
 from app.domain.evidence import EvidenceUpsert
 from app.domain.geocoding import extract_taiwan_search_location
+from app.domain.history.location_context import nearest_public_news_location_context
 
 
 FetchJson = Callable[[str, float], Mapping[str, Any]]
@@ -29,8 +32,12 @@ GDELT_DOC_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_ON_DEMAND_ADAPTER_KEY = "news.public_web.gdelt_backfill"
 PUBLIC_NEWS_ON_DEMAND_ADAPTER_KEY = "news.public_web.on_demand_search"
 PUBLIC_WIKI_ON_DEMAND_ADAPTER_KEY = "news.public_web.wiki_search"
+TAINAN_OFFICIAL_HISTORY_ADAPTER_KEY = "official.tainan.disaster_news"
 GOOGLE_NEWS_RSS_ENDPOINT = "https://news.google.com/rss/search"
 BING_NEWS_RSS_ENDPOINT = "https://www.bing.com/news/search"
+TAINAN_CITY_NEWS_INDEX_URL = (
+    "https://www.tainan.gov.tw/News.aspx?PageSize=200&n=13370&page=1&sms=9748"
+)
 ZH_WIKIPEDIA_API_ENDPOINT = "https://zh.wikipedia.org/w/api.php"
 ZH_WIKIPEDIA_PAGE_ENDPOINT = "https://zh.wikipedia.org/wiki/"
 ZH_WIKINEWS_API_ENDPOINT = "https://zh.wikinews.org/w/api.php"
@@ -130,6 +137,71 @@ class _SearchWindow:
     label: str
 
 
+@dataclass(frozen=True)
+class _TainanNewsRow:
+    published_date: str
+    title: str
+    url: str
+
+
+class _TainanNewsIndexParser(HTMLParser):
+    """Parse only the three public metadata fields in the city-news table."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[_TainanNewsRow] = []
+        self._row: dict[str, str] | None = None
+        self._field: str | None = None
+        self._field_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "tr":
+            self._row = {}
+            return
+        if self._row is None:
+            return
+        if tag == "td":
+            self._field = attributes.get("data-title")
+            self._field_text = []
+            return
+        if tag == "a" and self._field == "標題":
+            href = (attributes.get("href") or "").strip()
+            if href:
+                self._row["url"] = urljoin(TAINAN_CITY_NEWS_INDEX_URL, href)
+            title = (attributes.get("title") or "").strip()
+            if title:
+                self._row["title"] = title
+
+    def handle_data(self, data: str) -> None:
+        if self._row is not None and self._field is not None:
+            self._field_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "td" and self._row is not None and self._field is not None:
+            text = " ".join("".join(self._field_text).split())
+            if self._field == "刊登日期" and text:
+                self._row["published_date"] = text
+            elif self._field == "標題" and text and "title" not in self._row:
+                self._row["title"] = text
+            self._field = None
+            self._field_text = []
+            return
+        if tag != "tr" or self._row is None:
+            return
+        if all(self._row.get(key) for key in ("published_date", "title", "url")):
+            self.rows.append(
+                _TainanNewsRow(
+                    published_date=self._row["published_date"],
+                    title=self._row["title"],
+                    url=self._row["url"],
+                )
+            )
+        self._row = None
+        self._field = None
+        self._field_text = []
+
+
 _WIKI_SOURCES = (
     _WikiSource(
         WIKIMEDIA_REST_SEARCH_ENDPOINT,
@@ -150,6 +222,129 @@ _WIKI_SOURCES = (
         "mediawiki_query",
     ),
 )
+
+
+def search_tainan_official_flood_news(
+    *,
+    location_text: str | None,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    now: datetime,
+    max_records: int = 3,
+    timeout_seconds: float = 2.5,
+    fetch_text: FetchText | None = None,
+) -> OnDemandNewsSearchResult:
+    """Find recent flood incidents in Tainan's official city-news index.
+
+    Only the listing's title, publication date, and official URL are retained.
+    A district-only match remains explicitly imprecise and is never labelled as
+    a query-point observation.
+    """
+
+    context = nearest_public_news_location_context(
+        lat=lat,
+        lng=lng,
+        radius_m=radius_m,
+    )
+    if context is None or "台南市" not in _normalize(context.name):
+        return OnDemandNewsSearchResult(
+            attempted=False,
+            source_id="official-tainan-disaster-news",
+            message="查詢點不在臺南市官方新聞補查範圍。",
+            records=(),
+            health_status="unknown",
+        )
+
+    query_location = extract_taiwan_search_location(location_text or "") or context.name
+    relaxed_terms = _tainan_district_terms(context.name)
+    if fetch_text is None:
+        payload = _cached_tainan_news_index(
+            int(monotonic() // 600),
+            max(0.5, timeout_seconds),
+        )
+    else:
+        payload = fetch_text(TAINAN_CITY_NEWS_INDEX_URL, max(0.5, timeout_seconds))
+    if not payload:
+        return OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="official-tainan-disaster-news",
+            message="臺南市政府新聞索引暫時無法回應；保留既有歷史資料。",
+            records=(),
+            health_status="degraded",
+        )
+
+    rows = _tainan_news_rows(payload)
+    records: list[EvidenceUpsert] = []
+    seen: set[tuple[str, str]] = set()
+    oldest_allowed = now - timedelta(days=365 * 2)
+    for row in rows:
+        if not any(term in row.title for term in PRIMARY_FLOOD_TERMS):
+            continue
+        published_at = _parse_taiwan_roc_date(row.published_date)
+        if published_at is None or published_at < oldest_allowed:
+            continue
+        if published_at > now + timedelta(days=1):
+            continue
+        record = _record_from_article(
+            {
+                "title": row.title,
+                "url": row.url,
+                "published_at": published_at,
+                "domain": "www.tainan.gov.tw",
+            },
+            location=query_location,
+            match_scope=_scope_for_term(query_location),
+            target_source_weight=0.9,
+            lat=lat,
+            lng=lng,
+            radius_m=radius_m,
+            now=now,
+            query_url=TAINAN_CITY_NEWS_INDEX_URL,
+            search_window_label="official-tainan-city-news-latest-200",
+            adapter_key=TAINAN_OFFICIAL_HISTORY_ADAPTER_KEY,
+            source_prefix="tainan-official-news",
+            raw_ref_prefix="tainan-official-news",
+            ingestion_mode="on_demand_official_tainan_news",
+            relaxed_location_terms=relaxed_terms,
+            summary_source_label="臺南市政府新聞 metadata",
+            source_type="official",
+        )
+        if record is None:
+            continue
+        match_scope = str(record.properties.get("location_match_scope") or "")
+        match_term = str(record.properties.get("location_match_term") or context.name)
+        dedupe_key = (record.url or "", match_term if match_scope == "admin_area" else "")
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        records.append(
+            _official_tainan_record(
+                record,
+                context_lat=context.lat,
+                context_lng=context.lng,
+                match_scope=match_scope,
+                match_term=match_term,
+            )
+        )
+        if len(records) >= max(1, max_records):
+            break
+
+    if records:
+        return OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="official-tainan-disaster-news",
+            message=f"已補入 {len(records)} 筆臺南市政府近期積淹水事件 metadata。",
+            records=tuple(records),
+            health_status="healthy",
+        )
+    return OnDemandNewsSearchResult(
+        attempted=True,
+        source_id="official-tainan-disaster-news",
+        message="臺南市政府近期新聞未找到可通過行政區與淹水關鍵字比對的事件。",
+        records=(),
+        health_status="unknown",
+    )
 
 
 def search_public_flood_news(
@@ -176,7 +371,9 @@ def search_public_flood_news(
         )
 
     client = fetch_json or _fetch_json
-    text_client = fetch_text if fetch_text is not None else (_fetch_text if fetch_json is None else None)
+    text_client = (
+        fetch_text if fetch_text is not None else (_fetch_text if fetch_json is None else None)
+    )
     wiki_client = (
         fetch_wiki_json
         if fetch_wiki_json is not None
@@ -299,7 +496,12 @@ def search_public_flood_news(
             records=tuple(accepted),
             health_status="healthy",
         )
-    if timed_out or query_errors or (rss_attempted and rss_errors) or (wiki_attempted and wiki_errors):
+    if (
+        timed_out
+        or query_errors
+        or (rss_attempted and rss_errors)
+        or (wiki_attempted and wiki_errors)
+    ):
         message = "公開新聞、RSS 或百科索引暫時無法完整回應；保留既有資料，不阻塞風險查詢。"
         health_status: Literal["healthy", "degraded", "failed", "disabled", "unknown"] = "degraded"
     else:
@@ -323,7 +525,9 @@ def _gdelt_queries(location: str, *, scope: str) -> tuple[str, ...]:
     ]
     if scope != "admin_area":
         queries.append(f"{quoted_location} {context_clause} sourcecountry:TW")
-    queries.append(f"{quoted_location} {_or_clause(('災情', '道路積水', '地下道', '封閉'))} sourcecountry:TW")
+    queries.append(
+        f"{quoted_location} {_or_clause(('災情', '道路積水', '地下道', '封閉'))} sourcecountry:TW"
+    )
     return _dedupe(queries, limit=4)
 
 
@@ -452,7 +656,7 @@ def _fetch_text(url: str, timeout_seconds: float) -> str:
     request = Request(
         url,
         headers={
-            "Accept": "application/rss+xml, application/xml, text/xml",
+            "Accept": "application/rss+xml, application/xml, text/xml, text/html",
             "User-Agent": "FloodRiskTaiwan/0.1 on-demand-public-news-rss",
         },
         method="GET",
@@ -462,6 +666,11 @@ def _fetch_text(url: str, timeout_seconds: float) -> str:
             return response.read().decode("utf-8", errors="replace")
     except (HTTPError, URLError, TimeoutError, UnicodeDecodeError):
         return ""
+
+
+@lru_cache(maxsize=4)
+def _cached_tainan_news_index(_ten_minute_bucket: int, timeout_seconds: float) -> str:
+    return _fetch_text(TAINAN_CITY_NEWS_INDEX_URL, timeout_seconds)
 
 
 def _articles(payload: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]:
@@ -604,8 +813,7 @@ def _public_news_rss_urls(
             f"{urlencode({'q': query, 'hl': 'zh-TW', 'gl': 'TW', 'ceid': 'TW:zh-Hant'})}"
         )
         urls.append(
-            f"{BING_NEWS_RSS_ENDPOINT}?"
-            f"{urlencode({'q': query, 'format': 'rss', 'mkt': 'zh-TW'})}"
+            f"{BING_NEWS_RSS_ENDPOINT}?{urlencode({'q': query, 'format': 'rss', 'mkt': 'zh-TW'})}"
         )
     return _dedupe(urls, limit=16)
 
@@ -918,6 +1126,96 @@ def _wiki_source_weight(match_scope: str) -> float:
     return 0.52
 
 
+def _tainan_news_rows(payload: str) -> tuple[_TainanNewsRow, ...]:
+    parser = _TainanNewsIndexParser()
+    try:
+        parser.feed(payload)
+        parser.close()
+    except (TypeError, ValueError):
+        return ()
+    return tuple(parser.rows)
+
+
+def _tainan_district_terms(context_name: str) -> tuple[str, ...]:
+    match = re.search(r"台南市(?P<district>[\u4e00-\u9fff]{1,4}區)", _normalize(context_name))
+    if match is None:
+        return ()
+    district = match.group("district")
+    return (district, district.removesuffix("區"))
+
+
+def _parse_taiwan_roc_date(value: str) -> datetime | None:
+    match = re.fullmatch(r"\s*(\d{2,3})[-/](\d{1,2})[-/](\d{1,2})\s*", value)
+    if match is None:
+        return None
+    try:
+        return datetime(
+            int(match.group(1)) + 1911,
+            int(match.group(2)),
+            int(match.group(3)),
+            tzinfo=timezone(timedelta(hours=8)),
+        )
+    except ValueError:
+        return None
+
+
+def _official_tainan_record(
+    record: EvidenceUpsert,
+    *,
+    context_lat: float,
+    context_lng: float,
+    match_scope: str,
+    match_term: str,
+) -> EvidenceUpsert:
+    admin_match = match_scope == "admin_area"
+    limitation = (
+        "臺南市政府新聞僅確認行政區近期積淹水事件；未提供查詢門牌的實測淹水深度。"
+        if admin_match
+        else "臺南市政府新聞確認道路事件背景；未提供查詢門牌的實測淹水深度。"
+    )
+    precision = "admin_area" if admin_match else "road_or_lane"
+    record_lat = context_lat if admin_match else record.lat
+    record_lng = context_lng if admin_match else record.lng
+    identity = record.url or record.source_id
+    if admin_match:
+        identity = f"{identity}|{_normalize(match_term)}"
+    source_id = f"tainan-official-news:{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+    raw_ref = f"tainan-official-news:{sha256(identity.encode('utf-8')).hexdigest()[:32]}"
+    properties = {
+        **record.properties,
+        "evidence_scope": "historical",
+        "location_precision": precision,
+        "limitations": [limitation],
+        "license_name": "政府資料開放授權條款第 1 版",
+        "attribution": "臺南市政府",
+        "location_payload": {
+            "resolution": "admin_area_centroid" if admin_match else "query_point",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [record_lng, record_lat],
+            },
+            "matched_locations": record.properties.get("location_payload", {}).get(
+                "matched_locations", []
+            ),
+        },
+    }
+    return replace(
+        record,
+        id=str(uuid5(NAMESPACE_URL, source_id)),
+        source_id=source_id,
+        summary=(
+            "臺南市政府發布的近期積淹水事件；位置為行政區範圍，非門牌實測。"
+            if admin_match
+            else "臺南市政府發布的近期道路積淹水事件；未提供門牌實測深度。"
+        ),
+        lat=record_lat,
+        lng=record_lng,
+        distance_to_query_m=None if admin_match else record.distance_to_query_m,
+        raw_ref=raw_ref,
+        properties=properties,
+    )
+
+
 def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ...]:
     try:
         root = ElementTree.fromstring(payload)
@@ -926,7 +1224,7 @@ def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ..
     articles: list[Mapping[str, Any]] = []
     for item in root.findall(".//item"):
         title = _xml_child_text(item, "title")
-        link = _xml_child_text(item, "link")
+        link = _canonical_public_news_url(_xml_child_text(item, "link"))
         if not title or not link:
             continue
         description = _xml_child_text(item, "description")
@@ -969,9 +1267,10 @@ def _record_from_article(
     ingestion_mode: str = "on_demand_public_news",
     relaxed_location_terms: tuple[str, ...] = (),
     summary_source_label: str = "公開新聞索引 metadata",
+    source_type: str = "news",
 ) -> EvidenceUpsert | None:
     title = str(article.get("title", "")).strip()
-    url = str(article.get("url", "")).strip()
+    url = _canonical_public_news_url(str(article.get("url", "")).strip())
     if not title or not url:
         return None
     match_text = _article_match_text(article)
@@ -983,7 +1282,9 @@ def _record_from_article(
     if location_match is None:
         return None
 
-    published_at = _parse_public_news_datetime(article.get("seendate") or article.get("published_at"))
+    published_at = _parse_public_news_datetime(
+        article.get("seendate") or article.get("published_at")
+    )
     domain = str(article.get("domain", "")).strip() or _domain_from_url(url)
     source_id = f"{source_prefix}:{sha256(url.encode('utf-8')).hexdigest()[:24]}"
     raw_ref = f"{raw_ref_prefix}:{sha256((url + title).encode('utf-8')).hexdigest()[:32]}"
@@ -995,11 +1296,17 @@ def _record_from_article(
         domain=domain,
         match_scope=effective_match_scope,
     )
+    location_precision = "admin_area" if effective_match_scope == "admin_area" else "road_or_lane"
+    limitation = (
+        "公開來源僅確認行政區事件；不能據此判定查詢門牌曾經淹水。"
+        if effective_match_scope == "admin_area"
+        else "公開來源為道路事件線索；未提供查詢門牌的實測淹水深度。"
+    )
     return EvidenceUpsert(
         id=str(uuid5(NAMESPACE_URL, source_id)),
         adapter_key=adapter_key,
         source_id=source_id,
-        source_type="news",
+        source_type=source_type,
         event_type="flood_report",
         title=title,
         summary=_summary(
@@ -1038,6 +1345,9 @@ def _record_from_article(
             "search_window": search_window_label,
             "citation_only": True,
             "full_text_stored": False,
+            "evidence_scope": "historical",
+            "location_precision": location_precision,
+            "limitations": [limitation],
         },
     )
 
@@ -1052,7 +1362,9 @@ def _text_matches(
     *,
     relaxed_location_terms: tuple[str, ...] = (),
 ) -> bool:
-    return _location_match(text, location, relaxed_location_terms=relaxed_location_terms) is not None
+    return (
+        _location_match(text, location, relaxed_location_terms=relaxed_location_terms) is not None
+    )
 
 
 def _location_match(
@@ -1188,11 +1500,13 @@ def _search_windows(location_text: str, now: datetime) -> tuple[_SearchWindow, .
     match = _YEAR_PATTERN.search(location_text)
     if match:
         year = int(match.group(1))
-        return (_SearchWindow(
-            datetime(year, 1, 1, tzinfo=UTC),
-            datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC),
-            str(year),
-        ),)
+        return (
+            _SearchWindow(
+                datetime(year, 1, 1, tzinfo=UTC),
+                datetime(year, 12, 31, 23, 59, 59, tzinfo=UTC),
+                str(year),
+            ),
+        )
 
     windows = [
         _SearchWindow(now - timedelta(days=548), now, "recent-18-months"),
@@ -1251,9 +1565,34 @@ def _parse_public_news_datetime(value: object) -> datetime | None:
     return rss_parsed if rss_parsed.tzinfo else rss_parsed.replace(tzinfo=UTC)
 
 
+def _canonical_public_news_url(url: str) -> str:
+    """Unwrap Bing RSS redirect URLs so publisher citations deduplicate."""
+
+    normalized = unescape(url).strip()
+    try:
+        parsed = urlparse(normalized)
+    except ValueError:
+        return normalized
+    if parsed.hostname in {"bing.com", "www.bing.com"} and parsed.path.casefold().endswith(
+        "/news/apiclick.aspx"
+    ):
+        target = parse_qs(parsed.query).get("url", [""])[0]
+        target = unquote(target).strip()
+        try:
+            target_parsed = urlparse(target)
+        except ValueError:
+            target_parsed = None
+        if target_parsed is not None and target_parsed.scheme in {"http", "https"}:
+            return target
+    return normalized
+
+
 def _domain_from_url(url: str) -> str:
-    without_scheme = url.split("://", 1)[-1]
-    return without_scheme.split("/", 1)[0]
+    try:
+        return urlparse(url).netloc
+    except ValueError:
+        without_scheme = url.split("://", 1)[-1]
+        return without_scheme.split("/", 1)[0]
 
 
 def _normalize(value: str) -> str:
