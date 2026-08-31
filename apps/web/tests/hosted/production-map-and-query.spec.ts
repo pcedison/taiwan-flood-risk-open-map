@@ -30,4 +30,13 @@ test("production basemap and public risk query remain usable", async ({ page }) 
   const evidencePanel = page.getByTestId("evidence-panel");
   await expect(evidencePanel.getByText("判讀依據", { exact: true })).toBeVisible();
   await expect(evidencePanel.locator(".evidence-card").first()).not.toBeVisible();
+  await evidencePanel
+    .getByTestId("evidence-drawer")
+    .locator(":scope > summary")
+    .click();
+  await expect(evidencePanel.locator(".evidence-card").first()).toBeVisible();
+  await expect(evidencePanel.locator(".evidence-card-link").first()).toHaveAttribute(
+    "href",
+    /^https:\/\//,
+  );
 });
