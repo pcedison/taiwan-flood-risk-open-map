@@ -319,12 +319,12 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "台灣淹水風險開放地圖" })).toBeVisible();
   await expect(page.locator(".map-canvas")).toBeVisible();
-  await expect(page.getByText("重要提醒：本工具不是官方災害通報")).toBeVisible();
-  await expect(page.getByText(/本服務整合公開資料與歷史/)).toBeVisible();
-  await page.getByText("重要提醒：本工具不是官方災害通報").click();
+  await expect(page.getByText("非即時災害通報")).toBeVisible();
   await expect(page.getByText(/本服務整合公開資料與歷史/)).not.toBeVisible();
-  await page.getByText("重要提醒：本工具不是官方災害通報").click();
+  await page.getByText("非即時災害通報").click();
   await expect(page.getByText(/本服務整合公開資料與歷史/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "水利署防災資訊網" })).toBeVisible();
+  await page.getByText("非即時災害通報").click();
 
   await page.getByLabel("搜尋地點").fill("台北火車站");
   await page.getByRole("button", { name: "查詢風險" }).click();
@@ -332,36 +332,40 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("已定位：台北火車站").first()).toBeVisible();
   await expect(page.locator(".map-coordinate-card")).toContainText("25.04776, 121.51706");
   await expect(page.getByText("綜合風險：中")).toBeVisible();
-  await expect(page.getByTestId("risk-summary")).toContainText("本工具不是官方災害通報");
-  await expect(
-    page.getByTestId("risk-summary").getByRole("link", { name: "水利署防災資訊網" }),
-  ).toBeVisible();
-  await expect(page.getByText("回答：目前要看哪個風險？為什麼採這個等級？")).toBeVisible();
-  await expect(page.getByText("即時：低；歷史參考：中")).toBeVisible();
-  await expect(page.getByText("主導：歷史參考")).toBeVisible();
-  await expect(page.getByText("取即時/歷史較高")).toBeVisible();
-  await expect(page.getByText("本次採歷史參考，因歷史參考（中）高於即時（低）。")).toBeVisible();
+  await expect(page.getByTestId("risk-summary")).not.toContainText("本工具不是官方災害通報");
+  await expect(page.getByText("即時：低；歷史參考：中")).not.toBeVisible();
+  await expect(page.getByText("主導：歷史參考")).not.toBeVisible();
   await expect(page.getByText("即時風險為低，歷史參考風險為中，資料可信度為中。")).toBeVisible();
   await expect(page.getByTestId("nearby-sensing")).toContainText("附近觀測：中");
-  await expect(page.getByTestId("nearby-sensing")).toContainText("回答：附近感測器有沒有足夠覆蓋？");
-  await expect(page.getByTestId("nearby-sensing")).toContainText(
-    "附近有 雨量 1 類觀測；最近觀測距查詢點 260 公尺；仍缺 水位。",
-  );
+  await expect(page.getByTestId("nearby-sensing")).not.toContainText("回答：");
+  await expect(page.getByTestId("nearby-sensing")).toContainText("距查詢點 260 公尺");
   await expect(page.getByTestId("nearby-sensing")).toContainText("缺口");
   await expect(page.getByTestId("nearby-sensing")).toContainText("水位");
+  await expect(page.getByText("觀測範圍與解讀")).toBeVisible();
+  await expect(page.getByText("風險圈 500 公尺")).not.toBeVisible();
+  await page.getByText("觀測範圍與解讀").click();
+  await expect(page.getByText(/風險圈 500 公尺/)).toBeVisible();
+  const evidencePanel = page.getByTestId("evidence-panel");
+  await expect(evidencePanel.getByText("判讀依據")).toBeVisible();
+  await expect(evidencePanel.locator(".evidence-card")).toHaveCount(3);
+  await expect(evidencePanel.locator(".evidence-card").first()).not.toBeVisible();
+  await page.getByTestId("evidence-drawer").locator("summary").first().click();
   await expect(page.getByText("資料限制")).toBeVisible();
   await expect(page.getByText("本次查詢未取得可採用的即時雨量觀測。")).not.toBeVisible();
   await page.getByTestId("evidence-limitations").getByText("資料限制").click();
   await expect(page.getByText("本次查詢未取得可採用的即時雨量觀測。")).toBeVisible();
-  const evidencePanel = page.getByTestId("evidence-panel");
-  await expect(evidencePanel).toContainText("回答：哪些來源支撐這次判讀？");
+  await expect(evidencePanel).not.toContainText("回答：");
   await expect(evidencePanel).toContainText("來源可信度");
   await expect(evidencePanel).toContainText("淹水潛勢資料");
-  await expect(evidencePanel).toContainText("官方淹水潛勢圖資與本次查詢範圍重疊，可作為地形與歷史條件參考。");
-  await expect(evidencePanel).toContainText("用途：地形 / 歷史參考");
   await expect(evidencePanel).toContainText("雨量觀測");
-  await expect(evidencePanel).toContainText("附近即時雨量觀測可輔助判讀當下降雨壓力。");
-  await expect(evidencePanel).toContainText("用途：即時雨量");
+  await expect(evidencePanel.getByText("官方淹水潛勢圖資與本次查詢範圍重疊，可作為地形與歷史條件參考。")).not.toBeVisible();
+  await evidencePanel
+    .locator(".evidence-card")
+    .filter({ hasText: "淹水潛勢資料" })
+    .locator(".evidence-card-detail summary")
+    .click();
+  await expect(evidencePanel.getByText("官方淹水潛勢圖資與本次查詢範圍重疊，可作為地形與歷史條件參考。")).toBeVisible();
+  await expect(evidencePanel).toContainText("用途：地形 / 歷史參考");
   await expect(evidencePanel).not.toContainText("Raw flood potential layer title");
   await expect(evidencePanel).not.toContainText("Raw flood potential backend summary");
   await expect(evidencePanel).not.toContainText("Raw CWA rainfall station title");
@@ -375,16 +379,12 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByTestId("risk-summary").locator(".layer-list")).toHaveCount(0);
   await expect(page.getByTestId("evidence-panel").locator(".evidence-card")).toHaveCount(3);
   await expect(page.getByTestId("evidence-panel").locator(".freshness-strip")).toHaveCount(0);
-  await expect(page.getByTestId("user-report-panel")).toBeVisible();
-  await expect(page.getByText("此功能會等法律、隱私、審核與治理流程完成後再開放。")).not.toBeVisible();
-  await page.getByTestId("user-report-panel").getByText("民眾通報目前停用").click();
-  await expect(page.getByText("此功能會等法律、隱私、審核與治理流程完成後再開放。")).toBeVisible();
+  await expect(page.getByTestId("user-report-panel")).toHaveCount(0);
   await expect(page.getByTestId("diagnostics-panel")).toBeVisible();
   const primarySectionOrder = await page.evaluate(() => {
     const riskSummary = document.querySelector('[data-testid="risk-summary"]');
     const nearbySensing = document.querySelector('[data-testid="nearby-sensing"]');
     const evidencePanel = document.querySelector('[data-testid="evidence-panel"]');
-    const userReportPanel = document.querySelector('[data-testid="user-report-panel"]');
     const diagnosticsPanel = document.querySelector('[data-testid="diagnostics-panel"]');
     const evidenceList = document.querySelector('[data-testid="evidence-panel"] .evidence-list');
     const limitations = document.querySelector('[data-testid="evidence-limitations"]');
@@ -396,18 +396,16 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
       );
     return {
       evidenceBeforeLimitations: comesBefore(evidenceList, limitations),
-      evidenceBeforeUserReport: comesBefore(evidencePanel, userReportPanel),
+      evidenceBeforeDiagnostics: comesBefore(evidencePanel, diagnosticsPanel),
       nearbyBeforeEvidence: comesBefore(nearbySensing, evidencePanel),
       riskBeforeEvidence: comesBefore(riskSummary, evidencePanel),
-      userReportBeforeDiagnostics: comesBefore(userReportPanel, diagnosticsPanel),
     };
   });
   expect(primarySectionOrder).toEqual({
     evidenceBeforeLimitations: true,
-    evidenceBeforeUserReport: true,
+    evidenceBeforeDiagnostics: true,
     nearbyBeforeEvidence: true,
     riskBeforeEvidence: true,
-    userReportBeforeDiagnostics: true,
   });
   await expect(page.getByText("來源與圖層狀態")).toBeVisible();
   await expect(page.getByText("淹水潛勢示範圖層")).not.toBeVisible();
@@ -434,12 +432,19 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("選取範圍內部分雨量圖層資料延遲。")).toBeVisible();
   await expect(page.getByText("觀測 / 發布").first()).toBeVisible();
   await page.getByTestId("risk-method-drawer").click();
+  await expect(page.getByText(/綜合風險取即時與歷史參考中較高的等級/)).toBeVisible();
+  await expect(page.getByText(/目前由歷史事件或淹水潛勢參考主導/)).toBeVisible();
   await expect(page.getByText("地圖罩色：中（黃色，透明度 85%）")).toBeVisible();
   await expect(page.getByRole("link", { name: "開啟來源" }).first()).toHaveAttribute(
     "href",
     "https://example.test/rainfall-full",
   );
   await expect(page.getByText("公開討論淹水線索")).toBeVisible();
+  await evidencePanel
+    .locator(".evidence-card")
+    .filter({ hasText: "公開討論淹水線索" })
+    .locator(".evidence-card-detail summary")
+    .click();
   await expect(page.getByText("公開討論摘要")).toBeVisible();
   await expect(page.getByText("420 公尺", { exact: true })).toBeVisible();
   await expect(page.getByText("未提供連結")).toBeVisible();
@@ -567,9 +572,11 @@ test("live local unknown-address flow assesses precise fixtures and coarse admin
   // v1 serves persisted data only. With no ingested evidence for this point the
   // app must disclose the gap rather than infer a level, so this asserts the
   // fail-closed narrative instead of a specific historical level.
-  await expect(
-    page.getByText(/本次資料不足，暫不把即時或歷史參考推成結論/),
-  ).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("risk-summary").getByRole("heading", { name: "資料不足" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await page.getByTestId("risk-method-drawer").click();
+  await expect(page.getByText(/目前沒有足夠即時或歷史證據可判定/)).toBeVisible();
   await expect.poll(() => riskCalls).toBe(1);
 
   await page.getByLabel("搜尋地點").fill("宜蘭縣礁溪鄉");

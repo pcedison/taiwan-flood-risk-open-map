@@ -30,7 +30,7 @@ export function EvidenceSection({
 }: EvidenceSectionProps) {
   return (
     <section className="panel-section evidence-panel" data-testid="evidence-panel">
-      <details className="evidence-drawer" open>
+      <details className="evidence-drawer" data-testid="evidence-drawer">
         <summary>
           <span className="section-kicker">{text.evidenceKicker}</span>
           <strong>{text.evidenceTitle}</strong>
@@ -42,7 +42,6 @@ export function EvidenceSection({
         </summary>
         {assessment ? (
           <div className="evidence-drawer-body">
-            <p className="section-question">{text.evidenceQuestion}</p>
             <div className="evidence-scope-note" role="status">
               <span>{text.evidenceScopeNote}</span>
               {hiddenHistoricalNewsCount > 0 ? (
@@ -88,8 +87,6 @@ export function EvidenceSection({
                           </a>
                         ) : null}
                       </div>
-                      <p>{displayText.summary}</p>
-                      <span className="evidence-card-purpose">{displayText.purpose}</span>
                       <dl className="evidence-meta">
                         <div>
                           <dt>{text.evidenceDistance}</dt>
@@ -112,6 +109,11 @@ export function EvidenceSection({
                           </div>
                         ) : null}
                       </dl>
+                      <details className="evidence-card-detail">
+                        <summary>{text.evidenceUsage}</summary>
+                        <p>{displayText.summary}</p>
+                        <span className="evidence-card-purpose">{displayText.purpose}</span>
+                      </details>
                     </li>
                   );
                 })}
@@ -146,13 +148,7 @@ export function EvidenceSection({
               </details>
             ) : null}
           </div>
-        ) : (
-          <ul className="evidence-placeholder-list">
-            <li>{text.evidenceFlood}</li>
-            <li>{text.evidenceRain}</li>
-            <li>{text.evidenceTerrain}</li>
-          </ul>
-        )}
+        ) : null}
       </details>
     </section>
   );

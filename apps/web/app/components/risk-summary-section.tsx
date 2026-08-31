@@ -8,18 +8,16 @@ import type {
 } from "../lib/risk-display";
 import {
   normalizeRiskLevel,
-  riskDecisionSummary,
   riskLevelTextColor,
   riskSummaryDecisionText,
 } from "../lib/risk-display";
-import { emergencyGuidance, riskMeterPosition, text } from "../lib/ui-text";
+import { riskMeterPosition, text } from "../lib/ui-text";
 
 type RiskSummarySectionProps = {
   assessment: RiskAssessmentResponse | null;
   combinedRisk: string | null;
   riskOverlay: ReturnType<typeof riskOverlayPresentation>;
   riskSummaryHeading: string;
-  riskSummaryBasisLine: string | null;
   profileBasisText: ReturnType<typeof getProfileBasisText>;
   profilePreviewState: ReturnType<typeof getProfilePreviewState>;
 };
@@ -29,50 +27,21 @@ export function RiskSummarySection({
   combinedRisk,
   riskOverlay,
   riskSummaryHeading,
-  riskSummaryBasisLine,
   profileBasisText,
   profilePreviewState,
 }: RiskSummarySectionProps) {
   const realtimeLevel = normalizeRiskLevel(assessment?.realtime.level);
   const historicalLevel = normalizeRiskLevel(assessment?.historical.level);
   const confidenceLevel = normalizeRiskLevel(assessment?.confidence.level);
-  const decisionSummary = assessment
-    ? riskDecisionSummary({
-        confidenceLevel,
-        historicalLevel,
-        realtimeLevel,
-      })
-    : null;
-
   return (
     <section className="panel-section risk-summary" data-testid="risk-summary">
       <div className="section-heading">
         <span className="section-kicker">{text.riskSummary}</span>
         <h2>{riskSummaryHeading}</h2>
       </div>
-      <p className="risk-emergency-notice" role="note">
-        {emergencyGuidance.notice} {emergencyGuidance.callToAction}
-        {" "}
-        <a href={emergencyGuidance.officialLinkUrl} target="_blank" rel="noopener noreferrer">
-          {emergencyGuidance.officialLinkLabel}
-        </a>
-        。
-      </p>
-      <p className="section-question">{text.riskQuestion}</p>
       <div className="risk-meter" aria-label={text.riskMeter}>
         <span style={{ left: riskMeterPosition(combinedRisk ?? undefined) }} />
       </div>
-      {riskSummaryBasisLine ? (
-        <p className="risk-summary-basis">{riskSummaryBasisLine}</p>
-      ) : null}
-      {decisionSummary ? (
-        <div className="risk-verdict-strip" aria-label={text.riskDecisionSummary}>
-          <span>{decisionSummary.driver}</span>
-          <span>{decisionSummary.method}</span>
-          <span>{decisionSummary.confidence}</span>
-        </div>
-      ) : null}
-      {decisionSummary ? <p className="risk-decision-line">{decisionSummary.narrative}</p> : null}
       {assessment ? (
         <dl className="risk-levels">
           <div>

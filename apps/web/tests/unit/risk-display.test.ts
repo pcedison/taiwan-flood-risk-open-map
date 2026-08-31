@@ -699,7 +699,7 @@ test("right panel labels distinguish distance and source confidence", () => {
   assert.match(uiTextSource, /evidenceDistance:\s*"距查詢點"/);
   assert.match(uiTextSource, /evidenceConfidence:\s*"來源可信度"/);
   assert.match(uiTextSource, /evidenceScopeNote:[\s\S]*不是淹水機率/);
-  assert.match(uiTextSource, /nearbySensingQuestion:.*距離是感測器到查詢點/);
+  assert.match(uiTextSource, /nearbySensingDetails:\s*"觀測範圍與解讀"/);
 });
 
 test("nearby sensing state never presents missing observations as low", () => {
