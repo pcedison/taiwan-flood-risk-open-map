@@ -2466,6 +2466,7 @@ def fetch_assessment_evidence(
             ST_X(ST_PointOnSurface(e.geom::geometry)) AS lng,
             ST_AsGeoJSON(ST_PointOnSurface(e.geom::geometry)) AS geometry,
             CASE
+                WHEN e.properties->>'location_precision' = 'admin_area' THEN NULL
                 WHEN e.geom IS NOT NULL THEN ST_Distance(e.geom::geography, lq.geom::geography)
                 ELSE e.distance_to_query_m
             END AS distance_to_query_m,

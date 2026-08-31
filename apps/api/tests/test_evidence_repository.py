@@ -1705,6 +1705,7 @@ def test_evidence_record_reads_reviewed_precision_and_limitations() -> None:
     assert "ds.is_enabled = true" in sql
     assert "ra.expires_at > now()" in sql
     assert "jsonb_typeof(e.properties->'limitations') = 'array'" in sql
+    assert "WHEN e.properties->>'location_precision' = 'admin_area' THEN NULL" in sql
     assert "AS location_precision" in sql
     assert "AS limitations" in sql
     assert records[0].location_precision == "road_or_lane"
