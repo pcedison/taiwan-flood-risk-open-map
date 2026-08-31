@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import json
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -107,9 +107,7 @@ def data(now: datetime) -> AssessmentData:
         jurisdiction_status="unavailable",
     )
     return AssessmentData(
-        current_official=(
-            _record(CURRENT_ID, event_type="rainfall", evidence_scope="current"),
-        ),
+        current_official=(_record(CURRENT_ID, event_type="rainfall", evidence_scope="current"),),
         historical=(
             _record(
                 HISTORY_ID,
@@ -158,9 +156,7 @@ def test_service_scores_current_and_history_in_separate_calls(
 ) -> None:
     calls: list[tuple[RiskEvidenceSignal, ...]] = []
 
-    def scorer(
-        signals: tuple[RiskEvidenceSignal, ...], *, now: datetime
-    ) -> RiskScoringResult:
+    def scorer(signals: tuple[RiskEvidenceSignal, ...], *, now: datetime) -> RiskScoringResult:
         calls.append(signals)
         return score_risk(signals, now=now)
 
@@ -176,14 +172,85 @@ def test_service_scores_current_and_history_in_separate_calls(
     assert response.community.state == "none"
 
 
+def test_service_enriches_history_when_latest_observed_event_is_over_one_year_old(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    old_date = now - timedelta(days=365 * 10)
+    old_history = replace(
+        _record(HISTORY_ID, event_type="flood_report", evidence_scope="historical"),
+        occurred_at=old_date,
+        observed_at=old_date,
+    )
+    recent_id = "00000000-0000-0000-0000-000000000099"
+    recent_history = replace(
+        _record(
+            recent_id,
+            event_type="flood_report",
+            evidence_scope="historical",
+            adapter_key="official.tainan.disaster_news",
+            limitations=("行政區事件，非門牌實測。",),
+        ),
+        occurred_at=now - timedelta(days=7),
+        observed_at=now - timedelta(days=7),
+        location_precision="admin_area",
+        distance_to_query_m=None,
+    )
+    calls: list[RiskAssessRequest] = []
+
+    def lookup(
+        request: RiskAssessRequest,
+        _data: AssessmentData,
+        *,
+        now: datetime,
+    ) -> tuple[EvidenceRecord, ...]:
+        assert now == NOW
+        calls.append(request)
+        return (recent_history,)
+
+    response = AssessmentService(
+        FakeRepository(replace(data, historical=(old_history,))),
+        score_risk,
+        recent_history_lookup=lookup,
+    ).assess(risk_request, now=now)
+
+    assert calls == [risk_request]
+    assert [item.id for item in response.evidence].index(recent_id) < [
+        item.id for item in response.evidence
+    ].index(HISTORY_ID)
+    recent_preview = next(item for item in response.evidence if item.id == recent_id)
+    assert recent_preview.evidence_scope == "historical"
+    assert recent_preview.location_precision == "admin_area"
+
+
+def test_service_skips_enrichment_when_recent_observed_history_exists(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    recent_history = replace(
+        _record(HISTORY_ID, event_type="flood_report", evidence_scope="historical"),
+        occurred_at=now - timedelta(days=30),
+        observed_at=now - timedelta(days=30),
+    )
+
+    def fail(*_args: object, **_kwargs: object) -> tuple[EvidenceRecord, ...]:
+        raise AssertionError("recent history must not trigger official news lookup")
+
+    AssessmentService(
+        FakeRepository(replace(data, historical=(recent_history,))),
+        score_risk,
+        recent_history_lookup=fail,
+    ).assess(risk_request, now=now)
+
+
 def test_historical_scorer_missing_sources_do_not_leak_into_current_explanation(
     now: datetime,
     risk_request: RiskAssessRequest,
     data: AssessmentData,
 ) -> None:
-    def scorer(
-        signals: tuple[RiskEvidenceSignal, ...], *, now: datetime
-    ) -> RiskScoringResult:
+    def scorer(signals: tuple[RiskEvidenceSignal, ...], *, now: datetime) -> RiskScoringResult:
         result = score_risk(signals, now=now)
         marker = (
             "目前即時資料缺口"
@@ -192,15 +259,10 @@ def test_historical_scorer_missing_sources_do_not_leak_into_current_explanation(
         )
         return replace(result, missing_sources=(marker,))
 
-    response = AssessmentService(FakeRepository(data), scorer).assess(
-        risk_request, now=now
-    )
+    response = AssessmentService(FakeRepository(data), scorer).assess(risk_request, now=now)
 
     assert "目前即時資料缺口" in response.explanation.missing_sources
-    assert (
-        "歷史評分器不應輸出的即時資料缺口"
-        not in response.explanation.missing_sources
-    )
+    assert "歷史評分器不應輸出的即時資料缺口" not in response.explanation.missing_sources
 
 
 def test_optional_disabled_source_is_diagnostic_not_a_required_limitation(
@@ -223,8 +285,7 @@ def test_optional_disabled_source_is_diagnostic_not_a_required_limitation(
     ).assess(risk_request, now=now)
 
     assert any(
-        source.source_key == optional_state.source_key
-        for source in response.data_status.sources
+        source.source_key == optional_state.source_key for source in response.data_status.sources
     )
     assert optional_message not in response.data_status.missing
     assert optional_message not in response.explanation.missing_sources
@@ -258,21 +319,19 @@ def test_recent_context_is_display_only_and_never_changes_the_score(
     with_calls: list[tuple[RiskEvidenceSignal, ...]] = []
 
     def _scorer(sink: list[tuple[RiskEvidenceSignal, ...]]):
-        def scorer(
-            signals: tuple[RiskEvidenceSignal, ...], *, now: datetime
-        ) -> RiskScoringResult:
+        def scorer(signals: tuple[RiskEvidenceSignal, ...], *, now: datetime) -> RiskScoringResult:
             sink.append(signals)
             return score_risk(signals, now=now)
 
         return scorer
 
-    without_context = AssessmentService(
-        FakeRepository(data), _scorer(without_calls)
-    ).assess(risk_request, now=now)
+    without_context = AssessmentService(FakeRepository(data), _scorer(without_calls)).assess(
+        risk_request, now=now
+    )
     with_data = replace(data, recent_incident_context=_context_records())
-    with_context = AssessmentService(
-        FakeRepository(with_data), _scorer(with_calls)
-    ).assess(risk_request, now=now)
+    with_context = AssessmentService(FakeRepository(with_data), _scorer(with_calls)).assess(
+        risk_request, now=now
+    )
 
     assert with_context.realtime == without_context.realtime
     assert with_context.historical == without_context.historical
@@ -337,9 +396,7 @@ def test_response_preview_is_not_crowded_out_by_dense_flood_sensors(
         current_official=(*flood_sensors, water, rainfall),
     )
 
-    response = AssessmentService(FakeRepository(crowded), score_risk).assess(
-        risk_request, now=now
-    )
+    response = AssessmentService(FakeRepository(crowded), score_risk).assess(risk_request, now=now)
 
     assert len(response.evidence) == 10
     assert {item.event_type for item in response.evidence} >= {
@@ -362,9 +419,9 @@ def test_persist_failure_does_not_change_successful_response(
     risk_request: RiskAssessRequest,
     data: AssessmentData,
 ) -> None:
-    response = AssessmentService(
-        FakeRepository(data, fail_persist=True), score_risk
-    ).assess(risk_request, now=now)
+    response = AssessmentService(FakeRepository(data, fail_persist=True), score_risk).assess(
+        risk_request, now=now
+    )
     assert response.assessment_id
     assert response.overall is not None
 
@@ -454,9 +511,9 @@ def test_required_current_read_failure_is_unknown_not_low(
         health_available=True,
         jurisdiction_available=True,
     )
-    available_response = AssessmentService(
-        FakeRepository(available_data), score_risk
-    ).assess(risk_request, now=now)
+    available_response = AssessmentService(FakeRepository(available_data), score_risk).assess(
+        risk_request, now=now
+    )
     response = AssessmentService(
         FakeRepository(replace(available_data, current_available=False)), score_risk
     ).assess(risk_request, now=now)
@@ -472,9 +529,7 @@ def test_response_uses_same_data_for_status_freshness_and_coverage(
     risk_request: RiskAssessRequest,
     data: AssessmentData,
 ) -> None:
-    response = AssessmentService(FakeRepository(data), score_risk).assess(
-        risk_request, now=now
-    )
+    response = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now)
 
     assert response.nearby_realtime_coverage is data.nearby_coverage
     assert {item.source_key for item in response.data_status.sources} == {
@@ -494,9 +549,7 @@ def test_response_preserves_evidence_precision_and_limitations(
     risk_request: RiskAssessRequest,
     data: AssessmentData,
 ) -> None:
-    response = AssessmentService(FakeRepository(data), score_risk).assess(
-        risk_request, now=now
-    )
+    response = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now)
 
     current = response.evidence[0]
     assert current.location_precision == "road_or_lane"

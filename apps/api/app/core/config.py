@@ -49,6 +49,7 @@ class Settings:
     historical_news_on_demand_timeout_seconds: float
     official_flood_disaster_points_enabled: bool
     official_flood_disaster_points_path: str | None
+    official_tainan_history_news_enabled: bool
     risk_assessment_response_cache_seconds: int
     risk_assessment_response_cache_backend: RateLimitBackend
     risk_assessment_evidence_cache_ttl_seconds: int
@@ -159,6 +160,10 @@ def get_settings() -> Settings:
             default=_hosted_runtime(app_env),
         ),
         official_flood_disaster_points_path=_official_flood_disaster_points_path(),
+        official_tainan_history_news_enabled=_env_bool(
+            "OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED",
+            default=_hosted_runtime(app_env),
+        ),
         risk_assessment_response_cache_seconds=_env_int(
             "RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS",
             default=120 if _hosted_runtime(app_env) else 0,
@@ -202,12 +207,8 @@ def get_settings() -> Settings:
             choices={"redis", "memory"},
             default="memory" if _local_or_test_runtime(app_env) else "redis",
         ),
-        public_rate_limit_client_header=_env_str_or_none(
-            "PUBLIC_RATE_LIMIT_CLIENT_HEADER"
-        ),
-        public_rate_limit_trusted_proxy_cidrs=_env_csv(
-            "PUBLIC_RATE_LIMIT_TRUSTED_PROXY_CIDRS"
-        ),
+        public_rate_limit_client_header=_env_str_or_none("PUBLIC_RATE_LIMIT_CLIENT_HEADER"),
+        public_rate_limit_trusted_proxy_cidrs=_env_csv("PUBLIC_RATE_LIMIT_TRUSTED_PROXY_CIDRS"),
         geocode_rate_limit_max_requests=_env_int(
             "GEOCODE_RATE_LIMIT_MAX_REQUESTS",
             default=60,
@@ -256,12 +257,8 @@ def get_settings() -> Settings:
             choices={"turnstile", "static"},
             default="turnstile",
         ),
-        user_reports_challenge_secret_key=_env_str_or_none(
-            "USER_REPORTS_CHALLENGE_SECRET_KEY"
-        ),
-        user_reports_challenge_static_token=_env_str_or_none(
-            "USER_REPORTS_CHALLENGE_STATIC_TOKEN"
-        ),
+        user_reports_challenge_secret_key=_env_str_or_none("USER_REPORTS_CHALLENGE_SECRET_KEY"),
+        user_reports_challenge_static_token=_env_str_or_none("USER_REPORTS_CHALLENGE_STATIC_TOKEN"),
         user_reports_challenge_verify_url=os.getenv(
             "USER_REPORTS_CHALLENGE_VERIFY_URL",
             "https://challenges.cloudflare.com/turnstile/v0/siteverify",
@@ -363,10 +360,14 @@ def _local_or_test_runtime(app_env: str) -> bool:
 
 
 def _admin_sample_data_enabled(app_env: str) -> bool:
-    return _local_or_test_runtime(app_env) or _env_bool(
-        "ADMIN_SAMPLE_DATA_ENABLED",
-        default=False,
-    ) or _env_bool("DEMO_MODE_ENABLED", default=False)
+    return (
+        _local_or_test_runtime(app_env)
+        or _env_bool(
+            "ADMIN_SAMPLE_DATA_ENABLED",
+            default=False,
+        )
+        or _env_bool("DEMO_MODE_ENABLED", default=False)
+    )
 
 
 def _env_int(name: str, *, default: int, minimum: int | None = None) -> int:

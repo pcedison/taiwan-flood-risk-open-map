@@ -31,7 +31,11 @@ from app.domain.assessment import (
     apply_realtime_safety,
     compose_base_overall,
 )
-from app.domain.evidence import EvidenceRepositoryUnavailable, RiskAssessmentPersistence
+from app.domain.evidence import (
+    EvidenceRecord,
+    EvidenceRepositoryUnavailable,
+    RiskAssessmentPersistence,
+)
 from app.domain.risk import RiskEvidenceSignal, RiskScoringResult
 
 
@@ -44,10 +48,27 @@ class RiskScorer(Protocol):
     ) -> RiskScoringResult: ...
 
 
+class RecentHistoryLookup(Protocol):
+    def __call__(
+        self,
+        request: RiskAssessRequest,
+        data: AssessmentData,
+        *,
+        now: datetime,
+    ) -> tuple[EvidenceRecord, ...]: ...
+
+
 class AssessmentService:
-    def __init__(self, repository: AssessmentRepository, scorer: RiskScorer) -> None:
+    def __init__(
+        self,
+        repository: AssessmentRepository,
+        scorer: RiskScorer,
+        *,
+        recent_history_lookup: RecentHistoryLookup | None = None,
+    ) -> None:
         self._repository = repository
         self._scorer = scorer
+        self._recent_history_lookup = recent_history_lookup
 
     def assess(
         self,
@@ -62,12 +83,18 @@ class AssessmentService:
             as_of=now,
         )
         current_items = tuple(evidence_from_record(item) for item in data.current_official)
-        historical_items = tuple(evidence_from_record(item) for item in data.historical)
+        recent_history: tuple[EvidenceRecord, ...] = ()
+        if self._recent_history_lookup is not None and _history_needs_refresh(
+            data.historical,
+            now=now,
+        ):
+            recent_history = self._recent_history_lookup(request, data, now=now)
+        historical_items = tuple(
+            evidence_from_record(item) for item in (*recent_history, *data.historical)
+        )
         # Display-only. Context never becomes a scorer signal, so it cannot move
         # realtime, historical, overall, confidence, or coverage.
-        context_items = tuple(
-            evidence_from_record(item) for item in data.recent_incident_context
-        )
+        context_items = tuple(evidence_from_record(item) for item in data.recent_incident_context)
         current_scoring = self._scorer(
             tuple(signal_from_evidence(item) for item in current_items),
             now=now,
@@ -80,22 +107,14 @@ class AssessmentService:
         overall = compose_base_overall(current_scoring, historical_scoring)
 
         display_items = display_evidence_items(
-            list(
-                _deduplicate_evidence(
-                    (*current_items, *context_items, *historical_items)
-                )
-            )
+            list(_deduplicate_evidence((*current_items, *context_items, *historical_items)))
         )
-        persisted_evidence_ids = tuple(
-            item.id for item in display_items if _is_uuid(item.id)
-        )
+        persisted_evidence_ids = tuple(item.id for item in display_items if _is_uuid(item.id))
         data_freshness = _data_freshness(data)
         data_status = _data_status(data)
         explanation = Explanation(
             summary=(
-                overall.reasons[0]
-                if overall.reasons
-                else current_scoring.explanation_summary
+                overall.reasons[0] if overall.reasons else current_scoring.explanation_summary
             ),
             main_reasons=list(overall.reasons),
             missing_sources=list(
@@ -205,6 +224,29 @@ def _is_uuid(value: str) -> bool:
     except (ValueError, AttributeError):
         return False
     return True
+
+
+def _history_needs_refresh(
+    records: tuple[EvidenceRecord, ...],
+    *,
+    now: datetime,
+) -> bool:
+    observed_events = [
+        observed_at
+        for record in records
+        if record.event_type in {"flood_report", "road_closure"}
+        for observed_at in (record.observed_at or record.occurred_at,)
+        if observed_at is not None
+    ]
+    if not observed_events:
+        return True
+    comparable: list[datetime] = []
+    for observed_at in observed_events:
+        value = observed_at
+        if value.tzinfo is None and now.tzinfo is not None:
+            value = value.replace(tzinfo=now.tzinfo)
+        comparable.append(value)
+    return max(comparable) < now - timedelta(days=365)
 
 
 def _data_freshness(data: AssessmentData) -> list[DataFreshness]:

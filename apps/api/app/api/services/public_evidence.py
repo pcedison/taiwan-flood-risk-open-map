@@ -298,6 +298,9 @@ def historical_record_evidence(
 
 
 def evidence_from_upsert(record: EvidenceUpsert) -> Evidence:
+    evidence_scope = record.properties.get("evidence_scope", "historical")
+    location_precision = record.properties.get("location_precision", "unknown")
+    limitations = record.properties.get("limitations", [])
     return Evidence(
         id=record.id,
         source_id=record.source_id,
@@ -321,6 +324,11 @@ def evidence_from_upsert(record: EvidenceUpsert) -> Evidence:
         source_weight=record.source_weight,
         privacy_level=cast(Any, record.privacy_level),
         raw_ref=record.raw_ref,
+        evidence_scope=cast(Any, evidence_scope),
+        location_precision=cast(Any, location_precision),
+        limitations=(
+            [str(value) for value in limitations] if isinstance(limitations, list) else []
+        ),
     )
 
 
@@ -382,9 +390,7 @@ def signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
         freshness_score=evidence.freshness_score,
         source_weight=evidence.source_weight,
         risk_factor=(
-            evidence.realtime_risk_factor
-            if evidence.realtime_risk_factor is not None
-            else 1.0
+            evidence.realtime_risk_factor if evidence.realtime_risk_factor is not None else 1.0
         ),
         observed_at=evidence.observed_at or evidence.occurred_at,
         evidence_scope=evidence.evidence_scope,
@@ -418,11 +424,7 @@ def select_evidence_preview_items(
 
     reserved = set(reserved_indices)
     selected = [evidence_items[index] for index in reserved_indices]
-    selected.extend(
-        item
-        for index, item in enumerate(evidence_items)
-        if index not in reserved
-    )
+    selected.extend(item for index, item in enumerate(evidence_items) if index not in reserved)
     return selected[:limit]
 
 
@@ -449,9 +451,7 @@ def collapse_flood_potential_items(evidence_items: list[Evidence]) -> list[Evide
 
 
 def collapse_official_flood_disaster_items(evidence_items: list[Evidence]) -> list[Evidence]:
-    official_items = [
-        item for item in evidence_items if is_official_flood_disaster_item(item)
-    ]
+    official_items = [item for item in evidence_items if is_official_flood_disaster_item(item)]
     if len(official_items) <= 1:
         return evidence_items
 
@@ -479,9 +479,9 @@ def is_official_flood_disaster_item(item: Evidence) -> bool:
 def official_flood_disaster_summary_item(items: list[Evidence]) -> Evidence:
     closest_item = min(
         items,
-        key=lambda item: item.distance_to_query_m
-        if item.distance_to_query_m is not None
-        else float("inf"),
+        key=lambda item: (
+            item.distance_to_query_m if item.distance_to_query_m is not None else float("inf")
+        ),
     )
     candidate_times = [
         value
@@ -489,8 +489,10 @@ def official_flood_disaster_summary_item(items: list[Evidence]) -> Evidence:
         for value in (item.observed_at, item.occurred_at)
         if value is not None
     ]
-    latest_observed = max(candidate_times) if candidate_times else (
-        closest_item.observed_at or closest_item.occurred_at
+    latest_observed = (
+        max(candidate_times)
+        if candidate_times
+        else (closest_item.observed_at or closest_item.occurred_at)
     )
     years = sorted(
         {
@@ -518,7 +520,11 @@ def official_flood_disaster_summary_item(items: list[Evidence]) -> Evidence:
             "observed_at": latest_observed,
             "occurred_at": latest_observed,
             "distance_to_query_m": min(
-                (item.distance_to_query_m for item in items if item.distance_to_query_m is not None),
+                (
+                    item.distance_to_query_m
+                    for item in items
+                    if item.distance_to_query_m is not None
+                ),
                 default=None,
             ),
             "confidence": max(item.confidence for item in items),

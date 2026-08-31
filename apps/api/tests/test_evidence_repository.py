@@ -162,13 +162,10 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     assert "FROM recent_water_level" not in sql
     assert "AS location_precision" in sql
     assert "AS limitations" in sql
+    assert "WHEN c.properties->>'location_precision' = 'admin_area' THEN NULL" in sql
     assert "jsonb_typeof(c.properties->'limitations') = 'array'" in sql
-    assert (
-        sql.count("e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'") == 3
-    )
-    assert (
-        sql.count("e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'") == 3
-    )
+    assert sql.count("e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'") == 3
+    assert sql.count("e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'") == 3
     assert "ds.adapter_key = 'local.tainan.flood_sensor'" in sql
     assert "e.title LIKE '%%(停用)%%'" in sql
     # Without relevance arguments the realtime relevance collapses to the radius.
@@ -207,9 +204,7 @@ def test_query_nearby_evidence_uses_trusted_active_snapshot_for_wra_history_only
 
     sql, _params = connection.cursor_instance.executions[0]
     assert "ds.adapter_key <> 'official.wra.historical_flood'" in sql
-    assert (
-        "e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')" in sql
-    )
+    assert "e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')" in sql
     assert "snapshot_generation_mode" not in sql
     assert "runtime_pipeline_status" not in sql
 
@@ -362,7 +357,11 @@ def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
     assert rows[0].adapter_key == "local.kaohsiung.rainfall"
     assert rows[0].distance_to_query_m == 230.4
     query_call = next(
-        (item for item in connection.cursor_instance.executions if "official_realtime_latest" in item[0]),
+        (
+            item
+            for item in connection.cursor_instance.executions
+            if "official_realtime_latest" in item[0]
+        ),
         None,
     )
     assert query_call is not None
@@ -378,7 +377,9 @@ def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
     assert "interval '30 minutes'" not in sql
 
 
-def test_query_nearby_realtime_coverage_rows_falls_back_to_official_evidence_when_latest_empty() -> None:
+def test_query_nearby_realtime_coverage_rows_falls_back_to_official_evidence_when_latest_empty() -> (
+    None
+):
     observed_since = datetime(2026, 6, 29, 9, 0, tzinfo=UTC)
     latest_connection = _FakeConnection(rows=[])
     fallback_connection = _FakeConnection(
@@ -784,10 +785,7 @@ def test_public_source_health_migration_indexes_jobs_and_registers_kinmen() -> N
 def test_cwa_tide_hourly_freshness_migration_aligns_public_coverage() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     migration = (
-        repository_root
-        / "infra"
-        / "migrations"
-        / "0051_cwa_tide_hourly_freshness.sql"
+        repository_root / "infra" / "migrations" / "0051_cwa_tide_hourly_freshness.sql"
     ).read_text(encoding="utf-8")
 
     assert "'official.cwa.tide_level'" in migration
@@ -800,10 +798,7 @@ def test_cwa_tide_hourly_freshness_migration_aligns_public_coverage() -> None:
 def test_observed_flood_history_migration_bounds_sensor_history_lookup() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     migration = (
-        repository_root
-        / "infra"
-        / "migrations"
-        / "0052_observed_flood_history_indexes.sql"
+        repository_root / "infra" / "migrations" / "0052_observed_flood_history_indexes.sql"
     ).read_text(encoding="utf-8")
 
     assert "idx_evidence_observed_flood_history_geom" in migration
@@ -811,6 +806,19 @@ def test_observed_flood_history_migration_bounds_sensor_history_lookup() -> None
     assert "event_type = 'flood_report'" in migration
     assert "properties->>'evidence_scope' = 'current'" in migration
     assert "observed_at DESC" in migration
+
+
+def test_tainan_official_disaster_news_migration_registers_l1_metadata_source() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    migration = (
+        repository_root / "infra" / "migrations" / "0053_tainan_official_disaster_news.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "'official.tainan.disaster_news'" in migration
+    assert "'official'" in migration
+    assert "'L1'" in migration
+    assert "'full_text_stored', false" in migration
+    assert "OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED=false" in migration
 
 
 def test_station_inventory_and_jurisdiction_migration_is_fail_closed() -> None:
@@ -863,10 +871,7 @@ def test_station_inventory_and_jurisdiction_migration_is_fail_closed() -> None:
 def test_yilan_mobile_pump_migration_registers_source_and_jurisdiction() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     migration = (
-        repository_root
-        / "infra"
-        / "migrations"
-        / "0037_yilan_mobile_pump_status_source.sql"
+        repository_root / "infra" / "migrations" / "0037_yilan_mobile_pump_status_source.sql"
     ).read_text(encoding="utf-8")
 
     assert "'local.yilan.mobile_pump_status'" in migration
@@ -882,10 +887,7 @@ def test_yilan_mobile_pump_migration_registers_source_and_jurisdiction() -> None
 def test_inactive_tainan_station_migration_retires_public_rows_but_keeps_audit() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     migration = (
-        repository_root
-        / "infra"
-        / "migrations"
-        / "0043_retire_inactive_tainan_stations.sql"
+        repository_root / "infra" / "migrations" / "0043_retire_inactive_tainan_stations.sql"
     ).read_text(encoding="utf-8")
 
     assert "DELETE FROM official_realtime_latest" in migration
@@ -1288,34 +1290,31 @@ def test_query_nearby_recent_context_requires_aware_as_of() -> None:
 
 
 def test_cap_origin_vectors_match_canonical_json_contract() -> None:
-    fixture = (
-        Path(__file__).parents[3] / "tests" / "fixtures" / "cap_identity_vectors.json"
-    )
+    fixture = Path(__file__).parents[3] / "tests" / "fixtures" / "cap_identity_vectors.json"
     payload = json.loads(fixture.read_text(encoding="utf-8"))
 
     assert payload["version"] == 1
     for case in payload["cases"]:
-        assert _official_event_origin_key(
-            sender=case["sender"],
-            identifier=case["identifier"],
-            sent=datetime.fromisoformat(case["sent"]),
-            admin_code=case["admin_code"],
-        ) == case["origin_digest"]
+        assert (
+            _official_event_origin_key(
+                sender=case["sender"],
+                identifier=case["identifier"],
+                sent=datetime.fromisoformat(case["sent"]),
+                admin_code=case["admin_code"],
+            )
+            == case["origin_digest"]
+        )
 
 
 def test_cap_origin_encoding_has_no_delimiter_collision() -> None:
     sent = datetime(2026, 8, 24, 3, 4, 5, tzinfo=UTC)
     assert _official_event_origin_key(
         sender="a|b", identifier="c", sent=sent, admin_code="67000000"
-    ) != _official_event_origin_key(
-        sender="a", identifier="b|c", sent=sent, admin_code="67000000"
-    )
+    ) != _official_event_origin_key(sender="a", identifier="b|c", sent=sent, admin_code="67000000")
 
 
 def test_cap_origin_rejects_unicode_admin_digits() -> None:
-    fixture = (
-        Path(__file__).parents[3] / "tests" / "fixtures" / "cap_identity_vectors.json"
-    )
+    fixture = Path(__file__).parents[3] / "tests" / "fixtures" / "cap_identity_vectors.json"
     payload = json.loads(fixture.read_text(encoding="utf-8"))
     case = payload["invalid_cases"][0]
     with pytest.raises(ValueError, match="admin_code"):
@@ -1378,9 +1377,7 @@ def test_latest_materialized_candidate_pushes_down_scale_sensitive_filters() -> 
     )
     sql = connection.cursor_instance.executions[0][0]
     candidate_sql = sql[
-        sql.index("parsed_latest AS MATERIALIZED (") : sql.index(
-            "eligible_latest AS ("
-        )
+        sql.index("parsed_latest AS MATERIALIZED (") : sql.index("eligible_latest AS (")
     ]
 
     assert "latest.event_type IN (" in candidate_sql
@@ -1817,7 +1814,9 @@ class _UndefinedTableWithDiag(psycopg.errors.UndefinedTable):
         return self._diag
 
 
-def _undefined_table_error(*, table_name: str | None, message: str | None = None) -> psycopg.errors.UndefinedTable:
+def _undefined_table_error(
+    *, table_name: str | None, message: str | None = None
+) -> psycopg.errors.UndefinedTable:
     relation = table_name or "unknown"
     return _UndefinedTableWithDiag(
         message or f'relation "{relation}" does not exist',

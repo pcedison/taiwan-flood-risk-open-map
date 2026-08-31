@@ -295,6 +295,7 @@ Adapter and source variables:
 | `SOURCE_WRA_ENABLED` | worker, scheduler | Optional override for `official.wra.water_level`; unset defaults to enabled, `false` disables it |
 | `SOURCE_WRA_API_ENABLED` | worker, scheduler | Explicit live-client gate for the worker WRA water-level runtime adapter; keep `false` until cadence, egress, and operator ownership are ready |
 | `SOURCE_FLOOD_POTENTIAL_ENABLED` | worker, scheduler | Optional override for `official.flood_potential.geojson`; unset defaults to enabled, `false` disables it |
+| `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED` | api | Enables the reviewed metadata-only Tainan City Government recent flood-history lookup; hosted default `true`, `false` is the kill switch |
 | `SOURCE_NEWS_ENABLED` | worker, scheduler | Enables reviewed L2 news/public-web adapters only; default `false` |
 | `SOURCE_FORUM_ENABLED` | worker, scheduler | Family-level forum gate; must stay `false` until Phase 4 legal/source review |
 | `SOURCE_PTT_ENABLED` | worker, scheduler | Source-level PTT gate; also requires `SOURCE_FORUM_ENABLED=true`, terms acknowledgement, and candidate approval ack |

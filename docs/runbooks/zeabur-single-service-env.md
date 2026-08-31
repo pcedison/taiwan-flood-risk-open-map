@@ -56,6 +56,7 @@ in `schema_migrations` and can be disabled only with
 | `HISTORICAL_NEWS_ON_DEMAND_WRITEBACK_ENABLED` | `false` until database writeback is enabled |
 | `SOURCE_NEWS_ENABLED` | `false` until source terms are reviewed |
 | `SOURCE_TERMS_REVIEW_ACK` | `false` until source terms are reviewed |
+| `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED` | `true`; citation-only L1 lookup of recent Tainan City Government flood news, with a 10-minute process cache and no article-body storage |
 | `USER_REPORTS_ENABLED` | `false` until abuse controls and moderation owner are ready |
 
 ## Optional Variables

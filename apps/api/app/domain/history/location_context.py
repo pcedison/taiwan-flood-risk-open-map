@@ -20,6 +20,8 @@ class PublicNewsLocationContext:
     distance_m: float
     source_key: str
     precision: str
+    lat: float
+    lng: float
 
 
 def nearest_public_news_location_text(
@@ -60,6 +62,8 @@ def nearest_public_news_location_context(
                 distance_m=distance_m,
                 source_key=location["source_key"],
                 precision=location["precision"],
+                lat=location["lat"],
+                lng=location["lng"],
             )
     return best
 
