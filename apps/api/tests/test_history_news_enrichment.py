@@ -140,7 +140,7 @@ def test_nationwide_official_citations_accepts_official_gov_taipei_domain() -> N
     assert result.records[0].url.startswith("https://water.gov.taipei/")
 
 
-def test_nationwide_official_citations_accepts_google_publisher_metadata() -> None:
+def test_nationwide_official_citations_rejects_aggregator_link_with_official_publisher() -> None:
     payload = """<?xml version="1.0" encoding="utf-8" ?>
     <rss version="2.0"><channel><item>
       <title>高雄市仁武區道路積淹水</title>
@@ -158,14 +158,8 @@ def test_nationwide_official_citations_accepts_google_publisher_metadata() -> No
         fetch_text=lambda _url, _timeout: payload,
     )
 
-    assert len(result.records) == 1
-    record = result.records[0]
-    assert record.url == "https://news.google.com/rss/articles/example"
-    assert record.properties["source_domain"] == "rwdo.kcg.gov.tw"
-    assert record.properties["official_publisher_url"] == "https://rwdo.kcg.gov.tw/"
-    assert record.properties["publisher_name"] == "高雄市政府水利局"
-    assert record.properties["location_precision"] == "admin_area"
-    assert record.distance_to_query_m is None
+    assert result.records == ()
+    assert result.health_status == "unknown"
 
 
 def test_nationwide_official_citations_keep_village_context_at_admin_precision() -> None:

@@ -28,8 +28,8 @@ the live verification sources listed below.
 - Recent-history recovery is no longer a Tainan-only exception. The hosted API
   now applies one nationwide rule to Taiwan query points whose newest observed
   flood history is over one year old: search the current and previous six
-  calendar years, accept only HTTPS Taiwan government publishers, retain
-  citation metadata rather than article bodies, and label road versus
+  calendar years, accept only direct HTTPS Taiwan government citation URLs,
+  retain citation metadata rather than article bodies, and label road versus
   administrative-area precision. Search coverage is explicitly incomplete;
   no result must never be presented as evidence that flooding did not occur.
 - A separate `official.wra.flood_incident` adapter can accumulate successive

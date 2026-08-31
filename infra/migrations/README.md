@@ -234,3 +234,9 @@ stores official publisher metadata only and explicitly records incomplete
 coverage. The WRA path remains disabled until its credential and contract gates
 are approved; after activation it preserves successive latest-event responses
 instead of claiming an unavailable historical backfill.
+
+`0055_require_direct_official_citation_urls.sql` tightens the nationwide
+request-time source so the user-facing citation itself must be an approved
+government HTTPS URL. Existing aggregator-only citations are retained for
+audit but moved to `rejected`; they can no longer appear as public evidence or
+make an unreadable Google/Bing redirect look like an official source page.

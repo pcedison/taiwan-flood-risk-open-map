@@ -11,13 +11,15 @@ observed flood history is older than one year.
 - Scope: all Taiwan query points supported by the bundled national village data.
 - Window: the current year plus the previous six calendar years on every
   eligible lookup.
-- Accepted publishers: HTTPS Taiwan government domains ending in `.gov.tw` or
-  `.gov.taipei`.
+- Accepted citations: the URL opened by the user must itself be an HTTPS Taiwan
+  government URL ending in `.gov.tw` or `.gov.taipei`. A search index publisher
+  tag cannot authorize an aggregator redirect or an agency homepage as a
+  substitute for the cited page.
 - Stored data: title, citation URL, publication time, official publisher
   domain, and location-match metadata only.
-- Rejected data: article bodies, images, comments, non-government publishers,
-  undated results, future-dated results, and results older than the rolling
-  window.
+- Rejected data: article bodies, images, comments, non-government links,
+  aggregator-only redirects, undated results, future-dated results, and results
+  older than the rolling window.
 - Precision: road matches remain road-level; district/town matches are
   `admin_area`. Neither is a doorplate-level measured depth.
 - Completeness: search indexes are not official event registries. An empty
