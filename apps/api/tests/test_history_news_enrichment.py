@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from app.domain.history.news_enrichment import (
     search_public_flood_news,
+    search_taiwan_official_flood_citations,
     search_tainan_official_flood_news,
 )
 
@@ -66,6 +67,149 @@ def test_tainan_reviewed_incident_bootstrap_survives_official_index_egress_failu
         "https://www.tainan.gov.tw/News_Content.aspx?n=13370&s=8832256"
     )
     assert "隨版本審核" in result.message
+
+
+def test_nationwide_official_citations_accept_other_counties_and_recent_years_only() -> None:
+    requested_urls: list[str] = []
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel>
+      <item>
+        <title>臺中市太平區樹孝路豪雨積淹水</title>
+        <link>https://www.taichung.gov.tw/incident/2024-flood</link>
+        <pubDate>Wed, 01 May 2024 04:30:00 GMT</pubDate>
+      </item>
+      <item>
+        <title>臺中市太平區樹孝路豪雨積淹水</title>
+        <link>https://news.example.test/incident/2024-flood</link>
+        <pubDate>Wed, 01 May 2024 04:30:00 GMT</pubDate>
+      </item>
+      <item>
+        <title>臺中市太平區樹孝路豪雨積淹水</title>
+        <link>https://www.taichung.gov.tw/incident/2018-flood</link>
+        <pubDate>Tue, 01 May 2018 04:30:00 GMT</pubDate>
+      </item>
+    </channel></rss>"""
+
+    def fetch_text(url: str, _timeout: float) -> str:
+        requested_urls.append(url)
+        return payload
+
+    result = search_taiwan_official_flood_citations(
+        location_text="臺中市太平區樹孝路",
+        lat=24.154,
+        lng=120.716,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        max_records=3,
+        fetch_text=fetch_text,
+    )
+
+    assert result.attempted is True
+    assert result.health_status == "healthy"
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.adapter_key == "official.gov_tw.flood_citation"
+    assert record.source_type == "official"
+    assert record.url == "https://www.taichung.gov.tw/incident/2024-flood"
+    assert record.distance_to_query_m is None
+    assert record.properties["coverage_start_year"] == 2020
+    assert record.properties["coverage_end_year"] == 2026
+    assert record.properties["coverage_is_complete"] is False
+    assert record.properties["full_text_stored"] is False
+    assert any("2026" in url and "2020" in url for url in requested_urls)
+
+
+def test_nationwide_official_citations_accepts_official_gov_taipei_domain() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>臺北市文山區木柵路道路積水</title>
+      <link>https://water.gov.taipei/News_Content.aspx?n=1&amp;s=2</link>
+      <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="臺北市文山區木柵路",
+        lat=24.988,
+        lng=121.566,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert len(result.records) == 1
+    assert result.records[0].url.startswith("https://water.gov.taipei/")
+
+
+def test_nationwide_official_citations_accepts_google_publisher_metadata() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>高雄市仁武區道路積淹水</title>
+      <link>https://news.google.com/rss/articles/example</link>
+      <source url="https://rwdo.kcg.gov.tw/">高雄市政府水利局</source>
+      <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="高雄市仁武區",
+        lat=22.701,
+        lng=120.36,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.url == "https://news.google.com/rss/articles/example"
+    assert record.properties["source_domain"] == "rwdo.kcg.gov.tw"
+    assert record.properties["official_publisher_url"] == "https://rwdo.kcg.gov.tw/"
+    assert record.properties["publisher_name"] == "高雄市政府水利局"
+    assert record.properties["location_precision"] == "admin_area"
+    assert record.distance_to_query_m is None
+
+
+def test_nationwide_official_citations_keep_village_context_at_admin_precision() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>臺北市文山區萬興里豪雨積淹水</title>
+      <link>https://water.gov.taipei/flood/wanxing</link>
+      <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text=None,
+        lat=25.006,
+        lng=121.573,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record.properties["location_precision"] == "admin_area"
+    assert record.properties["location_match_scope"] == "admin_area"
+    assert record.distance_to_query_m is None
+
+
+def test_nationwide_official_citations_rejects_wrong_district_in_same_city() -> None:
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>新北市瑞芳區豪雨積淹水</title>
+      <link>https://www.ntpc.gov.tw/flood/ruifang</link>
+      <pubDate>Mon, 24 Aug 2026 04:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="新北市板橋區文化路",
+        lat=25.011,
+        lng=121.461,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+    )
+
+    assert result.records == ()
 
 
 def test_bing_rss_redirects_are_canonicalized_before_deduplication() -> None:

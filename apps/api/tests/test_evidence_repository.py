@@ -821,6 +821,22 @@ def test_tainan_official_disaster_news_migration_registers_l1_metadata_source() 
     assert "OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED=false" in migration
 
 
+def test_nationwide_recent_history_migration_supersedes_single_city_lookup_fail_closed() -> None:
+    repository_root = Path(__file__).resolve().parents[3]
+    migration = (
+        repository_root / "infra" / "migrations" / "0054_nationwide_recent_flood_history.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "'official.gov_tw.flood_citation'" in migration
+    assert "'official.wra.flood_incident'" in migration
+    assert "'rolling_lookback_years', 7" in migration
+    assert "'coverage_is_complete', false" in migration
+    assert "OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED=false" in migration
+    assert "SOURCE_WRA_FLOOD_INCIDENT_CONTRACT_ENABLED" in migration
+    assert "WRA_FLOOD_INCIDENT_API_KEY" in migration
+    assert "WHERE adapter_key = 'official.tainan.disaster_news'" in migration
+
+
 def test_station_inventory_and_jurisdiction_migration_is_fail_closed() -> None:
     repository_root = Path(__file__).resolve().parents[3]
     migration = (

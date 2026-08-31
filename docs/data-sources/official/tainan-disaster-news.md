@@ -1,5 +1,9 @@
 # Tainan City official disaster news
 
+> Superseded on 2026-08-31 by `official.gov_tw.flood_citation`. The old source
+> remains documented for audit, but the active request-time recovery path is
+> nationwide and the migration disables this single-city source.
+
 `official.tainan.disaster_news` is an L1, citation-only recovery source for
 recent flood incidents that have not yet reached the national spatial history
 datasets.

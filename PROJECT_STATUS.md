@@ -25,6 +25,18 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
+- Recent-history recovery is no longer a Tainan-only exception. The hosted API
+  now applies one nationwide rule to Taiwan query points whose newest observed
+  flood history is over one year old: search the current and previous six
+  calendar years, accept only HTTPS Taiwan government publishers, retain
+  citation metadata rather than article bodies, and label road versus
+  administrative-area precision. Search coverage is explicitly incomplete;
+  no result must never be presented as evidence that flooding did not occur.
+- A separate `official.wra.flood_incident` adapter can accumulate successive
+  all-county latest-event responses into durable cross-year history. It is
+  intentionally disabled until the official API credential, contract review,
+  and all three runtime gates are present. The upstream `Depth` schema has no
+  declared unit, so its raw value is not converted to centimetres.
 - Latest functional release verified before this documentation edit:
   `1dd018ab13755fa077312f57b9cdeb98d4904010` (PRs
   [#279](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/279),

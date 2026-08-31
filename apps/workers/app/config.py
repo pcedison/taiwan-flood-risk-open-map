@@ -20,6 +20,9 @@ class WorkerSettings:
     source_wra_api_enabled: bool
     source_wra_historical_flood_enabled: bool | None
     source_wra_historical_flood_api_enabled: bool
+    source_wra_flood_incident_enabled: bool
+    source_wra_flood_incident_api_enabled: bool
+    source_wra_flood_incident_contract_enabled: bool
     source_wra_iow_flood_depth_enabled: bool | None
     source_wra_iow_flood_depth_api_enabled: bool
     source_ncdr_cap_enabled: bool
@@ -147,6 +150,9 @@ class WorkerSettings:
     wra_api_timeout_seconds: int
     wra_historical_flood_index_url: str | None
     wra_historical_flood_timeout_seconds: int
+    wra_flood_incident_api_url: str | None
+    wra_flood_incident_api_key: str | None
+    wra_flood_incident_timeout_seconds: int
     wra_iow_flood_depth_api_url: str | None
     wra_iow_flood_sensor_metadata_api_url: str | None
     wra_iow_flood_depth_timeout_seconds: int
@@ -243,6 +249,18 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_wra_historical_flood_api_enabled=env_flag(
             values,
             "SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED",
+        ),
+        source_wra_flood_incident_enabled=env_flag(
+            values,
+            "SOURCE_WRA_FLOOD_INCIDENT_ENABLED",
+        ),
+        source_wra_flood_incident_api_enabled=env_flag(
+            values,
+            "SOURCE_WRA_FLOOD_INCIDENT_API_ENABLED",
+        ),
+        source_wra_flood_incident_contract_enabled=env_flag(
+            values,
+            "SOURCE_WRA_FLOOD_INCIDENT_CONTRACT_ENABLED",
         ),
         source_wra_iow_flood_depth_enabled=env_bool(
             values,
@@ -667,6 +685,13 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS",
             default=8,
+        ),
+        wra_flood_incident_api_url=env_str(values, "WRA_FLOOD_INCIDENT_API_URL"),
+        wra_flood_incident_api_key=env_str(values, "WRA_FLOOD_INCIDENT_API_KEY"),
+        wra_flood_incident_timeout_seconds=env_int(
+            values,
+            "WRA_FLOOD_INCIDENT_TIMEOUT_SECONDS",
+            default=12,
         ),
         wra_iow_flood_depth_api_url=env_str(values, "WRA_IOW_FLOOD_DEPTH_API_URL"),
         wra_iow_flood_sensor_metadata_api_url=env_str(

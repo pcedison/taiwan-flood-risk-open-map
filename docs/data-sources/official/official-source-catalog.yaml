@@ -140,6 +140,25 @@ sources:
       - "The source event time is taken only from a parseable KML event label or field."
       - "KML points and polygons describe source-provided historical locations and extents."
       - "The catalog landing page is retained as a historical dataset and may be withdrawn."
+  - key: official.wra.flood_incident
+    need: nationwide_reported_flood_incidents
+    status: disabled_by_default
+    data_gov_dataset_id: null
+    data_gov_url: null
+    title: "WRA nationwide latest-event reported flood incidents"
+    provider: "Water Resources Agency"
+    resource_url: "https://fhy.wra.gov.tw/OpenApiv3/v2/Disaster/Flooding?$top=100"
+    documentation_url: "https://fhy.wra.gov.tw/openapiv3"
+    resource_format: "authenticated JSON API"
+    update_frequency: "latest disaster event; intended worker polling every hosted cycle"
+    license: "official API contract review required before production activation"
+    integration_decision: "Poll the all-county latest-event response and durably preserve each unique incident as historical flood evidence after credential and contract approval."
+    limitations:
+      - "The endpoint returns the latest disaster event, not a complete historical archive."
+      - "Multi-year coverage begins only after scheduled polling is activated; no backfill completeness claim is allowed."
+      - "The published API schema does not specify the Depth unit, so the raw value is retained without conversion."
+      - "Rows without a valid WGS84 point remain raw audited rejections until a reviewed administrative geometry resolver exists."
+      - "Production activation requires three explicit source gates and a header-only API key."
   - key: official.flood_potential.geojson
     need: planning_flood_potential
     status: primary_reference
@@ -172,6 +191,24 @@ sources:
       - "Provides year and point coordinates only, not full event timestamps, depth, address, or impact details."
       - "Source coordinates are TWD97 / TM2 and must be converted to EPSG:4326 before spatial queries."
       - "Recent flood facts must be corroborated through public news/wiki metadata or other separately modeled official sources, not merged into this official snapshot."
+  - key: official.gov_tw.flood_citation
+    need: recent_official_flood_history_gap_recovery
+    status: primary_gap_recovery
+    data_gov_dataset_id: null
+    data_gov_url: null
+    title: "Taiwan government recent flood citation lookup"
+    provider: "Taiwan central and local government agencies"
+    resource_url: "https://news.google.com/rss/search"
+    secondary_resource_url: "https://www.bing.com/search?format=rss"
+    resource_format: "citation metadata from public search/RSS indexes"
+    update_frequency: "on demand with a bounded per-query time budget"
+    license: "citation metadata only; each official source page retains its own terms"
+    integration_decision: "When nearby observed history is older than one year, search a rolling seven-year window and accept only HTTPS Taiwan government publisher domains."
+    limitations:
+      - "Search indexes are not complete event registries; no result never means no historical flooding."
+      - "Only title, URL, publication time, official publisher domain, and location-match metadata are stored; article bodies are not fetched."
+      - "Road and administrative-area matches are labeled explicitly and never claim doorplate-level measured depth."
+      - "This nationwide source supersedes the Tainan-only request-time lookup; previously stored Tainan evidence remains auditable."
   - key: official.wra.flood_warning
     need: official_warning_context
     status: disabled_by_default

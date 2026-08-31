@@ -69,6 +69,7 @@ from app.adapters.ncdr import NCDR_CAP_METADATA
 from app.adapters.police_radio_traffic import POLICE_RADIO_TRAFFIC_METADATA
 from app.adapters.ptt import METADATA as PTT_METADATA
 from app.adapters.wra import (
+    WRA_FLOOD_INCIDENT_METADATA,
     WRA_FLOOD_WARNING_METADATA,
     WRA_HISTORICAL_FLOOD_METADATA,
     WRA_WATER_LEVEL_METADATA,
@@ -95,6 +96,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         CWA_TIDE_LEVEL_METADATA.key: CWA_TIDE_LEVEL_METADATA,
         CWA_HEAVY_RAIN_WARNING_METADATA.key: CWA_HEAVY_RAIN_WARNING_METADATA,
         WRA_WATER_LEVEL_METADATA.key: WRA_WATER_LEVEL_METADATA,
+        WRA_FLOOD_INCIDENT_METADATA.key: WRA_FLOOD_INCIDENT_METADATA,
         WRA_HISTORICAL_FLOOD_METADATA.key: WRA_HISTORICAL_FLOOD_METADATA,
         WRA_FLOOD_WARNING_METADATA.key: WRA_FLOOD_WARNING_METADATA,
         WRA_IOW_FLOOD_DEPTH_METADATA.key: WRA_IOW_FLOOD_DEPTH_METADATA,
@@ -185,6 +187,8 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
             metadata.enabled_by_default,
             settings.source_wra_historical_flood_enabled,
         )
+    if metadata.key == "official.wra.flood_incident":
+        return settings.source_wra_flood_incident_enabled
     if metadata.key == "official.wra_iow.flood_depth":
         return _with_optional_override(
             metadata.enabled_by_default,
@@ -434,6 +438,13 @@ def _adapter_passes_hard_gates(metadata: AdapterMetadata, settings: WorkerSettin
             settings.source_ncdr_cap_enabled
             and settings.source_ncdr_cap_contract_enabled
         )
+    if metadata.key == "official.wra.flood_incident":
+        return (
+            settings.source_wra_flood_incident_enabled
+            and settings.source_wra_flood_incident_api_enabled
+            and settings.source_wra_flood_incident_contract_enabled
+            and bool((settings.wra_flood_incident_api_key or "").strip())
+        )
     if metadata.key == "official.npa.police_radio_traffic":
         return (
             settings.source_npa_police_radio_enabled
@@ -469,6 +480,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_wra_enabled is not False
     if metadata.key == "official.wra.historical_flood":
         return settings.source_wra_historical_flood_enabled is True
+    if metadata.key == "official.wra.flood_incident":
+        return settings.source_wra_flood_incident_enabled is True
     if metadata.key == "official.wra_iow.flood_depth":
         return settings.source_wra_iow_flood_depth_enabled is True
     if metadata.key == "official.ncdr.cap":

@@ -33,8 +33,10 @@ GDELT_ON_DEMAND_ADAPTER_KEY = "news.public_web.gdelt_backfill"
 PUBLIC_NEWS_ON_DEMAND_ADAPTER_KEY = "news.public_web.on_demand_search"
 PUBLIC_WIKI_ON_DEMAND_ADAPTER_KEY = "news.public_web.wiki_search"
 TAINAN_OFFICIAL_HISTORY_ADAPTER_KEY = "official.tainan.disaster_news"
+TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY = "official.gov_tw.flood_citation"
 GOOGLE_NEWS_RSS_ENDPOINT = "https://news.google.com/rss/search"
 BING_NEWS_RSS_ENDPOINT = "https://www.bing.com/news/search"
+BING_WEB_RSS_ENDPOINT = "https://www.bing.com/search"
 TAINAN_CITY_NEWS_INDEX_URL = (
     "https://www.tainan.gov.tw/News.aspx?PageSize=200&n=13370&page=1&sms=9748"
 )
@@ -210,6 +212,9 @@ _TAINAN_REVIEWED_INCIDENT_BOOTSTRAP = (
     ),
 )
 
+_OFFICIAL_TAIWAN_WEB_SUFFIXES = (".gov.tw", ".gov.taipei")
+_OFFICIAL_HISTORY_LOOKBACK_YEARS = 7
+
 
 _WIKI_SOURCES = (
     _WikiSource(
@@ -363,6 +368,149 @@ def search_tainan_official_flood_news(
         message="臺南市政府近期新聞未找到可通過行政區與淹水關鍵字比對的事件。",
         records=(),
         health_status="unknown",
+    )
+
+
+def search_taiwan_official_flood_citations(
+    *,
+    location_text: str | None,
+    lat: float,
+    lng: float,
+    radius_m: int,
+    now: datetime,
+    max_records: int = 3,
+    timeout_seconds: float = 3.0,
+    fetch_text: FetchText | None = None,
+) -> OnDemandNewsSearchResult:
+    """Find recent Taiwan-wide flood citations on official government sites.
+
+    This is a bounded miss-recovery lookup, not a claim of complete historical
+    coverage. Only RSS/search citation metadata whose direct link or declared
+    publisher belongs to an official Taiwan government host is accepted.
+    Article bodies are never fetched or stored.
+    """
+
+    context = nearest_public_news_location_context(
+        lat=lat,
+        lng=lng,
+        radius_m=radius_m,
+    )
+    if context is None:
+        return OnDemandNewsSearchResult(
+            attempted=False,
+            source_id="official-taiwan-government-citations",
+            message="查詢點附近沒有可用的全臺行政區定位資料。",
+            records=(),
+            health_status="unknown",
+        )
+
+    query_location = extract_taiwan_search_location(location_text or "") or context.name
+    targets = _official_history_search_targets(query_location, context.name)
+    text_client = fetch_text or _fetch_text
+    deadline = monotonic() + max(0.5, timeout_seconds)
+    coverage_start_year = now.year - _OFFICIAL_HISTORY_LOOKBACK_YEARS + 1
+    oldest_allowed = datetime(coverage_start_year, 1, 1, tzinfo=now.tzinfo)
+    relaxed_terms = _official_specific_admin_terms(context.name) or _rss_relaxed_location_terms(
+        context.name
+    )
+    accepted: list[EvidenceUpsert] = []
+    seen_urls: set[str] = set()
+    errors = 0
+
+    for target in targets:
+        for feed_url in _official_history_rss_urls(
+            target.term,
+            now=now,
+        ):
+            remaining_seconds = deadline - monotonic()
+            if remaining_seconds <= 0:
+                errors += 1
+                break
+            payload = text_client(feed_url, min(1.5, max(0.45, remaining_seconds)))
+            if not payload:
+                errors += 1
+                continue
+            for article in _rss_articles(payload, feed_url=feed_url):
+                article_url = str(article.get("url") or "")
+                publisher_url = str(article.get("publisher_url") or "")
+                official_url = article_url if _is_official_taiwan_web_url(article_url) else publisher_url
+                if not _is_official_taiwan_web_url(official_url):
+                    continue
+                official_article = {
+                    **article,
+                    "domain": _domain_from_url(official_url),
+                    "official_publisher_url": official_url,
+                }
+                published_at = _parse_public_news_datetime(article.get("published_at"))
+                if published_at is None:
+                    continue
+                comparable = (
+                    published_at
+                    if published_at.tzinfo is not None
+                    else published_at.replace(tzinfo=UTC)
+                )
+                if comparable < oldest_allowed or comparable > now + timedelta(days=1):
+                    continue
+                record = _record_from_article(
+                    official_article,
+                    location=target.term,
+                    match_scope=target.scope,
+                    target_source_weight=0.9 if target.scope != "admin_area" else 0.74,
+                    lat=lat,
+                    lng=lng,
+                    radius_m=radius_m,
+                    now=now,
+                    query_url=feed_url,
+                    search_window_label=(
+                        f"rolling-{_OFFICIAL_HISTORY_LOOKBACK_YEARS}-year-official-citations"
+                    ),
+                    adapter_key=TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY,
+                    source_prefix="official-gov-tw-citation",
+                    raw_ref_prefix="official-gov-tw-citation",
+                    ingestion_mode="on_demand_official_government_citation",
+                    relaxed_location_terms=relaxed_terms,
+                    summary_source_label="臺灣政府機關公開頁面 citation metadata",
+                    source_type="official",
+                )
+                if record is None or record.url is None or record.url in seen_urls:
+                    continue
+                seen_urls.add(record.url)
+                accepted.append(
+                    _official_government_record(
+                        record,
+                        context_lat=context.lat,
+                        context_lng=context.lng,
+                        now=now,
+                    )
+                )
+                if len(accepted) >= max(1, max_records):
+                    break
+            if len(accepted) >= max(1, max_records):
+                break
+        if len(accepted) >= max(1, max_records) or deadline - monotonic() <= 0:
+            break
+
+    if accepted:
+        return OnDemandNewsSearchResult(
+            attempted=True,
+            source_id="official-taiwan-government-citations",
+            message=(
+                f"已補入 {len(accepted)} 筆全臺政府機關近期積淹水 citation metadata；"
+                "此查找不代表完整歷史覆蓋。"
+            ),
+            records=tuple(accepted),
+            health_status="healthy",
+        )
+    return OnDemandNewsSearchResult(
+        attempted=True,
+        source_id="official-taiwan-government-citations",
+        message=(
+            "政府機關公開頁面索引暫時無法完整回應。"
+            if errors
+            else "近七年政府機關公開頁面未找到可通過地點與淹水條件的事件。"
+        ),
+        records=(),
+        health_status="degraded" if errors else "unknown",
     )
 
 
@@ -837,6 +985,100 @@ def _public_news_rss_urls(
     return _dedupe(urls, limit=16)
 
 
+def _official_history_rss_urls(
+    location: str,
+    *,
+    now: datetime,
+) -> tuple[str, ...]:
+    coverage_start_year = now.year - _OFFICIAL_HISTORY_LOOKBACK_YEARS + 1
+    rolling_years = tuple(range(now.year, coverage_start_year - 1, -1))
+    year_clause = " OR ".join(str(year) for year in rolling_years)
+    queries = _dedupe(
+        (
+            f"{location} 淹水 site:gov.tw",
+            f"{location} 積淹水 ({year_clause}) site:gov.tw",
+            f"{location} 淹水 政府 ({year_clause})",
+        ),
+        limit=3,
+    )
+    urls: list[str] = []
+    for query in queries:
+        urls.append(
+            f"{GOOGLE_NEWS_RSS_ENDPOINT}?"
+            f"{urlencode({'q': query, 'hl': 'zh-TW', 'gl': 'TW', 'ceid': 'TW:zh-Hant'})}"
+        )
+        urls.append(
+            f"{BING_WEB_RSS_ENDPOINT}?"
+            f"{urlencode({'q': query, 'format': 'rss', 'setlang': 'zh-hant', 'cc': 'tw'})}"
+        )
+    return _dedupe(urls, limit=6)
+
+
+def _official_history_search_targets(
+    query_location: str,
+    context_name: str,
+) -> tuple[_SearchTarget, ...]:
+    query_is_admin_only = _ROAD_PATTERN.search(_normalize(query_location)) is None
+    query_targets = tuple(
+        _SearchTarget(
+            target.term,
+            "admin_area" if query_is_admin_only else target.scope,
+            min(target.source_weight, 0.68) if query_is_admin_only else target.source_weight,
+        )
+        for target in _rss_search_targets(query_location)
+    )
+    context_targets = tuple(
+        _SearchTarget(target.term, "admin_area", min(target.source_weight, 0.68))
+        for target in _rss_search_targets(context_name)
+    )
+    candidates = [*query_targets, *context_targets]
+    required_admin_terms = _official_specific_admin_terms(context_name)
+    deduped: list[_SearchTarget] = []
+    seen: set[str] = set()
+    for target in candidates:
+        normalized = _normalize(target.term)
+        if len(normalized) < 2 or normalized in seen:
+            continue
+        if (
+            target.scope == "admin_area"
+            and required_admin_terms
+            and not any(_normalize(term) in normalized for term in required_admin_terms)
+        ):
+            continue
+        seen.add(normalized)
+        deduped.append(target)
+        if len(deduped) >= 8:
+            break
+    return tuple(deduped)
+
+
+def _official_specific_admin_terms(context_name: str) -> tuple[str, ...]:
+    normalized = _normalize(context_name)
+    terms: list[str] = []
+    for suffix in ("區", "鄉", "鎮"):
+        end = normalized.rfind(suffix)
+        if end < 0:
+            continue
+        value = normalized[: end + 1]
+        for parent_suffix in ("縣", "市"):
+            if parent_suffix in value:
+                value = value.rsplit(parent_suffix, 1)[-1]
+        if len(value) >= 2:
+            terms.extend((value, value.removesuffix(suffix)))
+    return tuple(term for term in _dedupe(terms, limit=6) if len(term) >= 2)
+
+
+def _is_official_taiwan_web_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").casefold().rstrip(".")
+    return host == "gov.tw" or any(host.endswith(suffix) for suffix in _OFFICIAL_TAIWAN_WEB_SUFFIXES)
+
+
 def _rss_search_targets(location: str) -> tuple[_SearchTarget, ...]:
     targets = _search_targets(location)
     return tuple(
@@ -1235,6 +1477,60 @@ def _official_tainan_record(
     )
 
 
+def _official_government_record(
+    record: EvidenceUpsert,
+    *,
+    context_lat: float,
+    context_lng: float,
+    now: datetime,
+) -> EvidenceUpsert:
+    match_scope = str(record.properties.get("location_match_scope") or "admin_area")
+    admin_match = match_scope == "admin_area"
+    precision = "admin_area" if admin_match else "road_or_lane"
+    record_lat = context_lat if admin_match else record.lat
+    record_lng = context_lng if admin_match else record.lng
+    domain = str(record.properties.get("source_domain") or _domain_from_url(record.url or ""))
+    limitation = (
+        "政府機關頁面僅確認行政區近期積淹水事件；不能據此判定查詢門牌曾經淹水。"
+        if admin_match
+        else "政府機關頁面確認道路積淹水事件；未提供查詢門牌的實測淹水深度。"
+    )
+    properties = {
+        **record.properties,
+        "evidence_scope": "historical",
+        "location_precision": precision,
+        "limitations": [limitation],
+        "legal_basis": "L1 official public citation metadata",
+        "attribution": domain,
+        "coverage_start_year": now.year - _OFFICIAL_HISTORY_LOOKBACK_YEARS + 1,
+        "coverage_end_year": now.year,
+        "coverage_is_complete": False,
+        "location_payload": {
+            "resolution": "admin_area_centroid" if admin_match else "query_point",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [record_lng, record_lat],
+            },
+            "matched_locations": record.properties.get("location_payload", {}).get(
+                "matched_locations", []
+            ),
+        },
+    }
+    return replace(
+        record,
+        summary=(
+            "臺灣政府機關發布的近期積淹水事件；位置為行政區範圍，非門牌實測。"
+            if admin_match
+            else "臺灣政府機關發布的近期道路積淹水事件；未提供門牌實測深度。"
+        ),
+        lat=record_lat,
+        lng=record_lng,
+        distance_to_query_m=None,
+        confidence=min(record.confidence, 0.68 if admin_match else 0.84),
+        properties=properties,
+    )
+
+
 def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ...]:
     try:
         root = ElementTree.fromstring(payload)
@@ -1248,6 +1544,12 @@ def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ..
             continue
         description = _xml_child_text(item, "description")
         pub_date = _xml_child_text(item, "pubDate") or _xml_child_text(item, "published")
+        source = item.find("source")
+        publisher_url = ""
+        publisher_name = ""
+        if source is not None:
+            publisher_url = str(source.attrib.get("url") or "").strip()
+            publisher_name = str(source.text or "").strip()
         articles.append(
             {
                 "title": title,
@@ -1256,6 +1558,8 @@ def _rss_articles(payload: str, *, feed_url: str) -> tuple[Mapping[str, Any], ..
                 "published_at": pub_date,
                 "domain": _domain_from_url(link),
                 "feed_url": feed_url,
+                "publisher_url": publisher_url,
+                "publisher_name": publisher_name,
             }
         )
     return tuple(articles)
@@ -1360,6 +1664,8 @@ def _record_from_article(
                 "matched_locations": text_locations,
             },
             "source_domain": domain,
+            "official_publisher_url": str(article.get("official_publisher_url") or "") or None,
+            "publisher_name": str(article.get("publisher_name") or "") or None,
             "query_url": query_url,
             "search_window": search_window_label,
             "citation_only": True,

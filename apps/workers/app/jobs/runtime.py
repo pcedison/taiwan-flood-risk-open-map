@@ -118,6 +118,8 @@ from app.adapters.wra import (
     HistoricalFetchText as WraHistoricalFetchText,
 )
 from app.adapters.wra import (
+    WraFloodIncidentApiAdapter,
+    WraFloodIncidentFetchJson,
     WraFloodWarningAdapter,
     WraFloodWarningFetchJson,
     WraFloodWarningFetchText,
@@ -231,6 +233,7 @@ def build_runtime_adapters(
     cwa_tide_station_fetch_json: TideFetchJson | None = None,
     cwa_heavy_rain_warning_fetch_cap: CwaFetchCap | None = None,
     wra_fetch_json: WraFetchJson | None = None,
+    wra_flood_incident_fetch_json: WraFloodIncidentFetchJson | None = None,
     wra_historical_flood_fetch_json: WraHistoricalFetchJson | None = None,
     wra_historical_flood_fetch_text: WraHistoricalFetchText | None = None,
     ncdr_cap_fetch_json: NcdrFetchJson | None = None,
@@ -353,6 +356,22 @@ def build_runtime_adapters(
             fetch_json=wra_fetch_json,
         )
         live_adapters[wra_adapter.metadata.key] = wra_adapter
+
+    if (
+        settings.source_wra_flood_incident_enabled
+        and settings.source_wra_flood_incident_api_enabled
+        and settings.source_wra_flood_incident_contract_enabled
+        and bool((settings.wra_flood_incident_api_key or "").strip())
+        and "official.wra.flood_incident" in enabled_keys
+    ):
+        flood_incident_adapter = WraFloodIncidentApiAdapter(
+            api_key=settings.wra_flood_incident_api_key,
+            api_url=settings.wra_flood_incident_api_url,
+            timeout_seconds=settings.wra_flood_incident_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_json=wra_flood_incident_fetch_json,
+        )
+        live_adapters[flood_incident_adapter.metadata.key] = flood_incident_adapter
 
     if (
         settings.source_wra_historical_flood_api_enabled

@@ -293,7 +293,7 @@ def _assessment_service(settings: Settings) -> AssessmentService:
             database_url=settings.database_url,
             enabled=(
                 settings.evidence_repository_enabled
-                and settings.official_tainan_history_news_enabled
+                and settings.official_nationwide_history_citations_enabled
             ),
             timeout_seconds=min(
                 settings.historical_news_on_demand_timeout_seconds,

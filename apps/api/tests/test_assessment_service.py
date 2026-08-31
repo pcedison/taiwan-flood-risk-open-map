@@ -189,7 +189,7 @@ def test_service_enriches_history_when_latest_observed_event_is_over_one_year_ol
             recent_id,
             event_type="flood_report",
             evidence_scope="historical",
-            adapter_key="official.tainan.disaster_news",
+            adapter_key="official.gov_tw.flood_citation",
             limitations=("行政區事件，非門牌實測。",),
         ),
         occurred_at=now - timedelta(days=7),

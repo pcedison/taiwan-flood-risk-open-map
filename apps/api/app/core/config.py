@@ -50,6 +50,7 @@ class Settings:
     official_flood_disaster_points_enabled: bool
     official_flood_disaster_points_path: str | None
     official_tainan_history_news_enabled: bool
+    official_nationwide_history_citations_enabled: bool
     risk_assessment_response_cache_seconds: int
     risk_assessment_response_cache_backend: RateLimitBackend
     risk_assessment_evidence_cache_ttl_seconds: int
@@ -162,6 +163,10 @@ def get_settings() -> Settings:
         official_flood_disaster_points_path=_official_flood_disaster_points_path(),
         official_tainan_history_news_enabled=_env_bool(
             "OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED",
+            default=False,
+        ),
+        official_nationwide_history_citations_enabled=_env_bool(
+            "OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED",
             default=_hosted_runtime(app_env),
         ),
         risk_assessment_response_cache_seconds=_env_int(
