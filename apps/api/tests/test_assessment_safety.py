@@ -21,10 +21,15 @@ NATIONAL_REQUIRED_KEYS = frozenset(
 )
 
 
-def _source_state(source_key: str, *, state: str = "fresh") -> AssessmentSourceState:
+def _source_state(
+    source_key: str,
+    *,
+    state: str = "fresh",
+    signal_type: str | None = None,
+) -> AssessmentSourceState:
     return AssessmentSourceState(
         source_key=source_key,
-        signal_type=source_key.rsplit(".", 1)[-1],
+        signal_type=signal_type or source_key.rsplit(".", 1)[-1],
         state=state,
         observed_at=NOW,
         checked_at=NOW,
@@ -213,6 +218,49 @@ def test_failed_required_source_changes_only_low_to_unknown() -> None:
     data = assessment_data(source_states=one_required_source_failed())
     assert apply_realtime_safety(low_scoring(), data).realtime_level == "未知"
     assert apply_realtime_safety(high_scoring(), data).realtime_level == "高"
+
+
+def test_failed_hydrology_source_uses_independent_hydrology_redundancy() -> None:
+    data = assessment_data(
+        coverage=coverage_with(
+            rainfall=("fresh_nearby", 900.0),
+            flood_depth=("degraded_nearby", 700.0),
+        ),
+        source_states=(
+            _source_state("official.cwa.rainfall"),
+            _source_state(
+                "official.wra.water_level",
+                state="failed",
+                signal_type="water_level",
+            ),
+            _source_state(
+                "official.wra_iow.flood_depth",
+                state="degraded",
+                signal_type="flood_depth",
+            ),
+        ),
+    )
+
+    assert apply_realtime_safety(low_scoring(), data).realtime_level == "低"
+
+
+def test_failed_hydrology_source_without_redundancy_remains_unknown() -> None:
+    data = assessment_data(
+        coverage=coverage_with(
+            rainfall=("fresh_nearby", 900.0),
+            flood_depth=("fresh_nearby", 700.0),
+        ),
+        source_states=(
+            _source_state("official.cwa.rainfall"),
+            _source_state(
+                "official.wra.water_level",
+                state="failed",
+                signal_type="water_level",
+            ),
+        ),
+    )
+
+    assert apply_realtime_safety(low_scoring(), data).realtime_level == "未知"
 
 
 def test_core_composer_uses_higher_realtime_risk() -> None:
