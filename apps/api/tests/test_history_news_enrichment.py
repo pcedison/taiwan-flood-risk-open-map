@@ -19,7 +19,7 @@ def test_tainan_official_news_recovers_recent_district_flood_without_claiming_po
       </tr>
       <tr>
         <td data-title="刊登日期"><span>115-08-24</span></td>
-        <td data-title="標題"><a href="News_Content.aspx?n=13370&amp;s=2"
+        <td data-title="標題"><a href="https://www.tainan.gov.tw/News_Content.aspx?n=13370&amp;s=8832256"
           title="黃偉哲視察安南、仁德淹水災情">黃偉哲視察安南、仁德淹水災情</a></td>
       </tr>
     </table></body></html>
@@ -46,6 +46,26 @@ def test_tainan_official_news_recovers_recent_district_flood_without_claiming_po
     assert record.properties["location_precision"] == "admin_area"
     assert "未提供查詢門牌" in record.properties["limitations"][0]
     assert record.properties["full_text_stored"] is False
+
+
+def test_tainan_reviewed_incident_bootstrap_survives_official_index_egress_failure() -> None:
+    result = search_tainan_official_flood_news(
+        location_text="培安路305巷",
+        lat=23.03882,
+        lng=120.21349,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: "",
+    )
+
+    assert result.attempted is True
+    assert result.health_status == "degraded"
+    assert len(result.records) == 1
+    assert result.records[0].title.startswith("黃偉哲視察安南、仁德淹水災情")
+    assert result.records[0].url == (
+        "https://www.tainan.gov.tw/News_Content.aspx?n=13370&s=8832256"
+    )
+    assert "隨版本審核" in result.message
 
 
 def test_bing_rss_redirects_are_canonicalized_before_deduplication() -> None:
