@@ -237,6 +237,47 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
                 """,
                 (raw_snapshot_id, adapter_key, raw_ref, adapter_key),
             )
+            connection.execute(
+                """
+                INSERT INTO staging_evidence (
+                    raw_snapshot_id,
+                    data_source_id,
+                    source_id,
+                    source_type,
+                    event_type,
+                    title,
+                    summary,
+                    url,
+                    occurred_at,
+                    observed_at,
+                    geom,
+                    confidence,
+                    validation_status,
+                    rejection_reason,
+                    payload
+                )
+                SELECT
+                    raw_snapshot_id,
+                    data_source_id,
+                    source_id,
+                    source_type,
+                    event_type,
+                    title,
+                    summary,
+                    url,
+                    occurred_at,
+                    observed_at,
+                    geom,
+                    confidence,
+                    validation_status,
+                    rejection_reason,
+                    payload
+                FROM staging_evidence
+                WHERE raw_snapshot_id = %s
+                  AND validation_status = 'accepted'
+                """,
+                (raw_snapshot_id,),
+            )
             connection.commit()
 
         writer = PostgresHistoricalCoverageWriter(database_url=isolated_url)

@@ -137,17 +137,35 @@ _SOURCE_ROWS_CTE = f"""
         WHERE raw.raw_ref = %s
           AND raw.adapter_key = %s
     ),
-    accepted_rows AS MATERIALIZED (
+    accepted_row_candidates AS MATERIALIZED (
         SELECT
             staging.id,
+            COALESCE(
+                NULLIF(staging.payload->>'evidence_id', ''),
+                CASE
+                    WHEN staging.source_id IS NOT NULL THEN
+                        staging.source_id || '|' || staging.occurred_at::text
+                    ELSE NULL
+                END,
+                staging.id::text
+            ) AS evidence_key,
             EXTRACT(YEAR FROM staging.occurred_at)::integer AS coverage_year,
-            staging.payload->'location_payload'->'geometry' AS geometry_payload
+            staging.payload->'location_payload'->'geometry' AS geometry_payload,
+            staging.created_at
         FROM staging_evidence staging
         JOIN target_snapshot snapshot ON snapshot.id = staging.raw_snapshot_id
         WHERE staging.validation_status = 'accepted'
           AND staging.event_type = 'flood_report'
           AND staging.occurred_at IS NOT NULL
           AND EXTRACT(YEAR FROM staging.occurred_at)::integer BETWEEN %s AND %s
+    ),
+    accepted_rows AS MATERIALIZED (
+        SELECT DISTINCT ON (candidate.evidence_key)
+            candidate.id,
+            candidate.coverage_year,
+            candidate.geometry_payload
+        FROM accepted_row_candidates candidate
+        ORDER BY candidate.evidence_key, candidate.created_at DESC, candidate.id DESC
     ),
     source_rows AS MATERIALIZED (
         SELECT
