@@ -67,14 +67,35 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
-- At 2026-09-01 18:24 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
-  reported `c448da5f714eb975967225ee0b74a7caf0def068`; PostgreSQL and Redis were
+- At 2026-09-01 20:14 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `6d28f82cbdd2bc6430b7832a4aa15aa6de7d3186`; PostgreSQL and Redis were
   healthy. The deployment-identity smoke passed, there were no open Dependabot,
   code-scanning, or secret-scanning alerts, and there were no open pull requests.
-  CWA rainfall recovered automatically at 10:16 UTC and reported `operational`.
   The strict public-risk smoke now fails closed only because Civil IoT sewer water
   level reports `pipeline_unavailable`; retained sewer observations remain
   visible for traceability but are not used to claim low realtime risk.
+- PR [#306](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/306)
+  keeps the scheduler on its configured fixed-rate cadence by subtracting tick
+  and maintenance runtime from the next sleep. PR
+  [#307](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/307)
+  reduced historical coverage from two complete attribution statements to one.
+  Production then exposed that an unchanged 8,646-item NSTC snapshot had
+  accumulated 11 copies in staging, producing 95,106 attributed rows and a
+  659-second source runtime. PR
+  [#308](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/308)
+  now deduplicates by stable evidence identity and uses subdivided reviewed
+  county boundaries. Its PostGIS contract repeats the entire staging batch and
+  still requires six unique attributions. In production, the first and second
+  post-deploy CWA attempts started at 12:06:30 and 12:12:30 UTC respectively:
+  the complete source, historical-attribution, maintenance, and scheduler path
+  returned to a six-minute start-to-start interval with a healthy lease heartbeat.
+- The latest real-schedule Hosted Monitoring run
+  [#33502684679](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33502684679)
+  passed the public API contract and deployment smoke against its then-current
+  `032869a3c6c370d87c2fdb43e70b12c7ca43359f`. It failed the public-risk evidence
+  step only because `official.civil_iot.sewer_water_level` remained
+  `pipeline_unavailable`; downstream browser and freshness steps were skipped by
+  fail-fast ordering. Issues #289 and #293 therefore remain open.
 - Real-schedule Hosted Monitoring run
   [#33470758398](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33470758398)
   passed the public API contract, deployment, public-risk, and desktop and
