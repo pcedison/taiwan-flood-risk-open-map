@@ -140,6 +140,22 @@ sources:
       - "The source event time is taken only from a parseable KML event label or field."
       - "KML points and polygons describe source-provided historical locations and extents."
       - "The catalog landing page is retained as a historical dataset and may be withdrawn."
+  - key: official.nstc.flood_disaster_points
+    need: nationwide_recent_historical_flood_points
+    status: primary
+    data_gov_dataset_id: "130016"
+    data_gov_url: "https://data.gov.tw/dataset/130016"
+    title: "近5年淹水災點資料"
+    provider: "National Science and Technology Council"
+    resource_url: "https://mas.nstc.gov.tw/OPENDATA/GetFile?fileodr=1&format=csv&serialno=455"
+    resource_format: "CSV using TWD97 / TM2 zone 121 coordinates"
+    update_frequency: "irregular rolling recent-years snapshot"
+    license: "Government Open Data License, version 1.0"
+    integration_decision: "Fetch the current official CSV daily, preserve its raw snapshot, and persist point evidence with year-only event semantics."
+    limitations:
+      - "Rows contain an event year rather than an exact event timestamp."
+      - "The rolling year range must be derived from each fetched snapshot and must not be hard-coded."
+      - "A missing point is not evidence that a location did not flood."
   - key: official.wra.flood_incident
     need: nationwide_reported_flood_incidents
     status: disabled_by_default
@@ -174,23 +190,6 @@ sources:
     limitations:
       - "Planning/reference layer, not a realtime flood warning."
       - "Must not be used as land-use control or legal determination evidence."
-  - key: official.nstc.flood_disaster_points
-    need: observed_historical_flood_points
-    status: official_snapshot
-    data_gov_dataset_id: "130016"
-    data_gov_url: "https://data.gov.tw/dataset/130016"
-    title: "Flooding disaster point snapshot"
-    provider: "National Science and Technology Council"
-    resource_url: "https://mas.nstc.gov.tw/OPENDATA/GetFile?fileodr=1&format=csv&serialno=455"
-    resource_format: "CSV"
-    update_frequency: "irregular"
-    license: "Government Open Data License, version 1.0"
-    integration_decision: "Use as an official observed historical flood-point snapshot before news/wiki corroboration; do not treat it as rolling current-year coverage."
-    limitations:
-      - "Direct 2026-05-13 resource download returned 5,923 rows covering 2018-2022 only; no 2023-2026 events are present."
-      - "Provides year and point coordinates only, not full event timestamps, depth, address, or impact details."
-      - "Source coordinates are TWD97 / TM2 and must be converted to EPSG:4326 before spatial queries."
-      - "Recent flood facts must be corroborated through public news/wiki metadata or other separately modeled official sources, not merged into this official snapshot."
   - key: official.gov_tw.flood_citation
     need: recent_official_flood_history_gap_recovery
     status: primary_gap_recovery

@@ -87,6 +87,8 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.source_cwa_api_enabled is False
     assert settings.source_wra_api_enabled is False
     assert settings.source_wra_historical_flood_api_enabled is False
+    assert settings.source_nstc_flood_disaster_points_enabled is None
+    assert settings.source_nstc_flood_disaster_points_api_enabled is False
     assert settings.source_flood_potential_geojson_enabled is False
     assert settings.source_ptt_candidate_approval_ack is False
     assert settings.source_dcard_candidate_approval_ack is False
@@ -98,6 +100,8 @@ def test_cwa_api_runtime_client_config_is_safe_by_default() -> None:
     assert settings.wra_api_timeout_seconds == 8
     assert settings.wra_historical_flood_index_url is None
     assert settings.wra_historical_flood_timeout_seconds == 8
+    assert settings.nstc_flood_disaster_points_resource_url is None
+    assert settings.nstc_flood_disaster_points_timeout_seconds == 12
     assert settings.flood_potential_geojson_url is None
     assert settings.flood_potential_geojson_timeout_seconds == 8
     assert settings.source_ncdr_cap_enabled is False

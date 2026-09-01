@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-08-31 14:28 Asia/Taipei (06:28 UTC)
+Last verified: 2026-09-01 Asia/Taipei
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -39,13 +39,13 @@ the live verification sources listed below.
   visible but do not by themselves backfill events or complete any cell.
 - The second implementation slice adds `config/source-registry.yaml` as the canonical
   enablement-decision ledger for all worker, API-only, and catalog-only sources.
-  CI compares it with the 57 worker adapters, 51 V1 runtime keys, 11 hosted
-  deployment defaults, source-contract files, and 58 migrated catalog rows.
+  CI compares it with the 58 worker adapters, 52 V1 runtime keys, 12 hosted
+  deployment defaults, source-contract files, and 59 migrated catalog rows.
   This prevents silent source drift; it does not activate a disabled source.
 - The PR 2 observability slice adds migration `0057`, persists the
   `scheduler.v1-baseline-adapters` heartbeat through the database lease path,
   and exposes `GET /v1/ingestion-readiness`. The public response summarizes the
-  11 production-backbone sources and the reviewed rainfall, water-level,
+  12 production-backbone sources and the reviewed rainfall, water-level,
   flood-depth, and warning contracts for all 22 counties without exposing
   adapter keys, holder IDs, URLs, credentials, or raw errors. Readiness remains
   fail closed, reports the deployment SHA checked by hosted smoke, and does not
@@ -53,8 +53,29 @@ the live verification sources listed below.
   slice does not complete the PR 2 production exit gate by itself: hosted raw,
   staging, promotion, latest, adapter-run, and sustained-cadence evidence must
   still be verified after deployment.
+- The third implementation slice adds migration `0058` and the worker-first
+  `official.nstc.flood_disaster_points` adapter. A 2026-09-01 direct read of the
+  current official CSV returned 8,646 normalized rows spanning 2021–2025,
+  replacing the repository's frozen 5,923-row 2018–2022 snapshot as the
+  preferred copy for overlapping source IDs. The adapter derives available
+  years from every successful snapshot instead of hard-coding a range. After
+  promotion, a fail-closed PostGIS writer records source-level checks and
+  aggregates the exact snapshot into 22-county/year coverage cells; accepted
+  points that cannot be assigned to the reviewed active boundary snapshot fail
+  the source run instead of disappearing. This slice does not invent 2026
+  events or mark years absent from the official payload as checked.
 
 ## Recorded production checkpoint
+
+- PR [#295](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/295)
+  merged as `2fa2ea0bf54a1f8c57977561cbc163ceb31c8846`. CI and CodeQL passed,
+  production reported the same deployment SHA, and both the deployment smoke
+  and strict DB-backed public-risk evidence smoke passed. The public ingestion
+  readiness endpoint reported a healthy scheduler but degraded source health:
+  the platform's stale adapter-key environment value had omitted WRA historical
+  ingestion, and four Civil IoT sources were failing upstream. The next slice
+  makes the canonical revision's required adapter list additive so an older
+  platform value can add optional sources but cannot remove required ones.
 
 - Recent-history recovery is no longer a Tainan-only exception. The hosted API
   now applies one nationwide rule to Taiwan query points whose newest observed

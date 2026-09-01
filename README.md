@@ -126,8 +126,13 @@ Current placeholder boundaries:
   the API realtime bridge can fetch CWA/WRA observations for risk responses in
   local/dev runtimes only (hosted runtimes are gated to worker-persisted
   evidence; see [ADR-0010](docs/adr/0010-realtime-bridge-as-local-diagnostic.md)),
-  while the hosted worker persists gated CWA, WRA, NCDR, Civil IoT, and Tainan
-  official observations through the managed ingestion path. Flood-potential
+  while the hosted worker persists gated CWA, WRA, NCDR, Civil IoT, Tainan,
+  and NSTC nationwide flood-disaster observations through the managed
+  ingestion path. The NSTC history adapter reads the current official CSV,
+  derives the years actually present in each snapshot, and records fail-closed
+  per-source county/year coverage after promotion; the repository's older
+  bundled CSV remains fallback-only for source identities absent from the DB.
+  Flood-potential
   still needs reviewed upstream URL/license, credential, cadence, and egress
   approval before production use.
 - Realtime source freshness now uses a four-state source model:

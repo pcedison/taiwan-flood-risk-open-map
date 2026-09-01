@@ -44,6 +44,10 @@ def test_official_source_catalog_schema_and_primary_sources() -> None:
         "72d7aee9-e29b-49a2-bd0b-54acc8e3b75c?format=JSON&sort=_importdate+asc"
     )
     assert sources["official.wra.historical_flood"]["status"] == "disabled_by_default"
+    assert sources["official.nstc.flood_disaster_points"]["data_gov_dataset_id"] == (
+        "130016"
+    )
+    assert sources["official.nstc.flood_disaster_points"]["status"] == "primary"
     assert sources["official.ncdr.cap"]["status"] == "disabled_by_default"
     assert sources["official.ncdr.cap"]["resource_url"] == (
         "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx"
@@ -108,6 +112,7 @@ def test_runtime_official_adapter_metadata_matches_source_catalog() -> None:
         "official.wra.water_level",
         "official.wra_iow.flood_depth",
         "official.wra.historical_flood",
+        "official.nstc.flood_disaster_points",
         "official.wra.flood_incident",
         "official.ncdr.cap",
         "official.npa.police_radio_traffic",

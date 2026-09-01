@@ -191,7 +191,7 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     )
 
 
-def test_query_nearby_evidence_uses_trusted_active_snapshot_for_wra_history_only() -> None:
+def test_query_nearby_evidence_uses_trusted_active_historical_snapshots_only() -> None:
     connection = _FakeConnection(rows=[])
 
     query_nearby_evidence(
@@ -203,7 +203,9 @@ def test_query_nearby_evidence_uses_trusted_active_snapshot_for_wra_history_only
     )
 
     sql, _params = connection.cursor_instance.executions[0]
-    assert "ds.adapter_key <> 'official.wra.historical_flood'" in sql
+    assert "'official.wra.historical_flood'" in sql
+    assert "'official.nstc.flood_disaster_points'" in sql
+    assert "ds.adapter_key NOT IN" in sql
     assert "e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')" in sql
     assert "snapshot_generation_mode" not in sql
     assert "runtime_pipeline_status" not in sql

@@ -2,7 +2,10 @@
 
 PostGIS migrations for local development and deployment.
 
-Files in this directory are mounted into the PostgreSQL container init directory for fresh local databases.
+The tracked migration runner is the only authority that applies these files.
+PostgreSQL does not mount this directory into `docker-entrypoint-initdb.d`:
+doing so would execute migrations without recording their checksums and would
+then replay old migrations against a newer schema.
 
 ## Applying migrations to an existing database
 
@@ -13,7 +16,11 @@ docker compose up -d postgres
 docker compose --profile tools run --rm migrate
 ```
 
-For Zeabur or another Docker Compose compatible host, run the same `migrate` service as an explicit release step before restarting `api`, `worker`, and `scheduler`. The current SQL files are idempotent, so the command is safe to re-run while the schema remains in skeleton mode.
+For Zeabur or another Docker Compose compatible host, run the same `migrate`
+service as an explicit release step before restarting `api`, `worker`, and
+`scheduler`. The runner records every applied filename and checksum in
+`schema_migrations`, skips recorded migrations, rejects drift, and serializes
+concurrent runs with a PostgreSQL advisory lock.
 
 Validate migration filenames and basic SQL shape locally:
 
@@ -25,21 +32,20 @@ CI runs both `validate_migrations.py` and a PostGIS smoke check that applies the
 
 ## Local initialization
 
-The local `postgres` service runs these files once, in filename order, when the
-`postgres-data` volume is empty.
+Starting the local `postgres` service creates an empty PostGIS database. Apply
+the tracked migrations explicitly before starting API or worker services:
 
 ```powershell
 docker compose up -d postgres
+docker compose --profile tools run --rm migrate
 ```
 
-To re-run migrations from an empty local database, remove only the local
-PostgreSQL volume and start the service again:
-
-```powershell
-docker compose down
-docker volume rm flood-risk_postgres-data
-docker compose up -d postgres
-```
+Do not mount all numbered SQL files into PostgreSQL's init directory or run them
+with an untracked shell loop. A legacy local volume created by the former
+init-directory path can contain schema objects without `schema_migrations`;
+back it up and rebuild that development database, or have an operator review
+and baseline it deliberately. The runner does not guess which migrations a
+non-empty untracked database has already received.
 
 Smoke-check the Phase 1 tables:
 
@@ -251,7 +257,7 @@ timestamps, and limitations. The migration does not backfill events or mark any
 cell complete.
 
 `0057_ingestion_runtime_readiness.sql` persists the V1 scheduler heartbeat and
-the 11-source production-backbone readiness profile. Worker lease renewals now
+the initial 11-source production-backbone readiness profile. Worker lease renewals now
 refresh the public-safe heartbeat atomically, while graceful release records a
 stopped state; an expired heartbeat therefore cannot borrow API/database
 liveness. `/v1/ingestion-readiness` combines that state with exact adapter-run
@@ -259,3 +265,12 @@ and promotion outcomes plus the reviewed 22-county signal manifests. Ordinary
 sources use a 30-minute stale gate and the daily WRA historical snapshot uses a
 25-hour gate. The endpoint exposes no holder, URL, credential, raw error, or
 secret metadata, and county readiness is explicitly not nearby-station proof.
+
+`0058_nstc_recent_history_ingestion.sql` registers the official NSTC flood
+disaster-point source as a daily production-backbone adapter, bringing the
+readiness profile to 12 sources. It also creates
+`historical_coverage_source_checks`, which records each promoted historical
+snapshot's per-source, per-county, per-year result separately from the
+aggregated `historical_ingestion_coverage` state. A successful live snapshot can
+therefore advance only the years actually present in that payload, while a
+failed or unassignable snapshot cannot be misrepresented as an empty year.

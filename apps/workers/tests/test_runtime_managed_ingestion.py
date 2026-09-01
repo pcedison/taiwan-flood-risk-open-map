@@ -44,6 +44,7 @@ EXPECTED_V1_BASELINE_ADAPTER_KEYS = (
     "official.cwa.tide_level",
     "official.flood_potential.geojson",
     "official.ncdr.cap",
+    "official.nstc.flood_disaster_points",
     "official.wra.flood_incident",
     "official.wra.historical_flood",
     "official.wra.water_level",

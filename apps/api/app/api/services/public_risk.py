@@ -278,7 +278,10 @@ def assess_risk(
         risk_request,
         now=created_at,
     )
-    official_historical_records = official_history_lookup.records
+    official_historical_records = _exclude_persisted_historical_records(
+        official_history_lookup.records,
+        db_evidence_items=db_evidence_items,
+    )
     if (
         dependencies.can_use_profile_fast_path(db_evidence_items)
         and not official_historical_records
@@ -629,6 +632,21 @@ def _merge_realtime_data_freshness(
     ]
     merged.extend(persisted_by_source.values())
     return merged
+
+
+def _exclude_persisted_historical_records(
+    records: HistoricalRecordsWithDistance,
+    *,
+    db_evidence_items: tuple[Evidence, ...] | None,
+) -> HistoricalRecordsWithDistance:
+    """Prefer worker-persisted rows over the same bundled snapshot identity."""
+
+    if not db_evidence_items:
+        return records
+    persisted_source_ids = {item.source_id for item in db_evidence_items}
+    return tuple(
+        item for item in records if item[0].source_id not in persisted_source_ids
+    )
 
 
 def assessment_result_snapshot(

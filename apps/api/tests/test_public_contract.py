@@ -552,8 +552,8 @@ def test_ingestion_readiness_contract_is_public_safe_and_fail_closed(
     payload = response.json()
     assert payload["status"] == "down"
     assert payload["scheduler"]["status"] == "healthy"
-    assert payload["source_summary"]["expected_source_count"] == 11
-    assert payload["source_summary"]["missing_source_count"] == 10
+    assert payload["source_summary"]["expected_source_count"] == 12
+    assert payload["source_summary"]["missing_source_count"] == 11
     assert payload["jurisdiction_summary"]["expected_county_count"] == 22
     assert payload["jurisdiction_summary"]["unavailable_county_count"] == 21
     assert payload["jurisdiction_summary"]["minimum_coverage_met"] is False
@@ -595,7 +595,21 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
             captured["params"] = params
 
         def fetchone(self) -> tuple[bool, ...]:
-            return (True, True, True, True, True, True, True, True, True, True, True, True)
+            return (
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+            )
 
     health_routes._check_required_schema(FakeCursor())
 
@@ -603,13 +617,14 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        57,
-        "0057_ingestion_runtime_readiness.sql",
-        "00f9c4d6a3e426c67ccbc1e388fc715e65fdeb3fd110bfe3b0bd112f92e6d314",
-        57,
+        58,
+        "0058_nstc_recent_history_ingestion.sql",
+        "9b1526bb1ed85a15dd42415192879ec080a93be5021ee4efa8f377e392a31f53",
+        58,
         "public.ingestion_scheduler_heartbeats",
         "public.ingestion_readiness_sources",
         "public.historical_coverage_cells",
+        "public.historical_coverage_source_checks",
         "public.station_inventory_snapshots",
         "public.realtime_jurisdiction_boundary_snapshots",
         "public.realtime_jurisdiction_boundaries",
@@ -641,7 +656,7 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
                 True,
             )
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0057 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0058 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 

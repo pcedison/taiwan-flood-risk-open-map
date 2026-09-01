@@ -48,7 +48,11 @@ REALTIME_ADAPTER_KEYS = frozenset(
     }
 )
 STATIC_SLOW_CADENCE_ADAPTER_KEYS = frozenset(
-    {"official.wra.historical_flood", "official.flood_potential.geojson"}
+    {
+        "official.wra.historical_flood",
+        "official.nstc.flood_disaster_points",
+        "official.flood_potential.geojson",
+    }
 )
 
 

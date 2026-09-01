@@ -1,6 +1,6 @@
 # 全台淹水歷史與感測資料技術債修正計畫
 
-日期：2026-08-31
+日期：2026-08-31（2026-09-01 更新實作進度）
 
 狀態：實作中；本文件記錄唯讀查核、工程決策與驗收標準，不代表來源已啟用或正式環境已完成
 
@@ -9,9 +9,15 @@
 - migration `0056` 已建立 198 格 fail-closed coverage ledger 與 public-safe query；
 - `config/source-registry.yaml` 已統一記錄 worker、API-only、catalog-only 來源的啟用決策，
   並由 CI 查核 runtime scope、部署預設、契約檔與遷移後 catalog；
-- migration `0057` 已將 V1 scheduler heartbeat 與 11 個 production-backbone 來源契約持久化，
+- migration `0057` 已將 V1 scheduler heartbeat 與 production-backbone 來源契約持久化；
   `/v1/ingestion-readiness` 會 fail-closed 彙總來源狀態與 22 縣市四類核心訊號；
-- 198 格目前仍為 `unassessed`，近期年份回填與 PR 2 的正式環境持續寫入證據尚未完成。
+- migration `0058` 新增免密鑰的 `official.nstc.flood_disaster_points` 日更 adapter，
+  production-backbone 因此增為 12 個來源；2026-09-01 官方 live CSV 實抓為 8,646 筆，
+  實際年份為 2021–2025，不再依賴專案凍結的 2018–2022 快照；
+- 歷史來源成功 promotion 後會以相同 raw snapshot、經審核的 22 縣市界線，寫入
+  `historical_coverage_source_checks` 並彙總 county/year ledger；年份由每次回應動態推導；
+- 2018–2020 目前仍只有凍結基線補缺，2026 在本次官方 payload 中沒有事件列；其餘
+  未完成來源查核的格仍保持 `unassessed`，不得解讀為沒有淹水。
 
 ## 結論
 
@@ -65,8 +71,10 @@
 因此在地址查詢中只出現 2016 年，不是 UI 年齡說明可以解決的問題；根因是 ingestion
 沒有建立多來源、跨年度、持續累積的官方事件庫。
 
-國科會資料集 `130016` 可作近年基線，但官方頁面同樣標示不定期更新及「2023 年產製」，
-不能代表 2023 年以後持續有新事件。
+國科會資料集 `130016` 可作近年基線。專案原先內建的 5,923 筆 CSV 只到 2022，
+但 2026-09-01 直接讀取官方下載端點得到 8,646 筆、涵蓋 2021–2025。這證明凍結檔案本身
+就是資料債，也證明不能把資料集名稱的「近五年」或舊 catalog 年份當成 live contract。
+修正後每次成功 snapshot 都會重新推導實際年份；官方未回傳的年度不會被偽造為已查核。
 
 ### 3. WRA 最新事件來源已有 adapter，但正式啟用條件未完成
 
@@ -97,9 +105,10 @@
 token／契約；連江目前只找到中央雨量、潮位與警戒等最低脈絡，沒有地方道路淹水深度或
 下水道 live read API。
 
-`V1_BASELINE_ADAPTER_KEYS` 已列入中央與地方 adapter，但 `.env.example` 的
-`REALTIME_BACKBONE_ADAPTER_KEYS`／`WORKER_ENABLED_ADAPTER_KEYS` 範例仍只有 10 個來源。
-這只證明部署契約可能漂移，不能單靠範例檔推定正式環境實際開啟哪些來源。
+`V1_BASELINE_ADAPTER_KEYS` 已列入中央與地方 adapter。PR #295 部署後的唯讀 readiness
+進一步證實 Zeabur 舊的 `REALTIME_BACKBONE_ADAPTER_KEYS` 會覆蓋新 revision 的 canonical
+清單，造成 WRA historical 即使程式已列為必要來源仍被停用。修正後 force mode 會合併
+canonical required keys 與平台選填 keys；舊平台值只能增加來源，不能移除 revision 必要來源。
 
 ### 5. 正式 readiness 沒有證明 ingestion 健康
 
@@ -228,13 +237,13 @@ public API 只讀資料庫 → 網站
 
 - worker 取得／續租 V1 scheduler lease 時，會在同一交易持久化 public-safe heartbeat；
 - graceful release 會寫入 `stopped`，未正常停止則由 TTL 判為 `stale`；
-- 11 個部署預設來源有獨立 stale gate，日更歷史快照不套用 30 分鐘即時門檻；
+- 12 個部署預設來源有獨立 stale gate，日更歷史快照不套用 30 分鐘即時門檻；
 - readiness 逐筆查核最新 ingestion job 與相同 run 的 promotion outcome；
 - 22 縣市必須各有 rainfall、water level、flood depth、flood warning 四類有效 mapping proof，
   且所有 required source operational，才計入 minimum coverage；
 - API 不公開 adapter key、lease holder、URL、credential、raw error 或 secret metadata。
 - hosted deployment smoke 會比對 `/health`、`/ready` 與 ingestion readiness 的 merged SHA，
-  並拒絕 stale／stopped／missing scheduler heartbeat 或不完整的 11-source／22-county 契約。
+  並拒絕 stale／stopped／missing scheduler heartbeat 或不完整的 12-source／22-county 契約。
 
 尚未完成：正式環境部署後的連續 cadence、raw／staging／promotion／latest／adapter run 寫入證據，
 以及 7 日驗收；因此 PR 2 退出條件仍未達成。
@@ -253,6 +262,20 @@ public API 只讀資料庫 → 網站
 - WRA latest-event API 取得正式 credential／contract 後開始排程累積；
 - 日期區間 SOAP、七天 feed 與地方官方頁面各自通過 contract review 後才啟用；
 - 搜尋引擎僅作 discovery，不保存搜尋 redirect 為 citation，不在 request path 執行。
+
+已完成的工程切片：
+
+- 新增 source-specific、精確 URL allowlist 的 NSTC 官方 CSV adapter，保留 TLS 憑證與
+  hostname 驗證，只針對該官方 legacy 端點降低 cipher 相容層級；
+- TWD97 TM2 座標轉為 WGS84，保留 FID、年份與原始資料來源，年度精度不冒充完整事件日期；
+- live smoke 實得 8,646 筆 2021–2025 資料，所有可用年份由 payload 動態推導；
+- promotion 後以 `ST_Covers` 對 reviewed active county boundary 分區，逐來源／縣市／年份
+  upsert 查核；界線不是 22 縣市或有 accepted point 無法分區時 fail closed；
+- DB worker 資料與舊 bundled CSV source ID 重疊時，以已持久化資料優先，避免風險重複計分；
+- migration、adapter、registry、PostGIS 22 縣市／兩年度與冪等重跑測試已加入 CI。
+
+尚未完成：2018–2020 的 live 官方替代來源、2026 官方事件回補、WRA latest-event credential，
+以及 198 格全數離開 `unassessed`。這些缺口不因本切片接上 2021–2025 就被宣稱完成。
 
 退出條件：198 格都有可追溯狀態；已知近期事件跨縣市 regression fixtures 通過；最新事件
 離開 upstream latest feed 後仍可由資料庫查得。

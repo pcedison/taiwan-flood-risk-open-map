@@ -20,6 +20,10 @@ from app.cli.persistence import build_demo_persistence_writers
 from app.config import WorkerSettings
 from app.jobs.frozen_legacy import report_frozen_legacy
 from app.jobs.freshness import STATIC_SLOW_CADENCE_ADAPTER_KEYS
+from app.jobs.historical_coverage import (
+    HISTORICAL_COVERAGE_ADAPTER_KEYS,
+    PostgresHistoricalCoverageWriter,
+)
 from app.jobs.ingestion import (
     IngestionRunSummaryWriter,
     record_pipeline_status,
@@ -488,6 +492,47 @@ def _run_v1_baseline_tick(
                 elapsed_ms=_elapsed_ms(source_started),
             )
             continue
+
+        if adapter_key in HISTORICAL_COVERAGE_ADAPTER_KEYS:
+            summary = next(
+                (
+                    item
+                    for item in result.summaries
+                    if item.adapter_key == adapter_key and item.raw_ref is not None
+                ),
+                None,
+            )
+            if summary is not None:
+                try:
+                    coverage = PostgresHistoricalCoverageWriter(
+                        database_url=database_url
+                    ).record_success(
+                        adapter_key=adapter_key,
+                        raw_ref=summary.raw_ref or "",
+                        assessed_at=summary.finished_at,
+                    )
+                except Exception as exc:  # noqa: BLE001 - fail closed per source
+                    had_failure = True
+                    failed_count += 1
+                    _record_v1_source_failure(
+                        run_writer,
+                        adapter_key=adapter_key,
+                        run_at=source_started_at,
+                    )
+                    _log_v1_source_failed(
+                        adapter_key=adapter_key,
+                        phase="historical_coverage",
+                        exception_class=exc.__class__.__name__,
+                        elapsed_ms=_elapsed_ms(source_started),
+                    )
+                    continue
+                log_event(
+                    "worker.runtime.v1_baseline.historical_coverage_completed",
+                    adapter_key=adapter_key,
+                    assessed_year_count=len(coverage.assessed_years),
+                    source_check_count=coverage.source_check_count,
+                    attributed_record_count=coverage.attributed_record_count,
+                )
 
         completed_count += 1
         log_event(

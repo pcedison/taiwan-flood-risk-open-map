@@ -163,10 +163,20 @@ def _prepare_history_snapshot_schema(database_url: str) -> None:
         )
 
 
-def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good() -> None:
+@pytest.mark.parametrize(
+    "history_adapter_key",
+    (
+        "official.wra.historical_flood",
+        "official.nstc.flood_disaster_points",
+    ),
+)
+def test_history_reader_switches_complete_snapshot_and_keeps_last_known_good(
+    history_adapter_key: str,
+) -> None:
     database_url = _database_url()
-    raw_a = f"raw/official/wra/historical_flood/{'a' * 64}.json"
-    raw_b = f"raw/official/wra/historical_flood/{'b' * 64}.json"
+    adapter_path = history_adapter_key.replace(".", "/")
+    raw_a = f"raw/{adapter_path}/{'a' * 64}.json"
+    raw_b = f"raw/{adapter_path}/{'b' * 64}.json"
     history_source_id = uuid4()
     ordinary_source_id = uuid4()
     tainan_source_id = uuid4()
@@ -186,12 +196,13 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                 INSERT INTO data_sources (
                     id, adapter_key, is_enabled, metadata, runtime_pipeline_status
                 ) VALUES
-                    (%s, 'official.wra.historical_flood', true, %s::jsonb, 'succeeded'),
+                    (%s, %s, true, %s::jsonb, 'succeeded'),
                     (%s, 'official.test.ordinary', true, '{}'::jsonb, 'succeeded'),
                     (%s, 'local.tainan.flood_sensor', true, '{}'::jsonb, 'succeeded')
                 """,
                 (
                     history_source_id,
+                    history_adapter_key,
                     Jsonb({"active_snapshot_raw_ref": raw_a}),
                     ordinary_source_id,
                     tainan_source_id,
@@ -292,9 +303,9 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                     'active_snapshot_raw_ref',
                     %s::text
                 )
-                WHERE adapter_key = 'official.wra.historical_flood'
+                WHERE adapter_key = %s
                 """,
-                (raw_b,),
+                (raw_b, history_adapter_key),
             )
         # Atomic activation switches the full generation, including removed rows.
         assert visible_ids() == {str(b_shared_id), str(ordinary_id)}
@@ -304,8 +315,9 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                 """
                 UPDATE data_sources
                 SET runtime_pipeline_status = 'failed'
-                WHERE adapter_key = 'official.wra.historical_flood'
-                """
+                WHERE adapter_key = %s
+                """,
+                (history_adapter_key,),
             )
         assert visible_ids() == {str(b_shared_id), str(ordinary_id)}
 
@@ -314,8 +326,9 @@ def test_wra_history_reader_switches_complete_snapshot_and_keeps_last_known_good
                 """
                 UPDATE data_sources
                 SET metadata = '{}'::jsonb
-                WHERE adapter_key = 'official.wra.historical_flood'
-                """
+                WHERE adapter_key = %s
+                """,
+                (history_adapter_key,),
             )
         assert visible_ids() == {str(ordinary_id)}
 
