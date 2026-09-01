@@ -181,32 +181,36 @@ _SOURCE_ROWS_CTE = f"""
           AND snapshot.imported_count = 22
           AND snapshot.manifest_sha256 = snapshot.approved_manifest_sha256
     ),
-    exact_attributed_rows AS MATERIALIZED (
-        SELECT
+    point_attributed_rows AS MATERIALIZED (
+        SELECT DISTINCT ON (source.id)
             source.id,
             source.coverage_year,
-            matched.jurisdiction_code
+            boundary.jurisdiction_code
         FROM source_rows source
-        JOIN LATERAL (
-            SELECT boundary.jurisdiction_code
-            FROM active_boundaries boundary
-            WHERE ST_GeometryType(source.geom) = 'ST_Point'
-              AND ST_Covers(boundary.geom, source.geom)
-            ORDER BY ST_Area(boundary.geom::geography), boundary.jurisdiction_code
-            LIMIT 1
-        ) matched ON true
-
-        UNION ALL
-
+        JOIN active_boundaries boundary
+          ON boundary.geom && source.geom
+         AND ST_Covers(boundary.geom, source.geom)
+        WHERE ST_GeometryType(source.geom) = 'ST_Point'
+        ORDER BY source.id, boundary.jurisdiction_code
+    ),
+    polygon_attributed_rows AS MATERIALIZED (
         SELECT
             source.id,
             source.coverage_year,
             boundary.jurisdiction_code
         FROM source_rows source
         JOIN active_boundaries boundary
-          ON ST_GeometryType(source.geom) IN ('ST_Polygon', 'ST_MultiPolygon')
+          ON boundary.geom && source.geom
          AND ST_Intersects(boundary.geom, source.geom)
          AND ST_Area(ST_Intersection(boundary.geom, source.geom)::geography) > 0
+        WHERE ST_GeometryType(source.geom) IN ('ST_Polygon', 'ST_MultiPolygon')
+    ),
+    exact_attributed_rows AS MATERIALIZED (
+        SELECT id, coverage_year, jurisdiction_code
+        FROM point_attributed_rows
+        UNION ALL
+        SELECT id, coverage_year, jurisdiction_code
+        FROM polygon_attributed_rows
     ),
     unattributed_point_rows AS MATERIALIZED (
         SELECT source.id, source.coverage_year, source.geom
