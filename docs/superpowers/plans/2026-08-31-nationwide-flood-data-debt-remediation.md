@@ -269,8 +269,9 @@ public API 只讀資料庫 → 網站
   hostname 驗證，只針對該官方 legacy 端點降低 cipher 相容層級；
 - TWD97 TM2 座標轉為 WGS84，保留 FID、年份與原始資料來源，年度精度不冒充完整事件日期；
 - live smoke 實得 8,646 筆 2021–2025 資料，所有可用年份由 payload 動態推導；
-- promotion 後以 `ST_Covers` 對 reviewed active county boundary 分區，逐來源／縣市／年份
-  upsert 查核；界線不是 22 縣市或有 accepted point 無法分區時 fail closed；
+- promotion 後以相交關係對 reviewed active county boundary 分區，逐來源／縣市／年份
+  upsert 查核；僅對未相交的官方 Point 使用最近縣市界 100 公尺內的有界歸屬，並回報
+  調整筆數；界線不是 22 縣市、缺幾何或超出容許範圍時仍 fail closed；
 - DB worker 資料與舊 bundled CSV source ID 重疊時，以已持久化資料優先，避免風險重複計分；
 - migration、adapter、registry、PostGIS 22 縣市／兩年度與冪等重跑測試已加入 CI。
 

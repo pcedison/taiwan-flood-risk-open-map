@@ -136,6 +136,10 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
                 ("point-a", 2024, first_lng),
                 ("point-b", 2024, first_lng),
                 ("point-c", 2025, second_lng),
+                # Roughly 51 metres beyond the first synthetic county. Reviewed
+                # official points this close to a coastline may use the bounded
+                # nearest-county fallback instead of invalidating the snapshot.
+                ("point-near-boundary", 2024, 118.1905),
             ):
                 connection.execute(
                     """
@@ -248,8 +252,10 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
 
         assert first.assessed_years == (2024, 2025)
         assert first.source_check_count == 44
-        assert first.attributed_record_count == 4
+        assert first.attributed_record_count == 5
+        assert first.boundary_adjusted_record_count == 1
         assert second.source_check_count == 44
+        assert second.boundary_adjusted_record_count == 1
         with psycopg.connect(isolated_url) as connection:
             summary = connection.execute(
                 """
@@ -267,10 +273,67 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
                 "SELECT count(*)::integer FROM historical_coverage_source_checks"
             ).fetchone()[0]
 
-        assert summary == (44, 44, 5, 1, 1)
+        assert summary == (44, 44, 6, 1, 1)
         assert check_count == 44
 
         with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO staging_evidence (
+                    raw_snapshot_id,
+                    data_source_id,
+                    source_id,
+                    source_type,
+                    event_type,
+                    title,
+                    summary,
+                    occurred_at,
+                    observed_at,
+                    confidence,
+                    validation_status,
+                    payload
+                )
+                SELECT
+                    %s,
+                    id,
+                    'point-far-outside-boundaries',
+                    'official',
+                    'flood_report',
+                    'invalid distant point',
+                    'coverage writer must fail outside the bounded fallback',
+                    make_timestamptz(2025, 12, 31, 12, 0, 0, 'Asia/Taipei'),
+                    make_timestamptz(2025, 12, 31, 12, 0, 0, 'Asia/Taipei'),
+                    0.82,
+                    'accepted',
+                    jsonb_build_object(
+                        'adapter_key', %s::text,
+                        'raw_ref', %s::text,
+                        'location_payload', jsonb_build_object(
+                            'geometry', jsonb_build_object(
+                                'type', 'Point',
+                                'coordinates', jsonb_build_array(117.0, 23.1)
+                            )
+                        )
+                    )
+                FROM data_sources
+                WHERE adapter_key = %s
+                """,
+                (raw_snapshot_id, adapter_key, raw_ref, adapter_key),
+            )
+            connection.commit()
+
+        with pytest.raises(HistoricalCoverageWriteError, match="outside the active"):
+            writer.record_success(
+                adapter_key=adapter_key,
+                raw_ref=raw_ref,
+                assessed_at=assessed_at,
+            )
+
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                "DELETE FROM staging_evidence WHERE source_id = %s",
+                ("point-far-outside-boundaries",),
+            )
             connection.execute(
                 """
                 INSERT INTO staging_evidence (

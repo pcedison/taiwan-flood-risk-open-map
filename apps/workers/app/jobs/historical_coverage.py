@@ -10,6 +10,7 @@ ConnectionFactory = Callable[[], Any]
 
 HISTORICAL_COVERAGE_START_YEAR: Final = 2018
 HISTORICAL_COVERAGE_END_YEAR: Final = 2026
+HISTORICAL_COVERAGE_POINT_FALLBACK_METERS: Final = 100
 HISTORICAL_COVERAGE_ADAPTER_KEYS: Final[frozenset[str]] = frozenset(
     {
         "official.nstc.flood_disaster_points",
@@ -28,6 +29,7 @@ class HistoricalCoverageWriteResult:
     assessed_years: tuple[int, ...]
     source_check_count: int
     attributed_record_count: int
+    boundary_adjusted_record_count: int
 
 
 class PostgresHistoricalCoverageWriter:
@@ -54,7 +56,9 @@ class PostgresHistoricalCoverageWriter:
         if assessed_at.tzinfo is None or assessed_at.utcoffset() is None:
             raise ValueError("assessed_at must be timezone-aware")
         review_ref = (
-            f"worker-snapshot:{adapter_key}:"
+            "worker-snapshot:v2:"
+            f"point-fallback-{HISTORICAL_COVERAGE_POINT_FALLBACK_METERS}m:"
+            f"{adapter_key}:"
             f"{hashlib.sha256(raw_ref.encode('utf-8')).hexdigest()}"
         )
         with self._connect() as connection:
@@ -74,17 +78,24 @@ class PostgresHistoricalCoverageWriter:
                         "historical coverage preflight returned no row"
                     )
                 accepted_count = int(row[0])
-                attributed_count = int(row[1])
-                years = tuple(int(year) for year in (row[2] or ()))
-                boundary_count = int(row[3])
-                if accepted_count != attributed_count:
-                    raise HistoricalCoverageWriteError(
-                        "historical snapshot contains accepted points without valid geometry "
-                        "or outside the active 22-county boundary contract"
-                    )
+                geometry_count = int(row[1])
+                attributed_count = int(row[2])
+                years = tuple(int(year) for year in (row[3] or ()))
+                boundary_count = int(row[4])
+                boundary_adjusted_count = int(row[5])
                 if boundary_count != 22:
                     raise HistoricalCoverageWriteError(
                         "active historical coverage boundary contract is not exactly 22 counties"
+                    )
+                if accepted_count != geometry_count:
+                    raise HistoricalCoverageWriteError(
+                        "historical snapshot contains accepted rows without valid geometry"
+                    )
+                if geometry_count != attributed_count:
+                    raise HistoricalCoverageWriteError(
+                        "historical snapshot contains geometry outside the active 22-county "
+                        f"boundary contract and its bounded "
+                        f"{HISTORICAL_COVERAGE_POINT_FALLBACK_METERS}-metre point fallback"
                     )
                 if not years:
                     connection.commit()
@@ -93,6 +104,7 @@ class PostgresHistoricalCoverageWriter:
                         assessed_years=(),
                         source_check_count=0,
                         attributed_record_count=0,
+                        boundary_adjusted_record_count=0,
                     )
                 cursor.execute(
                     _UPSERT_SOURCE_CHECKS_SQL,
@@ -115,6 +127,7 @@ class PostgresHistoricalCoverageWriter:
             assessed_years=years,
             source_check_count=source_check_count,
             attributed_record_count=attributed_count,
+            boundary_adjusted_record_count=boundary_adjusted_count,
         )
 
     def _connect(self) -> Any:
@@ -126,7 +139,7 @@ class PostgresHistoricalCoverageWriter:
         return psycopg.connect(self._database_url)
 
 
-_SOURCE_ROWS_CTE = """
+_SOURCE_ROWS_CTE = f"""
     target_snapshot AS (
         SELECT raw.id
         FROM raw_snapshots raw
@@ -168,7 +181,7 @@ _SOURCE_ROWS_CTE = """
           AND snapshot.imported_count = 22
           AND snapshot.manifest_sha256 = snapshot.approved_manifest_sha256
     ),
-    attributed_rows AS (
+    exact_attributed_rows AS MATERIALIZED (
         SELECT
             source.id,
             source.coverage_year,
@@ -176,6 +189,43 @@ _SOURCE_ROWS_CTE = """
         FROM source_rows source
         JOIN active_boundaries boundary
           ON ST_Intersects(boundary.geom, source.geom)
+    ),
+    unattributed_point_rows AS MATERIALIZED (
+        SELECT source.id, source.coverage_year, source.geom
+        FROM source_rows source
+        WHERE ST_GeometryType(source.geom) = 'ST_Point'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM exact_attributed_rows attributed
+              WHERE attributed.id = source.id
+          )
+    ),
+    boundary_adjusted_rows AS (
+        SELECT
+            source.id,
+            source.coverage_year,
+            nearest.jurisdiction_code
+        FROM unattributed_point_rows source
+        JOIN LATERAL (
+            SELECT boundary.jurisdiction_code
+            FROM active_boundaries boundary
+            WHERE ST_DWithin(
+                boundary.geom::geography,
+                source.geom::geography,
+                {HISTORICAL_COVERAGE_POINT_FALLBACK_METERS}
+            )
+            ORDER BY
+                ST_Distance(boundary.geom::geography, source.geom::geography),
+                boundary.jurisdiction_code
+            LIMIT 1
+        ) nearest ON true
+    ),
+    attributed_rows AS (
+        SELECT id, coverage_year, jurisdiction_code
+        FROM exact_attributed_rows
+        UNION ALL
+        SELECT id, coverage_year, jurisdiction_code
+        FROM boundary_adjusted_rows
     )
 """
 
@@ -183,13 +233,15 @@ _COVERAGE_PREFLIGHT_SQL = f"""
     WITH {_SOURCE_ROWS_CTE}
     SELECT
         (SELECT count(*) FROM accepted_rows)::integer,
+        (SELECT count(*) FROM source_rows)::integer,
         (SELECT count(DISTINCT id) FROM attributed_rows)::integer,
         COALESCE(
             (SELECT array_agg(DISTINCT coverage_year ORDER BY coverage_year)
              FROM source_rows),
             ARRAY[]::integer[]
         ),
-        (SELECT count(*) FROM active_boundaries)::integer
+        (SELECT count(*) FROM active_boundaries)::integer,
+        (SELECT count(DISTINCT id) FROM boundary_adjusted_rows)::integer
 """
 
 _UPSERT_SOURCE_CHECKS_SQL = f"""

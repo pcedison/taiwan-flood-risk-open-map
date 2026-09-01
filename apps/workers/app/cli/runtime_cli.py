@@ -517,7 +517,7 @@ def _run_v1_baseline_tick(
                     _record_v1_source_failure(
                         run_writer,
                         adapter_key=adapter_key,
-                        run_at=source_started_at,
+                        run_at=summary.started_at,
                     )
                     _log_v1_source_failed(
                         adapter_key=adapter_key,
@@ -532,6 +532,9 @@ def _run_v1_baseline_tick(
                     assessed_year_count=len(coverage.assessed_years),
                     source_check_count=coverage.source_check_count,
                     attributed_record_count=coverage.attributed_record_count,
+                    boundary_adjusted_record_count=(
+                        coverage.boundary_adjusted_record_count
+                    ),
                 )
 
         completed_count += 1
