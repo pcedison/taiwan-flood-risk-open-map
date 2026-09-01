@@ -81,9 +81,9 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-09-01 20:14 Asia/Taipei checkpoint, `origin/main`, production
+the 2026-09-02 00:27 Asia/Taipei checkpoint, `origin/main`, production
 `/health`, and production `/ready` matched at
-`6d28f82cbdd2bc6430b7832a4aa15aa6de7d3186`; PostgreSQL and Redis were healthy,
+`14ffc808af31ef5ecc281917160a4aa8af667348`; PostgreSQL and Redis were healthy,
 and the hosted deployment smoke passed. The strict public-risk smoke failed
 closed only because Civil IoT sewer water level reported
 `pipeline_unavailable`. The first complete post-deploy scheduler cycle then
@@ -91,7 +91,9 @@ started CWA rainfall again after six minutes, within its 30-minute freshness
 contract. Do not treat a SHA copied into status documentation as a permanent
 deployment pin: derive the current expected SHA
 only after `git fetch origin --prune`, then verify both health endpoints. The
-latest real scheduled Hosted Monitoring run passed its public API and
+real scheduled Hosted Monitoring run
+[#33531780886](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33531780886)
+at that checkpoint passed its public API and
 deployment checks, then failed the public-risk evidence step on the same sewer
 source; its downstream browser and freshness steps were therefore skipped. The
 official RainSewer collections return HTTP 200 and the adapter completes all

@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-01 12:44 Asia/Taipei (04:44 UTC)
+Last verified: 2026-09-02 00:27 Asia/Taipei (2026-09-01 16:27 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -67,8 +67,8 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
-- At 2026-09-01 20:14 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
-  reported `6d28f82cbdd2bc6430b7832a4aa15aa6de7d3186`; PostgreSQL and Redis were
+- At 2026-09-02 00:27 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `14ffc808af31ef5ecc281917160a4aa8af667348`; PostgreSQL and Redis were
   healthy. The deployment-identity smoke passed, there were no open Dependabot,
   code-scanning, or secret-scanning alerts, and there were no open pull requests.
   The strict public-risk smoke now fails closed only because Civil IoT sewer water
@@ -89,10 +89,10 @@ the live verification sources listed below.
   post-deploy CWA attempts started at 12:06:30 and 12:12:30 UTC respectively:
   the complete source, historical-attribution, maintenance, and scheduler path
   returned to a six-minute start-to-start interval with a healthy lease heartbeat.
-- The latest real-schedule Hosted Monitoring run
-  [#33502684679](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33502684679)
-  passed the public API contract and deployment smoke against its then-current
-  `032869a3c6c370d87c2fdb43e70b12c7ca43359f`. It failed the public-risk evidence
+- At that checkpoint, the most recent real-schedule Hosted Monitoring run
+  [#33531780886](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33531780886)
+  passed the public API contract and deployment smoke against
+  `14ffc808af31ef5ecc281917160a4aa8af667348`. It failed the public-risk evidence
   step only because `official.civil_iot.sewer_water_level` remained
   `pipeline_unavailable`; downstream browser and freshness steps were skipped by
   fail-fast ordering. Issues #289 and #293 therefore remain open.
