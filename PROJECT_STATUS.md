@@ -67,19 +67,24 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
-- At 2026-09-01 14:05 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
-  reported `8a65890fa5580d454a44c74083379746b6848124`; PostgreSQL and Redis were
-  healthy. The deployment-identity and strict public-risk smokes passed, there
-  were no open Dependabot or code-scanning alerts, and there were no open pull
-  requests.
+- At 2026-09-01 17:09 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `420ba5127bba1369573739de35128e968757ea8b`; PostgreSQL and Redis were
+  healthy. The deployment-identity smoke passed, there were no open Dependabot,
+  code-scanning, or secret-scanning alerts, and there were no open pull requests.
+  The strict public-risk smoke failed closed because CWA rainfall reported
+  `upstream_unavailable` and Civil IoT sewer water level reported
+  `pipeline_unavailable`; retained official observations remained visible for
+  traceability but were not used to claim low realtime risk.
 - Real-schedule Hosted Monitoring run
   [#33470758398](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33470758398)
   passed the public API contract, deployment, public-risk, and desktop and
   mobile browser checks against its then-current
   `38dad7fd94306639d063912d8b4ad4fb6b13accf`; an independent strict public-risk
-  smoke against the current production SHA also passed. The run failed
-  required source freshness because `official.civil_iot.sewer_water_level` remained failed
-  while the official Civil IoT service continued returning HTTP 500. Issue
+  smoke against that production SHA also passed. The run failed required source
+  freshness because `official.civil_iot.sewer_water_level` remained failed
+  while the official Civil IoT service returned HTTP 500. Since that run, the
+  collections have recovered to HTTP 200, but the upstream Observations
+  collection currently has no usable readings. Issue
   [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289)
   tracks the source incident, and issue
   [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
@@ -92,6 +97,12 @@ the live verification sources listed below.
   presented as ordinary stale observations. Both passed CI and CodeQL; after
   #301, production Browser/Playwright checks passed at 1280 px and 390 px with
   no horizontal overflow or console errors.
+- PR [#303](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/303)
+  reduced the RainSewer collection page size from 2,000 to 500 so each request
+  stays within the worker's bounded timeout. Production now completes the full
+  2,046-station inventory in five pages; the source remains failed because the
+  official Observations collection is empty, not because station pagination is
+  incomplete. Issue #289 therefore remains open.
 
 - PR [#295](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/295)
   merged as `2fa2ea0bf54a1f8c57977561cbc163ceb31c8846`. CI and CodeQL passed,

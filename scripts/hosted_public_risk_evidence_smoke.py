@@ -288,18 +288,29 @@ def check_risk_payload(
             "risk response did not include official rainfall or water_level evidence "
             "with observed_at and ingested_at"
         )
-    elif _nested_get(payload, "realtime", "level") in {None, "unknown", "未知"}:
-        data_source_failures.append(
-            "risk response had usable official realtime evidence but still returned an unknown "
-            "realtime level"
-        )
 
     coverage = payload.get("nearby_realtime_coverage")
+    worker_source_health_failures: list[str] = []
     if not isinstance(coverage, Mapping):
         contract_failures.append("risk response missing nearby_realtime_coverage")
     else:
         contract_failures.extend(_check_nearby_coverage(coverage, radius_m=radius_m))
-        data_source_failures.extend(_check_worker_source_health(coverage))
+        worker_source_health_failures = _check_worker_source_health(coverage)
+        data_source_failures.extend(worker_source_health_failures)
+
+    # The API intentionally fails closed from low to unknown when a required
+    # worker source is unhealthy. Retained evidence can still be present for
+    # traceability in that state, so report the source-health failure without
+    # adding a contradictory "usable evidence but unknown" diagnostic.
+    if (
+        official_events
+        and not worker_source_health_failures
+        and _nested_get(payload, "realtime", "level") in {None, "unknown", "未知"}
+    ):
+        data_source_failures.append(
+            "risk response had usable official realtime evidence but still returned an unknown "
+            "realtime level"
+        )
     return contract_failures, data_source_failures, resolve_official_source_state(payload)
 
 
