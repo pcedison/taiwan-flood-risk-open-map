@@ -10,7 +10,7 @@
 
 ---
 
-## 最新營運檢查點（2026-08-29）
+## 最新營運檢查點（2026-09-01）
 
 目前正式站、監控、open issue／PR 與外部來源缺口以
 [`PROJECT_STATUS.md`](../PROJECT_STATUS.md) 為單一交接入口。本文件後續的
@@ -18,9 +18,12 @@ phase、work package 與舊 checkpoint 保留為實作契約及歷史紀錄，�
 正式站 `/health`、`/ready`、GitHub Actions 與 strict hosted smoke 的即時證據。
 
 本次檢查點已確認正式站部署識別與目前 `origin/main` 一致、PostgreSQL／Redis 健康、
-真實 `schedule` Hosted Monitoring 通過，且沒有 open PR。唯一 open issue
-#71 是外部官方資料／契約證據工作；中央與台南技術路徑已恢復，不能以程式碼
-修復、靜態地圖或未實際寄送的 request packet 假裝完成外部授權與回覆。
+deployment smoke 與 strict public-risk smoke 通過，且沒有 open PR。最近一次真實
+`schedule` Hosted Monitoring 的部署、public-risk 與 desktop/mobile Browser 檢查通過，
+但因 Civil IoT 下水道水位官方服務持續回傳 HTTP 500 而未通過 required source
+freshness；#289 與 #293 分別追蹤來源事故與真實排程 readiness，不能誤寫為部署失敗
+或整體監控全通過。#71 仍是外部官方資料／契約證據工作；中央與台南技術路徑已恢復，
+不能以程式碼修復、靜態地圖或未實際寄送的 request packet 假裝完成外部授權與回覆。
 
 ---
 
