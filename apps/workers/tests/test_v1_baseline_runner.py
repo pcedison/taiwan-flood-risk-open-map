@@ -36,6 +36,8 @@ BACKBONE_KEYS = (
     "official.civil_iot.pump_water_level",
     "official.civil_iot.gate_water_level",
     "local.tainan.flood_sensor",
+    "official.wra.historical_flood",
+    "official.nstc.flood_disaster_points",
 )
 
 
@@ -667,6 +669,158 @@ def test_tick_continues_when_first_source_returns_failed(
     assert failed_fields["exception_class"] == "TimeoutError"
     assert isinstance(failed_fields["elapsed_ms"], int)
     assert failed_fields["elapsed_ms"] >= 0
+
+
+def test_successful_historical_source_updates_county_year_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_key = "official.nstc.flood_disaster_points"
+    finished_at = datetime(2026, 9, 1, 3, 0, tzinfo=UTC)
+    captured: dict[str, object] = {}
+    events: list[tuple[str, dict[str, object]]] = []
+    _install_tick_writer(monkeypatch)
+
+    class _CoverageWriter:
+        def __init__(self, *, database_url: str | None) -> None:
+            captured["database_url"] = database_url
+
+        def record_success(self, **fields: object) -> SimpleNamespace:
+            captured["coverage_fields"] = fields
+            return SimpleNamespace(
+                assessed_years=(2021, 2022, 2023, 2024, 2025),
+                source_check_count=110,
+                attributed_record_count=8646,
+            )
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {adapter_key: _Adapter(adapter_key)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (adapter_key,),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_v1_baseline_adapter_cycle",
+        lambda *_args, **_kwargs: ManagedRuntimeIngestionResult(
+            status="succeeded",
+            summaries=(
+                SimpleNamespace(
+                    adapter_key=adapter_key,
+                    raw_ref="raw/official/nstc/verification.json",
+                    finished_at=finished_at,
+                    status="succeeded",
+                ),
+            ),
+            promoted=8646,
+        ),
+    )
+    monkeypatch.setattr(runtime_cli, "PostgresHistoricalCoverageWriter", _CoverageWriter)
+    monkeypatch.setattr(
+        runtime_cli,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(
+            load_worker_settings({}),
+            enabled_adapter_keys=(adapter_key,),
+        ),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+
+    assert failed is False
+    assert captured == {
+        "database_url": "postgresql://example.test/flood",
+        "coverage_fields": {
+            "adapter_key": adapter_key,
+            "raw_ref": "raw/official/nstc/verification.json",
+            "assessed_at": finished_at,
+        },
+    }
+    coverage_event = next(
+        fields
+        for event, fields in events
+        if event == "worker.runtime.v1_baseline.historical_coverage_completed"
+    )
+    assert coverage_event == {
+        "adapter_key": adapter_key,
+        "assessed_year_count": 5,
+        "source_check_count": 110,
+        "attributed_record_count": 8646,
+    }
+
+
+def test_historical_coverage_failure_isolated_and_fails_the_source_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_key = "official.nstc.flood_disaster_points"
+    writer = _install_tick_writer(monkeypatch)
+    events: list[tuple[str, dict[str, object]]] = []
+
+    class _CoverageWriter:
+        def __init__(self, **_fields: object) -> None:
+            pass
+
+        def record_success(self, **_fields: object) -> None:
+            raise RuntimeError("private-boundary-detail")
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {adapter_key: _Adapter(adapter_key)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (adapter_key,),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_v1_baseline_adapter_cycle",
+        lambda *_args, **_kwargs: ManagedRuntimeIngestionResult(
+            status="succeeded",
+            summaries=(
+                SimpleNamespace(
+                    adapter_key=adapter_key,
+                    raw_ref="raw/official/nstc/verification.json",
+                    finished_at=datetime(2026, 9, 1, 3, 0, tzinfo=UTC),
+                    status="succeeded",
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(runtime_cli, "PostgresHistoricalCoverageWriter", _CoverageWriter)
+    monkeypatch.setattr(
+        runtime_cli,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(
+            load_worker_settings({}),
+            enabled_adapter_keys=(adapter_key,),
+        ),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+
+    assert failed is True
+    assert writer.pipeline_statuses[0]["adapter_keys"] == (adapter_key,)
+    assert "private-boundary-detail" not in repr(events)
+    failure_event = next(
+        fields
+        for event, fields in events
+        if event == "worker.runtime.v1_baseline.source_failed"
+    )
+    assert failure_event["phase"] == "historical_coverage"
+    assert failure_event["exception_class"] == "RuntimeError"
 
 
 def test_freshness_alert_does_not_overwrite_a_completed_pipeline(

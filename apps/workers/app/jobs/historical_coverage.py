@@ -1,0 +1,290 @@
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Final
+
+ConnectionFactory = Callable[[], Any]
+
+HISTORICAL_COVERAGE_START_YEAR: Final = 2018
+HISTORICAL_COVERAGE_END_YEAR: Final = 2026
+HISTORICAL_COVERAGE_ADAPTER_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "official.nstc.flood_disaster_points",
+        "official.wra.historical_flood",
+    }
+)
+
+
+class HistoricalCoverageWriteError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class HistoricalCoverageWriteResult:
+    adapter_key: str
+    assessed_years: tuple[int, ...]
+    source_check_count: int
+    attributed_record_count: int
+
+
+class PostgresHistoricalCoverageWriter:
+    def __init__(
+        self,
+        *,
+        database_url: str | None = None,
+        connection_factory: ConnectionFactory | None = None,
+    ) -> None:
+        if database_url is None and connection_factory is None:
+            raise ValueError("database_url or connection_factory is required")
+        self._database_url = database_url
+        self._connection_factory = connection_factory
+
+    def record_success(
+        self,
+        *,
+        adapter_key: str,
+        raw_ref: str,
+        assessed_at: datetime,
+    ) -> HistoricalCoverageWriteResult:
+        if adapter_key not in HISTORICAL_COVERAGE_ADAPTER_KEYS:
+            raise ValueError("adapter is not approved for historical coverage updates")
+        if assessed_at.tzinfo is None or assessed_at.utcoffset() is None:
+            raise ValueError("assessed_at must be timezone-aware")
+        review_ref = (
+            f"worker-snapshot:{adapter_key}:"
+            f"{hashlib.sha256(raw_ref.encode('utf-8')).hexdigest()}"
+        )
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    _COVERAGE_PREFLIGHT_SQL,
+                    (
+                        raw_ref,
+                        adapter_key,
+                        HISTORICAL_COVERAGE_START_YEAR,
+                        HISTORICAL_COVERAGE_END_YEAR,
+                    ),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    raise HistoricalCoverageWriteError(
+                        "historical coverage preflight returned no row"
+                    )
+                accepted_count = int(row[0])
+                attributed_count = int(row[1])
+                years = tuple(int(year) for year in (row[2] or ()))
+                boundary_count = int(row[3])
+                if accepted_count != attributed_count:
+                    raise HistoricalCoverageWriteError(
+                        "historical snapshot contains accepted points without valid geometry "
+                        "or outside the active 22-county boundary contract"
+                    )
+                if boundary_count != 22:
+                    raise HistoricalCoverageWriteError(
+                        "active historical coverage boundary contract is not exactly 22 counties"
+                    )
+                if not years:
+                    connection.commit()
+                    return HistoricalCoverageWriteResult(
+                        adapter_key=adapter_key,
+                        assessed_years=(),
+                        source_check_count=0,
+                        attributed_record_count=0,
+                    )
+                cursor.execute(
+                    _UPSERT_SOURCE_CHECKS_SQL,
+                    (
+                        raw_ref,
+                        adapter_key,
+                        HISTORICAL_COVERAGE_START_YEAR,
+                        HISTORICAL_COVERAGE_END_YEAR,
+                        adapter_key,
+                        assessed_at,
+                        assessed_at,
+                        review_ref,
+                    ),
+                )
+                source_check_count = cursor.rowcount
+                cursor.execute(_REFRESH_COVERAGE_CELLS_SQL, (list(years),))
+            connection.commit()
+        return HistoricalCoverageWriteResult(
+            adapter_key=adapter_key,
+            assessed_years=years,
+            source_check_count=source_check_count,
+            attributed_record_count=attributed_count,
+        )
+
+    def _connect(self) -> Any:
+        if self._connection_factory is not None:
+            return self._connection_factory()
+        import psycopg
+
+        assert self._database_url is not None
+        return psycopg.connect(self._database_url)
+
+
+_SOURCE_ROWS_CTE = """
+    target_snapshot AS (
+        SELECT raw.id
+        FROM raw_snapshots raw
+        WHERE raw.raw_ref = %s
+          AND raw.adapter_key = %s
+    ),
+    accepted_rows AS (
+        SELECT
+            staging.id,
+            EXTRACT(YEAR FROM staging.occurred_at)::integer AS coverage_year,
+            staging.payload->'location_payload'->'geometry' AS geometry_payload
+        FROM staging_evidence staging
+        JOIN target_snapshot snapshot ON snapshot.id = staging.raw_snapshot_id
+        WHERE staging.validation_status = 'accepted'
+          AND staging.event_type = 'flood_report'
+          AND staging.occurred_at IS NOT NULL
+          AND EXTRACT(YEAR FROM staging.occurred_at)::integer BETWEEN %s AND %s
+    ),
+    source_rows AS (
+        SELECT
+            accepted.id,
+            accepted.coverage_year,
+            ST_SetSRID(
+                ST_GeomFromGeoJSON(accepted.geometry_payload::text),
+                4326
+            ) AS geom
+        FROM accepted_rows accepted
+        WHERE jsonb_typeof(accepted.geometry_payload) = 'object'
+    ),
+    active_boundaries AS (
+        SELECT boundary.jurisdiction_code, boundary.geom
+        FROM realtime_jurisdiction_boundary_snapshots snapshot
+        JOIN realtime_jurisdiction_boundaries boundary
+          ON boundary.snapshot_id = snapshot.id
+        WHERE snapshot.is_active
+          AND snapshot.is_complete
+          AND snapshot.reviewed_at IS NOT NULL
+          AND snapshot.review_ref IS NOT NULL
+          AND snapshot.imported_count = 22
+          AND snapshot.manifest_sha256 = snapshot.approved_manifest_sha256
+    ),
+    attributed_rows AS (
+        SELECT
+            source.id,
+            source.coverage_year,
+            matched.jurisdiction_code
+        FROM source_rows source
+        JOIN LATERAL (
+            SELECT boundary.jurisdiction_code
+            FROM active_boundaries boundary
+            WHERE ST_Covers(boundary.geom, source.geom)
+            ORDER BY ST_Area(boundary.geom::geography), boundary.jurisdiction_code
+            LIMIT 1
+        ) matched ON true
+    )
+"""
+
+_COVERAGE_PREFLIGHT_SQL = f"""
+    WITH {_SOURCE_ROWS_CTE}
+    SELECT
+        (SELECT count(*) FROM accepted_rows)::integer,
+        (SELECT count(*) FROM attributed_rows)::integer,
+        COALESCE(
+            (SELECT array_agg(DISTINCT coverage_year ORDER BY coverage_year)
+             FROM source_rows),
+            ARRAY[]::integer[]
+        ),
+        (SELECT count(*) FROM active_boundaries)::integer
+"""
+
+_UPSERT_SOURCE_CHECKS_SQL = f"""
+    WITH {_SOURCE_ROWS_CTE},
+    source_years AS (
+        SELECT DISTINCT coverage_year FROM source_rows
+    ),
+    record_counts AS (
+        SELECT jurisdiction_code, coverage_year, count(*)::integer AS record_count
+        FROM attributed_rows
+        GROUP BY jurisdiction_code, coverage_year
+    )
+    INSERT INTO historical_coverage_source_checks (
+        jurisdiction_code,
+        coverage_year,
+        adapter_key,
+        status,
+        record_count,
+        attempted_at,
+        succeeded_at,
+        review_ref
+    )
+    SELECT
+        boundary.jurisdiction_code,
+        year_window.coverage_year,
+        %s,
+        'succeeded',
+        COALESCE(counts.record_count, 0),
+        %s,
+        %s,
+        %s
+    FROM active_boundaries boundary
+    CROSS JOIN source_years year_window
+    LEFT JOIN record_counts counts
+      ON counts.jurisdiction_code = boundary.jurisdiction_code
+     AND counts.coverage_year = year_window.coverage_year
+    ON CONFLICT (jurisdiction_code, coverage_year, adapter_key) DO UPDATE SET
+        status = EXCLUDED.status,
+        record_count = EXCLUDED.record_count,
+        attempted_at = EXCLUDED.attempted_at,
+        succeeded_at = EXCLUDED.succeeded_at,
+        review_ref = EXCLUDED.review_ref,
+        updated_at = now()
+"""
+
+_REFRESH_COVERAGE_CELLS_SQL = """
+    WITH aggregate_checks AS (
+        SELECT
+            source_check.jurisdiction_code,
+            source_check.coverage_year,
+            COALESCE(
+                sum(source_check.record_count)
+                    FILTER (WHERE source_check.status = 'succeeded'),
+                0
+            )::integer AS record_count,
+            count(*)::integer AS checked_source_count,
+            count(*) FILTER (WHERE source_check.status = 'succeeded')::integer
+                AS successful_source_count,
+            array_agg(source_check.adapter_key ORDER BY source_check.adapter_key)
+                AS source_adapter_keys,
+            max(source_check.attempted_at) AS last_attempted_at,
+            max(source_check.succeeded_at)
+                FILTER (WHERE source_check.status = 'succeeded') AS last_succeeded_at,
+            max(source_check.review_ref) AS review_ref
+        FROM historical_coverage_source_checks source_check
+        WHERE source_check.coverage_year = ANY(%s::integer[])
+        GROUP BY source_check.jurisdiction_code, source_check.coverage_year
+    )
+    UPDATE historical_coverage_cells coverage
+    SET
+        status = CASE
+            WHEN aggregate.successful_source_count > 0 THEN 'partial'
+            ELSE 'failed'
+        END,
+        record_count = aggregate.record_count,
+        checked_source_count = aggregate.checked_source_count,
+        successful_source_count = aggregate.successful_source_count,
+        source_adapter_keys = aggregate.source_adapter_keys,
+        assessed_at = aggregate.last_attempted_at,
+        last_attempted_at = aggregate.last_attempted_at,
+        last_succeeded_at = aggregate.last_succeeded_at,
+        review_ref = aggregate.review_ref,
+        status_reason = CASE
+            WHEN aggregate.successful_source_count > 0 THEN
+                'Approved official source snapshots were checked; coverage remains partial until all reviewed sources are complete.'
+            ELSE
+                'All attempted official historical source checks failed.'
+        END,
+        updated_at = now()
+    FROM aggregate_checks aggregate
+    WHERE coverage.jurisdiction_code = aggregate.jurisdiction_code
+      AND coverage.coverage_year = aggregate.coverage_year
+"""

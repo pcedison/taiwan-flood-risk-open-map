@@ -20,6 +20,7 @@ EXPECTED_BACKBONE_ADAPTERS = (
     "official.civil_iot.sewer_water_level",
     "official.civil_iot.pump_water_level",
     "official.civil_iot.gate_water_level",
+    "official.nstc.flood_disaster_points",
 )
 
 
@@ -60,7 +61,7 @@ def test_zeabur_single_service_autostarts_backbone_when_database_is_attached() -
     assert 'realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"' in dockerfile
     assert 'realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"' in dockerfile
     assert 'realtime_backbone_emergency_stop="${REALTIME_BACKBONE_EMERGENCY_STOP:-false}"' in dockerfile
-    assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor,official.wra.historical_flood"' in dockerfile
+    assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points"' in dockerfile
     assert "SOURCE_WRA_HISTORICAL_FLOOD_ENABLED" in dockerfile
     assert "SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED" in dockerfile
     assert 'if [ -n "${worker_database_url}" ]; then' in dockerfile
@@ -135,6 +136,8 @@ def test_zeabur_single_service_sets_backbone_source_gates() -> None:
         "SOURCE_CIVIL_IOT_GATE_API_ENABLED",
         "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED",
         "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED",
+        "SOURCE_NSTC_FLOOD_DISASTER_POINTS_ENABLED",
+        "SOURCE_NSTC_FLOOD_DISASTER_POINTS_API_ENABLED",
     )
 
     force_block = entrypoint.split("configure_backbone_source_gates() {", 1)[1].split(
@@ -149,7 +152,11 @@ def test_zeabur_single_service_sets_backbone_source_gates() -> None:
 
     assert "configure_backbone_source_gates" in entrypoint
 
-    assert 'required_adapter_keys="${REALTIME_BACKBONE_ADAPTER_KEYS:-${realtime_backbone_adapter_keys}}"' in entrypoint
+    assert (
+        'required_adapter_keys="$(merge_adapter_keys "${realtime_backbone_adapter_keys}" '
+        '"${REALTIME_BACKBONE_ADAPTER_KEYS:-}")"'
+        in entrypoint
+    )
     assert 'export WORKER_ENABLED_ADAPTER_KEYS="$(merge_adapter_keys "${required_adapter_keys}" "${configured_adapter_keys}")"' in entrypoint
 
 

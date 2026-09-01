@@ -6,11 +6,15 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = REPO_ROOT / "infra" / "migrations" / "0057_ingestion_runtime_readiness.sql"
+PROFILE_MIGRATIONS = (
+    MIGRATION,
+    REPO_ROOT / "infra" / "migrations" / "0058_nstc_recent_history_ingestion.sql",
+)
 REGISTRY = REPO_ROOT / "config" / "source-registry.yaml"
 
 
 def test_migration_persists_scheduler_heartbeat_without_holder_or_secret_fields() -> None:
-    sql = MIGRATION.read_text(encoding="utf-8")
+    sql = "\n".join(path.read_text(encoding="utf-8") for path in PROFILE_MIGRATIONS)
 
     assert "CREATE TABLE IF NOT EXISTS ingestion_scheduler_heartbeats" in sql
     assert "last_seen_at timestamptz NOT NULL" in sql
@@ -22,21 +26,21 @@ def test_migration_persists_scheduler_heartbeat_without_holder_or_secret_fields(
 
 
 def test_migrated_readiness_profile_matches_registry_deployment_defaults() -> None:
-    sql = MIGRATION.read_text(encoding="utf-8")
+    sql = "\n".join(path.read_text(encoding="utf-8") for path in PROFILE_MIGRATIONS)
     payload = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
     expected = {
         source["adapter_key"] for source in payload["sources"] if source["deployment_default"]
     }
     migrated = set(
         re.findall(
-            r"\('production_backbone', '([^']+)', "
-            r"'(?:national_realtime|local_realtime|nationwide_history)', \d+\)",
+            r"\(\s*'production_backbone'\s*,\s*'([^']+)'\s*,\s*"
+            r"'(?:national_realtime|local_realtime|nationwide_history)'\s*,\s*\d+\s*\)",
             sql,
         )
     )
 
     assert migrated == expected
-    assert len(migrated) == 11
+    assert len(migrated) == 12
 
 
 def test_historical_source_has_a_daily_not_realtime_stale_gate() -> None:

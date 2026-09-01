@@ -29,6 +29,7 @@ class FakeConnection:
                 "official.wra.water_level",
                 "official.wra_iow.flood_depth",
                 "official.wra.historical_flood",
+                "official.nstc.flood_disaster_points",
                 "official.ncdr.cap",
                 "official.civil_iot.flood_sensor",
                 "official.civil_iot.sewer_water_level",
@@ -63,10 +64,10 @@ def test_checked_in_registry_covers_every_source_surface() -> None:
     validator.validate_static_surfaces(sources)
 
     assert len(sources) == 63
-    assert sum(source["implementation"] == "worker" for source in sources) == 57
-    assert sum(source["runtime_scope"] == "v1_baseline" for source in sources) == 51
-    assert sum(source["deployment_default"] for source in sources) == 11
-    assert sum(source["catalog_state"] != "absent" for source in sources) == 58
+    assert sum(source["implementation"] == "worker" for source in sources) == 58
+    assert sum(source["runtime_scope"] == "v1_baseline" for source in sources) == 52
+    assert sum(source["deployment_default"] for source in sources) == 12
+    assert sum(source["catalog_state"] != "absent" for source in sources) == 59
 
 
 def test_static_validator_rejects_silent_deployment_default_drift() -> None:

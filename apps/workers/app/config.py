@@ -20,6 +20,8 @@ class WorkerSettings:
     source_wra_api_enabled: bool
     source_wra_historical_flood_enabled: bool | None
     source_wra_historical_flood_api_enabled: bool
+    source_nstc_flood_disaster_points_enabled: bool | None
+    source_nstc_flood_disaster_points_api_enabled: bool
     source_wra_flood_incident_enabled: bool
     source_wra_flood_incident_api_enabled: bool
     source_wra_flood_incident_contract_enabled: bool
@@ -150,6 +152,8 @@ class WorkerSettings:
     wra_api_timeout_seconds: int
     wra_historical_flood_index_url: str | None
     wra_historical_flood_timeout_seconds: int
+    nstc_flood_disaster_points_resource_url: str | None
+    nstc_flood_disaster_points_timeout_seconds: int
     wra_flood_incident_api_url: str | None
     wra_flood_incident_api_key: str | None
     wra_flood_incident_timeout_seconds: int
@@ -249,6 +253,14 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
         source_wra_historical_flood_api_enabled=env_flag(
             values,
             "SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED",
+        ),
+        source_nstc_flood_disaster_points_enabled=env_bool(
+            values,
+            "SOURCE_NSTC_FLOOD_DISASTER_POINTS_ENABLED",
+        ),
+        source_nstc_flood_disaster_points_api_enabled=env_flag(
+            values,
+            "SOURCE_NSTC_FLOOD_DISASTER_POINTS_API_ENABLED",
         ),
         source_wra_flood_incident_enabled=env_flag(
             values,
@@ -685,6 +697,15 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "WRA_HISTORICAL_FLOOD_TIMEOUT_SECONDS",
             default=8,
+        ),
+        nstc_flood_disaster_points_resource_url=env_str(
+            values,
+            "NSTC_FLOOD_DISASTER_POINTS_RESOURCE_URL",
+        ),
+        nstc_flood_disaster_points_timeout_seconds=env_int(
+            values,
+            "NSTC_FLOOD_DISASTER_POINTS_TIMEOUT_SECONDS",
+            default=12,
         ),
         wra_flood_incident_api_url=env_str(values, "WRA_FLOOD_INCIDENT_API_URL"),
         wra_flood_incident_api_key=env_str(values, "WRA_FLOOD_INCIDENT_API_KEY"),

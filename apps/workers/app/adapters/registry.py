@@ -66,6 +66,7 @@ from app.adapters.local_yilan import (
 )
 from app.adapters.local_yunlin import YUNLIN_WATER_LEVEL_METADATA
 from app.adapters.ncdr import NCDR_CAP_METADATA
+from app.adapters.nstc import NSTC_FLOOD_DISASTER_POINTS_METADATA
 from app.adapters.police_radio_traffic import POLICE_RADIO_TRAFFIC_METADATA
 from app.adapters.ptt import METADATA as PTT_METADATA
 from app.adapters.wra import (
@@ -101,6 +102,7 @@ ADAPTER_REGISTRY = MappingProxyType(
         WRA_FLOOD_WARNING_METADATA.key: WRA_FLOOD_WARNING_METADATA,
         WRA_IOW_FLOOD_DEPTH_METADATA.key: WRA_IOW_FLOOD_DEPTH_METADATA,
         NCDR_CAP_METADATA.key: NCDR_CAP_METADATA,
+        NSTC_FLOOD_DISASTER_POINTS_METADATA.key: NSTC_FLOOD_DISASTER_POINTS_METADATA,
         POLICE_RADIO_TRAFFIC_METADATA.key: POLICE_RADIO_TRAFFIC_METADATA,
         FLOOD_SENSOR_METADATA.key: FLOOD_SENSOR_METADATA,
         RIVER_WATER_LEVEL_METADATA.key: RIVER_WATER_LEVEL_METADATA,
@@ -186,6 +188,11 @@ def adapter_is_enabled(metadata: AdapterMetadata, settings: WorkerSettings) -> b
         return _with_optional_override(
             metadata.enabled_by_default,
             settings.source_wra_historical_flood_enabled,
+        )
+    if metadata.key == "official.nstc.flood_disaster_points":
+        return _with_optional_override(
+            metadata.enabled_by_default,
+            settings.source_nstc_flood_disaster_points_enabled,
         )
     if metadata.key == "official.wra.flood_incident":
         return settings.source_wra_flood_incident_enabled
@@ -480,6 +487,8 @@ def _legacy_flag_allows_adapter(metadata: AdapterMetadata, settings: WorkerSetti
         return settings.source_wra_enabled is not False
     if metadata.key == "official.wra.historical_flood":
         return settings.source_wra_historical_flood_enabled is True
+    if metadata.key == "official.nstc.flood_disaster_points":
+        return settings.source_nstc_flood_disaster_points_enabled is True
     if metadata.key == "official.wra.flood_incident":
         return settings.source_wra_flood_incident_enabled is True
     if metadata.key == "official.wra_iow.flood_depth":

@@ -70,6 +70,15 @@ sources:
     catalog_state: enabled
     deployment_default: true
     enablement_decision: production_backbone
+  - adapter_key: official.nstc.flood_disaster_points
+    family: official
+    contract: nationwide_history
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
   - adapter_key: official.wra.flood_incident
     family: official
     contract: nationwide_history
@@ -169,16 +178,6 @@ sources:
     catalog_state: enabled
     deployment_default: false
     enablement_decision: planning_reference
-  - adapter_key: official.nstc.flood_disaster_points
-    family: official
-    contract: central_official
-    implementation: api
-    runtime_scope: not_applicable
-    worker_default_enabled: null
-    catalog_state: absent
-    deployment_default: false
-    enablement_decision: static_snapshot
-
   - adapter_key: local.new_taipei.water_level
     family: official
     contract: local_realtime

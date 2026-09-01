@@ -251,7 +251,7 @@ timestamps, and limitations. The migration does not backfill events or mark any
 cell complete.
 
 `0057_ingestion_runtime_readiness.sql` persists the V1 scheduler heartbeat and
-the 11-source production-backbone readiness profile. Worker lease renewals now
+the initial 11-source production-backbone readiness profile. Worker lease renewals now
 refresh the public-safe heartbeat atomically, while graceful release records a
 stopped state; an expired heartbeat therefore cannot borrow API/database
 liveness. `/v1/ingestion-readiness` combines that state with exact adapter-run
@@ -259,3 +259,12 @@ and promotion outcomes plus the reviewed 22-county signal manifests. Ordinary
 sources use a 30-minute stale gate and the daily WRA historical snapshot uses a
 25-hour gate. The endpoint exposes no holder, URL, credential, raw error, or
 secret metadata, and county readiness is explicitly not nearby-station proof.
+
+`0058_nstc_recent_history_ingestion.sql` registers the official NSTC flood
+disaster-point source as a daily production-backbone adapter, bringing the
+readiness profile to 12 sources. It also creates
+`historical_coverage_source_checks`, which records each promoted historical
+snapshot's per-source, per-county, per-year result separately from the
+aggregated `historical_ingestion_coverage` state. A successful live snapshot can
+therefore advance only the years actually present in that payload, while a
+failed or unassignable snapshot cannot be misrepresented as an empty year.

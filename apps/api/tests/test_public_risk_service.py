@@ -29,6 +29,19 @@ from app.domain.history.news_enrichment import OnDemandNewsSearchResult
 from app.domain.realtime import OfficialRealtimeBundle, OfficialRealtimeObservation
 
 
+def test_worker_persisted_nstc_rows_replace_same_bundled_snapshot_ids() -> None:
+    bundled_a = SimpleNamespace(source_id="data-gov-130016:2022:EMIC:1")
+    bundled_b = SimpleNamespace(source_id="data-gov-130016:2019:EMIC:2")
+    persisted = SimpleNamespace(source_id="data-gov-130016:2022:EMIC:1")
+
+    filtered = public_risk._exclude_persisted_historical_records(
+        ((bundled_a, 120.0), (bundled_b, 240.0)),  # type: ignore[arg-type]
+        db_evidence_items=(persisted,),  # type: ignore[arg-type]
+    )
+
+    assert filtered == ((bundled_b, 240.0),)
+
+
 def _risk_request() -> RiskAssessRequest:
     return RiskAssessRequest(
         point=LatLng(lat=25.033, lng=121.5654),

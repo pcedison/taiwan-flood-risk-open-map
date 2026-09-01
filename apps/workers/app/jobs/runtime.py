@@ -105,6 +105,8 @@ from app.adapters.local_yilan import (
 from app.adapters.local_yunlin import FetchJson as YunlinFetchJson
 from app.adapters.local_yunlin import YunlinWaterLevelApiAdapter
 from app.adapters.ncdr import NcdrCapAlertAdapter, NcdrFetchJson, NcdrFetchText
+from app.adapters.nstc import NstcFloodDisasterPointsAdapter
+from app.adapters.nstc.flood_disaster_points import FetchText as NstcFetchText
 from app.adapters.police_radio_traffic import (
     PoliceRadioFetchJson,
     PoliceRadioTrafficAdapter,
@@ -236,6 +238,7 @@ def build_runtime_adapters(
     wra_flood_incident_fetch_json: WraFloodIncidentFetchJson | None = None,
     wra_historical_flood_fetch_json: WraHistoricalFetchJson | None = None,
     wra_historical_flood_fetch_text: WraHistoricalFetchText | None = None,
+    nstc_flood_disaster_points_fetch_text: NstcFetchText | None = None,
     ncdr_cap_fetch_json: NcdrFetchJson | None = None,
     ncdr_cap_fetch_text: NcdrFetchText | None = None,
     police_radio_traffic_fetch_json: PoliceRadioFetchJson | None = None,
@@ -385,6 +388,20 @@ def build_runtime_adapters(
             fetch_text=wra_historical_flood_fetch_text,
         )
         live_adapters[historical_flood_adapter.metadata.key] = historical_flood_adapter
+
+    if (
+        settings.source_nstc_flood_disaster_points_api_enabled
+        and "official.nstc.flood_disaster_points" in enabled_keys
+    ):
+        nstc_flood_disaster_adapter = NstcFloodDisasterPointsAdapter(
+            resource_url=settings.nstc_flood_disaster_points_resource_url,
+            timeout_seconds=settings.nstc_flood_disaster_points_timeout_seconds,
+            fetched_at=fetched_at,
+            fetch_text=nstc_flood_disaster_points_fetch_text,
+        )
+        live_adapters[nstc_flood_disaster_adapter.metadata.key] = (
+            nstc_flood_disaster_adapter
+        )
 
     if (
         settings.source_wra_iow_flood_depth_api_enabled

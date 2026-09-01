@@ -178,7 +178,7 @@ Official ingestion scheduler for the single-service beta:
 | `REALTIME_BACKBONE_FORCE_INGESTION_ON_START` | leave unset or `true` | Forces the realtime backbone on when DB is attached. |
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Legacy maintenance stop; honored only when force mode is also `false`. |
 | `REALTIME_BACKBONE_EMERGENCY_STOP` | leave unset or `false` | Unconditional current emergency stop; always overrides force mode and must be removed after the incident. |
-| `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional override that replaces old `WORKER_ENABLED_ADAPTER_KEYS` values during forced backbone startup. |
+| `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional additions merged with the revision's canonical backbone during forced startup; it cannot remove a required source. |
 | `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
 | `MIGRATION_LOCK_TIMEOUT_MS` | leave unset or `10000` | Maximum PostgreSQL lock wait per migration statement, including contention with another startup runner. Increase only for a reviewed maintenance window. |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | leave unset or `300000` | Maximum execution time for each migration statement. Each migration commits independently before the next file begins. |

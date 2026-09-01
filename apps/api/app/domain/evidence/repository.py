@@ -440,7 +440,10 @@ def query_nearby_evidence(
                         AND e.title LIKE '%%(停用)%%'
                     )
                     AND (
-                        ds.adapter_key <> 'official.wra.historical_flood'
+                        ds.adapter_key NOT IN (
+                            'official.wra.historical_flood',
+                            'official.nstc.flood_disaster_points'
+                        )
                         OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
                     )
                     AND NOT (
