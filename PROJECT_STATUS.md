@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-01 Asia/Taipei
+Last verified: 2026-09-01 12:44 Asia/Taipei (04:44 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -66,6 +66,23 @@ the live verification sources listed below.
   events or mark years absent from the official payload as checked.
 
 ## Recorded production checkpoint
+
+- At 2026-09-01 12:44 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `38dad7fd94306639d063912d8b4ad4fb6b13accf`; PostgreSQL and Redis were
+  healthy. The deployment-identity and strict public-risk smokes passed, there
+  were no open Dependabot or code-scanning alerts, and there were no open pull
+  requests.
+- Real-schedule Hosted Monitoring run
+  [#33470758398](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33470758398)
+  passed the public API contract, deployment, public-risk, and desktop and
+  mobile browser checks against that SHA; an independent strict public-risk
+  smoke also passed. The run failed required source
+  freshness because `official.civil_iot.sewer_water_level` remained failed
+  while the official Civil IoT service continued returning HTTP 500. Issue
+  [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289)
+  tracks the source incident, and issue
+  [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
+  remains open until a genuine schedule run satisfies the readiness contract.
 
 - PR [#295](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/295)
   merged as `2fa2ea0bf54a1f8c57977561cbc163ceb31c8846`. CI and CodeQL passed,
@@ -238,8 +255,12 @@ the deployment plus strict public-risk smokes must be rerun.
 
 ## Remaining open work
 
+Operational issues
+[#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
+[#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
+remain open for the Civil IoT source failure and real-schedule readiness.
 Issue [#71](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/71)
-is the only open issue at this checkpoint. It no longer represents a broken
+remains the external source-contract queue; it does not represent a broken
 central or Tainan ingestion path. Its audited queue contains nine grouped
 external items and 21 completion targets:
 

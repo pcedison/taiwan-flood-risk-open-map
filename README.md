@@ -81,22 +81,24 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-08-31 checkpoint, `origin/main`, production `/health`, and production
+the 2026-09-01 checkpoint, `origin/main`, production `/health`, and production
 `/ready` matched; PostgreSQL and Redis were healthy, and strict hosted
 deployment/public-risk smokes passed. Do not treat a SHA copied into status
 documentation as a permanent deployment pin: derive the current expected SHA
-only after `git fetch origin --prune`, then verify both health endpoints. A real
-scheduled Hosted Monitoring run passed after the NCDR lifecycle repair, so the
-current schedule evidence is a genuine `schedule` event rather than a manual
-diagnostic dispatch. Hosted Monitoring also exercises the production basemap
-and a real public location query in desktop and mobile Chromium; major MapLibre
-and ESLint upgrades require an explicit migration review instead of an
-automatic Dependabot PR.
-The only open issue is the external local-source dispatch contract in #71; it
-must remain open until accepted official replies, production/authorization-
-gated adapters, or reviewed official-unavailable evidence exist. The phase
-descriptions below are implementation history and boundaries, not a substitute
-for live production verification.
+only after `git fetch origin --prune`, then verify both health endpoints. The
+latest real scheduled Hosted Monitoring run still passed its deployment,
+public-risk, and desktop/mobile browser checks, but failed required source
+freshness while the official Civil IoT SensorThings service continued returning
+HTTP 500. Issues #289 and #293 track that hosted failure and schedule readiness;
+they must not be collapsed into a deployment failure. Hosted Monitoring also
+exercises the production basemap and a real public location query in desktop
+and mobile Chromium; major MapLibre and ESLint upgrades require an explicit
+migration review instead of an automatic Dependabot PR.
+The external local-source dispatch contract in #71 must remain open until
+accepted official replies, production/authorization-gated adapters, or reviewed
+official-unavailable evidence exist. The phase descriptions below are
+implementation history and boundaries, not a substitute for live production
+verification.
 
 The repository has moved beyond the Phase 0 skeleton. Phase 1 map-first query
 groundwork is in place, Phase 2 ingestion/adapters have tested groundwork, and
