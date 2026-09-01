@@ -690,6 +690,7 @@ def test_successful_historical_source_updates_county_year_coverage(
                 assessed_years=(2021, 2022, 2023, 2024, 2025),
                 source_check_count=110,
                 attributed_record_count=8646,
+                boundary_adjusted_record_count=1,
             )
 
     monkeypatch.setattr(
@@ -753,6 +754,7 @@ def test_successful_historical_source_updates_county_year_coverage(
         "assessed_year_count": 5,
         "source_check_count": 110,
         "attributed_record_count": 8646,
+        "boundary_adjusted_record_count": 1,
     }
 
 
@@ -762,6 +764,7 @@ def test_historical_coverage_failure_isolated_and_fails_the_source_tick(
     adapter_key = "official.nstc.flood_disaster_points"
     writer = _install_tick_writer(monkeypatch)
     events: list[tuple[str, dict[str, object]]] = []
+    summary_started_at = datetime(2026, 9, 1, 2, 59, tzinfo=UTC)
 
     class _CoverageWriter:
         def __init__(self, **_fields: object) -> None:
@@ -789,6 +792,7 @@ def test_historical_coverage_failure_isolated_and_fails_the_source_tick(
                 SimpleNamespace(
                     adapter_key=adapter_key,
                     raw_ref="raw/official/nstc/verification.json",
+                    started_at=summary_started_at,
                     finished_at=datetime(2026, 9, 1, 3, 0, tzinfo=UTC),
                     status="succeeded",
                 ),
@@ -813,6 +817,7 @@ def test_historical_coverage_failure_isolated_and_fails_the_source_tick(
 
     assert failed is True
     assert writer.pipeline_statuses[0]["adapter_keys"] == (adapter_key,)
+    assert writer.pipeline_statuses[0]["run_at"] == summary_started_at
     assert "private-boundary-detail" not in repr(events)
     failure_event = next(
         fields
