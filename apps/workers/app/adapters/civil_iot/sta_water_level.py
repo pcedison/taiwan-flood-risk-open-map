@@ -69,7 +69,10 @@ def _build_sta_url(*, filter_expr: str, top: int = 2000) -> str:
     )
 
 
-def _build_rain_sewer_url(*, top: int = 2000) -> str:
+# RainSewer expands nested observations, so a bounded page stays within the
+# adapter's default eight-second read timeout while pagination preserves the
+# complete station inventory.
+def _build_rain_sewer_url(*, top: int = 500) -> str:
     return (
         f"{STA_RAIN_SEWER_BASE}Things"
         "?$expand=Locations,Datastreams($expand=Observations("

@@ -32,6 +32,7 @@ FETCHED_AT = datetime(2026, 6, 15, 3, 10, tzinfo=UTC)
 def test_sewer_water_level_uses_rain_sewer_service_not_water_resource() -> None:
     assert "STA_RainSewer" in SEWER_WATER_LEVEL.sta_url
     assert "STA_WaterResource" not in SEWER_WATER_LEVEL.sta_url
+    assert "$top=500" in SEWER_WATER_LEVEL.sta_url
     for source in (
         POND_WATER_LEVEL,
         SEWER_WATER_LEVEL,
