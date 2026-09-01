@@ -107,6 +107,10 @@ export type NearbyRealtimeCoverage = {
     nearest_distance_m: number | null;
     nearest_source_id: string | null;
     nearest_observed_at: string | null;
+    nearest_observation_value?: number | null;
+    nearest_observation_unit?: "mm_1h" | "m" | "cm" | null;
+    nearest_reference_value?: number | null;
+    nearest_reference_unit?: "m" | null;
     counts_by_radius_m: Record<string, number>;
     fresh_count: number;
     degraded_count?: number;

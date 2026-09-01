@@ -685,6 +685,8 @@ test("nearby sensing state prefers backend coverage and falls back to realtime e
             label: "Rainfall sensor",
             missing_reason: null,
             nearest_distance_m: 820,
+            nearest_observation_unit: "mm_1h",
+            nearest_observation_value: 12.5,
             nearest_observed_at: "2026-06-29T11:55:00Z",
             nearest_source_id: "cwa-rainfall:001",
             signal_type: "rainfall",
@@ -697,14 +699,26 @@ test("nearby sensing state prefers backend coverage and falls back to realtime e
     },
     evidenceItems: [],
   });
-  assert.equal(fromCoverage.badge, "附近觀測：中");
+  assert.equal(fromCoverage.badge, "附近觀測：部分可用");
   assert.deepEqual(fromCoverage.gaps, ["淹水深度"]);
   assert.equal(fromCoverage.items[0].label, "雨量");
   assert.equal(
     fromCoverage.summary,
-    "附近有 雨量 1 類觀測；最近觀測距查詢點 820 公尺；仍缺 淹水深度。",
+    "附近有 1 類觀測（雨量）；最近觀測距查詢點 820 公尺；仍缺 淹水深度。",
   );
   assert.match(fromCoverage.items[0].detail, /^距查詢點 820 公尺；新鮮/);
+  assert.deepEqual(fromCoverage.availability, {
+    available: 1,
+    delayed: 0,
+    fresh: 1,
+    regional: 0,
+    stale: 0,
+    total: 1,
+  });
+  assert.equal(fromCoverage.items[0].status, "可採用");
+  assert.equal(fromCoverage.items[0].value, "12.5");
+  assert.equal(fromCoverage.items[0].unit, "毫米 / 1 小時");
+  assert.match(fromCoverage.items[0].insight, /近 1 小時累積雨量/);
   assert.equal(
     fromCoverage.note,
     "缺口代表本次查詢範圍內沒有取得該類近距觀測，不等於現地安全。",
@@ -729,6 +743,44 @@ test("nearby sensing state prefers backend coverage and falls back to realtime e
   assert.deepEqual(fromEvidence.gaps, ["水位"]);
   assert.match(fromEvidence.summary, /可用即時觀測/);
   assert.match(fromEvidence.items[0].detail, /^距查詢點 260 公尺；觀測 /);
+});
+
+test("nearby sensing turns water readings into warning-distance context", () => {
+  const coverage = missingRainfallCoverage({
+    availabilityState: "no_station",
+    missingCause: "no_station_in_range",
+    sourceHealth: realtimeSourceHealth(),
+  });
+  coverage.missing_signal_types = [];
+  coverage.overall_level = "high";
+  coverage.signal_breakdown = [
+    {
+      availability_state: "fresh_nearby",
+      counts_by_radius_m: { "500": 1 },
+      coverage_level: "high",
+      degraded_count: 0,
+      fresh_count: 1,
+      label: "水位",
+      missing_cause: "none",
+      missing_reason: null,
+      nearest_distance_m: 320,
+      nearest_freshness_state: "fresh",
+      nearest_observation_unit: "m",
+      nearest_observation_value: 1.75,
+      nearest_observed_at: "2026-07-18T07:58:00Z",
+      nearest_reference_unit: "m",
+      nearest_reference_value: 2.25,
+      nearest_source_id: "wra-water-level:near",
+      signal_type: "water_level",
+      stale_count: 0,
+      status_only_count: 0,
+    },
+  ];
+
+  const state = nearbySensingState({ assessment: { nearby_realtime_coverage: coverage } });
+  assert.equal(state.items[0].value, "1.75");
+  assert.equal(state.items[0].unit, "公尺");
+  assert.match(state.items[0].insight, /0.5 公尺/);
 });
 
 test("right panel labels distinguish distance and source confidence", () => {
@@ -1213,7 +1265,7 @@ test("nearby sensing state reports partial failure without hiding useful observa
   const redundantFailureState = nearbySensingState({
     assessment: { nearby_realtime_coverage: coverage },
   });
-  assert.equal(redundantFailureState.badge, "附近觀測：高");
+  assert.equal(redundantFailureState.badge, "附近觀測：可用");
 
   coverage.source_health = [];
   coverage.source_health_checked = false;

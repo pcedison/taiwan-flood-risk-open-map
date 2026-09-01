@@ -847,6 +847,10 @@ class NearbyCoverageSignal(ContractModel):
     nearest_distance_m: float | None = Field(default=None, ge=0)
     nearest_source_id: str | None = None
     nearest_observed_at: datetime | None = None
+    nearest_observation_value: float | None = None
+    nearest_observation_unit: Literal["mm_1h", "m", "cm"] | None = None
+    nearest_reference_value: float | None = None
+    nearest_reference_unit: Literal["m"] | None = None
     counts_by_radius_m: dict[str, int]
     fresh_count: int = Field(ge=0)
     degraded_count: int = Field(default=0, ge=0)

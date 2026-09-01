@@ -97,6 +97,10 @@ class NearbyCoverageRow:
     ingested_at: datetime
     distance_to_query_m: float
     freshness_state: str
+    rainfall_mm_1h: float | None = None
+    water_level_m: float | None = None
+    warning_level_m: float | None = None
+    flood_depth_cm: float | None = None
 
 
 @dataclass(frozen=True)
@@ -2101,7 +2105,11 @@ def _query_nearby_latest_coverage_rows(
                     secs => freshness_threshold.fresh_seconds * 3
                 ) THEN 'degraded'
                 ELSE 'stale'
-            END AS freshness_state
+            END AS freshness_state,
+            latest.rainfall_mm_1h,
+            latest.water_level_m,
+            latest.warning_level_m,
+            latest.flood_depth_cm
         FROM official_realtime_latest latest
         JOIN data_sources ON data_sources.adapter_key = latest.adapter_key
             AND data_sources.is_enabled = true
@@ -2756,6 +2764,10 @@ def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:
         ingested_at=row["ingested_at"],
         distance_to_query_m=float(row["distance_to_query_m"]),
         freshness_state=str(row["freshness_state"]),
+        rainfall_mm_1h=_optional_float(row.get("rainfall_mm_1h")),
+        water_level_m=_optional_float(row.get("water_level_m")),
+        warning_level_m=_optional_float(row.get("warning_level_m")),
+        flood_depth_cm=_optional_float(row.get("flood_depth_cm")),
     )
 
 

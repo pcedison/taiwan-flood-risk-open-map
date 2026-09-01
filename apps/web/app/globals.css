@@ -939,6 +939,67 @@ button {
   text-wrap: pretty;
 }
 
+.sensing-availability {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(72, 94, 85, 0.16);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(236, 244, 239, 0.64);
+}
+
+.sensing-availability-heading,
+.sensing-availability-legend,
+.nearby-sensing-item-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sensing-availability-heading {
+  color: #31423b;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.sensing-availability-heading strong {
+  color: var(--foreground);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sensing-availability-track {
+  width: 100%;
+  height: 7px;
+  appearance: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 2px;
+  background: rgba(72, 94, 85, 0.14);
+}
+
+.sensing-availability-track::-webkit-progress-bar {
+  border-radius: inherit;
+  background: rgba(72, 94, 85, 0.14);
+}
+
+.sensing-availability-track::-webkit-progress-value,
+.sensing-availability-track::-moz-progress-bar {
+  border-radius: inherit;
+  background: #2f7657;
+  transition: width 240ms ease;
+}
+
+.sensing-availability-legend {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
 .nearby-sensing-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -987,13 +1048,82 @@ button {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
+.nearby-sensing-item-heading > span {
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.nearby-sensing-item-fresh .nearby-sensing-item-heading > span {
+  color: #155c3d;
+  background: rgba(47, 143, 91, 0.12);
+}
+
+.nearby-sensing-item-delayed .nearby-sensing-item-heading > span,
+.nearby-sensing-item-regional .nearby-sensing-item-heading > span {
+  color: #72590b;
+  background: rgba(217, 185, 40, 0.16);
+}
+
+.nearby-sensing-item-stale .nearby-sensing-item-heading > span,
+.nearby-sensing-item-missing .nearby-sensing-item-heading > span {
+  color: #75410f;
+  background: rgba(198, 106, 33, 0.12);
+}
+
+.nearby-sensing-reading {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid rgba(101, 115, 109, 0.12);
+  padding-top: 10px;
+}
+
+.nearby-sensing-reading > p {
+  margin: 0;
+}
+
+.nearby-sensing-reading > p:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: #10251e;
+  font-variant-numeric: tabular-nums;
+}
+
+.nearby-sensing-reading > p:first-child strong {
+  font-size: 1.25rem;
+  letter-spacing: -0.03em;
+}
+
+.nearby-sensing-reading > p:first-child span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.nearby-sensing-reading > p:last-child {
+  color: #31423b;
+  font-size: 0.73rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+.nearby-sensing-reading > .nearby-sensing-reading-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
 .nearby-sensing-list strong {
   overflow-wrap: anywhere;
   color: var(--foreground);
   font-size: 0.84rem;
 }
 
-.nearby-sensing-list span {
+.nearby-sensing-item-meta {
   border-top: 1px solid rgba(101, 115, 109, 0.12);
   padding-top: 10px;
   color: var(--muted);

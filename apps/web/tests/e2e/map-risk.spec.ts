@@ -174,6 +174,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
               missing_reason: null,
               nearest_distance_m: 260,
               nearest_freshness_state: "fresh",
+              nearest_observation_unit: "mm_1h",
+              nearest_observation_value: 12.5,
               nearest_observed_at: "2026-04-29T02:52:00Z",
               nearest_source_id: "cwa-rainfall",
               signal_type: "rainfall",
@@ -336,9 +338,13 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("即時：低；歷史參考：中")).not.toBeVisible();
   await expect(page.getByText("主導：歷史參考")).not.toBeVisible();
   await expect(page.getByText("即時風險為低，歷史參考風險為中，資料可信度為中。")).toBeVisible();
-  await expect(page.getByTestId("nearby-sensing")).toContainText("附近觀測：中");
+  await expect(page.getByTestId("nearby-sensing")).toContainText("附近觀測：部分可用");
   await expect(page.getByTestId("nearby-sensing")).not.toContainText("回答：");
   await expect(page.getByTestId("nearby-sensing")).toContainText("距查詢點 260 公尺");
+  await expect(page.getByTestId("sensing-availability")).toContainText("1 / 1 類");
+  await expect(page.getByTestId("nearby-sensing")).toContainText("12.5");
+  await expect(page.getByTestId("nearby-sensing")).toContainText("毫米 / 1 小時");
+  await expect(page.getByTestId("nearby-sensing")).toContainText("近 1 小時累積雨量");
   await expect(page.getByTestId("nearby-sensing")).toContainText("缺口");
   await expect(page.getByTestId("nearby-sensing")).toContainText("水位");
   await expect(page.getByText("觀測範圍與解讀")).toBeVisible();

@@ -43,6 +43,10 @@ def _row(
     distance_to_query_m: float,
     freshness_state: str = "fresh",
     observed_delta_minutes: int = 5,
+    rainfall_mm_1h: float | None = None,
+    water_level_m: float | None = None,
+    warning_level_m: float | None = None,
+    flood_depth_cm: float | None = None,
 ) -> NearbyCoverageRow:
     return NearbyCoverageRow(
         adapter_key=adapter_key,
@@ -53,7 +57,52 @@ def _row(
         ingested_at=NOW,
         distance_to_query_m=distance_to_query_m,
         freshness_state=freshness_state,
+        rainfall_mm_1h=rainfall_mm_1h,
+        water_level_m=water_level_m,
+        warning_level_m=warning_level_m,
+        flood_depth_cm=flood_depth_cm,
     )
+
+
+def test_nearby_coverage_exposes_nearest_public_safe_measurements() -> None:
+    coverage = build_nearby_realtime_coverage(
+        rows=(
+            _row(
+                adapter_key="official.cwa.rainfall",
+                source_id="cwa-rainfall:near",
+                event_type="rainfall",
+                distance_to_query_m=320.0,
+                rainfall_mm_1h=12.5,
+            ),
+            _row(
+                adapter_key="official.wra.water_level",
+                source_id="wra-water-level:near",
+                event_type="water_level",
+                distance_to_query_m=450.0,
+                water_level_m=1.75,
+                warning_level_m=2.25,
+            ),
+            _row(
+                adapter_key="official.wra_iow.flood_depth",
+                source_id="wra-flood-depth:near",
+                event_type="flood_depth",
+                distance_to_query_m=520.0,
+                flood_depth_cm=8.0,
+            ),
+        ),
+        query_radius_m=500,
+        evaluated_at=NOW,
+    )
+
+    by_type = {item.signal_type: item for item in coverage.signal_breakdown}
+    assert by_type["rainfall"].nearest_observation_value == 12.5
+    assert by_type["rainfall"].nearest_observation_unit == "mm_1h"
+    assert by_type["water_level"].nearest_observation_value == 1.75
+    assert by_type["water_level"].nearest_observation_unit == "m"
+    assert by_type["water_level"].nearest_reference_value == 2.25
+    assert by_type["water_level"].nearest_reference_unit == "m"
+    assert by_type["flood_depth"].nearest_observation_value == 8.0
+    assert by_type["flood_depth"].nearest_observation_unit == "cm"
 
 
 def test_nearby_coverage_distinguishes_nearby_from_county_available() -> None:

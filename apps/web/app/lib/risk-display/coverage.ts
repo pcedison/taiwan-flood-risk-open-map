@@ -130,7 +130,7 @@ function nearbySensingCoverageSummary(
   );
   const labels = Array.from(
     new Set(signals.map((signal) => nearbySignalLabel(signal.signal_type))),
-  ).slice(0, 3);
+  );
   const gaps = coverage.missing_signal_types.map(nearbySignalLabel);
   const nearestDistances = signals
     .map((signal) => signal.nearest_distance_m)
@@ -216,9 +216,9 @@ function nearbySensingCoverageSummary(
     return coverage.summary.trim() || "最近觀測已過期，不能代表當下狀況。";
   }
 
-  const signalText = labels.length ? labels.join("、") : "即時感測";
+  const signalText = labels.length ? `（${labels.join("、")}）` : "";
   const gapText = gaps.length ? `；仍缺 ${gaps.join("、")}。` : "。";
-  return `附近有 ${signalText} ${signals.length} 類觀測${nearestText}${gapText}`;
+  return `附近有 ${signals.length} 類觀測${signalText}${nearestText}${gapText}`;
 }
 
 function nearbyCoverageNote(
@@ -531,9 +531,18 @@ function coverageBadge(
   if (diagnosis.confirmedNoStation) return "附近觀測：範圍內無站";
 
   const measurementSignals = primaryMeasurementSignals(coverage);
-  const states = new Set(measurementSignals.map(signalAvailability));
-  if (states.has("fresh_nearby") || states.has("degraded_nearby")) {
-    return nearbyCoverageBadge(coverage.overall_level);
+  const measurementStates = measurementSignals.map(signalAvailability);
+  const states = new Set(measurementStates);
+  const usableCount = measurementStates.filter(
+    (state) => state === "fresh_nearby" || state === "degraded_nearby",
+  ).length;
+  if (usableCount > 0) {
+    if (usableCount < measurementSignals.length || coverage.missing_signal_types.length) {
+      return "附近觀測：部分可用";
+    }
+    return states.has("degraded_nearby")
+      ? "附近觀測：可用但有延遲"
+      : "附近觀測：可用";
   }
   if (states.has("regional_reference")) return "附近觀測：僅區域參考";
   if (states.has("stale_observation")) return "附近觀測：已過期";
@@ -629,6 +638,98 @@ function signalDetail(
   return `距查詢點 ${formatDistanceMeters(signal.nearest_distance_m)}；${status}${sourceStatus}${observedAt}`;
 }
 
+const observationUnitLabels = {
+  cm: "公分",
+  m: "公尺",
+  mm_1h: "毫米 / 1 小時",
+} as const;
+
+function formattedObservationValue(signal: CoverageSignal) {
+  const value = signal.nearest_observation_value;
+  const unit = signal.nearest_observation_unit;
+  if (value === null || value === undefined || !unit) {
+    return { unit: null, value: null };
+  }
+  const maximumFractionDigits = unit === "m" ? 2 : 1;
+  return {
+    unit: observationUnitLabels[unit],
+    value: new Intl.NumberFormat("zh-TW", {
+      maximumFractionDigits,
+      minimumFractionDigits: 0,
+    }).format(value),
+  };
+}
+
+function signalStatus(signal: CoverageSignal): {
+  label: string;
+  tone: NearbySensingState["items"][number]["statusTone"];
+} {
+  const availability = signalAvailability(signal);
+  if (availability === "fresh_nearby") return { label: "可採用", tone: "fresh" };
+  if (availability === "degraded_nearby") return { label: "更新較慢", tone: "delayed" };
+  if (availability === "regional_reference") return { label: "區域參考", tone: "regional" };
+  if (availability === "stale_observation") return { label: "已過期", tone: "stale" };
+  return { label: "無可用觀測", tone: "missing" };
+}
+
+function signalInsight(signal: CoverageSignal) {
+  const availability = signalAvailability(signal);
+  if (availability === "stale_observation") {
+    return "此讀值已過期，不能代表目前狀況。";
+  }
+  if (availability === "regional_reference") {
+    return "測站距離較遠，只能作區域背景參考。";
+  }
+  if (
+    signal.nearest_observation_value === null ||
+    signal.nearest_observation_value === undefined
+  ) {
+    return signal.nearest_distance_m === null
+      ? "本次沒有可顯示的測站讀值。"
+      : "已找到測站，但來源沒有提供可顯示的實際讀值。";
+  }
+
+  if (signal.signal_type === "rainfall") return "最近測站的近 1 小時累積雨量。";
+  if (signal.signal_type === "flood_depth") {
+    return signal.nearest_observation_value > 0
+      ? "感測器回報積淹水深度，請搭配現地與官方通報。"
+      : "感測器目前讀值為 0；不代表查詢點一定沒有積水。";
+  }
+  if (signal.signal_type === "sewer_water_level") {
+    return "目前下水道水位；未提供管高，不能換算滿管程度。";
+  }
+  if (signal.signal_type === "pump_or_gate_status") {
+    return "設備附近水位；不等同抽水站或水門的啟閉狀態。";
+  }
+  if (signal.signal_type === "water_level") {
+    const reference = signal.nearest_reference_value;
+    if (reference !== null && reference !== undefined) {
+      const difference = reference - signal.nearest_observation_value;
+      return difference <= 0
+        ? "目前讀值已達站點警戒參考值。"
+        : `距站點警戒參考值尚有 ${new Intl.NumberFormat("zh-TW", {
+            maximumFractionDigits: 2,
+          }).format(difference)} 公尺。`;
+    }
+    return "目前水位；站點未提供警戒參考值，不能只看數字判定安全。";
+  }
+  return "目前來源只提供觀測值，請搭配其他即時訊號判讀。";
+}
+
+function sensingAvailability(signals: CoverageSignal[]): NearbySensingState["availability"] {
+  const states = signals.map(signalAvailability);
+  const fresh = states.filter((state) => state === "fresh_nearby").length;
+  const delayed = states.filter((state) => state === "degraded_nearby").length;
+  return {
+    available: fresh + delayed,
+    delayed,
+    fresh,
+    regional: states.filter((state) => state === "regional_reference").length,
+    stale: states.filter((state) => state === "stale_observation").length,
+    total: signals.length,
+  };
+}
+
 function legacySourceAvailabilityNote(input: {
   data_freshness?: Array<{ source_id: string; health_status: string }> | null;
 }) {
@@ -663,12 +764,22 @@ export function nearbySensingState(input: {
     const orderedSignals = displayMeasurementSignals(coverage);
     return {
       badge: coverageBadge(coverage, diagnosis),
+      availability: sensingAvailability(orderedSignals),
       gaps: coverage.missing_signal_types.map(nearbySignalLabel),
-      items: orderedSignals.map((signal) => ({
-        detail: signalDetail(coverage, signal, searchRadiusM),
-        id: signal.signal_type,
-        label: nearbySignalLabel(signal.signal_type),
-      })),
+      items: orderedSignals.map((signal) => {
+        const observation = formattedObservationValue(signal);
+        const status = signalStatus(signal);
+        return {
+          detail: signalDetail(coverage, signal, searchRadiusM),
+          id: signal.signal_type,
+          insight: signalInsight(signal),
+          label: nearbySignalLabel(signal.signal_type),
+          status: status.label,
+          statusTone: status.tone,
+          unit: observation.unit,
+          value: observation.value,
+        };
+      }),
       note: sourceNote ?? nearbyCoverageNote(coverage, diagnosis),
       summary: nearbySensingCoverageSummary(coverage, diagnosis),
       tone:
@@ -693,6 +804,7 @@ export function nearbySensingState(input: {
   if (!input.assessment) {
     return {
       badge: "附近觀測：尚未查詢",
+      availability: { available: 0, delayed: 0, fresh: 0, regional: 0, stale: 0, total: 0 },
       gaps: [],
       items: [],
       note: "查詢後會獨立整理附近雨量、水位與警戒觀測。",
@@ -704,6 +816,7 @@ export function nearbySensingState(input: {
   if (realtimeItems.length === 0) {
     return {
       badge: "附近觀測：資料不足",
+      availability: { available: 0, delayed: 0, fresh: 0, regional: 0, stale: 0, total: 2 },
       gaps: ["雨量", "水位"],
       items: [],
       note: "資料不足代表本次回應沒有可列出的近距即時感測；不等於現地安全。",
@@ -726,11 +839,24 @@ export function nearbySensingState(input: {
 
   return {
     badge: nearbyCoverageBadge(level),
+    availability: {
+      available: 0,
+      delayed: 0,
+      fresh: 0,
+      regional: realtimeItems.length,
+      stale: 0,
+      total: Math.max(realtimeItems.length, requiredRealtimeSignals.length),
+    },
     gaps,
     items: realtimeItems.slice(0, 4).map((item) => ({
       detail: `距查詢點 ${formatDistance(item.distance_to_query_m)}；觀測 ${formatDateTime(item.observed_at)}`,
       id: item.id,
+      insight: "舊版回應未附結構化讀值，請展開判讀依據查看來源。",
       label: item.title || realtimeEventLabels[item.event_type] || "即時觀測",
+      status: "格式受限",
+      statusTone: "regional" as const,
+      unit: null,
+      value: null,
     })),
     note: "這是依目前證據列表整理的附近感測摘要；正式 coverage 欄位接上後會改用後端計算。",
     summary:

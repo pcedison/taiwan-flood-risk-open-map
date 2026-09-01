@@ -2576,6 +2576,32 @@ components:
             - string
             - "null"
           format: date-time
+        nearest_observation_value:
+          type:
+            - number
+            - "null"
+          description: Public-safe reading from the nearest displayed observation.
+        nearest_observation_unit:
+          type:
+            - string
+            - "null"
+          enum:
+            - mm_1h
+            - m
+            - cm
+            - null
+        nearest_reference_value:
+          type:
+            - number
+            - "null"
+          description: Optional station-specific warning reference for the displayed reading.
+        nearest_reference_unit:
+          type:
+            - string
+            - "null"
+          enum:
+            - m
+            - null
         counts_by_radius_m:
           type: object
           additionalProperties:
