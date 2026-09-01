@@ -66,6 +66,34 @@ def test_adapter_normalizes_official_historical_points() -> None:
     assert result.normalized[0].source_url == "https://data.gov.tw/dataset/130016"
 
 
+def test_partial_snapshot_preserves_every_invalid_source_row_as_rejected() -> None:
+    adapter = NstcFloodDisasterPointsAdapter(
+        fetched_at=datetime(2026, 9, 1, tzinfo=UTC),
+        fetch_text=lambda _url, _timeout: """FID,year,X_97,Y_97,source
+1,2022,250000,2650000,EMIC
+2,not-a-year,250000,2650000,EMIC
+3,2022,0,0,EMIC
+1,2022,250000,2650000,EMIC
+""",
+    )
+
+    result = adapter.run()
+
+    assert len(result.fetched) == 4
+    assert len(result.normalized) == 1
+    assert len(result.rejected) == 3
+    assert set(result.rejected) == {
+        "data-gov-130016:rejected:row-3",
+        "data-gov-130016:rejected:row-4",
+        "data-gov-130016:rejected:row-5",
+    }
+    assert {rejection.reason_code for rejection in result.source_rejections} == {
+        "nstc_duplicate_source_id",
+        "nstc_invalid_required_value",
+        "nstc_outside_taiwan_bounds",
+    }
+
+
 def test_runtime_requires_both_explicit_source_and_api_gates() -> None:
     key = NSTC_FLOOD_DISASTER_POINTS_METADATA.key
     base = {

@@ -172,15 +172,10 @@ _SOURCE_ROWS_CTE = """
         SELECT
             source.id,
             source.coverage_year,
-            matched.jurisdiction_code
+            boundary.jurisdiction_code
         FROM source_rows source
-        JOIN LATERAL (
-            SELECT boundary.jurisdiction_code
-            FROM active_boundaries boundary
-            WHERE ST_Covers(boundary.geom, source.geom)
-            ORDER BY ST_Area(boundary.geom::geography), boundary.jurisdiction_code
-            LIMIT 1
-        ) matched ON true
+        JOIN active_boundaries boundary
+          ON ST_Intersects(boundary.geom, source.geom)
     )
 """
 
@@ -188,7 +183,7 @@ _COVERAGE_PREFLIGHT_SQL = f"""
     WITH {_SOURCE_ROWS_CTE}
     SELECT
         (SELECT count(*) FROM accepted_rows)::integer,
-        (SELECT count(*) FROM attributed_rows)::integer,
+        (SELECT count(DISTINCT id) FROM attributed_rows)::integer,
         COALESCE(
             (SELECT array_agg(DISTINCT coverage_year ORDER BY coverage_year)
              FROM source_rows),
@@ -203,7 +198,10 @@ _UPSERT_SOURCE_CHECKS_SQL = f"""
         SELECT DISTINCT coverage_year FROM source_rows
     ),
     record_counts AS (
-        SELECT jurisdiction_code, coverage_year, count(*)::integer AS record_count
+        SELECT
+            jurisdiction_code,
+            coverage_year,
+            count(DISTINCT id)::integer AS record_count
         FROM attributed_rows
         GROUP BY jurisdiction_code, coverage_year
     )

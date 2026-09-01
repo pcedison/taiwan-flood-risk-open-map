@@ -190,6 +190,48 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
                         adapter_key,
                     ),
                 )
+            connection.execute(
+                """
+                INSERT INTO staging_evidence (
+                    raw_snapshot_id,
+                    data_source_id,
+                    source_id,
+                    source_type,
+                    event_type,
+                    title,
+                    summary,
+                    occurred_at,
+                    observed_at,
+                    confidence,
+                    validation_status,
+                    payload
+                )
+                SELECT
+                    %s,
+                    id,
+                    'footprint-cross-county',
+                    'official',
+                    'flood_report',
+                    'cross-county flood footprint',
+                    'one source footprint must contribute to every intersected county',
+                    make_timestamptz(2024, 12, 31, 12, 0, 0, 'Asia/Taipei'),
+                    make_timestamptz(2024, 12, 31, 12, 0, 0, 'Asia/Taipei'),
+                    0.82,
+                    'accepted',
+                    jsonb_build_object(
+                        'adapter_key', %s::text,
+                        'raw_ref', %s::text,
+                        'location_payload', jsonb_build_object(
+                            'geometry', ST_AsGeoJSON(
+                                ST_MakeEnvelope(118.1, 23.05, 118.3, 23.15, 4326)
+                            )::jsonb
+                        )
+                    )
+                FROM data_sources
+                WHERE adapter_key = %s
+                """,
+                (raw_snapshot_id, adapter_key, raw_ref, adapter_key),
+            )
             connection.commit()
 
         writer = PostgresHistoricalCoverageWriter(database_url=isolated_url)
@@ -206,7 +248,7 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
 
         assert first.assessed_years == (2024, 2025)
         assert first.source_check_count == 44
-        assert first.attributed_record_count == 3
+        assert first.attributed_record_count == 4
         assert second.source_check_count == 44
         with psycopg.connect(isolated_url) as connection:
             summary = connection.execute(
@@ -225,7 +267,7 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
                 "SELECT count(*)::integer FROM historical_coverage_source_checks"
             ).fetchone()[0]
 
-        assert summary == (44, 44, 3, 1, 1)
+        assert summary == (44, 44, 5, 1, 1)
         assert check_count == 44
 
         with psycopg.connect(isolated_url) as connection:

@@ -23,6 +23,7 @@ from app.adapters.contracts import (
     NormalizedEvidence,
     RawSourceItem,
     SourceFamily,
+    SourceRejection,
 )
 
 FetchText = Callable[[str, int], str]
@@ -182,10 +183,21 @@ class NstcFloodDisasterPointsAdapter:
         fetched = self.fetch()
         normalized: list[NormalizedEvidence] = []
         rejected: list[str] = []
+        source_rejections: list[SourceRejection] = []
         for raw in fetched:
             evidence = self.normalize(raw)
             if evidence is None:
                 rejected.append(raw.source_id)
+                reason_code = raw.payload.get("rejection_reason_code")
+                if not isinstance(reason_code, str):
+                    reason_code = "nstc_normalization_rejected"
+                if len(source_rejections) < 256:
+                    source_rejections.append(
+                        SourceRejection(
+                            source_id=raw.source_id,
+                            reason_code=reason_code,
+                        )
+                    )
             else:
                 normalized.append(evidence)
         return AdapterRunResult(
@@ -193,6 +205,7 @@ class NstcFloodDisasterPointsAdapter:
             fetched=fetched,
             normalized=tuple(normalized),
             rejected=tuple(rejected),
+            source_rejections=tuple(source_rejections),
         )
 
 
@@ -250,6 +263,7 @@ def parse_nstc_flood_disaster_csv(text: str) -> tuple[dict[str, object], ...]:
         )
     records: list[dict[str, object]] = []
     seen: set[str] = set()
+    valid_count = 0
     for row_number, row in enumerate(reader, start=2):
         if row_number > MAX_NSTC_FLOOD_DISASTER_POINTS_ROWS + 1:
             raise NstcFloodDisasterPointsPayloadError(
@@ -261,20 +275,33 @@ def parse_nstc_flood_disaster_csv(text: str) -> tuple[dict[str, object], ...]:
         x = _float_value(row.get("X_97"))
         y = _float_value(row.get("Y_97"))
         if not fid or year is None or x is None or y is None or not 1900 <= year <= 2100:
+            records.append(
+                _rejected_record(row_number, "nstc_invalid_required_value")
+            )
             continue
         coordinate = _twd97_tm2_121_to_wgs84(x, y)
         if coordinate is None:
+            records.append(
+                _rejected_record(row_number, "nstc_invalid_twd97_coordinate")
+            )
             continue
         lat, lng = coordinate
         if not (
             _TAIWAN_LATITUDE_BOUNDS[0] <= lat <= _TAIWAN_LATITUDE_BOUNDS[1]
             and _TAIWAN_LONGITUDE_BOUNDS[0] <= lng <= _TAIWAN_LONGITUDE_BOUNDS[1]
         ):
+            records.append(
+                _rejected_record(row_number, "nstc_outside_taiwan_bounds")
+            )
             continue
         source_id = f"data-gov-130016:{year}:{source}:{fid}"
         if source_id in seen:
+            records.append(
+                _rejected_record(row_number, "nstc_duplicate_source_id")
+            )
             continue
         seen.add(source_id)
+        valid_count += 1
         records.append(
             {
                 "source_id": source_id,
@@ -285,11 +312,18 @@ def parse_nstc_flood_disaster_csv(text: str) -> tuple[dict[str, object], ...]:
                 "geometry": {"type": "Point", "coordinates": [lng, lat]},
             }
         )
-    if not records:
+    if valid_count == 0:
         raise NstcFloodDisasterPointsPayloadError(
             "NSTC flood-disaster CSV contains no valid Taiwan point rows"
         )
     return tuple(records)
+
+
+def _rejected_record(row_number: int, reason_code: str) -> dict[str, object]:
+    return {
+        "source_id": f"data-gov-130016:rejected:row-{row_number}",
+        "rejection_reason_code": reason_code,
+    }
 
 
 def _approved_resource_url(value: object) -> str:
