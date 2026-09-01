@@ -137,17 +137,35 @@ _SOURCE_ROWS_CTE = f"""
         WHERE raw.raw_ref = %s
           AND raw.adapter_key = %s
     ),
-    accepted_rows AS MATERIALIZED (
+    accepted_row_candidates AS MATERIALIZED (
         SELECT
             staging.id,
+            COALESCE(
+                NULLIF(staging.payload->>'evidence_id', ''),
+                CASE
+                    WHEN staging.source_id IS NOT NULL THEN
+                        staging.source_id || '|' || staging.occurred_at::text
+                    ELSE NULL
+                END,
+                staging.id::text
+            ) AS evidence_key,
             EXTRACT(YEAR FROM staging.occurred_at)::integer AS coverage_year,
-            staging.payload->'location_payload'->'geometry' AS geometry_payload
+            staging.payload->'location_payload'->'geometry' AS geometry_payload,
+            staging.created_at
         FROM staging_evidence staging
         JOIN target_snapshot snapshot ON snapshot.id = staging.raw_snapshot_id
         WHERE staging.validation_status = 'accepted'
           AND staging.event_type = 'flood_report'
           AND staging.occurred_at IS NOT NULL
           AND EXTRACT(YEAR FROM staging.occurred_at)::integer BETWEEN %s AND %s
+    ),
+    accepted_rows AS MATERIALIZED (
+        SELECT DISTINCT ON (candidate.evidence_key)
+            candidate.id,
+            candidate.coverage_year,
+            candidate.geometry_payload
+        FROM accepted_row_candidates candidate
+        ORDER BY candidate.evidence_key, candidate.created_at DESC, candidate.id DESC
     ),
     source_rows AS MATERIALIZED (
         SELECT
@@ -172,28 +190,35 @@ _SOURCE_ROWS_CTE = f"""
           AND snapshot.imported_count = 22
           AND snapshot.manifest_sha256 = snapshot.approved_manifest_sha256
     ),
+    active_boundary_parts AS MATERIALIZED (
+        SELECT boundary.jurisdiction_code, part.geom
+        FROM active_boundaries boundary
+        CROSS JOIN LATERAL ST_Subdivide(boundary.geom, 256) AS part(geom)
+    ),
     point_attributed_rows AS MATERIALIZED (
         SELECT DISTINCT ON (source.id)
             source.id,
             source.coverage_year,
-            boundary.jurisdiction_code
+            boundary_part.jurisdiction_code
         FROM source_rows source
-        JOIN active_boundaries boundary
-          ON boundary.geom && source.geom
-         AND ST_Covers(boundary.geom, source.geom)
+        JOIN active_boundary_parts boundary_part
+          ON boundary_part.geom && source.geom
+         AND ST_Covers(boundary_part.geom, source.geom)
         WHERE ST_GeometryType(source.geom) = 'ST_Point'
-        ORDER BY source.id, boundary.jurisdiction_code
+        ORDER BY source.id, boundary_part.jurisdiction_code
     ),
     polygon_attributed_rows AS MATERIALIZED (
-        SELECT
+        SELECT DISTINCT
             source.id,
             source.coverage_year,
-            boundary.jurisdiction_code
+            boundary_part.jurisdiction_code
         FROM source_rows source
-        JOIN active_boundaries boundary
-          ON boundary.geom && source.geom
-         AND ST_Intersects(boundary.geom, source.geom)
-         AND ST_Area(ST_Intersection(boundary.geom, source.geom)::geography) > 0
+        JOIN active_boundary_parts boundary_part
+          ON boundary_part.geom && source.geom
+         AND ST_Intersects(boundary_part.geom, source.geom)
+          AND ST_Area(
+              ST_Intersection(boundary_part.geom, source.geom)::geography
+          ) > 0
         WHERE ST_GeometryType(source.geom) IN ('ST_Polygon', 'ST_MultiPolygon')
     ),
     exact_attributed_rows AS MATERIALIZED (

@@ -73,6 +73,8 @@ def test_record_success_attributes_and_upserts_in_one_database_statement() -> No
     coverage_sql, coverage_params = connection.cursor_instance.executions[0]
     assert coverage_sql.count("target_snapshot AS") == 1
     assert "upserted_source_checks AS" in coverage_sql
+    assert "DISTINCT ON (candidate.evidence_key)" in coverage_sql
+    assert "ST_Subdivide(boundary.geom, 256)" in coverage_sql
     assert len(coverage_params) == 8
     _, refresh_params = connection.cursor_instance.executions[1]
     assert refresh_params == ([2018, 2019],)
