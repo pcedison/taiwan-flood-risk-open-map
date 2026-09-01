@@ -39,6 +39,11 @@ Latest data.gov.tw review:
   machine-readable source catalog. Worker official adapter metadata is tested
   against it so data.gov.tw remains the primary public catalog reference while
   raw snapshots can still retain concrete resource URLs.
+- `config/source-registry.yaml` is the repository-wide enablement-decision
+  registry. It covers official, local, news, forum, worker, API-only, and
+  catalog-only sources, and CI rejects drift against worker scope, deployment
+  defaults, reviewed contract files, and the migrated `data_sources` catalog.
+  It does not replace source-specific metadata or prove runtime freshness.
 - `docs/data-sources/geocoding/geocoding-data-manifest.yaml` now carries the
   matching data.gov.tw dataset IDs, landing URLs, resource URLs, and source
   catalog keys for the primary geocoder inputs: village boundaries dataset 7438,

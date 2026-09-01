@@ -1,0 +1,588 @@
+version: source-registry/v1
+
+# This is the canonical enablement-decision registry. Runtime code, database
+# catalog rows, deployment defaults, and documentation remain separate
+# execution surfaces, but CI rejects any drift from the decisions recorded
+# here. A source being listed does not mean it is enabled or complete.
+contracts:
+  central_official: docs/data-sources/official/official-source-catalog.yaml
+  civil_iot: docs/data-sources/official/civil-iot-sensorthings-integration.md
+  incident_activation: docs/runbooks/safe-fast-official-incident-activation.md
+  local_realtime: docs/data-sources/local/taiwan-local-realtime-water-source-matrix.md
+  nationwide_history: docs/data-sources/official/nationwide-recent-flood-history.md
+  tainan_history: docs/data-sources/official/tainan-disaster-news.md
+  news_allowlist: docs/data-sources/news/l2-source-allowlist.yaml
+  news_enrichment: docs/data-sources/news/README.md
+  forum_approval: docs/data-sources/forum/source-approval-manifest.yaml
+
+sources:
+  - adapter_key: official.cwa.rainfall
+    family: official
+    contract: central_official
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: true
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.cwa.tide_level
+    family: official
+    contract: central_official
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: true
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.cwa.heavy_rain_warning
+    family: official
+    contract: incident_activation
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: audit_only
+  - adapter_key: official.wra.water_level
+    family: official
+    contract: central_official
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: true
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.wra_iow.flood_depth
+    family: official
+    contract: central_official
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.wra.historical_flood
+    family: official
+    contract: nationwide_history
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.wra.flood_incident
+    family: official
+    contract: nationwide_history
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: credential_and_contract_pending
+  - adapter_key: official.wra.flood_warning
+    family: official
+    contract: incident_activation
+    implementation: worker
+    runtime_scope: context_only
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: context_only
+  - adapter_key: official.ncdr.cap
+    family: official
+    contract: incident_activation
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.npa.police_radio_traffic
+    family: official
+    contract: incident_activation
+    implementation: worker
+    runtime_scope: context_only
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: context_only
+  - adapter_key: official.civil_iot.flood_sensor
+    family: official
+    contract: civil_iot
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.civil_iot.river_water_level
+    family: official
+    contract: civil_iot
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: official.civil_iot.pond_water_level
+    family: official
+    contract: civil_iot
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: official.civil_iot.sewer_water_level
+    family: official
+    contract: civil_iot
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.civil_iot.pump_water_level
+    family: official
+    contract: civil_iot
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.civil_iot.gate_water_level
+    family: official
+    contract: civil_iot
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: official.flood_potential.geojson
+    family: official
+    contract: central_official
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: true
+    catalog_state: enabled
+    deployment_default: false
+    enablement_decision: planning_reference
+  - adapter_key: official.nstc.flood_disaster_points
+    family: official
+    contract: central_official
+    implementation: api
+    runtime_scope: not_applicable
+    worker_default_enabled: null
+    catalog_state: absent
+    deployment_default: false
+    enablement_decision: static_snapshot
+
+  - adapter_key: local.new_taipei.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.new_taipei.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.new_taipei.rainfall
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.new_taipei.drainage_water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taipei.sewer_water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taipei.river_water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taipei.pump_station
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taoyuan.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taoyuan.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taoyuan.rainfall
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taichung.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.tainan.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: enabled
+    deployment_default: true
+    enablement_decision: production_backbone
+  - adapter_key: local.kaohsiung.sewer_water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.kaohsiung.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.kaohsiung.rainfall
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.keelung.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.keelung.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.keelung.rainfall
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.hsinchu_city.sewer_water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.hsinchu_city.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.chiayi_city.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.chiayi_city.rainfall
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.chiayi_county.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.nantou.sewer_water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.yunlin.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: contract_review_pending
+  - adapter_key: local.yilan.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.yilan.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.yilan.mobile_pump_status
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.penghu.water_level
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.kinmen.kwis_pump_station
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: authorization_pending
+  - adapter_key: local.hsinchu_county.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.miaoli.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.changhua.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.pingtung.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.hualien.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+  - adapter_key: local.taitung.flood_sensor
+    family: official
+    contract: local_realtime
+    implementation: worker
+    runtime_scope: v1_baseline
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: eligible_default_off
+
+  - adapter_key: news.public_web.sample
+    family: news
+    contract: news_allowlist
+    implementation: worker
+    runtime_scope: development_only
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: development_only
+  - adapter_key: news.public_web.gdelt_backfill
+    family: news
+    contract: news_allowlist
+    implementation: worker
+    runtime_scope: candidate
+    worker_default_enabled: false
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: candidate
+  - adapter_key: news.public_web.on_demand_search
+    family: news
+    contract: news_enrichment
+    implementation: api
+    runtime_scope: not_applicable
+    worker_default_enabled: null
+    catalog_state: absent
+    deployment_default: false
+    enablement_decision: request_time_legacy
+  - adapter_key: news.public_web.wiki_search
+    family: news
+    contract: news_enrichment
+    implementation: api
+    runtime_scope: not_applicable
+    worker_default_enabled: null
+    catalog_state: absent
+    deployment_default: false
+    enablement_decision: request_time_legacy
+  - adapter_key: news.public_web.production-template
+    family: news
+    contract: news_allowlist
+    implementation: catalog
+    runtime_scope: not_applicable
+    worker_default_enabled: null
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: candidate
+  - adapter_key: ptt
+    family: forum
+    contract: forum_approval
+    implementation: worker
+    runtime_scope: blocked
+    worker_default_enabled: false
+    catalog_state: absent
+    deployment_default: false
+    enablement_decision: blocked_pending_approval
+  - adapter_key: dcard
+    family: forum
+    contract: forum_approval
+    implementation: worker
+    runtime_scope: blocked
+    worker_default_enabled: false
+    catalog_state: absent
+    deployment_default: false
+    enablement_decision: blocked_pending_approval
+
+  - adapter_key: official.gov_tw.flood_citation
+    family: official
+    contract: nationwide_history
+    implementation: api
+    runtime_scope: not_applicable
+    worker_default_enabled: null
+    catalog_state: enabled
+    deployment_default: false
+    enablement_decision: request_time_fallback
+  - adapter_key: official.tainan.disaster_news
+    family: official
+    contract: tainan_history
+    implementation: api
+    runtime_scope: not_applicable
+    worker_default_enabled: null
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: superseded
