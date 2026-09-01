@@ -11,6 +11,32 @@ sys.path.insert(0, str(REPO_ROOT))
 from scripts import hosted_deployment_smoke as smoke  # noqa: E402
 
 
+def _ingestion_payload(
+    *,
+    scheduler_status: str = "healthy",
+    deployment_sha: str = "abc123",
+) -> dict[str, object]:
+    return {
+        "status": "degraded",
+        "deployment_sha": deployment_sha,
+        "scheduler": {"status": scheduler_status},
+        "source_summary": {"expected_source_count": 11},
+        "sources": [
+            {"source_id": f"source-{index}", "status": "operational"}
+            for index in range(11)
+        ],
+        "jurisdiction_summary": {
+            "expected_county_count": 22,
+            "returned_county_count": 22,
+        },
+        "jurisdictions": [
+            {"county_code": f"{index:08d}", "status": "operational"}
+            for index in range(22)
+        ],
+        "absence_is_safety_evidence": False,
+    }
+
+
 def test_hosted_deployment_smoke_writes_evidence_and_completion_overlay(
     tmp_path: Path,
     monkeypatch,
@@ -41,6 +67,8 @@ def test_hosted_deployment_smoke_writes_evidence_and_completion_overlay(
                     },
                 },
             )
+        if url.endswith("/v1/ingestion-readiness"):
+            return smoke.JsonResponse(status_code=200, payload=_ingestion_payload())
         raise AssertionError(f"unexpected URL {url}")
 
     monkeypatch.setattr(smoke, "request_json", fake_request_json)
@@ -71,6 +99,14 @@ def test_hosted_deployment_smoke_writes_evidence_and_completion_overlay(
     assert evidence["ready"]["dependencies"] == {
         "database": "healthy",
         "redis": "healthy",
+    }
+    assert evidence["ingestion_readiness"]["scheduler_status"] == "healthy"
+    assert evidence["ingestion_readiness"]["source_summary"] == {
+        "expected_source_count": 11
+    }
+    assert evidence["ingestion_readiness"]["jurisdiction_summary"] == {
+        "expected_county_count": 22,
+        "returned_county_count": 22,
     }
     assert evidence["completion_evidence_targets"] == [
         {
@@ -152,6 +188,8 @@ def test_hosted_deployment_smoke_fails_when_ready_sha_differs(
                     },
                 },
             )
+        if url.endswith("/v1/ingestion-readiness"):
+            return smoke.JsonResponse(status_code=200, payload=_ingestion_payload())
         raise AssertionError(f"unexpected URL {url}")
 
     monkeypatch.setattr(smoke, "request_json", fake_request_json)
@@ -191,8 +229,13 @@ def test_hosted_deployment_smoke_retries_until_deployed_sha_matches(
     def fake_request_json(url: str, *, timeout_seconds: float) -> smoke.JsonResponse:
         del timeout_seconds
         calls.append(url)
-        attempt = (len(calls) + 1) // 2
+        attempt = (len(calls) + 2) // 3
         deployment_sha = "old-sha" if attempt == 1 else "abc123"
+        if url.endswith("/v1/ingestion-readiness"):
+            return smoke.JsonResponse(
+                status_code=200,
+                payload=_ingestion_payload(deployment_sha=deployment_sha),
+            )
         payload = {
             "status": "ok",
             "service": "flood-risk-api",
@@ -228,10 +271,62 @@ def test_hosted_deployment_smoke_retries_until_deployed_sha_matches(
     assert calls == [
         "https://example.test/health",
         "https://example.test/ready",
+        "https://example.test/v1/ingestion-readiness",
         "https://example.test/health",
         "https://example.test/ready",
+        "https://example.test/v1/ingestion-readiness",
     ]
     evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
     assert evidence["status"] == "passed"
     assert evidence["attempt_count"] == 2
     assert evidence["health"]["deployment_sha"] == "abc123"
+
+
+def test_hosted_deployment_smoke_fails_when_scheduler_heartbeat_is_stale(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    evidence_output = tmp_path / "hosted-deployment-smoke.json"
+
+    def fake_request_json(url: str, *, timeout_seconds: float) -> smoke.JsonResponse:
+        del timeout_seconds
+        if url.endswith("/health"):
+            return smoke.JsonResponse(
+                status_code=200,
+                payload={"status": "ok", "deployment_sha": "abc123"},
+            )
+        if url.endswith("/ready"):
+            return smoke.JsonResponse(
+                status_code=200,
+                payload={
+                    "status": "ok",
+                    "deployment_sha": "abc123",
+                    "dependencies": {
+                        "database": {"status": "healthy"},
+                        "redis": {"status": "healthy"},
+                    },
+                },
+            )
+        if url.endswith("/v1/ingestion-readiness"):
+            return smoke.JsonResponse(
+                status_code=200,
+                payload=_ingestion_payload(scheduler_status="stale"),
+            )
+        raise AssertionError(f"unexpected URL {url}")
+
+    monkeypatch.setattr(smoke, "request_json", fake_request_json)
+
+    result = smoke.main(
+        [
+            "--base-url",
+            "https://example.test",
+            "--expected-deployment-sha",
+            "abc123",
+            "--evidence-output",
+            str(evidence_output),
+        ]
+    )
+
+    assert result == 1
+    evidence = json.loads(evidence_output.read_text(encoding="utf-8"))
+    assert "ingestion scheduler status is stale" in evidence["failures"]

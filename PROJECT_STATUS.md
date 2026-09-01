@@ -37,11 +37,22 @@ the live verification sources listed below.
   2018–2026 county/year ledger, and public-safe `GET /v1/history-coverage`.
   All 198 cells start as `unassessed`; the schema and endpoint make the work
   visible but do not by themselves backfill events or complete any cell.
-- The second PR 1 implementation slice adds `config/source-registry.yaml` as the canonical
+- The second implementation slice adds `config/source-registry.yaml` as the canonical
   enablement-decision ledger for all worker, API-only, and catalog-only sources.
   CI compares it with the 57 worker adapters, 51 V1 runtime keys, 11 hosted
   deployment defaults, source-contract files, and 58 migrated catalog rows.
   This prevents silent source drift; it does not activate a disabled source.
+- The PR 2 observability slice adds migration `0057`, persists the
+  `scheduler.v1-baseline-adapters` heartbeat through the database lease path,
+  and exposes `GET /v1/ingestion-readiness`. The public response summarizes the
+  11 production-backbone sources and the reviewed rainfall, water-level,
+  flood-depth, and warning contracts for all 22 counties without exposing
+  adapter keys, holder IDs, URLs, credentials, or raw errors. Readiness remains
+  fail closed, reports the deployment SHA checked by hosted smoke, and does not
+  claim nearby sensor coverage. This observability
+  slice does not complete the PR 2 production exit gate by itself: hosted raw,
+  staging, promotion, latest, adapter-run, and sustained-cadence evidence must
+  still be verified after deployment.
 
 ## Recorded production checkpoint
 

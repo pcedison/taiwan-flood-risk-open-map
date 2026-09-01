@@ -189,6 +189,81 @@ class HistoricalCoverageResponse(ContractModel):
     cells: list[HistoricalCoverageCell]
 
 
+IngestionReadinessStatus = Literal["ready", "degraded", "down"]
+IngestionSchedulerStatus = Literal["healthy", "stale", "stopped", "missing"]
+IngestionSourceStatus = Literal[
+    "operational",
+    "degraded",
+    "stale",
+    "failed",
+    "disabled",
+    "missing",
+]
+IngestionJurisdictionStatus = Literal["operational", "degraded", "unavailable"]
+
+
+class IngestionSchedulerReadiness(ContractModel):
+    status: IngestionSchedulerStatus
+    checked_at: datetime
+    last_heartbeat_at: datetime | None = None
+    stale_after_seconds: int | None = Field(default=None, gt=0)
+
+
+class IngestionSourceReadiness(ContractModel):
+    source_id: str
+    name: str
+    coverage_kind: Literal["national_realtime", "local_realtime", "nationwide_history"]
+    status: IngestionSourceStatus
+    reason_code: str
+    checked_at: datetime | None = None
+    last_attempted_at: datetime | None = None
+    last_succeeded_at: datetime | None = None
+    stale_after_seconds: int = Field(gt=0)
+
+
+class IngestionSourceReadinessSummary(ContractModel):
+    expected_source_count: int = Field(ge=0)
+    operational_source_count: int = Field(ge=0)
+    degraded_source_count: int = Field(ge=0)
+    stale_source_count: int = Field(ge=0)
+    failed_source_count: int = Field(ge=0)
+    disabled_source_count: int = Field(ge=0)
+    missing_source_count: int = Field(ge=0)
+    latest_success_at: datetime | None = None
+
+
+class IngestionJurisdictionReadiness(ContractModel):
+    county_code: str = Field(pattern=r"^\d{8}$")
+    county: str
+    status: IngestionJurisdictionStatus
+    expected_signal_count: int = Field(default=4, ge=0)
+    operational_signal_count: int = Field(ge=0)
+    degraded_signal_count: int = Field(ge=0)
+    unavailable_signal_count: int = Field(ge=0)
+
+
+class IngestionJurisdictionReadinessSummary(ContractModel):
+    expected_county_count: int = Field(default=22, ge=0)
+    returned_county_count: int = Field(ge=0)
+    operational_county_count: int = Field(ge=0)
+    degraded_county_count: int = Field(ge=0)
+    unavailable_county_count: int = Field(ge=0)
+    minimum_coverage_met: bool = False
+
+
+class IngestionReadinessResponse(ContractModel):
+    status: IngestionReadinessStatus
+    deployment_sha: str | None = None
+    generated_at: datetime
+    scheduler: IngestionSchedulerReadiness
+    source_summary: IngestionSourceReadinessSummary
+    sources: list[IngestionSourceReadiness]
+    jurisdiction_summary: IngestionJurisdictionReadinessSummary
+    jurisdictions: list[IngestionJurisdictionReadiness]
+    limitations: list[str]
+    absence_is_safety_evidence: Literal[False] = False
+
+
 class LocalSourceCoverage(ContractModel):
     county: str
     local_direct_statuses: list[LocalDirectSourceStatus]

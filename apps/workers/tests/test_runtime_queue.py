@@ -72,9 +72,11 @@ def test_scheduler_lease_acquire_release_sql_supports_expired_lease() -> None:
     acquire_sql, acquire_params = connection.cursor_instance.executions[0]
     release_sql, release_params = connection.cursor_instance.executions[1]
     assert "INSERT INTO worker_scheduler_leases" in acquire_sql
+    assert "INSERT INTO ingestion_scheduler_heartbeats" in acquire_sql
     assert "lease_expires_at <= now()" in acquire_sql
-    assert acquire_params == ("scheduler.enabled-adapters", "worker-a", 60)
+    assert acquire_params == ("scheduler.enabled-adapters", "worker-a", 60, 60)
     assert "DELETE FROM worker_scheduler_leases" in release_sql
+    assert "UPDATE ingestion_scheduler_heartbeats" in release_sql
     assert release_params == ("scheduler.enabled-adapters", "worker-a")
 
 

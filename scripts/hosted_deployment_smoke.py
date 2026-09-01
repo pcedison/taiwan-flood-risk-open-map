@@ -29,7 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Hosted deployment smoke: verify /health and /ready report the "
-            "expected main deployment SHA and healthy readiness dependencies."
+            "expected main deployment SHA, then require a healthy persisted "
+            "scheduler heartbeat and complete readiness contract shape."
         )
     )
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
@@ -75,16 +76,27 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
     health = JsonResponse(status_code=0, payload={}, error="not requested")
     ready = JsonResponse(status_code=0, payload={}, error="not requested")
+    ingestion_readiness = JsonResponse(status_code=0, payload={}, error="not requested")
 
     for attempt in range(1, attempts + 1):
         attempt_count = attempt
         failures = []
         health = request_json(f"{base_url}/health", timeout_seconds=args.timeout_seconds)
         ready = request_json(f"{base_url}/ready", timeout_seconds=args.timeout_seconds)
+        ingestion_readiness = request_json(
+            f"{base_url}/v1/ingestion-readiness",
+            timeout_seconds=args.timeout_seconds,
+        )
 
         failures.extend(_check_endpoint("health", health, args.expected_deployment_sha))
         failures.extend(_check_endpoint("ready", ready, args.expected_deployment_sha))
         failures.extend(_check_ready_dependencies(ready.payload))
+        failures.extend(
+            _check_ingestion_readiness(
+                ingestion_readiness,
+                expected_deployment_sha=args.expected_deployment_sha,
+            )
+        )
         if not failures:
             break
         if attempt < attempts and args.retry_delay_seconds > 0:
@@ -103,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         status=status,
         health=health,
         ready=ready,
+        ingestion_readiness=ingestion_readiness,
         attempt_count=attempt_count,
         failures=failures,
     )
@@ -139,6 +152,7 @@ def build_evidence_artifact(
     status: str,
     health: "JsonResponse",
     ready: "JsonResponse",
+    ingestion_readiness: "JsonResponse",
     attempt_count: int,
     failures: list[str],
 ) -> dict[str, Any]:
@@ -151,6 +165,7 @@ def build_evidence_artifact(
         "attempt_count": attempt_count,
         "health": _endpoint_summary(health),
         "ready": _endpoint_summary(ready),
+        "ingestion_readiness": _ingestion_readiness_summary(ingestion_readiness),
         "completion_evidence_targets": (
             [
                 {
@@ -227,6 +242,90 @@ def _check_ready_dependencies(payload: Mapping[str, Any]) -> list[str]:
     return failures
 
 
+def _check_ingestion_readiness(
+    response: "JsonResponse",
+    *,
+    expected_deployment_sha: str,
+) -> list[str]:
+    if response.status_code != 200:
+        return [
+            "ingestion-readiness returned HTTP "
+            f"{response.status_code}: {response.error or response.payload}"
+        ]
+    payload = response.payload
+    failures: list[str] = []
+    if payload.get("deployment_sha") != expected_deployment_sha:
+        failures.append(
+            "ingestion-readiness deployment_sha "
+            f"{payload.get('deployment_sha')} did not match expected {expected_deployment_sha}"
+        )
+    scheduler = payload.get("scheduler")
+    scheduler_status = scheduler.get("status") if isinstance(scheduler, Mapping) else None
+    if scheduler_status != "healthy":
+        failures.append(f"ingestion scheduler status is {scheduler_status}")
+
+    source_summary = payload.get("source_summary")
+    expected_sources = (
+        source_summary.get("expected_source_count")
+        if isinstance(source_summary, Mapping)
+        else None
+    )
+    sources = payload.get("sources")
+    if expected_sources != 11 or not isinstance(sources, list) or len(sources) != 11:
+        failures.append(
+            "ingestion readiness did not return the complete 11-source production profile"
+        )
+
+    jurisdiction_summary = payload.get("jurisdiction_summary")
+    expected_counties = (
+        jurisdiction_summary.get("expected_county_count")
+        if isinstance(jurisdiction_summary, Mapping)
+        else None
+    )
+    returned_counties = (
+        jurisdiction_summary.get("returned_county_count")
+        if isinstance(jurisdiction_summary, Mapping)
+        else None
+    )
+    jurisdictions = payload.get("jurisdictions")
+    if (
+        expected_counties != 22
+        or returned_counties != 22
+        or not isinstance(jurisdictions, list)
+        or len(jurisdictions) != 22
+    ):
+        failures.append("ingestion readiness did not return all 22 county contracts")
+    if payload.get("absence_is_safety_evidence") is not False:
+        failures.append("ingestion readiness must reject absence as safety evidence")
+
+    forbidden_keys = {
+        "adapter_key",
+        "holder_id",
+        "database_url",
+        "error_message",
+        "source_url",
+        "credential",
+        "secret",
+    }
+    exposed_keys = _nested_keys(payload).intersection(forbidden_keys)
+    if exposed_keys:
+        failures.append(
+            f"ingestion readiness exposed forbidden fields: {sorted(exposed_keys)}"
+        )
+    return failures
+
+
+def _nested_keys(value: object) -> set[str]:
+    if isinstance(value, Mapping):
+        return {
+            *(str(key) for key in value),
+            *(key for child in value.values() for key in _nested_keys(child)),
+        }
+    if isinstance(value, list):
+        return {key for child in value for key in _nested_keys(child)}
+    return set()
+
+
 def _endpoint_summary(response: "JsonResponse") -> dict[str, Any]:
     return {
         "status_code": response.status_code,
@@ -235,6 +334,22 @@ def _endpoint_summary(response: "JsonResponse") -> dict[str, Any]:
         "version": response.payload.get("version"),
         "deployment_sha": response.payload.get("deployment_sha"),
         "dependencies": _dependency_summary(response.payload),
+        "error": response.error,
+    }
+
+
+def _ingestion_readiness_summary(response: "JsonResponse") -> dict[str, Any]:
+    scheduler = response.payload.get("scheduler")
+    return {
+        "status_code": response.status_code,
+        "status": response.payload.get("status"),
+        "deployment_sha": response.payload.get("deployment_sha"),
+        "scheduler_status": (
+            scheduler.get("status") if isinstance(scheduler, Mapping) else None
+        ),
+        "source_summary": response.payload.get("source_summary"),
+        "jurisdiction_summary": response.payload.get("jurisdiction_summary"),
+        "absence_is_safety_evidence": response.payload.get("absence_is_safety_evidence"),
         "error": response.error,
     }
 

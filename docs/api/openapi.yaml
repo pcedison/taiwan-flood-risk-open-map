@@ -509,6 +509,33 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/ingestion-readiness:
+    get:
+      tags:
+        - Public
+      operationId: getIngestionReadiness
+      summary: Read public-safe worker scheduler and nationwide ingestion readiness.
+      description: >
+        Reports the persisted V1 scheduler heartbeat, the latest safe status of
+        every production-backbone source, and fail-closed readiness for the 22
+        counties across rainfall, water level, flood depth, and flood warning.
+        County readiness is not proof that a sensor exists near a query point.
+      responses:
+        "200":
+          description: Current ingestion readiness and explicit limitations.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestionReadinessResponse"
+        "503":
+          description: Ingestion readiness storage is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /v1/layers:
     get:
       tags:
@@ -3021,6 +3048,181 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/HistoricalCoverageCell"
+      additionalProperties: false
+
+    IngestionReadinessResponse:
+      type: object
+      required:
+        - status
+        - generated_at
+        - scheduler
+        - source_summary
+        - sources
+        - jurisdiction_summary
+        - jurisdictions
+        - limitations
+        - absence_is_safety_evidence
+      properties:
+        status:
+          type: string
+          enum: [ready, degraded, down]
+        deployment_sha:
+          type: [string, "null"]
+          default: null
+        generated_at:
+          type: string
+          format: date-time
+        scheduler:
+          $ref: "#/components/schemas/IngestionSchedulerReadiness"
+        source_summary:
+          $ref: "#/components/schemas/IngestionSourceReadinessSummary"
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngestionSourceReadiness"
+        jurisdiction_summary:
+          $ref: "#/components/schemas/IngestionJurisdictionReadinessSummary"
+        jurisdictions:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngestionJurisdictionReadiness"
+        limitations:
+          type: array
+          items:
+            type: string
+        absence_is_safety_evidence:
+          type: boolean
+          enum: [false]
+          default: false
+      additionalProperties: false
+
+    IngestionSchedulerReadiness:
+      type: object
+      required:
+        - status
+        - checked_at
+      properties:
+        status:
+          type: string
+          enum: [healthy, stale, stopped, missing]
+        checked_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: [string, "null"]
+          format: date-time
+          default: null
+        stale_after_seconds:
+          type: [integer, "null"]
+          exclusiveMinimum: 0
+          default: null
+      additionalProperties: false
+
+    IngestionSourceReadinessSummary:
+      type: object
+      required:
+        - expected_source_count
+        - operational_source_count
+        - degraded_source_count
+        - stale_source_count
+        - failed_source_count
+        - disabled_source_count
+        - missing_source_count
+      properties:
+        expected_source_count: {type: integer, minimum: 0}
+        operational_source_count: {type: integer, minimum: 0}
+        degraded_source_count: {type: integer, minimum: 0}
+        stale_source_count: {type: integer, minimum: 0}
+        failed_source_count: {type: integer, minimum: 0}
+        disabled_source_count: {type: integer, minimum: 0}
+        missing_source_count: {type: integer, minimum: 0}
+        latest_success_at:
+          type: [string, "null"]
+          format: date-time
+          default: null
+      additionalProperties: false
+
+    IngestionSourceReadiness:
+      type: object
+      required:
+        - source_id
+        - name
+        - coverage_kind
+        - status
+        - reason_code
+        - stale_after_seconds
+      properties:
+        source_id: {type: string}
+        name: {type: string}
+        coverage_kind:
+          type: string
+          enum: [national_realtime, local_realtime, nationwide_history]
+        status:
+          type: string
+          enum: [operational, degraded, stale, failed, disabled, missing]
+        reason_code: {type: string}
+        checked_at:
+          type: [string, "null"]
+          format: date-time
+          default: null
+        last_attempted_at:
+          type: [string, "null"]
+          format: date-time
+          default: null
+        last_succeeded_at:
+          type: [string, "null"]
+          format: date-time
+          default: null
+        stale_after_seconds:
+          type: integer
+          exclusiveMinimum: 0
+      additionalProperties: false
+
+    IngestionJurisdictionReadinessSummary:
+      type: object
+      required:
+        - returned_county_count
+        - operational_county_count
+        - degraded_county_count
+        - unavailable_county_count
+      properties:
+        expected_county_count:
+          type: integer
+          minimum: 0
+          default: 22
+        returned_county_count: {type: integer, minimum: 0}
+        operational_county_count: {type: integer, minimum: 0}
+        degraded_county_count: {type: integer, minimum: 0}
+        unavailable_county_count: {type: integer, minimum: 0}
+        minimum_coverage_met:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+    IngestionJurisdictionReadiness:
+      type: object
+      required:
+        - county_code
+        - county
+        - status
+        - operational_signal_count
+        - degraded_signal_count
+        - unavailable_signal_count
+      properties:
+        county_code:
+          type: string
+          pattern: "^[0-9]{8}$"
+        county: {type: string}
+        status:
+          type: string
+          enum: [operational, degraded, unavailable]
+        expected_signal_count:
+          type: integer
+          minimum: 0
+          default: 4
+        operational_signal_count: {type: integer, minimum: 0}
+        degraded_signal_count: {type: integer, minimum: 0}
+        unavailable_signal_count: {type: integer, minimum: 0}
       additionalProperties: false
 
     HistoricalCoverageSummary:

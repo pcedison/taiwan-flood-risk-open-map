@@ -211,21 +211,39 @@ class PostgresRuntimeQueue:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        INSERT INTO worker_scheduler_leases (
-                            lease_key,
-                            holder_id,
-                            lease_expires_at
+                        WITH acquired AS (
+                            INSERT INTO worker_scheduler_leases (
+                                lease_key,
+                                holder_id,
+                                lease_expires_at
+                            )
+                            VALUES (%s, %s, now() + make_interval(secs => %s))
+                            ON CONFLICT (lease_key) DO UPDATE SET
+                                holder_id = EXCLUDED.holder_id,
+                                lease_expires_at = EXCLUDED.lease_expires_at,
+                                updated_at = now()
+                            WHERE worker_scheduler_leases.lease_expires_at <= now()
+                                OR worker_scheduler_leases.holder_id = EXCLUDED.holder_id
+                            RETURNING lease_key
+                        ), recorded_heartbeat AS (
+                            INSERT INTO ingestion_scheduler_heartbeats (
+                                scheduler_key,
+                                runtime_status,
+                                last_seen_at,
+                                stale_after_seconds
+                            )
+                            SELECT lease_key, 'running', now(), %s
+                            FROM acquired
+                            ON CONFLICT (scheduler_key) DO UPDATE SET
+                                runtime_status = 'running',
+                                last_seen_at = EXCLUDED.last_seen_at,
+                                stale_after_seconds = EXCLUDED.stale_after_seconds,
+                                updated_at = now()
+                            RETURNING scheduler_key
                         )
-                        VALUES (%s, %s, now() + make_interval(secs => %s))
-                        ON CONFLICT (lease_key) DO UPDATE SET
-                            holder_id = EXCLUDED.holder_id,
-                            lease_expires_at = EXCLUDED.lease_expires_at,
-                            updated_at = now()
-                        WHERE worker_scheduler_leases.lease_expires_at <= now()
-                            OR worker_scheduler_leases.holder_id = EXCLUDED.holder_id
-                        RETURNING lease_key
+                        SELECT lease_key FROM acquired
                         """,
-                        (lease_key, holder_id, ttl_seconds),
+                        (lease_key, holder_id, ttl_seconds, ttl_seconds),
                     )
                     acquired = cursor.fetchone() is not None
                 connection.commit()
@@ -240,8 +258,18 @@ class PostgresRuntimeQueue:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         """
-                        DELETE FROM worker_scheduler_leases
-                        WHERE lease_key = %s AND holder_id = %s
+                        WITH released AS (
+                            DELETE FROM worker_scheduler_leases
+                            WHERE lease_key = %s AND holder_id = %s
+                            RETURNING lease_key
+                        )
+                        UPDATE ingestion_scheduler_heartbeats heartbeat
+                        SET runtime_status = 'stopped',
+                            last_seen_at = now(),
+                            updated_at = now()
+                        WHERE heartbeat.scheduler_key IN (
+                            SELECT lease_key FROM released
+                        )
                         """,
                         (lease_key, holder_id),
                     )

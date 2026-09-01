@@ -17,6 +17,12 @@ from app.api.schemas import (
     HistoricalCoverageCell,
     HistoricalCoverageResponse,
     HistoricalCoverageSummary,
+    IngestionJurisdictionReadiness,
+    IngestionJurisdictionReadinessSummary,
+    IngestionReadinessResponse,
+    IngestionSchedulerReadiness,
+    IngestionSourceReadiness,
+    IngestionSourceReadinessSummary,
     LatLng,  # noqa: F401  (re-exported for tests building Evidence payloads)
     LayersResponse,
     MapLayer,
@@ -46,6 +52,13 @@ from app.domain.history import (
     HistoricalCoverageRecord,
     HistoricalCoverageRepositoryUnavailable,
     list_historical_coverage,
+)
+from app.domain.ingestion import (
+    EXPECTED_JURISDICTION_COUNT,
+    EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT,
+    IngestionReadinessRepositoryUnavailable,
+    IngestionReadinessSnapshot,
+    fetch_ingestion_readiness,
 )
 from app.domain.layers import (
     LayerRecord,
@@ -340,6 +353,152 @@ def get_history_coverage(
         records,
         expected_count=expected_count,
         year=year,
+    )
+
+
+@router.get(
+    "/ingestion-readiness",
+    response_model=IngestionReadinessResponse,
+    responses={
+        503: {"description": "Ingestion readiness storage is unavailable."},
+    },
+)
+def get_ingestion_readiness() -> IngestionReadinessResponse:
+    settings = get_settings()
+    try:
+        snapshot = fetch_ingestion_readiness(database_url=settings.database_url)
+    except IngestionReadinessRepositoryUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "repository_unavailable",
+                "Ingestion readiness storage is temporarily unavailable.",
+            )["error"],
+        ) from exc
+    return _ingestion_readiness_response(
+        snapshot,
+        deployment_sha=settings.deployment_sha,
+    )
+
+
+def _ingestion_readiness_response(
+    snapshot: IngestionReadinessSnapshot,
+    *,
+    deployment_sha: str | None,
+) -> IngestionReadinessResponse:
+    source_counts = {
+        status: sum(1 for source in snapshot.sources if source.status == status)
+        for status in ("operational", "degraded", "stale", "failed", "disabled", "missing")
+    }
+    latest_success_at = max(
+        (
+            source.last_succeeded_at
+            for source in snapshot.sources
+            if source.last_succeeded_at is not None
+        ),
+        default=None,
+    )
+    jurisdiction_counts = {
+        status: sum(
+            1 for jurisdiction in snapshot.jurisdictions if jurisdiction.status == status
+        )
+        for status in ("operational", "degraded", "unavailable")
+    }
+    source_contract_complete = (
+        len(snapshot.sources) == EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT
+    )
+    jurisdiction_contract_complete = (
+        len(snapshot.jurisdictions) == EXPECTED_JURISDICTION_COUNT
+    )
+    minimum_coverage_met = (
+        jurisdiction_contract_complete
+        and jurisdiction_counts["operational"] == EXPECTED_JURISDICTION_COUNT
+    )
+    overall_status: Literal["ready", "degraded", "down"]
+    if (
+        snapshot.scheduler.status != "healthy"
+        or not source_contract_complete
+        or not jurisdiction_contract_complete
+        or source_counts["operational"] == 0
+    ):
+        overall_status = "down"
+    elif (
+        source_counts["operational"] == EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT
+        and minimum_coverage_met
+    ):
+        overall_status = "ready"
+    else:
+        overall_status = "degraded"
+
+    return IngestionReadinessResponse(
+        status=overall_status,
+        deployment_sha=deployment_sha,
+        generated_at=snapshot.generated_at,
+        scheduler=IngestionSchedulerReadiness(
+            status=snapshot.scheduler.status,
+            checked_at=snapshot.scheduler.checked_at,
+            last_heartbeat_at=snapshot.scheduler.last_heartbeat_at,
+            stale_after_seconds=snapshot.scheduler.stale_after_seconds,
+        ),
+        source_summary=IngestionSourceReadinessSummary(
+            expected_source_count=EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT,
+            operational_source_count=source_counts["operational"],
+            degraded_source_count=source_counts["degraded"],
+            stale_source_count=source_counts["stale"],
+            failed_source_count=source_counts["failed"],
+            disabled_source_count=source_counts["disabled"],
+            missing_source_count=(
+                source_counts["missing"]
+                + max(
+                    0,
+                    EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT - len(snapshot.sources),
+                )
+            ),
+            latest_success_at=latest_success_at,
+        ),
+        sources=[
+            IngestionSourceReadiness(
+                source_id=source.source_id,
+                name=source.name,
+                coverage_kind=source.coverage_kind,
+                status=source.status,
+                reason_code=source.reason_code,
+                checked_at=source.checked_at,
+                last_attempted_at=source.last_attempted_at,
+                last_succeeded_at=source.last_succeeded_at,
+                stale_after_seconds=source.stale_after_seconds,
+            )
+            for source in snapshot.sources
+        ],
+        jurisdiction_summary=IngestionJurisdictionReadinessSummary(
+            expected_county_count=EXPECTED_JURISDICTION_COUNT,
+            returned_county_count=len(snapshot.jurisdictions),
+            operational_county_count=jurisdiction_counts["operational"],
+            degraded_county_count=jurisdiction_counts["degraded"],
+            unavailable_county_count=(
+                jurisdiction_counts["unavailable"]
+                + max(0, EXPECTED_JURISDICTION_COUNT - len(snapshot.jurisdictions))
+            ),
+            minimum_coverage_met=minimum_coverage_met,
+        ),
+        jurisdictions=[
+            IngestionJurisdictionReadiness(
+                county_code=jurisdiction.county_code,
+                county=jurisdiction.county,
+                status=jurisdiction.status,
+                expected_signal_count=4,
+                operational_signal_count=jurisdiction.operational_signal_count,
+                degraded_signal_count=jurisdiction.degraded_signal_count,
+                unavailable_signal_count=jurisdiction.unavailable_signal_count,
+            )
+            for jurisdiction in snapshot.jurisdictions
+        ],
+        limitations=[
+            "縣市 readiness 只證明已審核的來源契約與背景更新狀態，不代表查詢點附近一定有感測器。",
+            "來源 operational 不等於上游站點清冊完整；點位風險仍須使用附近感測覆蓋結果。",
+            "資料缺漏、來源失敗或沒有歷史紀錄，都不能作為地點安全或未曾淹水的證據。",
+        ],
+        absence_is_safety_evidence=False,
     )
 
 
