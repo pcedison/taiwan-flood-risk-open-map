@@ -610,14 +610,15 @@ function signalDetail(
   }
 
   const availability = signalAvailability(signal);
-  const status =
-    availability === "regional_reference"
-      ? "僅供區域參考"
-      : availability === "fresh_nearby"
-        ? "新鮮"
-        : availability === "degraded_nearby"
-          ? "更新較慢"
-          : "已過期";
+  const status = {
+    degraded_nearby: "更新較慢",
+    fresh_nearby: "新鮮",
+    no_station: "無可用觀測",
+    regional_reference: "僅供區域參考",
+    source_status_unknown: "來源狀態不明",
+    source_unavailable: "讀值不可用",
+    stale_observation: "已過期",
+  } satisfies Record<SignalAvailability, string>;
   const sourceStatus =
     signal.missing_cause === "update_pipeline_stalled"
       ? "；更新管線停滯"
@@ -635,7 +636,7 @@ function signalDetail(
   const observedAt = signal.nearest_observed_at
     ? `；${formatDateTime(signal.nearest_observed_at)}`
     : "";
-  return `距查詢點 ${formatDistanceMeters(signal.nearest_distance_m)}；${status}${sourceStatus}${observedAt}`;
+  return `距查詢點 ${formatDistanceMeters(signal.nearest_distance_m)}；${status[availability]}${sourceStatus}${observedAt}`;
 }
 
 const observationUnitLabels = {
@@ -676,6 +677,12 @@ function signalInsight(signal: CoverageSignal) {
   const availability = signalAvailability(signal);
   if (availability === "stale_observation") {
     return "此讀值已過期，不能代表目前狀況。";
+  }
+  if (availability === "source_unavailable") {
+    return "來源目前異常；保留讀值僅供追溯，不能代表目前狀況。";
+  }
+  if (availability === "source_status_unknown") {
+    return "來源狀態未確認；保留讀值僅供追溯，不能代表目前狀況。";
   }
   if (availability === "regional_reference") {
     return "測站距離較遠，只能作區域背景參考。";

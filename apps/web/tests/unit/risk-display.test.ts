@@ -783,6 +783,46 @@ test("nearby sensing turns water readings into warning-distance context", () => 
   assert.match(state.items[0].insight, /0.5 公尺/);
 });
 
+test("nearby sensing does not present retained readings from a failed source as stale", () => {
+  const coverage = missingRainfallCoverage({
+    availabilityState: "source_unavailable",
+    missingCause: "source_failed",
+    sourceHealth: realtimeSourceHealth({
+      health_status: "failed",
+      reason_code: "upstream_unavailable",
+      signal_types: ["sewer_water_level"],
+      station_count: null,
+    }),
+  });
+  const unavailableSignal = coverage.signal_breakdown[0];
+  coverage.missing_signal_types = [];
+  coverage.signal_breakdown = [
+    {
+      ...unavailableSignal,
+      label: "下水道水位",
+      nearest_distance_m: 356,
+      nearest_freshness_state: "stale",
+      nearest_observation_unit: "m",
+      nearest_observation_value: 0.78,
+      nearest_observed_at: "2026-07-17T07:20:00Z",
+      nearest_source_id: "retained-sewer-reading",
+      signal_type: "sewer_water_level",
+      stale_count: 118,
+    },
+  ];
+
+  const state = nearbySensingState({
+    assessment: { nearby_realtime_coverage: coverage },
+  });
+
+  assert.equal(state.items[0].status, "無可用觀測");
+  assert.match(state.items[0].detail, /356 公尺；讀值不可用；來源異常/);
+  assert.doesNotMatch(state.items[0].detail, /已過期/);
+  assert.match(state.items[0].insight, /保留讀值僅供追溯/);
+  assert.doesNotMatch(state.items[0].insight, /目前下水道水位/);
+  assert.equal(state.availability.stale, 0);
+});
+
 test("right panel labels distinguish distance and source confidence", () => {
   assert.match(uiTextSource, /evidenceDistance:\s*"距查詢點"/);
   assert.match(uiTextSource, /evidenceConfidence:\s*"來源可信度"/);
