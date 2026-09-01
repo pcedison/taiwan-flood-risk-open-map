@@ -64,12 +64,16 @@ class PostgresHistoricalCoverageWriter:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    _COVERAGE_PREFLIGHT_SQL,
+                    _UPSERT_SOURCE_CHECKS_SQL,
                     (
                         raw_ref,
                         adapter_key,
                         HISTORICAL_COVERAGE_START_YEAR,
                         HISTORICAL_COVERAGE_END_YEAR,
+                        adapter_key,
+                        assessed_at,
+                        assessed_at,
+                        review_ref,
                     ),
                 )
                 row = cursor.fetchone()
@@ -83,6 +87,7 @@ class PostgresHistoricalCoverageWriter:
                 years = tuple(int(year) for year in (row[3] or ()))
                 boundary_count = int(row[4])
                 boundary_adjusted_count = int(row[5])
+                source_check_count = int(row[6])
                 if boundary_count != 22:
                     raise HistoricalCoverageWriteError(
                         "active historical coverage boundary contract is not exactly 22 counties"
@@ -106,20 +111,6 @@ class PostgresHistoricalCoverageWriter:
                         attributed_record_count=0,
                         boundary_adjusted_record_count=0,
                     )
-                cursor.execute(
-                    _UPSERT_SOURCE_CHECKS_SQL,
-                    (
-                        raw_ref,
-                        adapter_key,
-                        HISTORICAL_COVERAGE_START_YEAR,
-                        HISTORICAL_COVERAGE_END_YEAR,
-                        adapter_key,
-                        assessed_at,
-                        assessed_at,
-                        review_ref,
-                    ),
-                )
-                source_check_count = cursor.rowcount
                 cursor.execute(_REFRESH_COVERAGE_CELLS_SQL, (list(years),))
             connection.commit()
         return HistoricalCoverageWriteResult(
@@ -146,7 +137,7 @@ _SOURCE_ROWS_CTE = f"""
         WHERE raw.raw_ref = %s
           AND raw.adapter_key = %s
     ),
-    accepted_rows AS (
+    accepted_rows AS MATERIALIZED (
         SELECT
             staging.id,
             EXTRACT(YEAR FROM staging.occurred_at)::integer AS coverage_year,
@@ -158,7 +149,7 @@ _SOURCE_ROWS_CTE = f"""
           AND staging.occurred_at IS NOT NULL
           AND EXTRACT(YEAR FROM staging.occurred_at)::integer BETWEEN %s AND %s
     ),
-    source_rows AS (
+    source_rows AS MATERIALIZED (
         SELECT
             accepted.id,
             accepted.coverage_year,
@@ -169,7 +160,7 @@ _SOURCE_ROWS_CTE = f"""
         FROM accepted_rows accepted
         WHERE jsonb_typeof(accepted.geometry_payload) = 'object'
     ),
-    active_boundaries AS (
+    active_boundaries AS MATERIALIZED (
         SELECT boundary.jurisdiction_code, boundary.geom
         FROM realtime_jurisdiction_boundary_snapshots snapshot
         JOIN realtime_jurisdiction_boundaries boundary
@@ -222,7 +213,7 @@ _SOURCE_ROWS_CTE = f"""
               WHERE attributed.id = source.id
           )
     ),
-    boundary_adjusted_rows AS (
+    boundary_adjusted_rows AS MATERIALIZED (
         SELECT
             source.id,
             source.coverage_year,
@@ -242,7 +233,7 @@ _SOURCE_ROWS_CTE = f"""
             LIMIT 1
         ) nearest ON true
     ),
-    attributed_rows AS (
+    attributed_rows AS MATERIALIZED (
         SELECT id, coverage_year, jurisdiction_code
         FROM exact_attributed_rows
         UNION ALL
@@ -251,65 +242,85 @@ _SOURCE_ROWS_CTE = f"""
     )
 """
 
-_COVERAGE_PREFLIGHT_SQL = f"""
-    WITH {_SOURCE_ROWS_CTE}
-    SELECT
-        (SELECT count(*) FROM accepted_rows)::integer,
-        (SELECT count(*) FROM source_rows)::integer,
-        (SELECT count(DISTINCT id) FROM attributed_rows)::integer,
-        COALESCE(
-            (SELECT array_agg(DISTINCT coverage_year ORDER BY coverage_year)
-             FROM source_rows),
-            ARRAY[]::integer[]
-        ),
-        (SELECT count(*) FROM active_boundaries)::integer,
-        (SELECT count(DISTINCT id) FROM boundary_adjusted_rows)::integer
-"""
-
 _UPSERT_SOURCE_CHECKS_SQL = f"""
     WITH {_SOURCE_ROWS_CTE},
     source_years AS (
         SELECT DISTINCT coverage_year FROM source_rows
     ),
-    record_counts AS (
+    record_counts AS MATERIALIZED (
         SELECT
             jurisdiction_code,
             coverage_year,
             count(DISTINCT id)::integer AS record_count
         FROM attributed_rows
         GROUP BY jurisdiction_code, coverage_year
-    )
-    INSERT INTO historical_coverage_source_checks (
-        jurisdiction_code,
-        coverage_year,
-        adapter_key,
-        status,
-        record_count,
-        attempted_at,
-        succeeded_at,
-        review_ref
+    ),
+    source_metrics AS MATERIALIZED (
+        SELECT
+            (SELECT count(*) FROM accepted_rows)::integer AS accepted_count,
+            (SELECT count(*) FROM source_rows)::integer AS geometry_count,
+            (SELECT count(DISTINCT id) FROM attributed_rows)::integer
+                AS attributed_count,
+            COALESCE(
+                (SELECT array_agg(DISTINCT coverage_year ORDER BY coverage_year)
+                 FROM source_rows),
+                ARRAY[]::integer[]
+            ) AS years,
+            (SELECT count(*) FROM active_boundaries)::integer AS boundary_count,
+            (SELECT count(DISTINCT id) FROM boundary_adjusted_rows)::integer
+                AS boundary_adjusted_count
+    ),
+    valid_preflight AS (
+        SELECT 1
+        FROM source_metrics
+        WHERE boundary_count = 22
+          AND accepted_count = geometry_count
+          AND geometry_count = attributed_count
+    ),
+    upserted_source_checks AS (
+        INSERT INTO historical_coverage_source_checks (
+            jurisdiction_code,
+            coverage_year,
+            adapter_key,
+            status,
+            record_count,
+            attempted_at,
+            succeeded_at,
+            review_ref
+        )
+        SELECT
+            boundary.jurisdiction_code,
+            year_window.coverage_year,
+            %s,
+            'succeeded',
+            COALESCE(counts.record_count, 0),
+            %s,
+            %s,
+            %s
+        FROM active_boundaries boundary
+        CROSS JOIN source_years year_window
+        CROSS JOIN valid_preflight
+        LEFT JOIN record_counts counts
+          ON counts.jurisdiction_code = boundary.jurisdiction_code
+         AND counts.coverage_year = year_window.coverage_year
+        ON CONFLICT (jurisdiction_code, coverage_year, adapter_key) DO UPDATE SET
+            status = EXCLUDED.status,
+            record_count = EXCLUDED.record_count,
+            attempted_at = EXCLUDED.attempted_at,
+            succeeded_at = EXCLUDED.succeeded_at,
+            review_ref = EXCLUDED.review_ref,
+            updated_at = now()
+        RETURNING 1
     )
     SELECT
-        boundary.jurisdiction_code,
-        year_window.coverage_year,
-        %s,
-        'succeeded',
-        COALESCE(counts.record_count, 0),
-        %s,
-        %s,
-        %s
-    FROM active_boundaries boundary
-    CROSS JOIN source_years year_window
-    LEFT JOIN record_counts counts
-      ON counts.jurisdiction_code = boundary.jurisdiction_code
-     AND counts.coverage_year = year_window.coverage_year
-    ON CONFLICT (jurisdiction_code, coverage_year, adapter_key) DO UPDATE SET
-        status = EXCLUDED.status,
-        record_count = EXCLUDED.record_count,
-        attempted_at = EXCLUDED.attempted_at,
-        succeeded_at = EXCLUDED.succeeded_at,
-        review_ref = EXCLUDED.review_ref,
-        updated_at = now()
+        metrics.accepted_count,
+        metrics.geometry_count,
+        metrics.attributed_count,
+        metrics.years,
+        metrics.boundary_count,
+        metrics.boundary_adjusted_count,
+        (SELECT count(*) FROM upserted_source_checks)::integer
+    FROM source_metrics metrics
 """
 
 _REFRESH_COVERAGE_CELLS_SQL = """
