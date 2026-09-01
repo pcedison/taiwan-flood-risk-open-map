@@ -220,6 +220,24 @@ def test_check_risk_payload_rejects_unknown_when_official_realtime_evidence_exis
     ]
 
 
+def test_check_risk_payload_does_not_contradict_fail_closed_source_failure() -> None:
+    payload = _risk_payload()
+    payload["realtime"]["level"] = "未知"
+    rainfall_health = payload["nearby_realtime_coverage"]["source_health"][0]
+    rainfall_health["health_status"] = "failed"
+    rainfall_health["reason_code"] = "upstream_unavailable"
+
+    contract_failures, data_source_failures, state = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+
+    assert contract_failures == []
+    assert state == "configured"
+    assert data_source_failures == [
+        "required worker source cwa-source health is failed (upstream_unavailable)"
+    ]
+
+
 def test_check_risk_payload_accepts_zero_radius_counts_without_nearest_sensor() -> None:
     payload = _risk_payload()
     coverage = payload["nearby_realtime_coverage"]

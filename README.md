@@ -81,15 +81,20 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-09-01 checkpoint, `origin/main`, production `/health`, and production
-`/ready` matched; PostgreSQL and Redis were healthy, and strict hosted
-deployment/public-risk smokes passed. Do not treat a SHA copied into status
+the 2026-09-01 17:09 Asia/Taipei checkpoint, `origin/main`, production
+`/health`, and production `/ready` matched at
+`420ba5127bba1369573739de35128e968757ea8b`; PostgreSQL and Redis were healthy,
+and the hosted deployment smoke passed. The strict public-risk smoke failed
+closed because CWA rainfall reported `upstream_unavailable` and Civil IoT sewer
+water level reported `pipeline_unavailable`. Do not treat a SHA copied into status
 documentation as a permanent deployment pin: derive the current expected SHA
 only after `git fetch origin --prune`, then verify both health endpoints. The
 latest real scheduled Hosted Monitoring run still passed its deployment,
 public-risk, and desktop/mobile browser checks, but failed required source
-freshness while the official Civil IoT SensorThings service continued returning
-HTTP 500. Issues #289 and #293 track that hosted failure and schedule readiness;
+freshness. The official RainSewer collections now return HTTP 200 and the
+adapter completes all 2,046 stations in five bounded pages, but the upstream
+Observations collection currently contains no usable readings. Issues #289 and
+#293 track that hosted failure and schedule readiness;
 they must not be collapsed into a deployment failure. Hosted Monitoring also
 exercises the production basemap and a real public location query in desktop
 and mobile Chromium; major MapLibre and ESLint upgrades require an explicit
