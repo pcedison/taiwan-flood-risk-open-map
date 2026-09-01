@@ -9,7 +9,9 @@
 - migration `0056` 已建立 198 格 fail-closed coverage ledger 與 public-safe query；
 - `config/source-registry.yaml` 已統一記錄 worker、API-only、catalog-only 來源的啟用決策，
   並由 CI 查核 runtime scope、部署預設、契約檔與遷移後 catalog；
-- 198 格目前仍為 `unassessed`，中央排程、近期年份回填與 DB-only public query 尚未因此完成。
+- migration `0057` 已將 V1 scheduler heartbeat 與 11 個 production-backbone 來源契約持久化，
+  `/v1/ingestion-readiness` 會 fail-closed 彙總來源狀態與 22 縣市四類核心訊號；
+- 198 格目前仍為 `unassessed`，近期年份回填與 PR 2 的正式環境持續寫入證據尚未完成。
 
 ## 結論
 
@@ -221,6 +223,21 @@ public API 只讀資料庫 → 網站
 - public-safe readiness 顯示 scheduler heartbeat、最近成功時間、stale source count、
   22 縣市最低覆蓋數，不公開 URL credential 或 secret metadata；
 - 保留每來源 kill switch 與 rollback。
+
+已完成的工程切片：
+
+- worker 取得／續租 V1 scheduler lease 時，會在同一交易持久化 public-safe heartbeat；
+- graceful release 會寫入 `stopped`，未正常停止則由 TTL 判為 `stale`；
+- 11 個部署預設來源有獨立 stale gate，日更歷史快照不套用 30 分鐘即時門檻；
+- readiness 逐筆查核最新 ingestion job 與相同 run 的 promotion outcome；
+- 22 縣市必須各有 rainfall、water level、flood depth、flood warning 四類有效 mapping proof，
+  且所有 required source operational，才計入 minimum coverage；
+- API 不公開 adapter key、lease holder、URL、credential、raw error 或 secret metadata。
+- hosted deployment smoke 會比對 `/health`、`/ready` 與 ingestion readiness 的 merged SHA，
+  並拒絕 stale／stopped／missing scheduler heartbeat 或不完整的 11-source／22-county 契約。
+
+尚未完成：正式環境部署後的連續 cadence、raw／staging／promotion／latest／adapter run 寫入證據，
+以及 7 日驗收；因此 PR 2 退出條件仍未達成。
 
 退出條件：正式環境可證明 raw、staging、promotion、latest 與 adapter run 持續寫入。
 

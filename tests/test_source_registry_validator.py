@@ -9,16 +9,34 @@ from infra.scripts import validate_source_registry as validator
 
 
 class FakeResult:
-    def __init__(self, rows: list[tuple[str, bool]]) -> None:
+    def __init__(self, rows: list[tuple[object, ...]]) -> None:
         self._rows = rows
 
-    def fetchall(self) -> list[tuple[str, bool]]:
+    def fetchall(self) -> list[tuple[object, ...]]:
         return self._rows
 
 
 class FakeConnection:
     def __init__(self, rows: list[tuple[str, bool]]) -> None:
         self._rows = rows
+        self._readiness_rows = [
+            (adapter_key,)
+            for adapter_key, _enabled in rows
+            if adapter_key
+            in {
+                "official.cwa.rainfall",
+                "official.cwa.tide_level",
+                "official.wra.water_level",
+                "official.wra_iow.flood_depth",
+                "official.wra.historical_flood",
+                "official.ncdr.cap",
+                "official.civil_iot.flood_sensor",
+                "official.civil_iot.sewer_water_level",
+                "official.civil_iot.pump_water_level",
+                "official.civil_iot.gate_water_level",
+                "local.tainan.flood_sensor",
+            }
+        ]
 
     def __enter__(self) -> "FakeConnection":
         return self
@@ -27,8 +45,10 @@ class FakeConnection:
         return None
 
     def execute(self, query: str) -> FakeResult:
-        assert "SELECT adapter_key, is_enabled FROM data_sources" in query
-        return FakeResult(self._rows)
+        if "SELECT adapter_key, is_enabled FROM data_sources" in query:
+            return FakeResult(self._rows)
+        assert "FROM ingestion_readiness_sources" in query
+        return FakeResult(self._readiness_rows)
 
 
 def _registry() -> tuple[dict[str, Any], list[dict[str, Any]]]:

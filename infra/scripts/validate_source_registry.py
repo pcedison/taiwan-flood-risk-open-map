@@ -247,14 +247,32 @@ def validate_catalog(
             rows = connection.execute(
                 "SELECT adapter_key, is_enabled FROM data_sources ORDER BY adapter_key"
             ).fetchall()
+            readiness_rows = connection.execute(
+                """
+                SELECT adapter_key
+                FROM ingestion_readiness_sources
+                WHERE profile_key = 'production_backbone'
+                ORDER BY adapter_key
+                """
+            ).fetchall()
     except (OSError, psycopg.Error) as exc:
         raise SourceRegistryValidationError(
             f"cannot validate migrated data_sources catalog: {exc}"
         ) from exc
 
     actual = {str(row[0]): bool(row[1]) for row in rows}
+    actual_readiness = {str(row[0]) for row in readiness_rows}
+    expected_readiness = {
+        str(source["adapter_key"]) for source in sources if source["deployment_default"]
+    }
     errors: list[str] = []
     _compare_key_sets(errors, "migrated data_sources catalog", set(actual), set(expected))
+    _compare_key_sets(
+        errors,
+        "migrated production readiness profile",
+        actual_readiness,
+        expected_readiness,
+    )
     for adapter_key in sorted(set(actual) & set(expected)):
         if actual[adapter_key] != expected[adapter_key]:
             errors.append(

@@ -35,6 +35,13 @@ from app.domain.history import (
     HistoricalCoverageRecord,
     HistoricalCoverageRepositoryUnavailable,
 )
+from app.domain.ingestion import (
+    IngestionJurisdictionReadiness,
+    IngestionReadinessRepositoryUnavailable,
+    IngestionReadinessSnapshot,
+    IngestionSchedulerReadiness,
+    IngestionSourceReadiness,
+)
 from app.domain.realtime import (
     build_nearby_realtime_coverage,
 )
@@ -344,6 +351,7 @@ def test_ready_returns_503_when_dependency_fails(monkeypatch) -> None:
     assert response.status_code == 503
     payload = response.json()
     assert payload["status"] == "down"
+    assert "deployment_sha" in payload
     assert payload["dependencies"]["redis"]["status"] == "failed"
     assert_openapi_schema(payload, "ReadyResponse")
 
@@ -499,6 +507,85 @@ def test_history_coverage_returns_503_when_repository_is_unavailable(
     assert response.json()["error"]["code"] == "repository_unavailable"
 
 
+def test_ingestion_readiness_contract_is_public_safe_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    snapshot = IngestionReadinessSnapshot(
+        generated_at=now,
+        scheduler=IngestionSchedulerReadiness(
+            status="healthy",
+            checked_at=now,
+            last_heartbeat_at=now,
+            stale_after_seconds=600,
+        ),
+        sources=(
+            IngestionSourceReadiness(
+                adapter_key="official.cwa.rainfall",
+                source_id="official-cwa-rainfall",
+                name="中央氣象署雨量觀測",
+                coverage_kind="national_realtime",
+                status="operational",
+                reason_code="operational",
+                checked_at=now,
+                last_attempted_at=now,
+                last_succeeded_at=now,
+                stale_after_seconds=1800,
+            ),
+        ),
+        jurisdictions=(
+            IngestionJurisdictionReadiness(
+                county_code="67000000",
+                county="臺南市",
+                status="operational",
+                operational_signal_count=4,
+                degraded_signal_count=0,
+                unavailable_signal_count=0,
+            ),
+        ),
+    )
+    monkeypatch.setattr(public_routes, "fetch_ingestion_readiness", lambda **kwargs: snapshot)
+
+    response = client.get("/v1/ingestion-readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "down"
+    assert payload["scheduler"]["status"] == "healthy"
+    assert payload["source_summary"]["expected_source_count"] == 11
+    assert payload["source_summary"]["missing_source_count"] == 10
+    assert payload["jurisdiction_summary"]["expected_county_count"] == 22
+    assert payload["jurisdiction_summary"]["unavailable_county_count"] == 21
+    assert payload["jurisdiction_summary"]["minimum_coverage_met"] is False
+    assert payload["absence_is_safety_evidence"] is False
+    serialized = json.dumps(payload, ensure_ascii=False)
+    for forbidden in (
+        "adapter_key",
+        "holder_id",
+        "database_url",
+        "error_message",
+        "source_url",
+        "credential",
+    ):
+        assert forbidden not in serialized
+    assert_openapi_schema(payload, "IngestionReadinessResponse")
+
+
+def test_ingestion_readiness_returns_503_when_repository_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(**kwargs: object) -> IngestionReadinessSnapshot:
+        raise IngestionReadinessRepositoryUnavailable("private database detail")
+
+    monkeypatch.setattr(public_routes, "fetch_ingestion_readiness", unavailable)
+
+    response = client.get("/v1/ingestion-readiness")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "repository_unavailable"
+    assert "private database detail" not in response.text
+
+
 def test_required_schema_readiness_checks_latest_migration_and_relations() -> None:
     captured: dict[str, object] = {}
 
@@ -508,7 +595,7 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
             captured["params"] = params
 
         def fetchone(self) -> tuple[bool, ...]:
-            return (True, True, True, True, True, True, True, True, True, True)
+            return (True, True, True, True, True, True, True, True, True, True, True, True)
 
     health_routes._check_required_schema(FakeCursor())
 
@@ -516,10 +603,12 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        56,
-        "0056_historical_coverage_ledger.sql",
-        "7d55c56db7a1de2af26bf55c1336659419bf5606a850f1d18d5f2b9aaf07dea1",
-        56,
+        57,
+        "0057_ingestion_runtime_readiness.sql",
+        "00f9c4d6a3e426c67ccbc1e388fc715e65fdeb3fd110bfe3b0bd112f92e6d314",
+        57,
+        "public.ingestion_scheduler_heartbeats",
+        "public.ingestion_readiness_sources",
         "public.historical_coverage_cells",
         "public.station_inventory_snapshots",
         "public.realtime_jurisdiction_boundary_snapshots",
@@ -537,9 +626,22 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
             return None
 
         def fetchone(self) -> tuple[bool, ...]:
-            return (True, True, True, True, False, True, True, True, True, True)
+            return (
+                True,
+                True,
+                True,
+                True,
+                True,
+                True,
+                False,
+                True,
+                True,
+                True,
+                True,
+                True,
+            )
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0056 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0057 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 

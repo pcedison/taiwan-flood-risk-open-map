@@ -13,6 +13,10 @@ groundwork.
 
 - `/health`
 - `/ready` dependency readiness checks
+- `/v1/ingestion-readiness` public-safe V1 scheduler, 11-source backbone, and
+  22-county core-signal readiness; this is operational evidence, not nearby
+  sensor coverage or proof of safety
+- `/v1/history-coverage` fail-closed 2018–2026 county/year ingestion ledger
 - `/v1/geocode` mock provider
 - `/v1/risk/assess` mock/live-groundwork assessment surface backed by the
   current risk contract

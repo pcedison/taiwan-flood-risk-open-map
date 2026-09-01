@@ -17,7 +17,8 @@ python infra/scripts/validate_source_registry.py
 ```
 
 After applying migrations, also compare the registry with the real
-`data_sources` catalog:
+`data_sources` catalog and the `production_backbone` ingestion-readiness
+profile:
 
 ```powershell
 python infra/scripts/validate_source_registry.py `
@@ -26,5 +27,5 @@ python infra/scripts/validate_source_registry.py `
 ```
 
 The validator never prints the database URL. CI runs both modes and fails when
-an adapter, V1 scope decision, deployment default, source contract, or catalog
-enablement state drifts.
+an adapter, V1 scope decision, deployment default/readiness key, source
+contract, or catalog enablement state drifts.
