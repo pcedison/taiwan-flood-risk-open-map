@@ -67,22 +67,31 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
-- At 2026-09-01 12:44 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
-  reported `38dad7fd94306639d063912d8b4ad4fb6b13accf`; PostgreSQL and Redis were
+- At 2026-09-01 14:05 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `8a65890fa5580d454a44c74083379746b6848124`; PostgreSQL and Redis were
   healthy. The deployment-identity and strict public-risk smokes passed, there
   were no open Dependabot or code-scanning alerts, and there were no open pull
   requests.
 - Real-schedule Hosted Monitoring run
   [#33470758398](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33470758398)
   passed the public API contract, deployment, public-risk, and desktop and
-  mobile browser checks against that SHA; an independent strict public-risk
-  smoke also passed. The run failed required source
-  freshness because `official.civil_iot.sewer_water_level` remained failed
+  mobile browser checks against its then-current
+  `38dad7fd94306639d063912d8b4ad4fb6b13accf`; an independent strict public-risk
+  smoke against the current production SHA also passed. The run failed
+  required source freshness because `official.civil_iot.sewer_water_level` remained failed
   while the official Civil IoT service continued returning HTTP 500. Issue
   [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289)
   tracks the source incident, and issue
   [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
   remains open until a genuine schedule run satisfies the readiness contract.
+- PR [#300](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/300)
+  exposed actionable nearby observation values, units, timestamps, freshness,
+  and source states. PR
+  [#301](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/301)
+  then corrected retained readings from unavailable sources so they cannot be
+  presented as ordinary stale observations. Both passed CI and CodeQL; after
+  #301, production Browser/Playwright checks passed at 1280 px and 390 px with
+  no horizontal overflow or console errors.
 
 - PR [#295](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/295)
   merged as `2fa2ea0bf54a1f8c57977561cbc163ceb31c8846`. CI and CodeQL passed,
