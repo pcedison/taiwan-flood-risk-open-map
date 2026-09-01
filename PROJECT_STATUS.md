@@ -37,6 +37,11 @@ the live verification sources listed below.
   2018–2026 county/year ledger, and public-safe `GET /v1/history-coverage`.
   All 198 cells start as `unassessed`; the schema and endpoint make the work
   visible but do not by themselves backfill events or complete any cell.
+- The second PR 1 implementation slice adds `config/source-registry.yaml` as the canonical
+  enablement-decision ledger for all worker, API-only, and catalog-only sources.
+  CI compares it with the 57 worker adapters, 51 V1 runtime keys, 11 hosted
+  deployment defaults, source-contract files, and 58 migrated catalog rows.
+  This prevents silent source drift; it does not activate a disabled source.
 
 ## Recorded production checkpoint
 

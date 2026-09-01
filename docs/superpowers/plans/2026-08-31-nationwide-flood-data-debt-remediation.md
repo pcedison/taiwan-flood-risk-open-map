@@ -2,7 +2,14 @@
 
 日期：2026-08-31
 
-狀態：待實作；本文件只記錄唯讀查核、工程決策與驗收標準，不代表來源已啟用或正式環境已完成
+狀態：實作中；本文件記錄唯讀查核、工程決策與驗收標準，不代表來源已啟用或正式環境已完成
+
+目前進度：
+
+- migration `0056` 已建立 198 格 fail-closed coverage ledger 與 public-safe query；
+- `config/source-registry.yaml` 已統一記錄 worker、API-only、catalog-only 來源的啟用決策，
+  並由 CI 查核 runtime scope、部署預設、契約檔與遷移後 catalog；
+- 198 格目前仍為 `unassessed`，中央排程、近期年份回填與 DB-only public query 尚未因此完成。
 
 ## 結論
 
