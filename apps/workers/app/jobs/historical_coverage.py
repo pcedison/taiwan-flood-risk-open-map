@@ -172,28 +172,35 @@ _SOURCE_ROWS_CTE = f"""
           AND snapshot.imported_count = 22
           AND snapshot.manifest_sha256 = snapshot.approved_manifest_sha256
     ),
+    active_boundary_parts AS MATERIALIZED (
+        SELECT boundary.jurisdiction_code, part.geom
+        FROM active_boundaries boundary
+        CROSS JOIN LATERAL ST_Subdivide(boundary.geom, 256) AS part(geom)
+    ),
     point_attributed_rows AS MATERIALIZED (
         SELECT DISTINCT ON (source.id)
             source.id,
             source.coverage_year,
-            boundary.jurisdiction_code
+            boundary_part.jurisdiction_code
         FROM source_rows source
-        JOIN active_boundaries boundary
-          ON boundary.geom && source.geom
-         AND ST_Covers(boundary.geom, source.geom)
+        JOIN active_boundary_parts boundary_part
+          ON boundary_part.geom && source.geom
+         AND ST_Covers(boundary_part.geom, source.geom)
         WHERE ST_GeometryType(source.geom) = 'ST_Point'
-        ORDER BY source.id, boundary.jurisdiction_code
+        ORDER BY source.id, boundary_part.jurisdiction_code
     ),
     polygon_attributed_rows AS MATERIALIZED (
-        SELECT
+        SELECT DISTINCT
             source.id,
             source.coverage_year,
-            boundary.jurisdiction_code
+            boundary_part.jurisdiction_code
         FROM source_rows source
-        JOIN active_boundaries boundary
-          ON boundary.geom && source.geom
-         AND ST_Intersects(boundary.geom, source.geom)
-         AND ST_Area(ST_Intersection(boundary.geom, source.geom)::geography) > 0
+        JOIN active_boundary_parts boundary_part
+          ON boundary_part.geom && source.geom
+         AND ST_Intersects(boundary_part.geom, source.geom)
+          AND ST_Area(
+              ST_Intersection(boundary_part.geom, source.geom)::geography
+          ) > 0
         WHERE ST_GeometryType(source.geom) IN ('ST_Polygon', 'ST_MultiPolygon')
     ),
     exact_attributed_rows AS MATERIALIZED (
