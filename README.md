@@ -81,21 +81,23 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-09-01 18:24 Asia/Taipei checkpoint, `origin/main`, production
+the 2026-09-01 20:14 Asia/Taipei checkpoint, `origin/main`, production
 `/health`, and production `/ready` matched at
-`c448da5f714eb975967225ee0b74a7caf0def068`; PostgreSQL and Redis were healthy,
+`6d28f82cbdd2bc6430b7832a4aa15aa6de7d3186`; PostgreSQL and Redis were healthy,
 and the hosted deployment smoke passed. The strict public-risk smoke failed
 closed only because Civil IoT sewer water level reported
-`pipeline_unavailable`; CWA rainfall had recovered to `operational` at
-10:16 UTC. Do not treat a SHA copied into status documentation as a permanent
+`pipeline_unavailable`. The first complete post-deploy scheduler cycle then
+started CWA rainfall again after six minutes, within its 30-minute freshness
+contract. Do not treat a SHA copied into status documentation as a permanent
 deployment pin: derive the current expected SHA
 only after `git fetch origin --prune`, then verify both health endpoints. The
-latest real scheduled Hosted Monitoring run still passed its deployment,
-public-risk, and desktop/mobile browser checks, but failed required source
-freshness. The official RainSewer collections now return HTTP 200 and the
-adapter completes all 2,046 stations in five bounded pages, but the upstream
-Observations collection currently contains no usable readings. Issues #289 and
-#293 track that hosted failure and schedule readiness;
+latest real scheduled Hosted Monitoring run passed its public API and
+deployment checks, then failed the public-risk evidence step on the same sewer
+source; its downstream browser and freshness steps were therefore skipped. The
+official RainSewer collections return HTTP 200 and the adapter completes all
+2,046 stations in five bounded pages, but the upstream Observations collection
+currently contains no usable readings. Issues #289 and #293 track that hosted
+failure and schedule readiness;
 they must not be collapsed into a deployment failure. Hosted Monitoring also
 exercises the production basemap and a real public location query in desktop
 and mobile Chromium; major MapLibre and ESLint upgrades require an explicit

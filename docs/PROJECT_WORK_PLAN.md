@@ -3,7 +3,7 @@
 版本：0.1.0  
 狀態：正式工作進度規劃  
 來源規格：`docs/PROJECT_SDD.md`  
-最後更新：2026-08-29
+最後更新：2026-09-01
 專案授權決策：Apache-2.0  
 主要部署決策：GitHub repo -> Zeabur VPS auto deploy  
 語系決策：繁體中文 only
@@ -18,12 +18,13 @@ phase、work package 與舊 checkpoint 保留為實作契約及歷史紀錄，�
 正式站 `/health`、`/ready`、GitHub Actions 與 strict hosted smoke 的即時證據。
 
 本次檢查點已確認正式站部署識別與目前 `origin/main` 一致、PostgreSQL／Redis 健康、
-deployment smoke 與 strict public-risk smoke 通過，且沒有 open PR。最近一次真實
-`schedule` Hosted Monitoring 的部署、public-risk 與 desktop/mobile Browser 檢查通過，
-但因 Civil IoT 下水道水位官方服務持續回傳 HTTP 500 而未通過 required source
-freshness；#289 與 #293 分別追蹤來源事故與真實排程 readiness，不能誤寫為部署失敗
-或整體監控全通過。#71 仍是外部官方資料／契約證據工作；中央與台南技術路徑已恢復，
-不能以程式碼修復、靜態地圖或未實際寄送的 request packet 假裝完成外部授權與回覆。
+deployment smoke 通過且沒有 open PR。strict public-risk smoke 只因 Civil IoT 下水道
+水位 `pipeline_unavailable` 而 fail-closed；官方 collections 已恢復 HTTP 200，但
+Observations 仍沒有可用讀值。最近一次真實 `schedule` Hosted Monitoring 通過 public
+API 與 deployment，接著在同一 sewer public-risk 證據失敗，後續 Browser／freshness
+步驟因 fail-fast 被跳過。#289 與 #293 分別追蹤來源事故與真實排程 readiness，不能
+誤寫為部署失敗或整體監控全通過。#71 仍是外部官方資料／契約證據工作；不能以程式碼
+修復、靜態地圖或未實際寄送的 request packet 假裝完成外部授權與回覆。
 
 ---
 
