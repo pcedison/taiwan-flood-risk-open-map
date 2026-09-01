@@ -88,7 +88,7 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
             ).fetchall()
             for index, (jurisdiction_code,) in enumerate(jurisdictions):
                 min_lng = 118.0 + index * 0.2
-                max_lng = min_lng + 0.19
+                max_lng = min_lng + 0.2
                 connection.execute(
                     """
                     INSERT INTO realtime_jurisdiction_boundaries (
@@ -135,11 +135,12 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
             for source_id, year, lng in (
                 ("point-a", 2024, first_lng),
                 ("point-b", 2024, first_lng),
+                ("point-on-boundary", 2024, 118.2),
                 ("point-c", 2025, second_lng),
-                # Roughly 51 metres beyond the first synthetic county. Reviewed
+                # Roughly 51 metres beyond the last synthetic county. Reviewed
                 # official points this close to a coastline may use the bounded
                 # nearest-county fallback instead of invalidating the snapshot.
-                ("point-near-boundary", 2024, 118.1905),
+                ("point-near-boundary", 2024, 122.4005),
             ):
                 connection.execute(
                     """
@@ -252,7 +253,7 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
 
         assert first.assessed_years == (2024, 2025)
         assert first.source_check_count == 44
-        assert first.attributed_record_count == 5
+        assert first.attributed_record_count == 6
         assert first.boundary_adjusted_record_count == 1
         assert second.source_check_count == 44
         assert second.boundary_adjusted_record_count == 1
@@ -273,7 +274,7 @@ def test_successful_snapshot_updates_22_county_year_checks_idempotently() -> Non
                 "SELECT count(*)::integer FROM historical_coverage_source_checks"
             ).fetchone()[0]
 
-        assert summary == (44, 44, 6, 1, 1)
+        assert summary == (44, 44, 7, 1, 1)
         assert check_count == 44
 
         with psycopg.connect(isolated_url) as connection:

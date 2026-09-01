@@ -185,10 +185,28 @@ _SOURCE_ROWS_CTE = f"""
         SELECT
             source.id,
             source.coverage_year,
+            matched.jurisdiction_code
+        FROM source_rows source
+        JOIN LATERAL (
+            SELECT boundary.jurisdiction_code
+            FROM active_boundaries boundary
+            WHERE ST_GeometryType(source.geom) = 'ST_Point'
+              AND ST_Covers(boundary.geom, source.geom)
+            ORDER BY ST_Area(boundary.geom::geography), boundary.jurisdiction_code
+            LIMIT 1
+        ) matched ON true
+
+        UNION ALL
+
+        SELECT
+            source.id,
+            source.coverage_year,
             boundary.jurisdiction_code
         FROM source_rows source
         JOIN active_boundaries boundary
-          ON ST_Intersects(boundary.geom, source.geom)
+          ON ST_GeometryType(source.geom) IN ('ST_Polygon', 'ST_MultiPolygon')
+         AND ST_Intersects(boundary.geom, source.geom)
+         AND ST_Area(ST_Intersection(boundary.geom, source.geom)::geography) > 0
     ),
     unattributed_point_rows AS MATERIALIZED (
         SELECT source.id, source.coverage_year, source.geom
