@@ -770,7 +770,12 @@ def run_v1_baseline_enabled_adapters(
                     holder_id=lease_holder,
                 )
                 continue
-            time.sleep(settings.scheduler_interval_seconds)
+            sleep_seconds = _remaining_scheduler_sleep_seconds(
+                interval_seconds=settings.scheduler_interval_seconds,
+                tick_started_at=now_monotonic,
+            )
+            if sleep_seconds > 0:
+                time.sleep(sleep_seconds)
     finally:
         try:
             if lease_acquired:
@@ -788,6 +793,19 @@ def run_v1_baseline_enabled_adapters(
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
     return 1 if had_failure else 0
+
+
+def _remaining_scheduler_sleep_seconds(
+    *,
+    interval_seconds: int,
+    tick_started_at: float,
+    now: float | None = None,
+) -> float:
+    """Keep scheduler starts on the configured cadence despite variable tick time."""
+
+    checked_at = time.monotonic() if now is None else now
+    elapsed_seconds = max(0.0, checked_at - tick_started_at)
+    return max(0.0, interval_seconds - elapsed_seconds)
 
 
 def run_official_demo(
