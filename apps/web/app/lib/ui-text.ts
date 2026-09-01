@@ -32,6 +32,7 @@ export const text = {
   historical: "歷史參考",
   confidence: "資料可信度",
   nearbySensingKicker: "附近即時感測",
+  nearbySensingAvailability: "可作當下參考",
   nearbySensingDetails: "觀測範圍與解讀",
   nearbySensingGaps: "缺口",
   evidenceKicker: "資料證據",

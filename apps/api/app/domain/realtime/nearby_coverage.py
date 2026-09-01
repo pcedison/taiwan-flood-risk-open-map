@@ -176,6 +176,21 @@ class _SignalEvaluation:
     has_rows: bool
 
 
+def _observation_value(
+    signal_type: NearbyCoverageSignalType,
+    row: NearbyCoverageRow | None,
+) -> tuple[float | None, Literal["mm_1h", "m", "cm"] | None]:
+    if row is None:
+        return None, None
+    if signal_type == "rainfall":
+        return row.rainfall_mm_1h, "mm_1h" if row.rainfall_mm_1h is not None else None
+    if signal_type == "flood_depth":
+        return row.flood_depth_cm, "cm" if row.flood_depth_cm is not None else None
+    if signal_type in {"water_level", "sewer_water_level", "pump_or_gate_status"}:
+        return row.water_level_m, "m" if row.water_level_m is not None else None
+    return None, None
+
+
 @dataclass(frozen=True)
 class _SourceHealthDecision:
     health_status: HealthStatus
@@ -434,6 +449,10 @@ def _evaluate_signal(
         usable_rows, key=lambda row: row.distance_to_query_m, default=None
     )
     nearest_display_row = nearest_usable_row or nearest_row
+    observation_value, observation_unit = _observation_value(
+        signal_type,
+        nearest_display_row,
+    )
     counts_by_radius_m = {
         str(radius_m): sum(1 for row in in_range_rows if row.distance_to_query_m <= radius_m)
         for radius_m in RADIUS_BUCKETS_M
@@ -524,6 +543,17 @@ def _evaluate_signal(
             ),
             nearest_observed_at=(
                 nearest_display_row.observed_at if nearest_display_row is not None else None
+            ),
+            nearest_observation_value=observation_value,
+            nearest_observation_unit=observation_unit,
+            nearest_reference_value=(
+                nearest_display_row.warning_level_m if nearest_display_row is not None else None
+            ),
+            nearest_reference_unit=(
+                "m"
+                if nearest_display_row is not None
+                and nearest_display_row.warning_level_m is not None
+                else None
             ),
             counts_by_radius_m=counts_by_radius_m,
             fresh_count=len(fresh_rows),

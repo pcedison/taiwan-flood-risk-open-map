@@ -102,6 +102,14 @@ export type ProfileBasisText = {
 
 export type NearbySensingState = {
   badge: string;
+  availability: {
+    available: number;
+    delayed: number;
+    fresh: number;
+    regional: number;
+    stale: number;
+    total: number;
+  };
   gaps: string[];
   tone: "good" | "warn" | "poor" | "muted";
   summary: string;
@@ -109,6 +117,11 @@ export type NearbySensingState = {
     id: string;
     label: string;
     detail: string;
+    insight: string;
+    status: string;
+    statusTone: "fresh" | "delayed" | "regional" | "stale" | "missing";
+    value: string | null;
+    unit: string | null;
   }>;
   note: string;
 };

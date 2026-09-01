@@ -344,6 +344,10 @@ def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
                 "ingested_at": datetime(2026, 6, 29, 11, 56, tzinfo=UTC),
                 "distance_to_query_m": 230.4,
                 "freshness_state": "fresh",
+                "rainfall_mm_1h": 12.5,
+                "water_level_m": None,
+                "warning_level_m": None,
+                "flood_depth_cm": None,
             }
         ]
     )
@@ -358,6 +362,7 @@ def test_query_nearby_realtime_coverage_rows_counts_radius_buckets() -> None:
 
     assert rows[0].adapter_key == "local.kaohsiung.rainfall"
     assert rows[0].distance_to_query_m == 230.4
+    assert rows[0].rainfall_mm_1h == 12.5
     query_call = next(
         (
             item
