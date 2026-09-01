@@ -67,14 +67,14 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
-- At 2026-09-01 17:09 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
-  reported `420ba5127bba1369573739de35128e968757ea8b`; PostgreSQL and Redis were
+- At 2026-09-01 18:24 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `c448da5f714eb975967225ee0b74a7caf0def068`; PostgreSQL and Redis were
   healthy. The deployment-identity smoke passed, there were no open Dependabot,
   code-scanning, or secret-scanning alerts, and there were no open pull requests.
-  The strict public-risk smoke failed closed because CWA rainfall reported
-  `upstream_unavailable` and Civil IoT sewer water level reported
-  `pipeline_unavailable`; retained official observations remained visible for
-  traceability but were not used to claim low realtime risk.
+  CWA rainfall recovered automatically at 10:16 UTC and reported `operational`.
+  The strict public-risk smoke now fails closed only because Civil IoT sewer water
+  level reports `pipeline_unavailable`; retained sewer observations remain
+  visible for traceability but are not used to claim low realtime risk.
 - Real-schedule Hosted Monitoring run
   [#33470758398](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33470758398)
   passed the public API contract, deployment, public-risk, and desktop and
