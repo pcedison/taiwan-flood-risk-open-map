@@ -219,6 +219,7 @@ def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_inte
 ) -> None:
     captured_runs: list[frozenset[str]] = []
     maintenance_databases: list[str | None] = []
+    sleeps: list[float] = []
     static_key = "official.wra.historical_flood"
 
     class _Queue:
@@ -252,7 +253,7 @@ def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_inte
         maintenance_databases.append(getattr(settings, "database_url", None))
         return SimpleNamespace(failed=False, reason=None)
 
-    monotonic_values = iter((0.0, 300.0))
+    monotonic_values = iter((0.0, 120.0, 300.0))
     monkeypatch.setattr(runtime_cli, "PostgresRuntimeQueue", _Queue)
     monkeypatch.setattr(runtime_cli, "_SchedulerLeaseHeartbeat", _Heartbeat)
     monkeypatch.setattr(runtime_cli, "_run_v1_baseline_tick", fake_tick)
@@ -267,7 +268,7 @@ def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_inte
         lambda _settings: (SOURCE_A, static_key),
     )
     monkeypatch.setattr(runtime_cli.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(runtime_cli.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runtime_cli.time, "sleep", sleeps.append)
     monkeypatch.setattr(runtime_cli.signal, "signal", lambda _sig, _handler: object())
 
     exit_code = runtime_cli.run_v1_baseline_enabled_adapters(
@@ -290,6 +291,15 @@ def test_scheduler_runs_static_source_on_first_tick_then_defers_until_daily_inte
         "postgresql://example.test/flood",
         "postgresql://example.test/flood",
     ]
+    assert sleeps == [180.0]
+
+
+def test_scheduler_starts_next_tick_immediately_after_interval_overrun() -> None:
+    assert runtime_cli._remaining_scheduler_sleep_seconds(
+        interval_seconds=300,
+        tick_started_at=100.0,
+        now=401.0,
+    ) == 0.0
 
 
 def test_deferred_static_source_stays_in_authoritative_runtime_selection(
