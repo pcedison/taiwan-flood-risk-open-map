@@ -2,7 +2,10 @@
 
 PostGIS migrations for local development and deployment.
 
-Files in this directory are mounted into the PostgreSQL container init directory for fresh local databases.
+The tracked migration runner is the only authority that applies these files.
+PostgreSQL does not mount this directory into `docker-entrypoint-initdb.d`:
+doing so would execute migrations without recording their checksums and would
+then replay old migrations against a newer schema.
 
 ## Applying migrations to an existing database
 
@@ -13,7 +16,11 @@ docker compose up -d postgres
 docker compose --profile tools run --rm migrate
 ```
 
-For Zeabur or another Docker Compose compatible host, run the same `migrate` service as an explicit release step before restarting `api`, `worker`, and `scheduler`. The current SQL files are idempotent, so the command is safe to re-run while the schema remains in skeleton mode.
+For Zeabur or another Docker Compose compatible host, run the same `migrate`
+service as an explicit release step before restarting `api`, `worker`, and
+`scheduler`. The runner records every applied filename and checksum in
+`schema_migrations`, skips recorded migrations, rejects drift, and serializes
+concurrent runs with a PostgreSQL advisory lock.
 
 Validate migration filenames and basic SQL shape locally:
 
@@ -25,21 +32,20 @@ CI runs both `validate_migrations.py` and a PostGIS smoke check that applies the
 
 ## Local initialization
 
-The local `postgres` service runs these files once, in filename order, when the
-`postgres-data` volume is empty.
+Starting the local `postgres` service creates an empty PostGIS database. Apply
+the tracked migrations explicitly before starting API or worker services:
 
 ```powershell
 docker compose up -d postgres
+docker compose --profile tools run --rm migrate
 ```
 
-To re-run migrations from an empty local database, remove only the local
-PostgreSQL volume and start the service again:
-
-```powershell
-docker compose down
-docker volume rm flood-risk_postgres-data
-docker compose up -d postgres
-```
+Do not mount all numbered SQL files into PostgreSQL's init directory or run them
+with an untracked shell loop. A legacy local volume created by the former
+init-directory path can contain schema objects without `schema_migrations`;
+back it up and rebuild that development database, or have an operator review
+and baseline it deliberately. The runner does not guess which migrations a
+non-empty untracked database has already received.
 
 Smoke-check the Phase 1 tables:
 

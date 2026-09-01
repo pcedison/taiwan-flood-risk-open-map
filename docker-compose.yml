@@ -153,17 +153,17 @@ services:
         condition: service_healthy
 
   migrate:
-    image: postgis/postgis:16-3.4
+    image: python:3.12-slim
     working_dir: /workspace
     command:
       - sh
       - -c
       - |
         set -eu
-        for migration in /workspace/infra/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
-          echo "Applying $${migration}"
-          psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$$migration"
-        done
+        python -m pip install --quiet --disable-pip-version-check \
+          -r /workspace/apps/workers/requirements.lock
+        python /workspace/infra/scripts/apply_migrations.py \
+          --database-url "$$DATABASE_URL"
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://flood_risk:change-me-local@postgres:5432/flood_risk}
     volumes:
@@ -184,7 +184,6 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./infra/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
