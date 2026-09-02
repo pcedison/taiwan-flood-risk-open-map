@@ -182,7 +182,7 @@ Official ingestion scheduler for the single-service beta:
 | `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
 | `MIGRATION_LOCK_TIMEOUT_MS` | leave unset or `10000` | Maximum PostgreSQL lock wait per migration statement, including contention with another startup runner. Increase only for a reviewed maintenance window. |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | leave unset or `300000` | Maximum execution time for each migration statement. Each migration commits independently before the next file begins. |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor` | Selects the official realtime backbone plus the reviewed Tainan local flood-sensor fallback. |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.sewer_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points` | Selects the reviewed nine-source realtime/history backbone. |
 | `SOURCE_CWA_ENABLED` | `true` or leave unset | Enables the CWA adapter selection; `false` disables it. |
 | `SOURCE_CWA_API_ENABLED` | `true` | Enables the CWA live client. |
 | `SOURCE_WRA_ENABLED` | `true` or leave unset | Enables the WRA adapter selection; `false` disables it. |
@@ -192,15 +192,15 @@ Official ingestion scheduler for the single-service beta:
 | `SOURCE_NCDR_CAP_ENABLED` | `true` | Enables the NCDR CAP adapter selection. |
 | `SOURCE_NCDR_CAP_API_ENABLED` | `true` | Enables NCDR CAP alert ingestion. |
 | `NCDR_ALERTS_API_KEY` | leave unset or a valid member key | Without a key the worker uses NCDR's official public active-warning Atom feed; a configured key preserves the member datastore route. |
-| `SOURCE_FLOOD_SENSOR_ENABLED` | `true` | Enables Civil IoT flood-sensor adapter selection. |
-| `SOURCE_FLOOD_SENSOR_API_ENABLED` | `true` | Enables Civil IoT flood-sensor ingestion. |
-| `SOURCE_FLOOD_SENSOR_USE_LIVE` | `true` | Uses the Civil IoT live STA endpoint instead of fixture gating. |
+| `SOURCE_FLOOD_SENSOR_ENABLED` | `false` | Quarantined by migration 0062 while `STA_WaterResource_v2` entity queries return HTTP 500. |
+| `SOURCE_FLOOD_SENSOR_API_ENABLED` | `false` | Do not enable until a reviewed recovery migration lands. |
+| `SOURCE_FLOOD_SENSOR_USE_LIVE` | `false` | Do not override the catalog quarantine through env. |
 | `SOURCE_CIVIL_IOT_SEWER_ENABLED` | `true` | Enables Civil IoT sewer water-level adapter selection. |
 | `SOURCE_CIVIL_IOT_SEWER_API_ENABLED` | `true` | Enables Civil IoT sewer water-level ingestion. |
-| `SOURCE_CIVIL_IOT_PUMP_ENABLED` | `true` | Enables Civil IoT pump external water-level adapter selection. |
-| `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `true` | Enables Civil IoT pump external water-level ingestion. |
-| `SOURCE_CIVIL_IOT_GATE_ENABLED` | `true` | Enables Civil IoT gate water-level adapter selection. |
-| `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` | Enables Civil IoT gate water-level ingestion. |
+| `SOURCE_CIVIL_IOT_PUMP_ENABLED` | `false` | Quarantined by migration 0062. |
+| `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `false` | Do not enable until reviewed recovery. |
+| `SOURCE_CIVIL_IOT_GATE_ENABLED` | `false` | Quarantined by migration 0062. |
+| `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `false` | Do not enable until reviewed recovery. |
 | `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` | Enables the reviewed Tainan local flood-sensor fallback. |
 | `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` | Enables live Tainan flood-sensor ingestion. |
 | `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | leave unset or `45` | Allows the reviewed Tainan government JSON endpoint enough hosted-egress headroom. The adapter clamps lower stale platform overrides to 45 seconds and returns as soon as chunked JSON is complete. If the SOA endpoint fails, it reads the same resource's explicit JSON preview from the official Tainan data platform and records that effective resource URL in evidence provenance. |

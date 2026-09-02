@@ -13,7 +13,7 @@ groundwork.
 
 - `/health`
 - `/ready` dependency readiness checks
-- `/v1/ingestion-readiness` public-safe V1 scheduler, 12-source backbone, and
+- `/v1/ingestion-readiness` public-safe V1 scheduler, 9-source backbone, and
   22-county core-signal readiness; this is operational evidence, not nearby
   sensor coverage or proof of safety
 - `/v1/history-coverage` fail-closed 2018–2026 county/year ingestion ledger

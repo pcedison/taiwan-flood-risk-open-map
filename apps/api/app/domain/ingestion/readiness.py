@@ -11,7 +11,7 @@ from psycopg.rows import dict_row
 INGESTION_READINESS_PROFILE = "production_backbone"
 INGESTION_SCHEDULER_KEY = "scheduler.v1-baseline-adapters"
 EXPECTED_JURISDICTION_COUNT = 22
-EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT = 12
+EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT = 9
 REQUIRED_SIGNAL_TYPES = ("rainfall", "water_level", "flood_depth", "flood_warning")
 
 SchedulerReadinessStatus = Literal["healthy", "stale", "stopped", "missing"]

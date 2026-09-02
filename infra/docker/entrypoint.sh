@@ -51,7 +51,7 @@ ingestion_enabled="${HOSTED_INGESTION_SCHEDULER_ENABLED:-${SINGLE_SERVICE_INGEST
 realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"
 realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"
 realtime_backbone_emergency_stop="${REALTIME_BACKBONE_EMERGENCY_STOP:-false}"
-realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points"
+realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.sewer_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points"
 # Only the loopback hop (the co-located Next.js proxy) is trusted for
 # X-Forwarded-* by default; override for split topologies where the API's
 # direct peer is the platform ingress instead.
@@ -116,15 +116,8 @@ configure_backbone_source_gates() {
     SOURCE_NCDR_CAP_ENABLED
     SOURCE_NCDR_CAP_API_ENABLED
     SOURCE_NCDR_CAP_CONTRACT_ENABLED
-    SOURCE_FLOOD_SENSOR_ENABLED
-    SOURCE_FLOOD_SENSOR_API_ENABLED
-    SOURCE_FLOOD_SENSOR_USE_LIVE
     SOURCE_CIVIL_IOT_SEWER_ENABLED
     SOURCE_CIVIL_IOT_SEWER_API_ENABLED
-    SOURCE_CIVIL_IOT_PUMP_ENABLED
-    SOURCE_CIVIL_IOT_PUMP_API_ENABLED
-    SOURCE_CIVIL_IOT_GATE_ENABLED
-    SOURCE_CIVIL_IOT_GATE_API_ENABLED
     SOURCE_TAINAN_FLOOD_SENSOR_ENABLED
     SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED
   )

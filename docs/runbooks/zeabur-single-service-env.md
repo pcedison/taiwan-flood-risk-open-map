@@ -100,7 +100,7 @@ the stop removed.
 | `RUN_DATABASE_MIGRATIONS_ON_START` | Leave unset or `true`; use `false` only for an operator-managed migration window |
 | `MIGRATION_LOCK_TIMEOUT_MS` | Leave unset for the conservative `10000` ms PostgreSQL lock-wait limit |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | Leave unset for the conservative `300000` ms per-migration statement limit |
-| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points` |
+| `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.sewer_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points` |
 | `SOURCE_CWA_ENABLED` | Leave unset or `true`; `false` takes effect only when force mode is disabled |
 | `SOURCE_CWA_API_ENABLED` | `true` |
 | `CWA_API_AUTHORIZATION` | Your CWA API authorization token |
@@ -116,15 +116,15 @@ the stop removed.
 | `SOURCE_NCDR_CAP_API_ENABLED` | `true` |
 | `SOURCE_NCDR_CAP_CONTRACT_ENABLED` | Leave unset or `true`; force mode sets this reviewed contract gate to `true` so NCDR cannot be silently omitted |
 | `NCDR_ALERTS_API_KEY` | Optional NCDR member API key. Leave unset to use the official public active-warning Atom feed. |
-| `SOURCE_FLOOD_SENSOR_ENABLED` | `true` |
-| `SOURCE_FLOOD_SENSOR_API_ENABLED` | `true` |
-| `SOURCE_FLOOD_SENSOR_USE_LIVE` | `true` |
+| `SOURCE_FLOOD_SENSOR_ENABLED` | `false` — quarantined by migration 0062 while `STA_WaterResource_v2` returns HTTP 500 |
+| `SOURCE_FLOOD_SENSOR_API_ENABLED` | `false` |
+| `SOURCE_FLOOD_SENSOR_USE_LIVE` | `false` |
 | `SOURCE_CIVIL_IOT_SEWER_ENABLED` | `true` |
 | `SOURCE_CIVIL_IOT_SEWER_API_ENABLED` | `true` |
-| `SOURCE_CIVIL_IOT_PUMP_ENABLED` | `true` |
-| `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `true` |
-| `SOURCE_CIVIL_IOT_GATE_ENABLED` | `true` |
-| `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `true` |
+| `SOURCE_CIVIL_IOT_PUMP_ENABLED` | `false` — quarantined by migration 0062 |
+| `SOURCE_CIVIL_IOT_PUMP_API_ENABLED` | `false` |
+| `SOURCE_CIVIL_IOT_GATE_ENABLED` | `false` — quarantined by migration 0062 |
+| `SOURCE_CIVIL_IOT_GATE_API_ENABLED` | `false` |
 | `SOURCE_TAINAN_FLOOD_SENSOR_ENABLED` | `true` |
 | `SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED` | `true` |
 | `SOURCE_TAINAN_FLOOD_SENSOR_TIMEOUT_SECONDS` | Leave unset or `45`; lower stale overrides are clamped, chunked JSON completes without waiting for EOF, and an SOA failure falls back to the same resource's official data-platform JSON preview with provenance preserved |

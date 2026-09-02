@@ -1,8 +1,10 @@
 # Civil IoT Taiwan SensorThings Integration
 
-Date: 2026-06-15
-Status: adapters landed (disabled by default); live enablement gated on API keys
-and hosted memory headroom.
+Date: 2026-09-02
+Status: `STA_RainSewer` is retained for controlled live ingestion. The flood,
+pump, and gate production sources that depend on `STA_WaterResource_v2` are
+quarantined by migration 0062 after independent minimal entity queries returned
+HTTP 500. See `docs/reviews/civil-iot-source-recovery-2026-09-02.md`.
 
 ## Goal
 
@@ -73,7 +75,24 @@ the domain team before live enablement.
 existing `official.wra.water_level` (which reads `opendata.wra.gov.tw`). Enable
 only one, or dedup by station id, to avoid double-counting.
 
-## Live enablement gates (NOT yet enabled)
+## Current availability decision (2026-09-02)
+
+The official service root for `STA_WaterResource_v2` returned HTTP 200, but
+minimal `Things`, `Datastreams`, `Observations`, and `Sensors` queries each
+returned HTTP 500. This is an upstream availability incident, not a zero-reading
+condition. `official.civil_iot.flood_sensor`,
+`official.civil_iot.pump_water_level`, and
+`official.civil_iot.gate_water_level` are disabled in the catalog and removed
+from the production readiness profile. WRA IoW remains the observed flood-depth
+path.
+
+`STA_RainSewer` returned a complete 2,046-station inventory across five pages;
+1,950 stations had a parseable latest observation and 96 had none. One future
+timestamp remains correctly blocked by the promotion quality gate. Sewer stays
+in the production backbone but still requires the M4 48-hour staging soak before
+a production-readiness claim.
+
+## Live enablement gates
 
 Both adapters are off until two external prerequisites are met:
 

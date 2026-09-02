@@ -121,9 +121,9 @@ sources:
     implementation: worker
     runtime_scope: v1_baseline
     worker_default_enabled: false
-    catalog_state: enabled
-    deployment_default: true
-    enablement_decision: production_backbone
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: upstream_unavailable
   - adapter_key: official.civil_iot.river_water_level
     family: official
     contract: civil_iot
@@ -157,18 +157,18 @@ sources:
     implementation: worker
     runtime_scope: v1_baseline
     worker_default_enabled: false
-    catalog_state: enabled
-    deployment_default: true
-    enablement_decision: production_backbone
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: upstream_unavailable
   - adapter_key: official.civil_iot.gate_water_level
     family: official
     contract: civil_iot
     implementation: worker
     runtime_scope: v1_baseline
     worker_default_enabled: false
-    catalog_state: enabled
-    deployment_default: true
-    enablement_decision: production_backbone
+    catalog_state: disabled
+    deployment_default: false
+    enablement_decision: upstream_unavailable
   - adapter_key: official.flood_potential.geojson
     family: official
     contract: central_official

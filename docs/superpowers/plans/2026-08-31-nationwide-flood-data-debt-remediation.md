@@ -243,7 +243,7 @@ public API 只讀資料庫 → 網站
   且所有 required source operational，才計入 minimum coverage；
 - API 不公開 adapter key、lease holder、URL、credential、raw error 或 secret metadata。
 - hosted deployment smoke 會比對 `/health`、`/ready` 與 ingestion readiness 的 merged SHA，
-  並拒絕 stale／stopped／missing scheduler heartbeat 或不完整的 12-source／22-county 契約。
+  並拒絕 stale／stopped／missing scheduler heartbeat 或不完整的 9-source／22-county 契約。
 
 尚未完成：正式環境部署後的連續 cadence、raw／staging／promotion／latest／adapter run 寫入證據，
 以及 7 日驗收；因此 PR 2 退出條件仍未達成。
