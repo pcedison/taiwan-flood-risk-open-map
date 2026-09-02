@@ -17,15 +17,16 @@
 phase、work package 與舊 checkpoint 保留為實作契約及歷史紀錄，不應取代
 正式站 `/health`、`/ready`、GitHub Actions 與 strict hosted smoke 的即時證據。
 
-本次檢查點已確認正式站部署識別與目前 `origin/main` 一致、PostgreSQL／Redis 健康、
-deployment smoke 通過且沒有 open PR。strict public-risk smoke 只因 Civil IoT 下水道
-水位 `pipeline_unavailable` 而 fail-closed；官方 collections 已恢復 HTTP 200，但
-Observations 仍沒有可用讀值。在 2026-09-02 00:27 Asia/Taipei 檢查點，真實
-`schedule` Hosted Monitoring
-[#33531780886](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33531780886)
-於目前 main SHA 通過 public API 與 deployment，接著在同一 sewer public-risk 證據失敗，
-後續 Browser／freshness 步驟因 fail-fast 被跳過。#289 與 #293 分別追蹤來源事故與
-真實排程 readiness，不能誤寫為部署失敗或整體監控全通過。#71 仍是外部官方資料／
+在 2026-09-02 12:57 Asia/Taipei 檢查點，正式站部署識別與目前 `origin/main`
+`d85a0e210846ffe927cc6914c06013079bf1919b` 一致、PostgreSQL／Redis 健康，
+deployment 與 strict public-risk smoke 均通過。最新真實 `schedule` Hosted Monitoring
+[#33589308956](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33589308956)
+於前一個 main SHA 通過 public API、deployment、public-risk 與 desktop／mobile
+Playwright；最終只因 required `official.wra_iow.flood_depth` 的
+`freshness_state=failed` 而失敗。#289 與 #293 分別追蹤來源事故與真實排程
+readiness，不能誤寫為部署失敗或整體監控全通過。PR #312 雖然 7 項 required
+checks 全綠，仍有未解決的 P1／P2 review finding，因此維持 blocked、尚未部署。
+#71 仍是外部官方資料／
 契約證據工作；不能以程式碼
 修復、靜態地圖或未實際寄送的 request packet 假裝完成外部授權與回覆。
 
