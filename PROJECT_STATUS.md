@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-02 00:27 Asia/Taipei (2026-09-01 16:27 UTC)
+Last verified: 2026-09-02 12:57 Asia/Taipei (2026-09-02 04:57 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -67,13 +67,35 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
-- At 2026-09-02 00:27 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
-  reported `14ffc808af31ef5ecc281917160a4aa8af667348`; PostgreSQL and Redis were
-  healthy. The deployment-identity smoke passed, there were no open Dependabot,
-  code-scanning, or secret-scanning alerts, and there were no open pull requests.
-  The strict public-risk smoke now fails closed only because Civil IoT sewer water
-  level reports `pipeline_unavailable`; retained sewer observations remain
-  visible for traceability but are not used to claim low realtime risk.
+- At 2026-09-02 12:57 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `d85a0e210846ffe927cc6914c06013079bf1919b`; PostgreSQL and Redis were
+  healthy. CI and CodeQL passed, and the deployment-identity and strict
+  public-risk smokes both passed. Open security alerts were Dependabot 0, code
+  scanning 0, and secret scanning 0.
+- The latest genuine schedule run is Hosted Monitoring
+  [#33589308956](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33589308956)
+  on the preceding main SHA `2f5d36820f10733294a0d846c7ed2a8064feb773`.
+  Its public API, deployment, public-risk, and desktop/mobile Playwright checks
+  passed. The run failed required source freshness only because
+  `official.wra_iow.flood_depth` reported `freshness_state=failed`; advisory
+  Civil IoT failures did not determine the gate. PR
+  [#311](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/311)
+  makes future public-safe alert summaries include bounded freshness status and
+  failure details. Issues
+  [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
+  [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
+  remain open pending a successful genuine schedule run on current main.
+- Open pull request
+  [#312](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/312)
+  has all seven required checks green but remains blocked with unresolved P1
+  query-bounding and P2 Taiwan-calendar review findings. It is not deployed and
+  its staged migration/backfill plan must not be represented as production
+  state.
+- Issue [#71](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/71)
+  remains open. Its latest scheduled audit reports 9 grouped request items and
+  21 public completion targets, with no reviewed dispatch evidence, accepted
+  official reply, authorization, production adapter, or reviewed
+  official-unavailable result.
 - PR [#306](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/306)
   keeps the scheduler on its configured fixed-rate cadence by subtracting tick
   and maintenance runtime from the next sleep. PR

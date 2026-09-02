@@ -383,10 +383,12 @@ comment when the signature changes or the backoff window (24 hours by default)
 has elapsed. Before this, a workflow that failed every scheduled run appended
 one comment per run indefinitely. The body and comments include only the run
 URL, workflow, event, SHA, failure signature, the public hosted deployment smoke
-summary, and the public risk smoke status when those artifacts exist. The deployment summary includes the expected
+summary, public risk smoke status, and bounded source-freshness status/failure
+details when those artifacts exist. The deployment summary includes the expected
 deployment SHA, the `/health` deployment SHA, the `/ready` deployment SHA, and
 the first bounded failure messages so a Zeabur lag is visible directly in the
-issue body. It intentionally omits secrets, private manifests, and private
+issue body. The freshness summary is limited to the first five failures and
+1,200 characters. It intentionally omits secrets, private manifests, and private
 evidence refs. This gives operators a visible alert channel, but it is not
 enough by itself to satisfy
 `hosted_alert_routing`; accepted monitoring evidence still needs an owner,

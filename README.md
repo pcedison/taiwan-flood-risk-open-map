@@ -81,26 +81,22 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-09-02 00:27 Asia/Taipei checkpoint, `origin/main`, production
+the 2026-09-02 12:57 Asia/Taipei checkpoint, `origin/main`, production
 `/health`, and production `/ready` matched at
-`14ffc808af31ef5ecc281917160a4aa8af667348`; PostgreSQL and Redis were healthy,
-and the hosted deployment smoke passed. The strict public-risk smoke failed
-closed only because Civil IoT sewer water level reported
-`pipeline_unavailable`. The first complete post-deploy scheduler cycle then
-started CWA rainfall again after six minutes, within its 30-minute freshness
-contract. Do not treat a SHA copied into status documentation as a permanent
-deployment pin: derive the current expected SHA
-only after `git fetch origin --prune`, then verify both health endpoints. The
-real scheduled Hosted Monitoring run
-[#33531780886](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33531780886)
-at that checkpoint passed its public API and
-deployment checks, then failed the public-risk evidence step on the same sewer
-source; its downstream browser and freshness steps were therefore skipped. The
-official RainSewer collections return HTTP 200 and the adapter completes all
-2,046 stations in five bounded pages, but the upstream Observations collection
-currently contains no usable readings. Issues #289 and #293 track that hosted
-failure and schedule readiness;
-they must not be collapsed into a deployment failure. Hosted Monitoring also
+`d85a0e210846ffe927cc6914c06013079bf1919b`; PostgreSQL and Redis were healthy,
+and both the hosted deployment smoke and strict public-risk smoke passed. Do
+not treat a SHA copied into status documentation as a permanent deployment
+pin: derive the current expected SHA only after `git fetch origin --prune`,
+then verify both health endpoints. The latest real scheduled Hosted Monitoring
+run
+[#33589308956](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33589308956)
+ran on the preceding main SHA. Its public API, deployment, public-risk, and
+desktop/mobile browser checks passed; required source freshness failed only
+because `official.wra_iow.flood_depth` reported `freshness_state=failed`.
+Issues #289 and #293 therefore remain open until a genuine schedule run passes
+on the current main SHA. PR #311 now includes bounded source-freshness failure
+details in the public-safe alert route so that cause is not omitted again.
+Hosted Monitoring also
 exercises the production basemap and a real public location query in desktop
 and mobile Chromium; major MapLibre and ESLint upgrades require an explicit
 migration review instead of an automatic Dependabot PR.
