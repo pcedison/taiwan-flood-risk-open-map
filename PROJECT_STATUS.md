@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-02 17:00 Asia/Taipei (2026-09-02 09:00 UTC)
+Last verified: 2026-09-02 19:28 Asia/Taipei (2026-09-02 11:28 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -67,6 +67,15 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
+- At 2026-09-02 19:28 Asia/Taipei, `origin/main` was
+  `dcd592742dc5f6caf9e1ef066f0e18e0c9efe79b`; CI and CodeQL passed and open
+  Dependabot, code-scanning, and secret-scanning alerts were all zero. Zeabur's
+  latest deployment record still pointed to
+  `8fd4fc2aca7416d1f2da0829211f2d36e19a5ceb`. Production `/health` and `/ready`
+  returned HTTP 502, leaving deployment identity and PostgreSQL/Redis readiness
+  unavailable. Both local hosted smokes failed against the current main SHA.
+  The release remains unrecovered and requires Zeabur project-owner access to
+  the private deployment queue and build/runtime logs.
 - At 2026-09-02 17:00 Asia/Taipei, `origin/main` was rollback hotfix
   `38f10751cac5d3dfe37f5d43cc834e10fb9a63b9`; its CI and CodeQL runs passed.
   Zeabur's latest GitHub deployment record still pointed to
@@ -83,15 +92,14 @@ the live verification sources listed below.
   public-risk smokes both passed. Open security alerts were Dependabot 0, code
   scanning 0, and secret scanning 0.
 - The latest genuine schedule run is Hosted Monitoring
-  [#33589308956](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33589308956)
-  on the preceding main SHA `2f5d36820f10733294a0d846c7ed2a8064feb773`.
-  Its public API, deployment, public-risk, and desktop/mobile Playwright checks
-  passed. The run failed required source freshness only because
-  `official.wra_iow.flood_depth` reported `freshness_state=failed`; advisory
-  Civil IoT failures did not determine the gate. PR
-  [#311](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/311)
-  makes future public-safe alert summaries include bounded freshness status and
-  failure details. Issues
+  [#33622599107](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33622599107)
+  on current main `dcd592742dc5f6caf9e1ef066f0e18e0c9efe79b`. Its public API
+  contract probe passed, but the deployment smoke exhausted all six attempts;
+  the final recorded attempt returned HTTP 502 for `/health`, `/ready`, and
+  ingestion readiness. Public-risk,
+  desktop/mobile Playwright, source, and private-evidence steps were therefore
+  skipped fail-closed; the completion audit, artifact upload, and public-safe
+  failure routing still succeeded. Issues
   [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
   [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
   remain open pending a successful genuine schedule run on current main.
