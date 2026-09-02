@@ -24,7 +24,8 @@ HTTP 502，因此無法驗證 deployment identity 與 PostgreSQL／Redis readine
 deployment 與 strict public-risk smoke 均失敗；#289 留存事故證據。最新真實
 `schedule` Hosted Monitoring
 [#33622599107](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33622599107)
-已在目前 main 執行，但六次 deployment-smoke 嘗試都收到 502；下游
+已在目前 main 執行，但 deployment smoke 六次嘗試均已耗盡，最後一次記錄為
+HTTP 502；下游
 public-risk、desktop／mobile Playwright、source 與 private-evidence 步驟均正確
 fail-closed 跳過。#289 與 #293 分別追蹤部署事故與真實排程 readiness，不能誤寫為
 整體監控全通過。PR #312 已合併為引發 502 的

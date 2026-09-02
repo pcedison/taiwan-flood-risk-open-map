@@ -92,8 +92,9 @@ documentation as a permanent deployment pin: derive the current expected SHA
 only after `git fetch origin --prune`, then verify both health endpoints. The
 latest genuine scheduled Hosted Monitoring run
 [#33622599107](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33622599107)
-ran on the current main SHA and failed after six deployment-smoke attempts all
-received HTTP 502; downstream public-risk, browser, source, and private-evidence
+ran on the current main SHA and failed after exhausting six deployment-smoke
+attempts; the final recorded attempt received HTTP 502. Downstream public-risk,
+browser, source, and private-evidence
 steps correctly remained fail-closed. Issues #289 and #293 therefore remain
 open until a genuine schedule run passes on the current main SHA.
 Hosted Monitoring also

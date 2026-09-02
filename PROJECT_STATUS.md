@@ -94,8 +94,9 @@ the live verification sources listed below.
 - The latest genuine schedule run is Hosted Monitoring
   [#33622599107](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33622599107)
   on current main `dcd592742dc5f6caf9e1ef066f0e18e0c9efe79b`. Its public API
-  contract probe passed, but all six deployment-smoke attempts returned HTTP
-  502 for `/health`, `/ready`, and ingestion readiness. Public-risk,
+  contract probe passed, but the deployment smoke exhausted all six attempts;
+  the final recorded attempt returned HTTP 502 for `/health`, `/ready`, and
+  ingestion readiness. Public-risk,
   desktop/mobile Playwright, source, and private-evidence steps were therefore
   skipped fail-closed; the completion audit, artifact upload, and public-safe
   failure routing still succeeded. Issues
