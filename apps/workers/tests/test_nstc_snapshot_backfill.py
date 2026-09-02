@@ -85,6 +85,15 @@ def test_wrong_snapshot_digest_fails_before_any_writer_is_required() -> None:
         (
             {
                 "persist": True,
+                "target_environment": "staging",
+                "approval_ack": True,
+                "review_ref": "PR-313",
+            },
+            "production-ack",
+        ),
+        (
+            {
+                "persist": True,
                 "target_environment": "production",
                 "approval_ack": True,
                 "review_ref": "PR-313",
@@ -112,6 +121,7 @@ def test_persist_path_is_raw_ref_scoped_and_limits_coverage_to_2018_2020() -> No
             persist=True,
             target_environment="staging",
             approval_ack=True,
+            production_ack=True,
             review_ref="PR-313/staging-rehearsal",
         ),
         staging_writer=staging_writer,
@@ -127,6 +137,10 @@ def test_persist_path_is_raw_ref_scoped_and_limits_coverage_to_2018_2020() -> No
     assert result.summary.items_rejected == 4
     assert result.summary.ingestion_job_id == "ingestion-job-fixture"
     assert len(staging_writer.batches) == 1
+    assert staging_writer.batches[0].raw_snapshot.retention_expires_at is None
+    assert staging_writer.batches[0].raw_snapshot.metadata["retention_policy"] == (
+        "non_expiring_reviewed_frozen_snapshot"
+    )
     assert run_writer.job_keys == ["worker.nstc_snapshot.backfill"]
     assert promotion_writer.adapter_keys == ("official.nstc.flood_disaster_points",)
     assert promotion_writer.raw_refs == (result.raw_ref,)

@@ -26,7 +26,7 @@ from app.pipelines.promotion import (
     PromotionResult,
     promote_accepted_staging,
 )
-from app.pipelines.staging import StagingBatchWriter
+from app.pipelines.staging import AdapterStagingBatch, StagingBatchWriter
 
 
 NSTC_FROZEN_SNAPSHOT_SHA256 = "9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d"
@@ -50,6 +50,7 @@ NSTC_FROZEN_SNAPSHOT_REJECTION_REASON_COUNTS = {
 }
 NSTC_BACKFILL_AUTHORITATIVE_COVERAGE_YEARS = (2018, 2019, 2020)
 NSTC_BACKFILL_JOB_KEY = "worker.nstc_snapshot.backfill"
+NSTC_FROZEN_SNAPSHOT_RETENTION_POLICY = "non_expiring_reviewed_frozen_snapshot"
 
 NstcBackfillTargetEnvironment = Literal["staging", "production"]
 
@@ -69,6 +70,24 @@ class HistoricalCoverageWriter(Protocol):
         review_ref: str | None = None,
     ) -> HistoricalCoverageWriteResult:
         """Record reviewed historical coverage for one persisted raw revision."""
+
+
+@dataclass(frozen=True)
+class _NonExpiringSnapshotWriter:
+    """Keep the reviewed frozen revision available for durable replay/audit."""
+
+    writer: StagingBatchWriter
+
+    def write_batch(self, batch: AdapterStagingBatch) -> None:
+        raw_snapshot = replace(
+            batch.raw_snapshot,
+            retention_expires_at=None,
+            metadata={
+                **batch.raw_snapshot.metadata,
+                "retention_policy": NSTC_FROZEN_SNAPSHOT_RETENTION_POLICY,
+            },
+        )
+        self.writer.write_batch(replace(batch, raw_snapshot=raw_snapshot))
 
 
 @dataclass(frozen=True)
@@ -247,7 +266,7 @@ def run_nstc_snapshot_backfill(
     assert coverage_writer is not None
     summary = run_adapter_batch(
         adapter,
-        writer=staging_writer,
+        writer=_NonExpiringSnapshotWriter(staging_writer),
         run_writer=run_writer,
         job_key=NSTC_BACKFILL_JOB_KEY,
         parameters={
@@ -311,9 +330,14 @@ def _validate_config(config: NstcSnapshotBackfillConfig) -> None:
     if not config.approval_ack:
         raise NstcSnapshotBackfillError("persist mode requires --nstc-backfill-approval-ack")
     _validated_operator_review_ref(config.review_ref)
-    if config.target_environment == "production" and not config.production_ack:
+    # The target environment is an operator label, not an independently
+    # authenticated property of the database connection.  Fail closed for
+    # every persistence invocation so a copied staging command cannot reach a
+    # production URL without the second acknowledgement.
+    if not config.production_ack:
         raise NstcSnapshotBackfillError(
-            "production persist requires --nstc-backfill-production-ack"
+            "persist mode requires --nstc-backfill-production-ack because "
+            "the database target cannot be inferred from the environment label"
         )
 
 

@@ -37,7 +37,7 @@ class RawSnapshotUpsert:
     fetched_at: datetime
     source_timestamp_min: datetime | None
     source_timestamp_max: datetime | None
-    retention_expires_at: datetime
+    retention_expires_at: datetime | None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

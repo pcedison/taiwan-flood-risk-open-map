@@ -2,7 +2,8 @@
 
 本 runbook 只處理已審核的 data.gov.tw dataset 130016 凍結 CSV。工具預設
 `dry-run`、不連網、不連資料庫；任何寫入都需要明確環境、review reference 與
-ack。正式環境另有第二道 production ack。
+兩道 ack。`target-environment` 只是稽核標籤，不能驗證 database URL 的身分，
+因此 staging 與 production 寫入都必須提供 fail-safe production ack。
 
 ## 固定輸入契約
 
@@ -51,10 +52,14 @@ python -m app.main `
   --nstc-backfill-target-environment staging `
   --nstc-backfill-review-ref <approved-change-ref> `
   --nstc-backfill-approval-ack `
+  --nstc-backfill-production-ack `
   --database-url <staging-database-url>
 ```
 
 保存 stdout JSON 作為 deployment evidence。不可保存或貼出完整 database URL。
+寫入後的 reviewed raw snapshot 必須為 `retention_expires_at IS NULL`，metadata 的
+`retention_policy` 必須是 `non_expiring_reviewed_frozen_snapshot`；不得由一般
+180 天 raw retention job 清除。
 
 ## 3. Staging 驗證
 
@@ -106,7 +111,7 @@ coverage counts 不變。這是進入 production gate 前的冪等驗收。
 ## 4. Production gate
 
 只有 staging migration、兩次回填與 API/history smoke 全部通過後才能執行。
-production 命令必須將 target 改為 `production`，並額外加入：
+production 命令必須將 target 改為 `production`，並保留：
 
 ```text
 --nstc-backfill-production-ack

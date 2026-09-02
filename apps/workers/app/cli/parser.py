@@ -99,7 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--nstc-backfill-production-ack",
         action="store_true",
-        help="Additional explicit acknowledgement required for a production target.",
+        help=(
+            "Fail-safe database-target acknowledgement required for every persisted run; "
+            "the target environment label is not a database identity check."
+        ),
     )
     parser.add_argument(
         "--validate-gdelt-live-acceptance",
