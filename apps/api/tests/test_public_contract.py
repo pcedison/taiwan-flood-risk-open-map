@@ -583,8 +583,8 @@ def test_ingestion_readiness_contract_is_public_safe_and_fail_closed(
     payload = response.json()
     assert payload["status"] == "down"
     assert payload["scheduler"]["status"] == "healthy"
-    assert payload["source_summary"]["expected_source_count"] == 12
-    assert payload["source_summary"]["missing_source_count"] == 11
+    assert payload["source_summary"]["expected_source_count"] == 9
+    assert payload["source_summary"]["missing_source_count"] == 8
     assert payload["jurisdiction_summary"]["expected_county_count"] == 22
     assert payload["jurisdiction_summary"]["unavailable_county_count"] == 21
     assert payload["jurisdiction_summary"]["minimum_coverage_met"] is False
@@ -648,10 +648,10 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        61,
-        "0061_staging_snapshot_idempotency.sql",
-        "8ef132007ec4fff3b6ee0d1fab0e973d8ae97fcebb9001ea6d7f0212697a003c",
-        61,
+        62,
+        "0062_quarantine_civil_iot_water_resource.sql",
+        "510eaa856caa9aa783aff4bfd00d2ca78f7aa0a4599d9a4300c02b1fc66aa641",
+        62,
         "public.ingestion_scheduler_heartbeats",
         "public.ingestion_readiness_sources",
         "public.historical_coverage_cells",
@@ -687,7 +687,7 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
                 True,
             )
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0061 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0062 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 

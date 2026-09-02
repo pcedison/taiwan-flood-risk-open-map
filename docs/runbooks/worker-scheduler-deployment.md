@@ -127,19 +127,26 @@ Managed ingestion smoke:
 
 ```sh
 WORKER_RUNTIME_FIXTURES_ENABLED=true \
-WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,official.civil_iot.pond_water_level \
-python -m app.main --run-enabled-adapters --persist
+WORKER_ENABLED_ADAPTER_KEYS=official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.sewer_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points \
+python -m app.main --run-v1-baseline-adapters --persist
 ```
 
 Before claiming hosted or production readiness, capture evidence that the
 worker/scheduler path wrote `raw_snapshots`, `staging_evidence`,
 `adapter_runs`, promoted `evidence`, and fresh `official_realtime_latest` rows
 for each enabled official adapter. The local managed ingestion smoke now covers
-fixture-backed CWA rainfall, WRA water level, and Civil IoT flood, sewer, pump,
-gate, and pond water-level adapters, but production readiness still requires
+fixture-backed CWA rainfall, WRA water level, WRA IoW flood depth, NCDR CAP,
+Civil IoT sewer, Tainan flood sensor, and the two official history adapters, but
+production readiness still requires
 hosted evidence from the real enabled upstreams. The `official_realtime_latest`
 rows are the public hot path for nearby realtime coverage; do not use the API
 realtime bridge as a substitute for this evidence.
+
+Civil IoT flood, pump, and gate adapters are not production defaults after
+migration 0062. Their shared `STA_WaterResource_v2` entity service returned HTTP
+500 for independent minimal queries on 2026-09-02. Keep them disabled until a
+reviewed recovery migration satisfies the acceptance gate in
+`docs/reviews/civil-iot-source-recovery-2026-09-02.md`.
 
 ## Failure Detection
 

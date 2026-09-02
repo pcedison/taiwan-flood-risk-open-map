@@ -46,6 +46,13 @@ Pair this with:
    that source fail-closed with `upstream_observations_empty`; do not interpret
    it as zero flooding. The working WRA IoW flood-depth source remains the
    current observed-depth path.
+   A repeat minimal-query matrix on 2026-09-02 showed that independent
+   `Things`, `Datastreams`, `Observations`, and `Sensors` requests on
+   `STA_WaterResource_v2` all returned HTTP 500. Migration 0062 therefore
+   quarantines the flood, pump, and gate production sources. Do not enable them
+   through environment overrides while their catalog rows are disabled; follow
+   the re-enable gate in
+   `docs/reviews/civil-iot-source-recovery-2026-09-02.md` instead.
 5. **Baseline.** Record current RSS per container (`kubectl top pods` or
    `docker stats`) and the current `/health` `deployment_sha` before enabling.
 
@@ -59,11 +66,12 @@ adapter key must be in `WORKER_ENABLED_ADAPTER_KEYS` (or that var unset).
 | CWA rainfall (full network) | `official.cwa.rainfall` | `SOURCE_CWA_ENABLED=true` | `SOURCE_CWA_API_ENABLED=true` | `CWA_API_AUTHORIZATION=CWA-...` |
 | CWA coastal tide level | `official.cwa.tide_level` | `SOURCE_CWA_ENABLED=true` | `SOURCE_CWA_API_ENABLED=true` | `CWA_API_AUTHORIZATION=CWA-...`; coastal context only |
 | WRA water level (opendata) | `official.wra.water_level` | `SOURCE_WRA_ENABLED=true` | `SOURCE_WRA_API_ENABLED=true` | — |
-| Flood sensors | `official.civil_iot.flood_sensor` | `SOURCE_FLOOD_SENSOR_ENABLED=true` | `SOURCE_FLOOD_SENSOR_API_ENABLED=true` | optional `CIVIL_IOT_FLOOD_SENSOR_URL` |
+| Flood sensors | `official.civil_iot.flood_sensor` | **Quarantined** | **Do not enable** | `STA_WaterResource_v2` entity service HTTP 500 on 2026-09-02 |
 | River level (STA) | `official.civil_iot.river_water_level` | `SOURCE_CIVIL_IOT_RIVER_ENABLED=true` | `SOURCE_CIVIL_IOT_RIVER_API_ENABLED=true` | overlaps WRA water level — pick one |
 | Pond level | `official.civil_iot.pond_water_level` | `SOURCE_CIVIL_IOT_POND_ENABLED=true` | `SOURCE_CIVIL_IOT_POND_API_ENABLED=true` | — |
-| Sewer level | `official.civil_iot.sewer_water_level` | `SOURCE_CIVIL_IOT_SEWER_ENABLED=true` | `SOURCE_CIVIL_IOT_SEWER_API_ENABLED=true` | — |
-| Pump external level | `official.civil_iot.pump_water_level` | `SOURCE_CIVIL_IOT_PUMP_ENABLED=true` | `SOURCE_CIVIL_IOT_PUMP_API_ENABLED=true` | confirm `外水位` datastream name |
+| Sewer level | `official.civil_iot.sewer_water_level` | `SOURCE_CIVIL_IOT_SEWER_ENABLED=true` | `SOURCE_CIVIL_IOT_SEWER_API_ENABLED=true` | 48-hour staging soak required |
+| Pump external level | `official.civil_iot.pump_water_level` | **Quarantined** | **Do not enable** | shared WaterResource entity service unavailable |
+| Gate external level | `official.civil_iot.gate_water_level` | **Quarantined** | **Do not enable** | shared WaterResource entity service unavailable |
 
 Optional URL overrides:
 
@@ -72,8 +80,10 @@ Optional URL overrides:
 - Use overrides only for an official endpoint migration or emergency rollback.
   The old `sta.ci.taiwan.gov.tw` host is not the default.
 
-Recommended enablement order (highest realtime-water value first, lightest load
-first): CWA rainfall/tide-level → flood sensors → river level → sewer → pond → pump.
+Recommended production-backbone order: CWA rainfall/tide-level → WRA water
+level → WRA IoW flood depth → NCDR CAP → sewer. River and pond remain optional
+review items. Flood, pump, and gate remain quarantined until a reviewed
+migration re-enables them.
 
 ### Kinmen KWIS Local Read Adapter
 
@@ -112,9 +122,13 @@ worker-persisted evidence smoke normalizes real rows.
 3. **Deploy / restart the worker** (and API if env changed). On Zeabur, use the
    pod-replace path in `deploy-zeabur.md` if a rolling deploy will not fit.
 4. **Run the smoke checks** below.
-5. **Watch memory for one full retention window-ish** (or at least 30-60 min):
+5. **Watch sewer for at least 48 continuous hours** (other reviewed sources use
+   their documented soak):
    `kubectl top pods` / `docker stats`. PostGIS RSS and disk should plateau, not
-   climb without bound (retention should cap it).
+   climb without bound (retention should cap it). Sewer acceptance additionally
+   requires 2,046-station inventory reconciliation, explicit accounting for
+   missing observations and future timestamps, fresh promoted rows, and no
+   silent page loss.
 6. If healthy, proceed to the next source. If not, roll back (below).
 
 ## Per-source smoke checks
@@ -126,7 +140,9 @@ PYTHONPATH=apps/workers python scripts/official-realtime-live-smoke.py --env-fil
 ```
 
 The command emits JSON for CWA, WRA water level, WRA IoW flood depth, NCDR CAP,
-and Civil IoT flood/sewer/pump/gate water-level sources. It marks CWA as
+and Civil IoT flood/sewer/pump/gate water-level sources. The three quarantined
+WaterResource results are diagnostic incident evidence and are not required
+production sources. It marks CWA as
 `skipped` when `CWA_API_AUTHORIZATION` is not available in the selected env file
 or process environment; use `--fail-on-skipped` in CI or hosted readiness checks
 when all credentials must be loaded.
@@ -213,10 +229,11 @@ curl.exe -f 'https://sta.colife.org.tw/STA_RainSewer/v1.0/Things?$top=1'
 curl.exe -f 'https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/Datastreams?$filter=substringof(%27Datastream_Category_type=%E6%B7%B9%E6%B0%B4%E6%84%9F%E6%B8%AC%E5%99%A8%27,description)%20and%20substringof(%27Datastream_Category=%E6%B7%B9%E6%B0%B4%E6%B7%B1%E5%BA%A6%27,description)&$top=1&$count=true'
 ```
 
-If either probe fails while the official data portal announces a replacement
-host, set the matching `CIVIL_IOT_*_URL` override to the new full `Things?...`
-query (or the documented flood-sensor `Datastreams?...` query), redeploy one
-source at a time, and record the incident in the source matrix.
+If a probe fails while the official data portal announces a replacement host,
+do not silently set a production override. First capture the minimal-query
+matrix and inventory acceptance evidence, then add a reviewed migration that
+re-enables only the recovered source. Redeploy one source at a time and record
+the incident in the source matrix.
 
 ## Rollback (per source)
 

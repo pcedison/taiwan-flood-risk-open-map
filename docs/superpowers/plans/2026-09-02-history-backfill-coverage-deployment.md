@@ -29,8 +29,22 @@
   5,018 個穩定事件鍵，901 筆為保留 revision 但公開查詢需去重的重複事件列。
 - 2026-09-02 WRA historical live run：1,224 fetched、1,075 normalized、157
   rejected；事件年份止於 2016，沒有 2017。
-- 同日 Civil IoT live smoke：sewer 1,947 normalized／21 縣市；flood sensor、
-  pump、gate 的目前查詢皆為 HTTP 500。
+- 同日 Civil IoT live smoke：RainSewer upstream 2,046 站、完整 5 頁，1,950
+  筆有可解析最新觀測、96 站缺少可用最新觀測、涵蓋 21 縣市；其中 1 筆時間戳
+  位於未來，必須由 promotion quality gate 拒絕。flood sensor、pump、gate 所共用的
+  `STA_WaterResource_v2` 對最小 `Things`／`Datastreams`／`Observations`／`Sensors`
+  查詢皆回 HTTP 500。
+
+## 執行進度（2026-09-02）
+
+- M0：commit `86e3004`、PR #312；CI／CodeQL 全綠，受分支保護要求 review 而尚未合併。
+- M1：commit `b381459`、PR #314；凍結 snapshot、dry-run／persist／production ack、
+  SHA 與重跑冪等驗收已完成；尚未寫入 staging／production。
+- M2：commit `30d13a5`、PR #315；330 格受控 review manifest、2017／2026 缺口語意與
+  PostGIS 冪等驗收已完成；實際 staging persist 排入 M4。
+- M3：執行中。migration 0062、九來源 production profile 與來源 incident evidence
+  已實作；RainSewer 的 48 小時 staging soak 尚未開始。
+- M4／M5：未開始；不得以本機 rehearsal 冒充 staging migration 或正式部署。
 
 ## M0：收斂目前的 15 年歷史契約修繕
 
@@ -99,13 +113,20 @@ latest observation、nextLink。只有能證明是查詢形狀造成時才修改
 兩階段抓取與較小分頁。若最小官方查詢仍 500，留下 incident evidence 並維持
 failed/disabled，不將 upstream 事故包裝成程式修復。
 
+2026-09-02 決策：最小 entity queries 仍為 HTTP 500，因此由 migration 0062 將
+`official.civil_iot.flood_sensor`、`official.civil_iot.pump_water_level`、
+`official.civil_iot.gate_water_level` 停用並移出 production readiness profile；
+保留 adapter 與既有 evidence 供稽核。`official.civil_iot.sewer_water_level` 與
+WRA IoW flood depth 維持骨幹。重新啟用必須另有受 review migration 與 48 小時 staging
+證據，禁止只用環境變數繞過 catalog quarantine。
+
 退出門檻：sewer staging 48 小時穩定；另外三類來源要嘛通過相同門檻，要嘛有正式
 unavailable/incident 證據與不影響 WRA IoW 骨幹的降級行為。
 
 ## M4：Staging migration 與驗收
 
 1. 從 production backup 建立隔離 staging clone，完成 scratch restore drill。
-2. 停 staging scheduler，執行 0059／0060／0061並記錄鎖定時間與 row counts。
+2. 停 staging scheduler，執行 0059／0060／0061／0062 並記錄鎖定時間與 row counts。
 3. 部署 worker，執行 M1/M2 dry-run，再執行受控 persist 與 profile rebuild。
 4. 驗證 NSTC 年度列的 exact timestamps 為 NULL、穩定鍵無異常碰撞、歷史分頁固定於
    assessment 建立時間。
@@ -122,7 +143,7 @@ unavailable/incident 證據與不影響 WRA IoW 骨幹的降級行為。
 部署順序：
 
 1. 確認合併後 `origin/main`、CI/checks 與 production backup。
-2. 暫停 scheduler；套用 0059／0060／0061。
+2. 暫停 scheduler；套用 0059／0060／0061／0062。
 3. 先部署 worker，執行已在 staging 驗證的資料命令與 330 格對帳。
 4. 部署 API，再部署 Web；恢復 scheduler。
 5. `/health`、`/ready`、ingestion readiness 必須回報同一完整 SHA。

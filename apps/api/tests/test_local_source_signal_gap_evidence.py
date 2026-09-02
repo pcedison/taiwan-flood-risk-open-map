@@ -53,9 +53,9 @@ def test_signal_gap_evidence_compares_live_smoke_to_remaining_groups() -> None:
         "2026-06-30T19:45:00+08:00"
     )
     assert evidence["summary"]["signal_group_count"] == 3
-    assert evidence["summary"]["target_signal_gap_item_count"] == 15
-    assert evidence["summary"]["official_smoke_observed_item_count"] == 0
-    assert evidence["summary"]["unresolved_after_official_smoke_item_count"] == 15
+    assert evidence["summary"]["target_signal_gap_item_count"] == 27
+    assert evidence["summary"]["official_smoke_observed_item_count"] == 1
+    assert evidence["summary"]["unresolved_after_official_smoke_item_count"] == 26
     assert evidence["completion_effect"] == "diagnostic_only"
 
     groups = {group["signal_type"]: group for group in evidence["signal_gap_groups"]}
@@ -65,9 +65,9 @@ def test_signal_gap_evidence_compares_live_smoke_to_remaining_groups() -> None:
         "official.civil_iot.pump_water_level",
         "official.civil_iot.gate_water_level",
     ]
-    assert pump["official_smoke_observed_counties"] == []
+    assert pump["official_smoke_observed_counties"] == ["\u96f2\u6797\u7e23"]
     assert "\u5609\u7fa9\u5e02" in pump["unresolved_counties"]
-    assert "\u96f2\u6797\u7e23" not in pump["target_counties"]
+    assert "\u96f2\u6797\u7e23" in pump["target_counties"]
 
 
 def test_signal_gap_evidence_flags_new_official_observations_without_accepting_them() -> None:
