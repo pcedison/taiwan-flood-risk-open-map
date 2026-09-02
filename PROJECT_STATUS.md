@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-02 19:28 Asia/Taipei (2026-09-02 11:28 UTC)
+Last verified: 2026-09-03 00:28 Asia/Taipei (2026-09-02 16:28 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -67,8 +67,8 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
-- At 2026-09-02 19:28 Asia/Taipei, `origin/main` was
-  `dcd592742dc5f6caf9e1ef066f0e18e0c9efe79b`; CI and CodeQL passed and open
+- At 2026-09-03 00:28 Asia/Taipei, `origin/main` was
+  `310a7bc7553e1fa513518596215718f8ce15f6f8`; CI and CodeQL passed and open
   Dependabot, code-scanning, and secret-scanning alerts were all zero. Zeabur's
   latest deployment record still pointed to
   `8fd4fc2aca7416d1f2da0829211f2d36e19a5ceb`. Production `/health` and `/ready`
@@ -92,8 +92,8 @@ the live verification sources listed below.
   public-risk smokes both passed. Open security alerts were Dependabot 0, code
   scanning 0, and secret scanning 0.
 - The latest genuine schedule run is Hosted Monitoring
-  [#33622599107](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33622599107)
-  on current main `dcd592742dc5f6caf9e1ef066f0e18e0c9efe79b`. Its public API
+  [#33654647561](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33654647561)
+  on current main `310a7bc7553e1fa513518596215718f8ce15f6f8`. Its public API
   contract probe passed, but the deployment smoke exhausted all six attempts;
   the final recorded attempt returned HTTP 502 for `/health`, `/ready`, and
   ingestion readiness. Public-risk,
