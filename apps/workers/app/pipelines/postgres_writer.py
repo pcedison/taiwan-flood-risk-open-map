@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.pipelines.staging import AdapterStagingBatch, StagingEvidenceUpsert
 
 
 ConnectionFactory = Callable[[], Any]
+TAIWAN_TIMEZONE = ZoneInfo("Asia/Taipei")
 
 
 class PostgresStagingBatchWriter:
@@ -159,7 +161,7 @@ def _staging_evidence_params(
     event_year = (
         raw_event_year
         if isinstance(raw_event_year, int) and not isinstance(raw_event_year, bool)
-        else timestamp.year if timestamp is not None else None
+        else timestamp.astimezone(TAIWAN_TIMEZONE).year if timestamp is not None else None
     )
     raw_precision = item.payload.get("temporal_precision")
     temporal_precision = (

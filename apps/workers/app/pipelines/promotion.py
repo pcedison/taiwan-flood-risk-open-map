@@ -501,7 +501,10 @@ class PostgresEvidencePromotionWriter:
                         CASE
                             WHEN properties->>'event_year' ~ '^[0-9]{4}$'
                                 THEN (properties->>'event_year')::integer
-                            ELSE EXTRACT(YEAR FROM COALESCE(occurred_at, observed_at))::integer
+                            ELSE EXTRACT(
+                                YEAR FROM COALESCE(occurred_at, observed_at)
+                                    AT TIME ZONE 'Asia/Taipei'
+                            )::integer
                         END,
                         CASE
                             WHEN properties->>'temporal_precision' IN (

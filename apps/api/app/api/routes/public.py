@@ -653,14 +653,24 @@ def list_evidence(
         400: {"description": "The history cursor is invalid or belongs to another assessment."},
         404: {"description": "The assessment does not exist."},
         410: {"description": "The assessment has expired; run the query again."},
+        429: {"description": "The historical evidence request rate limit was exceeded."},
         503: {"description": "Historical evidence storage is unavailable."},
     },
 )
 def list_history(
     assessment_id: UUID,
+    http_request: FastAPIRequest,
     cursor: str | None = None,
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> EvidenceListResponse:
+    settings = get_settings()
+    _enforce_public_rate_limit(
+        http_request,
+        settings=settings,
+        namespace="public-history-rate",
+        max_requests=settings.risk_assessment_rate_limit_max_requests,
+        endpoint_name="Historical evidence",
+    )
     assessment_key = str(assessment_id)
     try:
         return public_evidence.list_assessment_history(

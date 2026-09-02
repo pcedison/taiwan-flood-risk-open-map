@@ -1806,9 +1806,12 @@ def test_fetch_assessment_history_reads_complete_keyset_page() -> None:
         connection_factory=lambda: connection,
     )
 
-    assert len(connection.cursor_instance.executions) == 2
-    preflight_sql, preflight_params = connection.cursor_instance.executions[0]
-    sql, params = connection.cursor_instance.executions[1]
+    assert len(connection.cursor_instance.executions) == 3
+    timeout_sql, timeout_params = connection.cursor_instance.executions[0]
+    preflight_sql, preflight_params = connection.cursor_instance.executions[1]
+    sql, params = connection.cursor_instance.executions[2]
+    assert timeout_sql == "SELECT set_config('statement_timeout', %s, true)"
+    assert timeout_params == ("2500ms",)
     assert "SELECT created_at, expires_at FROM risk_assessments" in preflight_sql
     assert preflight_params == ("d315d0e6-9c1e-475a-9118-f299d12d5c62",)
     assert "archived_ranked AS MATERIALIZED" in sql
@@ -1838,7 +1841,11 @@ def test_fetch_assessment_history_rejects_expired_assessment() -> None:
             connection_factory=lambda: connection,
         )
 
-    assert len(connection.cursor_instance.executions) == 1
+    assert len(connection.cursor_instance.executions) == 2
+    assert connection.cursor_instance.executions[0] == (
+        "SELECT set_config('statement_timeout', %s, true)",
+        ("2500ms",),
+    )
 
 
 @pytest.mark.parametrize("stored", ["exact_address", "parcel", "anything_else"])

@@ -34,6 +34,7 @@ RealtimeJurisdictionResolutionStatus = Literal[
     "unavailable",
 ]
 QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
+ASSESSMENT_HISTORY_STATEMENT_TIMEOUT_MS = 2_500
 RECENT_INCIDENT_CONTEXT_WINDOW = timedelta(hours=6)
 RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE = timedelta(minutes=5)
 OBSERVED_FLOOD_HISTORY_WINDOW_YEARS = HISTORICAL_LOOKBACK_YEARS
@@ -2620,6 +2621,7 @@ def fetch_assessment_history(
     as_of: datetime,
     page_size: int = 20,
     after: HistoricalEvidencePagePosition | None = None,
+    statement_timeout_ms: int = ASSESSMENT_HISTORY_STATEMENT_TIMEOUT_MS,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
     """Return a complete, keyset-paginated historical detail page.
@@ -2970,6 +2972,7 @@ def fetch_assessment_history(
             _connect(database_url, connection_factory) as connection,
             connection.cursor() as cursor,
         ):
+            _apply_statement_timeout(cursor, statement_timeout_ms)
             cursor.execute(
                 "SELECT created_at, expires_at FROM risk_assessments WHERE id = %s::uuid",
                 (assessment_id,),
