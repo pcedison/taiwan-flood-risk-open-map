@@ -17,6 +17,9 @@ HISTORICAL_COVERAGE_GAP_REVIEW_SCHEMA = "historical-coverage-gap-review/v1"
 HISTORICAL_COVERAGE_GAP_REVIEW_WINDOW = (2012, 2026)
 HISTORICAL_COVERAGE_GAP_REVIEW_JURISDICTIONS = 22
 HISTORICAL_COVERAGE_GAP_REVIEW_CELL_COUNT = 330
+HISTORICAL_COVERAGE_REVIEW_CONNECT_TIMEOUT_SECONDS = 10
+HISTORICAL_COVERAGE_REVIEW_LOCK_TIMEOUT_MS = 5_000
+HISTORICAL_COVERAGE_REVIEW_STATEMENT_TIMEOUT_MS = 30_000
 APPROVED_HISTORICAL_COVERAGE_GAP_REVIEW_SHA256 = (
     "01ca620ee29d8a8815ff00fffb7894ef02e1acf36a01960b00e2d625b1598d3c"
 )
@@ -148,6 +151,7 @@ class PostgresHistoricalCoverageGapReviewWriter:
         persisted_review_ref = _persisted_review_ref(manifest, manifest_sha256)
         with self._connect() as connection:
             with connection.cursor() as cursor:
+                _apply_review_transaction_timeouts(cursor)
                 _require_exact_coverage_matrix(cursor)
                 target_rows = _target_rows(cursor, manifest.targets)
                 expected_target_rows = manifest.target_cell_count
@@ -210,7 +214,24 @@ class PostgresHistoricalCoverageGapReviewWriter:
         import psycopg
 
         assert self._database_url is not None
-        return psycopg.connect(self._database_url)
+        return psycopg.connect(
+            self._database_url,
+            connect_timeout=HISTORICAL_COVERAGE_REVIEW_CONNECT_TIMEOUT_SECONDS,
+        )
+
+
+def _apply_review_transaction_timeouts(cursor: Any) -> None:
+    cursor.execute(
+        """
+        SELECT
+            set_config('lock_timeout', %s, true),
+            set_config('statement_timeout', %s, true)
+        """,
+        (
+            f"{HISTORICAL_COVERAGE_REVIEW_LOCK_TIMEOUT_MS}ms",
+            f"{HISTORICAL_COVERAGE_REVIEW_STATEMENT_TIMEOUT_MS}ms",
+        ),
+    )
 
 
 def _manifest_from_raw(

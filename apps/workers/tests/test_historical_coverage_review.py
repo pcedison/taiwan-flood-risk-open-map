@@ -56,6 +56,15 @@ def test_review_manifest_is_pinned_and_keeps_absence_fail_closed() -> None:
     )
 
 
+def test_review_manifest_checkout_is_pinned_to_lf_bytes() -> None:
+    attributes = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+
+    assert (
+        "docs/data-sources/official/historical-coverage-gap-review-2026-09-02.json "
+        "text eol=lf"
+    ) in attributes
+
+
 def test_review_manifest_rejects_wrong_digest() -> None:
     with pytest.raises(HistoricalCoverageGapReviewError, match="does not match"):
         load_historical_coverage_gap_review(
@@ -108,6 +117,32 @@ def test_dry_run_simulates_only_unassessed_targets_without_mutation() -> None:
     }
     assert database.cells[("J01", 2017)] == ("partial", "source-snapshot-review")
     assert database.rollback_count == 1
+    assert "set_config('lock_timeout', %s, true)" in database.statements[0]
+    assert "set_config('statement_timeout', %s, true)" in database.statements[0]
+    assert database.statement_parameters[0] == ("5000ms", "30000ms")
+
+
+def test_postgres_writer_uses_bounded_connect_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_connect(database_url: str, **kwargs: Any) -> object:
+        captured["database_url"] = database_url
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(psycopg, "connect", fake_connect)
+
+    connection = PostgresHistoricalCoverageGapReviewWriter(
+        database_url="postgresql://example.test/flood"
+    )._connect()
+
+    assert connection is not None
+    assert captured == {
+        "database_url": "postgresql://example.test/flood",
+        "kwargs": {"connect_timeout": 10},
+    }
 
 
 def test_persist_preserves_source_results_and_rerun_is_idempotent() -> None:
@@ -259,6 +294,8 @@ class _CoverageDatabase:
         }
         self.commit_count = 0
         self.rollback_count = 0
+        self.statements: list[str] = []
+        self.statement_parameters: list[tuple[Any, ...] | None] = []
 
     def __enter__(self) -> _CoverageDatabase:
         return self
@@ -294,7 +331,12 @@ class _CoverageCursor:
         parameters: tuple[Any, ...] | None = None,
     ) -> None:
         normalized = " ".join(statement.split())
+        self.database.statements.append(normalized)
+        self.database.statement_parameters.append(parameters)
         self.rowcount = 0
+        if "set_config('lock_timeout'" in normalized:
+            self._rows = []
+            return
         if "count(DISTINCT jurisdiction_code)" in normalized:
             self._rows = [(330, 22, 15, 2012, 2026)]
             return
