@@ -787,7 +787,13 @@ def request_json(
         except (json.JSONDecodeError, UnicodeDecodeError):
             error_payload = {}
         return JsonResponse(status_code=exc.code, payload=error_payload, error=str(exc))
-    except (TimeoutError, URLError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (
+        TimeoutError,
+        URLError,
+        OSError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    ) as exc:
         return JsonResponse(status_code=0, payload={}, error=str(exc))
 
 

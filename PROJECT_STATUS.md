@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-02 12:57 Asia/Taipei (2026-09-02 04:57 UTC)
+Last verified: 2026-09-02 17:00 Asia/Taipei (2026-09-02 09:00 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -67,6 +67,16 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
+- At 2026-09-02 17:00 Asia/Taipei, `origin/main` was rollback hotfix
+  `38f10751cac5d3dfe37f5d43cc834e10fb9a63b9`; its CI and CodeQL runs passed.
+  Zeabur's latest GitHub deployment record still pointed to
+  `8fd4fc2aca7416d1f2da0829211f2d36e19a5ceb`, and no deployment record existed
+  for the hotfix. Production `/health` and `/ready` both returned HTTP 502, so
+  deployment identity and PostgreSQL/Redis readiness were unavailable. The
+  SHA-pinned deployment smoke and strict public-risk smoke failed. Issue
+  [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289)
+  records the incident and hotfix evidence; the release is not recovered until
+  Zeabur serves the current full main SHA and both smokes pass.
 - At 2026-09-02 12:57 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
   reported `d85a0e210846ffe927cc6914c06013079bf1919b`; PostgreSQL and Redis were
   healthy. CI and CodeQL passed, and the deployment-identity and strict
@@ -85,12 +95,14 @@ the live verification sources listed below.
   [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
   [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
   remain open pending a successful genuine schedule run on current main.
-- Open pull request
-  [#312](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/312)
-  has all seven required checks green but remains blocked with unresolved P1
-  query-bounding and P2 Taiwan-calendar review findings. It is not deployed and
-  its staged migration/backfill plan must not be represented as production
-  state.
+- Pull request
+  [#312](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/312) was
+  merged as `8fd4fc2aca7416d1f2da0829211f2d36e19a5ceb`, after which production returned
+  HTTP 502. Pull request
+  [#317](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/317) removed
+  migration `0060` and its dependent history surface while retaining applied
+  migration `0059`; it merged as the current rollback hotfix. The removed
+  staged migration/backfill plan must not be represented as production state.
 - Issue [#71](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/71)
   remains open. Its latest scheduled audit reports 9 grouped request items and
   21 public completion targets, with no reviewed dispatch evidence, accepted
