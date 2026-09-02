@@ -14,6 +14,23 @@ def test_default_radius_reaches_the_nearest_official_tainan_rainfall_station() -
     assert smoke.DEFAULT_RADIUS_M == 2000
 
 
+def test_request_json_reports_connection_reset_without_traceback(monkeypatch) -> None:
+    def reset_connection(*_args, **_kwargs):
+        raise ConnectionResetError("connection reset by peer")
+
+    monkeypatch.setattr(smoke, "urlopen", reset_connection)
+
+    response = smoke.request_json(
+        "GET",
+        "https://example.test/health",
+        timeout_seconds=1,
+    )
+
+    assert response.status_code == 0
+    assert response.payload == {}
+    assert response.error == "connection reset by peer"
+
+
 def test_canonical_production_freshness_source_ids_are_accepted() -> None:
     payload = _risk_payload()
     payload["data_freshness"][0]["source_id"] = "official.cwa.rainfall"
