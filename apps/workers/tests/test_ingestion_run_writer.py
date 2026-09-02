@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Self
 
@@ -105,6 +106,63 @@ def test_postgres_ingestion_run_writer_maps_partial_to_succeeded_job() -> None:
 
     assert connection.cursor_instance.executions[0][1][4] == "succeeded"
     assert connection.cursor_instance.executions[1][1][4] == "partial"
+
+
+def test_non_operational_audit_is_pending_then_finalized_outside_live_selection() -> None:
+    pending = AdapterBatchRunSummary(
+        adapter_key="official.nstc.flood_disaster_points",
+        status="partial",
+        started_at=STARTED_AT,
+        finished_at=FINISHED_AT,
+        items_fetched=5_923,
+        items_promoted=5_919,
+        items_rejected=4,
+        raw_ref="raw/official/nstc/frozen.csv",
+    )
+    connection = _FakeConnection(job_id="audit-id")
+    writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    audit_id = writer.begin_non_operational_summary(
+        pending,
+        job_key="worker.nstc_snapshot.backfill",
+        parameters={"review_ref": "change-123"},
+    )
+    writer.finalize_non_operational_summary(
+        audit_id,
+        replace(pending, items_promoted=5_018, ingestion_job_id=audit_id),
+        job_key="worker.nstc_snapshot.backfill",
+        parameters={"terminal_phase": "complete"},
+    )
+
+    assert audit_id == "audit-id"
+    pending_job_sql, pending_job_params = connection.cursor_instance.executions[0]
+    pending_run_sql, pending_run_params = connection.cursor_instance.executions[1]
+    final_job_sql, final_job_params = connection.cursor_instance.executions[2]
+    final_run_sql, final_run_params = connection.cursor_instance.executions[3]
+    assert "VALUES (%s, NULL" in pending_job_sql
+    assert pending_job_params[0] == "worker.nstc_snapshot.backfill"
+    assert json.loads(str(pending_job_params[6])) == {
+        "audit_state": "pending",
+        "operational_run": False,
+        "review_ref": "change-123",
+    }
+    assert "'running'" in pending_run_sql
+    assert pending_run_params[1] == "official.nstc.flood_disaster_points"
+    assert "UPDATE ingestion_jobs" in final_job_sql
+    assert final_job_params[1] == "succeeded"
+    assert final_job_params[3] == 5_018
+    assert json.loads(str(final_job_params[9])) == {
+        "audit_state": "terminal",
+        "operational_run": False,
+        "terminal_phase": "complete",
+    }
+    assert "adapter_key IS NULL" in final_job_sql
+    assert "UPDATE adapter_runs" in final_run_sql
+    assert final_run_params[1] == "partial"
+    assert final_run_params[3] == 5_018
+    assert not any(
+        "UPDATE data_sources" in sql for sql, _params in connection.cursor_instance.executions
+    )
 
 
 def test_successful_no_active_summary_locks_warning_lifecycle_before_marker() -> None:

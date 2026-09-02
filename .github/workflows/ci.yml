@@ -88,6 +88,7 @@ jobs:
           tests/test_ingestion_readiness_migration.py
           tests/test_ncdr_alert_area_boundary_contract.py
           tests/test_ncdr_public_active_feed_contract.py
+          tests/test_staging_snapshot_idempotency_migration.py
           -q
 
       - name: Hosted deployment workflow contract tests
@@ -231,7 +232,10 @@ jobs:
           EVIDENCE_TEST_DATABASE_URL=postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk \
           OFFICIAL_DB_ACCEPTANCE_REQUIRED=1 \
           PYTHONPATH=apps/workers \
-            python -m pytest tests/test_historical_coverage_writer_postgres.py -q
+            python -m pytest \
+              tests/test_historical_coverage_writer_postgres.py \
+              tests/test_staging_snapshot_idempotency_postgres.py \
+              -q
 
       - name: Populated migration upgrade smoke from 0032 to 0036
         env:

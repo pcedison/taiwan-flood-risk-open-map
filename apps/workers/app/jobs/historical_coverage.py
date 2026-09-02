@@ -51,22 +51,28 @@ class PostgresHistoricalCoverageWriter:
         adapter_key: str,
         raw_ref: str,
         assessed_at: datetime,
+        authoritative_years: tuple[int, ...] | None = None,
+        review_ref: str | None = None,
     ) -> HistoricalCoverageWriteResult:
         if adapter_key not in HISTORICAL_COVERAGE_ADAPTER_KEYS:
             raise ValueError("adapter is not approved for historical coverage updates")
         if assessed_at.tzinfo is None or assessed_at.utcoffset() is None:
             raise ValueError("assessed_at must be timezone-aware")
-        review_ref = (
-            "worker-snapshot:v2:"
-            f"point-fallback-{HISTORICAL_COVERAGE_POINT_FALLBACK_METERS}m:"
-            f"{adapter_key}:"
-            f"{hashlib.sha256(raw_ref.encode('utf-8')).hexdigest()}"
+        resolved_review_ref = _resolved_review_ref(
+            adapter_key=adapter_key,
+            raw_ref=raw_ref,
+            review_ref=review_ref,
         )
         local_year = assessed_at.astimezone(
             ZoneInfo(HISTORICAL_COVERAGE_CALENDAR_TIMEZONE)
         ).year
         start_year = local_year - HISTORICAL_COVERAGE_LOOKBACK_YEARS + 1
         end_year = local_year
+        target_years = _target_years(
+            authoritative_years,
+            start_year=start_year,
+            end_year=end_year,
+        )
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(_ENSURE_ACTIVE_WINDOW_SQL, (start_year, end_year))
@@ -75,12 +81,13 @@ class PostgresHistoricalCoverageWriter:
                     (
                         raw_ref,
                         adapter_key,
+                        list(target_years),
                         start_year,
                         end_year,
                         adapter_key,
                         assessed_at,
                         assessed_at,
-                        review_ref,
+                        resolved_review_ref,
                     ),
                 )
                 row = cursor.fetchone()
@@ -137,12 +144,64 @@ class PostgresHistoricalCoverageWriter:
         return psycopg.connect(self._database_url)
 
 
+def _target_years(
+    authoritative_years: tuple[int, ...] | None,
+    *,
+    start_year: int,
+    end_year: int,
+) -> tuple[int, ...]:
+    if authoritative_years is None:
+        return tuple(range(start_year, end_year + 1))
+    if not authoritative_years:
+        raise ValueError("authoritative_years must contain at least one year")
+    if any(
+        isinstance(year, bool) or not isinstance(year, int)
+        for year in authoritative_years
+    ):
+        raise ValueError("authoritative_years must contain integers")
+    normalized = tuple(sorted(set(authoritative_years)))
+    if len(normalized) != len(authoritative_years):
+        raise ValueError("authoritative_years must not contain duplicates")
+    if normalized[0] < start_year or normalized[-1] > end_year:
+        raise ValueError("authoritative_years must stay inside the active coverage window")
+    return normalized
+
+
+def _resolved_review_ref(
+    *,
+    adapter_key: str,
+    raw_ref: str,
+    review_ref: str | None,
+) -> str:
+    if review_ref is None:
+        return (
+            "worker-snapshot:v2:"
+            f"point-fallback-{HISTORICAL_COVERAGE_POINT_FALLBACK_METERS}m:"
+            f"{adapter_key}:"
+            f"{hashlib.sha256(raw_ref.encode('utf-8')).hexdigest()}"
+        )
+    if (
+        not review_ref
+        or review_ref != review_ref.strip()
+        or "\n" in review_ref
+        or "\r" in review_ref
+        or len(review_ref) > 512
+    ):
+        raise ValueError(
+            "review_ref must be a trimmed single-line value of at most 512 characters"
+        )
+    return review_ref
+
+
 _SOURCE_ROWS_CTE = f"""
     target_snapshot AS (
         SELECT raw.id
         FROM raw_snapshots raw
         WHERE raw.raw_ref = %s
           AND raw.adapter_key = %s
+    ),
+    requested_years AS MATERIALIZED (
+        SELECT unnest(%s::integer[]) AS coverage_year
     ),
     accepted_row_candidates AS MATERIALIZED (
         SELECT
@@ -180,6 +239,14 @@ _SOURCE_ROWS_CTE = f"""
                 END,
                 EXTRACT(YEAR FROM staging.occurred_at)::integer
               ) BETWEEN %s AND %s
+          AND COALESCE(
+                staging.event_year,
+                CASE
+                    WHEN staging.payload->>'event_year' ~ '^[0-9]{{4}}$'
+                        THEN (staging.payload->>'event_year')::integer
+                END,
+                EXTRACT(YEAR FROM staging.occurred_at)::integer
+              ) IN (SELECT coverage_year FROM requested_years)
     ),
     accepted_rows AS MATERIALIZED (
         SELECT DISTINCT ON (candidate.evidence_key)

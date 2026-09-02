@@ -73,6 +73,27 @@ def test_adapter_retains_revisions_instead_of_replacing_older_years() -> None:
     assert NSTC_FLOOD_DISASTER_POINTS_METADATA.snapshot_generation_mode is None
 
 
+def test_backfill_can_pin_dataset_revision_to_the_exact_input_byte_digest() -> None:
+    revision = "a" * 64
+    result = NstcFloodDisasterPointsAdapter(
+        fetched_at=datetime(2026, 9, 1, tzinfo=UTC),
+        fetch_text=lambda _url, _timeout: CSV,
+        dataset_revision_sha256=revision,
+    ).run()
+
+    assert {item.payload["dataset_revision"] for item in result.fetched} == {
+        revision
+    }
+
+
+def test_backfill_rejects_an_invalid_dataset_revision_digest() -> None:
+    with pytest.raises(ValueError, match="dataset_revision_sha256"):
+        NstcFloodDisasterPointsAdapter(
+            fetch_text=lambda _url, _timeout: CSV,
+            dataset_revision_sha256="not-a-sha256",
+        )
+
+
 def test_partial_snapshot_preserves_every_invalid_source_row_as_rejected() -> None:
     adapter = NstcFloodDisasterPointsAdapter(
         fetched_at=datetime(2026, 9, 1, tzinfo=UTC),
