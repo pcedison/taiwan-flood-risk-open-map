@@ -388,11 +388,16 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "artifacts/hosted-deployment-smoke.json" in alert_script
     assert "artifacts/hosted-public-risk-evidence-smoke.json" in alert_script
     assert "artifacts/hosted-web-ui-smoke.json" in alert_script
+    assert "artifacts/hosted-source-freshness-smoke.json" in alert_script
     assert "expected deployment SHA" in alert_script
     assert "health deployment SHA" in alert_script
     assert "ready deployment SHA" in alert_script
     assert "official source state" in alert_script
     assert "unexpected tests" in alert_script
+    assert "Hosted source freshness smoke" in alert_script
+    assert "source freshness failures" in alert_script
+    assert "sourceFreshness?.status" in alert_script
+    assert "sourceFreshness?.failures" in alert_script
 
     resolve_step = next(
         step

@@ -359,6 +359,7 @@ jobs:
             const smoke = readJson("artifacts/hosted-deployment-smoke.json");
             const publicRisk = readJson("artifacts/hosted-public-risk-evidence-smoke.json");
             const hostedWeb = readJson("artifacts/hosted-web-ui-smoke.json");
+            const sourceFreshness = readJson("artifacts/hosted-source-freshness-smoke.json");
             function hostedDeploymentSmokeLines() {
               if (!smoke) {
                 return [];
@@ -405,6 +406,28 @@ jobs:
                 "",
               ];
             }
+            function sourceFreshnessLines() {
+              if (!sourceFreshness) {
+                return [];
+              }
+              if (sourceFreshness._readError) {
+                return [
+                  "Hosted source freshness smoke:",
+                  `- read error: ${sourceFreshness._readError}`,
+                  "",
+                ];
+              }
+              const failures = Array.isArray(sourceFreshness.failures)
+                && sourceFreshness.failures.length > 0
+                ? sourceFreshness.failures.slice(0, 5).map(String).join("; ")
+                : "none";
+              return [
+                "Hosted source freshness smoke:",
+                `- status: ${sourceFreshness.status || "unknown"}`,
+                `- source freshness failures: ${failures.slice(0, 1200)}`,
+                "",
+              ];
+            }
             // The signature deliberately excludes run id, sha and timestamps so a
             // recurring failure keeps updating one issue instead of adding a comment
             // on every run.
@@ -417,6 +440,8 @@ jobs:
               ...(publicRisk?.data_source_failures || []),
               hostedWeb?.stats?.unexpected,
               hostedWeb?.stats?.flaky,
+              sourceFreshness?.status,
+              ...(sourceFreshness?.failures || []),
             ]);
             const body = [
               "Hosted Monitoring failure detected.",
@@ -430,6 +455,7 @@ jobs:
               ...hostedDeploymentSmokeLines(),
               ...publicRiskLines(),
               ...hostedWebLines(),
+              ...sourceFreshnessLines(),
               "Artifacts, if uploaded, are attached to the workflow run.",
               "This issue route is public-safe and does not include tokens, manifests, or private evidence refs.",
             ].join("\n");
