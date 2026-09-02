@@ -32,6 +32,8 @@ python -m app.main `
 
 必要輸出：`status=succeeded`、`mode=dry-run`、`network_allowed=false`、
 `database_checked=false`、`target_cell_count=44`。
+即使 worker runtime 已注入 `WORKER_DATABASE_URL` 或 `DATABASE_URL`，此命令也不得連線；
+dry-run 只有明確傳入 `--database-url` 才進入唯讀對帳。
 
 ## 2. Staging 唯讀對帳
 

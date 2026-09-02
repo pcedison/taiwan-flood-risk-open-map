@@ -213,8 +213,23 @@ def test_persist_preserves_source_results_and_rerun_is_idempotent() -> None:
 
 
 def test_cli_defaults_to_manifest_only_no_network_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.setenv(
+        "WORKER_DATABASE_URL",
+        "postgresql://injected-worker-database.example.test/flood",
+    )
+
+    def unexpected_database_operation(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("manifest-only dry-run must not use the worker database env")
+
+    monkeypatch.setattr(
+        PostgresHistoricalCoverageGapReviewWriter,
+        "assess",
+        unexpected_database_operation,
+    )
+
     exit_code = main(
         [
             "--run-historical-coverage-gap-review",

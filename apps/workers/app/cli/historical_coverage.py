@@ -36,7 +36,9 @@ def run_historical_coverage_gap_review_command(
             Path(manifest_path),
             expected_sha256=expected_sha256,
         )
-        database_url = args.database_url or settings.database_url
+        database_url = args.database_url
+        if args.persist and not database_url:
+            database_url = settings.database_url
         if args.persist and not database_url:
             raise HistoricalCoverageGapReviewError(
                 "--persist requires --database-url, WORKER_DATABASE_URL, or DATABASE_URL"
