@@ -3,28 +3,28 @@
 版本：0.1.0  
 狀態：正式工作進度規劃  
 來源規格：`docs/PROJECT_SDD.md`  
-最後更新：2026-09-01
+最後更新：2026-09-03
 專案授權決策：Apache-2.0  
 主要部署決策：GitHub repo -> Zeabur VPS auto deploy  
 語系決策：繁體中文 only
 
 ---
 
-## 最新營運檢查點（2026-09-02）
+## 最新營運檢查點（2026-09-03）
 
 目前正式站、監控、open issue／PR 與外部來源缺口以
 [`PROJECT_STATUS.md`](../PROJECT_STATUS.md) 為單一交接入口。本文件後續的
 phase、work package 與舊 checkpoint 保留為實作契約及歷史紀錄，不應取代
 正式站 `/health`、`/ready`、GitHub Actions 與 strict hosted smoke 的即時證據。
 
-在 2026-09-03 00:28 Asia/Taipei 檢查點，`origin/main` 是
-`310a7bc7553e1fa513518596215718f8ce15f6f8`，CI／CodeQL 已通過，但 Zeabur
+在 2026-09-03 04:58 Asia/Taipei 檢查點，`origin/main` 是
+`68b985b7c0d0e66f2232ba22c7e9330e820cd735`，CI／CodeQL 已通過，但 Zeabur
 最新 deployment record 仍停在 `8fd4fc2a`。正式站 `/health`、`/ready` 都回
 HTTP 502，因此無法驗證 deployment identity 與 PostgreSQL／Redis readiness，
 deployment 與 strict public-risk smoke 均失敗；#289 留存事故證據。最新真實
 `schedule` Hosted Monitoring
-[#33654647561](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33654647561)
-已在目前 main 執行，但 deployment smoke 六次嘗試均已耗盡，最後一次記錄為
+[#33682011765](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33682011765)
+已在檢查點 main 執行，但 deployment smoke 六次嘗試均已耗盡，最後一次記錄為
 HTTP 502；下游
 public-risk、desktop／mobile Playwright、source 與 private-evidence 步驟均正確
 fail-closed 跳過。#289 與 #293 分別追蹤部署事故與真實排程 readiness，不能誤寫為
