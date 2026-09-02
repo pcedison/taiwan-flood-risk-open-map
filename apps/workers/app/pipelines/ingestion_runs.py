@@ -34,7 +34,7 @@ class PostgresIngestionRunWriter:
         *,
         job_key: str,
         parameters: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> str:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 if is_successful_no_active_warning_summary(summary):
@@ -56,6 +56,7 @@ class PostgresIngestionRunWriter:
                 )
                 _update_data_source_health(cursor, summary)
             connection.commit()
+        return job_id
 
     def write_runtime_selection(
         self,

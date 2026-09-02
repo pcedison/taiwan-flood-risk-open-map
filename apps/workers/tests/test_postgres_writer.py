@@ -47,6 +47,10 @@ def test_postgres_writer_upserts_raw_snapshot_and_inserts_staging_rows() -> None
     assert "INSERT INTO staging_evidence" in staging_sql
     assert "data_source_id" in staging_sql
     assert "SELECT id FROM data_sources WHERE adapter_key = %s" in staging_sql
+    assert "uq_staging_evidence_snapshot_evidence_id" not in staging_sql
+    assert "ON CONFLICT" in staging_sql
+    assert "payload->>'evidence_id'" in staging_sql
+    assert "DO NOTHING" in staging_sql
     assert len(staging_params_list) == 1
     staging_params = staging_params_list[0]
     assert staging_params[0] == "raw-snapshot-id"

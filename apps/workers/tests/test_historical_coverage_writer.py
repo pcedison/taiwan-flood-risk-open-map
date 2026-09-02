@@ -78,7 +78,8 @@ def test_record_success_attributes_and_upserts_in_one_database_statement() -> No
     assert "upserted_source_checks AS" in coverage_sql
     assert "DISTINCT ON (candidate.evidence_key)" in coverage_sql
     assert "ST_Subdivide(boundary.geom, 256)" in coverage_sql
-    assert len(coverage_params) == 8
+    assert len(coverage_params) == 9
+    assert coverage_params[2] == list(range(2012, 2027))
     _, refresh_params = connection.cursor_instance.executions[2]
     assert refresh_params == ([2018, 2019],)
 
@@ -120,7 +121,26 @@ def test_record_success_rolls_window_forward_in_taiwan_calendar_time() -> None:
     _, ensure_params = connection.cursor_instance.executions[0]
     assert ensure_params == (2013, 2027)
     _, coverage_params = connection.cursor_instance.executions[1]
-    assert coverage_params[2:4] == (2013, 2027)
+    assert coverage_params[3:5] == (2013, 2027)
+
+
+def test_record_success_restricts_a_legacy_snapshot_to_authoritative_years() -> None:
+    connection = _FakeConnection((6, 6, 6, [2018, 2019, 2020], 22, 0, 66))
+
+    result = _writer(connection).record_success(
+        adapter_key="official.nstc.flood_disaster_points",
+        raw_ref="raw:legacy",
+        assessed_at=datetime(2026, 9, 1, tzinfo=UTC),
+        authoritative_years=(2018, 2019, 2020),
+        review_ref="nstc-backfill:v1:PR-313:fixture",
+    )
+
+    assert result.assessed_years == (2018, 2019, 2020)
+    _, coverage_params = connection.cursor_instance.executions[1]
+    assert coverage_params[2] == [2018, 2019, 2020]
+    assert coverage_params[-1] == "nstc-backfill:v1:PR-313:fixture"
+    _, refresh_params = connection.cursor_instance.executions[2]
+    assert refresh_params == ([2018, 2019, 2020],)
 
 
 def test_record_success_rejects_naive_assessment_time() -> None:

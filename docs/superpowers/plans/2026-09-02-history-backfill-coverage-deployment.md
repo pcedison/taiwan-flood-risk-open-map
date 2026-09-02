@@ -24,7 +24,9 @@
 - 正式 coverage 仍是 2018–2026：198 格中 110 `partial`、88 `unassessed`。
 - migration 0059／0060 與 2012–2026 動態窗口尚未部署。
 - 凍結 NSTC CSV 共 5,923 列；年份 2018–2022；SHA-256
-  `9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d`。
+  `9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d`；
+  5,919 列正規化成功、4 列因座標在臺灣合理範圍外而拒收。5,919 列形成
+  5,018 個穩定事件鍵，901 筆為保留 revision 但公開查詢需去重的重複事件列。
 - 2026-09-02 WRA historical live run：1,224 fetched、1,075 normalized、157
   rejected；事件年份止於 2016，沒有 2017。
 - 同日 Civil IoT live smoke：sewer 1,947 normalized／21 縣市；flood sensor、
@@ -100,7 +102,7 @@ unavailable/incident 證據與不影響 WRA IoW 骨幹的降級行為。
 ## M4：Staging migration 與驗收
 
 1. 從 production backup 建立隔離 staging clone，完成 scratch restore drill。
-2. 停 staging scheduler，執行 0059／0060並記錄鎖定時間與 row counts。
+2. 停 staging scheduler，執行 0059／0060／0061並記錄鎖定時間與 row counts。
 3. 部署 worker，執行 M1/M2 dry-run，再執行受控 persist 與 profile rebuild。
 4. 驗證 NSTC 年度列的 exact timestamps 為 NULL、穩定鍵無異常碰撞、歷史分頁固定於
    assessment 建立時間。
@@ -117,7 +119,7 @@ unavailable/incident 證據與不影響 WRA IoW 骨幹的降級行為。
 部署順序：
 
 1. 確認合併後 `origin/main`、CI/checks 與 production backup。
-2. 暫停 scheduler；套用 0059／0060。
+2. 暫停 scheduler；套用 0059／0060／0061。
 3. 先部署 worker，執行已在 staging 驗證的資料命令與 330 格對帳。
 4. 部署 API，再部署 Web；恢復 scheduler。
 5. `/health`、`/ready`、ingestion readiness 必須回報同一完整 SHA。

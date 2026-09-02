@@ -99,12 +99,14 @@ class NstcFloodDisasterPointsAdapter:
         fetched_at: datetime | None = None,
         fetch_text: FetchText | None = None,
         raw_snapshot_key: str | None = None,
+        dataset_revision_sha256: str | None = None,
     ) -> None:
         self._resource_url = (resource_url or self.metadata.resource_url or "").strip()
         self._timeout_seconds = max(1, timeout_seconds)
         self._fetched_at = fetched_at
         self._fetch_text = fetch_text or fetch_nstc_flood_disaster_csv
         self._raw_snapshot_key = raw_snapshot_key
+        self._dataset_revision_sha256 = _normalized_sha256(dataset_revision_sha256)
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         fetched_at = self._fetched_at or datetime.now(UTC)
@@ -117,7 +119,9 @@ class NstcFloodDisasterPointsAdapter:
             raise NstcFloodDisasterPointsFetchError(
                 f"NSTC flood-disaster point fetcher failed: {exc}"
             ) from exc
-        revision = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        revision = self._dataset_revision_sha256 or hashlib.sha256(
+            text.encode("utf-8")
+        ).hexdigest()
         return tuple(
             RawSourceItem(
                 source_id=str(record["source_id"]),
@@ -363,6 +367,17 @@ def _clean_text(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalized_sha256(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if len(normalized) != 64 or any(
+        character not in "0123456789abcdef" for character in normalized
+    ):
+        raise ValueError("dataset_revision_sha256 must be a 64-character SHA-256 digest")
+    return normalized
 
 
 def _int_value(value: object) -> int | None:

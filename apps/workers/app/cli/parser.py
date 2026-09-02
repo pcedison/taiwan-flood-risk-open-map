@@ -66,6 +66,42 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--run-nstc-snapshot-backfill",
+        action="store_true",
+        help=(
+            "Validate the reviewed frozen NSTC 2018-2022 CSV without network access. "
+            "Defaults to dry-run; --persist opens the separately gated writer path."
+        ),
+    )
+    parser.add_argument(
+        "--nstc-backfill-input",
+        metavar="CSV",
+        help="Path to the frozen NSTC dataset 130016 CSV revision.",
+    )
+    parser.add_argument(
+        "--nstc-backfill-expected-sha256",
+        help="Required SHA-256 of the exact input bytes.",
+    )
+    parser.add_argument(
+        "--nstc-backfill-target-environment",
+        choices=("staging", "production"),
+        help="Required target label when --persist is supplied.",
+    )
+    parser.add_argument(
+        "--nstc-backfill-review-ref",
+        help="Required operator/change-review reference when --persist is supplied.",
+    )
+    parser.add_argument(
+        "--nstc-backfill-approval-ack",
+        action="store_true",
+        help="Acknowledge the concrete review reference for this persisted run.",
+    )
+    parser.add_argument(
+        "--nstc-backfill-production-ack",
+        action="store_true",
+        help="Additional explicit acknowledgement required for a production target.",
+    )
+    parser.add_argument(
         "--validate-gdelt-live-acceptance",
         metavar="YAML",
         help=(
