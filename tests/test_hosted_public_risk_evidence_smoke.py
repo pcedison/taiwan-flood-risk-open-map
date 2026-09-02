@@ -31,6 +31,36 @@ def test_request_json_reports_connection_reset_without_traceback(monkeypatch) ->
     assert response.error == "connection reset by peer"
 
 
+def test_request_json_handles_reset_while_reading_http_error_body(monkeypatch) -> None:
+    error = smoke.HTTPError(
+        "https://example.test/health",
+        502,
+        "Bad Gateway",
+        {},
+        None,
+    )
+
+    def reset_body_read():
+        raise ConnectionResetError("reset while reading error body")
+
+    monkeypatch.setattr(error, "read", reset_body_read)
+
+    def raise_http_error(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(smoke, "urlopen", raise_http_error)
+
+    response = smoke.request_json(
+        "GET",
+        "https://example.test/health",
+        timeout_seconds=1,
+    )
+
+    assert response.status_code == 502
+    assert response.payload == {}
+    assert response.error == "HTTP Error 502: Bad Gateway"
+
+
 def test_canonical_production_freshness_source_ids_are_accepted() -> None:
     payload = _risk_payload()
     payload["data_freshness"][0]["source_id"] = "official.cwa.rainfall"
