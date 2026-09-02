@@ -117,9 +117,12 @@ def test_dry_run_simulates_only_unassessed_targets_without_mutation() -> None:
     }
     assert database.cells[("J01", 2017)] == ("partial", "source-snapshot-review")
     assert database.rollback_count == 1
-    assert "set_config('lock_timeout', %s, true)" in database.statements[0]
-    assert "set_config('statement_timeout', %s, true)" in database.statements[0]
-    assert database.statement_parameters[0] == ("5000ms", "30000ms")
+    assert database.statements[0] == (
+        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+    )
+    assert "set_config('lock_timeout', %s, true)" in database.statements[1]
+    assert "set_config('statement_timeout', %s, true)" in database.statements[1]
+    assert database.statement_parameters[1] == ("5000ms", "30000ms")
     target_query = next(
         statement
         for statement in database.statements
@@ -127,7 +130,7 @@ def test_dry_run_simulates_only_unassessed_targets_without_mutation() -> None:
             "SELECT jurisdiction_code, coverage_year, status, review_ref"
         )
     )
-    assert target_query.endswith("FOR UPDATE")
+    assert not target_query.endswith("FOR UPDATE")
 
 
 def test_empty_coverage_matrix_fails_with_review_error() -> None:
@@ -198,6 +201,15 @@ def test_persist_preserves_source_results_and_rerun_is_idempotent() -> None:
     assert second.preserved_cell_count == 44
     assert database.cells[("J01", 2017)] == ("partial", "source-snapshot-review")
     assert database.commit_count == 2
+    target_queries = [
+        statement
+        for statement in database.statements
+        if statement.startswith(
+            "SELECT jurisdiction_code, coverage_year, status, review_ref"
+        )
+    ]
+    assert len(target_queries) == 2
+    assert all(statement.endswith("FOR UPDATE") for statement in target_queries)
 
 
 def test_cli_defaults_to_manifest_only_no_network_dry_run(
@@ -359,6 +371,9 @@ class _CoverageCursor:
         self.database.statements.append(normalized)
         self.database.statement_parameters.append(parameters)
         self.rowcount = 0
+        if normalized == "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY":
+            self._rows = []
+            return
         if "set_config('lock_timeout'" in normalized:
             self._rows = []
             return

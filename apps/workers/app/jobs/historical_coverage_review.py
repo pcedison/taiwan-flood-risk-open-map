@@ -151,9 +151,15 @@ class PostgresHistoricalCoverageGapReviewWriter:
         persisted_review_ref = _persisted_review_ref(manifest, manifest_sha256)
         with self._connect() as connection:
             with connection.cursor() as cursor:
+                if not persist:
+                    _begin_read_only_review_transaction(cursor)
                 _apply_review_transaction_timeouts(cursor)
                 _require_exact_coverage_matrix(cursor)
-                target_rows = _target_rows(cursor, manifest.targets)
+                target_rows = _target_rows(
+                    cursor,
+                    manifest.targets,
+                    for_update=persist,
+                )
                 expected_target_rows = manifest.target_cell_count
                 if len(target_rows) != expected_target_rows:
                     raise HistoricalCoverageGapReviewError(
@@ -232,6 +238,10 @@ def _apply_review_transaction_timeouts(cursor: Any) -> None:
             f"{HISTORICAL_COVERAGE_REVIEW_STATEMENT_TIMEOUT_MS}ms",
         ),
     )
+
+
+def _begin_read_only_review_transaction(cursor: Any) -> None:
+    cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
 
 
 def _manifest_from_raw(
@@ -385,14 +395,16 @@ def _require_exact_coverage_matrix(cursor: Any) -> None:
 def _target_rows(
     cursor: Any,
     targets: tuple[HistoricalCoverageGapTarget, ...],
+    *,
+    for_update: bool,
 ) -> tuple[tuple[str, int, str, str | None], ...]:
+    lock_clause = "\n        FOR UPDATE" if for_update else ""
     cursor.execute(
-        """
+        f"""
         SELECT jurisdiction_code, coverage_year, status, review_ref
         FROM historical_coverage_cells
         WHERE coverage_year = ANY(%s::integer[])
-        ORDER BY coverage_year, jurisdiction_code
-        FOR UPDATE
+        ORDER BY coverage_year, jurisdiction_code{lock_clause}
         """,
         ([target.year for target in targets],),
     )

@@ -49,6 +49,8 @@ python -m app.main `
 
 保存 stdout JSON。`would_update_cell_count` 是仍為 `unassessed` 的目標格；
 `preserved_cell_count` 必須等於已有來源結果、先前 review 或其他非 `unassessed` 狀態數。
+唯讀對帳會使用 `REPEATABLE READ READ ONLY` transaction 取得一致快照，不要求 row-lock
+權限；只有 `--persist` 才會鎖定 44 個目標格，避免來源刷新與 review 寫入競態。
 此 operator workflow 的 database connect、transaction lock 與 statement 上限分別為
 10 秒、5 秒與 30 秒；逾時必須回傳去敏感化的 structured failure，不可無限等待。
 
