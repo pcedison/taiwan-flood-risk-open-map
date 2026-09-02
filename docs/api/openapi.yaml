@@ -413,11 +413,10 @@ paths:
       summary: List evidence attached to an assessment.
       parameters:
         - $ref: "#/components/parameters/AssessmentId"
-        - $ref: "#/components/parameters/PageCursor"
         - $ref: "#/components/parameters/PageSize"
       responses:
         "200":
-          description: Paginated evidence list.
+          description: Bounded evidence list attached to the assessment. Historical pagination uses /v1/history/{assessment_id}.
           content:
             application/json:
               schema:
@@ -465,6 +464,44 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/history/{assessment_id}:
+    get:
+      tags:
+        - Public
+      operationId: listAssessmentHistory
+      summary: List complete nearby historical evidence for an assessment.
+      description: >
+        Returns a stable, newest-first keyset page over the rolling 15-year
+        Taiwan calendar window. Annual-only records expose event_year and do
+        not fabricate an exact event date. The cursor is bound to the assessment.
+      parameters:
+        - $ref: "#/components/parameters/AssessmentId"
+        - $ref: "#/components/parameters/PageCursor"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Paginated historical evidence list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceListResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          description: The assessment expired; run the location query again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Historical evidence storage is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/history-coverage:
     get:
       tags:
@@ -472,7 +509,8 @@ paths:
       operationId: getHistoryCoverage
       summary: Read the public-safe 22-county historical ingestion coverage ledger.
       description: >
-        Returns explicit county/year ingestion coverage for 2018 through 2026.
+        Returns explicit county/year ingestion coverage for the rolling 15-year
+        Taiwan calendar window reported by summary.start_year and summary.end_year.
         A missing, failed, stale, or unassessed cell is never evidence that
         flooding did not occur or that a location is safe.
       parameters:
@@ -488,9 +526,9 @@ paths:
           required: false
           schema:
             type: integer
-            minimum: 2018
-            maximum: 2026
-          description: Optional year within the first reviewed baseline window.
+            minimum: 1900
+            maximum: 2100
+          description: Optional year within the current rolling 15-year window.
       responses:
         "200":
           description: Historical ingestion coverage cells and fail-closed summary.
@@ -1911,7 +1949,7 @@ components:
           $ref: "#/components/schemas/Explanation"
         evidence:
           type: array
-          description: Short evidence preview. Use /v1/evidence/{assessment_id} for pagination.
+          description: Short evidence preview. Use /v1/history/{assessment_id} for complete historical pagination.
           items:
             $ref: "#/components/schemas/EvidencePreview"
         data_freshness:
@@ -2186,6 +2224,35 @@ components:
             - context
             - unspecified
           default: unspecified
+        event_year:
+          type:
+            - integer
+            - "null"
+          minimum: 1900
+          maximum: 2100
+        temporal_precision:
+          type: string
+          enum: [instant, day, month, year, unknown]
+          default: unknown
+        event_start_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        event_end_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        observation_count:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+        episode_algorithm_version:
+          type:
+            - string
+            - "null"
       additionalProperties: false
 
     EvidenceListResponse:
@@ -2313,6 +2380,35 @@ components:
             - context
             - unspecified
           default: unspecified
+        event_year:
+          type:
+            - integer
+            - "null"
+          minimum: 1900
+          maximum: 2100
+        temporal_precision:
+          type: string
+          enum: [instant, day, month, year, unknown]
+          default: unknown
+        event_start_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        event_end_at:
+          type:
+            - string
+            - "null"
+          format: date-time
+        observation_count:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+        episode_algorithm_version:
+          type:
+            - string
+            - "null"
       additionalProperties: false
 
     SourceType:
@@ -2744,6 +2840,12 @@ components:
         jurisdiction_catalog_complete:
           type: boolean
           description: True only when every considered county/signal contract is reviewed and its current source-mapping count, checksum, revision, and redundancy parents match the approval.
+        home_jurisdiction_code:
+          type:
+            - string
+            - "null"
+          pattern: "^[0-9]{8}$"
+          description: Canonical county code used to query the matching historical coverage summary.
         home_jurisdiction:
           type:
             - string
@@ -3267,11 +3369,11 @@ components:
       properties:
         start_year:
           type: integer
-          minimum: 2018
+          minimum: 2012
           maximum: 2100
         end_year:
           type: integer
-          minimum: 2018
+          minimum: 2012
           maximum: 2100
         expected_cell_count:
           type: integer
@@ -3293,6 +3395,24 @@ components:
           additionalProperties:
             type: integer
             minimum: 0
+        lookback_years:
+          type: integer
+          const: 15
+          default: 15
+        calendar_timezone:
+          type: string
+          const: Asia/Taipei
+          default: Asia/Taipei
+        audit_complete:
+          type: boolean
+          default: false
+        data_coverage_complete:
+          type: boolean
+          default: false
+        known_gap_cell_count:
+          type: integer
+          minimum: 0
+          default: 0
         coverage_complete:
           type: boolean
         absence_is_safety_evidence:
@@ -3326,7 +3446,7 @@ components:
           type: string
         year:
           type: integer
-          minimum: 2018
+          minimum: 2012
           maximum: 2100
         status:
           $ref: "#/components/schemas/HistoricalCoverageStatus"

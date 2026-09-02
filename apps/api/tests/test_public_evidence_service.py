@@ -1,9 +1,10 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
 
 from app.api.services import public_evidence
-from app.domain.evidence import EvidenceRecord
+from app.domain.evidence import EvidenceRecord, HistoricalEvidencePagePosition
 from app.domain.history import HistoricalFloodRecord
 from app.domain.realtime import OfficialRealtimeObservation
 
@@ -132,7 +133,125 @@ def test_generated_realtime_and_historical_evidence_publish_explicit_scope() -> 
     assert public_evidence.evidence_preview(historical).evidence_scope == "historical"
 
 
-def test_display_evidence_collapses_official_disaster_points_stably() -> None:
+def test_annual_historical_record_never_fabricates_an_exact_date() -> None:
+    annual = public_evidence.historical_record_evidence(
+        HistoricalFloodRecord(
+            source_id="data-gov-130016:2025:demo:1",
+            source_name="官方淹水災點",
+            source_type="official",
+            event_type="flood_report",
+            title="2025 官方淹水災點",
+            summary="來源只提供年度。",
+            url="https://data.gov.tw/dataset/130016",
+            occurred_at=None,
+            ingested_at=datetime(2026, 1, 2, tzinfo=UTC),
+            lat=23.0,
+            lng=120.2,
+            confidence=0.9,
+            freshness_score=0.8,
+            source_weight=1.0,
+            risk_factor=1.0,
+            event_year=2025,
+            temporal_precision="year",
+        ),
+        distance_to_query_m=100.0,
+    )
+
+    assert annual.event_year == 2025
+    assert annual.temporal_precision == "year"
+    assert annual.occurred_at is None
+    assert annual.observed_at is None
+    assert annual.event_start_at is None
+    assert annual.event_end_at is None
+
+
+def test_history_cursor_round_trip_is_bound_to_assessment() -> None:
+    assessment_id = "d315d0e6-9c1e-475a-9118-f299d12d5c62"
+    position = HistoricalEvidencePagePosition(
+        event_year=2025,
+        event_time=datetime(2025, 1, 1, tzinfo=UTC),
+        evidence_id="b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+    )
+
+    cursor = public_evidence.encode_history_cursor(
+        assessment_id=assessment_id,
+        position=position,
+    )
+
+    assert public_evidence.decode_history_cursor(
+        cursor,
+        assessment_id=assessment_id,
+    ) == position
+    with pytest.raises(ValueError, match="invalid history cursor"):
+        public_evidence.decode_history_cursor(
+            cursor,
+            assessment_id="018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
+        )
+
+
+@pytest.mark.parametrize("cursor", ["%%%", "e30", "", "a" * 2049])
+def test_history_cursor_rejects_malformed_values(cursor: str) -> None:
+    with pytest.raises(ValueError, match="invalid history cursor"):
+        public_evidence.decode_history_cursor(
+            cursor,
+            assessment_id="d315d0e6-9c1e-475a-9118-f299d12d5c62",
+        )
+
+
+def test_history_page_uses_extra_row_to_emit_stable_cursor() -> None:
+    assessment_id = "d315d0e6-9c1e-475a-9118-f299d12d5c62"
+    base = _record(
+        evidence_id="b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+        source_id="history:1",
+        event_type="flood_report",
+        occurred_at=datetime(2025, 8, 1, tzinfo=UTC),
+    )
+    records = (
+        replace(base, event_year=2025, temporal_precision="instant"),
+        replace(
+            base,
+            id="62f677b5-ae0c-44d7-9e65-f0567a92a5ca",
+            source_id="history:2",
+            occurred_at=datetime(2024, 8, 1, tzinfo=UTC),
+            event_year=2024,
+            temporal_precision="instant",
+        ),
+        replace(
+            base,
+            id="0ca7e95a-7cfa-4e8d-b7e3-a0ca4b1836ec",
+            source_id="history:3",
+            occurred_at=datetime(2023, 8, 1, tzinfo=UTC),
+            event_year=2023,
+            temporal_precision="instant",
+        ),
+    )
+    calls: list[dict[str, object]] = []
+
+    def fetch_history(**kwargs: object) -> tuple[EvidenceRecord, ...]:
+        calls.append(kwargs)
+        return records
+
+    page = public_evidence.list_assessment_history(
+        assessment_id,
+        cursor=None,
+        page_size=2,
+        fetch_history=fetch_history,
+    )
+
+    assert [item.id for item in page.items] == [records[0].id, records[1].id]
+    assert page.next_cursor is not None
+    assert calls == [
+        {"assessment_id": assessment_id, "page_size": 2, "after": None}
+    ]
+    decoded = public_evidence.decode_history_cursor(
+        page.next_cursor,
+        assessment_id=assessment_id,
+    )
+    assert decoded.event_year == 2024
+    assert decoded.evidence_id == records[1].id
+
+
+def test_display_evidence_preserves_and_sorts_official_disaster_points_newest_first() -> None:
     closest_older = public_evidence.evidence_from_record(
         _record(
             evidence_id="disaster:older",
@@ -153,24 +272,18 @@ def test_display_evidence_collapses_official_disaster_points_stably() -> None:
         )
     )
 
-    collapsed = public_evidence.display_evidence_items(
+    displayed = public_evidence.display_evidence_items(
         [closest_older, farther_latest]
     )
-    reversed_collapsed = public_evidence.display_evidence_items(
+    reversed_displayed = public_evidence.display_evidence_items(
         [farther_latest, closest_older]
     )
 
-    assert len(collapsed) == 1
-    summary = collapsed[0]
-    assert summary.distance_to_query_m == 45.0
-    assert summary.observed_at == datetime(2024, 7, 26, tzinfo=UTC)
-    assert summary.occurred_at == datetime(2024, 7, 26, tzinfo=UTC)
-    assert summary.source_id == "data-gov-130016:summary"
-    assert summary.title == "官方淹水災害情資點位彙整（2020、2024）"
-    assert summary.raw_ref == "historical-record:data-gov-130016:summary:2"
-    assert reversed_collapsed[0].id == summary.id
-    assert reversed_collapsed[0].source_id == summary.source_id
-    assert reversed_collapsed[0].title == summary.title
+    assert [item.id for item in displayed] == ["disaster:latest", "disaster:older"]
+    assert [item.id for item in reversed_displayed] == [
+        "disaster:latest",
+        "disaster:older",
+    ]
 
 
 def test_preview_reserves_current_signal_families_and_historical_context() -> None:

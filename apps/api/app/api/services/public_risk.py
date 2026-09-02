@@ -555,6 +555,7 @@ def _nearby_realtime_coverage_with_bridge_fallback(
             for signal_type in REQUIRED_SIGNAL_TYPES
             if signal_type not in coverage.jurisdiction_unverified_signal_types
         ),
+        home_jurisdiction_code=coverage.home_jurisdiction_code,
         home_jurisdiction=coverage.home_jurisdiction,
         considered_jurisdictions=tuple(coverage.considered_jurisdictions),
         jurisdiction_mapping_revisions=tuple(

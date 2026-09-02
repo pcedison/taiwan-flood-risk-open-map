@@ -274,3 +274,20 @@ snapshot's per-source, per-county, per-year result separately from the
 aggregated `historical_ingestion_coverage` state. A successful live snapshot can
 therefore advance only the years actually present in that payload, while a
 failed or unassignable snapshot cannot be misrepresented as an empty year.
+
+`0059_historical_coverage_15y_retention.sql` expands the fail-closed review
+matrix to 22 × 15 county/year cells for 2012–2026. It also changes the rolling
+NSTC source from active-snapshot replacement to revision retention, so a newly
+published five-year snapshot cannot hide older official rows already ingested.
+The migration only expands and preserves audit state; it does not claim that
+the unresolved 15-year cells are complete.
+
+`0060_historical_event_semantics.sql` separates event time from ingestion time
+for historical evidence. It adds `event_year`, `temporal_precision`, explicit
+event bounds, and a stable upstream record key to staging and promoted
+evidence. Dataset 130016 rows are migrated from the legacy synthetic December
+31 timestamp to true year-only semantics with nullable event timestamps. Raw
+snapshot revisions remain available for audit, while public readers can dedupe
+them by stable record identity. The migration also adds bounded indexes for
+newest-first history pages and query-time flood-sensor episode aggregation; it
+does not delete raw observations or claim missing years are complete.

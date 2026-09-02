@@ -169,6 +169,11 @@ def test_rebuild_risk_profile_scores_and_links_existing_profile() -> None:
     sql, params = connection.cursor_instance.executions[0]
     assert "FROM admin_area_profiles" in sql
     assert "FROM evidence e" in sql
+    assert "official.nstc.flood_disaster_points" in sql
+    assert "public_revision_rank = 1" in sql
+    assert "es.evidence_scope = 'historical'" in sql
+    assert "FROM event_scores es" in sql
+    assert "FULL JOIN event_scores" not in sql
     assert "e.ingestion_status = 'accepted'" in sql
     assert "UPDATE admin_area_profiles profile" in sql
     assert "INSERT INTO profile_evidence_links" in sql

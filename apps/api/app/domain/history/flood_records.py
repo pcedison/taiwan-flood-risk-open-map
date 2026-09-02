@@ -16,7 +16,7 @@ class HistoricalFloodRecord:
     title: str
     summary: str
     url: str
-    occurred_at: datetime
+    occurred_at: datetime | None
     ingested_at: datetime
     lat: float
     lng: float
@@ -24,6 +24,10 @@ class HistoricalFloodRecord:
     freshness_score: float
     source_weight: float
     risk_factor: float
+    event_year: int | None = None
+    temporal_precision: Literal["instant", "day", "month", "year", "unknown"] = (
+        "instant"
+    )
 
 
 _TAIWAN_TZ = timezone(timedelta(hours=8))

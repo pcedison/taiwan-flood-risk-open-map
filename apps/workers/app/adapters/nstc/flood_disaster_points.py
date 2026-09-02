@@ -5,7 +5,7 @@ import hashlib
 import math
 import ssl
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime
 from http.client import HTTPMessage
 from io import StringIO
 from typing import Any
@@ -39,7 +39,6 @@ NSTC_FLOOD_DISASTER_POINTS_USER_AGENT = (
 DEFAULT_NSTC_FLOOD_DISASTER_POINTS_TIMEOUT_SECONDS = 12
 MAX_NSTC_FLOOD_DISASTER_POINTS_BYTES = 2 * 1024 * 1024
 MAX_NSTC_FLOOD_DISASTER_POINTS_ROWS = 50_000
-_TAIWAN_TZ = timezone(timedelta(hours=8))
 _TAIWAN_LONGITUDE_BOUNDS = (117.0, 123.5)
 _TAIWAN_LATITUDE_BOUNDS = (20.0, 27.5)
 _REQUIRED_FIELDS = frozenset({"FID", "year", "X_97", "Y_97", "source"})
@@ -60,7 +59,6 @@ NSTC_FLOOD_DISASTER_POINTS_METADATA = AdapterMetadata(
     update_frequency="irregular rolling recent-years snapshot; worker checks daily",
     license="Government Open Data License, version 1.0",
     limitations=_LIMITATIONS,
-    snapshot_generation_mode="complete_replace",
 )
 
 
@@ -129,6 +127,11 @@ class NstcFloodDisasterPointsAdapter:
                 payload={
                     **record,
                     "evidence_scope": "historical",
+                    "event_year": record.get("year"),
+                    "temporal_precision": (
+                        "year" if record.get("year") is not None else None
+                    ),
+                    "source_record_key": record.get("source_record_key"),
                     "location_precision": "point",
                     "dataset_revision": revision,
                     "resource_url": self._resource_url,
@@ -141,16 +144,12 @@ class NstcFloodDisasterPointsAdapter:
 
     def normalize(self, raw: RawSourceItem) -> NormalizedEvidence | None:
         payload = raw.payload
-        source_timestamp = payload.get("source_timestamp")
         geometry = payload.get("geometry")
         year = payload.get("year")
         source = payload.get("source")
         fid = payload.get("fid")
         if (
-            not isinstance(source_timestamp, datetime)
-            or source_timestamp.tzinfo is None
-            or source_timestamp.utcoffset() is None
-            or not isinstance(geometry, Mapping)
+            not isinstance(geometry, Mapping)
             or geometry.get("type") != "Point"
             or not isinstance(year, int)
             or not isinstance(source, str)
@@ -166,7 +165,7 @@ class NstcFloodDisasterPointsAdapter:
             source_id=raw.source_id,
             source_url=raw.source_url,
             source_title=title,
-            source_timestamp=source_timestamp.astimezone(UTC),
+            source_timestamp=None,
             fetched_at=raw.fetched_at,
             summary=(
                 "data.gov.tw dataset 130016 彙整防救災部會署淹水災害情資點位；"
@@ -294,6 +293,12 @@ def parse_nstc_flood_disaster_csv(text: str) -> tuple[dict[str, object], ...]:
                 _rejected_record(row_number, "nstc_outside_taiwan_bounds")
             )
             continue
+        stable_location_key = _stable_location_key(
+            year=year,
+            source=source,
+            lng=lng,
+            lat=lat,
+        )
         source_id = f"data-gov-130016:{year}:{source}:{fid}"
         if source_id in seen:
             records.append(
@@ -305,10 +310,10 @@ def parse_nstc_flood_disaster_csv(text: str) -> tuple[dict[str, object], ...]:
         records.append(
             {
                 "source_id": source_id,
+                "source_record_key": stable_location_key,
                 "fid": fid,
                 "year": year,
                 "source": source,
-                "source_timestamp": datetime(year, 12, 31, 12, 0, tzinfo=_TAIWAN_TZ),
                 "geometry": {"type": "Point", "coordinates": [lng, lat]},
             }
         )
@@ -324,6 +329,12 @@ def _rejected_record(row_number: int, reason_code: str) -> dict[str, object]:
         "source_id": f"data-gov-130016:rejected:row-{row_number}",
         "rejection_reason_code": reason_code,
     }
+
+
+def _stable_location_key(*, year: int, source: str, lng: float, lat: float) -> str:
+    normalized_source = " ".join(source.casefold().split()) or "unknown"
+    identity = f"{year}|{normalized_source}|{lng:.6f}|{lat:.6f}"
+    return f"{year}:{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:24]}"
 
 
 def _approved_resource_url(value: object) -> str:

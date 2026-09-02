@@ -527,7 +527,7 @@ def rebuild_risk_profile(
             WHERE {key_column} = %s
             FOR UPDATE
         ),
-        profile_evidence AS (
+        profile_evidence_ranked AS (
             SELECT
                 e.id,
                 e.source_type,
@@ -545,8 +545,34 @@ def rebuild_risk_profile(
                 e.occurred_at,
                 e.ingested_at,
                 e.created_at,
+                CASE
+                    WHEN e.properties->>'evidence_scope' IN (
+                        'current', 'historical', 'context'
+                    ) THEN e.properties->>'evidence_scope'
+                    WHEN e.event_type = 'flood_potential' THEN 'context'
+                    ELSE 'unspecified'
+                END AS evidence_scope,
+                CASE
+                    WHEN ds.adapter_key = 'official.nstc.flood_disaster_points'
+                    THEN ROW_NUMBER() OVER (
+                        PARTITION BY
+                            ds.adapter_key,
+                            COALESCE(NULLIF(e.source_record_key, ''), e.source_id)
+                        ORDER BY e.ingested_at DESC, e.id DESC
+                    )
+                    WHEN e.event_type = 'flood_report'
+                        AND e.properties->>'evidence_scope' = 'current'
+                    THEN ROW_NUMBER() OVER (
+                        PARTITION BY
+                            ds.adapter_key,
+                            COALESCE(NULLIF(e.properties->>'station_id', ''), e.source_id)
+                        ORDER BY e.observed_at DESC NULLS LAST, e.ingested_at DESC, e.id DESC
+                    )
+                    ELSE 1
+                END AS public_revision_rank,
                 ST_Distance(e.geom::geography, tp.center_geom::geography) AS distance_to_profile_m
             FROM evidence e
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
             JOIN target_profile tp ON true
             WHERE e.ingestion_status = 'accepted'
                 AND e.privacy_level IN ('public', 'aggregated')
@@ -555,6 +581,11 @@ def rebuild_risk_profile(
                     ST_Intersects(e.geom, tp.geom)
                     OR ST_DWithin(e.geom::geography, tp.center_geom::geography, tp.profile_radius_m)
                 )
+        ),
+        profile_evidence AS (
+            SELECT *
+            FROM profile_evidence_ranked
+            WHERE public_revision_rank = 1
         ),
         evidence_counts AS (
             SELECT COALESCE(
@@ -587,6 +618,7 @@ def rebuild_risk_profile(
         event_scores AS (
             SELECT
                 event_type,
+                evidence_scope,
                 SUM(
                     CASE event_type
                         WHEN 'rainfall' THEN 40.0
@@ -607,38 +639,50 @@ def rebuild_risk_profile(
                     END
                 ) AS score
             FROM profile_evidence
-            GROUP BY event_type
+            GROUP BY event_type, evidence_scope
         ),
         scored AS (
             SELECT
                 COUNT(pe.id)::integer AS evidence_count,
                 LEAST(
-                    COALESCE(SUM(
-                        CASE
-                            WHEN es.event_type IN ('rainfall', 'water_level', 'flood_warning')
-                                THEN es.score
-                            WHEN es.event_type IN ('flood_report', 'road_closure')
-                                AND EXISTS (
-                                    SELECT 1
-                                    FROM profile_evidence recent
-                                    WHERE recent.event_type = es.event_type
-                                        AND COALESCE(recent.observed_at, recent.occurred_at)
-                                            BETWEEN %s::timestamptz - interval '6 hours'
+                    COALESCE((
+                        SELECT SUM(
+                            CASE
+                                WHEN es.event_type IN (
+                                    'rainfall', 'water_level', 'flood_warning'
+                                ) THEN es.score
+                                WHEN es.event_type IN ('flood_report', 'road_closure')
+                                    AND EXISTS (
+                                        SELECT 1
+                                        FROM profile_evidence recent
+                                        WHERE recent.event_type = es.event_type
+                                            AND COALESCE(
+                                                recent.observed_at,
+                                                recent.occurred_at
+                                            ) BETWEEN %s::timestamptz - interval '6 hours'
                                                 AND %s::timestamptz + interval '5 minutes'
-                                )
-                                THEN es.score
-                            ELSE 0.0
-                        END
+                                    )
+                                    THEN es.score
+                                ELSE 0.0
+                            END
+                        )
+                        FROM event_scores es
                     ), 0.0),
                     100.0
                 ) AS realtime_score,
                 LEAST(
-                    COALESCE(SUM(
-                        CASE
-                            WHEN es.event_type = 'flood_potential' THEN LEAST(es.score, 40.0)
-                            WHEN es.event_type IN ('flood_report', 'road_closure') THEN es.score
-                            ELSE 0.0
-                        END
+                    COALESCE((
+                        SELECT SUM(
+                            CASE
+                                WHEN es.event_type = 'flood_potential'
+                                    THEN LEAST(es.score, 40.0)
+                                WHEN es.event_type = 'flood_report'
+                                    AND es.evidence_scope = 'historical' THEN es.score
+                                WHEN es.event_type = 'road_closure' THEN es.score
+                                ELSE 0.0
+                            END
+                        )
+                        FROM event_scores es
                     ), 0.0),
                     100.0
                 ) AS historical_score,
@@ -654,15 +698,26 @@ def rebuild_risk_profile(
                     )
                 END AS confidence_score,
                 BOOL_OR(pe.event_type IN ('rainfall', 'water_level', 'flood_warning')) AS has_realtime,
-                BOOL_OR(pe.event_type IN ('flood_potential', 'flood_report', 'road_closure')) AS has_historical,
-                BOOL_OR(pe.event_type IN ('flood_report', 'road_closure')) AS has_observed_history,
+                BOOL_OR(
+                    pe.event_type IN ('flood_potential', 'road_closure')
+                    OR (
+                        pe.event_type = 'flood_report'
+                        AND pe.evidence_scope = 'historical'
+                    )
+                ) AS has_historical,
+                BOOL_OR(
+                    pe.event_type = 'road_closure'
+                    OR (
+                        pe.event_type = 'flood_report'
+                        AND pe.evidence_scope = 'historical'
+                    )
+                ) AS has_observed_history,
                 BOOL_OR(pe.event_type = 'rainfall') AS has_rainfall,
                 BOOL_OR(pe.event_type = 'water_level') AS has_water_level,
                 MAX(pe.observed_at) AS latest_observed_at,
                 MAX(pe.occurred_at) AS latest_occurred_at,
                 MAX(pe.ingested_at) AS latest_ingested_at
             FROM profile_evidence pe
-            FULL JOIN event_scores es ON es.event_type = pe.event_type
         ),
         profile_update AS (
             UPDATE {profile_table} profile

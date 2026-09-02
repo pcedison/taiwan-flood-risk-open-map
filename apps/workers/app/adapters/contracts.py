@@ -73,7 +73,10 @@ class NormalizedEvidence:
     source_id: str
     source_url: str
     source_title: str
-    source_timestamp: datetime
+    # Some official historical datasets publish only a calendar year.  None
+    # means no exact upstream timestamp exists; event_year and
+    # temporal_precision stay in the raw/staging metadata instead.
+    source_timestamp: datetime | None
     fetched_at: datetime
     summary: str
     location_text: str | None

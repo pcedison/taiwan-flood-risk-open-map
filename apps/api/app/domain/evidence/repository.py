@@ -12,6 +12,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.core.db import pooled_connection
+from app.domain.history.window import HISTORICAL_LOOKBACK_YEARS, historical_window_start
 
 ConnectionFactory = Callable[[], Any]
 EvidenceLocationPrecision = Literal[
@@ -24,6 +25,7 @@ EvidenceLocationPrecision = Literal[
     "map_click",
     "unknown",
 ]
+EvidenceTemporalPrecision = Literal["instant", "day", "month", "year", "unknown"]
 RealtimeJurisdictionResolutionStatus = Literal[
     "verified",
     "boundary_unverified",
@@ -34,8 +36,10 @@ RealtimeJurisdictionResolutionStatus = Literal[
 QUERY_HEAT_STATEMENT_TIMEOUT_MS = 1_200
 RECENT_INCIDENT_CONTEXT_WINDOW = timedelta(hours=6)
 RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE = timedelta(minutes=5)
-OBSERVED_FLOOD_HISTORY_WINDOW = timedelta(days=365 * 5)
+OBSERVED_FLOOD_HISTORY_WINDOW_YEARS = HISTORICAL_LOOKBACK_YEARS
 OBSERVED_FLOOD_HISTORY_CURRENT_GRACE = timedelta(hours=6)
+OBSERVED_FLOOD_EPISODE_GAP = timedelta(hours=6)
+OBSERVED_FLOOD_EPISODE_ALGORITHM_VERSION = "sensor-episode-v1"
 RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS = (
     "official.npa.police_radio_traffic",
     "official.wra.flood_warning",
@@ -50,6 +54,21 @@ _MAX_FRESHNESS_THRESHOLD_SECONDS = 86_400
 
 class EvidenceRepositoryUnavailable(RuntimeError):
     """Raised when evidence storage cannot be queried."""
+
+
+class AssessmentEvidenceNotFound(RuntimeError):
+    """Raised when a detail request references an unknown assessment."""
+
+
+class AssessmentEvidenceExpired(RuntimeError):
+    """Raised when a detail request references an expired assessment."""
+
+
+@dataclass(frozen=True)
+class HistoricalEvidencePagePosition:
+    event_year: int
+    event_time: datetime
+    evidence_id: str
 
 
 @dataclass(frozen=True)
@@ -85,6 +104,13 @@ class EvidenceRecord:
     active_until: datetime | None = None
     location_precision: EvidenceLocationPrecision = "unknown"
     limitations: tuple[str, ...] = ()
+    event_year: int | None = None
+    temporal_precision: EvidenceTemporalPrecision = "unknown"
+    event_start_at: datetime | None = None
+    event_end_at: datetime | None = None
+    source_record_key: str | None = None
+    observation_count: int | None = None
+    episode_algorithm_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -388,6 +414,7 @@ def query_nearby_evidence(
     water_relevance_m: int | None = None,
     official_realtime_since: datetime | None = None,
     statement_timeout_ms: int = 0,
+    historical_since: datetime | None = None,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
     """Fetch accepted evidence near a query point.
@@ -426,11 +453,23 @@ def query_nearby_evidence(
         candidate_rows AS (
             SELECT *
             FROM (
+                SELECT *
+                FROM (
                 SELECT
                     e.*,
                     ds.adapter_key,
                     ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
-                    %s::double precision AS branch_relevance_m
+                    %s::double precision AS branch_relevance_m,
+                    CASE
+                        WHEN ds.adapter_key = 'official.nstc.flood_disaster_points'
+                        THEN ROW_NUMBER() OVER (
+                            PARTITION BY
+                                ds.adapter_key,
+                                COALESCE(NULLIF(e.source_record_key, ''), e.source_id)
+                            ORDER BY e.ingested_at DESC, e.id DESC
+                        )
+                        ELSE 1
+                    END AS history_revision_rank
                 FROM evidence e
                 JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
@@ -444,11 +483,26 @@ def query_nearby_evidence(
                         AND e.title LIKE '%%(停用)%%'
                     )
                     AND (
-                        ds.adapter_key NOT IN (
-                            'official.wra.historical_flood',
-                            'official.nstc.flood_disaster_points'
-                        )
+                        ds.adapter_key <> 'official.wra.historical_flood'
                         OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
+                    )
+                    AND (
+                        %s::timestamptz IS NULL
+                        OR e.properties->>'evidence_scope' IS DISTINCT FROM 'historical'
+                        OR CASE
+                            WHEN e.temporal_precision = 'year' AND e.event_year IS NOT NULL
+                                THEN make_timestamptz(
+                                    e.event_year, 1, 1, 0, 0, 0,
+                                    'Asia/Taipei'
+                                )
+                            ELSE COALESCE(
+                                e.event_end_at,
+                                e.event_start_at,
+                                e.occurred_at,
+                                e.observed_at,
+                                e.ingested_at
+                            )
+                        END >= %s::timestamptz
                     )
                     AND NOT (
                         e.source_type = 'official'
@@ -456,10 +510,30 @@ def query_nearby_evidence(
                     )
                     AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
                     AND ST_DWithin(e.geom::geography, qp.geog, qp.radius_m)
-                ORDER BY
+            ) ranked_nearby
+            WHERE ranked_nearby.history_revision_rank = 1
+            ORDER BY
+                    CASE
+                        WHEN ranked_nearby.properties->>'evidence_scope' = 'historical' THEN 0
+                        ELSE 1
+                    END ASC,
+                    CASE
+                        WHEN ranked_nearby.properties->>'evidence_scope' = 'historical'
+                            THEN ranked_nearby.event_year
+                    END DESC NULLS LAST,
+                    CASE
+                        WHEN ranked_nearby.properties->>'evidence_scope' = 'historical'
+                            THEN COALESCE(
+                                ranked_nearby.event_end_at,
+                                ranked_nearby.event_start_at,
+                                ranked_nearby.occurred_at,
+                                ranked_nearby.observed_at,
+                                ranked_nearby.ingested_at
+                            )
+                    END DESC NULLS LAST,
                     computed_distance_to_query_m ASC,
-                    e.occurred_at DESC NULLS LAST,
-                    e.created_at DESC
+                    ranked_nearby.occurred_at DESC NULLS LAST,
+                    ranked_nearby.created_at DESC
                 LIMIT %s
             ) nearby_evidence
             UNION ALL
@@ -469,7 +543,8 @@ def query_nearby_evidence(
                     e.*,
                     ds.adapter_key,
                     ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
-                    %s::double precision AS branch_relevance_m
+                    %s::double precision AS branch_relevance_m,
+                    1::bigint AS history_revision_rank
                 FROM evidence e
                 JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
@@ -496,7 +571,8 @@ def query_nearby_evidence(
                     e.*,
                     ds.adapter_key,
                     ST_Distance(e.geom::geography, qp.geog) AS computed_distance_to_query_m,
-                    %s::double precision AS branch_relevance_m
+                    %s::double precision AS branch_relevance_m,
+                    1::bigint AS history_revision_rank
                 FROM evidence e
                 JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
                 CROSS JOIN query_point qp
@@ -578,7 +654,12 @@ def query_nearby_evidence(
                     )
                 ),
                 ARRAY[]::text[]
-            ) AS limitations
+            ) AS limitations,
+            c.event_year,
+            c.temporal_precision,
+            c.event_start_at,
+            c.event_end_at,
+            c.source_record_key
         FROM candidate_rows c
         WHERE c.computed_distance_to_query_m <= c.branch_relevance_m
         ORDER BY
@@ -586,8 +667,23 @@ def query_nearby_evidence(
                 WHEN c.source_type = 'official'
                     AND c.event_type IN ('rainfall', 'water_level')
                 THEN 0
-                ELSE 1
+                WHEN c.properties->>'evidence_scope' = 'historical' THEN 1
+                ELSE 2
             END ASC,
+            CASE
+                WHEN c.properties->>'evidence_scope' = 'historical'
+                    THEN c.event_year
+            END DESC NULLS LAST,
+            CASE
+                WHEN c.properties->>'evidence_scope' = 'historical'
+                    THEN COALESCE(
+                        c.event_end_at,
+                        c.event_start_at,
+                        c.occurred_at,
+                        c.observed_at,
+                        c.ingested_at
+                    )
+            END DESC NULLS LAST,
             computed_distance_to_query_m ASC,
             c.occurred_at DESC NULLS LAST,
             c.created_at DESC
@@ -604,6 +700,8 @@ def query_nearby_evidence(
             rainfall_relevance,
             water_relevance,
             radius_m,
+            historical_since,
+            historical_since,
             bounded_limit,
             rainfall_relevance,
             official_realtime_since,
@@ -632,21 +730,18 @@ def query_nearby_observed_flood_history(
     statement_timeout_ms: int = 0,
     connection_factory: ConnectionFactory | None = None,
 ) -> tuple[EvidenceRecord, ...]:
-    """Return retained positive flood-depth observations as historical evidence.
+    """Group retained flood-depth cycles into ended historical episodes.
 
-    Realtime flood-depth adapters write a new ``flood_report`` row for every
-    station cycle and retain positive observations for audit/history. The
-    realtime latest table intentionally exposes only the newest station value,
-    so this reader projects the latest ended positive observation per station
-    into the historical partition. The six-hour grace keeps one row from being
-    scored as both current and historical during an active event.
+    A positive reading starts a new episode after a dry reading or a gap over
+    six hours. Repeated cycles inside the same episode are scored once using
+    the peak reading, while start/end/max-depth/count remain auditable.
     """
 
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         raise ValueError("observed flood history as_of must be timezone-aware")
 
     bounded_limit = max(1, min(limit, 100))
-    window_start = as_of - OBSERVED_FLOOD_HISTORY_WINDOW
+    window_start = historical_window_start(as_of)
     history_cutoff = as_of - OBSERVED_FLOOD_HISTORY_CURRENT_GRACE
     sql = """
         WITH query_point AS (
@@ -656,7 +751,7 @@ def query_nearby_observed_flood_history(
                 %s::double precision AS radius_m,
                 (%s::double precision / 90000.0) AS degree_radius
         ),
-        nearby_positive AS MATERIALIZED (
+        nearby_readings AS MATERIALIZED (
             SELECT
                 e.*,
                 ds.adapter_key,
@@ -664,7 +759,8 @@ def query_nearby_observed_flood_history(
                 COALESCE(
                     NULLIF(e.properties->>'station_id', ''),
                     e.source_id
-                ) AS station_key
+                ) AS station_key,
+                (e.properties->>'flood_depth_cm')::double precision AS depth_cm
             FROM evidence e
             JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
             CROSS JOIN query_point qp
@@ -674,7 +770,6 @@ def query_nearby_observed_flood_history(
                 AND e.event_type = 'flood_report'
                 AND e.properties->>'evidence_scope' = 'current'
                 AND e.properties->>'flood_depth_cm' ~ '^[0-9]+([.][0-9]+)?$'
-                AND (e.properties->>'flood_depth_cm')::double precision >= 3.0
                 AND e.observed_at >= %s::timestamptz
                 AND e.observed_at <= %s::timestamptz
                 AND e.geom IS NOT NULL
@@ -687,17 +782,63 @@ def query_nearby_observed_flood_history(
                 AND e.geom && ST_Expand(qp.geom, qp.degree_radius)
                 AND ST_DWithin(e.geom::geography, qp.geog, qp.radius_m)
         ),
-        station_ranked AS (
+        ordered_readings AS (
             SELECT
                 candidate.*,
-                ROW_NUMBER() OVER (
+                LAG(candidate.observed_at) OVER (
                     PARTITION BY candidate.adapter_key, candidate.station_key
-                    ORDER BY
-                        candidate.observed_at DESC,
-                        candidate.ingested_at DESC,
-                        candidate.id DESC
-                ) AS station_rank
-            FROM nearby_positive candidate
+                    ORDER BY candidate.observed_at, candidate.ingested_at, candidate.id
+                ) AS previous_observed_at,
+                LAG(candidate.depth_cm) OVER (
+                    PARTITION BY candidate.adapter_key, candidate.station_key
+                    ORDER BY candidate.observed_at, candidate.ingested_at, candidate.id
+                ) AS previous_depth_cm
+            FROM nearby_readings candidate
+        ),
+        positive_markers AS (
+            SELECT
+                reading.*,
+                CASE
+                    WHEN reading.previous_observed_at IS NULL
+                        OR reading.previous_depth_cm < 3.0
+                        OR reading.observed_at - reading.previous_observed_at
+                            > %s::interval
+                    THEN 1
+                    ELSE 0
+                END AS starts_new_episode
+            FROM ordered_readings reading
+            WHERE reading.depth_cm >= 3.0
+        ),
+        positive_grouped AS (
+            SELECT
+                positive.*,
+                SUM(positive.starts_new_episode) OVER (
+                    PARTITION BY positive.adapter_key, positive.station_key
+                    ORDER BY positive.observed_at, positive.ingested_at, positive.id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS episode_number
+            FROM positive_markers positive
+        ),
+        episode_stats AS MATERIALIZED (
+            SELECT
+                grouped.adapter_key,
+                grouped.station_key,
+                grouped.episode_number,
+                min(grouped.observed_at) AS episode_started_at,
+                max(grouped.observed_at) AS episode_ended_at,
+                max(grouped.depth_cm) AS max_depth_cm,
+                count(*)::integer AS observation_count,
+                (array_agg(
+                    grouped.id
+                    ORDER BY grouped.depth_cm DESC, grouped.observed_at DESC, grouped.id DESC
+                ))[1] AS peak_evidence_id
+            FROM positive_grouped grouped
+            GROUP BY grouped.adapter_key, grouped.station_key, grouped.episode_number
+        ),
+        ended_episodes AS (
+            SELECT *
+            FROM episode_stats episode
+            WHERE episode.episode_ended_at <= %s::timestamptz
         )
         SELECT
             c.id::text AS id,
@@ -707,8 +848,8 @@ def query_nearby_observed_flood_history(
             c.title,
             c.summary,
             c.url,
-            COALESCE(c.occurred_at, c.observed_at) AS occurred_at,
-            c.observed_at,
+            episode.episode_started_at AS occurred_at,
+            episode.episode_ended_at AS observed_at,
             c.ingested_at,
             ST_Y(ST_PointOnSurface(c.geom::geometry)) AS lat,
             ST_X(ST_PointOnSurface(c.geom::geometry)) AS lng,
@@ -722,13 +863,13 @@ def query_nearby_observed_flood_history(
             NULL::double precision AS rainfall_mm_1h,
             NULL::double precision AS water_level_m,
             NULL::double precision AS warning_level_m,
-            (c.properties->>'flood_depth_cm')::double precision AS flood_depth_cm,
+            episode.max_depth_cm AS flood_depth_cm,
             NULL::double precision AS realtime_risk_factor,
             'historical'::text AS evidence_scope,
             c.adapter_key,
             NULL::text AS official_event_origin_key,
-            NULL::timestamptz AS active_from,
-            NULL::timestamptz AS active_until,
+            episode.episode_started_at AS active_from,
+            episode.episode_ended_at AS active_until,
             NULL::text AS cap_sender,
             NULL::text AS cap_identifier,
             NULL::timestamptz AS cap_sent,
@@ -753,11 +894,26 @@ def query_nearby_observed_flood_history(
                 ARRAY[]::text[]
             ) || ARRAY[
                 '此為淹水感測器保留的正值觀測；代表測站當時讀值，不代表整個查詢範圍皆淹水。'
-            ]::text[] AS limitations
-        FROM station_ranked c
-        WHERE c.station_rank = 1
+            ]::text[] AS limitations,
+            EXTRACT(
+                YEAR FROM episode.episode_started_at AT TIME ZONE 'Asia/Taipei'
+            )::integer AS event_year,
+            'instant'::text AS temporal_precision,
+            episode.episode_started_at AS event_start_at,
+            episode.episode_ended_at AS event_end_at,
+            concat(
+                episode.adapter_key,
+                ':',
+                episode.station_key,
+                ':',
+                episode.episode_started_at::text
+            ) AS source_record_key,
+            episode.observation_count,
+            %s::text AS episode_algorithm_version
+        FROM ended_episodes episode
+        JOIN nearby_readings c ON c.id = episode.peak_evidence_id
         ORDER BY
-            c.observed_at DESC,
+            episode.episode_ended_at DESC,
             c.computed_distance_to_query_m ASC,
             c.id DESC
         LIMIT %s
@@ -772,7 +928,10 @@ def query_nearby_observed_flood_history(
             radius_m,
             radius_m,
             window_start,
+            as_of,
+            f"{int(OBSERVED_FLOOD_EPISODE_GAP.total_seconds())} seconds",
             history_cutoff,
+            OBSERVED_FLOOD_EPISODE_ALGORITHM_VERSION,
             bounded_limit,
         ),
         database_url=database_url,
@@ -2454,6 +2613,413 @@ def fetch_query_heat_snapshot(
     )
 
 
+def fetch_assessment_history(
+    *,
+    database_url: str,
+    assessment_id: str,
+    as_of: datetime,
+    page_size: int = 20,
+    after: HistoricalEvidencePagePosition | None = None,
+    connection_factory: ConnectionFactory | None = None,
+) -> tuple[EvidenceRecord, ...]:
+    """Return a complete, keyset-paginated historical detail page.
+
+    Unlike ``risk_assessment_evidence``, this detail reader is not limited to
+    the small set used by the scorer/preview.  It reuses the assessment's
+    privacy-coarsened query point and radius, deduplicates rolling NSTC
+    revisions, and groups raw flood-depth cycles into ended episodes.
+    """
+
+    if as_of.tzinfo is None or as_of.utcoffset() is None:
+        raise ValueError("assessment history as_of must be timezone-aware")
+    if after is not None and (
+        after.event_time.tzinfo is None or after.event_time.utcoffset() is None
+    ):
+        raise ValueError("assessment history cursor time must be timezone-aware")
+
+    from app.domain.history.window import historical_year_window
+
+    bounded_limit = max(1, min(page_size, 100)) + 1
+    sql = """
+        WITH assessment_context AS (
+            SELECT lq.geom, lq.radius_m, ra.created_at AS assessment_created_at
+            FROM risk_assessments ra
+            JOIN location_queries lq ON lq.id = ra.query_id
+            WHERE ra.id = %s::uuid
+        ),
+        archived_ranked AS MATERIALIZED (
+            SELECT
+                e.id,
+                CASE
+                    WHEN e.temporal_precision = 'year' AND e.event_year IS NOT NULL
+                        THEN e.event_year
+                    ELSE EXTRACT(
+                        YEAR FROM COALESCE(
+                            e.event_end_at,
+                            e.event_start_at,
+                            e.occurred_at,
+                            e.observed_at,
+                            e.ingested_at
+                        ) AT TIME ZONE 'Asia/Taipei'
+                    )::integer
+                END AS sort_year,
+                CASE
+                    WHEN e.temporal_precision = 'year' AND e.event_year IS NOT NULL
+                        THEN make_timestamptz(e.event_year, 1, 1, 0, 0, 0, 'Asia/Taipei')
+                    ELSE COALESCE(
+                        e.event_end_at,
+                        e.event_start_at,
+                        e.occurred_at,
+                        e.observed_at,
+                        e.ingested_at
+                    )
+                END AS sort_time,
+                CASE
+                    WHEN e.properties->>'location_precision' = 'admin_area' THEN NULL
+                    ELSE ST_Distance(e.geom::geography, context.geom::geography)
+                END AS computed_distance_to_query_m,
+                CASE
+                    WHEN ds.adapter_key = 'official.nstc.flood_disaster_points'
+                    THEN ROW_NUMBER() OVER (
+                        PARTITION BY
+                            ds.adapter_key,
+                            COALESCE(NULLIF(e.source_record_key, ''), e.source_id)
+                        ORDER BY e.ingested_at DESC, e.id DESC
+                    )
+                    ELSE 1
+                END AS revision_rank
+            FROM evidence e
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+            CROSS JOIN assessment_context context
+            WHERE e.ingestion_status = 'accepted'
+              AND e.privacy_level IN ('public', 'aggregated')
+              AND e.properties->>'evidence_scope' = 'historical'
+              AND e.geom IS NOT NULL
+              AND e.ingested_at <= context.assessment_created_at
+              AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
+              AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
+              AND (
+                    ds.adapter_key <> 'official.wra.historical_flood'
+                    OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
+              )
+              AND ST_DWithin(
+                    e.geom::geography,
+                    context.geom::geography,
+                    context.radius_m
+              )
+        ),
+        archived_ids AS (
+            SELECT
+                'archive'::text AS history_kind,
+                ranked.id,
+                ranked.sort_year,
+                ranked.sort_time,
+                ranked.computed_distance_to_query_m,
+                NULL::timestamptz AS episode_started_at,
+                NULL::timestamptz AS episode_ended_at,
+                NULL::double precision AS max_depth_cm,
+                NULL::integer AS observation_count,
+                NULL::text AS episode_record_key
+            FROM archived_ranked ranked
+            WHERE ranked.revision_rank = 1
+              AND ranked.sort_year BETWEEN %s::integer AND %s::integer
+        ),
+        sensor_readings AS MATERIALIZED (
+            SELECT
+                e.*,
+                ds.adapter_key,
+                ST_Distance(e.geom::geography, context.geom::geography)
+                    AS computed_distance_to_query_m,
+                COALESCE(NULLIF(e.properties->>'station_id', ''), e.source_id)
+                    AS station_key,
+                (e.properties->>'flood_depth_cm')::double precision AS depth_cm
+            FROM evidence e
+            JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+            CROSS JOIN assessment_context context
+            WHERE e.ingestion_status = 'accepted'
+              AND e.privacy_level IN ('public', 'aggregated')
+              AND e.source_type = 'official'
+              AND e.event_type = 'flood_report'
+              AND e.properties->>'evidence_scope' = 'current'
+              AND e.properties->>'flood_depth_cm' ~ '^[0-9]+([.][0-9]+)?$'
+              AND e.observed_at IS NOT NULL
+              AND EXTRACT(YEAR FROM e.observed_at AT TIME ZONE 'Asia/Taipei')::integer
+                    BETWEEN %s::integer AND %s::integer
+              AND e.observed_at <= %s::timestamptz
+              AND e.geom IS NOT NULL
+              AND e.ingested_at <= context.assessment_created_at
+              AND e.properties->>'realtime_station_enabled' IS DISTINCT FROM 'false'
+              AND e.properties->>'metadata_station_enabled' IS DISTINCT FROM 'false'
+              AND NOT (
+                    ds.adapter_key = 'local.tainan.flood_sensor'
+                    AND e.title LIKE '%%(停用)%%'
+              )
+              AND ST_DWithin(
+                    e.geom::geography,
+                    context.geom::geography,
+                    context.radius_m
+              )
+        ),
+        sensor_ordered AS (
+            SELECT
+                reading.*,
+                LAG(reading.observed_at) OVER (
+                    PARTITION BY reading.adapter_key, reading.station_key
+                    ORDER BY reading.observed_at, reading.ingested_at, reading.id
+                ) AS previous_observed_at,
+                LAG(reading.depth_cm) OVER (
+                    PARTITION BY reading.adapter_key, reading.station_key
+                    ORDER BY reading.observed_at, reading.ingested_at, reading.id
+                ) AS previous_depth_cm
+            FROM sensor_readings reading
+        ),
+        sensor_positive_markers AS (
+            SELECT
+                reading.*,
+                CASE
+                    WHEN reading.previous_observed_at IS NULL
+                      OR reading.previous_depth_cm < 3.0
+                      OR reading.observed_at - reading.previous_observed_at > %s::interval
+                    THEN 1
+                    ELSE 0
+                END AS starts_new_episode
+            FROM sensor_ordered reading
+            WHERE reading.depth_cm >= 3.0
+        ),
+        sensor_positive_grouped AS (
+            SELECT
+                positive.*,
+                SUM(positive.starts_new_episode) OVER (
+                    PARTITION BY positive.adapter_key, positive.station_key
+                    ORDER BY positive.observed_at, positive.ingested_at, positive.id
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                ) AS episode_number
+            FROM sensor_positive_markers positive
+        ),
+        sensor_episode_stats AS MATERIALIZED (
+            SELECT
+                grouped.adapter_key,
+                grouped.station_key,
+                grouped.episode_number,
+                min(grouped.observed_at) AS episode_started_at,
+                max(grouped.observed_at) AS episode_ended_at,
+                max(grouped.depth_cm) AS max_depth_cm,
+                count(*)::integer AS observation_count,
+                min(grouped.computed_distance_to_query_m)
+                    AS computed_distance_to_query_m,
+                (array_agg(
+                    grouped.id
+                    ORDER BY grouped.depth_cm DESC, grouped.observed_at DESC, grouped.id DESC
+                ))[1] AS peak_evidence_id
+            FROM sensor_positive_grouped grouped
+            GROUP BY grouped.adapter_key, grouped.station_key, grouped.episode_number
+        ),
+        sensor_episode_ids AS (
+            SELECT
+                'episode'::text AS history_kind,
+                episode.peak_evidence_id AS id,
+                EXTRACT(
+                    YEAR FROM episode.episode_started_at AT TIME ZONE 'Asia/Taipei'
+                )::integer AS sort_year,
+                episode.episode_ended_at AS sort_time,
+                episode.computed_distance_to_query_m,
+                episode.episode_started_at,
+                episode.episode_ended_at,
+                episode.max_depth_cm,
+                episode.observation_count,
+                concat(
+                    episode.adapter_key,
+                    ':',
+                    episode.station_key,
+                    ':',
+                    episode.episode_started_at::text
+                ) AS episode_record_key
+            FROM sensor_episode_stats episode
+            WHERE episode.episode_ended_at <= %s::timestamptz
+        ),
+        history_candidates AS (
+            SELECT * FROM archived_ids
+            UNION ALL
+            SELECT * FROM sensor_episode_ids
+        ),
+        paged_ids AS MATERIALIZED (
+            SELECT candidate.*
+            FROM history_candidates candidate
+            WHERE (
+                %s::integer IS NULL
+                OR candidate.sort_year < %s::integer
+                OR (
+                    candidate.sort_year = %s::integer
+                    AND candidate.sort_time < %s::timestamptz
+                )
+                OR (
+                    candidate.sort_year = %s::integer
+                    AND candidate.sort_time = %s::timestamptz
+                    AND candidate.id > %s::uuid
+                )
+            )
+            ORDER BY candidate.sort_year DESC, candidate.sort_time DESC, candidate.id ASC
+            LIMIT %s
+        )
+        SELECT
+            e.id::text AS id,
+            e.source_id,
+            e.source_type,
+            e.event_type,
+            e.title,
+            e.summary,
+            e.url,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.episode_started_at
+                ELSE e.occurred_at
+            END AS occurred_at,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.episode_ended_at
+                ELSE e.observed_at
+            END AS observed_at,
+            e.ingested_at,
+            ST_Y(ST_PointOnSurface(e.geom::geometry)) AS lat,
+            ST_X(ST_PointOnSurface(e.geom::geometry)) AS lng,
+            ST_AsGeoJSON(e.geom) AS geometry,
+            page.computed_distance_to_query_m AS distance_to_query_m,
+            e.confidence,
+            COALESCE(e.freshness_score, 0.8) AS freshness_score,
+            COALESCE(
+                e.source_weight,
+                CASE WHEN e.source_type = 'official' THEN 1.0 ELSE 0.85 END
+            ) AS source_weight,
+            e.privacy_level,
+            e.raw_ref,
+            NULL::double precision AS rainfall_mm_1h,
+            NULL::double precision AS water_level_m,
+            NULL::double precision AS warning_level_m,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.max_depth_cm
+                ELSE (e.properties->>'flood_depth_cm')::double precision
+            END AS flood_depth_cm,
+            NULL::double precision AS realtime_risk_factor,
+            'historical'::text AS evidence_scope,
+            ds.adapter_key,
+            NULL::text AS official_event_origin_key,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.episode_started_at
+            END AS active_from,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.episode_ended_at
+            END AS active_until,
+            NULL::text AS cap_sender,
+            NULL::text AS cap_identifier,
+            NULL::timestamptz AS cap_sent,
+            NULL::text AS admin_code,
+            CASE
+                WHEN e.properties->>'location_precision' IN (
+                    'point', 'road_or_lane', 'poi', 'admin_area', 'polygon',
+                    'inferred', 'map_click'
+                ) THEN e.properties->>'location_precision'
+                WHEN page.history_kind = 'episode' THEN 'point'
+                ELSE 'unknown'
+            END AS location_precision,
+            COALESCE(
+                ARRAY(
+                    SELECT jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(e.properties->'limitations') = 'array'
+                                THEN e.properties->'limitations'
+                            ELSE '[]'::jsonb
+                        END
+                    )
+                ),
+                ARRAY[]::text[]
+            ) || CASE
+                WHEN page.history_kind = 'episode' THEN ARRAY[
+                    '此為同一測站連續觀測聚合的淹水事件；代表測站讀值，不代表整個查詢範圍皆淹水。'
+                ]::text[]
+                ELSE ARRAY[]::text[]
+            END AS limitations,
+            page.sort_year AS event_year,
+            CASE
+                WHEN page.history_kind = 'episode' THEN 'instant'
+                ELSE e.temporal_precision
+            END AS temporal_precision,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.episode_started_at
+                ELSE e.event_start_at
+            END AS event_start_at,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.episode_ended_at
+                ELSE e.event_end_at
+            END AS event_end_at,
+            CASE
+                WHEN page.history_kind = 'episode' THEN page.episode_record_key
+                ELSE e.source_record_key
+            END AS source_record_key,
+            page.observation_count,
+            CASE
+                WHEN page.history_kind = 'episode' THEN %s::text
+            END AS episode_algorithm_version
+        FROM paged_ids page
+        JOIN evidence e ON e.id = page.id
+        JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true
+        ORDER BY page.sort_year DESC, page.sort_time DESC, page.id ASC
+    """
+    cursor_year = after.event_year if after is not None else None
+    cursor_time = after.event_time if after is not None else None
+    cursor_id = after.evidence_id if after is not None else None
+    try:
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute(
+                "SELECT created_at, expires_at FROM risk_assessments WHERE id = %s::uuid",
+                (assessment_id,),
+            )
+            access_row = cursor.fetchone()
+            if access_row is None:
+                raise AssessmentEvidenceNotFound(assessment_id)
+            if isinstance(access_row, Mapping):
+                assessment_as_of = access_row.get("created_at")
+                expires_at = access_row.get("expires_at")
+            else:
+                assessment_as_of = access_row[0]
+                expires_at = access_row[1]
+            if expires_at is None or expires_at <= as_of:
+                raise AssessmentEvidenceExpired(assessment_id)
+            if not isinstance(assessment_as_of, datetime):
+                raise EvidenceRepositoryUnavailable(
+                    "assessment history timestamp is unavailable"
+                )
+            window = historical_year_window(assessment_as_of)
+            history_cutoff = (
+                assessment_as_of - OBSERVED_FLOOD_HISTORY_CURRENT_GRACE
+            )
+            params = (
+                assessment_id,
+                window.start_year,
+                window.end_year,
+                window.start_year,
+                window.end_year,
+                assessment_as_of,
+                f"{int(OBSERVED_FLOOD_EPISODE_GAP.total_seconds())} seconds",
+                history_cutoff,
+                cursor_year,
+                cursor_year,
+                cursor_year,
+                cursor_time,
+                cursor_year,
+                cursor_time,
+                cursor_id,
+                bounded_limit,
+                OBSERVED_FLOOD_EPISODE_ALGORITHM_VERSION,
+            )
+            cursor.execute(sql, params)
+            return tuple(_record_from_row(row) for row in cursor.fetchall())
+    except (AssessmentEvidenceNotFound, AssessmentEvidenceExpired):
+        raise
+    except (OSError, psycopg.Error) as exc:
+        raise EvidenceRepositoryUnavailable(str(exc)) from exc
+
+
 def fetch_assessment_evidence(
     *,
     database_url: str,
@@ -2535,8 +3101,18 @@ def fetch_assessment_evidence(
             AND e.ingestion_status = 'accepted'
             AND e.privacy_level IN ('public', 'aggregated')
         ORDER BY
-            rae.created_at ASC,
+            CASE
+                WHEN e.properties->>'evidence_scope' = 'current' THEN 0
+                WHEN e.properties->>'evidence_scope' = 'context' THEN 1
+                WHEN e.properties->>'evidence_scope' = 'historical' THEN 2
+                ELSE 3
+            END ASC,
+            CASE
+                WHEN e.properties->>'evidence_scope' = 'historical'
+                    THEN COALESCE(e.occurred_at, e.observed_at, e.ingested_at)
+            END DESC NULLS LAST,
             e.occurred_at DESC NULLS LAST,
+            rae.created_at ASC,
             e.created_at DESC
         LIMIT %s
     """
@@ -2727,6 +3303,31 @@ def _record_from_row(row: Mapping[str, Any] | Sequence[Any]) -> EvidenceRecord:
         active_until=value("active_until", 28),
         location_precision=_evidence_location_precision(value("location_precision", 33)),
         limitations=_evidence_limitations(value("limitations", 34)),
+        event_year=(
+            int(value("event_year", 35))
+            if value("event_year", 35) is not None
+            else None
+        ),
+        temporal_precision=_evidence_temporal_precision(
+            value("temporal_precision", 36, "unknown")
+        ),
+        event_start_at=value("event_start_at", 37),
+        event_end_at=value("event_end_at", 38),
+        source_record_key=(
+            str(value("source_record_key", 39))
+            if value("source_record_key", 39) is not None
+            else None
+        ),
+        observation_count=(
+            int(value("observation_count", 40))
+            if value("observation_count", 40) is not None
+            else None
+        ),
+        episode_algorithm_version=(
+            str(value("episode_algorithm_version", 41))
+            if value("episode_algorithm_version", 41) is not None
+            else None
+        ),
     )
 
 
@@ -2748,6 +3349,12 @@ def _evidence_limitations(value: object) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)):
         return ()
     return tuple(str(item) for item in value)
+
+
+def _evidence_temporal_precision(value: object) -> EvidenceTemporalPrecision:
+    if value in {"instant", "day", "month", "year", "unknown"}:
+        return cast(EvidenceTemporalPrecision, value)
+    return "unknown"
 
 
 def _nearby_coverage_row(row: dict[str, Any]) -> NearbyCoverageRow:

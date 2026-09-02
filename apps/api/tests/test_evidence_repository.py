@@ -10,14 +10,17 @@ import pytest
 
 from app.domain.evidence.repository import (
     OBSERVED_FLOOD_HISTORY_CURRENT_GRACE,
-    OBSERVED_FLOOD_HISTORY_WINDOW,
+    OBSERVED_FLOOD_HISTORY_WINDOW_YEARS,
     RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE,
     RECENT_INCIDENT_CONTEXT_WINDOW,
+    AssessmentEvidenceExpired,
     EvidenceRepositoryUnavailable,
     EvidenceUpsert,
     RiskAssessmentPersistence,
+    HistoricalEvidencePagePosition,
     _official_event_origin_key,
     fetch_assessment_evidence,
+    fetch_assessment_history,
     fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
     persist_risk_assessment,
@@ -30,6 +33,7 @@ from app.domain.evidence.repository import (
     query_realtime_source_health_rows,
     upsert_public_evidence,
 )
+from app.domain.history.window import historical_window_start
 from app.domain.layers import fetch_map_layer, fetch_map_layers
 
 
@@ -178,6 +182,8 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
         500,
         500,
         500,
+        None,
+        None,
         50,
         500,
         None,
@@ -191,7 +197,7 @@ def test_query_nearby_evidence_uses_point_on_surface_for_non_point_geometry() ->
     )
 
 
-def test_query_nearby_evidence_uses_trusted_active_historical_snapshots_only() -> None:
+def test_query_nearby_evidence_uses_wra_active_snapshot_and_deduplicates_nstc_revisions() -> None:
     connection = _FakeConnection(rows=[])
 
     query_nearby_evidence(
@@ -205,7 +211,9 @@ def test_query_nearby_evidence_uses_trusted_active_historical_snapshots_only() -
     sql, _params = connection.cursor_instance.executions[0]
     assert "'official.wra.historical_flood'" in sql
     assert "'official.nstc.flood_disaster_points'" in sql
-    assert "ds.adapter_key NOT IN" in sql
+    assert "history_revision_rank = 1" in sql
+    assert "COALESCE(NULLIF(e.source_record_key, ''), e.source_id)" in sql
+    assert "ds.adapter_key <> 'official.wra.historical_flood'" in sql
     assert "e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')" in sql
     assert "snapshot_generation_mode" not in sql
     assert "runtime_pipeline_status" not in sql
@@ -241,6 +249,8 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
         5000,
         3000,
         500,
+        None,
+        None,
         50,
         5000,
         realtime_since,
@@ -254,7 +264,7 @@ def test_query_nearby_evidence_extends_radius_for_realtime_stations() -> None:
     )
 
 
-def test_observed_flood_history_promotes_one_ended_positive_row_per_station() -> None:
+def test_observed_flood_history_groups_positive_cycles_into_ended_episodes() -> None:
     as_of = datetime(2026, 8, 31, 2, 0, tzinfo=UTC)
     observed_at = as_of - timedelta(days=14)
     connection = _FakeConnection(
@@ -298,11 +308,13 @@ def test_observed_flood_history_promotes_one_ended_positive_row_per_station() ->
     )
 
     sql, params = connection.cursor_instance.executions[0]
-    assert "nearby_positive AS MATERIALIZED" in sql
-    assert "(e.properties->>'flood_depth_cm')::double precision >= 3.0" in sql
+    assert "nearby_readings AS MATERIALIZED" in sql
+    assert "positive_grouped AS" in sql
+    assert "episode_stats AS MATERIALIZED" in sql
+    assert "reading.previous_depth_cm < 3.0" in sql
     assert "e.properties->>'evidence_scope' = 'current'" in sql
-    assert "PARTITION BY candidate.adapter_key, candidate.station_key" in sql
-    assert "WHERE c.station_rank = 1" in sql
+    assert "PARTITION BY positive.adapter_key, positive.station_key" in sql
+    assert "episode.episode_ended_at <= %s::timestamptz" in sql
     assert "'historical'::text AS evidence_scope" in sql
     assert params == (
         120.2106,
@@ -311,13 +323,17 @@ def test_observed_flood_history_promotes_one_ended_positive_row_per_station() ->
         23.0165,
         500,
         500,
-        as_of - OBSERVED_FLOOD_HISTORY_WINDOW,
+        historical_window_start(as_of),
+        as_of,
+        "21600 seconds",
         as_of - OBSERVED_FLOOD_HISTORY_CURRENT_GRACE,
+        "sensor-episode-v1",
         20,
     )
     assert records[0].evidence_scope == "historical"
     assert records[0].flood_depth_cm == 40.0
     assert records[0].adapter_key == "local.tainan.flood_sensor"
+    assert OBSERVED_FLOOD_HISTORY_WINDOW_YEARS == 15
 
 
 def test_observed_flood_history_requires_timezone_aware_cutoff() -> None:
@@ -1733,6 +1749,96 @@ def test_evidence_record_reads_reviewed_precision_and_limitations() -> None:
     assert "AS limitations" in sql
     assert records[0].location_precision == "road_or_lane"
     assert records[0].limitations == ("公開資料僅精確至道路尺度",)
+
+
+def test_fetch_assessment_history_reads_complete_keyset_page() -> None:
+    as_of = datetime(2026, 8, 31, 2, 0, tzinfo=UTC)
+    connection = _FakeConnection(
+        row={
+            "created_at": as_of - timedelta(minutes=1),
+            "expires_at": as_of + timedelta(minutes=5),
+        },
+        rows=[
+            {
+                "id": "b3f22a36-7316-4e2a-92b6-c6f6443c8528",
+                "source_id": "data-gov-130016:2025:demo:1",
+                "source_type": "official",
+                "event_type": "flood_report",
+                "title": "2025 官方淹水災點",
+                "summary": "來源只提供年度。",
+                "url": "https://data.gov.tw/dataset/130016",
+                "occurred_at": None,
+                "observed_at": None,
+                "ingested_at": as_of,
+                "lat": 23.0,
+                "lng": 120.2,
+                "geometry": '{"type":"Point","coordinates":[120.2,23.0]}',
+                "distance_to_query_m": 100.0,
+                "confidence": 0.9,
+                "freshness_score": 0.8,
+                "source_weight": 1.0,
+                "privacy_level": "public",
+                "raw_ref": "raw:annual",
+                "evidence_scope": "historical",
+                "adapter_key": "official.nstc.flood_disaster_points",
+                "location_precision": "point",
+                "limitations": ["來源未提供確切日期。"],
+                "event_year": 2025,
+                "temporal_precision": "year",
+                "event_start_at": None,
+                "event_end_at": None,
+                "source_record_key": "2025:stable",
+            }
+        ],
+    )
+    after = HistoricalEvidencePagePosition(
+        event_year=2025,
+        event_time=datetime(2025, 1, 1, tzinfo=UTC),
+        evidence_id="62f677b5-ae0c-44d7-9e65-f0567a92a5ca",
+    )
+
+    records = fetch_assessment_history(
+        database_url="postgresql://example.test/flood",
+        assessment_id="d315d0e6-9c1e-475a-9118-f299d12d5c62",
+        as_of=as_of,
+        page_size=7,
+        after=after,
+        connection_factory=lambda: connection,
+    )
+
+    assert len(connection.cursor_instance.executions) == 2
+    preflight_sql, preflight_params = connection.cursor_instance.executions[0]
+    sql, params = connection.cursor_instance.executions[1]
+    assert "SELECT created_at, expires_at FROM risk_assessments" in preflight_sql
+    assert preflight_params == ("d315d0e6-9c1e-475a-9118-f299d12d5c62",)
+    assert "archived_ranked AS MATERIALIZED" in sql
+    assert "sensor_episode_stats AS MATERIALIZED" in sql
+    assert "ranked.revision_rank = 1" in sql
+    assert "ORDER BY candidate.sort_year DESC, candidate.sort_time DESC, candidate.id ASC" in sql
+    assert "LIMIT %s" in sql
+    assert params[-2] == 8
+    assert params[-1] == "sensor-episode-v1"
+    assert records[0].event_year == 2025
+    assert records[0].temporal_precision == "year"
+    assert records[0].occurred_at is None
+
+
+def test_fetch_assessment_history_rejects_expired_assessment() -> None:
+    as_of = datetime(2026, 8, 31, 2, 0, tzinfo=UTC)
+    connection = _FakeConnection(
+        row={"created_at": as_of - timedelta(minutes=10), "expires_at": as_of},
+        rows=[],
+    )
+
+    with pytest.raises(AssessmentEvidenceExpired):
+        fetch_assessment_history(
+            database_url="postgresql://example.test/flood",
+            assessment_id="d315d0e6-9c1e-475a-9118-f299d12d5c62",
+            as_of=as_of,
+            connection_factory=lambda: connection,
+        )
+
+    assert len(connection.cursor_instance.executions) == 1
 
 
 @pytest.mark.parametrize("stored", ["exact_address", "parcel", "anything_else"])
