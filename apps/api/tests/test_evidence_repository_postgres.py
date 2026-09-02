@@ -12,11 +12,9 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from app.api.services import public_evidence
 from app.domain.assessment.repository import _complete_signal_types
 from app.domain.evidence import (
     fetch_assessment_evidence,
-    fetch_assessment_history,
     query_nearby_evidence,
     query_nearby_latest_official,
     query_nearby_observed_flood_history,
@@ -159,11 +157,6 @@ def _prepare_history_snapshot_schema(database_url: str) -> None:
                 raw_ref text,
                 ingestion_status text NOT NULL DEFAULT 'accepted',
                 properties jsonb NOT NULL DEFAULT '{}'::jsonb,
-                event_year integer,
-                temporal_precision text NOT NULL DEFAULT 'unknown',
-                event_start_at timestamptz,
-                event_end_at timestamptz,
-                source_record_key text,
                 created_at timestamptz NOT NULL DEFAULT now()
             )
             """
@@ -171,15 +164,14 @@ def _prepare_history_snapshot_schema(database_url: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("history_adapter_key", "uses_rolling_revision_semantics"),
+    "history_adapter_key",
     (
-        ("official.wra.historical_flood", False),
-        ("official.nstc.flood_disaster_points", True),
+        "official.wra.historical_flood",
+        "official.nstc.flood_disaster_points",
     ),
 )
 def test_history_reader_switches_complete_snapshot_and_keeps_last_known_good(
     history_adapter_key: str,
-    uses_rolling_revision_semantics: bool,
 ) -> None:
     database_url = _database_url()
     adapter_path = history_adapter_key.replace(".", "/")
@@ -283,21 +275,6 @@ def test_history_reader_switches_complete_snapshot_and_keeps_last_known_good(
                     ),
                 )
 
-            connection.execute(
-                """
-                UPDATE evidence
-                SET
-                    ingested_at = CASE
-                        WHEN raw_ref = %s THEN now() - interval '1 day'
-                        WHEN raw_ref = %s THEN now()
-                        ELSE ingested_at
-                    END,
-                    source_record_key = source_id
-                WHERE data_source_id = %s
-                """,
-                (raw_a, raw_b, history_source_id),
-            )
-
         def visible_ids() -> set[str]:
             return {
                 record.id
@@ -311,24 +288,12 @@ def test_history_reader_switches_complete_snapshot_and_keeps_last_known_good(
                 )
             }
 
-        active_a_ids = {
+        # B may already be promoted/auditable, but A remains public until activation.
+        assert visible_ids() == {
             str(a_shared_id),
             str(a_removed_id),
             str(ordinary_id),
         }
-        rolling_public_ids = {
-            str(a_removed_id),
-            str(b_shared_id),
-            str(ordinary_id),
-        }
-        # WRA is a full replacement snapshot. NSTC retains raw revisions for
-        # audit, but the public reader returns only the newest stable record
-        # revision while preserving records absent from later year ranges.
-        assert visible_ids() == (
-            rolling_public_ids
-            if uses_rolling_revision_semantics
-            else active_a_ids
-        )
 
         with psycopg.connect(isolated_url) as connection:
             connection.execute(
@@ -342,12 +307,8 @@ def test_history_reader_switches_complete_snapshot_and_keeps_last_known_good(
                 """,
                 (raw_b, history_adapter_key),
             )
-        active_b_ids = {str(b_shared_id), str(ordinary_id)}
-        assert visible_ids() == (
-            rolling_public_ids
-            if uses_rolling_revision_semantics
-            else active_b_ids
-        )
+        # Atomic activation switches the full generation, including removed rows.
+        assert visible_ids() == {str(b_shared_id), str(ordinary_id)}
 
         with psycopg.connect(isolated_url) as connection:
             connection.execute(
@@ -358,11 +319,7 @@ def test_history_reader_switches_complete_snapshot_and_keeps_last_known_good(
                 """,
                 (history_adapter_key,),
             )
-        assert visible_ids() == (
-            rolling_public_ids
-            if uses_rolling_revision_semantics
-            else active_b_ids
-        )
+        assert visible_ids() == {str(b_shared_id), str(ordinary_id)}
 
         with psycopg.connect(isolated_url) as connection:
             connection.execute(
@@ -373,11 +330,7 @@ def test_history_reader_switches_complete_snapshot_and_keeps_last_known_good(
                 """,
                 (history_adapter_key,),
             )
-        assert visible_ids() == (
-            rolling_public_ids
-            if uses_rolling_revision_semantics
-            else {str(ordinary_id)}
-        )
+        assert visible_ids() == {str(ordinary_id)}
 
 
 def test_source_health_safely_resolves_bounded_catalog_thresholds() -> None:
@@ -1465,29 +1418,13 @@ def test_generic_history_uses_exact_geography_radius_polygon_and_kill_switch() -
             connection.execute("DELETE FROM data_sources WHERE id = %s", (source_id,))
 
 
-def test_observed_flood_history_groups_each_ended_sensor_episode() -> None:
+def test_observed_flood_history_returns_latest_ended_positive_per_station() -> None:
     database_url = _database_url()
     data_source_id = uuid4()
     adapter_key = f"test.observed-flood-history.{data_source_id}"
     as_of = datetime(2026, 8, 31, 2, 0, tzinfo=UTC)
     rows = (
         (uuid4(), "station-a", as_of - timedelta(days=30), 12.0, {}, 120.0),
-        (
-            uuid4(),
-            "station-a",
-            as_of - timedelta(days=14, minutes=20),
-            20.0,
-            {},
-            120.0,
-        ),
-        (
-            uuid4(),
-            "station-a",
-            as_of - timedelta(days=14, minutes=10),
-            30.0,
-            {},
-            120.0,
-        ),
         (uuid4(), "station-a", as_of - timedelta(days=14), 40.0, {}, 120.0),
         (uuid4(), "station-b", as_of - timedelta(days=10), 0.0, {}, 120.0),
         (uuid4(), "station-c", as_of - timedelta(hours=1), 25.0, {}, 120.0),
@@ -1552,15 +1489,10 @@ def test_observed_flood_history_groups_each_ended_sensor_episode() -> None:
         )
 
         selected = [item for item in records if item.adapter_key == adapter_key]
-        assert len(selected) == 2
+        assert len(selected) == 1
         assert selected[0].source_id.startswith("station-a:")
         assert selected[0].observed_at == as_of - timedelta(days=14)
         assert selected[0].flood_depth_cm == 40.0
-        assert selected[0].observation_count == 3
-        assert selected[0].episode_algorithm_version == "sensor-episode-v1"
-        assert selected[1].observed_at == as_of - timedelta(days=30)
-        assert selected[1].flood_depth_cm == 12.0
-        assert selected[1].observation_count == 1
         assert selected[0].evidence_scope == "historical"
         assert selected[0].location_precision == "point"
         assert any("感測器保留" in item for item in selected[0].limitations)
@@ -1573,160 +1505,6 @@ def test_observed_flood_history_groups_each_ended_sensor_episode() -> None:
             connection.execute(
                 "DELETE FROM data_sources WHERE id = %s",
                 (data_source_id,),
-            )
-
-
-def test_assessment_history_paginates_all_rows_and_deduplicates_revisions() -> None:
-    database_url = _database_url()
-    now = datetime.now(UTC)
-    query_id = uuid4()
-    assessment_id = uuid4()
-    old_revision_id = uuid4()
-    new_revision_id = uuid4()
-    older_event_id = uuid4()
-    post_assessment_id = uuid4()
-    evidence_ids = (
-        old_revision_id,
-        new_revision_id,
-        older_event_id,
-        post_assessment_id,
-    )
-    try:
-        with psycopg.connect(database_url) as connection:
-            source_id = connection.execute(
-                """
-                SELECT id
-                FROM data_sources
-                WHERE adapter_key = 'official.nstc.flood_disaster_points'
-                """
-            ).fetchone()[0]
-            connection.execute(
-                """
-                INSERT INTO location_queries (id, input_type, geom, radius_m)
-                VALUES (
-                    %s, 'map_click',
-                    ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326), 500
-                )
-                """,
-                (query_id,),
-            )
-            connection.execute(
-                """
-                INSERT INTO risk_assessments (
-                    id, query_id, score_version, created_at, expires_at
-                ) VALUES (%s, %s, 'history-pagination-test', %s, %s)
-                """,
-                (assessment_id, query_id, now, now + timedelta(minutes=10)),
-            )
-            for (
-                evidence_id,
-                event_year,
-                source_record_key,
-                ingested_at,
-                raw_ref,
-            ) in (
-                (
-                    old_revision_id,
-                    2025,
-                    "2025:stable-record",
-                    now - timedelta(days=2),
-                    "history-pagination:old",
-                ),
-                (
-                    new_revision_id,
-                    2025,
-                    "2025:stable-record",
-                    now - timedelta(days=1),
-                    "history-pagination:new",
-                ),
-                (
-                    older_event_id,
-                    2024,
-                    "2024:other-record",
-                    now,
-                    "history-pagination:other",
-                ),
-                (
-                    post_assessment_id,
-                    2026,
-                    "2026:post-assessment-record",
-                    now + timedelta(seconds=1),
-                    "history-pagination:post-assessment",
-                ),
-            ):
-                connection.execute(
-                    """
-                    INSERT INTO evidence (
-                        id, data_source_id, source_id, source_type, event_type,
-                        title, summary, url, occurred_at, observed_at, ingested_at,
-                        geom, confidence, freshness_score, source_weight,
-                        privacy_level, raw_ref, ingestion_status, properties,
-                        event_year, temporal_precision, source_record_key
-                    ) VALUES (
-                        %s, %s, %s, 'official', 'flood_report',
-                        %s, 'Annual-only public history test.',
-                        'https://data.gov.tw/dataset/130016', NULL, NULL, %s,
-                        ST_SetSRID(ST_MakePoint(120.0, 23.0), 4326),
-                        0.9, 0.8, 1.0, 'public', %s, 'accepted',
-                        '{"evidence_scope":"historical","location_precision":"point"}'::jsonb,
-                        %s, 'year', %s
-                    )
-                    """,
-                    (
-                        evidence_id,
-                        source_id,
-                        f"data-gov-130016:{event_year}:test:{evidence_id}",
-                        f"{event_year} annual event",
-                        ingested_at,
-                        raw_ref,
-                        event_year,
-                        source_record_key,
-                    ),
-                )
-
-        def fetch_history(**kwargs: object):
-            return fetch_assessment_history(
-                database_url=database_url,
-                assessment_id=str(kwargs["assessment_id"]),
-                as_of=now,
-                page_size=int(kwargs["page_size"]),
-                after=kwargs["after"],  # type: ignore[arg-type]
-            )
-
-        seen = []
-        cursor: str | None = None
-        while True:
-            page = public_evidence.list_assessment_history(
-                str(assessment_id),
-                cursor=cursor,
-                page_size=1,
-                fetch_history=fetch_history,
-            )
-            seen.extend(page.items)
-            cursor = page.next_cursor
-            if cursor is None:
-                break
-
-        assert [item.id for item in seen] == [
-            str(new_revision_id),
-            str(older_event_id),
-        ]
-        assert all(item.temporal_precision == "year" for item in seen)
-        assert all(item.occurred_at is None for item in seen)
-        assert all(item.observed_at is None for item in seen)
-    finally:
-        with psycopg.connect(database_url) as connection:
-            connection.execute(
-                "DELETE FROM evidence WHERE id = ANY(%s::uuid[])",
-                (list(evidence_ids),),
-            )
-            connection.execute(
-                "DELETE FROM risk_assessments WHERE id = %s",
-                (assessment_id,),
-            )
-            connection.execute(
-                "DELETE FROM location_queries WHERE id = %s",
-                (query_id,),
             )
 
 

@@ -3,13 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable
 import json
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from app.pipelines.staging import AdapterStagingBatch, StagingEvidenceUpsert
 
 
 ConnectionFactory = Callable[[], Any]
-TAIWAN_TIMEZONE = ZoneInfo("Asia/Taipei")
 
 
 class PostgresStagingBatchWriter:
@@ -112,12 +110,7 @@ _INSERT_STAGING_EVIDENCE_SQL = """
         confidence,
         validation_status,
         rejection_reason,
-        payload,
-        event_year,
-        temporal_precision,
-        event_start_at,
-        event_end_at,
-        source_record_key
+        payload
     )
     VALUES (
         %s,
@@ -133,12 +126,7 @@ _INSERT_STAGING_EVIDENCE_SQL = """
         %s,
         %s,
         %s,
-        %s::jsonb,
-        %s,
-        %s,
-        %s,
-        %s,
-        %s
+        %s::jsonb
     )
     """
 
@@ -156,28 +144,6 @@ def _staging_evidence_params(
     raw_snapshot_id: str,
     item: StagingEvidenceUpsert,
 ) -> tuple[Any, ...]:
-    timestamp = item.occurred_at or item.observed_at
-    raw_event_year = item.payload.get("event_year")
-    event_year = (
-        raw_event_year
-        if isinstance(raw_event_year, int) and not isinstance(raw_event_year, bool)
-        else timestamp.astimezone(TAIWAN_TIMEZONE).year if timestamp is not None else None
-    )
-    raw_precision = item.payload.get("temporal_precision")
-    temporal_precision = (
-        raw_precision
-        if raw_precision in {"instant", "day", "month", "year", "unknown"}
-        else "instant" if timestamp is not None else "unknown"
-    )
-    source_record_key = item.payload.get("source_record_key")
-    if not isinstance(source_record_key, str) or not source_record_key.strip():
-        source_record_key = item.source_id
-    event_start_at = None if temporal_precision == "year" else timestamp
-    event_end_at = (
-        None
-        if temporal_precision == "year"
-        else item.observed_at or item.occurred_at
-    )
     return (
         raw_snapshot_id,
         item.adapter_key,
@@ -200,11 +166,6 @@ def _staging_evidence_params(
                 "raw_ref": item.raw_ref,
             }
         ),
-        event_year,
-        temporal_precision,
-        event_start_at,
-        event_end_at,
-        source_record_key,
     )
 
 

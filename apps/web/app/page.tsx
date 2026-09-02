@@ -8,20 +8,13 @@ import { RiskSummarySection } from "./components/risk-summary-section";
 import { SearchForm } from "./components/search-form";
 import { UserReportSection } from "./components/user-report-section";
 import { useFloodMap } from "./components/use-flood-map";
-import {
-  ApiRequestError,
-  apiBaseUrl,
-  getJson,
-  postJson,
-  publicApiErrorMessage,
-} from "./lib/api-client";
+import { apiBaseUrl, getJson, postJson, publicApiErrorMessage } from "./lib/api-client";
 import { INITIAL_COORDINATE, INITIAL_RADIUS, targetZoom } from "./lib/map-setup";
 import type {
   Coordinate,
   EvidenceListResponse,
   GeocodeCandidate,
   GeocodeResponse,
-  HistoricalCoverageResponse,
   QueryMode,
   RiskAssessmentResponse,
 } from "./lib/page-types";
@@ -38,18 +31,12 @@ import {
   hiddenHistoricalNewsCount,
   publicDataFreshnessItems,
   publicEvidenceDisplayItems,
-  publicHistoricalEvidenceItems,
   riskOverlayPresentation,
   riskSummaryTitle,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } from "./lib/risk-display";
-import type {
-  EvidenceItem,
-  EvidenceStatus,
-  HistoricalCoverageStatus,
-  UserReportSubmissionStatus,
-} from "./lib/risk-display";
+import type { EvidenceItem, EvidenceStatus, UserReportSubmissionStatus } from "./lib/risk-display";
 import {
   coordinateSummary,
   geocodeCandidateNotice,
@@ -67,23 +54,12 @@ const GEOCODE_CANDIDATE_LIMIT = 5;
 export default function HomePage() {
   const requestIdRef = useRef(0);
   const searchAbortRef = useRef<AbortController | null>(null);
-  const historyAbortRef = useRef<AbortController | null>(null);
-  const coverageAbortRef = useRef<AbortController | null>(null);
   const [query, setQuery] = useState(text.taipeiMainStation);
   const [radius, setRadius] = useState(INITIAL_RADIUS);
   const [coordinate, setCoordinate] = useState<Coordinate>(INITIAL_COORDINATE);
   const [assessment, setAssessment] = useState<RiskAssessmentResponse | null>(null);
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([]);
   const [evidenceStatus, setEvidenceStatus] = useState<EvidenceStatus>("idle");
-  const [historyItems, setHistoryItems] = useState<EvidenceItem[]>([]);
-  const [historyStatus, setHistoryStatus] = useState<EvidenceStatus>("idle");
-  const [historyErrorMessage, setHistoryErrorMessage] = useState<string | null>(null);
-  const [historyCanRetry, setHistoryCanRetry] = useState(true);
-  const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null);
-  const [historyCoverage, setHistoryCoverage] =
-    useState<HistoricalCoverageResponse | null>(null);
-  const [historyCoverageStatus, setHistoryCoverageStatus] =
-    useState<HistoricalCoverageStatus>("idle");
   const [isLoading, setIsLoading] = useState(false);
   const [queryMode, setQueryMode] = useState<QueryMode>("search");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -100,18 +76,9 @@ export default function HomePage() {
         : [],
     [assessment, evidenceItems, evidenceStatus],
   );
-  const previewHistoricalEvidence = useMemo(
-    () => publicHistoricalEvidenceItems(assessment?.evidence ?? []).slice(0, 1),
-    [assessment],
-  );
   const displayedEvidence = useMemo(
-    () => [
-      ...publicEvidenceDisplayItems(
-        selectedEvidence.filter((item) => item.evidence_scope !== "historical"),
-      ),
-      ...previewHistoricalEvidence,
-    ],
-    [previewHistoricalEvidence, selectedEvidence],
+    () => publicEvidenceDisplayItems(selectedEvidence),
+    [selectedEvidence],
   );
   const hiddenNewsCount = useMemo(
     () => hiddenHistoricalNewsCount(selectedEvidence),
@@ -160,20 +127,6 @@ export default function HomePage() {
   const reportDisplayState = getUserReportSubmissionDisplayState(reportStatus);
   const isReportLoading = reportStatus === "loading";
 
-  function resetHistoricalQueryState() {
-    historyAbortRef.current?.abort();
-    historyAbortRef.current = null;
-    coverageAbortRef.current?.abort();
-    coverageAbortRef.current = null;
-    setHistoryItems([]);
-    setHistoryStatus("idle");
-    setHistoryErrorMessage(null);
-    setHistoryCanRetry(true);
-    setHistoryNextCursor(null);
-    setHistoryCoverage(null);
-    setHistoryCoverageStatus("idle");
-  }
-
   const { mapContainerRef, mapRef, isMapReady } = useFloodMap({
     coordinate,
     radius,
@@ -182,7 +135,6 @@ export default function HomePage() {
     onMapClick: (point) => {
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
-      resetHistoricalQueryState();
       setCoordinate({
         lat: point.lat,
         lng: point.lng,
@@ -207,10 +159,6 @@ export default function HomePage() {
     return () => {
       searchAbortRef.current?.abort();
       searchAbortRef.current = null;
-      historyAbortRef.current?.abort();
-      historyAbortRef.current = null;
-      coverageAbortRef.current?.abort();
-      coverageAbortRef.current = null;
     };
   }, []);
 
@@ -243,105 +191,6 @@ export default function HomePage() {
     return { resolvedLocationText, target };
   }
 
-  function loadHistoricalCoverage(risk: RiskAssessmentResponse, requestId: number) {
-    coverageAbortRef.current?.abort();
-    coverageAbortRef.current = null;
-    setHistoryCoverage(null);
-
-    const countyCode = risk.nearby_realtime_coverage.home_jurisdiction_code;
-    if (!countyCode) {
-      setHistoryCoverageStatus("unavailable");
-      return;
-    }
-
-    const controller = new AbortController();
-    coverageAbortRef.current = controller;
-    setHistoryCoverageStatus("loading");
-    void getJson<HistoricalCoverageResponse>(
-      `/v1/history-coverage?county_code=${encodeURIComponent(countyCode)}`,
-      { signal: controller.signal },
-    )
-      .then((coverage) => {
-        if (controller.signal.aborted || requestIdRef.current !== requestId) return;
-        setHistoryCoverage(coverage);
-        setHistoryCoverageStatus("ready");
-      })
-      .catch(() => {
-        if (controller.signal.aborted || requestIdRef.current !== requestId) return;
-        setHistoryCoverageStatus("error");
-      })
-      .finally(() => {
-        if (coverageAbortRef.current === controller) coverageAbortRef.current = null;
-      });
-  }
-
-  async function loadHistoricalPage(cursor: string | null, replace = false) {
-    const assessmentId = assessment?.assessment_id;
-    if (!assessmentId || historyStatus === "loading") return;
-
-    historyAbortRef.current?.abort();
-    const controller = new AbortController();
-    historyAbortRef.current = controller;
-    const requestId = requestIdRef.current;
-    setHistoryStatus("loading");
-    setHistoryErrorMessage(null);
-    setHistoryCanRetry(true);
-
-    const query = new URLSearchParams({ page_size: "20" });
-    if (cursor) query.set("cursor", cursor);
-
-    try {
-      const response = await getJson<EvidenceListResponse>(
-        `/v1/history/${encodeURIComponent(assessmentId)}?${query.toString()}`,
-        { signal: controller.signal },
-      );
-      if (controller.signal.aborted || requestIdRef.current !== requestId) {
-        return;
-      }
-      if (response.assessment_id !== assessmentId) {
-        setHistoryErrorMessage(text.evidenceHistoryError);
-        setHistoryStatus("error");
-        return;
-      }
-      const received = publicHistoricalEvidenceItems(response.items);
-      setHistoryItems((current) => {
-        const unique = new Map<string, EvidenceItem>();
-        for (const item of replace ? received : [...current, ...received]) {
-          unique.set(item.id, item);
-        }
-        return publicHistoricalEvidenceItems([...unique.values()]);
-      });
-      setHistoryNextCursor(response.next_cursor);
-      setHistoryStatus("ready");
-    } catch (error) {
-      if (!controller.signal.aborted && requestIdRef.current === requestId) {
-        const expired =
-          error instanceof ApiRequestError &&
-          (error.status === 410 || error.code === "assessment_expired");
-        setHistoryErrorMessage(
-          expired ? text.evidenceHistoryExpired : text.evidenceHistoryError,
-        );
-        setHistoryCanRetry(!expired);
-        setHistoryStatus("error");
-      }
-    } finally {
-      if (historyAbortRef.current === controller) historyAbortRef.current = null;
-    }
-  }
-
-  function handleExpandHistory() {
-    if (historyStatus === "idle") void loadHistoricalPage(null, true);
-  }
-
-  function handleRetryHistory() {
-    const retryCursor = historyItems.length ? historyNextCursor : null;
-    void loadHistoricalPage(retryCursor, historyItems.length === 0);
-  }
-
-  function handleLoadMoreHistory() {
-    if (historyNextCursor) void loadHistoricalPage(historyNextCursor);
-  }
-
   async function runRiskAssessment({
     requestController,
     requestId,
@@ -364,7 +213,6 @@ export default function HomePage() {
     setAssessment(risk);
     setEvidenceItems(risk.evidence);
     setIsLoading(false);
-    loadHistoricalCoverage(risk, requestId);
 
     if (shouldFetchEvidenceList(risk.assessment_id)) {
       setEvidenceStatus("loading");
@@ -390,7 +238,6 @@ export default function HomePage() {
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     searchAbortRef.current?.abort();
-    resetHistoricalQueryState();
     const requestController = new AbortController();
     searchAbortRef.current = requestController;
     const requestId = requestIdRef.current + 1;
@@ -461,7 +308,6 @@ export default function HomePage() {
 
   async function handleSelectGeocodeCandidate(candidate: GeocodeCandidate) {
     searchAbortRef.current?.abort();
-    resetHistoricalQueryState();
     const requestController = new AbortController();
     searchAbortRef.current = requestController;
     const requestId = requestIdRef.current + 1;
@@ -596,18 +442,8 @@ export default function HomePage() {
             displayedEvidence={displayedEvidence}
             evidenceDisplayState={evidenceDisplayState}
             hiddenHistoricalNewsCount={hiddenNewsCount}
-            historicalItems={historyItems}
-            historicalNextCursor={historyNextCursor}
-            historicalStatus={historyStatus}
-            historicalErrorMessage={historyErrorMessage}
-            historicalCanRetry={historyCanRetry}
-            historyCoverage={historyCoverage}
-            historyCoverageStatus={historyCoverageStatus}
             profileBasisText={profileBasisText}
             profilePreviewState={profilePreviewState}
-            onExpandHistory={handleExpandHistory}
-            onLoadMoreHistory={handleLoadMoreHistory}
-            onRetryHistory={handleRetryHistory}
           />
         ) : null}
 

@@ -95,14 +95,7 @@ def lookup_official_flood_disaster_points(
             matches.append((record, distance_m))
 
     ordered = tuple(sorted(matches, key=lambda item: item[1])[: max(1, limit)])
-    latest_observed = max(
-        (
-            record.occurred_at
-            for record, _ in ordered
-            if record.occurred_at is not None
-        ),
-        default=None,
-    )
+    latest_observed = max((record.occurred_at for record, _ in ordered), default=None)
     if ordered:
         return OfficialFloodDisasterLookup(
             attempted=True,
@@ -181,6 +174,7 @@ def parse_official_flood_disaster_csv(text: str) -> tuple[HistoricalFloodRecord,
         lat, lng = coordinate
         if not _within_taiwan_bounds(lat, lng):
             continue
+        occurred_at = datetime(year, 12, 31, 12, 0, tzinfo=_TAIWAN_TZ)
         source_id = f"data-gov-130016:{year}:{source}:{fid}"
         records.append(
             HistoricalFloodRecord(
@@ -194,7 +188,7 @@ def parse_official_flood_disaster_csv(text: str) -> tuple[HistoricalFloodRecord,
                     "此筆資料提供年度與座標點，未提供完整事件時間、淹水深度或地址。"
                 ),
                 url=DATA_GOV_URL,
-                occurred_at=None,
+                occurred_at=occurred_at,
                 ingested_at=datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
                 lat=lat,
                 lng=lng,
@@ -202,8 +196,6 @@ def parse_official_flood_disaster_csv(text: str) -> tuple[HistoricalFloodRecord,
                 freshness_score=_freshness_score(year),
                 source_weight=1.0,
                 risk_factor=1.0,
-                event_year=year,
-                temporal_precision="year",
             )
         )
     return tuple(records)
@@ -262,20 +254,7 @@ def _freshness_score(year: int) -> float:
 
 
 def _record_year_bounds(records: tuple[HistoricalFloodRecord, ...]) -> tuple[int, int] | None:
-    years = sorted(
-        {
-            year
-            for record in records
-            for year in (
-                record.event_year
-                if record.event_year is not None
-                else record.occurred_at.year
-                if record.occurred_at is not None
-                else None,
-            )
-            if year is not None
-        }
-    )
+    years = sorted({record.occurred_at.year for record in records})
     if not years:
         return None
     return (years[0], years[-1])

@@ -155,7 +155,7 @@ class AdminSourcesResponse(ContractModel):
 class HistoricalCoverageCell(ContractModel):
     county_code: str = Field(pattern=r"^\d{8}$")
     county: str
-    year: int = Field(ge=2012, le=2100)
+    year: int = Field(ge=2018, le=2100)
     status: HistoricalCoverageStatus
     resolved: bool = False
     persisted: bool = False
@@ -171,21 +171,14 @@ class HistoricalCoverageCell(ContractModel):
 
 
 class HistoricalCoverageSummary(ContractModel):
-    start_year: int = Field(ge=2012, le=2100)
-    end_year: int = Field(ge=2012, le=2100)
+    start_year: int = Field(ge=2018, le=2100)
+    end_year: int = Field(ge=2018, le=2100)
     expected_cell_count: int = Field(ge=0)
     returned_cell_count: int = Field(ge=0)
     resolved_cell_count: int = Field(ge=0)
     unresolved_cell_count: int = Field(ge=0)
     missing_persisted_cell_count: int = Field(ge=0)
     status_counts: dict[str, int] = Field(default_factory=dict)
-    lookback_years: Literal[15] = 15
-    calendar_timezone: Literal["Asia/Taipei"] = "Asia/Taipei"
-    audit_complete: bool = False
-    data_coverage_complete: bool = False
-    known_gap_cell_count: int = Field(default=0, ge=0)
-    # Compatibility alias. This means every requested matrix cell has a
-    # resolved audit status; it does not mean every source published data.
     coverage_complete: bool = False
     absence_is_safety_evidence: Literal[False] = False
 
@@ -752,14 +745,6 @@ class EvidencePreview(ContractModel):
     evidence_scope: Literal["current", "historical", "context", "unspecified"] = (
         "unspecified"
     )
-    event_year: int | None = Field(default=None, ge=1900, le=2100)
-    temporal_precision: Literal["instant", "day", "month", "year", "unknown"] = (
-        "unknown"
-    )
-    event_start_at: datetime | None = None
-    event_end_at: datetime | None = None
-    observation_count: int | None = Field(default=None, ge=1)
-    episode_algorithm_version: str | None = None
 
 
 class DataFreshness(ContractModel):
@@ -905,11 +890,6 @@ class NearbyRealtimeCoverage(ContractModel):
     jurisdiction_catalog_complete: bool = Field(
         default=False,
         description="True only when every considered county/signal contract is reviewed and its current source-mapping count, checksum, revision, and redundancy parents match the approval.",
-    )
-    home_jurisdiction_code: str | None = Field(
-        default=None,
-        pattern=r"^\d{8}$",
-        description="Canonical county code used to request the matching historical coverage summary.",
     )
     home_jurisdiction: str | None = None
     considered_jurisdictions: list[str] = Field(default_factory=list)

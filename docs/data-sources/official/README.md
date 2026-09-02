@@ -14,7 +14,7 @@ This bridge is not Phase 2 completion by itself. Phase 2 acceptance still requir
 | `official.wra_iow.flood_depth` | `official` | `flood_report` | Gated worker live client implemented; joins latest flood depth with station metadata |
 | `official.flood_potential.geojson` | `official` | `flood_potential` | Fixture parser implemented |
 | `official.nstc.flood_disaster_points` | `official` | `flood_report` | API bundled historical snapshot fallback implemented; not a rolling current-year source |
-| `official.gov_tw.flood_citation` | `official` | `flood_report` | Hosted nationwide rolling 15-year citation-only gap recovery |
+| `official.gov_tw.flood_citation` | `official` | `flood_report` | Hosted nationwide rolling seven-year citation-only gap recovery |
 | `official.wra.flood_incident` | `official` | `flood_report` | Worker adapter implemented; credential/contract gated and disabled until approved |
 
 Current official endpoints used by the MVP bridge:

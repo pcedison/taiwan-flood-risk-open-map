@@ -23,7 +23,6 @@ from defusedxml import ElementTree
 from app.domain.evidence import EvidenceUpsert
 from app.domain.geocoding import extract_taiwan_search_location
 from app.domain.history.location_context import nearest_public_news_location_context
-from app.domain.history.window import HISTORICAL_LOOKBACK_YEARS
 
 
 FetchJson = Callable[[str, float], Mapping[str, Any]]
@@ -238,7 +237,7 @@ _TAINAN_REVIEWED_INCIDENT_BOOTSTRAP = (
 )
 
 _OFFICIAL_TAIWAN_WEB_SUFFIXES = (".gov.tw", ".gov.taipei")
-_OFFICIAL_HISTORY_LOOKBACK_YEARS = HISTORICAL_LOOKBACK_YEARS
+_OFFICIAL_HISTORY_LOOKBACK_YEARS = 7
 
 
 _WIKI_SOURCES = (

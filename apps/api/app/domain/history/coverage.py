@@ -7,10 +7,13 @@ from typing import Literal, cast
 import psycopg
 from psycopg.rows import dict_row
 
-from app.domain.history.window import HistoricalYearWindow, historical_year_window
 
-
+HISTORICAL_COVERAGE_START_YEAR = 2018
+HISTORICAL_COVERAGE_END_YEAR = 2026
 HISTORICAL_COVERAGE_JURISDICTION_COUNT = 22
+HISTORICAL_COVERAGE_EXPECTED_CELL_COUNT = (
+    HISTORICAL_COVERAGE_END_YEAR - HISTORICAL_COVERAGE_START_YEAR + 1
+) * HISTORICAL_COVERAGE_JURISDICTION_COUNT
 
 HistoricalCoverageStatus = Literal[
     "unassessed",
@@ -66,17 +69,15 @@ class HistoricalCoverageRecord:
 def list_historical_coverage(
     *,
     database_url: str,
-    as_of: datetime,
     county_code: str | None = None,
     year: int | None = None,
 ) -> tuple[HistoricalCoverageRecord, ...]:
-    window = historical_year_window(as_of)
     if year is not None and not (
-        window.start_year <= year <= window.end_year
+        HISTORICAL_COVERAGE_START_YEAR <= year <= HISTORICAL_COVERAGE_END_YEAR
     ):
         raise ValueError(
             "year must be between "
-            f"{window.start_year} and {window.end_year}"
+            f"{HISTORICAL_COVERAGE_START_YEAR} and {HISTORICAL_COVERAGE_END_YEAR}"
         )
 
     query = """
@@ -120,8 +121,8 @@ def list_historical_coverage(
     params = (
         county_code,
         county_code,
-        window.start_year,
-        window.end_year,
+        HISTORICAL_COVERAGE_START_YEAR,
+        HISTORICAL_COVERAGE_END_YEAR,
         year,
         year,
     )
@@ -136,10 +137,6 @@ def list_historical_coverage(
         raise HistoricalCoverageRepositoryUnavailable(str(exc)) from exc
 
     return tuple(_record_from_row(row) for row in rows)
-
-
-def coverage_window(as_of: datetime) -> HistoricalYearWindow:
-    return historical_year_window(as_of)
 
 
 def _record_from_row(row: dict[str, object]) -> HistoricalCoverageRecord:

@@ -8,9 +8,6 @@ import pytest
 from app.domain.history import coverage
 
 
-AS_OF = datetime(2026, 8, 31, 14, 0, tzinfo=UTC)
-
-
 class FakeResult:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self._rows = rows
@@ -68,7 +65,6 @@ def test_repository_reads_public_safe_coverage_records(monkeypatch: pytest.Monke
 
     records = coverage.list_historical_coverage(
         database_url="postgresql://example.invalid/flood",
-        as_of=AS_OF,
         county_code="67000000",
         year=2026,
     )
@@ -83,7 +79,7 @@ def test_repository_reads_public_safe_coverage_records(monkeypatch: pytest.Monke
     assert "CROSS JOIN selected_years" in str(connection.query)
     assert "LEFT JOIN historical_coverage_cells" in str(connection.query)
     assert "generate_series(%s::integer, %s::integer)" in str(connection.query)
-    assert connection.params == ("67000000", "67000000", 2012, 2026, 2026, 2026)
+    assert connection.params == ("67000000", "67000000", 2018, 2026, 2026, 2026)
 
 
 def test_repository_preserves_unassessed_missing_rows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -108,7 +104,6 @@ def test_repository_preserves_unassessed_missing_rows(monkeypatch: pytest.Monkey
 
     record = coverage.list_historical_coverage(
         database_url="postgresql://example.invalid/flood",
-        as_of=AS_OF,
         county_code="67000000",
         year=2026,
     )[0]
@@ -128,7 +123,6 @@ def test_repository_rejects_unknown_status(monkeypatch: pytest.MonkeyPatch) -> N
     ):
         coverage.list_historical_coverage(
             database_url="postgresql://example.invalid/flood",
-            as_of=AS_OF,
             county_code="67000000",
             year=2026,
         )
@@ -143,28 +137,12 @@ def test_repository_wraps_database_failure(monkeypatch: pytest.MonkeyPatch) -> N
     with pytest.raises(coverage.HistoricalCoverageRepositoryUnavailable):
         coverage.list_historical_coverage(
             database_url="postgresql://example.invalid/flood",
-            as_of=AS_OF,
         )
 
 
-def test_repository_rejects_year_outside_15_year_window() -> None:
-    with pytest.raises(ValueError, match="year must be between 2012 and 2026"):
+def test_repository_rejects_year_outside_baseline_window() -> None:
+    with pytest.raises(ValueError, match="year must be between 2018 and 2026"):
         coverage.list_historical_coverage(
             database_url="postgresql://example.invalid/flood",
-            as_of=AS_OF,
             year=2027,
         )
-
-
-def test_repository_uses_taiwan_calendar_year_at_rollover(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    connection = FakeConnection([])
-    monkeypatch.setattr(coverage.psycopg, "connect", lambda *args, **kwargs: connection)
-
-    coverage.list_historical_coverage(
-        database_url="postgresql://example.invalid/flood",
-        as_of=datetime(2026, 12, 31, 16, 1, tzinfo=UTC),
-    )
-
-    assert connection.params == (None, None, 2013, 2027, None, None)

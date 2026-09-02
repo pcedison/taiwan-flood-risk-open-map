@@ -56,7 +56,7 @@ in `schema_migrations` and can be disabled only with
 | `HISTORICAL_NEWS_ON_DEMAND_WRITEBACK_ENABLED` | `false` until database writeback is enabled |
 | `SOURCE_NEWS_ENABLED` | `false` until source terms are reviewed |
 | `SOURCE_TERMS_REVIEW_ACK` | `false` until source terms are reviewed |
-| `OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED` | `true`; all-Taiwan rolling 15-year official-domain citation lookup with no article-body storage |
+| `OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED` | `true`; all-Taiwan rolling seven-year official-domain citation lookup with no article-body storage |
 | `OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED` | `false`; superseded single-city request path |
 | `USER_REPORTS_ENABLED` | `false` until abuse controls and moderation owner are ready |
 
