@@ -120,6 +120,14 @@ def test_dry_run_simulates_only_unassessed_targets_without_mutation() -> None:
     assert "set_config('lock_timeout', %s, true)" in database.statements[0]
     assert "set_config('statement_timeout', %s, true)" in database.statements[0]
     assert database.statement_parameters[0] == ("5000ms", "30000ms")
+    target_query = next(
+        statement
+        for statement in database.statements
+        if statement.startswith(
+            "SELECT jurisdiction_code, coverage_year, status, review_ref"
+        )
+    )
+    assert target_query.endswith("FOR UPDATE")
 
 
 def test_empty_coverage_matrix_fails_with_review_error() -> None:

@@ -392,6 +392,7 @@ def _target_rows(
         FROM historical_coverage_cells
         WHERE coverage_year = ANY(%s::integer[])
         ORDER BY coverage_year, jurisdiction_code
+        FOR UPDATE
         """,
         ([target.year for target in targets],),
     )
