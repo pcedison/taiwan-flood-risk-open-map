@@ -63,11 +63,13 @@ python -m app.main `
   --persist `
   --historical-coverage-review-target-environment staging `
   --historical-coverage-review-approval-ack `
+  --historical-coverage-review-production-ack `
   --database-url <staging-database-url>
 ```
 
 用相同命令重跑一次，第二次的 `applied_cell_count` 必須為 0。不得把 database URL、
-token 或其他 secret 放進稽核文件。
+token 或其他 secret 放進稽核文件。target environment 只是稽核標籤，不能驗證
+database URL 的身分，因此 staging 與 production 寫入都必須保留兩道 ack。
 
 ## 4. Coverage 對帳
 
@@ -107,7 +109,7 @@ review ref 與明確限制；若某格先前已有 `partial` 或其他非 `unass
 
 只有 staging migration、來源 backfill、gap review 重跑冪等、API coverage/history smoke
 與 rollback rehearsal 全通過後才能執行。production 命令改用 production database，
-目標環境改為 `production`，並額外加入：
+目標環境改為 `production`，並保留：
 
 ```text
 --historical-coverage-review-production-ack

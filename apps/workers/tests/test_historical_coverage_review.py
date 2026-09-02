@@ -173,6 +173,14 @@ def test_cli_defaults_to_manifest_only_no_network_dry_run(
         (
             [
                 "--historical-coverage-review-target-environment",
+                "staging",
+                "--historical-coverage-review-approval-ack",
+            ],
+            "production-ack",
+        ),
+        (
+            [
+                "--historical-coverage-review-target-environment",
                 "production",
                 "--historical-coverage-review-approval-ack",
             ],

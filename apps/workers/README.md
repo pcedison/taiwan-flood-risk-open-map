@@ -121,9 +121,10 @@ Partially complete, not production-ready:
 - Validate the immutable 2017／2026 official-source gap review without network
   or database writes:
   `python -m app.main --run-historical-coverage-gap-review --historical-coverage-review-manifest ../../docs/data-sources/official/historical-coverage-gap-review-2026-09-02.json --historical-coverage-review-expected-sha256 01ca620ee29d8a8815ff00fffb7894ef02e1acf36a01960b00e2d625b1598d3c`
-- Gap-review persistence requires a database URL, target environment and
-  `--historical-coverage-review-approval-ack`; production additionally requires
-  `--historical-coverage-review-production-ack`. The writer only changes
+- Gap-review persistence requires a database URL, target environment,
+  `--historical-coverage-review-approval-ack`, and the fail-safe
+  `--historical-coverage-review-production-ack` for every write because the
+  target label does not authenticate the database URL. The writer only changes
   `unassessed` cells and preserves source-derived results. Follow
   `docs/runbooks/historical-coverage-gap-review.md` for the staging-first
   workflow and exact verification queries.

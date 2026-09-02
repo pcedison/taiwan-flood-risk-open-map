@@ -100,7 +100,11 @@ def _require_persist_approval(args: argparse.Namespace) -> None:
         raise HistoricalCoverageGapReviewError(
             "--persist requires --historical-coverage-review-approval-ack"
         )
-    if target_environment == "production" and not args.historical_coverage_review_production_ack:
+    # The target environment is an operator label, not an independently
+    # authenticated property of the selected database URL. Fail closed for
+    # every write so a staging command cannot be copied onto production.
+    if not args.historical_coverage_review_production_ack:
         raise HistoricalCoverageGapReviewError(
-            "production --persist requires --historical-coverage-review-production-ack"
+            "--persist requires --historical-coverage-review-production-ack because "
+            "the database target cannot be inferred from the environment label"
         )
