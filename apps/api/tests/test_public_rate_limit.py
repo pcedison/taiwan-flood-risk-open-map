@@ -206,6 +206,33 @@ def test_public_endpoint_rate_limited_returns_429(
     }
 
 
+def test_history_endpoint_rate_limited_before_database_work(monkeypatch) -> None:
+    monkeypatch.setattr(public_routes, "get_settings", lambda: _settings())
+
+    def rate_limited(**kwargs: Any) -> None:
+        assert kwargs["namespace"] == "public-history-rate"
+        assert kwargs["max_requests"] == 30
+        raise RateLimitExceeded(
+            retry_after_seconds=11,
+            policy=RateLimitPolicy(max_requests=30, window_seconds=60),
+        )
+
+    monkeypatch.setattr(public_routes, "check_rate_limit", rate_limited)
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_assessment_history",
+        lambda **_kwargs: pytest.fail("rate-limited history request reached the database"),
+    )
+
+    response = client.get(
+        "/v1/history/d315d0e6-9c1e-475a-9118-f299d12d5c62"
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "11"
+    assert response.json()["error"]["code"] == "rate_limited"
+
+
 def test_hosted_public_rate_limit_uses_redis_even_if_memory_is_configured(
     monkeypatch,
 ) -> None:

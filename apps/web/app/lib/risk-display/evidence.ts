@@ -8,6 +8,7 @@ import type {
 } from "./types.ts";
 
 const SAFE_LINK_SCHEMES = new Set(["http:", "https:"]);
+export const HISTORICAL_LOOKBACK_YEARS = 15;
 
 /**
  * Guards against unsafe href schemes (e.g. `javascript:`, `data:`) before a
@@ -33,6 +34,10 @@ export function evidencePublishedAt(item: EvidencePreview) {
 }
 
 export function evidenceTimeSummary(item: EvidencePreview) {
+  if (item.temporal_precision === "year" && item.event_year) {
+    return `${item.event_year} 年（年度資料，來源未提供確切日期）`;
+  }
+
   const observedAt = item.observed_at;
   const publishedAt = evidencePublishedAt(item);
 
@@ -54,6 +59,9 @@ export function evidenceTimeSummary(item: EvidencePreview) {
 
 export function historicalEvidenceVintage(item: EvidencePreview, now = new Date()) {
   if (item.evidence_scope !== "historical") return null;
+  if (item.temporal_precision === "year" && item.event_year) {
+    return historicalVintageForYear(item.event_year, now);
+  }
   const timestamp =
     item.occurred_at ?? item.observed_at ?? item.published_at ?? item.ingested_at;
   if (!timestamp) return { isOld: true, label: "年代不明 · 涵蓋可能不完整" };
@@ -65,10 +73,14 @@ export function historicalEvidenceVintage(item: EvidencePreview, now = new Date(
 
   const year = recordedAt.getUTCFullYear();
   const ageMs = Math.max(0, now.getTime() - recordedAt.getTime());
-  const ageYears = Math.max(1, Math.round(ageMs / (365.2425 * 24 * 60 * 60 * 1000)));
   if (ageMs < 365.2425 * 24 * 60 * 60 * 1000) {
     return { isOld: false, label: `${year} 年 · 近 1 年內紀錄` };
   }
+  return historicalVintageForYear(year, now);
+}
+
+function historicalVintageForYear(year: number, now: Date) {
+  const ageYears = Math.max(1, now.getUTCFullYear() - year);
   if (ageYears >= 5) {
     return { isOld: true, label: `${year} 年 · 約 ${ageYears} 年前 · 舊資料` };
   }
@@ -283,6 +295,35 @@ export function publicEvidenceDisplayItems<T extends EvidencePreview & { source_
   return selected;
 }
 
+export function publicHistoricalEvidenceItems<
+  T extends EvidencePreview & { source_id?: string | null },
+>(items: T[], asOf?: Date) {
+  const newestYear = asOf?.getUTCFullYear() ?? null;
+  const oldestYear = newestYear === null ? null : newestYear - HISTORICAL_LOOKBACK_YEARS + 1;
+  return [...items]
+    .filter((item) => {
+      if (item.evidence_scope !== "historical" || isHistoricalNewsEvidence(item)) return false;
+      // The API is authoritative for the Asia/Taipei 15-year window.  A window
+      // is applied here only when a caller supplies an explicit audited `asOf`
+      // (principally deterministic unit tests), never from the browser clock.
+      if (oldestYear === null || newestYear === null) return true;
+      if (item.temporal_precision === "year" && item.event_year) {
+        return oldestYear <= item.event_year && item.event_year <= newestYear;
+      }
+      const timestamp = evidencePublishedAt(item) ?? item.observed_at ?? item.ingested_at;
+      if (!timestamp) return false;
+      const recordedAt = new Date(timestamp);
+      if (Number.isNaN(recordedAt.getTime())) return false;
+      const year = recordedAt.getUTCFullYear();
+      return oldestYear <= year && year <= newestYear;
+    })
+    .sort((left, right) => {
+      const timeDelta = evidenceSortTime(right) - evidenceSortTime(left);
+      if (timeDelta !== 0) return timeDelta;
+      return left.id.localeCompare(right.id);
+    });
+}
+
 export function publicDataFreshnessItems(items: DataFreshnessItem[]) {
   return items.filter((item) => !isHistoricalNewsFreshness(item));
 }
@@ -316,6 +357,9 @@ export function isRealtimeEvidence(item: EvidencePreview) {
 }
 
 function evidenceSortTime(item: EvidencePreview) {
+  if (item.temporal_precision === "year" && item.event_year) {
+    return Date.UTC(item.event_year, 0, 1);
+  }
   const time = evidencePublishedAt(item) ?? item.observed_at ?? item.ingested_at;
   if (!time) return 0;
   const parsed = Date.parse(time);

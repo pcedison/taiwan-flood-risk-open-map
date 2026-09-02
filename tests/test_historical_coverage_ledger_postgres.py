@@ -12,7 +12,7 @@ from psycopg import sql
 from infra.scripts.apply_migrations import apply_migrations
 
 
-TARGET_MIGRATION = "0056_historical_coverage_ledger.sql"
+TARGET_MIGRATION = "0059_historical_coverage_15y_retention.sql"
 
 
 def _database_url() -> str:
@@ -76,14 +76,14 @@ def test_migration_seeds_exact_fail_closed_matrix_and_is_idempotent() -> None:
                 """
             ).fetchone()
 
-        assert row == (198, 22, 9, 2018, 2026, 198)
+        assert row == (330, 22, 15, 2012, 2026, 330)
 
         repeated = apply_migrations(database_url=isolated_url)
         assert TARGET_MIGRATION in repeated.skipped
         with psycopg.connect(isolated_url) as connection:
             assert connection.execute(
                 "SELECT count(*) FROM historical_coverage_cells"
-            ).fetchone() == (198,)
+            ).fetchone() == (330,)
 
 
 def test_ledger_rejects_false_empty_and_accepts_reviewed_empty() -> None:

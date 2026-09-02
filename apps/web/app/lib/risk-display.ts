@@ -11,6 +11,7 @@ export type {
   EvidenceItem,
   EvidencePreview,
   EvidenceStatus,
+  HistoricalCoverageStatus,
   LayerContractItem,
   LayerDisplayItem,
   LayerDisplayState,
@@ -50,6 +51,7 @@ export {
 } from "./risk-display/risk.ts";
 
 export {
+  HISTORICAL_LOOKBACK_YEARS,
   evidenceDisplayText,
   evidencePublishedAt,
   evidenceSourceUrl,
@@ -64,6 +66,7 @@ export {
   latestNewsLinksFreshnessSourceId,
   publicDataFreshnessItems,
   publicEvidenceDisplayItems,
+  publicHistoricalEvidenceItems,
   selectEvidenceItems,
   shouldFetchEvidenceList,
 } from "./risk-display/evidence.ts";

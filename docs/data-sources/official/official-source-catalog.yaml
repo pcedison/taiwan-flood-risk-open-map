@@ -202,7 +202,7 @@ sources:
     resource_format: "citation metadata from public search/RSS indexes"
     update_frequency: "on demand with a bounded per-query time budget"
     license: "citation metadata only; each official source page retains its own terms"
-    integration_decision: "When nearby observed history is older than one year, search a rolling seven-year window and accept only direct HTTPS Taiwan government citation URLs."
+    integration_decision: "When nearby observed history is older than one year, search a rolling 15-year window and accept only direct HTTPS Taiwan government citation URLs."
     limitations:
       - "Search indexes are not complete event registries; no result never means no historical flooding."
       - "Only title, URL, publication time, official publisher domain, and location-match metadata are stored; article bodies are not fetched."

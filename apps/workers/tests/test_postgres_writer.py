@@ -104,6 +104,31 @@ def test_postgres_writer_batches_accepted_and_rejected_rows_in_one_executemany()
     assert validation_statuses.count("rejected") == len(batch.rejected)
 
 
+def test_postgres_writer_derives_event_year_in_taiwan_timezone() -> None:
+    adapter = SamplePublicWebNewsAdapter(
+        [
+            {
+                "id": "taiwan-new-year-boundary",
+                "url": "https://example.test/news/taiwan-new-year-boundary",
+                "title": "Taiwan calendar boundary observation",
+                "summary": "The UTC date is still December but Taiwan is already in January.",
+                "published_at": "2026-12-31T16:30:00+00:00",
+                "location_text": "Taiwan",
+                "confidence": 0.8,
+            }
+        ],
+        fetched_at=datetime(2026, 12, 31, 17, 0, tzinfo=timezone.utc),
+        raw_snapshot_key="raw/news-public-web/taiwan-new-year-boundary.json",
+    )
+    connection = _FakeConnection(raw_snapshot_id="raw-snapshot-id")
+    writer = PostgresStagingBatchWriter(connection_factory=lambda: connection)
+
+    writer.write_batch(build_staging_batch(adapter.run()))
+
+    staging_params = connection.cursor_instance.executemany_calls[0][1][0]
+    assert staging_params[14] == 2027
+
+
 def test_postgres_writer_requires_database_url_or_connection_factory() -> None:
     try:
         PostgresStagingBatchWriter()
