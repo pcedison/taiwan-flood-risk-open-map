@@ -197,7 +197,9 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         "flood_depth",
         "pump_or_gate_status",
     ]
-    assert "既有 production adapter 仍未覆蓋所有必要水資訊訊號" in chiayi_city["request_body"]
+    assert "既有 production adapter 仍未覆蓋必要水資訊訊號" in chiayi_city[
+        "request_body"
+    ]
     assert "status-only" in chiayi_city["request_body"]
     assert (
         chiayi_city["production_operational_requirements"]
@@ -228,11 +230,18 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
     assert kinmen["target_signal_types"] == ["pump_or_gate_status"]
     yunlin = next(packet for packet in packets if packet["county"] == "雲林縣")
     assert yunlin["target_signal_types"] == ["pump_or_gate_status"]
-    assert "訊號：pump_or_gate_status。" in yunlin["request_body"]
+    assert "訊號：pump_or_gate_status（抽水站或水門水位／運轉狀態觀測）" in yunlin[
+        "request_body"
+    ]
     assert "flood_depth、pump_or_gate_status" not in yunlin["request_body"]
     lienchiang = next(packet for packet in packets if packet["county"] == "連江縣")
     assert lienchiang["target_signal_types"] == ["pump_or_gate_status"]
     assert "地方直連訊號：pump_or_gate_status。" in lienchiang["request_body"]
+    assert "抽水站或水門水位／運轉狀態觀測等地方直連 read API" in lienchiang[
+        "request_body"
+    ]
+    assert "道路淹水深度或淹水感測器觀測" not in lienchiang["request_body"]
+    assert "雨水下水道水位觀測" not in lienchiang["request_body"]
     assert "flood_depth、sewer_water_level" not in lienchiang["request_body"]
     markdown = render_official_request_packets_markdown((yunlin, lienchiang))
     assert "待補水資訊訊號：pump_or_gate_status" in markdown
@@ -417,6 +426,58 @@ def test_reviewed_signal_evidence_removes_only_matching_request_target() -> None
     assert pump_batch["county_count"] == 19
     assert "金門縣" not in pump_batch["counties"]
     assert "--county 金門縣" not in pump_batch["packet_generator_command"]
+
+
+def test_reviewed_signal_evidence_rebuilds_remaining_request_copy() -> None:
+    plan = build_local_source_action_plan(list_local_source_coverage())
+    completion_evidence = {
+        "schema_version": "local-source-completion-evidence/v1",
+        "captured_at": "2026-09-02T10:30:00Z",
+        "signal_family_gap_evidence": [
+            {
+                "county": county,
+                "signal_type": signal_type,
+                "status": "official_unavailable",
+                "evidence_ref": (
+                    f"private-ops://local-source/review/{county}/{signal_type}"
+                ),
+                "reviewed_at": "2026-09-02T10:30:00Z",
+            }
+            for county, signal_type in (
+                ("雲林縣", "flood_depth"),
+                ("連江縣", "flood_depth"),
+                ("連江縣", "sewer_water_level"),
+            )
+        ],
+        "source_contract_evidence": [],
+        "production_gate_evidence": [],
+    }
+
+    packets = build_official_request_packets(
+        plan,
+        completion_evidence=completion_evidence,
+    )
+
+    yunlin = next(packet for packet in packets if packet["county"] == "雲林縣")
+    assert yunlin["target_signal_types"] == ["pump_or_gate_status"]
+    assert "pump_or_gate_status（抽水站或水門水位／運轉狀態觀測）" in yunlin[
+        "request_body"
+    ]
+    assert "flood_depth" not in yunlin["request_body"]
+    assert "道路淹水深度或淹水感測器觀測" not in yunlin["request_body"]
+
+    lienchiang = next(packet for packet in packets if packet["county"] == "連江縣")
+    assert lienchiang["target_signal_types"] == ["pump_or_gate_status"]
+    assert "抽水站或水門水位／運轉狀態觀測等地方直連 read API" in lienchiang[
+        "request_body"
+    ]
+    assert "flood_depth、sewer_water_level" not in lienchiang["request_body"]
+    assert "道路淹水深度或淹水感測器觀測" not in lienchiang["request_body"]
+    assert "雨水下水道水位觀測" not in lienchiang["request_body"]
+
+    markdown = render_official_request_packets_markdown((yunlin, lienchiang))
+    assert "待補水資訊訊號：pump_or_gate_status" in markdown
+    assert "flood_depth、pump_or_gate_status" not in markdown
 
 
 def test_dispatch_only_or_placeholder_evidence_does_not_remove_request_targets() -> None:

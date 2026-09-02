@@ -16,6 +16,16 @@ PRODUCTION_OPERATIONAL_REQUIREMENTS = [
     "hosted_egress_review",
     "worker_persisted_evidence_path",
 ]
+SIGNAL_REQUEST_LABELS = {
+    "rainfall": "雨量觀測",
+    "river_water_level": "河川水位觀測",
+    "tide_level": "潮位觀測",
+    "cap_alert": "防災警報",
+    "hydrologic_observation": "水位或水文觀測",
+    "flood_depth": "道路淹水深度或淹水感測器觀測",
+    "sewer_water_level": "雨水下水道水位觀測",
+    "pump_or_gate_status": "抽水站或水門水位／運轉狀態觀測",
+}
 
 
 def build_official_request_packets(
@@ -214,16 +224,26 @@ def _remove_completed_packet_targets(
         updated = dict(packet)
         updated["completion_evidence_targets"] = remaining_targets
         if "target_signal_types" in updated:
+            original_signal_types = [
+                str(signal_type)
+                for signal_type in packet.get("target_signal_types", [])
+            ]
             remaining_signal_types = {
                 str(target.get("signal_type", ""))
                 for target in remaining_targets
                 if target.get("manifest_section") == "signal_family_gap_evidence"
             }
-            updated["target_signal_types"] = [
-                str(signal_type)
-                for signal_type in packet.get("target_signal_types", [])
-                if str(signal_type) in remaining_signal_types
+            filtered_signal_types = [
+                signal_type
+                for signal_type in original_signal_types
+                if signal_type in remaining_signal_types
             ]
+            updated["target_signal_types"] = filtered_signal_types
+            _filter_central_missing_signals(updated, filtered_signal_types)
+            updated["request_body"] = _request_body_for_signal_targets(
+                updated,
+                target_signal_types=filtered_signal_types,
+            )
         filtered.append(updated)
     return tuple(filtered)
 
@@ -348,10 +368,10 @@ def _filter_packets(
                     or str(target.get("signal_type", "")) in signal_filter
                 )
             ]
-            updated["request_body"] = _rewrite_filtered_signal_summary(
-                packet.get("request_body"),
-                original_signal_types=original_signal_types,
-                filtered_signal_types=filtered_signal_types,
+            _filter_central_missing_signals(updated, filtered_signal_types)
+            updated["request_body"] = _request_body_for_signal_targets(
+                updated,
+                target_signal_types=filtered_signal_types,
             )
             filtered.append(updated)
             continue
@@ -359,17 +379,42 @@ def _filter_packets(
     return tuple(filtered)
 
 
-def _rewrite_filtered_signal_summary(
-    value: Any,
+def _filter_central_missing_signals(
+    packet: dict[str, Any],
+    target_signal_types: list[str],
+) -> None:
+    if "central_backbone_missing_signal_types" not in packet:
+        return
+    target_set = set(target_signal_types)
+    packet["central_backbone_missing_signal_types"] = [
+        str(signal_type)
+        for signal_type in packet.get("central_backbone_missing_signal_types", [])
+        if str(signal_type) in target_set
+    ]
+
+
+def _request_body_for_signal_targets(
+    packet: Mapping[str, Any],
     *,
-    original_signal_types: list[str],
-    filtered_signal_types: list[str],
+    target_signal_types: list[str],
 ) -> Any:
-    if not isinstance(value, str) or original_signal_types == filtered_signal_types:
-        return value
-    original_summary = "、".join(original_signal_types)
-    filtered_summary = "、".join(filtered_signal_types)
-    return value.replace(original_summary, filtered_summary)
+    packet_type = packet.get("packet_type")
+    county = str(packet.get("county", ""))
+    if packet_type == "signal_gap_request":
+        return _signal_gap_request_body(county, target_signal_types)
+    if packet_type == "metadata_release_request":
+        return _metadata_release_request_body(
+            county,
+            target_signal_types=target_signal_types,
+            central_backbone_missing=bool(
+                packet.get("central_backbone_missing_signal_types")
+            ),
+            non_qualifying_reasons=[
+                str(reason)
+                for reason in packet.get("non_qualifying_source_reasons", [])
+            ],
+        )
+    return packet.get("request_body")
 
 
 def render_official_request_packets_markdown(
@@ -668,17 +713,7 @@ def _metadata_release_packet(
         priority_item=priority_item,
     )
     non_qualifying_reasons = list(item.get("non_qualifying_source_reasons", []))
-    area_hint = "南竿、北竿、莒光、東引" if county == "連江縣" else county
-    excluded_summary = _non_qualifying_request_summary(non_qualifying_reasons)
     if central_missing_signal_types:
-        status_sentence = "因此仍未補足 hydrologic_observation。"
-        request_body = (
-            f"目前{county}僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的"
-            f"即時水文觀測 read API。請協助釋出{area_hint}的雨水下水道水位、道路"
-            "淹水感測器、抽水站或水門水位、易淹區鄰近水位站等資料，或確認是否可加入 "
-            "Civil IoT / WRA 等中央公開 SensorThings 主幹。"
-            f"{excluded_summary}{status_sentence}"
-        )
         checklist = [
             "確認是否可提供最新觀測 read API",
             "確認是否可加入 Civil IoT 或 WRA 公開主幹",
@@ -686,23 +721,17 @@ def _metadata_release_packet(
             "確認短期無感測器時的建置計畫或資料釋出時程",
         ] + _production_operational_checklist()
     else:
-        signal_summary = "、".join(str(signal) for signal in target_signal_types)
-        status_sentence = (
-            "目前中央最低水文骨幹已補足；仍需補足地方直連訊號："
-            f"{signal_summary}。"
-        )
-        request_body = (
-            f"目前{county}已由中央主幹補足最低水文脈絡，但地方公開資料仍只有靜態"
-            f"或 metadata 類資料。請協助釋出{area_hint}的雨水下水道水位、道路"
-            "淹水感測器、抽水站或水門水位、易淹區鄰近水位站等地方直連 read API。"
-            f"{excluded_summary}{status_sentence}"
-        )
         checklist = [
             "確認是否可提供地方最新觀測 read API",
             "取得站點 ID、觀測時間、測值、單位與座標",
             "確認短期無感測器時的建置計畫或資料釋出時程",
         ] + _production_operational_checklist()
-    request_body = request_body + _production_operational_request_suffix()
+    request_body = _metadata_release_request_body(
+        county,
+        target_signal_types=[str(signal) for signal in target_signal_types],
+        central_backbone_missing=bool(central_missing_signal_types),
+        non_qualifying_reasons=[str(reason) for reason in non_qualifying_reasons],
+    )
     return {
         "county": county,
         "packet_type": "metadata_release_request",
@@ -715,6 +744,7 @@ def _metadata_release_packet(
         "requested_counterparty": item.get("requested_counterparty"),
         "tracking_status": item.get("tracking_status"),
         "last_followed_up_at": item.get("last_followed_up_at"),
+        "central_backbone_missing_signal_types": central_missing_signal_types,
         "target_signal_types": target_signal_types,
         "required_read_api_fields": list(item.get("required_read_api_fields", [])),
         "completion_evidence_targets": (
@@ -724,6 +754,53 @@ def _metadata_release_packet(
         "request_body": request_body,
         "checklist": checklist,
     } | _priority_packet_fields(priority_item)
+
+
+def _metadata_release_request_body(
+    county: str,
+    *,
+    target_signal_types: list[str],
+    central_backbone_missing: bool,
+    non_qualifying_reasons: list[str],
+) -> str:
+    area_hint = "南竿、北竿、莒光、東引" if county == "連江縣" else county
+    requested_observations = _requested_signal_observations(target_signal_types)
+    signal_summary = "、".join(target_signal_types)
+    excluded_summary = _non_qualifying_request_summary(non_qualifying_reasons)
+    central_status = (
+        f"因此仍未補足 {signal_summary}。"
+        if signal_summary
+        else "目前只剩中央來源契約與資料釋出狀態需要追蹤。"
+    )
+    local_status = (
+        f"仍需補足地方直連訊號：{signal_summary}。"
+        if signal_summary
+        else "目前只剩地方來源契約與資料釋出狀態需要追蹤。"
+    )
+    if central_backbone_missing:
+        return (
+            f"目前{county}僅找到靜態或 metadata 類公開資料，尚未找到可機器讀取的"
+            f"即時水文觀測 read API。請協助釋出{area_hint}的{requested_observations}，"
+            "或確認是否可加入 Civil IoT / WRA 等中央公開 SensorThings 主幹。"
+            f"{excluded_summary}{central_status}"
+            f"{_production_operational_request_suffix()}"
+        )
+    return (
+        f"目前{county}已由中央主幹補足最低水文脈絡，但地方公開資料仍只有靜態"
+        f"或 metadata 類資料。請協助釋出{area_hint}的{requested_observations}"
+        f"等地方直連 read API。{excluded_summary}目前中央最低水文骨幹已補足；"
+        f"{local_status}"
+        f"{_production_operational_request_suffix()}"
+    )
+
+
+def _requested_signal_observations(signal_types: list[str]) -> str:
+    if not signal_types:
+        return "可機器讀取的即時水情觀測"
+    return "、".join(
+        SIGNAL_REQUEST_LABELS.get(signal_type, signal_type)
+        for signal_type in signal_types
+    )
 
 
 def _metadata_target_signal_types(
@@ -845,7 +922,6 @@ def _signal_gap_packet(
     county = str(item["county"])
     missing_signal_types = list(item.get("missing_signal_types", []))
     required_fields = list(item.get("required_read_api_fields", []))
-    signal_summary = "、".join(str(signal) for signal in missing_signal_types)
     return {
         "county": county,
         "packet_type": "signal_gap_request",
@@ -865,13 +941,9 @@ def _signal_gap_packet(
             county,
             signal_types=missing_signal_types,
         ),
-        "request_body": (
-            f"目前{county}既有 production adapter 仍未覆蓋所有必要水資訊訊號："
-            f"{signal_summary}。請協助確認是否有官方公開 read API、開放資料或"
-            "可授權資料來源可補齊這些訊號；若資料只有警戒、開關、警示燈或營運"
-            "狀態，請明確標示為 status-only，不得替代水位、雨量、淹水深度或"
-            "下水道水位量測。"
-            f"{_production_operational_request_suffix()}"
+        "request_body": _signal_gap_request_body(
+            county,
+            [str(signal) for signal in missing_signal_types],
         ),
         "checklist": [
             "確認缺漏 signal families 是否存在官方 read API 或開放資料",
@@ -881,6 +953,19 @@ def _signal_gap_packet(
         ]
         + _production_operational_checklist(),
     } | _priority_packet_fields(priority_item)
+
+
+def _signal_gap_request_body(county: str, target_signal_types: list[str]) -> str:
+    signal_summary = "、".join(target_signal_types)
+    requested_observations = _requested_signal_observations(target_signal_types)
+    return (
+        f"目前{county}既有 production adapter 仍未覆蓋必要水資訊訊號："
+        f"{signal_summary}（{requested_observations}）。請協助確認是否有官方公開 "
+        "read API、開放資料或可授權資料來源可補齊這些訊號；若資料只有警戒、"
+        "開關、警示燈或營運狀態，請明確標示為 status-only，不得替代水位、"
+        "雨量、淹水深度或下水道水位量測。"
+        f"{_production_operational_request_suffix()}"
+    )
 
 
 def _priority_packet_fields(priority_item: Mapping[str, Any] | None) -> dict[str, Any]:
