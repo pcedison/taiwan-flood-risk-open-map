@@ -234,6 +234,7 @@ jobs:
           PYTHONPATH=apps/workers \
             python -m pytest \
               tests/test_historical_coverage_writer_postgres.py \
+              tests/test_historical_coverage_review_postgres.py \
               tests/test_staging_snapshot_idempotency_postgres.py \
               -q
 
