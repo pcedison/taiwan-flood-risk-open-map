@@ -376,7 +376,7 @@ def _require_exact_coverage_matrix(cursor: Any) -> None:
     )
     row = cursor.fetchone()
     expected = (330, 22, 15, 2012, 2026)
-    if row is None or tuple(int(value) for value in row) != expected:
+    if row is None or tuple(row) != expected:
         raise HistoricalCoverageGapReviewError(
             "historical coverage matrix must be exactly 22 x 15 for 2012-2026"
         )

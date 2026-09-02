@@ -122,6 +122,22 @@ def test_dry_run_simulates_only_unassessed_targets_without_mutation() -> None:
     assert database.statement_parameters[0] == ("5000ms", "30000ms")
 
 
+def test_empty_coverage_matrix_fails_with_review_error() -> None:
+    database = _CoverageDatabase()
+    database.matrix_row = (0, 0, 0, None, None)
+    writer = PostgresHistoricalCoverageGapReviewWriter(connection_factory=lambda: database)
+
+    with pytest.raises(
+        HistoricalCoverageGapReviewError,
+        match="historical coverage matrix must be exactly 22 x 15 for 2012-2026",
+    ):
+        writer.assess(
+            _manifest(),
+            manifest_sha256=REVIEW_MANIFEST_SHA256,
+            persist=False,
+        )
+
+
 def test_postgres_writer_uses_bounded_connect_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -287,13 +303,14 @@ def test_cli_persist_requires_explicit_approval_gates(
 
 class _CoverageDatabase:
     def __init__(self) -> None:
-        self.cells = {
+        self.cells: dict[tuple[str, int], tuple[str, str | None]] = {
             (f"J{jurisdiction:02d}", year): ("unassessed", None)
             for jurisdiction in range(1, 23)
             for year in range(2012, 2027)
         }
         self.commit_count = 0
         self.rollback_count = 0
+        self.matrix_row: tuple[Any, ...] = (330, 22, 15, 2012, 2026)
         self.statements: list[str] = []
         self.statement_parameters: list[tuple[Any, ...] | None] = []
 
@@ -338,7 +355,7 @@ class _CoverageCursor:
             self._rows = []
             return
         if "count(DISTINCT jurisdiction_code)" in normalized:
-            self._rows = [(330, 22, 15, 2012, 2026)]
+            self._rows = [self.database.matrix_row]
             return
         if normalized.startswith("SELECT jurisdiction_code, coverage_year, status, review_ref"):
             assert parameters is not None
