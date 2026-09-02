@@ -106,10 +106,12 @@ Partially complete, not production-ready:
   writes (default mode):
   `python -m app.main --run-nstc-snapshot-backfill --nstc-backfill-input ../../apps/api/app/data/official/flood_disaster_points_130016.csv --nstc-backfill-expected-sha256 9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d`
 - Persist the same revision to staging only after recording a concrete review
-  reference and acknowledgement:
-  `python -m app.main --run-nstc-snapshot-backfill --nstc-backfill-input ../../apps/api/app/data/official/flood_disaster_points_130016.csv --nstc-backfill-expected-sha256 9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d --persist --nstc-backfill-target-environment staging --nstc-backfill-review-ref <change-or-review-ref> --nstc-backfill-approval-ack --database-url postgresql://...`
-- Production additionally requires `--nstc-backfill-production-ack`. The
-  command retains 2021–2022 evidence revisions but deliberately updates the
+  reference and both acknowledgements. The production acknowledgement is a
+  fail-safe requirement for every persisted run because the target label does
+  not authenticate the database URL:
+  `python -m app.main --run-nstc-snapshot-backfill --nstc-backfill-input ../../apps/api/app/data/official/flood_disaster_points_130016.csv --nstc-backfill-expected-sha256 9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d --persist --nstc-backfill-target-environment staging --nstc-backfill-review-ref <change-or-review-ref> --nstc-backfill-approval-ack --nstc-backfill-production-ack --database-url postgresql://...`
+- Production must change the target label to `production` while retaining both
+  acknowledgements. The command retains 2021–2022 evidence revisions but deliberately updates the
   coverage ledger only for 2018–2020, so a frozen snapshot cannot replace newer
   live coverage authority. Follow
   `docs/runbooks/nstc-snapshot-backfill.md` for preflight, verification, and
