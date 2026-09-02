@@ -111,9 +111,11 @@ Partially complete, not production-ready:
   not authenticate the database URL:
   `python -m app.main --run-nstc-snapshot-backfill --nstc-backfill-input ../../apps/api/app/data/official/flood_disaster_points_130016.csv --nstc-backfill-expected-sha256 9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d --persist --nstc-backfill-target-environment staging --nstc-backfill-review-ref <change-or-review-ref> --nstc-backfill-approval-ack --nstc-backfill-production-ack --database-url postgresql://...`
 - Production must change the target label to `production` while retaining both
-  acknowledgements. The command retains 2021–2022 evidence revisions but deliberately updates the
-  coverage ledger only for 2018–2020, so a frozen snapshot cannot replace newer
-  live coverage authority. Follow
+  acknowledgements. The command creates a non-operational pending audit, then
+  finalizes it only after promotion and coverage; this audit is excluded from
+  live readiness selection. It retains 2021–2022 evidence revisions but
+  deliberately updates the coverage ledger only for 2018–2020, so a frozen
+  snapshot cannot replace newer live coverage authority. Follow
   `docs/runbooks/nstc-snapshot-backfill.md` for preflight, verification, and
   quarantine.
 - Do not run GDELT rehearsal as production ingestion. The gates only permit a

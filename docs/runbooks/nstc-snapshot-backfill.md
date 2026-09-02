@@ -98,6 +98,15 @@ SELECT min(coverage_year), max(coverage_year), count(*)
 FROM historical_coverage_source_checks
 WHERE adapter_key = 'official.nstc.flood_disaster_points'
   AND review_ref LIKE 'nstc-backfill:v1:%';
+
+SELECT adapter_key, status, items_promoted,
+       parameters->>'audit_state' AS audit_state,
+       parameters->>'terminal_phase' AS terminal_phase,
+       parameters->>'promotion_count_complete' AS promotion_count_complete
+FROM ingestion_jobs
+WHERE job_key = 'worker.nstc_snapshot.backfill'
+ORDER BY created_at DESC
+LIMIT 1;
 ```
 
 必要結果：1 個 raw revision、5,919 staging rows、5,919 accepted evidence rows、
@@ -107,6 +116,12 @@ WHERE adapter_key = 'official.nstc.flood_disaster_points'
 
 使用相同命令再執行一次：`new_evidence_count` 必須為 0，staging 仍為 5,919，
 coverage counts 不變。這是進入 production gate 前的冪等驗收。
+
+backfill audit 在 promotion 與 coverage 前必須先是 `running/pending`，所有下游完成
+後才可成為 terminal；失敗則必須記錄已確認的 promotion count 與失敗 phase。
+terminal row 的 `adapter_key` 必須為 NULL、linked `adapter_runs.adapter_key` 保留原
+NSTC adapter，確保 backfill audit 可追溯但不會被 live ingestion readiness 選為
+最新營運週期。正常命令返回後不得殘留該次 `running` audit。
 
 ## 4. Production gate
 

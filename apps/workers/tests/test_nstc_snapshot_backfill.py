@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from app.jobs import nstc_snapshot_backfill as nstc_backfill_module
 from app.jobs.historical_coverage import HistoricalCoverageWriteResult
 from app.jobs.nstc_snapshot_backfill import (
     NSTC_BACKFILL_AUTHORITATIVE_COVERAGE_YEARS,
@@ -15,6 +16,7 @@ from app.jobs.nstc_snapshot_backfill import (
     NstcSnapshotBackfillError,
     run_nstc_snapshot_backfill,
 )
+from app.pipelines.promotion import PromotionResult
 from app.main import main
 
 
@@ -141,7 +143,17 @@ def test_persist_path_is_raw_ref_scoped_and_limits_coverage_to_2018_2020() -> No
     assert staging_writer.batches[0].raw_snapshot.metadata["retention_policy"] == (
         "non_expiring_reviewed_frozen_snapshot"
     )
-    assert run_writer.job_keys == ["worker.nstc_snapshot.backfill"]
+    assert run_writer.job_keys == [
+        "worker.nstc_snapshot.backfill",
+        "worker.nstc_snapshot.backfill",
+    ]
+    assert len(run_writer.pending) == 1
+    assert len(run_writer.terminal) == 1
+    terminal_summary, terminal_parameters = run_writer.terminal[0]
+    assert terminal_summary.status == "partial"
+    assert terminal_summary.items_promoted == 0
+    assert terminal_parameters["terminal_phase"] == "complete"
+    assert terminal_parameters["promotion_count_complete"] is True
     assert promotion_writer.adapter_keys == ("official.nstc.flood_disaster_points",)
     assert promotion_writer.raw_refs == (result.raw_ref,)
     assert coverage_writer.authoritative_years == (2018, 2019, 2020)
@@ -167,6 +179,82 @@ def test_cli_defaults_to_no_network_dry_run(capsys: pytest.CaptureFixture[str]) 
     assert payload["coverage_authoritative_years"] == [2018, 2019, 2020]
 
 
+def test_promotion_failure_finalizes_failed_audit_with_confirmed_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_writer = _RunWriter()
+    promotion_writer = _ConfirmThenFailPromotionWriter()
+
+    def fail_after_one_confirmed_write(writer: Any, **_kwargs: Any) -> PromotionResult:
+        writer.write_evidence(None)
+        writer.write_evidence(None)
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(
+        nstc_backfill_module,
+        "promote_accepted_staging",
+        fail_after_one_confirmed_write,
+    )
+
+    with pytest.raises(NstcSnapshotBackfillError, match="promotion failed"):
+        run_nstc_snapshot_backfill(
+            _persist_config(),
+            staging_writer=_StagingWriter(),
+            run_writer=run_writer,
+            promotion_writer=promotion_writer,
+            coverage_writer=_CoverageWriter(),
+        )
+
+    terminal_summary, terminal_parameters = run_writer.terminal[0]
+    assert terminal_summary.status == "failed"
+    assert terminal_summary.items_promoted == 1
+    assert terminal_summary.error_code == "nstc_promotion_failed"
+    assert terminal_parameters["terminal_phase"] == "promotion"
+    assert terminal_parameters["confirmed_promoted_count"] == 1
+    assert terminal_parameters["promotion_count_complete"] is False
+
+
+def test_coverage_failure_finalizes_failed_audit_after_complete_promotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_writer = _RunWriter()
+    monkeypatch.setattr(
+        nstc_backfill_module,
+        "promote_accepted_staging",
+        lambda *_args, **_kwargs: PromotionResult(
+            promoted=7,
+            evidence_ids=tuple(f"evidence-{index}" for index in range(7)),
+        ),
+    )
+
+    with pytest.raises(NstcSnapshotBackfillError, match="coverage attribution failed"):
+        run_nstc_snapshot_backfill(
+            _persist_config(),
+            staging_writer=_StagingWriter(),
+            run_writer=run_writer,
+            promotion_writer=_PromotionWriter(),
+            coverage_writer=_FailingCoverageWriter(),
+        )
+
+    terminal_summary, terminal_parameters = run_writer.terminal[0]
+    assert terminal_summary.status == "failed"
+    assert terminal_summary.items_promoted == 7
+    assert terminal_summary.error_code == "nstc_coverage_failed"
+    assert terminal_parameters["terminal_phase"] == "coverage"
+    assert terminal_parameters["confirmed_promoted_count"] == 7
+    assert terminal_parameters["promotion_count_complete"] is True
+
+
+def _persist_config() -> NstcSnapshotBackfillConfig:
+    return _config(
+        persist=True,
+        target_environment="staging",
+        approval_ack=True,
+        production_ack=True,
+        review_ref="PR-313/staging-rehearsal",
+    )
+
+
 class _StagingWriter:
     def __init__(self) -> None:
         self.batches: list[Any] = []
@@ -178,17 +266,31 @@ class _StagingWriter:
 class _RunWriter:
     def __init__(self) -> None:
         self.job_keys: list[str] = []
+        self.pending: list[tuple[Any, dict[str, Any]]] = []
+        self.terminal: list[tuple[Any, dict[str, Any]]] = []
 
-    def write_summary(
+    def begin_non_operational_summary(
         self,
         summary: Any,
         *,
         job_key: str,
         parameters: dict[str, Any] | None = None,
     ) -> str:
-        del summary, parameters
         self.job_keys.append(job_key)
+        self.pending.append((summary, parameters or {}))
         return "ingestion-job-fixture"
+
+    def finalize_non_operational_summary(
+        self,
+        ingestion_job_id: str,
+        summary: Any,
+        *,
+        job_key: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        assert ingestion_job_id == "ingestion-job-fixture"
+        self.job_keys.append(job_key)
+        self.terminal.append((summary, parameters or {}))
 
 
 class _PromotionWriter:
@@ -215,6 +317,19 @@ class _PromotionWriter:
         return 0
 
 
+class _ConfirmThenFailPromotionWriter(_PromotionWriter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.write_count = 0
+
+    def write_evidence(self, payload: Any) -> str | None:
+        del payload
+        self.write_count += 1
+        if self.write_count == 1:
+            return "confirmed-evidence-id"
+        raise RuntimeError("promotion batch failed")
+
+
 class _CoverageWriter:
     def __init__(self) -> None:
         self.authoritative_years: tuple[int, ...] | None = None
@@ -239,3 +354,8 @@ class _CoverageWriter:
             attributed_record_count=5_018,
             boundary_adjusted_record_count=0,
         )
+
+
+class _FailingCoverageWriter(_CoverageWriter):
+    def record_success(self, **_kwargs: Any) -> HistoricalCoverageWriteResult:
+        raise RuntimeError("coverage write failed")

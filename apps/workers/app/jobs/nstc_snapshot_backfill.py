@@ -22,7 +22,9 @@ from app.jobs.ingestion import (
     run_adapter_batch,
 )
 from app.pipelines.promotion import (
+    EvidencePromotionPayload,
     EvidencePromotionWriter,
+    PromotionCandidate,
     PromotionResult,
     promote_accepted_staging,
 )
@@ -88,6 +90,64 @@ class _NonExpiringSnapshotWriter:
             },
         )
         self.writer.write_batch(replace(batch, raw_snapshot=raw_snapshot))
+
+
+@dataclass
+class _CountingPromotionWriter:
+    """Track confirmed writes so a terminal failure audit stays truthful."""
+
+    writer: EvidencePromotionWriter
+    promoted: int = 0
+
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        return self.writer.fetch_accepted_staging(
+            limit=limit,
+            adapter_keys=adapter_keys,
+            raw_refs=raw_refs,
+        )
+
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
+        evidence_id = self.writer.write_evidence(payload)
+        if evidence_id is not None:
+            self.promoted += 1
+        return evidence_id
+
+    def write_evidence_batch(
+        self,
+        payloads: tuple[EvidencePromotionPayload, ...],
+    ) -> tuple[str | None, ...]:
+        batch_write = getattr(self.writer, "write_evidence_batch", None)
+        if callable(batch_write):
+            batch_results = tuple(batch_write(payloads))
+            self.promoted += sum(result is not None for result in batch_results)
+            return batch_results
+
+        individual_results: list[str | None] = []
+        for payload in payloads:
+            evidence_id = self.writer.write_evidence(payload)
+            individual_results.append(evidence_id)
+            if evidence_id is not None:
+                self.promoted += 1
+        return tuple(individual_results)
+
+    def retire_warning_latest_for_no_active_event(
+        self,
+        *,
+        adapter_key: str,
+        generation_started_at: datetime,
+        completed_at: datetime,
+    ) -> int:
+        return self.writer.retire_warning_latest_for_no_active_event(
+            adapter_key=adapter_key,
+            generation_started_at=generation_started_at,
+            completed_at=completed_at,
+        )
 
 
 @dataclass(frozen=True)
@@ -264,34 +324,55 @@ def run_nstc_snapshot_backfill(
     assert run_writer is not None
     assert promotion_writer is not None
     assert coverage_writer is not None
+    audit_parameters = {
+        "snapshot_sha256": actual_sha256,
+        "snapshot_bytes": len(payload),
+        "input_row_count": len(adapter_result.fetched),
+        "input_year_counts": dict(sorted(input_year_counts.items())),
+        "normalized_year_counts": dict(sorted(normalized_year_counts.items())),
+        "rejection_reason_counts": dict(sorted(rejection_reason_counts.items())),
+        "target_environment": config.target_environment,
+        "review_ref": review_ref,
+        "coverage_authoritative_years": NSTC_BACKFILL_AUTHORITATIVE_COVERAGE_YEARS,
+    }
     summary = run_adapter_batch(
         adapter,
         writer=_NonExpiringSnapshotWriter(staging_writer),
-        run_writer=run_writer,
-        job_key=NSTC_BACKFILL_JOB_KEY,
-        parameters={
-            "snapshot_sha256": actual_sha256,
-            "snapshot_bytes": len(payload),
-            "input_row_count": len(adapter_result.fetched),
-            "input_year_counts": dict(sorted(input_year_counts.items())),
-            "normalized_year_counts": dict(sorted(normalized_year_counts.items())),
-            "rejection_reason_counts": dict(sorted(rejection_reason_counts.items())),
-            "target_environment": config.target_environment,
-            "review_ref": review_ref,
-            "coverage_authoritative_years": (NSTC_BACKFILL_AUTHORITATIVE_COVERAGE_YEARS),
-        },
     )
+    audit_id = _begin_backfill_audit(run_writer, summary, parameters=audit_parameters)
     if summary.status not in ("succeeded", "partial") or summary.raw_ref != raw_ref:
-        raise NstcSnapshotBackfillError(
+        error = NstcSnapshotBackfillError(
             "NSTC snapshot staging did not complete as the reviewed raw revision"
         )
+        _finalize_backfill_audit(
+            run_writer,
+            audit_id,
+            summary,
+            parameters=audit_parameters,
+            phase="staging",
+            confirmed_promoted=0,
+            promotion_count_complete=False,
+            error=error,
+        )
+        raise error
+    counting_promotion_writer = _CountingPromotionWriter(promotion_writer)
     try:
         promotion = promote_accepted_staging(
-            promotion_writer,
+            counting_promotion_writer,
             adapter_keys=(NSTC_FLOOD_DISASTER_POINTS_METADATA.key,),
             raw_refs=(raw_ref,),
         )
     except Exception as exc:  # noqa: BLE001 - sanitize the persistence boundary
+        _finalize_backfill_audit(
+            run_writer,
+            audit_id,
+            summary,
+            parameters=audit_parameters,
+            phase="promotion",
+            confirmed_promoted=counting_promotion_writer.promoted,
+            promotion_count_complete=False,
+            error=exc,
+        )
         raise NstcSnapshotBackfillError(
             "NSTC snapshot promotion failed "
             f"({exc.__class__.__name__}); inspect the private worker logs"
@@ -304,19 +385,113 @@ def run_nstc_snapshot_backfill(
             authoritative_years=NSTC_BACKFILL_AUTHORITATIVE_COVERAGE_YEARS,
             review_ref=review_ref,
         )
+        if coverage.assessed_years != NSTC_BACKFILL_AUTHORITATIVE_COVERAGE_YEARS:
+            raise NstcSnapshotBackfillError(
+                "NSTC coverage writer did not assess exactly 2018-2020"
+            )
     except Exception as exc:  # noqa: BLE001 - sanitize the persistence boundary
+        _finalize_backfill_audit(
+            run_writer,
+            audit_id,
+            summary,
+            parameters=audit_parameters,
+            phase="coverage",
+            confirmed_promoted=promotion.promoted,
+            promotion_count_complete=True,
+            error=exc,
+        )
         raise NstcSnapshotBackfillError(
             "NSTC coverage attribution failed "
             f"({exc.__class__.__name__}); inspect the private worker logs"
         ) from exc
-    if coverage.assessed_years != NSTC_BACKFILL_AUTHORITATIVE_COVERAGE_YEARS:
-        raise NstcSnapshotBackfillError("NSTC coverage writer did not assess exactly 2018-2020")
+    _finalize_backfill_audit(
+        run_writer,
+        audit_id,
+        summary,
+        parameters=audit_parameters,
+        phase="complete",
+        confirmed_promoted=promotion.promoted,
+        promotion_count_complete=True,
+        error=None,
+    )
     return replace(
         base_result,
-        summary=summary,
+        summary=replace(summary, ingestion_job_id=audit_id),
         promotion=promotion,
         coverage=coverage,
     )
+
+
+def _begin_backfill_audit(
+    writer: IngestionRunSummaryWriter,
+    summary: AdapterBatchRunSummary,
+    *,
+    parameters: dict[str, Any],
+) -> str:
+    begin = getattr(writer, "begin_non_operational_summary", None)
+    if not callable(begin):
+        raise NstcSnapshotBackfillError(
+            "NSTC persist requires a pending non-operational audit writer"
+        )
+    try:
+        audit_id = begin(summary, job_key=NSTC_BACKFILL_JOB_KEY, parameters=parameters)
+    except Exception as exc:  # noqa: BLE001 - sanitize the persistence boundary
+        raise NstcSnapshotBackfillError(
+            "NSTC pending audit write failed "
+            f"({exc.__class__.__name__}); inspect the private worker logs"
+        ) from exc
+    if not isinstance(audit_id, str) or not audit_id:
+        raise NstcSnapshotBackfillError("NSTC pending audit writer did not return an audit ID")
+    return audit_id
+
+
+def _finalize_backfill_audit(
+    writer: IngestionRunSummaryWriter,
+    audit_id: str,
+    staging_summary: AdapterBatchRunSummary,
+    *,
+    parameters: dict[str, Any],
+    phase: Literal["staging", "promotion", "coverage", "complete"],
+    confirmed_promoted: int,
+    promotion_count_complete: bool,
+    error: Exception | None,
+) -> None:
+    finalize = getattr(writer, "finalize_non_operational_summary", None)
+    if not callable(finalize):
+        raise NstcSnapshotBackfillError(
+            "NSTC persist requires a terminal non-operational audit writer"
+        )
+    terminal_summary = replace(
+        staging_summary,
+        status="failed" if error is not None else staging_summary.status,
+        finished_at=datetime.now(UTC),
+        items_promoted=confirmed_promoted,
+        error_code=(f"nstc_{phase}_failed" if error is not None else None),
+        error_message=(
+            f"{error.__class__.__name__}; inspect the private worker logs"
+            if error is not None
+            else None
+        ),
+        ingestion_job_id=audit_id,
+    )
+    terminal_parameters = {
+        **parameters,
+        "terminal_phase": phase,
+        "confirmed_promoted_count": confirmed_promoted,
+        "promotion_count_complete": promotion_count_complete,
+    }
+    try:
+        finalize(
+            audit_id,
+            terminal_summary,
+            job_key=NSTC_BACKFILL_JOB_KEY,
+            parameters=terminal_parameters,
+        )
+    except Exception as exc:  # noqa: BLE001 - sanitize the persistence boundary
+        raise NstcSnapshotBackfillError(
+            "NSTC terminal audit write failed "
+            f"({exc.__class__.__name__}); inspect the private worker logs"
+        ) from exc
 
 
 def _validate_config(config: NstcSnapshotBackfillConfig) -> None:
