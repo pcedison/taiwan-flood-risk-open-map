@@ -105,6 +105,42 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--run-historical-coverage-gap-review",
+        action="store_true",
+        help=(
+            "Validate an immutable historical coverage gap-review manifest without "
+            "network access. Defaults to dry-run; --persist opens the separately "
+            "gated coverage-cell writer path."
+        ),
+    )
+    parser.add_argument(
+        "--historical-coverage-review-manifest",
+        metavar="JSON",
+        help="Path to the reviewed historical coverage gap manifest.",
+    )
+    parser.add_argument(
+        "--historical-coverage-review-expected-sha256",
+        help="Required SHA-256 of the exact review-manifest bytes.",
+    )
+    parser.add_argument(
+        "--historical-coverage-review-target-environment",
+        choices=("staging", "production"),
+        help="Required target label when --persist is supplied.",
+    )
+    parser.add_argument(
+        "--historical-coverage-review-approval-ack",
+        action="store_true",
+        help="Acknowledge the immutable review manifest for this persisted run.",
+    )
+    parser.add_argument(
+        "--historical-coverage-review-production-ack",
+        action="store_true",
+        help=(
+            "Fail-safe database-target acknowledgement required for every persisted run; "
+            "the target environment label is not a database identity check."
+        ),
+    )
+    parser.add_argument(
         "--validate-gdelt-live-acceptance",
         metavar="YAML",
         help=(

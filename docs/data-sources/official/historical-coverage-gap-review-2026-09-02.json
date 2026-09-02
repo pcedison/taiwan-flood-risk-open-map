@@ -1,0 +1,76 @@
+{
+  "schema_version": "historical-coverage-gap-review/v1",
+  "review_ref": "M2-2017-2026-nationwide-official-snapshot-review-2026-09-02",
+  "reviewed_at": "2026-09-02T13:31:53+08:00",
+  "absence_is_safety_evidence": false,
+  "data_coverage_complete": false,
+  "window": {
+    "start_year": 2012,
+    "end_year": 2026,
+    "jurisdiction_count": 22
+  },
+  "source_reviews": [
+    {
+      "review_id": "wra-25770-live-2026-09-02",
+      "adapter_key": "official.wra.historical_flood",
+      "official_dataset_url": "https://data.gov.tw/dataset/25770",
+      "resource_url": "https://opendata.wra.gov.tw/cloud/HistoricalFloodingArea/210-%E6%AD%B7%E5%B9%B4%E9%A2%B1%E9%A2%A8%E6%B7%B9%E6%B0%B4%E7%AF%84%E5%9C%8D.kml",
+      "revision": "2018-06-08T16:26:00",
+      "observed_years": [
+        2004,
+        2005,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011,
+        2012,
+        2013,
+        2014,
+        2015,
+        2016
+      ],
+      "fetched_count": 1224,
+      "normalized_count": 1075,
+      "rejected_count": 157,
+      "outcome": "year_absent_from_snapshot"
+    },
+    {
+      "review_id": "nstc-130016-live-2026-09-02",
+      "adapter_key": "official.nstc.flood_disaster_points",
+      "official_dataset_url": "https://data.gov.tw/dataset/130016",
+      "resource_url": "https://mas.nstc.gov.tw/OPENDATA/GetFile?fileodr=1&format=csv&serialno=455",
+      "revision": "7c4a0fe0d05f1fa372886aacccfbff1601e13a8335264fde8be1add813dbf6895",
+      "observed_years": [
+        2021,
+        2022,
+        2023,
+        2024,
+        2025
+      ],
+      "fetched_count": 8838,
+      "normalized_count": 8646,
+      "rejected_count": 192,
+      "outcome": "year_absent_from_snapshot"
+    }
+  ],
+  "targets": [
+    {
+      "year": 2017,
+      "status": "not_published",
+      "source_review_ids": [
+        "wra-25770-live-2026-09-02",
+        "nstc-130016-live-2026-09-02"
+      ],
+      "status_reason": "The reviewed WRA nationwide large-scale historical snapshot and NSTC rolling nationwide snapshot publish no 2017 rows. This source-publication gap does not show that no local flood occurred and does not represent an exhaustive review of every county publication."
+    },
+    {
+      "year": 2026,
+      "status": "failed",
+      "source_review_ids": [
+        "nstc-130016-live-2026-09-02"
+      ],
+      "status_reason": "The reviewed NSTC rolling snapshot publishes no 2026 historical rows as of 2026-09-02. The current year remains unavailable and must be reassessed; this is not evidence of safety or annual completeness."
+    }
+  ]
+}
