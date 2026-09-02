@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from app.adapters.registry import enabled_adapter_keys
-from app.cli import gdelt, maintenance_cli, profiles_cli, queue_cli, runtime_cli
+from app.cli import gdelt, maintenance_cli, nstc, profiles_cli, queue_cli, runtime_cli
 from app.cli.parser import build_parser, parse_query_heat_periods
 from app.config import load_worker_settings
 from app.jobs.frozen_legacy import report_frozen_legacy
@@ -53,6 +53,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return runtime_cli.record_runtime_sources_disabled(
             settings=settings,
             database_url=args.database_url,
+        )
+
+    if args.run_nstc_snapshot_backfill:
+        return nstc.run_nstc_snapshot_backfill_command(
+            args=args,
+            settings=settings,
         )
 
     if args.rehearse_gdelt_news_backfill:

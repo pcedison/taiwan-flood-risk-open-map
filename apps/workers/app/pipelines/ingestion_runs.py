@@ -34,7 +34,7 @@ class PostgresIngestionRunWriter:
         *,
         job_key: str,
         parameters: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> str:
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 if is_successful_no_active_warning_summary(summary):
@@ -55,6 +55,68 @@ class PostgresIngestionRunWriter:
                     ingestion_job_id=job_id,
                 )
                 _update_data_source_health(cursor, summary)
+            connection.commit()
+        return job_id
+
+    def begin_non_operational_summary(
+        self,
+        summary: AdapterBatchRunSummary,
+        *,
+        job_key: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> str:
+        """Create a pending audit that cannot become the latest live adapter run."""
+
+        audit_parameters = {
+            **(parameters or {}),
+            "operational_run": False,
+            "audit_state": "pending",
+        }
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                job_id = _insert_pending_non_operational_job(
+                    cursor,
+                    summary,
+                    job_key=job_key,
+                    parameters=audit_parameters,
+                )
+                _insert_pending_non_operational_adapter_run(
+                    cursor,
+                    summary,
+                    ingestion_job_id=job_id,
+                )
+            connection.commit()
+        return job_id
+
+    def finalize_non_operational_summary(
+        self,
+        ingestion_job_id: str,
+        summary: AdapterBatchRunSummary,
+        *,
+        job_key: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> None:
+        """Atomically finalize a pending audit without mutating live source health."""
+
+        audit_parameters = {
+            **(parameters or {}),
+            "operational_run": False,
+            "audit_state": "terminal",
+        }
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                _finalize_non_operational_job(
+                    cursor,
+                    ingestion_job_id,
+                    summary,
+                    job_key=job_key,
+                    parameters=audit_parameters,
+                )
+                _finalize_non_operational_adapter_run(
+                    cursor,
+                    ingestion_job_id,
+                    summary,
+                )
             connection.commit()
 
     def write_runtime_selection(
@@ -214,6 +276,175 @@ def _insert_ingestion_job(
     if row is None:
         raise RuntimeError("ingestion job insert did not return an id")
     return str(row[0])
+
+
+def _insert_pending_non_operational_job(
+    cursor: Any,
+    summary: AdapterBatchRunSummary,
+    *,
+    job_key: str,
+    parameters: Mapping[str, Any],
+) -> str:
+    cursor.execute(
+        """
+        INSERT INTO ingestion_jobs (
+            job_key,
+            adapter_key,
+            started_at,
+            finished_at,
+            status,
+            items_fetched,
+            items_promoted,
+            items_rejected,
+            source_timestamp_min,
+            source_timestamp_max,
+            parameters
+        )
+        VALUES (%s, NULL, %s, NULL, 'running', %s, 0, %s, %s, %s, %s::jsonb)
+        RETURNING id
+        """,
+        (
+            job_key,
+            summary.started_at,
+            summary.items_fetched,
+            summary.items_rejected,
+            summary.source_timestamp_min,
+            summary.source_timestamp_max,
+            _json(dict(parameters)),
+        ),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("non-operational ingestion audit insert did not return an id")
+    return str(row[0])
+
+
+def _insert_pending_non_operational_adapter_run(
+    cursor: Any,
+    summary: AdapterBatchRunSummary,
+    *,
+    ingestion_job_id: str,
+) -> None:
+    cursor.execute(
+        """
+        INSERT INTO adapter_runs (
+            ingestion_job_id,
+            adapter_key,
+            started_at,
+            status,
+            items_fetched,
+            items_promoted,
+            items_rejected,
+            raw_ref,
+            source_timestamp_min,
+            source_timestamp_max,
+            metrics
+        )
+        VALUES (%s, %s, %s, 'running', %s, 0, %s, %s, %s, %s, %s::jsonb)
+        """,
+        (
+            ingestion_job_id,
+            summary.adapter_key,
+            summary.started_at,
+            summary.items_fetched,
+            summary.items_rejected,
+            summary.raw_ref,
+            summary.source_timestamp_min,
+            summary.source_timestamp_max,
+            _json(_adapter_run_metrics(summary)),
+        ),
+    )
+
+
+def _finalize_non_operational_job(
+    cursor: Any,
+    ingestion_job_id: str,
+    summary: AdapterBatchRunSummary,
+    *,
+    job_key: str,
+    parameters: Mapping[str, Any],
+) -> None:
+    cursor.execute(
+        """
+        UPDATE ingestion_jobs
+        SET
+            finished_at = %s,
+            status = %s,
+            items_fetched = %s,
+            items_promoted = %s,
+            items_rejected = %s,
+            error_code = %s,
+            error_message = %s,
+            source_timestamp_min = %s,
+            source_timestamp_max = %s,
+            parameters = %s::jsonb,
+            updated_at = now()
+        WHERE id = %s
+            AND job_key = %s
+            AND adapter_key IS NULL
+            AND status = 'running'
+        RETURNING id
+        """,
+        (
+            summary.finished_at,
+            _job_status(summary),
+            summary.items_fetched,
+            summary.items_promoted,
+            summary.items_rejected,
+            summary.error_code,
+            summary.error_message,
+            summary.source_timestamp_min,
+            summary.source_timestamp_max,
+            _json(dict(parameters)),
+            ingestion_job_id,
+            job_key,
+        ),
+    )
+    if cursor.fetchone() is None:
+        raise RuntimeError("pending non-operational ingestion audit was not finalized")
+
+
+def _finalize_non_operational_adapter_run(
+    cursor: Any,
+    ingestion_job_id: str,
+    summary: AdapterBatchRunSummary,
+) -> None:
+    cursor.execute(
+        """
+        UPDATE adapter_runs
+        SET
+            finished_at = %s,
+            status = %s,
+            items_fetched = %s,
+            items_promoted = %s,
+            items_rejected = %s,
+            error_code = %s,
+            error_message = %s,
+            source_timestamp_min = %s,
+            source_timestamp_max = %s,
+            metrics = %s::jsonb
+        WHERE ingestion_job_id = %s
+            AND adapter_key = %s
+            AND status = 'running'
+        RETURNING id
+        """,
+        (
+            summary.finished_at,
+            _adapter_run_status(summary),
+            summary.items_fetched,
+            summary.items_promoted,
+            summary.items_rejected,
+            summary.error_code,
+            summary.error_message,
+            summary.source_timestamp_min,
+            summary.source_timestamp_max,
+            _json(_adapter_run_metrics(summary)),
+            ingestion_job_id,
+            summary.adapter_key,
+        ),
+    )
+    if cursor.fetchone() is None:
+        raise RuntimeError("pending non-operational adapter audit was not finalized")
 
 
 def _insert_adapter_run(

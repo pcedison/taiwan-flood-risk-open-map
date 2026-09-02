@@ -102,6 +102,22 @@ Partially complete, not production-ready:
   `GDELT_SOURCE_ENABLED=true GDELT_BACKFILL_ENABLED=true SOURCE_NEWS_ENABLED=true SOURCE_TERMS_REVIEW_ACK=true python -m app.main --rehearse-gdelt-news-backfill --gdelt-start 2025-08-01T00:00:00Z --gdelt-end 2025-08-02T00:00:00Z`
 - GDELT backfill staging-batch rehearsal, still no persistence or promotion:
   `GDELT_SOURCE_ENABLED=true GDELT_BACKFILL_ENABLED=true SOURCE_NEWS_ENABLED=true SOURCE_TERMS_REVIEW_ACK=true python -m app.main --rehearse-gdelt-news-backfill --gdelt-rehearsal-mode staging-batch --gdelt-start 2025-08-01T00:00:00Z --gdelt-end 2025-08-02T00:00:00Z --gdelt-max-records 10`
+- Validate the reviewed NSTC 2018–2022 frozen snapshot without network or DB
+  writes (default mode):
+  `python -m app.main --run-nstc-snapshot-backfill --nstc-backfill-input ../../apps/api/app/data/official/flood_disaster_points_130016.csv --nstc-backfill-expected-sha256 9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d`
+- Persist the same revision to staging only after recording a concrete review
+  reference and both acknowledgements. The production acknowledgement is a
+  fail-safe requirement for every persisted run because the target label does
+  not authenticate the database URL:
+  `python -m app.main --run-nstc-snapshot-backfill --nstc-backfill-input ../../apps/api/app/data/official/flood_disaster_points_130016.csv --nstc-backfill-expected-sha256 9919ed734ca8cca4d0541ac88148f4909d47e1939d56199da34af7964ef72f5d --persist --nstc-backfill-target-environment staging --nstc-backfill-review-ref <change-or-review-ref> --nstc-backfill-approval-ack --nstc-backfill-production-ack --database-url postgresql://...`
+- Production must change the target label to `production` while retaining both
+  acknowledgements. The command creates a non-operational pending audit, then
+  finalizes it only after promotion and coverage; this audit is excluded from
+  live readiness selection. It retains 2021–2022 evidence revisions but
+  deliberately updates the coverage ledger only for 2018–2020, so a frozen
+  snapshot cannot replace newer live coverage authority. Follow
+  `docs/runbooks/nstc-snapshot-backfill.md` for preflight, verification, and
+  quarantine.
 - Do not run GDELT rehearsal as production ingestion. The gates only permit a
   bounded operator rehearsal; source/legal approval, rate limits, geocoding QA,
   hosted cadence, persistence/promotion approval, and operator ownership still

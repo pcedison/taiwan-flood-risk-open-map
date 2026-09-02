@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
@@ -56,6 +56,7 @@ class AdapterBatchRunSummary:
     station_inventory_proof: StationInventoryProof | None = None
     event_active_from_min: datetime | None = None
     event_active_until_max: datetime | None = None
+    ingestion_job_id: str | None = None
 
     def log_fields(self) -> dict[str, object]:
         return {
@@ -73,6 +74,7 @@ class AdapterBatchRunSummary:
             "source_timestamp_max": self.source_timestamp_max,
             "event_active_from_min": self.event_active_from_min,
             "event_active_until_max": self.event_active_until_max,
+            "ingestion_job_id": self.ingestion_job_id,
             "station_inventory_proof": (
                 self.station_inventory_proof.public_summary()
                 if self.station_inventory_proof is not None
@@ -90,7 +92,7 @@ class IngestionRunSummaryWriter(Protocol):
         *,
         job_key: str,
         parameters: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> str | None:
         """Persist an operational audit row for an adapter batch run."""
 
 
@@ -190,7 +192,13 @@ def run_adapter_batch(
 
     if run_writer is not None:
         try:
-            run_writer.write_summary(summary, job_key=job_key, parameters=parameters)
+            ingestion_job_id = run_writer.write_summary(
+                summary,
+                job_key=job_key,
+                parameters=parameters,
+            )
+            if ingestion_job_id is not None:
+                summary = replace(summary, ingestion_job_id=ingestion_job_id)
         except Exception as exc:  # noqa: BLE001 - audit boundary records arbitrary failures
             summary = AdapterBatchRunSummary(
                 adapter_key=summary.adapter_key,
@@ -210,6 +218,7 @@ def run_adapter_batch(
                 station_inventory_proof=summary.station_inventory_proof,
                 event_active_from_min=summary.event_active_from_min,
                 event_active_until_max=summary.event_active_until_max,
+                ingestion_job_id=summary.ingestion_job_id,
             )
 
     log_event("adapter.batch.completed", job_key=job_key, **summary.log_fields())

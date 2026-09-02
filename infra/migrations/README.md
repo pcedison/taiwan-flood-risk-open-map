@@ -291,3 +291,11 @@ snapshot revisions remain available for audit, while public readers can dedupe
 them by stable record identity. The migration also adds bounded indexes for
 newest-first history pages and query-time flood-sensor episode aggregation; it
 does not delete raw observations or claim missing years are complete.
+
+`0061_staging_snapshot_idempotency.sql` makes replay of one exact raw snapshot
+revision idempotent at the staging boundary. Before adding the partial unique
+index, it collapses legacy duplicate `(raw_snapshot_id, evidence_id)` rows while
+preferentially retaining the row referenced by promoted evidence. The writer
+then uses `ON CONFLICT DO NOTHING`, so an operator retry preserves the original
+staging decision and no longer grows the audit table. Raw snapshots and
+promoted evidence remain retained.

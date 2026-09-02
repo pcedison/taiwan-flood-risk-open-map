@@ -140,6 +140,13 @@ _INSERT_STAGING_EVIDENCE_SQL = """
         %s,
         %s
     )
+    ON CONFLICT (
+        raw_snapshot_id,
+        (payload->>'evidence_id')
+    )
+    WHERE raw_snapshot_id IS NOT NULL
+      AND NULLIF(payload->>'evidence_id', '') IS NOT NULL
+    DO NOTHING
     """
 
 

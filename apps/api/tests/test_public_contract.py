@@ -648,10 +648,10 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        60,
-        "0060_historical_event_semantics.sql",
-        "a95ac5ae2f444bec4529dc6fa0d452f3027787fe5b6ff89be70f874408558af8",
-        60,
+        61,
+        "0061_staging_snapshot_idempotency.sql",
+        "8ef132007ec4fff3b6ee0d1fab0e973d8ae97fcebb9001ea6d7f0212697a003c",
+        61,
         "public.ingestion_scheduler_heartbeats",
         "public.ingestion_readiness_sources",
         "public.historical_coverage_cells",
@@ -687,7 +687,7 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
                 True,
             )
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0060 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0061 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 
