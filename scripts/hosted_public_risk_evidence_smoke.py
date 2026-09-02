@@ -784,7 +784,7 @@ def request_json(
     except HTTPError as exc:
         try:
             error_payload = json.loads(exc.read().decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             error_payload = {}
         return JsonResponse(status_code=exc.code, payload=error_payload, error=str(exc))
     except (
