@@ -81,22 +81,21 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-09-02 17:00 Asia/Taipei checkpoint, `origin/main` was the rollback
-hotfix `38f10751cac5d3dfe37f5d43cc834e10fb9a63b9`, with CI and CodeQL passing,
-but Zeabur had not created a deployment record for that SHA. Production
-`/health` and `/ready` both returned HTTP 502, so PostgreSQL/Redis readiness and
-deployment identity could not be verified; deployment and strict public-risk
-smokes failed. Issue #289 contains the incident evidence. Do not treat a SHA
-copied into status documentation as a permanent deployment pin: derive the
-current expected SHA only after `git fetch origin --prune`, then verify both
-health endpoints. The latest real scheduled Hosted Monitoring run
-[#33589308956](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33589308956)
-ran on the preceding main SHA. Its public API, deployment, public-risk, and
-desktop/mobile browser checks passed; required source freshness failed only
-because `official.wra_iow.flood_depth` reported `freshness_state=failed`.
-Issues #289 and #293 therefore remain open until a genuine schedule run passes
-on the current main SHA. PR #311 now includes bounded source-freshness failure
-details in the public-safe alert route so that cause is not omitted again.
+the 2026-09-02 19:28 Asia/Taipei checkpoint, `origin/main` was
+`dcd592742dc5f6caf9e1ef066f0e18e0c9efe79b`, with CI and CodeQL passing, but
+Zeabur's latest deployment record still pointed to
+`8fd4fc2aca7416d1f2da0829211f2d36e19a5ceb`. Production `/health` and `/ready`
+both returned HTTP 502, so PostgreSQL/Redis readiness and deployment identity
+could not be verified; deployment and strict public-risk smokes failed. Issue
+#289 contains the incident evidence. Do not treat a SHA copied into status
+documentation as a permanent deployment pin: derive the current expected SHA
+only after `git fetch origin --prune`, then verify both health endpoints. The
+latest genuine scheduled Hosted Monitoring run
+[#33622599107](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33622599107)
+ran on the current main SHA and failed after six deployment-smoke attempts all
+received HTTP 502; downstream public-risk, browser, source, and private-evidence
+steps correctly remained fail-closed. Issues #289 and #293 therefore remain
+open until a genuine schedule run passes on the current main SHA.
 Hosted Monitoring also
 exercises the production basemap and a real public location query in desktop
 and mobile Chromium; major MapLibre and ESLint upgrades require an explicit

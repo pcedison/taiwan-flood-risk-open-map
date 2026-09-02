@@ -17,17 +17,17 @@
 phase、work package 與舊 checkpoint 保留為實作契約及歷史紀錄，不應取代
 正式站 `/health`、`/ready`、GitHub Actions 與 strict hosted smoke 的即時證據。
 
-在 2026-09-02 17:00 Asia/Taipei 檢查點，`origin/main` 是 rollback hotfix
-`38f10751cac5d3dfe37f5d43cc834e10fb9a63b9`，CI／CodeQL 已通過，但 Zeabur
-尚未建立此 SHA 的 deployment record。正式站 `/health`、`/ready` 都回 HTTP
-502，因此無法驗證 deployment identity 與 PostgreSQL／Redis readiness，deployment
-與 strict public-risk smoke 均失敗；#289 留存事故與 hotfix 證據。最新真實
+在 2026-09-02 19:28 Asia/Taipei 檢查點，`origin/main` 是
+`dcd592742dc5f6caf9e1ef066f0e18e0c9efe79b`，CI／CodeQL 已通過，但 Zeabur
+最新 deployment record 仍停在 `8fd4fc2a`。正式站 `/health`、`/ready` 都回
+HTTP 502，因此無法驗證 deployment identity 與 PostgreSQL／Redis readiness，
+deployment 與 strict public-risk smoke 均失敗；#289 留存事故證據。最新真實
 `schedule` Hosted Monitoring
-[#33589308956](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33589308956)
-於前一個 main SHA 通過 public API、deployment、public-risk 與 desktop／mobile
-Playwright；最終只因 required `official.wra_iow.flood_depth` 的
-`freshness_state=failed` 而失敗。#289 與 #293 分別追蹤來源事故與真實排程
-readiness，不能誤寫為整體監控全通過。PR #312 已合併為引發 502 的
+[#33622599107](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33622599107)
+已在目前 main 執行，但六次 deployment-smoke 嘗試都收到 502；下游
+public-risk、desktop／mobile Playwright、source 與 private-evidence 步驟均正確
+fail-closed 跳過。#289 與 #293 分別追蹤部署事故與真實排程 readiness，不能誤寫為
+整體監控全通過。PR #312 已合併為引發 502 的
 `8fd4fc2a`；PR #317 已移除越過 staged rollout 邊界的 migration `0060` 並合併為
 目前 hotfix，但在 Zeabur 實際部署且兩項 smoke 通過前不能宣稱恢復。
 #71 仍是外部官方資料／
