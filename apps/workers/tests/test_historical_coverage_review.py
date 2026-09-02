@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 from collections import Counter
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from app.jobs.historical_coverage_review import (
+    APPROVED_HISTORICAL_COVERAGE_GAP_REVIEW_SHA256,
     HistoricalCoverageGapReviewError,
     PostgresHistoricalCoverageGapReviewWriter,
     load_historical_coverage_gap_review,
@@ -40,6 +42,7 @@ def _manifest() -> Any:
 def test_review_manifest_is_pinned_and_keeps_absence_fail_closed() -> None:
     manifest = _manifest()
 
+    assert REVIEW_MANIFEST_SHA256 == APPROVED_HISTORICAL_COVERAGE_GAP_REVIEW_SHA256
     assert manifest.target_cell_count == 44
     assert [(target.year, target.status) for target in manifest.targets] == [
         (2017, "not_published"),
@@ -57,6 +60,26 @@ def test_review_manifest_rejects_wrong_digest() -> None:
         load_historical_coverage_gap_review(
             REVIEW_MANIFEST,
             expected_sha256="0" * 64,
+        )
+
+
+def test_review_manifest_rejects_modified_content_with_matching_operator_digest(
+    tmp_path: Path,
+) -> None:
+    raw = json.loads(REVIEW_MANIFEST.read_text(encoding="utf-8"))
+    raw["targets"][0]["status_reason"] += " Modified after approval."
+    modified = tmp_path / "modified-review.json"
+    modified.write_text(
+        json.dumps(raw, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    operator_digest = sha256(modified.read_bytes()).hexdigest()
+
+    with pytest.raises(HistoricalCoverageGapReviewError, match="code-approved revision"):
+        load_historical_coverage_gap_review(
+            modified,
+            expected_sha256=operator_digest,
+            now=datetime(2026, 9, 2, 6, 0, tzinfo=UTC),
         )
 
 

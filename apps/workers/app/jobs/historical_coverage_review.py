@@ -17,6 +17,9 @@ HISTORICAL_COVERAGE_GAP_REVIEW_SCHEMA = "historical-coverage-gap-review/v1"
 HISTORICAL_COVERAGE_GAP_REVIEW_WINDOW = (2012, 2026)
 HISTORICAL_COVERAGE_GAP_REVIEW_JURISDICTIONS = 22
 HISTORICAL_COVERAGE_GAP_REVIEW_CELL_COUNT = 330
+APPROVED_HISTORICAL_COVERAGE_GAP_REVIEW_SHA256 = (
+    "01ca620ee29d8a8815ff00fffb7894ef02e1acf36a01960b00e2d625b1598d3c"
+)
 APPROVED_HISTORICAL_SOURCE_URLS = {
     "official.wra.historical_flood": "https://data.gov.tw/dataset/25770",
     "official.nstc.flood_disaster_points": "https://data.gov.tw/dataset/130016",
@@ -108,6 +111,10 @@ def load_historical_coverage_gap_review(
     if actual_sha256 != _normalized_sha256(expected_sha256):
         raise HistoricalCoverageGapReviewError(
             "historical coverage review manifest SHA-256 does not match"
+        )
+    if actual_sha256 != APPROVED_HISTORICAL_COVERAGE_GAP_REVIEW_SHA256:
+        raise HistoricalCoverageGapReviewError(
+            "historical coverage review manifest is not the code-approved revision"
         )
     try:
         raw = json.loads(payload.decode("utf-8"))
