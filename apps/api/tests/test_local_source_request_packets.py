@@ -30,9 +30,9 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
         "連江縣",
         "金門縣",
         "花蓮縣",
+        "屏東縣",
         "臺東縣",
         "苗栗縣",
-        "屏東縣",
     ]
     assert {packet["county"] for packet in packets} >= {
         "苗栗縣",
@@ -181,14 +181,22 @@ def test_build_official_request_packets_turns_remaining_blockers_into_requests()
     assert "status-only" in taipei["request_body"]
     assert "不得替代水位、雨量、淹水深度或下水道水位量測" in taipei["request_body"]
 
-    assert all(packet["county"] != "雲林縣" for packet in packets)
-    assert all(packet["county"] != "臺南市" for packet in packets)
+    yunlin = next(packet for packet in packets if packet["county"] == "雲林縣")
+    assert yunlin["target_signal_types"] == [
+        "flood_depth",
+        "pump_or_gate_status",
+    ]
+    tainan = next(packet for packet in packets if packet["county"] == "臺南市")
+    assert tainan["target_signal_types"] == ["pump_or_gate_status"]
 
     chiayi_city = next(packet for packet in packets if packet["county"] == "嘉義市")
     assert chiayi_city["packet_type"] == "signal_gap_request"
     assert chiayi_city["tracking_status"] == "needs_signal_gap_review"
     assert chiayi_city["priority_tier"] == "P2"
-    assert chiayi_city["target_signal_types"] == ["pump_or_gate_status"]
+    assert chiayi_city["target_signal_types"] == [
+        "flood_depth",
+        "pump_or_gate_status",
+    ]
     assert "既有 production adapter 仍未覆蓋所有必要水資訊訊號" in chiayi_city["request_body"]
     assert "status-only" in chiayi_city["request_body"]
     assert (
@@ -209,7 +217,7 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
 
     assert top_gap["signal_type"] == "pump_or_gate_status"
     assert [packet["county"] for packet in packets] == top_gap["counties"]
-    assert len(packets) == top_gap["county_count"] == 11
+    assert len(packets) == top_gap["county_count"] == 20
     assert all(
         top_gap["signal_type"] in packet["target_signal_types"]
         for packet in packets
@@ -219,7 +227,7 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
     assert kinmen["packet_type"] == "authorization_request"
     assert kinmen["target_signal_types"] == ["pump_or_gate_status"]
     assert all(packet["county"] != "宜蘭縣" for packet in packets)
-    assert all(packet["county"] != "桃園市" for packet in packets)
+    assert any(packet["county"] == "桃園市" for packet in packets)
 
 
 def test_official_request_packets_expose_completion_evidence_targets() -> None:
@@ -253,6 +261,22 @@ def test_official_request_packets_expose_completion_evidence_targets() -> None:
         {
             "manifest_section": "signal_family_gap_evidence",
             "county": "\u91d1\u9580\u7e23",
+            "signal_type": "flood_depth",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/signal-gap/"
+                "\u91d1\u9580\u7e23/flood_depth"
+            ),
+        },
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": "\u91d1\u9580\u7e23",
             "signal_type": "pump_or_gate_status",
             "accepted_statuses": [
                 "accepted",
@@ -276,6 +300,22 @@ def test_official_request_packets_expose_completion_evidence_targets() -> None:
         for target in pingtung["completion_evidence_targets"]
     )
     assert chiayi_city["completion_evidence_targets"] == [
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": "\u5609\u7fa9\u5e02",
+            "signal_type": "flood_depth",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/signal-gap/"
+                "\u5609\u7fa9\u5e02/flood_depth"
+            ),
+        },
         {
             "manifest_section": "signal_family_gap_evidence",
             "county": "\u5609\u7fa9\u5e02",
@@ -323,7 +363,7 @@ def test_reviewed_signal_evidence_removes_only_matching_request_target() -> None
     )
 
     kinmen = next(packet for packet in packets if packet["county"] == "金門縣")
-    assert kinmen["target_signal_types"] == []
+    assert kinmen["target_signal_types"] == ["flood_depth"]
     assert kinmen["completion_evidence_targets"] == [
         {
             "manifest_section": "source_contract_evidence",
@@ -341,14 +381,29 @@ def test_reviewed_signal_evidence_removes_only_matching_request_target() -> None
                 "private-ops://local-source/source-contract/"
                 "金門縣/authorization_request"
             ),
-        }
+        },
+        {
+            "manifest_section": "signal_family_gap_evidence",
+            "county": "金門縣",
+            "signal_type": "flood_depth",
+            "accepted_statuses": [
+                "accepted",
+                "authorization_gated_adapter",
+                "official_unavailable",
+                "production_adapter",
+            ],
+            "evidence_ref_required": True,
+            "private_evidence_ref_hint": (
+                "private-ops://local-source/signal-gap/金門縣/flood_depth"
+            ),
+        },
     ]
     pump_batch = next(
         batch
         for batch in batches
         if batch["target_signal_type"] == "pump_or_gate_status"
     )
-    assert pump_batch["county_count"] == 10
+    assert pump_batch["county_count"] == 19
     assert "金門縣" not in pump_batch["counties"]
     assert "--county 金門縣" not in pump_batch["packet_generator_command"]
 
@@ -387,7 +442,7 @@ def test_dispatch_only_or_placeholder_evidence_does_not_remove_request_targets()
         for batch in batches
         if batch["target_signal_type"] == "pump_or_gate_status"
     )
-    assert pump_batch["county_count"] == 11
+    assert pump_batch["county_count"] == 20
     assert "金門縣" in pump_batch["counties"]
     assert "嘉義市" in pump_batch["counties"]
 
@@ -405,7 +460,7 @@ def test_completion_evidence_template_is_pending_draft_from_request_packets() ->
     assert template["captured_at"] == "2026-06-30T12:00:00+08:00"
     assert template["production_gate_evidence"] == []
     assert len(template["source_contract_evidence"]) == 6
-    assert len(template["signal_family_gap_evidence"]) == 15
+    assert len(template["signal_family_gap_evidence"]) == 27
 
     kinmen = next(
         item
@@ -465,8 +520,8 @@ def test_render_official_request_packets_markdown_is_ready_for_outreach() -> Non
     assert "## 屏東縣：屏東縣地方即時水情 read API contract 請求" in markdown
     assert "## 臺北市：臺北市缺漏水資訊訊號補齊請求" in markdown
     assert "## 嘉義市：嘉義市缺漏水資訊訊號補齊請求" in markdown
-    assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" not in markdown
-    assert "## 臺南市：臺南市缺漏水資訊訊號補齊請求" not in markdown
+    assert "## 雲林縣：雲林縣缺漏水資訊訊號補齊請求" in markdown
+    assert "## 臺南市：臺南市缺漏水資訊訊號補齊請求" in markdown
     assert "- 需要人工介入：是" in markdown
     assert "- 追蹤狀態：needs_public_read_api_contract" in markdown
     assert "- 追蹤狀態：needs_signal_gap_review" in markdown
@@ -576,20 +631,25 @@ def test_kinmen_packet_marks_upload_api_as_insufficient_for_read_adapter() -> No
     assert "Data: []" in kinmen["unauthorized_smoke_result"]
 
 
-def test_tainan_no_longer_emits_signal_gap_packet_after_civil_iot_coverage() -> None:
+def test_tainan_reopens_pump_signal_gap_after_civil_iot_quarantine() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
 
     packets = build_official_request_packets(plan)
 
-    assert all(packet["county"] != "\u81fa\u5357\u5e02" for packet in packets)
+    tainan = next(packet for packet in packets if packet["county"] == "\u81fa\u5357\u5e02")
+    assert tainan["packet_type"] == "signal_gap_request"
+    assert tainan["target_signal_types"] == ["pump_or_gate_status"]
 
 
-def test_rendered_packets_do_not_list_resolved_tainan_signal_gap_sources() -> None:
+def test_rendered_packets_include_tainan_signal_gap_source_leads() -> None:
     plan = build_local_source_action_plan(list_local_source_coverage())
     packets = build_official_request_packets(plan)
 
     markdown = render_official_request_packets_markdown(packets)
 
-    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e" not in markdown
-    assert "https://soa.tainan.gov.tw/Api/Service/Get/6c525fc0-f70a-433e-8529-8e11e65e85e9" not in markdown
-    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf" not in markdown
+    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u4e4b\u6c34\u4f4d\u7ad9\u540d\u7a31\u53ca\u4f4d\u7f6e" in markdown
+    assert (
+        "https://soa.tainan.gov.tw/Api/Service/Get/"
+        "6c525fc0-f70a-433e-8529-8e11e65e85e9"
+    ) in markdown
+    assert "\u81fa\u5357\u5e02\u7ba1\u5340\u57df\u6392\u6c34\u5373\u6642\u5f71\u50cf" in markdown

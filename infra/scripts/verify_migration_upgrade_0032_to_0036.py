@@ -22,7 +22,7 @@ from infra.scripts.apply_migrations import apply_migrations  # noqa: E402
 
 MIGRATIONS_DIR = REPO_ROOT / "infra" / "migrations"
 EXPECTED_PRE_UPGRADE_VERSION = 32
-EXPECTED_POST_UPGRADE_VERSION = 36
+PRIVACY_FENCE_VERSION = 36
 EXPECTED_CHECKED_IN_VERSION = 62
 EXPECTED_JURISDICTION_COUNT = 22
 EXPECTED_SIGNAL_CONTRACT_COUNT = 88
@@ -153,6 +153,42 @@ def main(argv: list[str] | None = None) -> int:
         marker="post-update",
     )
     _verify_inventory_schema_and_fail_closed_seed(args.database_url)
+
+    latest = apply_migrations(
+        database_url=args.database_url,
+        migrations_dir=MIGRATIONS_DIR,
+    )
+    expected_latest_upgrade = tuple(
+        path.name
+        for path in sorted(MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.sql"))
+        if PRIVACY_FENCE_VERSION < int(path.name[:4]) <= EXPECTED_CHECKED_IN_VERSION
+    )
+    _expect_equal(
+        "migrations applied after privacy fence through checked-in latest",
+        latest.applied,
+        expected_latest_upgrade,
+    )
+    _expect_equal(
+        "migrations skipped before checked-in latest upgrade",
+        len(latest.skipped),
+        PRIVACY_FENCE_VERSION,
+    )
+    _verify_schema_manifest(
+        args.database_url,
+        expected_version=EXPECTED_CHECKED_IN_VERSION,
+    )
+    _verify_civil_iot_quarantine(args.database_url)
+
+    rerun = apply_migrations(
+        database_url=args.database_url,
+        migrations_dir=MIGRATIONS_DIR,
+    )
+    _expect_equal("latest migration rerun applied", rerun.applied, ())
+    _expect_equal(
+        "latest migration rerun skipped",
+        len(rerun.skipped),
+        EXPECTED_CHECKED_IN_VERSION,
+    )
     print(
         "Populated migration upgrade verified: "
         f"0032->{EXPECTED_CHECKED_IN_VERSION:04d} via 0036, gap repair, "
@@ -211,7 +247,7 @@ def _migration_manifests() -> Iterator[tuple[Path, Path, Path]]:
         through_0036.mkdir()
         for migration in migration_paths:
             version = int(migration.name[:4])
-            if version <= EXPECTED_POST_UPGRADE_VERSION:
+            if version <= PRIVACY_FENCE_VERSION:
                 shutil.copy2(migration, through_0036 / migration.name)
             if version <= 35:
                 shutil.copy2(migration, through_0035 / migration.name)
@@ -237,11 +273,61 @@ def _verify_schema_manifest(database_url: str, *, expected_version: int) -> None
         32: "0032_cwa_tide_level_source.sql",
         35: "0035_station_inventory_and_jurisdiction_proofs.sql",
         36: "0036_database_privacy_fence.sql",
+        62: "0062_quarantine_civil_iot_water_resource.sql",
     }[expected_version]
     _expect_equal(
         "latest recorded migration filename",
         str(rows[-1][1]),
         expected_filename,
+    )
+
+
+def _verify_civil_iot_quarantine(database_url: str) -> None:
+    quarantined_keys = (
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.pump_water_level",
+    )
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT adapter_key,
+                       is_enabled,
+                       metadata->>'availability_status'
+                FROM data_sources
+                WHERE adapter_key = ANY(%s)
+                ORDER BY adapter_key
+                """,
+                (list(quarantined_keys),),
+            )
+            quarantined_rows = cursor.fetchall()
+            cursor.execute(
+                """
+                SELECT adapter_key
+                FROM ingestion_readiness_sources
+                WHERE profile_key = 'production_backbone'
+                ORDER BY adapter_key
+                """
+            )
+            readiness_rows = cursor.fetchall()
+
+    _expect_equal(
+        "quarantined Civil IoT source state",
+        tuple((str(row[0]), bool(row[1]), str(row[2])) for row in quarantined_rows),
+        tuple((key, False, "upstream_unavailable") for key in quarantined_keys),
+    )
+    readiness_keys = tuple(str(row[0]) for row in readiness_rows)
+    _expect_equal("production readiness source count after quarantine", len(readiness_keys), 9)
+    _expect_equal(
+        "quarantined sources absent from production readiness",
+        set(readiness_keys).isdisjoint(quarantined_keys),
+        True,
+    )
+    _expect_equal(
+        "RainSewer remains in production readiness",
+        "official.civil_iot.sewer_water_level" in readiness_keys,
+        True,
     )
 
 

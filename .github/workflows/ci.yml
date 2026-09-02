@@ -240,7 +240,7 @@ jobs:
               tests/test_civil_iot_water_resource_quarantine_postgres.py \
               -q
 
-      - name: Populated migration upgrade smoke from 0032 to 0036
+      - name: Populated migration upgrade smoke from 0032 to checked-in latest
         env:
           MIGRATION_UPGRADE_TEST_DATABASE_URL: postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk_upgrade_test
         run: |

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -99,6 +99,13 @@ COVERAGE_SIGNAL_TYPES = (
     "flood_depth",
     "sewer_water_level",
     "pump_or_gate_status",
+)
+QUARANTINED_CENTRAL_BACKBONE_ADAPTER_KEYS = frozenset(
+    {
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+    }
 )
 
 
@@ -933,8 +940,21 @@ TAIWAN_LOCAL_SOURCE_COVERAGE: tuple[LocalSourceCoverageRecord, ...] = (
 
 
 def local_source_coverage_generated_at() -> datetime:
-    return datetime(2026, 6, 29, tzinfo=UTC)
+    return datetime(2026, 9, 2, tzinfo=UTC)
 
 
 def list_local_source_coverage() -> tuple[LocalSourceCoverageRecord, ...]:
-    return TAIWAN_LOCAL_SOURCE_COVERAGE
+    # Preserve the reviewed raw discovery records above, including historical
+    # source observations, while preventing quarantined adapters from being
+    # presented as current operational county coverage.
+    return tuple(
+        replace(
+            record,
+            central_backbone_adapter_keys=tuple(
+                adapter_key
+                for adapter_key in record.central_backbone_adapter_keys
+                if adapter_key not in QUARANTINED_CENTRAL_BACKBONE_ADAPTER_KEYS
+            ),
+        )
+        for record in TAIWAN_LOCAL_SOURCE_COVERAGE
+    )

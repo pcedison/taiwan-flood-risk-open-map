@@ -332,6 +332,23 @@ def _filter_packets(
             }
             if packet_signals.isdisjoint(signal_filter):
                 continue
+            updated = dict(packet)
+            updated["target_signal_types"] = [
+                str(signal_type)
+                for signal_type in packet.get("target_signal_types", [])
+                if str(signal_type) in signal_filter
+            ]
+            updated["completion_evidence_targets"] = [
+                dict(target)
+                for target in packet.get("completion_evidence_targets", [])
+                if isinstance(target, Mapping)
+                and (
+                    target.get("manifest_section") != "signal_family_gap_evidence"
+                    or str(target.get("signal_type", "")) in signal_filter
+                )
+            ]
+            filtered.append(updated)
+            continue
         filtered.append(packet)
     return tuple(filtered)
 
