@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import psycopg
+
 from app.config import WorkerSettings
 from app.jobs.historical_coverage_review import (
     HistoricalCoverageGapReviewError,
@@ -56,19 +58,16 @@ def run_historical_coverage_gap_review_command(
                 "target_years": [target.year for target in manifest.targets],
                 "target_statuses": {str(target.year): target.status for target in manifest.targets},
             }
-    except (HistoricalCoverageGapReviewError, OSError, ValueError) as exc:
-        print(
-            json.dumps(
-                {
-                    "status": "failed",
-                    "mode": "persist" if args.persist else "dry-run",
-                    "reason": str(exc),
-                    "network_allowed": False,
-                },
-                sort_keys=True,
-            )
+    except psycopg.Error as exc:
+        return _print_failure(
+            persist=args.persist,
+            reason=(
+                "historical coverage database operation failed "
+                f"({exc.__class__.__name__}); inspect the private worker logs"
+            ),
         )
-        return 1
+    except (HistoricalCoverageGapReviewError, OSError, ValueError) as exc:
+        return _print_failure(persist=args.persist, reason=str(exc))
 
     payload.update(
         {
@@ -86,6 +85,21 @@ def run_historical_coverage_gap_review_command(
     )
     print(json.dumps(payload, sort_keys=True))
     return 0
+
+
+def _print_failure(*, persist: bool, reason: str) -> int:
+    print(
+        json.dumps(
+            {
+                "status": "failed",
+                "mode": "persist" if persist else "dry-run",
+                "reason": reason,
+                "network_allowed": False,
+            },
+            sort_keys=True,
+        )
+    )
+    return 1
 
 
 def _require_persist_approval(args: argparse.Namespace) -> None:

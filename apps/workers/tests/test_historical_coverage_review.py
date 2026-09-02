@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import psycopg
 
 from app.jobs.historical_coverage_review import (
     APPROVED_HISTORICAL_COVERAGE_GAP_REVIEW_SHA256,
@@ -160,6 +161,43 @@ def test_cli_defaults_to_manifest_only_no_network_dry_run(
     assert payload["network_allowed"] is False
     assert payload["database_checked"] is False
     assert payload["target_cell_count"] == 44
+
+
+def test_cli_returns_sanitized_json_for_database_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_database_url = "postgresql://private-user:private-password@example.test/flood"
+
+    def fail_database_operation(*_args: Any, **_kwargs: Any) -> Any:
+        raise psycopg.OperationalError(f"could not connect to {private_database_url}")
+
+    monkeypatch.setattr(
+        PostgresHistoricalCoverageGapReviewWriter,
+        "assess",
+        fail_database_operation,
+    )
+
+    exit_code = main(
+        [
+            "--run-historical-coverage-gap-review",
+            "--historical-coverage-review-manifest",
+            str(REVIEW_MANIFEST),
+            "--historical-coverage-review-expected-sha256",
+            REVIEW_MANIFEST_SHA256,
+            "--database-url",
+            private_database_url,
+        ]
+    )
+
+    assert exit_code == 1
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["status"] == "failed"
+    assert payload["mode"] == "dry-run"
+    assert payload["reason"].startswith("historical coverage database operation failed")
+    assert private_database_url not in output
+    assert "private-password" not in output
 
 
 @pytest.mark.parametrize(
