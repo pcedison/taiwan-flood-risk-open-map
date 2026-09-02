@@ -71,13 +71,16 @@ live snapshot。必須有測試證明舊 snapshot 不會覆蓋新版 source chec
 | 年份 | 主要證據 | 目標狀態 |
 | --- | --- | --- |
 | 2012–2016 | WRA historical KML | 來源已查核；保留大尺度調查限制 |
-| 2017 | 全國與 22 縣市官方來源 review | `partial` 或有 review ref 的 `not_published` |
+| 2017 | WRA／NSTC 全國官方來源 review；地方來源仍列明未耗盡 | 有 review ref 的 `not_published`；不得宣稱地方事件完整 |
 | 2018–2020 | 凍結 NSTC snapshot | 受控 backfill 後 `partial` |
 | 2021–2025 | NSTC live revisions | 維持較新 snapshot 權威 |
-| 2026 | 當年度持續 ingestion／來源 review | `partial`，不得宣稱年度完整 |
+| 2026 | 當年度持續 ingestion／來源 review | 未取得年度列前維持 `failed`；不得宣稱年度完整 |
 
 新增受控 coverage assessment 命令，禁止直接手改 330 格。每個非 `unassessed` cell
 必須能追到 source check 或 immutable review ref。
+
+2017 的 `not_published` 只描述 manifest 內核准全國來源的發布缺口；22 縣市個別網站
+仍是明示 backlog，不能把 nationwide review 擴張成所有地方事件的完整稽核。
 
 退出門檻：恰好 22 × 15 = 330 格、每年 22 格、`unassessed=0`、
 `missing_persisted=0`；known gaps 繼續存在且 `data_coverage_complete` 不得被誤設為 true。
