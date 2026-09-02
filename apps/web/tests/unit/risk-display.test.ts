@@ -42,7 +42,6 @@ const {
   normalizeRiskLevel,
   publicDataFreshnessItems,
   publicEvidenceDisplayItems,
-  publicHistoricalEvidenceItems,
   riskDecisionSummary,
   riskOverlayPresentation,
   riskSummaryDecisionText,
@@ -561,52 +560,6 @@ test("public evidence display keeps current families and one historical basis", 
   assert.deepEqual(
     historicalEvidenceVintage(history, new Date("2026-08-31T00:00:00Z")),
     { isOld: true, label: "2016 年 · 約 10 年前 · 舊資料" },
-  );
-});
-
-test("historical evidence keeps 15 calendar years and sorts newest to oldest", () => {
-  const history = (year: number, id: string): EvidenceItem => ({
-    ...fullEvidence,
-    evidence_scope: "historical",
-    event_type: "flood_report",
-    id,
-    observed_at: `${year}-08-01T00:00:00Z`,
-    occurred_at: `${year}-08-01T00:00:00Z`,
-    published_at: null,
-    source_type: "official",
-  });
-  const newest = history(2026, "newest");
-  const middle = history(2021, "middle");
-  const oldestIncluded = history(2012, "oldest-included");
-  const outsideWindow = history(2011, "outside-window");
-
-  assert.deepEqual(
-    publicHistoricalEvidenceItems(
-      [middle, outsideWindow, oldestIncluded, newest],
-      new Date("2026-09-01T00:00:00Z"),
-    ).map((item) => item.id),
-    ["newest", "middle", "oldest-included"],
-  );
-});
-
-test("annual historical evidence never renders a synthetic exact date", () => {
-  const annualHistory: EvidenceItem = {
-    ...fullEvidence,
-    evidence_scope: "historical",
-    event_type: "flood_report",
-    event_year: 2025,
-    observed_at: "2025-12-31T04:00:00Z",
-    occurred_at: "2025-12-31T04:00:00Z",
-    temporal_precision: "year",
-  };
-
-  assert.equal(
-    evidenceTimeSummary(annualHistory),
-    "2025 年（年度資料，來源未提供確切日期）",
-  );
-  assert.deepEqual(
-    historicalEvidenceVintage(annualHistory, new Date("2026-09-01T00:00:00Z")),
-    { isOld: false, label: "2025 年 · 約 1 年前" },
   );
 });
 

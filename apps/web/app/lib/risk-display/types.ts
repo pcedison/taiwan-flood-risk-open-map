@@ -18,12 +18,6 @@ export type EvidencePreview = {
   url?: string | null;
   distance_to_query_m: number | null;
   evidence_scope?: "current" | "historical" | "context" | "unspecified";
-  event_year?: number | null;
-  temporal_precision?: "instant" | "day" | "month" | "year" | "unknown";
-  event_start_at?: string | null;
-  event_end_at?: string | null;
-  observation_count?: number | null;
-  episode_algorithm_version?: string | null;
 };
 
 export type EvidenceItem = EvidencePreview & {
@@ -35,13 +29,6 @@ export type EvidenceItem = EvidencePreview & {
 };
 
 export type EvidenceStatus = "idle" | "loading" | "ready" | "error";
-
-export type HistoricalCoverageStatus =
-  | "idle"
-  | "loading"
-  | "ready"
-  | "error"
-  | "unavailable";
 
 export type DataFreshnessItem = {
   source_id: string;

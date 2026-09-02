@@ -37,53 +37,6 @@ export type EvidenceListResponse = {
   next_cursor: string | null;
 };
 
-export type HistoricalCoverageCell = {
-  county_code: string;
-  county: string;
-  year: number;
-  status:
-    | "unassessed"
-    | "complete"
-    | "partial"
-    | "official_checked_empty"
-    | "not_published"
-    | "stale"
-    | "failed";
-  resolved: boolean;
-  persisted: boolean;
-  record_count: number;
-  checked_source_count: number;
-  successful_source_count: number;
-  source_adapter_keys: string[];
-  assessed_at: string | null;
-  last_attempted_at: string | null;
-  last_succeeded_at: string | null;
-  status_reason: string;
-  updated_at: string | null;
-};
-
-export type HistoricalCoverageResponse = {
-  generated_at: string;
-  summary: {
-    start_year: number;
-    end_year: number;
-    lookback_years?: number;
-    calendar_timezone?: string;
-    expected_cell_count: number;
-    returned_cell_count: number;
-    resolved_cell_count: number;
-    unresolved_cell_count: number;
-    missing_persisted_cell_count: number;
-    known_gap_cell_count?: number;
-    status_counts: Record<string, number>;
-    audit_complete?: boolean;
-    data_coverage_complete?: boolean;
-    coverage_complete?: boolean;
-    absence_is_safety_evidence: false;
-  };
-  cells: HistoricalCoverageCell[];
-};
-
 export type NearbyCoverageLevel =
   | "high"
   | "medium"
@@ -195,7 +148,6 @@ export type NearbyRealtimeCoverage = {
   jurisdiction_checked?: boolean;
   jurisdiction_catalog_complete?: boolean;
   home_jurisdiction?: string | null;
-  home_jurisdiction_code?: string | null;
   considered_jurisdictions?: string[];
   jurisdiction_mapping_revisions?: string[];
   jurisdiction_unverified_signal_types?: NearbyCoverageSignalType[];

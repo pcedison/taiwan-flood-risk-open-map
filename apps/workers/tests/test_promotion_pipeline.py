@@ -357,7 +357,6 @@ def test_postgres_promotion_writer_fetches_accepted_rows_and_inserts_evidence() 
     assert "ST_GeomFromGeoJSON" in insert_sql
     assert "JOIN data_sources source" in insert_sql
     assert "source_catalog_resolved" in insert_sql
-    assert "AT TIME ZONE 'Asia/Taipei'" in insert_sql
     assert insert_params[1] == "news.public_web.sample"
     assert insert_params[2] == "sample-news-001"
     assert insert_params[11] is None

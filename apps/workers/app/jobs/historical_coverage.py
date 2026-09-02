@@ -5,12 +5,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Final
-from zoneinfo import ZoneInfo
 
 ConnectionFactory = Callable[[], Any]
 
-HISTORICAL_COVERAGE_LOOKBACK_YEARS: Final = 15
-HISTORICAL_COVERAGE_CALENDAR_TIMEZONE: Final = "Asia/Taipei"
+HISTORICAL_COVERAGE_START_YEAR: Final = 2018
+HISTORICAL_COVERAGE_END_YEAR: Final = 2026
 HISTORICAL_COVERAGE_POINT_FALLBACK_METERS: Final = 100
 HISTORICAL_COVERAGE_ADAPTER_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -62,21 +61,15 @@ class PostgresHistoricalCoverageWriter:
             f"{adapter_key}:"
             f"{hashlib.sha256(raw_ref.encode('utf-8')).hexdigest()}"
         )
-        local_year = assessed_at.astimezone(
-            ZoneInfo(HISTORICAL_COVERAGE_CALENDAR_TIMEZONE)
-        ).year
-        start_year = local_year - HISTORICAL_COVERAGE_LOOKBACK_YEARS + 1
-        end_year = local_year
         with self._connect() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(_ENSURE_ACTIVE_WINDOW_SQL, (start_year, end_year))
                 cursor.execute(
                     _UPSERT_SOURCE_CHECKS_SQL,
                     (
                         raw_ref,
                         adapter_key,
-                        start_year,
-                        end_year,
+                        HISTORICAL_COVERAGE_START_YEAR,
+                        HISTORICAL_COVERAGE_END_YEAR,
                         adapter_key,
                         assessed_at,
                         assessed_at,
@@ -148,8 +141,6 @@ _SOURCE_ROWS_CTE = f"""
         SELECT
             staging.id,
             COALESCE(
-                NULLIF(staging.source_record_key, ''),
-                NULLIF(staging.payload->>'source_record_key', ''),
                 NULLIF(staging.payload->>'evidence_id', ''),
                 CASE
                     WHEN staging.source_id IS NOT NULL THEN
@@ -158,28 +149,15 @@ _SOURCE_ROWS_CTE = f"""
                 END,
                 staging.id::text
             ) AS evidence_key,
-            COALESCE(
-                staging.event_year,
-                CASE
-                    WHEN staging.payload->>'event_year' ~ '^[0-9]{{4}}$'
-                        THEN (staging.payload->>'event_year')::integer
-                END,
-                EXTRACT(YEAR FROM staging.occurred_at)::integer
-            ) AS coverage_year,
+            EXTRACT(YEAR FROM staging.occurred_at)::integer AS coverage_year,
             staging.payload->'location_payload'->'geometry' AS geometry_payload,
             staging.created_at
         FROM staging_evidence staging
         JOIN target_snapshot snapshot ON snapshot.id = staging.raw_snapshot_id
         WHERE staging.validation_status = 'accepted'
           AND staging.event_type = 'flood_report'
-          AND COALESCE(
-                staging.event_year,
-                CASE
-                    WHEN staging.payload->>'event_year' ~ '^[0-9]{{4}}$'
-                        THEN (staging.payload->>'event_year')::integer
-                END,
-                EXTRACT(YEAR FROM staging.occurred_at)::integer
-              ) BETWEEN %s AND %s
+          AND staging.occurred_at IS NOT NULL
+          AND EXTRACT(YEAR FROM staging.occurred_at)::integer BETWEEN %s AND %s
     ),
     accepted_rows AS MATERIALIZED (
         SELECT DISTINCT ON (candidate.evidence_key)
@@ -287,20 +265,6 @@ _SOURCE_ROWS_CTE = f"""
         SELECT id, coverage_year, jurisdiction_code
         FROM boundary_adjusted_rows
     )
-"""
-
-_ENSURE_ACTIVE_WINDOW_SQL = """
-    INSERT INTO historical_coverage_cells (
-        jurisdiction_code,
-        coverage_year
-    )
-    SELECT
-        jurisdiction.jurisdiction_code,
-        year_window.coverage_year
-    FROM realtime_jurisdictions jurisdiction
-    CROSS JOIN generate_series(%s::integer, %s::integer)
-        AS year_window(coverage_year)
-    ON CONFLICT (jurisdiction_code, coverage_year) DO NOTHING
 """
 
 _UPSERT_SOURCE_CHECKS_SQL = f"""

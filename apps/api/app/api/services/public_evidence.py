@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import base64
-import binascii
-import json
-from datetime import UTC, datetime
 from typing import Any, Protocol, cast
-from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from app.api.schemas import (
     Evidence,
@@ -16,11 +10,7 @@ from app.api.schemas import (
     LatLng,
 )
 from app.api.services import public_evidence_cache
-from app.domain.evidence import (
-    EvidenceRecord,
-    EvidenceUpsert,
-    HistoricalEvidencePagePosition,
-)
+from app.domain.evidence import EvidenceRecord, EvidenceRepositoryUnavailable, EvidenceUpsert
 from app.domain.geocoding import stable_uuid
 from app.domain.history import HistoricalFloodRecord
 from app.domain.realtime import OfficialRealtimeObservation
@@ -32,6 +22,8 @@ OFFICIAL_DATA_GOV_URLS = {
     "flood_potential": "https://data.gov.tw/dataset/25766",
     "flood_report": "https://data.gov.tw/dataset/130016",
 }
+
+OFFICIAL_FLOOD_DISASTER_SOURCE_PREFIX = "data-gov-130016:"
 
 # Alias kept for tests that clear the in-process cache between cases.
 _ASSESSMENT_EVIDENCE_CACHE = public_evidence_cache._MEMORY_CACHE
@@ -49,16 +41,6 @@ class FetchAssessmentEvidence(Protocol):
 
 class AssessmentDbEvidence(Protocol):
     def __call__(self, assessment_id: str, *, page_size: int) -> tuple[Evidence, ...]: ...
-
-
-class FetchAssessmentHistory(Protocol):
-    def __call__(
-        self,
-        *,
-        assessment_id: str,
-        page_size: int,
-        after: HistoricalEvidencePagePosition | None,
-    ) -> tuple[EvidenceRecord, ...]: ...
 
 
 def cache_assessment_evidence(
@@ -188,12 +170,6 @@ def evidence_from_record(record: EvidenceRecord) -> Evidence:
         evidence_scope=record.evidence_scope,
         location_precision=record.location_precision,
         limitations=list(record.limitations),
-        event_year=record.event_year,
-        temporal_precision=record.temporal_precision,
-        event_start_at=record.event_start_at,
-        event_end_at=record.event_end_at,
-        observation_count=record.observation_count,
-        episode_algorithm_version=record.episode_algorithm_version,
     )
 
 
@@ -234,122 +210,15 @@ def assessment_db_evidence(
     database_url: str,
     fetch_assessment_evidence: FetchAssessmentEvidence,
 ) -> tuple[Evidence, ...]:
-    records = fetch_assessment_evidence(
-        database_url=database_url,
-        assessment_id=assessment_id,
-        page_size=page_size,
-    )
-    return tuple(evidence_from_record(record) for record in records)
-
-
-def list_assessment_history(
-    assessment_id: str,
-    *,
-    cursor: str | None,
-    page_size: int,
-    fetch_history: FetchAssessmentHistory,
-) -> EvidenceListResponse:
-    after = decode_history_cursor(cursor, assessment_id=assessment_id) if cursor else None
-    records = fetch_history(
-        assessment_id=assessment_id,
-        page_size=page_size,
-        after=after,
-    )
-    has_more = len(records) > page_size
-    visible = records[:page_size]
-    next_cursor = (
-        encode_history_cursor(
-            assessment_id=assessment_id,
-            position=_history_page_position(visible[-1]),
-        )
-        if has_more and visible
-        else None
-    )
-    return EvidenceListResponse(
-        assessment_id=assessment_id,
-        items=[evidence_from_record(record) for record in visible],
-        next_cursor=next_cursor,
-    )
-
-
-def encode_history_cursor(
-    *,
-    assessment_id: str,
-    position: HistoricalEvidencePagePosition,
-) -> str:
-    payload = {
-        "v": 1,
-        "a": str(UUID(assessment_id)),
-        "y": position.event_year,
-        "t": position.event_time.astimezone(UTC).isoformat().replace("+00:00", "Z"),
-        "i": str(UUID(position.evidence_id)),
-    }
-    encoded = base64.urlsafe_b64encode(
-        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    ).decode("ascii")
-    return encoded.rstrip("=")
-
-
-def decode_history_cursor(
-    value: str,
-    *,
-    assessment_id: str,
-) -> HistoricalEvidencePagePosition:
-    if not value or len(value) > 2048:
-        raise ValueError("invalid history cursor")
     try:
-        padded = value + "=" * (-len(value) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
-        if not isinstance(payload, dict) or payload.get("v") != 1:
-            raise ValueError
-        bound_assessment = str(UUID(str(payload["a"])))
-        expected_assessment = str(UUID(assessment_id))
-        if bound_assessment != expected_assessment:
-            raise ValueError
-        event_year = int(payload["y"])
-        if not 1900 <= event_year <= 2100:
-            raise ValueError
-        event_time = datetime.fromisoformat(str(payload["t"]).replace("Z", "+00:00"))
-        if event_time.tzinfo is None or event_time.utcoffset() is None:
-            raise ValueError
-        evidence_id = str(UUID(str(payload["i"])))
-    except (
-        KeyError,
-        TypeError,
-        ValueError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        binascii.Error,
-    ) as exc:
-        raise ValueError("invalid history cursor") from exc
-    return HistoricalEvidencePagePosition(
-        event_year=event_year,
-        event_time=event_time,
-        evidence_id=evidence_id,
-    )
-
-
-def _history_page_position(record: EvidenceRecord) -> HistoricalEvidencePagePosition:
-    taipei = ZoneInfo("Asia/Taipei")
-    event_time = (
-        record.event_end_at
-        or record.event_start_at
-        or record.occurred_at
-        or record.observed_at
-    )
-    event_year = record.event_year
-    if event_year is None:
-        fallback = event_time or record.ingested_at
-        event_year = fallback.astimezone(taipei).year
-    if record.temporal_precision == "year":
-        event_time = datetime(event_year, 1, 1, tzinfo=taipei)
-    elif event_time is None:
-        event_time = record.ingested_at
-    return HistoricalEvidencePagePosition(
-        event_year=event_year,
-        event_time=event_time,
-        evidence_id=record.id,
-    )
+        records = fetch_assessment_evidence(
+            database_url=database_url,
+            assessment_id=assessment_id,
+            page_size=page_size,
+        )
+    except EvidenceRepositoryUnavailable:
+        return ()
+    return tuple(evidence_from_record(record) for record in records)
 
 
 def list_assessment_evidence(
@@ -425,20 +294,6 @@ def historical_record_evidence(
         privacy_level="public",
         raw_ref=f"historical-record:{record.source_id}",
         evidence_scope="historical",
-        event_year=(
-            record.event_year
-            if record.event_year is not None
-            else record.occurred_at.year
-            if record.occurred_at is not None
-            else None
-        ),
-        temporal_precision=record.temporal_precision,
-        event_start_at=(
-            record.occurred_at if record.temporal_precision != "year" else None
-        ),
-        event_end_at=(
-            record.occurred_at if record.temporal_precision != "year" else None
-        ),
     )
 
 
@@ -493,12 +348,6 @@ def evidence_preview(evidence: Evidence) -> EvidencePreview:
         location_precision=evidence.location_precision,
         limitations=list(evidence.limitations),
         evidence_scope=evidence.evidence_scope,
-        event_year=evidence.event_year,
-        temporal_precision=evidence.temporal_precision,
-        event_start_at=evidence.event_start_at,
-        event_end_at=evidence.event_end_at,
-        observation_count=evidence.observation_count,
-        episode_algorithm_version=evidence.episode_algorithm_version,
     )
 
 
@@ -549,22 +398,8 @@ def signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
 
 
 def display_evidence_items(evidence_items: list[Evidence]) -> list[Evidence]:
-    return sorted(collapse_flood_potential_items(evidence_items), key=_display_sort_key)
-
-
-def _display_sort_key(item: Evidence) -> tuple[int, float, float, str]:
-    scope_rank = {"current": 0, "context": 1, "historical": 2}.get(
-        item.evidence_scope,
-        3,
-    )
-    event_time = (
-        item.occurred_at or item.observed_at or item.ingested_at
-        if item.evidence_scope == "historical"
-        else item.observed_at or item.occurred_at or item.ingested_at
-    )
-    timestamp = event_time.timestamp() if event_time is not None else 0.0
-    distance = item.distance_to_query_m if item.distance_to_query_m is not None else float("inf")
-    return scope_rank, -timestamp, distance, item.id
+    evidence_items = collapse_official_flood_disaster_items(evidence_items)
+    return collapse_flood_potential_items(evidence_items)
 
 
 def select_evidence_preview_items(
@@ -613,3 +448,96 @@ def collapse_flood_potential_items(evidence_items: list[Evidence]) -> list[Evide
         }
     )
     return [*non_flood_potential_items, representative]
+
+
+def collapse_official_flood_disaster_items(evidence_items: list[Evidence]) -> list[Evidence]:
+    official_items = [item for item in evidence_items if is_official_flood_disaster_item(item)]
+    if len(official_items) <= 1:
+        return evidence_items
+
+    representative = official_flood_disaster_summary_item(official_items)
+    collapsed: list[Evidence] = []
+    inserted = False
+    for item in evidence_items:
+        if not is_official_flood_disaster_item(item):
+            collapsed.append(item)
+            continue
+        if not inserted:
+            collapsed.append(representative)
+            inserted = True
+    return collapsed
+
+
+def is_official_flood_disaster_item(item: Evidence) -> bool:
+    return (
+        item.source_type == "official"
+        and item.event_type == "flood_report"
+        and item.source_id.startswith(OFFICIAL_FLOOD_DISASTER_SOURCE_PREFIX)
+    )
+
+
+def official_flood_disaster_summary_item(items: list[Evidence]) -> Evidence:
+    closest_item = min(
+        items,
+        key=lambda item: (
+            item.distance_to_query_m if item.distance_to_query_m is not None else float("inf")
+        ),
+    )
+    candidate_times = [
+        value
+        for item in items
+        for value in (item.observed_at, item.occurred_at)
+        if value is not None
+    ]
+    latest_observed = (
+        max(candidate_times)
+        if candidate_times
+        else (closest_item.observed_at or closest_item.occurred_at)
+    )
+    years = sorted(
+        {
+            value.year
+            for item in items
+            for value in (item.observed_at or item.occurred_at,)
+            if value is not None
+        }
+    )
+    label = year_label(years)
+    return closest_item.model_copy(
+        update={
+            "id": stable_uuid(
+                "official-flood-disaster-summary",
+                len(items),
+                ",".join(sorted(item.source_id for item in items)),
+            ),
+            "source_id": "data-gov-130016:summary",
+            "title": f"官方淹水災害情資點位彙整（{label}）",
+            "summary": (
+                f"查詢半徑內命中 {len(items)} 筆 data.gov.tw 130016 官方淹水災點快照，"
+                f"命中年份：{label}。已合併為一筆代表資料顯示，以避免同一官方快照"
+                "在證據清單重複佔版面；風險計分仍使用原始命中點位。"
+            ),
+            "observed_at": latest_observed,
+            "occurred_at": latest_observed,
+            "distance_to_query_m": min(
+                (
+                    item.distance_to_query_m
+                    for item in items
+                    if item.distance_to_query_m is not None
+                ),
+                default=None,
+            ),
+            "confidence": max(item.confidence for item in items),
+            "freshness_score": max(item.freshness_score for item in items),
+            "source_weight": max(item.source_weight for item in items),
+            "raw_ref": f"historical-record:data-gov-130016:summary:{len(items)}",
+        }
+    )
+
+
+def year_label(years: list[int]) -> str:
+    if not years:
+        return "年份未提供"
+    if len(years) <= 3:
+        return "、".join(str(year) for year in years)
+    return f"{years[0]}-{years[-1]}"

@@ -2,9 +2,7 @@
 
 from app.domain.evidence.repository import (
     OBSERVED_FLOOD_HISTORY_CURRENT_GRACE,
-    OBSERVED_FLOOD_HISTORY_WINDOW_YEARS,
-    AssessmentEvidenceExpired,
-    AssessmentEvidenceNotFound,
+    OBSERVED_FLOOD_HISTORY_WINDOW,
     RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS,
     RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE,
     RECENT_INCIDENT_CONTEXT_WINDOW,
@@ -12,7 +10,6 @@ from app.domain.evidence.repository import (
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
     EvidenceUpsert,
-    HistoricalEvidencePagePosition,
     NearbyCoverageRow,
     QueryHeatSnapshot,
     RealtimeJurisdictionContext,
@@ -21,7 +18,6 @@ from app.domain.evidence.repository import (
     RealtimeSourceHealthRow,
     RiskAssessmentPersistence,
     fetch_assessment_evidence,
-    fetch_assessment_history,
     fetch_evidence_by_ids,
     fetch_query_heat_snapshot,
     persist_risk_assessment,
@@ -37,9 +33,7 @@ from app.domain.evidence.repository import (
 
 __all__ = [
     "OBSERVED_FLOOD_HISTORY_CURRENT_GRACE",
-    "OBSERVED_FLOOD_HISTORY_WINDOW_YEARS",
-    "AssessmentEvidenceExpired",
-    "AssessmentEvidenceNotFound",
+    "OBSERVED_FLOOD_HISTORY_WINDOW",
     "RECENT_INCIDENT_CONTEXT_ADAPTER_KEYS",
     "RECENT_INCIDENT_CONTEXT_FUTURE_TOLERANCE",
     "RECENT_INCIDENT_CONTEXT_WINDOW",
@@ -47,7 +41,6 @@ __all__ = [
     "EvidenceRecord",
     "EvidenceRepositoryUnavailable",
     "EvidenceUpsert",
-    "HistoricalEvidencePagePosition",
     "NearbyCoverageRow",
     "QueryHeatSnapshot",
     "RealtimeJurisdictionContext",
@@ -56,7 +49,6 @@ __all__ = [
     "RealtimeSourceHealthRow",
     "RiskAssessmentPersistence",
     "fetch_assessment_evidence",
-    "fetch_assessment_history",
     "fetch_evidence_by_ids",
     "fetch_query_heat_snapshot",
     "persist_risk_assessment",

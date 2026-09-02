@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.api.schemas import LatLng, NearbyCoverageSignal, RiskAssessRequest
-from app.api.services.assessment import AssessmentService, _historical_records_in_window
+from app.api.services.assessment import AssessmentService
 from app.domain.assessment import AssessmentData, AssessmentSourceState
 from app.domain.evidence import (
     EvidenceRecord,
@@ -24,23 +24,6 @@ HISTORY_ID = "911d1bdf-0cc9-49bc-896d-f92680054b08"
 POLICE_CONTEXT_ID = "3b3a3f0f-0b6a-4f0a-9b4a-8c1f5b6a2d31"
 WRA_CONTEXT_ID = "5f2c1a44-8f2b-4d4c-9a2e-1c7d3e9b6a52"
 POLICE_LIMITATION = "警廣即時路況通報，尚未由淹水感測器確認。"
-
-
-def test_historical_window_uses_event_date_and_keeps_15_calendar_years() -> None:
-    outside = replace(
-        _record("outside", event_type="flood_report", evidence_scope="historical"),
-        occurred_at=datetime(2011, 12, 31, tzinfo=UTC),
-        observed_at=NOW,
-    )
-    oldest_included = replace(
-        _record("oldest", event_type="flood_report", evidence_scope="historical"),
-        occurred_at=datetime(2012, 1, 1, tzinfo=UTC),
-        observed_at=NOW,
-    )
-
-    assert _historical_records_in_window((outside, oldest_included), now=NOW) == (
-        oldest_included,
-    )
 
 
 @dataclass

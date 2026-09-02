@@ -105,13 +105,11 @@ def test_bundled_official_flood_disaster_points_cover_taiwan_wide_extent() -> No
     )
 
     records = load_official_flood_disaster_records(str(csv_path))
-    years = {record.event_year for record in records}
+    years = {record.occurred_at.year for record in records}
     latitudes = [record.lat for record in records]
     longitudes = [record.lng for record in records]
 
     assert len(records) >= 5000
-    assert all(record.occurred_at is None for record in records)
-    assert all(record.temporal_precision == "year" for record in records)
     assert min(years) == 2018
     assert max(years) == 2022
     assert min(latitudes) <= 22.1

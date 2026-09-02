@@ -93,11 +93,7 @@ class AssessmentService:
         ):
             recent_history = self._recent_history_lookup(request, data, now=now)
         historical_items = tuple(
-            evidence_from_record(item)
-            for item in _historical_records_in_window(
-                (*recent_history, *data.historical),
-                now=now,
-            )
+            evidence_from_record(item) for item in (*recent_history, *data.historical)
         )
         # Display-only. Context never becomes a scorer signal, so it cannot move
         # realtime, historical, overall, confidence, or coverage.
@@ -225,60 +221,6 @@ def _deduplicate_evidence(items: tuple[Evidence, ...]) -> tuple[Evidence, ...]:
     return tuple(unique)
 
 
-def _historical_records_in_window(
-    records: tuple[EvidenceRecord, ...],
-    *,
-    now: datetime,
-) -> tuple[EvidenceRecord, ...]:
-    from app.domain.history.window import historical_year_window
-
-    window = historical_year_window(now)
-    retained = [
-        record
-        for record in records
-        if record.evidence_scope != "historical"
-        or (
-            (event_year := _historical_record_year(record, now)) is not None
-            and window.start_year <= event_year <= window.end_year
-        )
-    ]
-    return tuple(sorted(retained, key=lambda record: _historical_record_sort_key(record, now)))
-
-
-def _historical_record_sort_key(
-    record: EvidenceRecord,
-    now: datetime,
-) -> tuple[float, float, str]:
-    from zoneinfo import ZoneInfo
-
-    event_year = _historical_record_year(record, now) or 0
-    event_time = record.event_end_at or record.event_start_at or record.occurred_at or record.observed_at
-    if event_time is None:
-        event_time = datetime(event_year, 1, 1, tzinfo=ZoneInfo("Asia/Taipei"))
-    distance = (
-        record.distance_to_query_m
-        if record.distance_to_query_m is not None
-        else float("inf")
-    )
-    return -event_time.timestamp(), distance, record.id
-
-
-def _historical_record_year(record: EvidenceRecord, now: datetime) -> int | None:
-    if record.event_year is not None:
-        return record.event_year
-    event_time = (
-        record.event_end_at
-        or record.event_start_at
-        or record.occurred_at
-        or record.observed_at
-    )
-    if event_time is None:
-        return None
-    from zoneinfo import ZoneInfo
-
-    return event_time.astimezone(ZoneInfo("Asia/Taipei")).year
-
-
 def _is_uuid(value: str) -> bool:
     try:
         UUID(value)
@@ -296,7 +238,7 @@ def _history_needs_refresh(
         observed_at
         for record in records
         if record.event_type in {"flood_report", "road_closure"}
-        for observed_at in (record.occurred_at or record.observed_at,)
+        for observed_at in (record.observed_at or record.occurred_at,)
         if observed_at is not None
     ]
     if not observed_events:

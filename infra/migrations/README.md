@@ -281,13 +281,3 @@ NSTC source from active-snapshot replacement to revision retention, so a newly
 published five-year snapshot cannot hide older official rows already ingested.
 The migration only expands and preserves audit state; it does not claim that
 the unresolved 15-year cells are complete.
-
-`0060_historical_event_semantics.sql` separates event time from ingestion time
-for historical evidence. It adds `event_year`, `temporal_precision`, explicit
-event bounds, and a stable upstream record key to staging and promoted
-evidence. Dataset 130016 rows are migrated from the legacy synthetic December
-31 timestamp to true year-only semantics with nullable event timestamps. Raw
-snapshot revisions remain available for audit, while public readers can dedupe
-them by stable record identity. The migration also adds bounded indexes for
-newest-first history pages and query-time flood-sensor episode aggregation; it
-does not delete raw observations or claim missing years are complete.

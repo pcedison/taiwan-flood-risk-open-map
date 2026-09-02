@@ -34,9 +34,8 @@ must not be treated as the production basemap path.
 - Map-first risk query shell.
 - Address/geocode query flow against the API contract.
 - Risk summary and evidence/freshness rendering groundwork.
-- Evidence drawer that fetches assessment-attached evidence from
-  `/v1/evidence/{assessment_id}`, falls back to risk-response previews on
-  failure, and lazily pages complete history from `/v1/history/{assessment_id}`.
+- Evidence drawer that fetches the full `/v1/evidence/{assessment_id}` list and
+  falls back to risk-response previews on failure.
 - Node unit tests for risk/evidence display helpers.
 - Playwright smoke coverage for the core map-risk path.
 

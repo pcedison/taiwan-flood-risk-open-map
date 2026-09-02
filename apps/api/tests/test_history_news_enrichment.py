@@ -109,18 +109,17 @@ def test_nationwide_official_citations_accept_other_counties_and_recent_years_on
 
     assert result.attempted is True
     assert result.health_status == "healthy"
-    assert len(result.records) == 2
+    assert len(result.records) == 1
     record = result.records[0]
     assert record.adapter_key == "official.gov_tw.flood_citation"
     assert record.source_type == "official"
     assert record.url == "https://www.taichung.gov.tw/incident/2024-flood"
     assert record.distance_to_query_m is None
-    assert record.properties["coverage_start_year"] == 2012
+    assert record.properties["coverage_start_year"] == 2020
     assert record.properties["coverage_end_year"] == 2026
     assert record.properties["coverage_is_complete"] is False
     assert record.properties["full_text_stored"] is False
-    assert result.records[1].url == "https://www.taichung.gov.tw/incident/2018-flood"
-    assert any("2026" in url and "2012" in url for url in requested_urls)
+    assert any("2026" in url and "2020" in url for url in requested_urls)
 
 
 def test_nationwide_official_citations_search_admin_area_before_exact_road() -> None:

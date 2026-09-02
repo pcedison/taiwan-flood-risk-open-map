@@ -192,14 +192,7 @@ def historical_data_freshness(
             source_id="historical-flood-records",
             name="Historical flood fallback records",
             health_status="healthy" if historical_records else "unknown",
-            observed_at=max(
-                (
-                    record.occurred_at
-                    for record, _ in historical_records
-                    if record.occurred_at is not None
-                ),
-                default=None,
-            ),
+            observed_at=max((record.occurred_at for record, _ in historical_records), default=None),
             ingested_at=now,
             feature_count=len(historical_records),
             message=historical_freshness_message(historical_records),

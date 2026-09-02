@@ -73,7 +73,6 @@ function nearbyRealtimeCoverage(overrides: MockCoverageOverrides = {}) {
 test("searching a Taiwan landmark moves the map and renders a risk assessment", async ({
   page,
 }) => {
-  let historyRequestCount = 0;
   await page.route(`${API_BASE_URL}/v1/geocode`, async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -141,22 +140,6 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
             summary: "Community report summary",
             title: "公開討論淹水線索",
           },
-          {
-            confidence: 0.88,
-            distance_to_query_m: 180,
-            evidence_scope: "historical",
-            event_type: "flood_report",
-            event_year: 2025,
-            id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073d",
-            ingested_at: "2026-04-29T02:30:00Z",
-            observed_at: "2025-12-31T04:00:00Z",
-            occurred_at: "2025-12-31T04:00:00Z",
-            source_type: "official",
-            summary: "2025 官方年度歷史淹水點位。",
-            temporal_precision: "year",
-            title: "2025 官方歷史淹水點位",
-            url: "https://data.gov.tw/dataset/130016",
-          },
         ],
         evidence_url: null,
         expires_at: "2026-04-29T03:10:00Z",
@@ -173,7 +156,6 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
         nearby_realtime_coverage: {
           county_level_note: "縣市級 coverage catalog 只作背景；附近 coverage 以查詢點半徑重新判斷。",
           evaluated_at: "2026-04-29T03:00:00Z",
-          home_jurisdiction_code: "63000000",
           limitations: ["coverage 僅描述附近觀測密度與新鮮度，不直接改變風險分數。"],
           missing_signal_types: ["water_level"],
           overall_level: "medium",
@@ -329,155 +311,8 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
               title: "Raw CWA rainfall station title",
               url: "https://example.test/rainfall-full",
             },
-            {
-              confidence: 0.88,
-              distance_to_query_m: 180,
-              evidence_scope: "historical",
-              event_type: "flood_report",
-              freshness_score: 0.9,
-              geometry: { type: "Point", coordinates: [121.5165, 25.0475] },
-              id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073d",
-              ingested_at: "2026-04-29T02:30:00Z",
-              observed_at: "2025-08-12T04:00:00Z",
-              occurred_at: "2025-08-12T04:00:00Z",
-              point: { lat: 25.0475, lng: 121.5165 },
-              privacy_level: "public",
-              raw_ref: "history:2025",
-              source_id: "data-gov-130016:2025:test:1",
-              source_type: "official",
-              source_weight: 1,
-              summary: "2025 官方歷史淹水點位。",
-              title: "2025 官方歷史淹水點位",
-              url: "https://data.gov.tw/dataset/130016",
-            },
-            {
-              confidence: 0.84,
-              distance_to_query_m: 95,
-              evidence_scope: "historical",
-              event_type: "flood_report",
-              freshness_score: 0.86,
-              geometry: { type: "Point", coordinates: [121.5168, 25.0477] },
-              id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073e",
-              ingested_at: "2026-04-29T02:25:00Z",
-              observed_at: "2020-07-03T06:00:00Z",
-              occurred_at: "2020-07-03T06:00:00Z",
-              point: { lat: 25.0477, lng: 121.5168 },
-              privacy_level: "public",
-              raw_ref: "history:2020",
-              source_id: "data-gov-130016:2020:test:2",
-              source_type: "official",
-              source_weight: 1,
-              summary: "2020 官方歷史淹水點位。",
-              title: "2020 官方歷史淹水點位",
-              url: "https://data.gov.tw/dataset/130016",
-            },
           ],
           next_cursor: null,
-        },
-      });
-    },
-  );
-
-  await page.route(`${API_BASE_URL}/v1/history-coverage?county_code=63000000`, async (route) => {
-    await route.fulfill({
-      contentType: "application/json",
-      json: {
-        generated_at: "2026-09-01T12:00:00+08:00",
-        summary: {
-          absence_is_safety_evidence: false,
-          audit_complete: false,
-          calendar_timezone: "Asia/Taipei",
-          coverage_complete: false,
-          data_coverage_complete: false,
-          end_year: 2026,
-          expected_cell_count: 15,
-          known_gap_cell_count: 1,
-          lookback_years: 15,
-          missing_persisted_cell_count: 0,
-          resolved_cell_count: 13,
-          returned_cell_count: 15,
-          start_year: 2012,
-          status_counts: { complete: 12, failed: 1, unassessed: 2 },
-          unresolved_cell_count: 2,
-        },
-        cells: [],
-      },
-    });
-  });
-
-  await page.route(
-    `${API_BASE_URL}/v1/history/018f3bd2-6e4a-7b10-8d21-3d7fd9676c11**`,
-    async (route) => {
-      historyRequestCount += 1;
-      if (historyRequestCount === 1) {
-        await route.fulfill({
-          contentType: "application/json",
-          json: { detail: { code: "history_unavailable", message: "temporary failure" } },
-          status: 500,
-        });
-        return;
-      }
-      const cursor = new URL(route.request().url()).searchParams.get("cursor");
-      const common = {
-        confidence: 0.84,
-        evidence_scope: "historical",
-        event_type: "flood_report",
-        freshness_score: 0.86,
-        ingested_at: "2026-04-29T02:25:00Z",
-        privacy_level: "public",
-        source_type: "official",
-        source_weight: 1,
-        url: "https://data.gov.tw/dataset/130016",
-      };
-      await route.fulfill({
-        contentType: "application/json",
-        json: {
-          assessment_id: "018f3bd2-6e4a-7b10-8d21-3d7fd9676c11",
-          items: cursor
-            ? [
-                {
-                  ...common,
-                  distance_to_query_m: 210,
-                  event_year: 2018,
-                  id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073f",
-                  observed_at: "2018-12-31T04:00:00Z",
-                  occurred_at: "2018-12-31T04:00:00Z",
-                  raw_ref: "history:2018",
-                  source_id: "data-gov-130016:2018:test:3",
-                  summary: "2018 官方年度歷史淹水點位。",
-                  temporal_precision: "year",
-                  title: "2018 官方歷史淹水點位",
-                },
-              ]
-            : [
-                {
-                  ...common,
-                  confidence: 0.88,
-                  distance_to_query_m: 180,
-                  event_year: 2025,
-                  id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073d",
-                  observed_at: "2025-12-31T04:00:00Z",
-                  occurred_at: "2025-12-31T04:00:00Z",
-                  raw_ref: "history:2025",
-                  source_id: "data-gov-130016:2025:test:1",
-                  summary: "2025 官方年度歷史淹水點位。",
-                  temporal_precision: "year",
-                  title: "2025 官方歷史淹水點位",
-                },
-                {
-                  ...common,
-                  distance_to_query_m: 95,
-                  id: "018f3bd3-1b8f-7ac0-a71d-8c33f7c5073e",
-                  observed_at: "2020-07-03T06:00:00Z",
-                  occurred_at: "2020-07-03T06:00:00Z",
-                  raw_ref: "history:2020",
-                  source_id: "data-gov-130016:2020:test:2",
-                  summary: "2020 官方歷史淹水點位。",
-                  temporal_precision: "day",
-                  title: "2020 官方歷史淹水點位",
-                },
-              ],
-          next_cursor: cursor ? null : "history-cursor-2",
         },
       });
     },
@@ -518,52 +353,9 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText(/風險圈 500 公尺/)).toBeVisible();
   const evidencePanel = page.getByTestId("evidence-panel");
   await expect(evidencePanel.getByText("判讀依據")).toBeVisible();
-  await expect(evidencePanel.locator(".evidence-card")).toHaveCount(4);
+  await expect(evidencePanel.locator(".evidence-card")).toHaveCount(3);
   await expect(evidencePanel.locator(".evidence-card").first()).not.toBeVisible();
   await page.getByTestId("evidence-drawer").locator("summary").first().click();
-  await expect(evidencePanel.getByText("歷史淹水查核（近 15 年）")).toBeVisible();
-  await expect(evidencePanel.getByTestId("history-coverage-summary")).toContainText(
-    "15 年資料涵蓋不完整",
-  );
-  await expect(evidencePanel.getByTestId("history-coverage-summary")).toContainText(
-    "已查核 13 / 15 格",
-  );
-  await expect(evidencePanel.getByTestId("history-coverage-summary")).toContainText(
-    "已知缺口 1 格",
-  );
-  await expect(evidencePanel).toContainText("查無紀錄不能解讀為安全");
-  await expect(evidencePanel).toContainText(
-    "2025 年（年度資料，來源未提供確切日期）",
-  );
-  expect(historyRequestCount).toBe(0);
-  await expect(
-    evidencePanel.locator(".historical-evidence > .evidence-list .evidence-card"),
-  ).toBeVisible();
-  await expect(
-    evidencePanel.locator(".historical-evidence-more .evidence-card"),
-  ).not.toBeVisible();
-  await evidencePanel
-    .getByTestId("historical-evidence-more")
-    .locator(":scope > summary")
-    .click();
-  await expect.poll(() => historyRequestCount).toBe(1);
-  await expect(evidencePanel).toContainText("歷史紀錄載入失敗，已保留最新預覽資料");
-  await expect(evidencePanel).toContainText(
-    "2025 年（年度資料，來源未提供確切日期）",
-  );
-  await evidencePanel.getByRole("button", { name: "重試" }).click();
-  await expect.poll(() => historyRequestCount).toBe(2);
-  await expect(
-    evidencePanel.locator(".historical-evidence-more .evidence-card"),
-  ).toBeVisible();
-  await evidencePanel.getByRole("button", { name: "載入更多" }).click();
-  await expect.poll(() => historyRequestCount).toBe(3);
-  await expect(evidencePanel).toContainText(
-    "2018 年（年度資料，來源未提供確切日期）",
-  );
-  expect(
-    await evidencePanel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
-  ).toBe(true);
   await expect(page.getByText("資料限制")).toBeVisible();
   await expect(page.getByText("本次查詢未取得可採用的即時雨量觀測。")).not.toBeVisible();
   await page.getByTestId("evidence-limitations").getByText("資料限制").click();
@@ -587,11 +379,11 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
   await expect(page.getByText("官方公開資料").first()).toBeVisible();
   await expect(page.getByText("90%")).toBeVisible();
   await expect(page.getByText("0 公尺", { exact: true })).toBeVisible();
-  await expect(page.getByText("6 筆來源")).toBeVisible();
+  await expect(page.getByText("3 筆來源")).toBeVisible();
   await expect(page.getByTestId("risk-summary").locator(".risk-confidence-card")).toBeVisible();
   await expect(page.getByTestId("risk-summary").locator(".risk-explanation")).toBeVisible();
   await expect(page.getByTestId("risk-summary").locator(".layer-list")).toHaveCount(0);
-  await expect(page.getByTestId("evidence-panel").locator(".evidence-card")).toHaveCount(6);
+  await expect(page.getByTestId("evidence-panel").locator(".evidence-card")).toHaveCount(3);
   await expect(page.getByTestId("evidence-panel").locator(".freshness-strip")).toHaveCount(0);
   await expect(page.getByTestId("user-report-panel")).toHaveCount(0);
   await expect(page.getByTestId("diagnostics-panel")).toBeVisible();
