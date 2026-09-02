@@ -9,6 +9,7 @@ MIGRATION = REPO_ROOT / "infra" / "migrations" / "0057_ingestion_runtime_readine
 PROFILE_MIGRATIONS = (
     MIGRATION,
     REPO_ROOT / "infra" / "migrations" / "0058_nstc_recent_history_ingestion.sql",
+    REPO_ROOT / "infra" / "migrations" / "0062_quarantine_civil_iot_water_resource.sql",
 )
 REGISTRY = REPO_ROOT / "config" / "source-registry.yaml"
 
@@ -38,9 +39,17 @@ def test_migrated_readiness_profile_matches_registry_deployment_defaults() -> No
             sql,
         )
     )
+    quarantined = set(
+        re.findall(
+            r"DELETE FROM ingestion_readiness_sources.*?adapter_key IN \((.*?)\);",
+            sql,
+            flags=re.DOTALL,
+        )[0].replace("'", "").replace("\n", " ").replace(" ", "").split(",")
+    )
+    migrated -= quarantined
 
     assert migrated == expected
-    assert len(migrated) == 12
+    assert len(migrated) == 9
 
 
 def test_historical_source_has_a_daily_not_realtime_stale_gate() -> None:

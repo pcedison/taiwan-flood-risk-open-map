@@ -271,9 +271,9 @@ def _check_ingestion_readiness(
         else None
     )
     sources = payload.get("sources")
-    if expected_sources != 12 or not isinstance(sources, list) or len(sources) != 12:
+    if expected_sources != 9 or not isinstance(sources, list) or len(sources) != 9:
         failures.append(
-            "ingestion readiness did not return the complete 12-source production profile"
+            "ingestion readiness did not return the complete 9-source production profile"
         )
 
     jurisdiction_summary = payload.get("jurisdiction_summary")

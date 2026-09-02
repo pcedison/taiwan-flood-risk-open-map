@@ -31,10 +31,7 @@ class FakeConnection:
                 "official.wra.historical_flood",
                 "official.nstc.flood_disaster_points",
                 "official.ncdr.cap",
-                "official.civil_iot.flood_sensor",
                 "official.civil_iot.sewer_water_level",
-                "official.civil_iot.pump_water_level",
-                "official.civil_iot.gate_water_level",
                 "local.tainan.flood_sensor",
             }
         ]
@@ -66,7 +63,7 @@ def test_checked_in_registry_covers_every_source_surface() -> None:
     assert len(sources) == 63
     assert sum(source["implementation"] == "worker" for source in sources) == 58
     assert sum(source["runtime_scope"] == "v1_baseline" for source in sources) == 52
-    assert sum(source["deployment_default"] for source in sources) == 12
+    assert sum(source["deployment_default"] for source in sources) == 9
     assert sum(source["catalog_state"] != "absent" for source in sources) == 59
 
 

@@ -62,6 +62,7 @@ ALLOWED_ENABLEMENT_DECISIONS = frozenset(
         "request_time_fallback",
         "request_time_legacy",
         "superseded",
+        "upstream_unavailable",
     }
 )
 ADAPTER_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*(?:\.[a-z0-9_-]+)*$")

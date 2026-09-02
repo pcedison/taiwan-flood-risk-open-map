@@ -16,10 +16,7 @@ EXPECTED_BACKBONE_ADAPTERS = (
     "official.wra.water_level",
     "official.wra_iow.flood_depth",
     "official.ncdr.cap",
-    "official.civil_iot.flood_sensor",
     "official.civil_iot.sewer_water_level",
-    "official.civil_iot.pump_water_level",
-    "official.civil_iot.gate_water_level",
     "official.nstc.flood_disaster_points",
 )
 
@@ -61,7 +58,7 @@ def test_zeabur_single_service_autostarts_backbone_when_database_is_attached() -
     assert 'realtime_backbone_force_ingestion="${REALTIME_BACKBONE_FORCE_INGESTION_ON_START:-true}"' in dockerfile
     assert 'realtime_backbone_ingestion_disabled="${REALTIME_BACKBONE_INGESTION_DISABLED:-false}"' in dockerfile
     assert 'realtime_backbone_emergency_stop="${REALTIME_BACKBONE_EMERGENCY_STOP:-false}"' in dockerfile
-    assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.flood_sensor,official.civil_iot.sewer_water_level,official.civil_iot.pump_water_level,official.civil_iot.gate_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points"' in dockerfile
+    assert 'realtime_backbone_adapter_keys="official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.sewer_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points"' in dockerfile
     assert "SOURCE_WRA_HISTORICAL_FLOOD_ENABLED" in dockerfile
     assert "SOURCE_WRA_HISTORICAL_FLOOD_API_ENABLED" in dockerfile
     assert 'if [ -n "${worker_database_url}" ]; then' in dockerfile
@@ -125,15 +122,8 @@ def test_zeabur_single_service_sets_backbone_source_gates() -> None:
         "SOURCE_NCDR_CAP_ENABLED",
         "SOURCE_NCDR_CAP_API_ENABLED",
         "SOURCE_NCDR_CAP_CONTRACT_ENABLED",
-        "SOURCE_FLOOD_SENSOR_ENABLED",
-        "SOURCE_FLOOD_SENSOR_API_ENABLED",
-        "SOURCE_FLOOD_SENSOR_USE_LIVE",
         "SOURCE_CIVIL_IOT_SEWER_ENABLED",
         "SOURCE_CIVIL_IOT_SEWER_API_ENABLED",
-        "SOURCE_CIVIL_IOT_PUMP_ENABLED",
-        "SOURCE_CIVIL_IOT_PUMP_API_ENABLED",
-        "SOURCE_CIVIL_IOT_GATE_ENABLED",
-        "SOURCE_CIVIL_IOT_GATE_API_ENABLED",
         "SOURCE_TAINAN_FLOOD_SENSOR_ENABLED",
         "SOURCE_TAINAN_FLOOD_SENSOR_API_ENABLED",
         "SOURCE_NSTC_FLOOD_DISASTER_POINTS_ENABLED",

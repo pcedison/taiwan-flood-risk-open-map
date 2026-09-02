@@ -20,10 +20,10 @@ def _ingestion_payload(
         "status": "degraded",
         "deployment_sha": deployment_sha,
         "scheduler": {"status": scheduler_status},
-        "source_summary": {"expected_source_count": 12},
+        "source_summary": {"expected_source_count": 9},
         "sources": [
             {"source_id": f"source-{index}", "status": "operational"}
-            for index in range(12)
+            for index in range(9)
         ],
         "jurisdiction_summary": {
             "expected_county_count": 22,
@@ -102,7 +102,7 @@ def test_hosted_deployment_smoke_writes_evidence_and_completion_overlay(
     }
     assert evidence["ingestion_readiness"]["scheduler_status"] == "healthy"
     assert evidence["ingestion_readiness"]["source_summary"] == {
-        "expected_source_count": 12
+        "expected_source_count": 9
     }
     assert evidence["ingestion_readiness"]["jurisdiction_summary"] == {
         "expected_county_count": 22,

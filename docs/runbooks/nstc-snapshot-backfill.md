@@ -39,7 +39,7 @@ python -m app.main `
 ## 2. Staging migration 與回填
 
 先備份並確認 staging 部署 SHA、資料庫連線目標、恰好一份已審核且 active 的
-22 縣市 boundary snapshot。依正常 migration runner 套用到 0061；`/ready`
+22 縣市 boundary snapshot。依正常 migration runner 套用到 0062；`/ready`
 必須仍為 healthy。
 
 ```powershell

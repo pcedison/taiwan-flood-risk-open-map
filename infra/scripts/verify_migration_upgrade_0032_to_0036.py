@@ -23,7 +23,7 @@ from infra.scripts.apply_migrations import apply_migrations  # noqa: E402
 MIGRATIONS_DIR = REPO_ROOT / "infra" / "migrations"
 EXPECTED_PRE_UPGRADE_VERSION = 32
 EXPECTED_POST_UPGRADE_VERSION = 36
-EXPECTED_CHECKED_IN_VERSION = 61
+EXPECTED_CHECKED_IN_VERSION = 62
 EXPECTED_JURISDICTION_COUNT = 22
 EXPECTED_SIGNAL_CONTRACT_COUNT = 88
 EXPECTED_SOURCE_MAPPING_COUNT = 46
@@ -45,7 +45,10 @@ SCRUBBED_LNG = Decimal("121.53")
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Verify a populated production-style migration upgrade from 0032 to 0036."
+        description=(
+            "Verify a populated production-style migration upgrade from 0032 "
+            "through the checked-in latest migration."
+        )
     )
     parser.add_argument(
         "--database-url",
@@ -152,7 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     _verify_inventory_schema_and_fail_closed_seed(args.database_url)
     print(
         "Populated migration upgrade verified: "
-        "0032->0036, gap repair, database privacy fences, indexes, seed counts, "
+        f"0032->{EXPECTED_CHECKED_IN_VERSION:04d} via 0036, gap repair, "
+        "database privacy fences, indexes, seed counts, "
         "and fail-closed defaults."
     )
     return 0

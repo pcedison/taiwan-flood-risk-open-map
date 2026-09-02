@@ -37,7 +37,7 @@ dry-run 只有明確傳入 `--database-url` 才進入唯讀對帳。
 
 ## 2. Staging 唯讀對帳
 
-先確認 staging 已套用到 migration 0061，並已存在恰好 2012–2026 × 22 = 330 格。
+先確認 staging 已套用到 migration 0062，並已存在恰好 2012–2026 × 22 = 330 格。
 加入 database URL 但不要加入 `--persist`：
 
 ```powershell
