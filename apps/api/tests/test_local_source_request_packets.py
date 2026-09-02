@@ -226,6 +226,17 @@ def test_official_request_packets_can_filter_signal_gap_batch() -> None:
     kinmen = next(packet for packet in packets if packet["county"] == "\u91d1\u9580\u7e23")
     assert kinmen["packet_type"] == "authorization_request"
     assert kinmen["target_signal_types"] == ["pump_or_gate_status"]
+    yunlin = next(packet for packet in packets if packet["county"] == "雲林縣")
+    assert yunlin["target_signal_types"] == ["pump_or_gate_status"]
+    assert "訊號：pump_or_gate_status。" in yunlin["request_body"]
+    assert "flood_depth、pump_or_gate_status" not in yunlin["request_body"]
+    lienchiang = next(packet for packet in packets if packet["county"] == "連江縣")
+    assert lienchiang["target_signal_types"] == ["pump_or_gate_status"]
+    assert "地方直連訊號：pump_or_gate_status。" in lienchiang["request_body"]
+    assert "flood_depth、sewer_water_level" not in lienchiang["request_body"]
+    markdown = render_official_request_packets_markdown((yunlin, lienchiang))
+    assert "待補水資訊訊號：pump_or_gate_status" in markdown
+    assert "flood_depth、pump_or_gate_status" not in markdown
     assert all(packet["county"] != "宜蘭縣" for packet in packets)
     assert any(packet["county"] == "桃園市" for packet in packets)
 

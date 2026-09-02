@@ -326,18 +326,19 @@ def _filter_packets(
         if county_filter is not None and str(packet.get("county", "")) not in county_filter:
             continue
         if signal_filter is not None:
-            packet_signals = {
+            original_signal_types = [
                 str(signal_type)
                 for signal_type in packet.get("target_signal_types", [])
-            }
-            if packet_signals.isdisjoint(signal_filter):
+            ]
+            filtered_signal_types = [
+                signal_type
+                for signal_type in original_signal_types
+                if signal_type in signal_filter
+            ]
+            if not filtered_signal_types:
                 continue
             updated = dict(packet)
-            updated["target_signal_types"] = [
-                str(signal_type)
-                for signal_type in packet.get("target_signal_types", [])
-                if str(signal_type) in signal_filter
-            ]
+            updated["target_signal_types"] = filtered_signal_types
             updated["completion_evidence_targets"] = [
                 dict(target)
                 for target in packet.get("completion_evidence_targets", [])
@@ -347,10 +348,28 @@ def _filter_packets(
                     or str(target.get("signal_type", "")) in signal_filter
                 )
             ]
+            updated["request_body"] = _rewrite_filtered_signal_summary(
+                packet.get("request_body"),
+                original_signal_types=original_signal_types,
+                filtered_signal_types=filtered_signal_types,
+            )
             filtered.append(updated)
             continue
         filtered.append(packet)
     return tuple(filtered)
+
+
+def _rewrite_filtered_signal_summary(
+    value: Any,
+    *,
+    original_signal_types: list[str],
+    filtered_signal_types: list[str],
+) -> Any:
+    if not isinstance(value, str) or original_signal_types == filtered_signal_types:
+        return value
+    original_summary = "、".join(original_signal_types)
+    filtered_summary = "、".join(filtered_signal_types)
+    return value.replace(original_summary, filtered_summary)
 
 
 def render_official_request_packets_markdown(
