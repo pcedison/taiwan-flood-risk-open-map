@@ -39,9 +39,11 @@ def test_unified_service_shares_database_and_supervises_scheduler() -> None:
     assert 'wait -n "${api_pid}" "${web_pid}" "${scheduler_pid}"' in script
     assert "running initial official ingestion tick" not in script
     assert "first tick runs immediately" in script
-    assert script.index("setup_ingestion_env\nfi\napply_migrations") < script.index(
+    assert script.index("setup_ingestion_env\nfi\nreject_startup_migrations") < script.index(
         'echo "[start] launching api"'
     )
+    unified_block = script.split('echo "[start] api=', 1)[1]
+    assert "apply_migrations.py" not in unified_block
 
 
 def test_unified_service_records_intentional_ingestion_disable_before_api_start() -> None:
