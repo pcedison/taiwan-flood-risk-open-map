@@ -30,3 +30,13 @@ def test_water_resource_quarantine_is_explicit_and_preserves_rain_sewer() -> Non
     sewer_assertion = sql.split("SELECT is_enabled INTO sewer_enabled", 1)[1]
     assert "official.civil_iot.sewer_water_level" in sewer_assertion
     assert "sewer_enabled IS DISTINCT FROM true" in sewer_assertion
+
+
+def test_water_resource_quarantine_uses_runner_transaction() -> None:
+    sql = MIGRATION.read_text(encoding="utf-8")
+
+    # apply_migrations.py wraps the SQL and manifest insert in one transaction.
+    # Transaction control inside the migration would commit the SQL before its
+    # schema_migrations row and break that atomicity guarantee.
+    assert "\nBEGIN;" not in sql.upper()
+    assert "\nCOMMIT;" not in sql.upper()

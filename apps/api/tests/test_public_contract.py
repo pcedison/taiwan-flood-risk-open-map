@@ -650,7 +650,7 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert captured["params"] == (
         62,
         "0062_quarantine_civil_iot_water_resource.sql",
-        "510eaa856caa9aa783aff4bfd00d2ca78f7aa0a4599d9a4300c02b1fc66aa641",
+        "7a7ea91e05c60119d78792735c953edfd29236df470776a3053c4903b6114dd0",
         62,
         "public.ingestion_scheduler_heartbeats",
         "public.ingestion_readiness_sources",

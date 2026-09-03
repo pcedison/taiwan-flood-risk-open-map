@@ -9,8 +9,6 @@
 -- reviewed migration must explicitly re-enable these catalog rows after a
 -- replacement endpoint or restored entity service passes live acceptance.
 
-BEGIN;
-
 UPDATE data_sources
 SET is_enabled = false,
     metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
@@ -80,5 +78,3 @@ BEGIN
     END IF;
 END
 $$;
-
-COMMIT;
