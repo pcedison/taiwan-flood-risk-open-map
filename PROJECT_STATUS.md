@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-03 04:58 Asia/Taipei (2026-09-02 20:58 UTC)
+Last verified: 2026-09-03 09:28 Asia/Taipei (2026-09-03 01:28 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -67,6 +67,17 @@ the live verification sources listed below.
 
 ## Recorded production checkpoint
 
+- At 2026-09-03 09:28 Asia/Taipei, `origin/main`, Zeabur production deployment
+  `6235041060`, `/health`, and `/ready` all reported
+  `8723c01012cdbad2c792eb1119207681a8265f82`. PostgreSQL and Redis were
+  healthy, the SHA-pinned deployment smoke and strict public-risk evidence
+  smoke passed, and main CI and CodeQL were green. Open Dependabot,
+  code-scanning, and secret-scanning alerts and pull requests were all zero.
+  This proves production recovery, but issues
+  [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
+  [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
+  remain open until a genuine `schedule` Hosted Monitoring run passes on the
+  current main SHA.
 - At 2026-09-03 04:58 Asia/Taipei, `origin/main` was
   `68b985b7c0d0e66f2232ba22c7e9330e820cd735`; CI and CodeQL passed and open
   Dependabot, code-scanning, and secret-scanning alerts were all zero. Zeabur's
