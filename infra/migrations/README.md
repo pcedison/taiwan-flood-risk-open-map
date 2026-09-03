@@ -16,11 +16,13 @@ docker compose up -d postgres
 docker compose --profile tools run --rm migrate
 ```
 
-For Zeabur or another Docker Compose compatible host, run the same `migrate`
-service as an explicit release step before restarting `api`, `worker`, and
-`scheduler`. The runner records every applied filename and checksum in
-`schema_migrations`, skips recorded migrations, rejects drift, and serializes
-concurrent runs with a PostgreSQL advisory lock.
+For Zeabur, use the private `SERVICE_ROLE=migrate` plan/apply job in
+[explicit-migration-release.md](../../docs/runbooks/explicit-migration-release.md)
+before restarting `api`, `worker`, and `scheduler`. Application startup never
+applies migrations. The release runner records every applied filename and
+checksum in `schema_migrations`, skips recorded migrations, rejects drift,
+bounds the target version, and serializes concurrent runs with a PostgreSQL
+advisory lock.
 
 Validate migration filenames and basic SQL shape locally:
 
@@ -299,3 +301,12 @@ preferentially retaining the row referenced by promoted evidence. The writer
 then uses `ON CONFLICT DO NOTHING`, so an operator retry preserves the original
 staging decision and no longer grows the audit table. Raw snapshots and
 promoted evidence remain retained.
+
+`0062_quarantine_civil_iot_water_resource.sql` disables the Civil IoT flood,
+pump, and gate sources whose minimum official SensorThings entity queries were
+returning HTTP 500 during the 2026-09-02 review. It removes those sources from
+the production readiness profile while retaining their catalog and incident
+evidence. The independent RainSewer sewer source and WRA IoW flood-depth source
+remain in the reviewed backbone. Re-enabling a quarantined source requires a
+later reviewed migration and fresh 48-hour staging evidence; environment flags
+cannot override this catalog decision.

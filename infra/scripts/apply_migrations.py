@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import sys
+from time import monotonic
 from types import TracebackType
 from typing import Protocol, Self, cast
 
@@ -65,6 +66,7 @@ class Connection(Protocol):
 
 
 ConnectionFactory = Callable[[str], Connection]
+ProgressCallback = Callable[[str, str | None, int], None]
 
 
 def _connect(database_url: str) -> Connection:
@@ -73,6 +75,10 @@ def _connect(database_url: str) -> Connection:
 
 class MigrationDriftError(RuntimeError):
     """The database migration manifest differs from the checked-in files."""
+
+
+class MigrationReleaseGateError(RuntimeError):
+    """The database state differs from the explicitly reviewed release gate."""
 
 
 @dataclass(frozen=True)
@@ -94,6 +100,10 @@ class RecordedMigration:
 class MigrationSummary:
     applied: tuple[str, ...]
     skipped: tuple[str, ...]
+    pending: tuple[str, ...] = ()
+    current_version_before: int = 0
+    current_version_after: int = 0
+    target_version: int = 0
 
 
 def apply_migrations(
@@ -103,10 +113,20 @@ def apply_migrations(
     connection_factory: ConnectionFactory = _connect,
     lock_timeout_ms: int = DEFAULT_LOCK_TIMEOUT_MS,
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,
+    expected_current_version: int | None = None,
+    target_version: int | None = None,
+    dry_run: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> MigrationSummary:
     _validate_timeout("lock_timeout_ms", lock_timeout_ms)
     _validate_timeout("statement_timeout_ms", statement_timeout_ms)
     migrations = _migration_files(migrations_dir)
+    latest_version = migrations[-1].version
+    resolved_target_version = latest_version if target_version is None else target_version
+    if resolved_target_version not in {migration.version for migration in migrations}:
+        raise RuntimeError(
+            f"target_version must identify a checked-in migration: {resolved_target_version:04d}"
+        )
     applied: list[str] = []
     skipped: list[str] = []
 
@@ -121,15 +141,61 @@ def apply_migrations(
                 lock_timeout_ms=lock_timeout_ms,
                 statement_timeout_ms=statement_timeout_ms,
             )
+            lock_started = monotonic()
             _acquire_migration_lock(cursor)
+            if progress_callback is not None:
+                progress_callback(
+                    "lock_acquired",
+                    None,
+                    round((monotonic() - lock_started) * 1000),
+                )
 
-            with connection.transaction():
-                _ensure_schema_migrations(cursor)
+            if not dry_run:
+                with connection.transaction():
+                    _ensure_schema_migrations(cursor)
 
             recorded = _recorded_migrations(cursor)
             _validate_recorded_migrations(migrations, recorded)
+            current_version = max(recorded, default=0)
+            if (
+                expected_current_version is not None
+                and current_version != expected_current_version
+            ):
+                raise MigrationReleaseGateError(
+                    "Current migration version does not match the explicit release gate: "
+                    f"expected={expected_current_version:04d} actual={current_version:04d}"
+                )
+            if current_version > resolved_target_version:
+                raise MigrationReleaseGateError(
+                    "Database migration version is newer than the requested release target: "
+                    f"current={current_version:04d} target={resolved_target_version:04d}"
+                )
 
-            for migration in migrations:
+            selected_migrations = tuple(
+                migration
+                for migration in migrations
+                if migration.version <= resolved_target_version
+            )
+            pending = tuple(
+                migration.filename
+                for migration in selected_migrations
+                if migration.version not in recorded
+            )
+            if dry_run:
+                return MigrationSummary(
+                    applied=(),
+                    skipped=tuple(
+                        migration.filename
+                        for migration in selected_migrations
+                        if migration.version in recorded
+                    ),
+                    pending=pending,
+                    current_version_before=current_version,
+                    current_version_after=current_version,
+                    target_version=resolved_target_version,
+                )
+
+            for migration in selected_migrations:
                 if migration.version in recorded:
                     skipped.append(migration.filename)
                     continue
@@ -137,18 +203,43 @@ def apply_migrations(
                 # The SQL and its manifest row succeed or roll back together.
                 # Exiting this block commits before the next migration starts,
                 # so table locks cannot accidentally span multiple files.
-                with connection.transaction():
-                    cursor.execute(migration.sql)
-                    cursor.execute(
-                        """
-                        INSERT INTO schema_migrations (version, filename, checksum)
-                        VALUES (%s, %s, %s)
-                        """,
-                        (migration.version, migration.filename, migration.checksum),
+                migration_started = monotonic()
+                if progress_callback is not None:
+                    progress_callback("migration_started", migration.filename, 0)
+                try:
+                    with connection.transaction():
+                        cursor.execute(migration.sql)
+                        cursor.execute(
+                            """
+                            INSERT INTO schema_migrations (version, filename, checksum)
+                            VALUES (%s, %s, %s)
+                            """,
+                            (migration.version, migration.filename, migration.checksum),
+                        )
+                except Exception:
+                    if progress_callback is not None:
+                        progress_callback(
+                            "migration_failed",
+                            migration.filename,
+                            round((monotonic() - migration_started) * 1000),
+                        )
+                    raise
+                if progress_callback is not None:
+                    progress_callback(
+                        "migration_applied",
+                        migration.filename,
+                        round((monotonic() - migration_started) * 1000),
                     )
                 applied.append(migration.filename)
 
-    return MigrationSummary(applied=tuple(applied), skipped=tuple(skipped))
+    return MigrationSummary(
+        applied=tuple(applied),
+        skipped=tuple(skipped),
+        pending=(),
+        current_version_before=current_version,
+        current_version_after=resolved_target_version,
+        target_version=resolved_target_version,
+    )
 
 
 def _configure_session_timeouts(
@@ -278,6 +369,8 @@ def _environment_timeout(name: str, default: int) -> int:
 
 
 def _safe_failure_message(exc: Exception) -> str:
+    if isinstance(exc, MigrationReleaseGateError):
+        return f"Migration release gate failed: {exc}"
     if isinstance(exc, MigrationDriftError):
         return "Migration failed: migration manifest validation failed."
     if isinstance(exc, psycopg.Error):
@@ -287,6 +380,52 @@ def _safe_failure_message(exc: Exception) -> str:
     if isinstance(exc, (ValueError, RuntimeError)):
         return "Migration failed: migration configuration or manifest is invalid."
     return "Migration failed: unexpected error."
+
+
+def _print_progress(event: str, filename: str | None, elapsed_ms: int) -> None:
+    if filename is None:
+        print(f"Migration progress: event={event} elapsed_ms={elapsed_ms}", flush=True)
+    else:
+        print(
+            "Migration progress: "
+            f"event={event} filename={filename} elapsed_ms={elapsed_ms}",
+            flush=True,
+        )
+
+
+def _validate_release_gate(
+    *,
+    dry_run: bool,
+    release_environment: str | None,
+    release_sha: str | None,
+    release_ack: str | None,
+    expected_current_version: int | None,
+    target_version: int | None,
+) -> None:
+    release_requested = any(
+        value is not None
+        for value in (release_environment, release_sha, release_ack)
+    )
+    if not release_requested:
+        return
+    if release_environment not in {"staging", "production-beta"}:
+        raise RuntimeError(
+            "release_environment must be staging or production-beta"
+        )
+    if expected_current_version is None or target_version is None:
+        raise RuntimeError(
+            "explicit releases require expected_current_version and target_version"
+        )
+    if release_sha is None or re.fullmatch(r"[0-9a-f]{40}", release_sha) is None:
+        raise RuntimeError("explicit releases require a full lowercase commit SHA")
+    if dry_run:
+        return
+    expected_ack = (
+        f"apply:{release_environment}:"
+        f"{expected_current_version:04d}->{target_version:04d}:{release_sha}"
+    )
+    if release_ack != expected_ack:
+        raise RuntimeError("release acknowledgement does not match the exact release target")
 
 
 def _run(argv: list[str] | None = None) -> int:
@@ -305,16 +444,59 @@ def _run(argv: list[str] | None = None) -> int:
             "MIGRATION_STATEMENT_TIMEOUT_MS", DEFAULT_STATEMENT_TIMEOUT_MS
         ),
     )
+    parser.add_argument(
+        "--expected-current-version",
+        type=int,
+        help="Fail closed unless the database is currently at this version.",
+    )
+    parser.add_argument(
+        "--target-version",
+        type=int,
+        help="Apply no migration newer than this checked-in version.",
+    )
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="Validate and list the bounded release without writing to the database.",
+    )
+    parser.add_argument("--release-environment", choices=("staging", "production-beta"))
+    parser.add_argument("--release-sha")
+    parser.add_argument("--release-ack")
     args = parser.parse_args(argv)
+
+    _validate_release_gate(
+        dry_run=args.plan,
+        release_environment=args.release_environment,
+        release_sha=args.release_sha,
+        release_ack=args.release_ack,
+        expected_current_version=args.expected_current_version,
+        target_version=args.target_version,
+    )
 
     summary = apply_migrations(
         database_url=args.database_url,
         migrations_dir=args.migrations_dir,
         lock_timeout_ms=args.lock_timeout_ms,
         statement_timeout_ms=args.statement_timeout_ms,
+        expected_current_version=args.expected_current_version,
+        target_version=args.target_version,
+        dry_run=args.plan,
+        progress_callback=_print_progress,
     )
+    if args.plan:
+        print(
+            "Migration plan validated. "
+            f"current={summary.current_version_before:04d} "
+            f"target={summary.target_version:04d} "
+            f"pending={len(summary.pending)}"
+        )
+        if summary.pending:
+            print("Pending: " + ", ".join(summary.pending))
+        return 0
     print(
         "Migrations applied. "
+        f"from={summary.current_version_before:04d} "
+        f"to={summary.current_version_after:04d} "
         f"applied={len(summary.applied)} skipped={len(summary.skipped)}"
     )
     if summary.applied:

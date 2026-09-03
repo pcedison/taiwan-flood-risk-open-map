@@ -7,11 +7,12 @@
 # docs/architecture/realtime-storage-optimization-plan.md Phase 1):
 #
 #   all        (default) API + Web + optional ingestion scheduler together
-#   api        FastAPI only, foreground (applies migrations first)
+#   api        FastAPI only, foreground (never applies migrations)
 #   web        Next.js only, foreground (set INTERNAL_API_BASE_URL to the
 #              API service URL so /v1 rewrites reach it)
 #   scheduler  ingestion scheduler only, foreground (expects migrations to
 #              have been applied by the api service)
+#   migrate    explicit, bounded migration release job; defaults to plan-only
 set -Eeuo pipefail
 
 truthy() {
@@ -93,11 +94,51 @@ elif truthy "${realtime_backbone_ingestion_disabled}"; then
   fi
 fi
 
-apply_migrations() {
-  if truthy "${RUN_DATABASE_MIGRATIONS_ON_START:-true}" && [ -n "${worker_database_url}" ]; then
-    echo "[start] applying database migrations"
-    python /app/infra/scripts/apply_migrations.py --database-url "${worker_database_url}"
+reject_startup_migrations() {
+  if truthy "${RUN_DATABASE_MIGRATIONS_ON_START:-false}"; then
+    echo "[start] RUN_DATABASE_MIGRATIONS_ON_START is no longer supported; use SERVICE_ROLE=migrate"
+    exit 1
   fi
+}
+
+run_migration_release() {
+  local release_mode="${MIGRATION_RELEASE_MODE:-plan}"
+  local release_environment="${APP_ENV:-}"
+  local release_sha="${DEPLOYMENT_SHA:-${ZEABUR_GIT_COMMIT_SHA:-}}"
+  local expected_current="${MIGRATION_RELEASE_EXPECTED_CURRENT_VERSION:-}"
+  local target_version="${MIGRATION_RELEASE_TARGET_VERSION:-}"
+  local release_ack="${MIGRATION_RELEASE_ACK:-}"
+  local args=()
+
+  if [ -z "${worker_database_url}" ]; then
+    echo "[migration-release] no supported database URL is configured"
+    exit 1
+  fi
+  if [ -z "${expected_current}" ] || [ -z "${target_version}" ]; then
+    echo "[migration-release] expected current and target versions are required"
+    exit 1
+  fi
+  args=(
+    --database-url "${worker_database_url}"
+    --expected-current-version "${expected_current}"
+    --target-version "${target_version}"
+    --release-environment "${release_environment}"
+    --release-sha "${release_sha}"
+  )
+  case "${release_mode}" in
+    plan)
+      args+=(--plan)
+      ;;
+    apply)
+      args+=(--release-ack "${release_ack}")
+      ;;
+    *)
+      echo "[migration-release] MIGRATION_RELEASE_MODE must be plan or apply"
+      exit 1
+      ;;
+  esac
+  echo "[migration-release] mode=${release_mode} environment=${release_environment} expected=${expected_current} target=${target_version}"
+  exec python /app/infra/scripts/apply_migrations.py "${args[@]}"
 }
 
 configure_backbone_source_gates() {
@@ -162,11 +203,14 @@ setup_ingestion_env() {
 }
 
 case "${role}" in
+  migrate)
+    run_migration_release
+    ;;
   api)
     api_host="${API_HOST:-0.0.0.0}"
     api_port="${PORT:-${API_PORT:-8000}}"
     echo "[start] role=api ${api_host}:${api_port}"
-    apply_migrations
+    reject_startup_migrations
     cd /app/apps/api
     exec python -m uvicorn app.main:app --host "${api_host}" --port "${api_port}" --proxy-headers --forwarded-allow-ips "${uvicorn_forwarded_allow_ips}"
     ;;
@@ -193,7 +237,7 @@ case "${role}" in
   all)
     ;;
   *)
-    echo "[start] unknown SERVICE_ROLE '${role}' (expected all|api|web|scheduler)"
+    echo "[start] unknown SERVICE_ROLE '${role}' (expected all|api|web|scheduler|migrate)"
     exit 1
     ;;
 esac
@@ -205,7 +249,7 @@ if truthy "${ingestion_enabled}"; then
   # diagnostics describe the same adapters the scheduler actually runs.
   setup_ingestion_env
 fi
-apply_migrations
+reject_startup_migrations
 if ! truthy "${ingestion_enabled}" && [ -n "${worker_database_url}" ]; then
   echo "[start] recording intentionally disabled ingestion sources"
   cd /app/apps/workers

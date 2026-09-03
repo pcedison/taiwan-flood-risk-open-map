@@ -11,6 +11,7 @@ import infra.scripts.apply_migrations as migration_runner
 from infra.scripts.apply_migrations import (
     MIGRATION_ADVISORY_LOCK_KEY,
     MigrationDriftError,
+    MigrationReleaseGateError,
     MigrationSummary,
     apply_migrations,
 )
@@ -223,6 +224,166 @@ def test_skips_only_an_exact_recorded_manifest_match(tmp_path: Path) -> None:
     assert seed_sql in executed_sql
 
 
+def test_plan_lists_bounded_pending_migrations_without_writes(tmp_path: Path) -> None:
+    base_sql = "CREATE TABLE example(id int);"
+    migrations = _write_migrations(
+        tmp_path,
+        {
+            "0001_base.sql": base_sql,
+            "0002_seed.sql": "INSERT INTO example(id) VALUES (1);",
+            "0003_later.sql": "SELECT 3;",
+        },
+    )
+    connection = FakeConnection({1: ("0001_base.sql", _checksum(base_sql))})
+
+    summary = apply_migrations(
+        database_url="postgresql://example.test/db",
+        migrations_dir=migrations,
+        connection_factory=lambda _url: connection,
+        expected_current_version=1,
+        target_version=2,
+        dry_run=True,
+    )
+
+    assert summary.applied == ()
+    assert summary.skipped == ("0001_base.sql",)
+    assert summary.pending == ("0002_seed.sql",)
+    assert summary.current_version_before == 1
+    assert summary.current_version_after == 1
+    assert summary.target_version == 2
+    assert connection.transaction_events == []
+    executed_sql = "\n".join(sql for sql, _params in connection.cursor_obj.executed)
+    assert "CREATE TABLE IF NOT EXISTS" not in executed_sql
+    assert "INSERT INTO example" not in executed_sql
+
+
+def test_release_applies_only_through_explicit_target(tmp_path: Path) -> None:
+    base_sql = "CREATE TABLE example(id int);"
+    migrations = _write_migrations(
+        tmp_path,
+        {
+            "0001_base.sql": base_sql,
+            "0002_seed.sql": "INSERT INTO example(id) VALUES (1);",
+            "0003_later.sql": "SELECT 3;",
+        },
+    )
+    connection = FakeConnection({1: ("0001_base.sql", _checksum(base_sql))})
+
+    summary = apply_migrations(
+        database_url="postgresql://example.test/db",
+        migrations_dir=migrations,
+        connection_factory=lambda _url: connection,
+        expected_current_version=1,
+        target_version=2,
+    )
+
+    assert summary.applied == ("0002_seed.sql",)
+    assert summary.current_version_before == 1
+    assert summary.current_version_after == 2
+    assert summary.target_version == 2
+    executed_sql = "\n".join(sql for sql, _params in connection.cursor_obj.executed)
+    assert "INSERT INTO example(id) VALUES (1);" in executed_sql
+    assert "SELECT 3;" not in executed_sql
+
+
+def test_release_rejects_unexpected_current_version_before_new_migration(
+    tmp_path: Path,
+) -> None:
+    base_sql = "CREATE TABLE example(id int);"
+    migrations = _write_migrations(
+        tmp_path,
+        {
+            "0001_base.sql": base_sql,
+            "0002_seed.sql": "INSERT INTO example(id) VALUES (1);",
+        },
+    )
+    connection = FakeConnection({1: ("0001_base.sql", _checksum(base_sql))})
+
+    with pytest.raises(MigrationReleaseGateError, match="expected=0000 actual=0001"):
+        apply_migrations(
+            database_url="postgresql://example.test/db",
+            migrations_dir=migrations,
+            connection_factory=lambda _url: connection,
+            expected_current_version=0,
+            target_version=2,
+        )
+
+    executed_sql = "\n".join(sql for sql, _params in connection.cursor_obj.executed)
+    assert "INSERT INTO example" not in executed_sql
+
+
+def test_release_gate_requires_exact_environment_version_sha_ack() -> None:
+    sha = "a" * 40
+
+    with pytest.raises(RuntimeError, match="acknowledgement"):
+        migration_runner._validate_release_gate(
+            dry_run=False,
+            release_environment="staging",
+            release_sha=sha,
+            release_ack="apply:staging:0059->0061:" + sha,
+            expected_current_version=59,
+            target_version=62,
+        )
+
+    migration_runner._validate_release_gate(
+        dry_run=False,
+        release_environment="staging",
+        release_sha=sha,
+        release_ack="apply:staging:0059->0062:" + sha,
+        expected_current_version=59,
+        target_version=62,
+    )
+
+
+def test_release_plan_does_not_require_apply_ack() -> None:
+    migration_runner._validate_release_gate(
+        dry_run=True,
+        release_environment="staging",
+        release_sha="b" * 40,
+        release_ack=None,
+        expected_current_version=59,
+        target_version=62,
+    )
+
+
+def test_release_progress_reports_lock_and_per_migration_duration(tmp_path: Path) -> None:
+    migrations = _write_migrations(
+        tmp_path,
+        {
+            "0001_base.sql": "CREATE TABLE example(id int);",
+            "0002_seed.sql": "INSERT INTO example(id) VALUES (1);",
+        },
+    )
+    connection = FakeConnection()
+    events: list[tuple[str, str | None, int]] = []
+
+    apply_migrations(
+        database_url="postgresql://example.test/db",
+        migrations_dir=migrations,
+        connection_factory=lambda _url: connection,
+        target_version=2,
+        progress_callback=lambda event, filename, elapsed_ms: events.append(
+            (event, filename, elapsed_ms)
+        ),
+    )
+
+    assert [event for event, _filename, _elapsed_ms in events] == [
+        "lock_acquired",
+        "migration_started",
+        "migration_applied",
+        "migration_started",
+        "migration_applied",
+    ]
+    assert [filename for _event, filename, _elapsed_ms in events] == [
+        None,
+        "0001_base.sql",
+        "0001_base.sql",
+        "0002_seed.sql",
+        "0002_seed.sql",
+    ]
+    assert all(elapsed_ms >= 0 for _event, _filename, elapsed_ms in events)
+
+
 @pytest.mark.parametrize(
     ("recorded_filename", "recorded_checksum", "message"),
     [
@@ -426,6 +587,41 @@ def test_main_redacts_password_from_unexpected_failure(
     assert result == 1
     assert captured.out == ""
     assert captured.err == "Migration failed: unexpected error.\n"
+    assert database_url not in captured.err
+    assert "private-password" not in captured.err
+
+
+def test_main_reports_public_safe_release_version_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    database_url = "postgresql://private-user:private-password@example.test/staging"
+
+    def reject_release(**_kwargs: object) -> MigrationSummary:
+        raise MigrationReleaseGateError(
+            "Current migration version does not match the explicit release gate: "
+            "expected=0059 actual=0060"
+        )
+
+    monkeypatch.setattr(migration_runner, "apply_migrations", reject_release)
+
+    result = migration_runner.main(
+        [
+            "--database-url",
+            database_url,
+            "--migrations-dir",
+            str(tmp_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert captured.out == ""
+    assert captured.err == (
+        "Migration release gate failed: Current migration version does not match "
+        "the explicit release gate: expected=0059 actual=0060\n"
+    )
     assert database_url not in captured.err
     assert "private-password" not in captured.err
 

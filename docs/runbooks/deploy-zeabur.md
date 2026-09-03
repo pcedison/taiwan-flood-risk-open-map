@@ -105,15 +105,15 @@ forces this realtime backbone on when a database URL is present, so a legacy
 `REALTIME_BACKBONE_INGESTION_DISABLED=true` maintenance stop. Use
 `REALTIME_BACKBONE_EMERGENCY_STOP=true` for an unconditional current emergency
 stop; it always overrides force mode and must be removed after the incident.
-When a database URL is present, the start script applies unrecorded
-`infra/migrations/*.sql` files before launching API/Web; set
-`RUN_DATABASE_MIGRATIONS_ON_START=false` only if an operator is applying
-migrations separately. The startup runner takes a PostgreSQL session advisory
-lock so rolling replicas cannot migrate concurrently, verifies the recorded
-filename and checksum before skipping any version, and commits each migration
-in its own transaction. A drift, lock timeout, statement timeout, or failed SQL
-file aborts startup without logging the database URL; already committed earlier
-migrations remain available for a safe retry.
+Application startup never applies database migrations. Keep
+`RUN_DATABASE_MIGRATIONS_ON_START=false`; setting it to true makes the
+application role fail closed. Apply migrations only through a private,
+one-off `SERVICE_ROLE=migrate` service by following
+[explicit-migration-release.md](explicit-migration-release.md). The release job
+defaults to plan-only and requires an exact current version, target version,
+environment, full deployment SHA, and typed acknowledgement before it writes.
+The runner takes a PostgreSQL session advisory lock, validates the recorded
+filename and checksum, and commits each migration in its own transaction.
 
 Before a production migration that rewrites existing rows, verify a recent
 database backup has completed successfully and can be restored. An application
@@ -179,7 +179,7 @@ Official ingestion scheduler for the single-service beta:
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | leave unset or `false` | Legacy maintenance stop; honored only when force mode is also `false`. |
 | `REALTIME_BACKBONE_EMERGENCY_STOP` | leave unset or `false` | Unconditional current emergency stop; always overrides force mode and must be removed after the incident. |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | leave unset for full backbone | Optional additions merged with the revision's canonical backbone during forced startup; it cannot remove a required source. |
-| `RUN_DATABASE_MIGRATIONS_ON_START` | leave unset or `true` | Applies unrecorded `infra/migrations/*.sql` files before API/Web startup. |
+| `RUN_DATABASE_MIGRATIONS_ON_START` | `false` | Required for application roles; startup migration is intentionally unsupported. |
 | `MIGRATION_LOCK_TIMEOUT_MS` | leave unset or `10000` | Maximum PostgreSQL lock wait per migration statement, including contention with another startup runner. Increase only for a reviewed maintenance window. |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | leave unset or `300000` | Maximum execution time for each migration statement. Each migration commits independently before the next file begins. |
 | `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.sewer_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points` | Selects the reviewed nine-source realtime/history backbone. |
@@ -358,11 +358,12 @@ var each:
 
 | Service | Env | Public | Notes |
 |---|---|---|---|
-| `api` | `SERVICE_ROLE=api` | yes (or internal-only behind web) | Listens on `$PORT`; applies migrations on start (`RUN_DATABASE_MIGRATIONS_ON_START`); set `UVICORN_FORWARDED_ALLOW_IPS` if the direct peer is the platform ingress. |
+| `api` | `SERVICE_ROLE=api` | yes (or internal-only behind web) | Listens on `$PORT`; never applies migrations; set `UVICORN_FORWARDED_ALLOW_IPS` if the direct peer is the platform ingress. |
 | `web` | `SERVICE_ROLE=web` | yes | Set `INTERNAL_API_BASE_URL` to the api service URL so `/v1` rewrites reach it (the entrypoint warns if it still points at loopback). |
 | `scheduler` | `SERVICE_ROLE=scheduler` | no | Exactly one replica; expects migrations already applied by `api`; needs `WORKER_DATABASE_URL`/`DATABASE_URL`. Resolved maintenance/emergency stops record disabled source state and keep the service idle instead of entering a restart loop. |
+| `migration` | `SERVICE_ROLE=migrate` | no | One-off plan/apply release job. Pin exact current/target versions and full SHA; never expose a domain. |
 
-Deploy order on first split: `api` (migrations) → `web` → `scheduler`.
+Deploy order on first split: migration release → `api` → `web` → `scheduler`.
 The startup contract lives in `infra/docker/entrypoint.sh`.
 
 ## Future Service Split
@@ -405,7 +406,9 @@ Deploy sequence:
 
 1. Pause or scale down `scheduler` to zero replicas.
 2. Let active `worker` jobs finish, then scale `worker` down if the migration changes tables used by ingestion.
-3. Run the `migration` one-off command:
+3. Run the migration plan and exact apply acknowledgement described in
+   [explicit-migration-release.md](explicit-migration-release.md). For local
+   development only, the equivalent unhosted tool service remains:
 
    ```bash
    docker compose --profile tools run --rm migrate

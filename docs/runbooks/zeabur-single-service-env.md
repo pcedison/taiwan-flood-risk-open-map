@@ -29,10 +29,10 @@ stop and remove it after the incident. A
 separate worker/scheduler topology is still the preferred production operating
 model once alerting, scaling, and incident ownership are accepted.
 
-When a database URL is attached, the start script also applies any unrecorded
-`infra/migrations/*.sql` files before launching API/Web. Migrations are tracked
-in `schema_migrations` and can be disabled only with
-`RUN_DATABASE_MIGRATIONS_ON_START=false`.
+Application startup never applies unrecorded `infra/migrations/*.sql` files.
+Keep `RUN_DATABASE_MIGRATIONS_ON_START=false`; a true value makes the
+application fail closed. Use a separate private `SERVICE_ROLE=migrate` release
+job and follow [explicit-migration-release.md](explicit-migration-release.md).
 
 ## Required Variables
 
@@ -97,7 +97,7 @@ the stop removed.
 | `REALTIME_BACKBONE_INGESTION_DISABLED` | Leave unset or `false`; this legacy maintenance stop is ignored while force mode is active |
 | `REALTIME_BACKBONE_EMERGENCY_STOP` | Leave unset or `false`; set `true` only for a current unconditional emergency stop, then remove it after the incident |
 | `REALTIME_BACKBONE_ADAPTER_KEYS` | Leave unset for the full backbone; optional values are added to the revision's canonical list and cannot remove a required source |
-| `RUN_DATABASE_MIGRATIONS_ON_START` | Leave unset or `true`; use `false` only for an operator-managed migration window |
+| `RUN_DATABASE_MIGRATIONS_ON_START` | `false`; application startup migration is unsupported |
 | `MIGRATION_LOCK_TIMEOUT_MS` | Leave unset for the conservative `10000` ms PostgreSQL lock-wait limit |
 | `MIGRATION_STATEMENT_TIMEOUT_MS` | Leave unset for the conservative `300000` ms per-migration statement limit |
 | `WORKER_ENABLED_ADAPTER_KEYS` | `official.cwa.rainfall,official.cwa.tide_level,official.wra.water_level,official.wra_iow.flood_depth,official.ncdr.cap,official.civil_iot.sewer_water_level,local.tainan.flood_sensor,official.wra.historical_flood,official.nstc.flood_disaster_points` |

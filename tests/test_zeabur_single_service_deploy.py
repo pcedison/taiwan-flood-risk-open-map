@@ -88,15 +88,41 @@ def test_split_scheduler_honors_resolved_ingestion_stop_without_restart_loop() -
     )
 
 
-def test_zeabur_single_service_applies_migrations_before_startup() -> None:
+def test_zeabur_application_roles_never_apply_migrations_on_startup() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
 
     assert "COPY infra/migrations /app/infra/migrations" in dockerfile
     assert "COPY infra/scripts/apply_migrations.py /app/infra/scripts/apply_migrations.py" in dockerfile
     assert "COPY infra/docker/entrypoint.sh /app/entrypoint.sh" in dockerfile
-    assert 'RUN_DATABASE_MIGRATIONS_ON_START:-true' in entrypoint
-    assert 'python /app/infra/scripts/apply_migrations.py --database-url "${worker_database_url}"' in entrypoint
+    assert 'RUN_DATABASE_MIGRATIONS_ON_START:-false' in entrypoint
+    assert "RUN_DATABASE_MIGRATIONS_ON_START is no longer supported" in entrypoint
+    api_block = entrypoint.split("  api)", 1)[1].split("  web)", 1)[0]
+    all_block = entrypoint.split("  all)", 1)[1].split("  *)", 1)[0]
+    assert "reject_startup_migrations" in api_block
+    assert "reject_startup_migrations" in entrypoint.split('echo "[start] api=', 1)[1]
+    assert "apply_migrations.py" not in api_block
+    assert "apply_migrations.py" not in all_block
+
+
+def test_zeabur_has_explicit_bounded_migration_release_role() -> None:
+    entrypoint = ENTRYPOINT.read_text(encoding="utf-8")
+    release_block = entrypoint.split("run_migration_release() {", 1)[1].split(
+        "configure_backbone_source_gates() {", 1
+    )[0]
+
+    assert "MIGRATION_RELEASE_MODE:-plan" in release_block
+    assert "MIGRATION_RELEASE_EXPECTED_CURRENT_VERSION" in release_block
+    assert "MIGRATION_RELEASE_TARGET_VERSION" in release_block
+    assert "MIGRATION_RELEASE_ACK" in release_block
+    assert '--expected-current-version "${expected_current}"' in release_block
+    assert '--target-version "${target_version}"' in release_block
+    assert '--release-environment "${release_environment}"' in release_block
+    assert '--release-sha "${release_sha}"' in release_block
+    assert 'args+=(--plan)' in release_block
+    assert 'args+=(--release-ack "${release_ack}")' in release_block
+    assert "  migrate)" in entrypoint
+    assert "    run_migration_release" in entrypoint
 
 
 def test_zeabur_single_service_scheduler_loop_runs_the_initial_tick() -> None:
@@ -165,7 +191,7 @@ def test_image_runs_as_non_root_with_role_dispatch() -> None:
 
     assert "USER app" in dockerfile
     assert 'CMD ["/app/entrypoint.sh"]' in dockerfile
-    for role_case in ("api)", "web)", "scheduler)", "all)"):
+    for role_case in ("api)", "web)", "scheduler)", "migrate)", "all)"):
         assert role_case in entrypoint
     assert 'role="${SERVICE_ROLE:-all}"' in entrypoint
     # Single-role paths must exec so signals reach the real process.

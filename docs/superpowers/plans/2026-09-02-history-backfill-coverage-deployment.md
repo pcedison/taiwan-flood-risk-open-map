@@ -126,7 +126,11 @@ unavailable/incident 證據與不影響 WRA IoW 骨幹的降級行為。
 ## M4：Staging migration 與驗收
 
 1. 從 production backup 建立隔離 staging clone，完成 scratch restore drill。
-2. 停 staging scheduler，執行 0059／0060／0061／0062 並記錄鎖定時間與 row counts。
+2. 停 staging scheduler，依
+   `docs/runbooks/explicit-migration-release.md` 先以 plan 模式確認
+   `0059 -> 0062` 與 3 個 pending files，再以完整 SHA 與 exact ack 執行
+   0060／0061／0062，並記錄鎖定時間與 row counts。API／Web／scheduler
+   啟動不得自動套用 migration。
 3. 部署 worker，執行 M1/M2 dry-run，再執行受控 persist 與 profile rebuild。
 4. 驗證 NSTC 年度列的 exact timestamps 為 NULL、穩定鍵無異常碰撞、歷史分頁固定於
    assessment 建立時間。
