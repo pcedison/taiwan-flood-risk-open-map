@@ -41,7 +41,13 @@ class FakeCursor:
     def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         self.executed.append((sql, params))
         normalized = " ".join(sql.split())
-        if normalized.startswith("SELECT version, filename, checksum"):
+        if normalized.startswith("SELECT to_regclass"):
+            self._rows = [(self.connection.manifest_exists,)]
+        elif normalized.startswith("CREATE TABLE IF NOT EXISTS schema_migrations"):
+            self.connection.manifest_exists = True
+        elif normalized.startswith("SELECT version, filename, checksum"):
+            if not self.connection.manifest_exists:
+                raise RuntimeError("schema_migrations does not exist")
             self._rows = [
                 (version, filename, checksum)
                 for version, (filename, checksum) in sorted(self.connection.records.items())
@@ -87,9 +93,11 @@ class FakeConnection:
         records: dict[int, tuple[str, str]] | None = None,
         *,
         fail_on_sql: str | None = None,
+        manifest_exists: bool | None = None,
     ) -> None:
         self.records = dict(records or {})
         self.fail_on_sql = fail_on_sql
+        self.manifest_exists = bool(records) if manifest_exists is None else manifest_exists
         self.autocommit = False
         self.transaction_events: list[str] = []
         self.cursor_obj = FakeCursor(self)
@@ -255,6 +263,36 @@ def test_plan_lists_bounded_pending_migrations_without_writes(tmp_path: Path) ->
     executed_sql = "\n".join(sql for sql, _params in connection.cursor_obj.executed)
     assert "CREATE TABLE IF NOT EXISTS" not in executed_sql
     assert "INSERT INTO example" not in executed_sql
+
+
+def test_plan_treats_missing_manifest_as_empty_without_writes(tmp_path: Path) -> None:
+    migrations = _write_migrations(
+        tmp_path,
+        {
+            "0001_base.sql": "CREATE TABLE example(id int);",
+            "0002_seed.sql": "INSERT INTO example(id) VALUES (1);",
+        },
+    )
+    connection = FakeConnection(manifest_exists=False)
+
+    summary = apply_migrations(
+        database_url="postgresql://example.test/db",
+        migrations_dir=migrations,
+        connection_factory=lambda _url: connection,
+        expected_current_version=0,
+        target_version=2,
+        dry_run=True,
+    )
+
+    assert summary.current_version_before == 0
+    assert summary.current_version_after == 0
+    assert summary.pending == ("0001_base.sql", "0002_seed.sql")
+    assert connection.manifest_exists is False
+    assert connection.transaction_events == []
+    executed_sql = "\n".join(sql for sql, _params in connection.cursor_obj.executed)
+    assert "to_regclass('schema_migrations')" in executed_sql
+    assert "CREATE TABLE IF NOT EXISTS schema_migrations" not in executed_sql
+    assert "SELECT version, filename, checksum" not in executed_sql
 
 
 def test_release_applies_only_through_explicit_target(tmp_path: Path) -> None:

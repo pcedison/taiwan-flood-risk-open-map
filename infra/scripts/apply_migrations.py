@@ -150,11 +150,13 @@ def apply_migrations(
                     round((monotonic() - lock_started) * 1000),
                 )
 
+            manifest_exists = _schema_migrations_exists(cursor)
             if not dry_run:
                 with connection.transaction():
                     _ensure_schema_migrations(cursor)
+                manifest_exists = True
 
-            recorded = _recorded_migrations(cursor)
+            recorded = _recorded_migrations(cursor) if manifest_exists else {}
             _validate_recorded_migrations(migrations, recorded)
             current_version = max(recorded, default=0)
             if (
@@ -273,6 +275,14 @@ def _ensure_schema_migrations(cursor: Cursor) -> None:
         )
         """
     )
+
+
+def _schema_migrations_exists(cursor: Cursor) -> bool:
+    cursor.execute("SELECT to_regclass('schema_migrations') IS NOT NULL")
+    rows = cursor.fetchall()
+    if len(rows) != 1 or len(rows[0]) != 1 or not isinstance(rows[0][0], bool):
+        raise MigrationDriftError("schema_migrations existence check returned an invalid row")
+    return rows[0][0]
 
 
 def _recorded_migrations(cursor: Cursor) -> dict[int, RecordedMigration]:
