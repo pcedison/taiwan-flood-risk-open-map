@@ -224,6 +224,13 @@ def _staging_metadata_errors(
     ):
         errors.append("dataset_revision must be a 1..256 character string")
 
+    snapshot_authority = raw_payload.get("snapshot_authority")
+    if snapshot_authority is not None and snapshot_authority not in {
+        "live",
+        "reviewed_frozen_backfill",
+    }:
+        errors.append("snapshot_authority is not reviewed")
+
     cap_keys = {
         "cap_sender",
         "cap_identifier",
@@ -487,6 +494,7 @@ _STAGING_PAYLOAD_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "ncdr_geocode_name",
     "ncdr_geocode",
     "dataset_revision",
+    "snapshot_authority",
     "event_year",
     "temporal_precision",
     "source_record_key",

@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from http.client import HTTPMessage
 from io import StringIO
-from typing import Any
+from typing import Any, Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
@@ -27,6 +27,7 @@ from app.adapters.contracts import (
 )
 
 FetchText = Callable[[str, int], str]
+NstcSnapshotAuthority = Literal["live", "reviewed_frozen_backfill"]
 
 NSTC_FLOOD_DISASTER_POINTS_DATASET_ID = "130016"
 NSTC_FLOOD_DISASTER_POINTS_DATA_GOV_URL = "https://data.gov.tw/dataset/130016"
@@ -39,6 +40,16 @@ NSTC_FLOOD_DISASTER_POINTS_USER_AGENT = (
 DEFAULT_NSTC_FLOOD_DISASTER_POINTS_TIMEOUT_SECONDS = 12
 MAX_NSTC_FLOOD_DISASTER_POINTS_BYTES = 2 * 1024 * 1024
 MAX_NSTC_FLOOD_DISASTER_POINTS_ROWS = 50_000
+NSTC_SNAPSHOT_AUTHORITY_LIVE: NstcSnapshotAuthority = "live"
+NSTC_SNAPSHOT_AUTHORITY_REVIEWED_FROZEN_BACKFILL: NstcSnapshotAuthority = (
+    "reviewed_frozen_backfill"
+)
+_NSTC_SNAPSHOT_AUTHORITIES = frozenset(
+    {
+        NSTC_SNAPSHOT_AUTHORITY_LIVE,
+        NSTC_SNAPSHOT_AUTHORITY_REVIEWED_FROZEN_BACKFILL,
+    }
+)
 _TAIWAN_LONGITUDE_BOUNDS = (117.0, 123.5)
 _TAIWAN_LATITUDE_BOUNDS = (20.0, 27.5)
 _REQUIRED_FIELDS = frozenset({"FID", "year", "X_97", "Y_97", "source"})
@@ -100,13 +111,17 @@ class NstcFloodDisasterPointsAdapter:
         fetch_text: FetchText | None = None,
         raw_snapshot_key: str | None = None,
         dataset_revision_sha256: str | None = None,
+        snapshot_authority: NstcSnapshotAuthority = NSTC_SNAPSHOT_AUTHORITY_LIVE,
     ) -> None:
+        if snapshot_authority not in _NSTC_SNAPSHOT_AUTHORITIES:
+            raise ValueError("snapshot_authority is not a reviewed NSTC authority")
         self._resource_url = (resource_url or self.metadata.resource_url or "").strip()
         self._timeout_seconds = max(1, timeout_seconds)
         self._fetched_at = fetched_at
         self._fetch_text = fetch_text or fetch_nstc_flood_disaster_csv
         self._raw_snapshot_key = raw_snapshot_key
         self._dataset_revision_sha256 = _normalized_sha256(dataset_revision_sha256)
+        self._snapshot_authority = snapshot_authority
 
     def fetch(self) -> tuple[RawSourceItem, ...]:
         fetched_at = self._fetched_at or datetime.now(UTC)
@@ -138,6 +153,7 @@ class NstcFloodDisasterPointsAdapter:
                     "source_record_key": record.get("source_record_key"),
                     "location_precision": "point",
                     "dataset_revision": revision,
+                    "snapshot_authority": self._snapshot_authority,
                     "resource_url": self._resource_url,
                     "limitations": list(_LIMITATIONS),
                     "attribution": "NSTC nationwide flood-disaster information points",

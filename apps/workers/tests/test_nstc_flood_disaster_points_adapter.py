@@ -66,6 +66,7 @@ def test_adapter_normalizes_official_historical_points() -> None:
     assert result.fetched[0].payload["evidence_scope"] == "historical"
     assert result.fetched[0].payload["location_precision"] == "point"
     assert result.fetched[0].payload["dataset_revision"]
+    assert result.fetched[0].payload["snapshot_authority"] == "live"
     assert result.normalized[0].source_url == "https://data.gov.tw/dataset/130016"
 
 
@@ -91,6 +92,14 @@ def test_backfill_rejects_an_invalid_dataset_revision_digest() -> None:
         NstcFloodDisasterPointsAdapter(
             fetch_text=lambda _url, _timeout: CSV,
             dataset_revision_sha256="not-a-sha256",
+        )
+
+
+def test_adapter_rejects_an_unreviewed_snapshot_authority() -> None:
+    with pytest.raises(ValueError, match="snapshot_authority"):
+        NstcFloodDisasterPointsAdapter(
+            fetch_text=lambda _url, _timeout: CSV,
+            snapshot_authority="newest",  # type: ignore[arg-type]
         )
 
 

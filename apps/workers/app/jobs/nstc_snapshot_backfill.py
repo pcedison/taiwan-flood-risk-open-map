@@ -12,6 +12,7 @@ from typing import Any, Literal, Protocol
 from app.adapters.nstc.flood_disaster_points import (
     MAX_NSTC_FLOOD_DISASTER_POINTS_BYTES,
     NSTC_FLOOD_DISASTER_POINTS_METADATA,
+    NSTC_SNAPSHOT_AUTHORITY_REVIEWED_FROZEN_BACKFILL,
     NstcFloodDisasterPointsAdapter,
     NstcFloodDisasterPointsPayloadError,
 )
@@ -255,6 +256,7 @@ def run_nstc_snapshot_backfill(
         fetch_text=lambda _url, _timeout: text,
         raw_snapshot_key=raw_ref,
         dataset_revision_sha256=actual_sha256,
+        snapshot_authority=NSTC_SNAPSHOT_AUTHORITY_REVIEWED_FROZEN_BACKFILL,
     )
     adapter_result = adapter.run()
     normalized_year_counts = Counter(

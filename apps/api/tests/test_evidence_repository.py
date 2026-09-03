@@ -213,6 +213,8 @@ def test_query_nearby_evidence_uses_wra_active_snapshot_and_deduplicates_nstc_re
     assert "'official.nstc.flood_disaster_points'" in sql
     assert "history_revision_rank = 1" in sql
     assert "COALESCE(NULLIF(e.source_record_key, ''), e.source_id)" in sql
+    assert "e.properties->>'snapshot_authority'" in sql
+    assert "= 'reviewed_frozen_backfill'" in sql
     assert "ds.adapter_key <> 'official.wra.historical_flood'" in sql
     assert "e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')" in sql
     assert "snapshot_generation_mode" not in sql
@@ -1840,6 +1842,8 @@ def test_fetch_assessment_history_reads_complete_keyset_page() -> None:
     assert "archived_ranked AS MATERIALIZED" in sql
     assert "sensor_episode_stats AS MATERIALIZED" in sql
     assert "ranked.revision_rank = 1" in sql
+    assert "e.properties->>'snapshot_authority'" in sql
+    assert "= 'reviewed_frozen_backfill'" in sql
     assert "ORDER BY candidate.sort_year DESC, candidate.sort_time DESC, candidate.id ASC" in sql
     assert "LIMIT %s" in sql
     assert params[-2] == 8

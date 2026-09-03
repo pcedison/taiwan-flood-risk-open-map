@@ -558,7 +558,15 @@ def rebuild_risk_profile(
                         PARTITION BY
                             ds.adapter_key,
                             COALESCE(NULLIF(e.source_record_key, ''), e.source_id)
-                        ORDER BY e.ingested_at DESC, e.id DESC
+                        ORDER BY
+                            CASE
+                                WHEN e.properties->>'snapshot_authority'
+                                    = 'reviewed_frozen_backfill'
+                                THEN 1
+                                ELSE 0
+                            END ASC,
+                            e.ingested_at DESC,
+                            e.id DESC
                     )
                     WHEN e.event_type = 'flood_report'
                         AND e.properties->>'evidence_scope' = 'current'

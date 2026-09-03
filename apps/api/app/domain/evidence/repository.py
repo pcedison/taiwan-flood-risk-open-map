@@ -467,7 +467,15 @@ def query_nearby_evidence(
                             PARTITION BY
                                 ds.adapter_key,
                                 COALESCE(NULLIF(e.source_record_key, ''), e.source_id)
-                            ORDER BY e.ingested_at DESC, e.id DESC
+                            ORDER BY
+                                CASE
+                                    WHEN e.properties->>'snapshot_authority'
+                                        = 'reviewed_frozen_backfill'
+                                    THEN 1
+                                    ELSE 0
+                                END ASC,
+                                e.ingested_at DESC,
+                                e.id DESC
                         )
                         ELSE 1
                     END AS history_revision_rank
@@ -2686,7 +2694,15 @@ def fetch_assessment_history(
                         PARTITION BY
                             ds.adapter_key,
                             COALESCE(NULLIF(e.source_record_key, ''), e.source_id)
-                        ORDER BY e.ingested_at DESC, e.id DESC
+                        ORDER BY
+                            CASE
+                                WHEN e.properties->>'snapshot_authority'
+                                    = 'reviewed_frozen_backfill'
+                                THEN 1
+                                ELSE 0
+                            END ASC,
+                            e.ingested_at DESC,
+                            e.id DESC
                     )
                     ELSE 1
                 END AS revision_rank

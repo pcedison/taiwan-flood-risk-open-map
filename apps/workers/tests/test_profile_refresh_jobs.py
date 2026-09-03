@@ -171,6 +171,8 @@ def test_rebuild_risk_profile_scores_and_links_existing_profile() -> None:
     assert "FROM evidence e" in sql
     assert "official.nstc.flood_disaster_points" in sql
     assert "public_revision_rank = 1" in sql
+    assert "e.properties->>'snapshot_authority'" in sql
+    assert "= 'reviewed_frozen_backfill'" in sql
     assert "es.evidence_scope = 'historical'" in sql
     assert "FROM event_scores es" in sql
     assert "FULL JOIN event_scores" not in sql

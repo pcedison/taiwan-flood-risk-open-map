@@ -58,8 +58,10 @@ resolved；Civil IoT 四類來源失敗；WRA 與 NSTC 歷史匯入 degraded。
    raw、staging、promotion、repository、API 與 UI 均保留年度精度。
 3. 感測器歷史由「每站只取最新正值」改為 query-time episode aggregation：低於 3 cm 或超過 6
    小時間隔會切開事件，並回傳開始／結束、最高深度、觀測數與演算法版本。
-4. NSTC raw revisions 仍留存，但 public query 與 profile scoring 依 `source_record_key` 只採最新
-   revision；連續 sensor cycles 也不再重複灌高 profile 歷史分數。
+4. NSTC raw revisions 仍留存，但 public query 與 profile scoring 依 `source_record_key` 去重，
+   明確優先採用 `snapshot_authority=live`，再於同一 authority 內取最新 revision；較晚執行的
+   reviewed frozen backfill 不會遮蔽 live provenance。連續 sensor cycles 也不再重複灌高
+   profile 歷史分數。
 5. 新增 `/v1/history/{assessment_id}`，直接依 assessment 地點與半徑查完整歷史，不受 scorer
    preview 上限限制；資料與 15 年窗口凍結在 assessment 建立時間，採 assessment-bound opaque
    keyset cursor，且區分 404、410 與 503。

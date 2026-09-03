@@ -18,6 +18,9 @@
 - 穩定事件鍵：5,018；重複事件列 901 筆、529 組 key
 - coverage 權威範圍：只允許 2018–2020。2021–2022 可保留 evidence revision，
   但不得覆寫較新的 live NSTC coverage check。
+- snapshot 權威：一般 adapter 寫入 `snapshot_authority=live`；本工具固定寫入
+  `snapshot_authority=reviewed_frozen_backfill`。相同穩定事件鍵永遠由 live revision
+  優先，才在同一 authority 內依匯入時間取最新，避免後執行的回填遮蔽 live provenance。
 
 任一數字或 checksum 不同都必須停止。不可更新常數來迎合未知檔案；先建立新
 revision、來源審查與獨立變更。
@@ -83,7 +86,10 @@ SELECT
     count(*) FILTER (
         WHERE occurred_at IS NULL AND observed_at IS NULL
     ) AS annual_null_timestamps,
-    count(DISTINCT properties->>'source_record_key') AS stable_keys
+    count(DISTINCT properties->>'source_record_key') AS stable_keys,
+    count(*) FILTER (
+        WHERE properties->>'snapshot_authority' = 'reviewed_frozen_backfill'
+    ) AS frozen_authority_rows
 FROM evidence
 WHERE raw_ref = '<raw-ref>'
   AND ingestion_status = 'accepted';
@@ -110,8 +116,9 @@ LIMIT 1;
 ```
 
 必要結果：1 個 raw revision、5,919 staging rows、5,919 accepted evidence rows、
-5,919 筆 exact timestamps 皆為 NULL、5,018 個 stable keys、source checks 只涵蓋
-2018–2020 且共 66 格。2018–2020 應為 `partial`；不得由此快照改動
+5,919 筆 exact timestamps 皆為 NULL、5,018 個 stable keys、5,919 筆
+`reviewed_frozen_backfill` authority rows，source checks 只涵蓋 2018–2020 且共 66 格。
+2018–2020 應為 `partial`；不得由此快照改動
 2021–2022。
 
 使用相同命令再執行一次：`new_evidence_count` 必須為 0，staging 仍為 5,919，

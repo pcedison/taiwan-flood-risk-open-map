@@ -143,6 +143,10 @@ def test_persist_path_is_raw_ref_scoped_and_limits_coverage_to_2018_2020() -> No
     assert staging_writer.batches[0].raw_snapshot.metadata["retention_policy"] == (
         "non_expiring_reviewed_frozen_snapshot"
     )
+    assert {
+        item.payload["snapshot_authority"]
+        for item in staging_writer.batches[0].accepted
+    } == {"reviewed_frozen_backfill"}
     assert run_writer.job_keys == [
         "worker.nstc_snapshot.backfill",
         "worker.nstc_snapshot.backfill",
