@@ -557,6 +557,7 @@ def _display_sort_key(item: Evidence) -> tuple[int, float, float, str]:
         item.evidence_scope,
         3,
     )
+    event_time: datetime | None
     if (
         item.evidence_scope == "historical"
         and item.temporal_precision == "year"
