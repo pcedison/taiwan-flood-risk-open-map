@@ -17,20 +17,19 @@
 phase、work package 與舊 checkpoint 保留為實作契約及歷史紀錄，不應取代
 正式站 `/health`、`/ready`、GitHub Actions 與 strict hosted smoke 的即時證據。
 
-在 2026-09-03 04:58 Asia/Taipei 檢查點，`origin/main` 是
-`68b985b7c0d0e66f2232ba22c7e9330e820cd735`，CI／CodeQL 已通過，但 Zeabur
-最新 deployment record 仍停在 `8fd4fc2a`。正式站 `/health`、`/ready` 都回
-HTTP 502，因此無法驗證 deployment identity 與 PostgreSQL／Redis readiness，
-deployment 與 strict public-risk smoke 均失敗；#289 留存事故證據。最新真實
-`schedule` Hosted Monitoring
-[#33682011765](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33682011765)
-已在檢查點 main 執行，但 deployment smoke 六次嘗試均已耗盡，最後一次記錄為
-HTTP 502；下游
-public-risk、desktop／mobile Playwright、source 與 private-evidence 步驟均正確
-fail-closed 跳過。#289 與 #293 分別追蹤部署事故與真實排程 readiness，不能誤寫為
-整體監控全通過。PR #312 已合併為引發 502 的
-`8fd4fc2a`；PR #317 已移除越過 staged rollout 邊界的 migration `0060` 並合併為
-目前 hotfix，但在 Zeabur 實際部署且兩項 smoke 通過前不能宣稱恢復。
+在 2026-09-03 09:28 Asia/Taipei 檢查點，`origin/main`、Zeabur production
+deployment record、正式站 `/health` 與 `/ready` 都是
+`8723c01012cdbad2c792eb1119207681a8265f82`；PostgreSQL／Redis 健康，main
+CI／CodeQL、SHA 鎖定 deployment smoke 與 strict public-risk smoke 均通過，
+open security alerts 與 PR 都是零。#289 留存事故與恢復證據。最新真實
+`schedule` Hosted Monitoring 仍是
+[#33682011765](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33682011765)，
+它在恢復前於 prior main `68b985b7` 執行，deployment smoke 六次嘗試均已耗盡，
+下游 public-risk、desktop／mobile Playwright、source 與 private-evidence 步驟均
+正確 fail-closed 跳過。#289 與 #293 仍須等待目前 main 的真實 schedule 成功，
+不能把手動或本機 smoke 取代排程證據。PR #312 已合併為引發 502 的
+`8fd4fc2a`；PR #317 移除越過 staged rollout 邊界的 migration `0060`，後續
+文件提交 `8723c010` 已由 Zeabur 部署並通過兩項 smoke。
 #71 仍是外部官方資料／
 契約證據工作；不能以程式碼
 修復、靜態地圖或未實際寄送的 request packet 假裝完成外部授權與回覆。

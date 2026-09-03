@@ -81,22 +81,21 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-09-03 04:58 Asia/Taipei checkpoint, `origin/main` was
-`68b985b7c0d0e66f2232ba22c7e9330e820cd735`, with CI and CodeQL passing, but
-Zeabur's latest deployment record still pointed to
-`8fd4fc2aca7416d1f2da0829211f2d36e19a5ceb`. Production `/health` and `/ready`
-both returned HTTP 502, so PostgreSQL/Redis readiness and deployment identity
-could not be verified; deployment and strict public-risk smokes failed. Issue
-#289 contains the incident evidence. Do not treat a SHA copied into status
+the 2026-09-03 09:28 Asia/Taipei checkpoint, `origin/main`, Zeabur's production
+deployment record, `/health`, and `/ready` all reported
+`8723c01012cdbad2c792eb1119207681a8265f82`. PostgreSQL and Redis were healthy,
+the SHA-pinned deployment and strict public-risk smokes passed, main CI and
+CodeQL were green, and open security alerts and pull requests were zero. Issue
+#289 contains the recovery evidence. Do not treat a SHA copied into status
 documentation as a permanent deployment pin: derive the current expected SHA
 only after `git fetch origin --prune`, then verify both health endpoints. The
-latest genuine scheduled Hosted Monitoring run
+latest genuine scheduled Hosted Monitoring run remains
 [#33682011765](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33682011765)
-ran on the checkpoint SHA and failed after exhausting six deployment-smoke
-attempts; the final recorded attempt received HTTP 502. Downstream public-risk,
-browser, source, and private-evidence
-steps correctly remained fail-closed. Issues #289 and #293 therefore remain
-open until a genuine schedule run passes on the current main SHA.
+on prior main `68b985b7c0d0e66f2232ba22c7e9330e820cd735`; it ran before recovery and
+failed after exhausting six deployment-smoke attempts. Downstream public-risk,
+browser, source, and private-evidence steps correctly remained fail-closed.
+Issues #289 and #293 therefore remain open until a genuine schedule run passes
+on the current main SHA.
 Hosted Monitoring also
 exercises the production basemap and a real public location query in desktop
 and mobile Chromium; major MapLibre and ESLint upgrades require an explicit
