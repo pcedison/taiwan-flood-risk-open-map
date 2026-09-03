@@ -41,16 +41,23 @@ from app.api.services.client_signal import resolve_client_signal
 from app.api.services.official_history import OfficialRecentHistoryLookup
 from app.core.config import Settings, get_settings
 from app.domain.assessment import PostgresAssessmentRepository
-from app.domain.evidence import fetch_assessment_evidence
+from app.domain.evidence import (
+    AssessmentEvidenceExpired,
+    AssessmentEvidenceNotFound,
+    EvidenceRepositoryUnavailable,
+    HistoricalEvidencePagePosition,
+    fetch_assessment_evidence,
+    fetch_assessment_history,
+)
 from app.domain.geocoding import build_open_data_geocoder
 from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
 from app.domain.history import (
-    HISTORICAL_COVERAGE_END_YEAR,
     HISTORICAL_COVERAGE_JURISDICTION_COUNT,
-    HISTORICAL_COVERAGE_START_YEAR,
     HISTORICAL_COVERAGE_STATUSES,
     HistoricalCoverageRecord,
     HistoricalCoverageRepositoryUnavailable,
+    HistoricalYearWindow,
+    coverage_window,
     list_historical_coverage,
 )
 from app.domain.ingestion import (
@@ -303,17 +310,25 @@ def get_history_coverage(
     county_code: str | None = Query(default=None, pattern=r"^\d{8}$"),
     year: int | None = Query(
         default=None,
-        ge=HISTORICAL_COVERAGE_START_YEAR,
-        le=HISTORICAL_COVERAGE_END_YEAR,
+        ge=1900,
+        le=2100,
     ),
 ) -> HistoricalCoverageResponse:
     settings = get_settings()
+    generated_at = _now()
+    window = coverage_window(generated_at)
     try:
         records = list_historical_coverage(
             database_url=settings.database_url,
+            as_of=generated_at,
             county_code=county_code,
             year=year,
         )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=error_payload("invalid_year", str(exc))["error"],
+        ) from exc
     except HistoricalCoverageRepositoryUnavailable as exc:
         raise HTTPException(
             status_code=503,
@@ -337,7 +352,7 @@ def get_history_coverage(
     ) * (
         1
         if year is not None
-        else HISTORICAL_COVERAGE_END_YEAR - HISTORICAL_COVERAGE_START_YEAR + 1
+        else window.end_year - window.start_year + 1
     )
     if len(records) != expected_count:
         raise HTTPException(
@@ -353,6 +368,8 @@ def get_history_coverage(
         records,
         expected_count=expected_count,
         year=year,
+        window=window,
+        generated_at=generated_at,
     )
 
 
@@ -507,6 +524,8 @@ def _historical_coverage_response(
     *,
     expected_count: int,
     year: int | None,
+    window: HistoricalYearWindow,
+    generated_at: datetime,
 ) -> HistoricalCoverageResponse:
     status_counts = {status: 0 for status in sorted(HISTORICAL_COVERAGE_STATUSES)}
     cells: list[HistoricalCoverageCell] = []
@@ -535,10 +554,18 @@ def _historical_coverage_response(
     resolved_cell_count = sum(1 for record in records if record.resolved)
     missing_persisted_cell_count = sum(1 for record in records if not record.persisted)
     unresolved_cell_count = len(records) - resolved_cell_count
-    start_year = year if year is not None else HISTORICAL_COVERAGE_START_YEAR
-    end_year = year if year is not None else HISTORICAL_COVERAGE_END_YEAR
+    known_gap_cell_count = sum(
+        1
+        for record in records
+        if record.status not in {"complete", "official_checked_empty"}
+    )
+    audit_complete = (
+        unresolved_cell_count == 0 and missing_persisted_cell_count == 0
+    )
+    start_year = year if year is not None else window.start_year
+    end_year = year if year is not None else window.end_year
     return HistoricalCoverageResponse(
-        generated_at=_now(),
+        generated_at=generated_at,
         summary=HistoricalCoverageSummary(
             start_year=start_year,
             end_year=end_year,
@@ -548,9 +575,10 @@ def _historical_coverage_response(
             unresolved_cell_count=unresolved_cell_count,
             missing_persisted_cell_count=missing_persisted_cell_count,
             status_counts=status_counts,
-            coverage_complete=(
-                unresolved_cell_count == 0 and missing_persisted_cell_count == 0
-            ),
+            audit_complete=audit_complete,
+            data_coverage_complete=(audit_complete and known_gap_cell_count == 0),
+            known_gap_cell_count=known_gap_cell_count,
+            coverage_complete=audit_complete,
             absence_is_safety_evidence=False,
         ),
         cells=cells,
@@ -597,18 +625,88 @@ def _assessment_service(settings: Settings) -> AssessmentService:
 @router.get("/evidence/{assessment_id}", response_model=EvidenceListResponse)
 def list_evidence(
     assessment_id: UUID,
+    page_size: int = Query(default=20, ge=1, le=100),
+) -> EvidenceListResponse:
+    settings = get_settings()
+    try:
+        return public_evidence.list_assessment_evidence(
+            str(assessment_id),
+            page_size=page_size,
+            fetch_db_evidence=_assessment_db_evidence,
+            backend=settings.risk_assessment_evidence_cache_backend,
+            redis_url=settings.redis_url,
+        )
+    except EvidenceRepositoryUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "repository_unavailable",
+                "Evidence storage is temporarily unavailable.",
+            )["error"],
+        ) from exc
+
+
+@router.get(
+    "/history/{assessment_id}",
+    response_model=EvidenceListResponse,
+    responses={
+        400: {"description": "The history cursor is invalid or belongs to another assessment."},
+        404: {"description": "The assessment does not exist."},
+        410: {"description": "The assessment has expired; run the query again."},
+        429: {"description": "The historical evidence request rate limit was exceeded."},
+        503: {"description": "Historical evidence storage is unavailable."},
+    },
+)
+def list_history(
+    assessment_id: UUID,
+    http_request: FastAPIRequest,
     cursor: str | None = None,
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> EvidenceListResponse:
-    del cursor
     settings = get_settings()
-    return public_evidence.list_assessment_evidence(
-        str(assessment_id),
-        page_size=page_size,
-        fetch_db_evidence=_assessment_db_evidence,
-        backend=settings.risk_assessment_evidence_cache_backend,
-        redis_url=settings.redis_url,
+    _enforce_public_rate_limit(
+        http_request,
+        settings=settings,
+        namespace="public-history-rate",
+        max_requests=settings.risk_assessment_rate_limit_max_requests,
+        endpoint_name="Historical evidence",
     )
+    assessment_key = str(assessment_id)
+    try:
+        return public_evidence.list_assessment_history(
+            assessment_key,
+            cursor=cursor,
+            page_size=page_size,
+            fetch_history=_assessment_history_db,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=error_payload("invalid_cursor", "The history cursor is invalid.")[
+                "error"
+            ],
+        ) from exc
+    except AssessmentEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=error_payload("not_found", "The assessment was not found.")["error"],
+        ) from exc
+    except AssessmentEvidenceExpired as exc:
+        raise HTTPException(
+            status_code=410,
+            detail=error_payload(
+                "assessment_expired",
+                "This assessment has expired; run the location query again.",
+            )["error"],
+        ) from exc
+    except EvidenceRepositoryUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=error_payload(
+                "repository_unavailable",
+                "Historical evidence storage is temporarily unavailable.",
+            )["error"],
+        ) from exc
 
 
 def _assessment_db_evidence(assessment_id: str, *, page_size: int) -> tuple[Evidence, ...]:
@@ -617,6 +715,21 @@ def _assessment_db_evidence(assessment_id: str, *, page_size: int) -> tuple[Evid
         page_size=page_size,
         database_url=get_settings().database_url,
         fetch_assessment_evidence=fetch_assessment_evidence,
+    )
+
+
+def _assessment_history_db(
+    *,
+    assessment_id: str,
+    page_size: int,
+    after: HistoricalEvidencePagePosition | None,
+) -> tuple[Any, ...]:
+    return fetch_assessment_history(
+        database_url=get_settings().database_url,
+        assessment_id=assessment_id,
+        as_of=_now(),
+        page_size=page_size,
+        after=after,
     )
 
 

@@ -27,7 +27,8 @@ def test_parser_converts_twd97_points_and_preserves_year_only_semantics() -> Non
 
     assert len(rows) == 2
     assert rows[0]["source_id"] == "data-gov-130016:2022:EMIC:1"
-    assert rows[0]["source_timestamp"].year == 2022  # type: ignore[union-attr]
+    assert str(rows[0]["source_record_key"]).startswith("2022:")
+    assert "source_timestamp" not in rows[0]
     geometry = rows[0]["geometry"]
     assert isinstance(geometry, dict)
     assert geometry["type"] == "Point"
@@ -58,12 +59,18 @@ def test_adapter_normalizes_official_historical_points() -> None:
     assert len(result.fetched) == 2
     assert len(result.normalized) == 2
     assert result.rejected == ()
-    assert result.normalized[0].source_timestamp.year == 2022
+    assert result.normalized[0].source_timestamp is None
+    assert result.fetched[0].payload["event_year"] == 2022
+    assert result.fetched[0].payload["temporal_precision"] == "year"
     assert result.normalized[0].event_type.value == "flood_report"
     assert result.fetched[0].payload["evidence_scope"] == "historical"
     assert result.fetched[0].payload["location_precision"] == "point"
     assert result.fetched[0].payload["dataset_revision"]
     assert result.normalized[0].source_url == "https://data.gov.tw/dataset/130016"
+
+
+def test_adapter_retains_revisions_instead_of_replacing_older_years() -> None:
+    assert NSTC_FLOOD_DISASTER_POINTS_METADATA.snapshot_generation_mode is None
 
 
 def test_partial_snapshot_preserves_every_invalid_source_row_as_rejected() -> None:

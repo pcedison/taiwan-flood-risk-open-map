@@ -52,8 +52,8 @@ class StagingEvidenceUpsert:
     title: str
     summary: str
     url: str
-    occurred_at: datetime
-    observed_at: datetime
+    occurred_at: datetime | None
+    observed_at: datetime | None
     confidence: float
     validation_status: ValidationStatus
     rejection_reason: str | None
@@ -330,7 +330,11 @@ def build_raw_snapshot(
         raise ValueError("adapter run must include at least one fetched raw item before raw snapshot")
 
     content_hash = _content_hash(result)
-    source_timestamps = tuple(evidence.source_timestamp for evidence in result.normalized)
+    source_timestamps = tuple(
+        evidence.source_timestamp
+        for evidence in result.normalized
+        if evidence.source_timestamp is not None
+    )
     fetched_at = max(item.fetched_at for item in result.fetched)
     source_family = _source_family_for_retention(result)
     metadata: dict[str, Any] = {
@@ -483,6 +487,9 @@ _STAGING_PAYLOAD_PASSTHROUGH_KEYS: tuple[str, ...] = (
     "ncdr_geocode_name",
     "ncdr_geocode",
     "dataset_revision",
+    "event_year",
+    "temporal_precision",
+    "source_record_key",
 )
 
 

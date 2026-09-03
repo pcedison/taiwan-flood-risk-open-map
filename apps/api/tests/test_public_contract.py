@@ -28,6 +28,8 @@ from app.api.services.assessment import AssessmentService
 from app.core.config import get_settings
 from app.domain.assessment import AssessmentData, AssessmentSourceState
 from app.domain.evidence import (
+    AssessmentEvidenceExpired,
+    AssessmentEvidenceNotFound,
     EvidenceRecord,
 )
 from app.domain.layers import LayerRecord, LayerRepositoryUnavailable
@@ -418,6 +420,11 @@ def test_history_coverage_contract_exposes_status_without_claiming_safety(
             "stale": 0,
             "unassessed": 0,
         },
+        "lookback_years": 15,
+        "calendar_timezone": "Asia/Taipei",
+        "audit_complete": True,
+        "data_coverage_complete": True,
+        "known_gap_cell_count": 0,
         "coverage_complete": True,
         "absence_is_safety_evidence": False,
     }
@@ -453,6 +460,30 @@ def test_history_coverage_marks_missing_persisted_cell_unassessed(
     assert payload["summary"]["absence_is_safety_evidence"] is False
 
 
+def test_history_coverage_distinguishes_completed_audit_from_known_data_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        public_routes,
+        "list_historical_coverage",
+        lambda **kwargs: (
+            _historical_coverage_record(status="not_published", persisted=True),
+        ),
+    )
+
+    response = client.get(
+        "/v1/history-coverage",
+        params={"county_code": "67000000", "year": 2026},
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    assert summary["audit_complete"] is True
+    assert summary["coverage_complete"] is True
+    assert summary["data_coverage_complete"] is False
+    assert summary["known_gap_cell_count"] == 1
+
+
 def test_history_coverage_rejects_unknown_county_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -485,7 +516,7 @@ def test_history_coverage_fails_closed_when_matrix_is_incomplete(
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "coverage_matrix_incomplete"
     assert response.json()["error"]["details"] == {
-        "expected_cell_count": 198,
+        "expected_cell_count": 330,
         "returned_cell_count": 1,
     }
 
@@ -617,10 +648,10 @@ def test_required_schema_readiness_checks_latest_migration_and_relations() -> No
     assert "checksum = %s" in str(captured["sql"])
     assert "MAX(version) = %s" in str(captured["sql"])
     assert captured["params"] == (
-        59,
-        "0059_historical_coverage_15y_retention.sql",
-        "5243c84fde06291446c138b6dbc7d668e695083b58744787c6e09a87e0399dd4",
-        59,
+        60,
+        "0060_historical_event_semantics.sql",
+        "a95ac5ae2f444bec4529dc6fa0d452f3027787fe5b6ff89be70f874408558af8",
+        60,
         "public.ingestion_scheduler_heartbeats",
         "public.ingestion_readiness_sources",
         "public.historical_coverage_cells",
@@ -656,7 +687,7 @@ def test_required_schema_readiness_rejects_partial_migration() -> None:
                 True,
             )
 
-    with pytest.raises(RuntimeError, match="required database schema migration 0059 is incomplete"):
+    with pytest.raises(RuntimeError, match="required database schema migration 0060 is incomplete"):
         health_routes._check_required_schema(FakeCursor())
 
 
@@ -1575,6 +1606,12 @@ def test_evidence_list_contract(monkeypatch) -> None:
         "location_precision",
         "limitations",
         "evidence_scope",
+        "event_year",
+        "temporal_precision",
+        "event_start_at",
+        "event_end_at",
+        "observation_count",
+        "episode_algorithm_version",
     }
     assert UUID(evidence["id"])
     assert evidence["geometry"] == {"type": "Point", "coordinates": [120.213493, 23.038818]}
@@ -1597,6 +1634,73 @@ def test_evidence_list_can_read_persisted_assessment_evidence(monkeypatch) -> No
     assert payload["items"][0]["id"] == "b3f22a36-7316-4e2a-92b6-c6f6443c8528"
     assert payload["items"][0]["point"] == {"lat": 23.038818, "lng": 120.213493}
     assert_openapi_schema(payload, "EvidenceListResponse")
+
+
+def test_history_list_contract_preserves_annual_precision(monkeypatch) -> None:
+    assessment_id = "d315d0e6-9c1e-475a-9118-f299d12d5c62"
+    annual = replace(
+        _db_evidence_record(),
+        occurred_at=None,
+        observed_at=None,
+        event_year=2025,
+        temporal_precision="year",
+        event_start_at=None,
+        event_end_at=None,
+        evidence_scope="historical",
+    )
+    monkeypatch.setattr(
+        public_routes,
+        "fetch_assessment_history",
+        lambda **_kwargs: (annual,),
+    )
+
+    response = client.get(f"/v1/history/{assessment_id}", params={"page_size": 1})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["assessment_id"] == assessment_id
+    assert payload["next_cursor"] is None
+    assert payload["items"][0]["event_year"] == 2025
+    assert payload["items"][0]["temporal_precision"] == "year"
+    assert payload["items"][0]["occurred_at"] is None
+    assert payload["items"][0]["observed_at"] is None
+    assert_openapi_schema(payload, "EvidenceListResponse")
+
+
+def test_history_list_rejects_cursor_bound_to_another_assessment() -> None:
+    response = client.get(
+        "/v1/history/d315d0e6-9c1e-475a-9118-f299d12d5c62",
+        params={"cursor": "e30"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_cursor"
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_code"),
+    [
+        (AssessmentEvidenceNotFound("missing"), 404, "not_found"),
+        (AssessmentEvidenceExpired("expired"), 410, "assessment_expired"),
+    ],
+)
+def test_history_list_distinguishes_missing_and_expired_assessments(
+    monkeypatch: pytest.MonkeyPatch,
+    error: RuntimeError,
+    expected_status: int,
+    expected_code: str,
+) -> None:
+    def fail(**_kwargs: object) -> tuple[EvidenceRecord, ...]:
+        raise error
+
+    monkeypatch.setattr(public_routes, "fetch_assessment_history", fail)
+
+    response = client.get(
+        "/v1/history/d315d0e6-9c1e-475a-9118-f299d12d5c62"
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()["error"]["code"] == expected_code
 
 
 def test_layers_uses_db_records_when_available(monkeypatch) -> None:

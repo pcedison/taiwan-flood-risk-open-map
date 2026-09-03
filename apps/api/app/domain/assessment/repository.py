@@ -18,6 +18,7 @@ from app.domain.evidence import (
     query_realtime_jurisdiction_context,
     query_realtime_source_health_rows,
 )
+from app.domain.history.window import historical_window_start
 from app.domain.realtime import (
     build_nearby_realtime_coverage,
     build_nearby_source_health,
@@ -145,6 +146,7 @@ class PostgresAssessmentRepository:
             lat=lat,
             lng=lng,
             radius_m=radius_m,
+            as_of=as_of,
         )
         observed_flood_history, observed_flood_history_available = (
             self._load_observed_flood_history(
@@ -190,6 +192,7 @@ class PostgresAssessmentRepository:
             # read below was filtered against nothing rather than answered.
             jurisdiction_mapping_missing=not applicable_keys,
             jurisdiction_complete_signal_types=_complete_signal_types(jurisdiction),
+            home_jurisdiction_code=jurisdiction.home_jurisdiction_code,
             home_jurisdiction=jurisdiction.home_jurisdiction_name,
             considered_jurisdictions=tuple(
                 name for _, name in jurisdiction.considered_jurisdictions
@@ -258,7 +261,7 @@ class PostgresAssessmentRepository:
             return (), False
 
     def _load_history(
-        self, *, lat: float, lng: float, radius_m: int
+        self, *, lat: float, lng: float, radius_m: int, as_of: datetime
     ) -> tuple[tuple[EvidenceRecord, ...], bool]:
         try:
             return (
@@ -267,6 +270,7 @@ class PostgresAssessmentRepository:
                     lat=lat,
                     lng=lng,
                     radius_m=radius_m,
+                    historical_since=historical_window_start(as_of),
                 ),
                 True,
             )

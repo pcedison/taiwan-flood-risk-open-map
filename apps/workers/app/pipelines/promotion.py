@@ -474,6 +474,11 @@ class PostgresEvidencePromotionWriter:
                         geom,
                         raw_ref,
                         ingestion_status,
+                        event_year,
+                        temporal_precision,
+                        event_start_at,
+                        event_end_at,
+                        source_record_key,
                         properties
                     )
                     SELECT
@@ -493,6 +498,30 @@ class PostgresEvidencePromotionWriter:
                         END,
                         raw_ref,
                         'accepted',
+                        CASE
+                            WHEN properties->>'event_year' ~ '^[0-9]{4}$'
+                                THEN (properties->>'event_year')::integer
+                            ELSE EXTRACT(
+                                YEAR FROM COALESCE(occurred_at, observed_at)
+                                    AT TIME ZONE 'Asia/Taipei'
+                            )::integer
+                        END,
+                        CASE
+                            WHEN properties->>'temporal_precision' IN (
+                                'instant', 'day', 'month', 'year', 'unknown'
+                            ) THEN properties->>'temporal_precision'
+                            WHEN COALESCE(occurred_at, observed_at) IS NOT NULL THEN 'instant'
+                            ELSE 'unknown'
+                        END,
+                        CASE
+                            WHEN properties->>'temporal_precision' = 'year' THEN NULL
+                            ELSE COALESCE(occurred_at, observed_at)
+                        END,
+                        CASE
+                            WHEN properties->>'temporal_precision' = 'year' THEN NULL
+                            ELSE COALESCE(observed_at, occurred_at)
+                        END,
+                        COALESCE(NULLIF(properties->>'source_record_key', ''), source_id),
                         properties
                     FROM resolved_candidate
                     ON CONFLICT ON CONSTRAINT evidence_source_raw_ref_unique
