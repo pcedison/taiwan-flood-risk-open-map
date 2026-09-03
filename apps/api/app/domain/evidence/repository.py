@@ -3093,7 +3093,14 @@ def fetch_assessment_evidence(
                     )
                 ),
                 ARRAY[]::text[]
-            ) AS limitations
+            ) AS limitations,
+            e.event_year,
+            e.temporal_precision,
+            e.event_start_at,
+            e.event_end_at,
+            e.source_record_key,
+            NULL::integer AS observation_count,
+            NULL::text AS episode_algorithm_version
         FROM risk_assessment_evidence rae
         JOIN risk_assessments ra ON ra.id = rae.risk_assessment_id
         JOIN location_queries lq ON lq.id = ra.query_id
@@ -3112,7 +3119,19 @@ def fetch_assessment_evidence(
             END ASC,
             CASE
                 WHEN e.properties->>'evidence_scope' = 'historical'
-                    THEN COALESCE(e.occurred_at, e.observed_at, e.ingested_at)
+                    THEN CASE
+                        WHEN e.temporal_precision = 'year' AND e.event_year IS NOT NULL
+                            THEN make_timestamptz(
+                                e.event_year, 1, 1, 0, 0, 0, 'Asia/Taipei'
+                            )
+                        ELSE COALESCE(
+                            e.event_end_at,
+                            e.event_start_at,
+                            e.occurred_at,
+                            e.observed_at,
+                            e.ingested_at
+                        )
+                    END
             END DESC NULLS LAST,
             e.occurred_at DESC NULLS LAST,
             rae.created_at ASC,
@@ -3200,7 +3219,14 @@ def fetch_evidence_by_ids(
                     )
                 ),
                 ARRAY[]::text[]
-            ) AS limitations
+            ) AS limitations,
+            e.event_year,
+            e.temporal_precision,
+            e.event_start_at,
+            e.event_end_at,
+            e.source_record_key,
+            NULL::integer AS observation_count,
+            NULL::text AS episode_algorithm_version
         FROM requested
         JOIN evidence e ON e.id = requested.id
         JOIN data_sources ds ON ds.id = e.data_source_id AND ds.is_enabled = true

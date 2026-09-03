@@ -286,6 +286,43 @@ def test_display_evidence_preserves_and_sorts_official_disaster_points_newest_fi
     ]
 
 
+def test_display_evidence_sorts_year_precision_history_by_event_year() -> None:
+    base = _record(
+        evidence_id="annual:older",
+        source_id="data-gov-130016:2021:demo:1",
+        event_type="flood_report",
+        occurred_at=datetime(2021, 1, 1, tzinfo=UTC),
+    )
+    older = public_evidence.evidence_from_record(
+        replace(
+            base,
+            occurred_at=None,
+            observed_at=None,
+            ingested_at=datetime(2026, 9, 2, tzinfo=UTC),
+            event_year=2021,
+            temporal_precision="year",
+            evidence_scope="historical",
+        )
+    )
+    newer = public_evidence.evidence_from_record(
+        replace(
+            base,
+            id="annual:newer",
+            source_id="data-gov-130016:2022:demo:2",
+            occurred_at=None,
+            observed_at=None,
+            ingested_at=datetime(2026, 9, 1, tzinfo=UTC),
+            event_year=2022,
+            temporal_precision="year",
+            evidence_scope="historical",
+        )
+    )
+
+    displayed = public_evidence.display_evidence_items([older, newer])
+
+    assert [item.id for item in displayed] == ["annual:newer", "annual:older"]
+
+
 def test_preview_reserves_current_signal_families_and_historical_context() -> None:
     observed_at = datetime(2026, 8, 29, tzinfo=UTC)
     flood_sensors = [

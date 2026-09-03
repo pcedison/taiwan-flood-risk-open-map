@@ -21,6 +21,10 @@ def test_migration_preserves_annual_precision_and_stable_record_identity() -> No
     assert "observed_at IS NULL" in sql
     assert "source.adapter_key = 'official.nstc.flood_disaster_points'" in sql
     assert "temporal_precision = 'year'" in sql
+    assert "digest(" in sql
+    assert "'sha256'" in sql
+    assert "'FM999990.000000'" in sql
+    assert "md5(" not in sql
     assert "CREATE INDEX IF NOT EXISTS idx_evidence_flood_station_episode_time" in sql
     assert "CREATE INDEX IF NOT EXISTS idx_evidence_source_record_key_year" in sql
 

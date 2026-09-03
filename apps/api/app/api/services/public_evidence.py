@@ -557,11 +557,23 @@ def _display_sort_key(item: Evidence) -> tuple[int, float, float, str]:
         item.evidence_scope,
         3,
     )
-    event_time = (
-        item.occurred_at or item.observed_at or item.ingested_at
-        if item.evidence_scope == "historical"
-        else item.observed_at or item.occurred_at or item.ingested_at
-    )
+    if (
+        item.evidence_scope == "historical"
+        and item.temporal_precision == "year"
+        and item.event_year is not None
+    ):
+        event_time = datetime(item.event_year, 1, 1, tzinfo=ZoneInfo("Asia/Taipei"))
+    elif item.evidence_scope == "historical":
+        event_time = (
+            item.event_end_at
+            or item.event_start_at
+            or item.occurred_at
+            or item.observed_at
+        )
+    else:
+        event_time = item.observed_at or item.occurred_at or item.ingested_at
+    if event_time is None:
+        event_time = item.ingested_at
     timestamp = event_time.timestamp() if event_time is not None else 0.0
     distance = item.distance_to_query_m if item.distance_to_query_m is not None else float("inf")
     return scope_rank, -timestamp, distance, item.id

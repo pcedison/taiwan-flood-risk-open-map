@@ -1532,6 +1532,11 @@ def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
                 "source_weight": 1.0,
                 "privacy_level": "public",
                 "raw_ref": "profile-top:official",
+                "event_year": 2024,
+                "temporal_precision": "year",
+                "event_start_at": None,
+                "event_end_at": None,
+                "source_record_key": "2024:stable-profile-key",
             },
             {
                 "id": "11111111-1111-4111-8111-111111111111",
@@ -1571,6 +1576,9 @@ def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
     assert "WITH ORDINALITY" in sql
     assert "ORDER BY requested.ordinality ASC" in sql
     assert "jsonb_typeof(e.properties->'limitations') = 'array'" in sql
+    assert "e.event_year" in sql
+    assert "e.temporal_precision" in sql
+    assert "e.source_record_key" in sql
     assert params == (
         [
             "22222222-2222-4222-8222-222222222222",
@@ -1582,6 +1590,9 @@ def test_fetch_evidence_by_ids_preserves_requested_order() -> None:
         "11111111-1111-4111-8111-111111111111",
     ]
     assert records[0].geometry == {"type": "Point", "coordinates": [120.32574, 22.65646]}
+    assert records[0].event_year == 2024
+    assert records[0].temporal_precision == "year"
+    assert records[0].source_record_key == "2024:stable-profile-key"
 
 
 def test_upsert_public_evidence_writes_point_geometry_and_metadata() -> None:
@@ -1730,6 +1741,11 @@ def test_evidence_record_reads_reviewed_precision_and_limitations() -> None:
                 "privacy_level": "public",
                 "location_precision": "road_or_lane",
                 "limitations": ["公開資料僅精確至道路尺度"],
+                "event_year": 2025,
+                "temporal_precision": "year",
+                "event_start_at": None,
+                "event_end_at": None,
+                "source_record_key": "2025:stable-detail-key",
             }
         ]
     )
@@ -1747,8 +1763,15 @@ def test_evidence_record_reads_reviewed_precision_and_limitations() -> None:
     assert "WHEN e.properties->>'location_precision' = 'admin_area' THEN NULL" in sql
     assert "AS location_precision" in sql
     assert "AS limitations" in sql
+    assert "e.event_year" in sql
+    assert "e.temporal_precision" in sql
+    assert "e.source_record_key" in sql
+    assert "make_timestamptz" in sql
     assert records[0].location_precision == "road_or_lane"
     assert records[0].limitations == ("公開資料僅精確至道路尺度",)
+    assert records[0].event_year == 2025
+    assert records[0].temporal_precision == "year"
+    assert records[0].source_record_key == "2025:stable-detail-key"
 
 
 def test_fetch_assessment_history_reads_complete_keyset_page() -> None:

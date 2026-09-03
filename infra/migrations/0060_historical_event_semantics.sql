@@ -133,25 +133,54 @@ SET
                 ),
                 ':',
                 substring(
-                    md5(
-                        lower(regexp_replace(
-                            COALESCE(
-                                substring(
-                                    staging.source_id
-                                    FROM '^data-gov-130016:[0-9]{4}:(.*):[^:]+$'
+                    encode(
+                        digest(
+                            convert_to(
+                                concat(
+                                    COALESCE(
+                                        CASE
+                                            WHEN staging.payload->>'event_year' ~ '^[0-9]{4}$'
+                                                THEN staging.payload->>'event_year'
+                                        END,
+                                        substring(
+                                            staging.source_id
+                                            FROM '^data-gov-130016:([0-9]{4}):'
+                                        )
+                                    ),
+                                    '|',
+                                    lower(regexp_replace(
+                                        btrim(COALESCE(
+                                            NULLIF(staging.payload->>'source', ''),
+                                            substring(
+                                                staging.source_id
+                                                FROM '^data-gov-130016:[0-9]{4}:(.*):[^:]+$'
+                                            ),
+                                            'unknown'
+                                        )),
+                                        '[[:space:]]+',
+                                        ' ',
+                                        'g'
+                                    )),
+                                    '|',
+                                    to_char(
+                                        ST_X(ST_GeomFromGeoJSON(
+                                            (staging.payload->'location_payload'->'geometry')::text
+                                        )),
+                                        'FM999990.000000'
+                                    ),
+                                    '|',
+                                    to_char(
+                                        ST_Y(ST_GeomFromGeoJSON(
+                                            (staging.payload->'location_payload'->'geometry')::text
+                                        )),
+                                        'FM999990.000000'
+                                    )
                                 ),
-                                'unknown'
+                                'UTF8'
                             ),
-                            '\\s+',
-                            ' ',
-                            'g'
-                        )) || '|' ||
-                        round(ST_X(ST_GeomFromGeoJSON(
-                            (staging.payload->'location_payload'->'geometry')::text
-                        ))::numeric, 6)::text || '|' ||
-                        round(ST_Y(ST_GeomFromGeoJSON(
-                            (staging.payload->'location_payload'->'geometry')::text
-                        ))::numeric, 6)::text
+                            'sha256'
+                        ),
+                        'hex'
                     )
                     FROM 1 FOR 24
                 )
@@ -190,21 +219,50 @@ SET
                 ),
                 ':',
                 substring(
-                    md5(
-                        lower(regexp_replace(
-                            COALESCE(
-                                substring(
-                                    promoted.source_id
-                                    FROM '^data-gov-130016:[0-9]{4}:(.*):[^:]+$'
+                    encode(
+                        digest(
+                            convert_to(
+                                concat(
+                                    COALESCE(
+                                        CASE
+                                            WHEN promoted.properties->>'event_year' ~ '^[0-9]{4}$'
+                                                THEN promoted.properties->>'event_year'
+                                        END,
+                                        substring(
+                                            promoted.source_id
+                                            FROM '^data-gov-130016:([0-9]{4}):'
+                                        )
+                                    ),
+                                    '|',
+                                    lower(regexp_replace(
+                                        btrim(COALESCE(
+                                            NULLIF(promoted.properties->>'source', ''),
+                                            substring(
+                                                promoted.source_id
+                                                FROM '^data-gov-130016:[0-9]{4}:(.*):[^:]+$'
+                                            ),
+                                            'unknown'
+                                        )),
+                                        '[[:space:]]+',
+                                        ' ',
+                                        'g'
+                                    )),
+                                    '|',
+                                    to_char(
+                                        ST_X(ST_PointOnSurface(promoted.geom)),
+                                        'FM999990.000000'
+                                    ),
+                                    '|',
+                                    to_char(
+                                        ST_Y(ST_PointOnSurface(promoted.geom)),
+                                        'FM999990.000000'
+                                    )
                                 ),
-                                'unknown'
+                                'UTF8'
                             ),
-                            '\\s+',
-                            ' ',
-                            'g'
-                        )) || '|' ||
-                        round(ST_X(ST_PointOnSurface(promoted.geom))::numeric, 6)::text || '|' ||
-                        round(ST_Y(ST_PointOnSurface(promoted.geom))::numeric, 6)::text
+                            'sha256'
+                        ),
+                        'hex'
                     )
                     FROM 1 FOR 24
                 )

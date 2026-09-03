@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -170,6 +171,10 @@ def test_migration_backfills_year_only_rows_without_synthetic_dates() -> None:
 
         assert staging[:6] == (2025, "year", None, None, None, None)
         assert promoted[:6] == (2025, "year", None, None, None, None)
-        assert staging[6]
-        assert promoted[6] == staging[6]
+        canonical_key = (
+            "2025:"
+            + sha256("2025|demo|120.200000|23.000000".encode("utf-8")).hexdigest()[:24]
+        )
+        assert staging[6] == canonical_key
+        assert promoted[6] == canonical_key
         assert raw == (None, None, "year", "false")
