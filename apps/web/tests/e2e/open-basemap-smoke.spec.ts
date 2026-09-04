@@ -132,7 +132,7 @@ async function mockRiskApi(page: Page) {
           updated_at: "2026-04-29T03:00:00Z",
         },
         realtime: { level: "low" },
-        score_version: "risk-v0.2.0",
+        score_version: "risk-v0.3.0",
       },
     });
   });
@@ -275,7 +275,7 @@ test("map-click assessment skips stale search geocoding", async ({ page }) => {
           updated_at: "2026-04-29T03:00:00Z",
         },
         realtime: { level: "low" },
-        score_version: "risk-v0.2.0",
+        score_version: "risk-v0.3.0",
       },
     });
   });

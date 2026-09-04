@@ -238,7 +238,7 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
         ],
         radius_m: 500,
         realtime: { level: "low" },
-        score_version: "risk-v0.2.0",
+        score_version: "risk-v0.3.0",
       },
     });
   });
@@ -657,7 +657,7 @@ test("a failed address lookup clears stale risk results and does not assess old 
         },
         radius_m: 300,
         realtime: { level: "低" },
-        score_version: "risk-v0.2.0",
+        score_version: "risk-v0.3.0",
       },
     });
   });
@@ -784,7 +784,7 @@ test("an admin-area geocode warns and still assesses with data limits", async ({
         },
         radius_m: 300,
         realtime: { level: isAdminFallback ? "未知" : "低" },
-        score_version: "risk-v0.2.0",
+        score_version: "risk-v0.3.0",
       },
     });
   });

@@ -7,7 +7,7 @@ from typing import Literal
 PublicRiskLevel = Literal["低", "中", "高", "極高", "未知"]
 PublicConfidenceLevel = Literal["低", "中", "高", "未知"]
 
-SCORE_VERSION = "risk-v0.2.0"
+SCORE_VERSION = "risk-v0.3.0"
 
 REALTIME_WEIGHTS = {
     "rainfall": 40.0,
@@ -21,6 +21,28 @@ HISTORICAL_WEIGHTS = {
     "flood_report": 35.0,
     "road_closure": 15.0,
 }
+# Historical evidence quality depends on how precisely it locates the query
+# point. An admin-area-level citation (e.g. a county-wide news article) is
+# much weaker proof of risk at a specific point than a point/road-level
+# record. Only flood_report/road_closure carry a location claim that varies
+# in precision this way: flood_potential/flood_warning/rainfall/water_level
+# are already area- or station-scoped data and are exempt (factor 1.0).
+PRECISION_FACTORS = {
+    "point": 1.0,
+    "map_click": 1.0,
+    "poi": 0.9,
+    "polygon": 0.85,
+    "road_or_lane": 0.7,
+    "inferred": 0.5,
+    "admin_area": 0.35,
+    "unknown": 0.6,
+}
+PRECISION_WEIGHTED_EVENT_TYPES = frozenset({"flood_report", "road_closure"})
+# SDD 9.3: historical risk must be backed by official records or *repeated*
+# news evidence, not a single admin-area-level citation. When every eligible
+# historical signal is admin-area precision, cap the historical score so the
+# public level cannot exceed "中" (medium).
+ADMIN_AREA_ONLY_HISTORICAL_CAP = 40.0
 EVENT_SCORE_CAPS = {
     # Nearby stations are correlated measurements of the same weather event.
     # A wider support search must not turn station density into higher risk.
@@ -55,6 +77,7 @@ class RiskEvidenceSignal:
     risk_factor: float = 1.0
     observed_at: datetime | None = None
     evidence_scope: Literal["current", "historical", "context", "unspecified"] = "unspecified"
+    location_precision: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -74,6 +97,7 @@ class RiskScoringResult:
 def score_risk(signals: tuple[RiskEvidenceSignal, ...], *, now: datetime) -> RiskScoringResult:
     realtime_score = _weighted_score(signals, REALTIME_WEIGHTS, now=now, max_age=timedelta(hours=6))
     historical_score = _weighted_score(signals, HISTORICAL_WEIGHTS)
+    historical_score = _apply_admin_area_only_historical_cap(signals, historical_score)
     confidence_score = _confidence_score(signals)
     missing_sources = _missing_sources(signals, now=now)
     has_historical_evidence = _has_weighted_evidence(signals, HISTORICAL_WEIGHTS)
@@ -126,8 +150,14 @@ def _weighted_score(
     max_age: timedelta | None = None,
 ) -> float:
     totals_by_event: dict[str, float] = {}
+    # A single low-precision citation (admin-area, or precision unknown) is not
+    # strong enough proof of an observed incident to justify suppressing
+    # flood_potential's own score down to the "context" cap: garbage evidence
+    # must never be able to *lower* the historical score below what it would
+    # have been without it.
     has_observed_history = any(
         signal.event_type in {"flood_report", "road_closure"}
+        and signal.location_precision not in {"admin_area", "unknown"}
         and _is_weighted_signal_eligible(
             signal,
             weights,
@@ -146,6 +176,8 @@ def _weighted_score(
             continue
         weight = weights[signal.event_type]
         contribution = _weighted_signal_contribution(signal, weight)
+        if weights is HISTORICAL_WEIGHTS:
+            contribution *= _precision_factor(signal)
         if (
             signal.event_type == "flood_report"
             and weight >= HISTORICAL_WEIGHTS["flood_report"]
@@ -226,6 +258,24 @@ def _weighted_signal_contribution(
         * _distance_factor(signal.distance_to_query_m)
         * max(signal.source_weight, 0.0)
     )
+
+
+def _precision_factor(signal: RiskEvidenceSignal) -> float:
+    if signal.event_type not in PRECISION_WEIGHTED_EVENT_TYPES:
+        return 1.0
+    return PRECISION_FACTORS.get(signal.location_precision, PRECISION_FACTORS["unknown"])
+
+
+def _apply_admin_area_only_historical_cap(
+    signals: tuple[RiskEvidenceSignal, ...],
+    historical_score: float,
+) -> float:
+    eligible = [
+        signal for signal in signals if _is_weighted_signal_eligible(signal, HISTORICAL_WEIGHTS)
+    ]
+    if eligible and all(signal.location_precision == "admin_area" for signal in eligible):
+        return min(historical_score, ADMIN_AREA_ONLY_HISTORICAL_CAP)
+    return historical_score
 
 
 def _is_recent(signal: RiskEvidenceSignal, now: datetime, max_age: timedelta) -> bool:

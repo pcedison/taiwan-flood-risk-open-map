@@ -345,6 +345,7 @@ def test_flood_potential_context_does_not_escalate_single_observed_history_to_hi
                 distance_to_query_m=101.0,
                 freshness_score=0.74,
                 source_weight=1.0,
+                location_precision="point",
             ),
             RiskEvidenceSignal(
                 source_type="official",
@@ -371,6 +372,120 @@ def test_flood_potential_context_does_not_escalate_single_observed_history_to_hi
     assert result.realtime_level == "未知"
 
 
+def test_weak_admin_area_report_cannot_lower_flood_potential_context_score() -> None:
+    # A single weak, imprecise flood_report must never make the historical
+    # score go DOWN relative to having no such report at all: that would mean
+    # garbage evidence actively suppresses a legitimate flood_potential score.
+    now = datetime.fromisoformat("2026-09-05T00:00:00+00:00")
+    flood_potential_only = score_risk(
+        (
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_potential",
+                confidence=0.9,
+                distance_to_query_m=0.0,
+                freshness_score=0.8,
+                source_weight=1.0,
+            ),
+        ),
+        now=now,
+    )
+    with_weak_admin_area_report = score_risk(
+        (
+            RiskEvidenceSignal(
+                source_type="official",
+                event_type="flood_potential",
+                confidence=0.9,
+                distance_to_query_m=0.0,
+                freshness_score=0.8,
+                source_weight=1.0,
+            ),
+            RiskEvidenceSignal(
+                source_type="news",
+                event_type="flood_report",
+                confidence=0.4,
+                distance_to_query_m=None,
+                freshness_score=0.5,
+                source_weight=0.5,
+                location_precision="admin_area",
+            ),
+        ),
+        now=now,
+    )
+
+    assert with_weak_admin_area_report.historical_score >= flood_potential_only.historical_score
+
+
+def test_admin_area_only_historical_evidence_is_capped_at_medium() -> None:
+    # Mirrors the production bug: several admin-area-level citations of the
+    # same generic county-wide event, each floored to the observed-history
+    # minimum, would otherwise stack to "極高" with no point-level backing.
+    now = datetime.fromisoformat("2026-09-01T00:00:00+00:00")
+    signals = tuple(
+        RiskEvidenceSignal(
+            source_type="news",
+            event_type="flood_report",
+            confidence=0.6,
+            distance_to_query_m=100.0,
+            freshness_score=0.9,
+            source_weight=1.0,
+            location_precision="admin_area",
+        )
+        for _ in range(4)
+    )
+
+    result = score_risk(signals, now=now)
+
+    assert result.historical_score <= 40.0
+    assert result.historical_level == "中"
+
+
+def test_point_precision_historical_evidence_is_not_reduced() -> None:
+    now = datetime.fromisoformat("2026-09-01T00:00:00+00:00")
+
+    def flood_report(precision: str) -> RiskEvidenceSignal:
+        return RiskEvidenceSignal(
+            source_type="news",
+            event_type="flood_report",
+            confidence=0.9,
+            distance_to_query_m=2000.0,
+            freshness_score=0.95,
+            source_weight=1.0,
+            location_precision=precision,
+        )
+
+    point_result = score_risk((flood_report("point"),), now=now)
+    admin_area_result = score_risk((flood_report("admin_area"),), now=now)
+
+    expected_unweighted = 35.0 * 0.9 * 0.95 * 0.5
+    assert point_result.historical_score == pytest.approx(expected_unweighted, abs=0.001)
+    assert point_result.historical_score > admin_area_result.historical_score
+
+
+def test_realtime_flood_report_score_is_unaffected_by_location_precision() -> None:
+    now = datetime.fromisoformat("2026-09-01T00:00:00+00:00")
+
+    def current_flood_report(precision: str) -> RiskEvidenceSignal:
+        return RiskEvidenceSignal(
+            source_type="official",
+            event_type="flood_report",
+            confidence=0.9,
+            distance_to_query_m=80.0,
+            freshness_score=0.95,
+            source_weight=1.0,
+            risk_factor=1.0,
+            observed_at=now,
+            evidence_scope="current",
+            location_precision=precision,
+        )
+
+    admin_area_result = score_risk((current_flood_report("admin_area"),), now=now)
+    point_result = score_risk((current_flood_report("point"),), now=now)
+
+    assert admin_area_result.realtime_score == point_result.realtime_score
+    assert admin_area_result.realtime_level == point_result.realtime_level
+
+
 def _signal_from_fixture(payload: dict[str, object]) -> RiskEvidenceSignal:
     observed_at = payload.get("observed_at")
     return RiskEvidenceSignal(
@@ -384,4 +499,5 @@ def _signal_from_fixture(payload: dict[str, object]) -> RiskEvidenceSignal:
         source_weight=float(cast(Any, payload["source_weight"])),
         risk_factor=float(cast(Any, payload.get("risk_factor", 1.0))),
         observed_at=datetime.fromisoformat(str(observed_at)) if observed_at else None,
+        location_precision=str(payload.get("location_precision", "unknown")),
     )

@@ -476,8 +476,20 @@ def search_taiwan_official_flood_citations(
                 )
                 if comparable < oldest_allowed or comparable > now + timedelta(days=1):
                     continue
+                # At admin-area precision, an article's RSS description/snippet
+                # is untrusted body text: a nationwide notice can mention many
+                # unrelated place names there, which previously let the same
+                # generic page satisfy several different counties' queries.
+                # Require the county/district name in the title itself; a
+                # body-only mention falls through to the bounded direct-page
+                # verification below instead of being auto-accepted.
+                metadata_match_text = (
+                    str(article.get("title", "")).strip()
+                    if target.scope == "admin_area"
+                    else match_text
+                )
                 metadata_location_match = _location_match(
-                    match_text,
+                    metadata_match_text,
                     target.term,
                     relaxed_location_terms=relaxed_terms,
                 )
@@ -527,9 +539,19 @@ def search_taiwan_official_flood_citations(
                     if not citation_payload:
                         errors += 1
                         continue
+                    # At admin-area precision, the raw page body is still
+                    # untrusted text (nav/footer/related-article lists can
+                    # name many unrelated counties). Only the page's own
+                    # <title> or first <h1> is treated as an authoritative
+                    # statement of what the page is about.
+                    citation_match_text = (
+                        _page_heading_text(citation_payload)
+                        if target.scope == "admin_area"
+                        else citation_payload
+                    )
                     if (
                         _location_match(
-                            citation_payload,
+                            citation_match_text,
                             target.term,
                             relaxed_location_terms=relaxed_terms,
                         )
@@ -1162,8 +1184,41 @@ def _official_history_record_time(record: EvidenceUpsert) -> datetime:
     return value.astimezone(UTC)
 
 
+# Never describe an actual flood incident, regardless of surrounding
+# context: reject unconditionally.
+_HARD_NON_INCIDENT_PHRASES = (
+    "防蚊",
+    "登革熱",
+    "病媒蚊",
+    "積水容器",
+    "孳生源",
+    "衛教",
+    "常見問題",
+    "faq",
+    "q&a",
+    "應向哪個單位",
+    "通報單位",
+)
+# Also used by routine incident follow-up, preparedness, and completed-project
+# copy, so only reject when the text carries none of the incident markers
+# below (a genuine incident report can legitimately mention cleanup/repair).
+_SOFT_NON_INCIDENT_PHRASES = (
+    "消毒",
+    "儲備",
+    "整備",
+    "演練",
+    "宣導",
+    "防颱準備",
+    "完工",
+    "通車",
+    "淹水問題",
+)
+
+
 def _official_history_text_qualifies(text: str) -> bool:
     normalized = _normalize(text)
+    if any(_normalize(phrase) in normalized for phrase in _HARD_NON_INCIDENT_PHRASES):
+        return False
     if not any(_normalize(term) in normalized for term in PRIMARY_FLOOD_TERMS):
         return False
     planning_phrases = (
@@ -1193,7 +1248,9 @@ def _official_history_text_qualifies(text: str) -> bool:
         "退水",
         "進水",
         "泡水",
-        "水淹",
+        # Deliberately excludes the reversed "水淹" form: it collides with
+        # place names ending in "水" (e.g. "秀水" + "淹水" reads as "水淹" at
+        # the boundary), which falsely marks unrelated text as an incident.
         "道路積水",
         "積淹水",
         "造成",
@@ -1209,11 +1266,17 @@ def _official_history_text_qualifies(text: str) -> bool:
         "多處",
         "視察",
     )
+    has_event_marker = any(marker in normalized for marker in event_markers)
+    if (
+        any(_normalize(phrase) in normalized for phrase in _SOFT_NON_INCIDENT_PHRASES)
+        and not has_event_marker
+    ):
+        return False
     if any(phrase in normalized for phrase in planning_phrases) and not any(
         phrase in normalized for phrase in incident_phrases
     ):
         return False
-    return any(marker in normalized for marker in event_markers)
+    return has_event_marker
 
 
 def _has_recent_official_history(
@@ -2163,6 +2226,31 @@ def _location_match(
         if normalized_term and normalized_term in normalized_text:
             return _LocationMatch(term=term, basis="relaxed_admin_context")
     return None
+
+
+_PAGE_TITLE_TAG_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_PAGE_H1_TAG_PATTERN = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+
+
+def _page_heading_text(html: str) -> str:
+    """Extract only a fetched page's <title> and first <h1>.
+
+    Used to verify an admin-area location claim: the full page body is
+    untrusted (nav/footer/related-article lists can mention many unrelated
+    counties), but the page's own title/heading is a reasonable statement of
+    what the page is actually about.
+    """
+
+    fragments = []
+    title_match = _PAGE_TITLE_TAG_PATTERN.search(html)
+    if title_match:
+        fragments.append(title_match.group(1))
+    h1_match = _PAGE_H1_TAG_PATTERN.search(html)
+    if h1_match:
+        fragments.append(h1_match.group(1))
+    combined = " ".join(fragments)
+    return unescape(_HTML_TAG_PATTERN.sub(" ", combined)).strip()
 
 
 def _article_match_text(article: Mapping[str, Any]) -> str:

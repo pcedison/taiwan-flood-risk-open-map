@@ -5,8 +5,11 @@ import json
 from urllib.parse import parse_qs, quote, urlparse
 
 from app.domain.history.news_enrichment import (
+    TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY,
     _google_news_decode_params,
     _google_news_decoded_url,
+    _official_history_text_qualifies,
+    _record_from_article,
     search_public_flood_news,
     search_taiwan_official_flood_citations,
     search_tainan_official_flood_news,
@@ -316,7 +319,8 @@ def test_nationwide_official_citations_verifies_location_on_generic_official_pag
             "https://ktc.kcg.gov.tw/disaster/detail?id=102026064754139"
         ),
         fetch_citation_text=lambda _url, _timeout: (
-            "積淹水災情：仁武區高楠公路路面積水。"
+            "<html><head><title>積淹水災情：仁武區高楠公路路面積水</title></head>"
+            "<body><p>詳細內容說明。</p></body></html>"
         ),
     )
 
@@ -388,6 +392,190 @@ def test_nationwide_official_citations_rejects_wrong_district_in_same_city() -> 
     )
 
     assert result.records == ()
+
+
+def test_official_history_text_qualifies_rejects_dengue_prevention_notice() -> None:
+    assert (
+        _official_history_text_qualifies(
+            "大雨過後記得整理戶內外環境，確實清除積水容器，提醒民眾做好防蚊措施"
+        )
+        is False
+    )
+
+
+def test_official_history_text_qualifies_rejects_faq_page() -> None:
+    assert (
+        _official_history_text_qualifies("豪大雨造成一般道路積淹水時，應向哪個單位通報?")
+        is False
+    )
+
+
+def test_official_history_text_qualifies_rejects_typhoon_preparedness_notice() -> None:
+    assert _official_history_text_qualifies("迎戰巴威颱風！楊文科坐鎮防颱整備") is False
+
+
+def test_official_history_text_qualifies_rejects_completed_drainage_project_notice() -> None:
+    assert (
+        _official_history_text_qualifies("改善板本排水及護岸橋梁 解決大村、秀水淹水問題")
+        is False
+    )
+
+
+def test_official_history_text_qualifies_accepts_genuine_incident_report() -> None:
+    assert (
+        _official_history_text_qualifies("卓揆赴宜蘭蘇澳關心淹水災情 指示地方政府加速清淤復原")
+        is True
+    )
+
+
+def test_official_history_text_qualifies_accepts_incident_with_followup_sanitation() -> None:
+    # "消毒" is a soft-exclude phrase, but this text also carries genuine
+    # incident markers ("災情"/"災後") and must not be rejected for that.
+    assert (
+        _official_history_text_qualifies(
+            "台南市多處淹水災情嚴重，衛生局派員進行災後消毒作業"
+        )
+        is True
+    )
+
+
+def test_official_history_text_qualifies_accepts_incident_with_completed_repair() -> None:
+    # "完工"/"通車" are soft-exclude phrases, but "封閉" is a genuine incident
+    # marker describing the road closure that preceded the repair.
+    assert (
+        _official_history_text_qualifies(
+            "因豪雨淹水封閉的中山路已搶修完工，今起恢復通車"
+        )
+        is True
+    )
+
+
+def test_official_history_text_qualifies_accepts_incident_with_pump_deployment() -> None:
+    # "整備" is a soft-exclude phrase, but "多處" plus the flood term marks
+    # this as a live incident report, not a preparedness notice.
+    assert (
+        _official_history_text_qualifies("嘉義縣多處淹水 縣府緊急整備抽水機馳援")
+        is True
+    )
+
+
+def test_official_history_text_qualifies_rejects_sanitation_supply_press_release() -> None:
+    # No incident marker present alongside the soft-exclude phrases, so this
+    # generic preparedness press release must still be rejected.
+    assert (
+        _official_history_text_qualifies(
+            "衛福部提醒：汛期水患將至，消毒劑儲備量充足因應"
+        )
+        is False
+    )
+
+
+def test_nationwide_official_citations_rejects_admin_area_match_found_only_in_body() -> None:
+    # The title never names the district; only the RSS description does. A
+    # bounded direct-page fetch is the only path that may confirm an
+    # admin-area match, and here it fails to mention the district too, so
+    # this must not be silently accepted from body text alone.
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>災情詳情</title>
+      <description>高雄市仁武區近期發生嚴重積淹水，請留意。</description>
+      <link>https://ktc.kcg.gov.tw/disaster/detail?id=999</link>
+      <pubDate>Tue, 25 Aug 2026 05:48:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="高雄市仁武區",
+        lat=22.701,
+        lng=120.36,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+        fetch_citation_text=lambda _url, _timeout: (
+            "本頁為全國性防汛宣導頁面，適用於所有縣市。"
+        ),
+    )
+
+    assert result.records == ()
+
+
+def test_nationwide_official_citations_rejects_page_listing_multiple_counties_in_body() -> None:
+    # The direct-page body lists several counties, including the queried
+    # district, but the page's own <title> is a generic nationwide roundup.
+    # Body text is untrusted for admin-area verification: only the title/h1
+    # may confirm the match, so this must still be rejected.
+    payload = """<?xml version="1.0" encoding="utf-8" ?>
+    <rss version="2.0"><channel><item>
+      <title>災情詳情</title>
+      <link>https://ktc.kcg.gov.tw/disaster/detail?id=888</link>
+      <pubDate>Tue, 25 Aug 2026 05:48:00 GMT</pubDate>
+    </item></channel></rss>"""
+
+    result = search_taiwan_official_flood_citations(
+        location_text="高雄市仁武區",
+        lat=22.701,
+        lng=120.36,
+        radius_m=500,
+        now=datetime(2026, 8, 31, tzinfo=timezone.utc),
+        fetch_text=lambda _url, _timeout: payload,
+        fetch_citation_text=lambda _url, _timeout: (
+            "<html><head><title>全國積淹水災情彙整專區</title></head>"
+            "<body><p>本頁彙整近期積淹水縣市，包括台北市、高雄市仁武區、"
+            "南投縣、澎湖縣等地災情。</p></body></html>"
+        ),
+    )
+
+    assert result.records == ()
+
+
+def test_record_from_article_id_is_stable_across_different_query_counties() -> None:
+    # SDD 9.3 fix: the same URL must resolve to the same evidence id
+    # regardless of which county's query produced it, so the same
+    # nationwide citation cannot be duplicated once per county.
+    now = datetime(2026, 8, 31, tzinfo=timezone.utc)
+    article = {
+        "title": "台北市南投縣豪雨淹水共同報導",
+        "url": "https://www.cdc.gov.tw/News/generic-flood-notice",
+        "published_at": now,
+        "domain": "www.cdc.gov.tw",
+    }
+
+    record_taipei = _record_from_article(
+        article,
+        location="台北市",
+        match_scope="admin_area",
+        target_source_weight=0.74,
+        lat=25.03,
+        lng=121.56,
+        radius_m=500,
+        now=now,
+        query_url="https://example.test/feed-taipei",
+        search_window_label="test-window",
+        adapter_key=TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY,
+        source_prefix="official-gov-tw-citation",
+        raw_ref_prefix="official-gov-tw-citation",
+        source_type="official",
+    )
+    record_nantou = _record_from_article(
+        article,
+        location="南投縣",
+        match_scope="admin_area",
+        target_source_weight=0.74,
+        lat=23.9,
+        lng=120.68,
+        radius_m=500,
+        now=now,
+        query_url="https://example.test/feed-nantou",
+        search_window_label="test-window",
+        adapter_key=TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY,
+        source_prefix="official-gov-tw-citation",
+        raw_ref_prefix="official-gov-tw-citation",
+        source_type="official",
+    )
+
+    assert record_taipei is not None
+    assert record_nantou is not None
+    assert record_taipei.id == record_nantou.id
+    assert record_taipei.source_id == record_nantou.source_id
 
 
 def test_bing_rss_redirects_are_canonicalized_before_deduplication() -> None:

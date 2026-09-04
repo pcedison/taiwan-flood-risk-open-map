@@ -21,7 +21,7 @@
     }
   ],
   "expected": {
-    "score_version": "risk-v0.2.0",
+    "score_version": "risk-v0.3.0",
     "realtime_level": "高",
     "historical_level": "未知",
     "confidence_level": "中",
