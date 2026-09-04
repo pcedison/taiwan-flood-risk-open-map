@@ -786,3 +786,44 @@ def test_verified_jurisdiction_without_mappings_reports_mapping_missing(
         if item.signal_type == "rainfall"
     )
     assert rainfall.missing_cause == "jurisdiction_mapping_missing"
+
+
+GOV_CITATION = _record(
+    "gov-citation",
+    adapter_key="official.gov_tw.flood_citation",
+    event_type="flood_report",
+    evidence_scope="historical",
+    observed_at=NOW - timedelta(days=3),
+)
+
+
+def test_excluded_adapter_keys_drop_persisted_request_time_lookups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _repository(
+        monkeypatch,
+        query_nearby_evidence=lambda **_: (HISTORY, GOV_CITATION),
+        query_nearby_observed_flood_history=lambda **_: (GOV_CITATION, OBSERVED_FLOOD_HISTORY),
+    )
+    repository = PostgresAssessmentRepository(
+        "postgresql://example.test/flood",
+        excluded_adapter_keys=frozenset({"official.gov_tw.flood_citation"}),
+    )
+
+    data = repository.load(**POINT)
+
+    assert [item.id for item in data.historical] == ["observed-flood-history", "history"]
+    assert data.historical_available is True
+
+
+def test_excluded_adapter_keys_default_to_keeping_every_persisted_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _repository(
+        monkeypatch,
+        query_nearby_evidence=lambda **_: (HISTORY, GOV_CITATION),
+    )
+
+    data = repository.load(**POINT)
+
+    assert "gov-citation" in [item.id for item in data.historical]
