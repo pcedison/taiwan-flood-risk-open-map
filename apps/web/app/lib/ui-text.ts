@@ -91,6 +91,7 @@ export const text = {
   diagnosticsTitle: "來源與圖層狀態",
   diagnosticsPending: "尚未查詢",
   diagnosticsReady: "技術明細",
+  diagnosticsSummaryLabel: "技術明細（維運診斷，一般查詢不需要展開）",
   diagnosticsCoverageTitle: "附近即時覆蓋明細",
   diagnosticsCoverageNoSignals: "本次回應沒有 signal breakdown。",
   diagnosticsCoverageBuckets: "半徑計數",

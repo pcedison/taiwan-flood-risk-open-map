@@ -413,9 +413,12 @@ test("searching a Taiwan landmark moves the map and renders a risk assessment", 
     nearbyBeforeEvidence: true,
     riskBeforeEvidence: true,
   });
-  await expect(page.getByText("來源與圖層狀態")).toBeVisible();
+  await expect(page.getByText("技術明細（維運診斷，一般查詢不需要展開）")).toBeVisible();
+  await expect(page.getByTestId("diagnostics-drawer")).not.toHaveAttribute("open", "");
   await expect(page.getByText("淹水潛勢示範圖層")).not.toBeVisible();
+  await expect(page.getByText("來源摘要：部分受限")).not.toBeVisible();
   await page.getByTestId("diagnostics-summary").click();
+  await expect(page.getByTestId("diagnostics-drawer")).toHaveAttribute("open", "");
   await expect(page.getByText("來源摘要：部分受限")).toBeVisible();
   await expect(page.getByText("逐來源公開診斷：正常")).toBeVisible();
   await expect(page.getByText("中央氣象署雨量觀測：正常")).toBeVisible();
