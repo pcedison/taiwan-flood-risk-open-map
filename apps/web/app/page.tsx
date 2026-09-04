@@ -23,6 +23,7 @@ import {
   buildLayerDisplayState,
   buildUserReportPayload,
   combinedRiskLevel,
+  confirmedNoLocalSensor,
   formatCoordinate,
   getEvidenceDisplayState,
   getProfileBasisText,
@@ -113,7 +114,11 @@ export default function HomePage() {
   );
   const riskSummaryHeading = assessment
     ? hasInsufficientRiskData(assessment)
-      ? text.insufficientData
+      ? // A verified empty sensor inventory (offshore islands, counties with no
+        // flood sensors) is a known answer, not a failure to look it up.
+        confirmedNoLocalSensor(assessment.nearby_realtime_coverage)
+        ? text.noLocalSensorHeading
+        : text.insufficientData
       : riskSummaryTitle(realtimeRiskLevel, historicalRiskLevel)
     : text.pendingData;
   const currentSummary = useMemo(
