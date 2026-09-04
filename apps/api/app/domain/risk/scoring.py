@@ -30,7 +30,6 @@ HISTORICAL_WEIGHTS = {
 PRECISION_FACTORS = {
     "point": 1.0,
     "map_click": 1.0,
-    "parcel": 1.0,
     "poi": 0.9,
     "polygon": 0.85,
     "road_or_lane": 0.7,
@@ -151,8 +150,14 @@ def _weighted_score(
     max_age: timedelta | None = None,
 ) -> float:
     totals_by_event: dict[str, float] = {}
+    # A single low-precision citation (admin-area, or precision unknown) is not
+    # strong enough proof of an observed incident to justify suppressing
+    # flood_potential's own score down to the "context" cap: garbage evidence
+    # must never be able to *lower* the historical score below what it would
+    # have been without it.
     has_observed_history = any(
         signal.event_type in {"flood_report", "road_closure"}
+        and signal.location_precision not in {"admin_area", "unknown"}
         and _is_weighted_signal_eligible(
             signal,
             weights,

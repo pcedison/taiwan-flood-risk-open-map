@@ -19,7 +19,8 @@
       "freshness_score": 0.8,
       "source_weight": 0.8,
       "risk_factor": 1.0,
-      "observed_at": "2026-04-28T22:30:00+00:00"
+      "observed_at": "2026-04-28T22:30:00+00:00",
+      "location_precision": "road_or_lane"
     }
   ],
   "expected": {
