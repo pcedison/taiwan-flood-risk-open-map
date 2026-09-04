@@ -78,9 +78,18 @@ class AssessmentRepository(Protocol):
 
 
 class PostgresAssessmentRepository:
-    def __init__(self, database_url: str, *, enabled: bool = True) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        enabled: bool = True,
+        excluded_adapter_keys: frozenset[str] = frozenset(),
+    ) -> None:
         self._database_url = database_url
         self._enabled = enabled
+        # Persisted rows from request-time lookups that are now switched off must
+        # not keep feeding the scorer after the switch.
+        self._excluded_adapter_keys = frozenset(excluded_adapter_keys)
 
     def load(
         self,
@@ -167,6 +176,11 @@ class PostgresAssessmentRepository:
         )
         latest = tuple(item for item in latest if item.adapter_key in applicable_keys)
         coverage_rows = tuple(item for item in coverage_rows if item.adapter_key in applicable_keys)
+        history = _without_excluded(history, self._excluded_adapter_keys)
+        observed_flood_history = _without_excluded(
+            observed_flood_history, self._excluded_adapter_keys
+        )
+        recent_context = _without_excluded(recent_context, self._excluded_adapter_keys)
         health_rows, health_available = self._load_health(tuple(sorted(applicable_keys)))
         source_health = build_nearby_source_health(
             health_rows,
@@ -365,6 +379,17 @@ def _warning_origin_rank(item: EvidenceRecord) -> tuple[int, float]:
     }.get(item.adapter_key or "", 2)
     observed_rank = -(item.observed_at.timestamp() if item.observed_at else 0.0)
     return authority_rank, observed_rank
+
+
+def _without_excluded(
+    records: tuple[EvidenceRecord, ...],
+    excluded_adapter_keys: frozenset[str],
+) -> tuple[EvidenceRecord, ...]:
+    if not excluded_adapter_keys:
+        return records
+    return tuple(
+        record for record in records if (record.adapter_key or "") not in excluded_adapter_keys
+    )
 
 
 def _historical_only(records: tuple[EvidenceRecord, ...]) -> tuple[EvidenceRecord, ...]:

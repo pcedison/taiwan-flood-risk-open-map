@@ -15,7 +15,7 @@ import {
   publicDataFreshnessItems,
   sourceHealthSummaryState,
 } from "../lib/risk-display";
-import { healthLabel, text } from "../lib/ui-text";
+import { healthLabel, sourceReasonLabel, text } from "../lib/ui-text";
 
 type CoverageSignal =
   RiskAssessmentResponse["nearby_realtime_coverage"]["signal_breakdown"][number];
@@ -130,7 +130,11 @@ export function DiagnosticsSection({
                     <ul className="freshness-list" data-testid="realtime-source-health-list">
                       {realtimeSourceHealth.map((source, index) => (
                         <li key={`${source.name}-${index}`}>
-                          <strong>{`${source.name}：${healthLabel(source.health_status)}`}</strong>
+                          <strong>{`${source.name}：${healthLabel(source.health_status)}${
+                            sourceReasonLabel(source.reason_code)
+                              ? `（${sourceReasonLabel(source.reason_code)}）`
+                              : ""
+                          }`}</strong>
                           {source.message ? <span>{source.message}</span> : null}
                           <span>
                             {`${text.diagnosticsSourceScope}：${

@@ -41,6 +41,10 @@ from app.api.services import (
 from app.api.services.assessment import AssessmentService, ResponseCache
 from app.api.services.client_signal import resolve_client_signal
 from app.api.services.official_history import OfficialRecentHistoryLookup
+from app.domain.history.news_enrichment import (
+    TAINAN_OFFICIAL_HISTORY_ADAPTER_KEY,
+    TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY,
+)
 from app.core.config import Settings, get_settings
 from app.domain.assessment import PostgresAssessmentRepository
 from app.domain.evidence import fetch_assessment_evidence
@@ -656,10 +660,16 @@ def _assessment_service(settings: Settings) -> AssessmentService:
     response_cache: ResponseCache | None = None
     if settings.risk_assessment_response_cache_seconds > 0:
         response_cache = SettingsResponseCache(settings)
+    excluded_adapter_keys: set[str] = set()
+    if not settings.official_nationwide_history_citations_enabled:
+        excluded_adapter_keys.add(TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY)
+    if not settings.official_tainan_history_news_enabled:
+        excluded_adapter_keys.add(TAINAN_OFFICIAL_HISTORY_ADAPTER_KEY)
     return AssessmentService(
         PostgresAssessmentRepository(
             settings.database_url,
             enabled=settings.evidence_repository_enabled,
+            excluded_adapter_keys=frozenset(excluded_adapter_keys),
         ),
         score_risk,
         recent_history_lookup=OfficialRecentHistoryLookup(

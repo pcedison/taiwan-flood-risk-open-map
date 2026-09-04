@@ -165,9 +165,12 @@ def get_settings() -> Settings:
             "OFFICIAL_TAINAN_HISTORY_NEWS_ENABLED",
             default=False,
         ),
+        # Request-time Google/Bing citation search is off by default everywhere:
+        # it added 4-13 s to every assessment and produced admin-area "evidence"
+        # such as dengue notices and FAQ pages (audit 2026-09-03).
         official_nationwide_history_citations_enabled=_env_bool(
             "OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED",
-            default=_hosted_runtime(app_env),
+            default=False,
         ),
         risk_assessment_response_cache_seconds=_env_int(
             "RISK_ASSESSMENT_RESPONSE_CACHE_SECONDS",

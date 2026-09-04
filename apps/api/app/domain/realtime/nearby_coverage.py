@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal, cast
 
 from app.api.schemas import (
@@ -129,6 +129,13 @@ REALTIME_SOURCE_ADAPTER_KEYS = tuple(_ADAPTER_SIGNAL_TYPES)
 _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS = 600
 _SOURCE_WORKER_DELAYED = timedelta(minutes=15)
 _SOURCE_WORKER_STOPPED = timedelta(minutes=30)
+# National networks always carry a tail of stations that report late.  Demanding
+# every active station be fresh made a 1,357-station rainfall feed permanently
+# "degraded" while the data itself was 10 minutes old, so health is judged on
+# the share of active stations that reported inside the freshness window.
+SOURCE_HEALTHY_FRESH_RATIO = 0.80
+SOURCE_DEGRADED_USABLE_RATIO = 0.50
+_TAIPEI_TZ = timezone(timedelta(hours=8))
 _EVENT_CONTEXT_SIGNAL_TYPES = frozenset({"flood_warning", "status_only"})
 _PUBLIC_SOURCE_NAMES = {
     "official.cwa.rainfall": "中央氣象署雨量觀測",
@@ -1018,6 +1025,16 @@ def _source_health_decision(
     if status in {"queued", "running"}:
         return _source_decision("degraded", "delayed", "背景更新仍在進行或回報延遲。")
     if status == "partial":
+        # A partial run means some upstream items were rejected, not that our
+        # background update is broken.  When the worker is still running on
+        # schedule, the observations themselves decide the public health.
+        if run_age is None or run_age <= _SOURCE_WORKER_DELAYED:
+            return _observation_health_decision(
+                row,
+                signal_type=signal_type,
+                evaluated_at=evaluated_at,
+                run_age=run_age,
+            )
         return _source_decision("degraded", "delayed", "最近一次背景更新僅部分完成。")
     if status == "skipped":
         return _source_decision(
@@ -1028,6 +1045,7 @@ def _source_health_decision(
             row,
             signal_type=signal_type,
             evaluated_at=evaluated_at,
+            run_age=run_age,
         )
         if (
             run_age is not None
@@ -1048,12 +1066,14 @@ def _source_health_decision(
             row,
             signal_type=signal_type,
             evaluated_at=evaluated_at,
+            run_age=run_age,
         )
     if row.latest_observed_at is not None:
         return _observation_health_decision(
             row,
             signal_type=signal_type,
             evaluated_at=evaluated_at,
+            run_age=run_age,
         )
     if row.configured_health_status == "failed":
         return _source_decision(
@@ -1104,6 +1124,7 @@ def _observation_health_decision(
     *,
     signal_type: NearbyCoverageSignalType,
     evaluated_at: datetime,
+    run_age: timedelta | None = None,
 ) -> _SourceHealthDecision:
     if signal_type in _EVENT_CONTEXT_SIGNAL_TYPES:
         if (
@@ -1124,25 +1145,57 @@ def _observation_health_decision(
         return _source_decision(
             "unknown", "not_yet_observed", "目前無法確認此來源的站點清冊狀態。"
         )
-    if row.station_count == 0 or row.latest_observed_at is None:
+    fresh_seconds = row.freshness_threshold_seconds
+    if fresh_seconds is None or fresh_seconds <= 0:
+        fresh_seconds = _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS
+    # A feed frozen for longer than the active-station window drains
+    # active_station_count to zero.  Decide the upstream stall before the
+    # "no usable station observation" branch, or a longer outage would be
+    # reported as our own missing inventory.
+    upstream_stale = _upstream_stale_decision(
+        row,
+        evaluated_at=evaluated_at,
+        run_age=run_age,
+        fresh_seconds=fresh_seconds,
+    )
+    active_station_count = max(
+        0,
+        row.active_station_count
+        if row.active_station_count is not None
+        else row.station_count,
+    )
+    if active_station_count == 0 or row.latest_observed_at is None:
+        if upstream_stale is not None and row.station_count > 0:
+            return upstream_stale
         return _source_decision(
             "degraded", "upstream_unavailable", "來源有更新紀錄，但尚未產生可用站點觀測。"
         )
     if row.fresh_station_count is not None:
         fresh_station_count = max(0, row.fresh_station_count)
         delayed_station_count = max(0, row.delayed_station_count or 0)
-        if fresh_station_count >= row.station_count:
+        usable_station_count = fresh_station_count + delayed_station_count
+        if fresh_station_count / active_station_count >= SOURCE_HEALTHY_FRESH_RATIO:
             return _source_decision(
                 "healthy",
                 "operational",
-                "所有目前已觀測站點皆在預期時間內更新；清冊完整性另行判定。",
+                "多數活躍站點皆在預期時間內更新"
+                f"（{fresh_station_count}/{active_station_count}）；清冊完整性另行判定。",
             )
-        if fresh_station_count + delayed_station_count > 0:
+        if usable_station_count / active_station_count >= SOURCE_DEGRADED_USABLE_RATIO:
             return _source_decision(
                 "degraded",
                 "delayed",
-                "目前已觀測站點僅部分在預期時間內更新。",
+                f"部分站點更新較慢（新鮮 {fresh_station_count}、"
+                f"較慢 {delayed_station_count}、活躍 {active_station_count}）。",
             )
+        if usable_station_count > 0:
+            return _source_decision(
+                "degraded",
+                "upstream_unavailable",
+                "多數站點已超過可用時效。",
+            )
+        if upstream_stale is not None:
+            return upstream_stale
         return _source_decision(
             "failed",
             "upstream_unavailable",
@@ -1151,9 +1204,6 @@ def _observation_health_decision(
     observed_age = _age(evaluated_at, row.latest_observed_at)
     if observed_age is None:
         return _source_decision("unknown", "not_yet_observed", "尚無足夠觀測時間資訊。")
-    fresh_seconds = row.freshness_threshold_seconds
-    if fresh_seconds is None or fresh_seconds <= 0:
-        fresh_seconds = _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS
     fresh_window = timedelta(seconds=fresh_seconds)
     degraded_window = timedelta(seconds=fresh_seconds * 3)
     if observed_age <= fresh_window:
@@ -1166,6 +1216,35 @@ def _observation_health_decision(
         return _source_decision("degraded", "delayed", "站點觀測更新較慢。")
     return _source_decision(
         "failed", "upstream_unavailable", "站點觀測已超過可用時效。"
+    )
+
+
+def _upstream_stale_decision(
+    row: RealtimeSourceHealthRow,
+    *,
+    evaluated_at: datetime,
+    run_age: timedelta | None,
+    fresh_seconds: int,
+) -> _SourceHealthDecision | None:
+    """Separate an upstream publication gap from a broken background update.
+
+    When the worker is still running on schedule but every station observation
+    has aged out, the fault is upstream, not ours.  Saying so keeps the public
+    diagnosis honest and stops monitoring from paging on a foreign outage.
+    """
+    if run_age is None or run_age > _SOURCE_WORKER_DELAYED:
+        return None
+    observed_at = row.latest_observed_at
+    if observed_at is None:
+        return None
+    observed_age = _age(evaluated_at, observed_at)
+    if observed_age is None or observed_age <= timedelta(seconds=fresh_seconds * 3):
+        return None
+    stalled_since = _normalized_utc(observed_at).astimezone(_TAIPEI_TZ)
+    return _source_decision(
+        "degraded",
+        "upstream_stale",
+        f"上游資料來源自 {stalled_since:%Y/%m/%d %H:%M} 起未更新；本站背景更新正常。",
     )
 
 

@@ -548,6 +548,7 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
                 "fresh_station_count": 200,
                 "delayed_station_count": 20,
                 "stale_station_count": 16,
+                "active_station_count": 220,
             }
         ]
     )
@@ -584,6 +585,8 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
     assert "fresh_station_count" in sql
     assert "delayed_station_count" in sql
     assert "stale_station_count" in sql
+    assert "active_station_count" in sql
+    assert "WHERE latest.observed_at >= now() - interval '7 days'" in sql
     assert "data_sources.station_inventory_reviewed" in sql
     assert "data_sources.runtime_enabled IS true" in sql
     assert "data_sources.runtime_pipeline_status = 'succeeded'" in sql
@@ -617,6 +620,7 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
     assert rows[0].fresh_station_count == 200
     assert rows[0].delayed_station_count == 20
     assert rows[0].stale_station_count == 16
+    assert rows[0].active_station_count == 220
 
 
 def test_query_realtime_source_health_rows_maps_positional_task9_fields() -> None:
@@ -647,6 +651,7 @@ def test_query_realtime_source_health_rows_maps_positional_task9_fields() -> Non
                 0,
                 0,
                 0,
+                0,
                 None,
                 None,
                 None,
@@ -666,6 +671,9 @@ def test_query_realtime_source_health_rows_maps_positional_task9_fields() -> Non
 
     assert rows[0].latest_run_error_code == "no_active_event"
     assert rows[0].freshness_threshold_seconds == 600
+    assert rows[0].active_station_count == 0
+    assert rows[0].inventory_proof_status == "missing"
+    assert rows[0].inventory_complete is False
 
 
 def test_query_realtime_jurisdiction_context_resolves_home_adjacent_and_mappings() -> None:
@@ -993,11 +1001,13 @@ def test_query_realtime_source_health_rows_falls_back_without_latest_table() -> 
     assert "official_realtime_latest" not in fallback_sql
     assert "data_sources.source_timestamp_max AS latest_observed_at" in fallback_sql
     assert "NULL::integer AS station_count" in fallback_sql
+    assert "NULL::integer AS active_station_count" in fallback_sql
     assert "false AS inventory_complete" in fallback_sql
     assert fallback_params == (["official.wra.water_level"],)
     assert rows[0].latest_observed_at == source_timestamp_max
     assert rows[0].latest_ingested_at == last_success_at
     assert rows[0].station_count is None
+    assert rows[0].active_station_count is None
     assert rows[0].inventory_complete is False
 
 

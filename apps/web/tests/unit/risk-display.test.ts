@@ -1218,6 +1218,33 @@ test("nearby sensing state distinguishes source failure, stalled pipeline, and u
   assert.equal(unverifiedInventory.tone, "muted");
 });
 
+test("an upstream publication gap is not presented as a broken pipeline here", () => {
+  const upstreamStale = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: missingRainfallCoverage({
+        availabilityState: "source_unavailable",
+        missingCause: "source_degraded",
+        sourceHealth: realtimeSourceHealth({
+          health_status: "degraded",
+          message: "上游資料來源自 2026/09/02 12:29 起未更新；本站背景更新正常。",
+          reason_code: "upstream_stale",
+        }),
+      }),
+    },
+  });
+
+  assert.equal(upstreamStale.badge, "附近觀測：來源受限");
+  assert.equal(
+    upstreamStale.items[0].detail,
+    "來源部分可用或更新延遲，無法確認附近測站",
+  );
+  assert.doesNotMatch(upstreamStale.badge, /更新管線停滯/);
+  assert.match(
+    uiTextSource,
+    /upstream_stale:\s*"上游資料來源未更新（非本站問題）"/,
+  );
+});
+
 test("nearby sensing state reports partial failure without hiding useful observations", () => {
   const coverage = missingRainfallCoverage({
     availabilityState: "source_unavailable",
