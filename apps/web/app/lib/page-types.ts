@@ -63,8 +63,10 @@ export type PublicRealtimeSourceHealth = {
     | "operational"
     | "delayed"
     | "upstream_unavailable"
+    | "upstream_stale"
     | "pipeline_unavailable"
     | "pipeline_stalled"
+    | "source_misconfigured"
     | "disabled"
     | "not_yet_observed";
   observed_at: string | null;

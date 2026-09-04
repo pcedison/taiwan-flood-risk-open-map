@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 import sys
@@ -326,6 +327,118 @@ def test_custom_source_policy_cannot_remove_every_required_source(
     )
 
     assert result == 1
+
+
+def test_upstream_stall_with_healthy_worker_is_advisory_not_a_failure() -> None:
+    recent_run_at = (
+        datetime.now(UTC) - timedelta(minutes=3)
+    ).replace(microsecond=0).isoformat()
+    source = _source_payload(
+        "official.wra_iow.flood_depth",
+        health_status="degraded",
+        freshness_state="failed",
+        observed_at="2026-09-02T04:29:00Z",
+    )
+    source["upstream_status"] = "partial"
+    source["last_success_at"] = recent_run_at
+    payload = {"sources": [source]}
+
+    failures = smoke.check_sources(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    )
+    advisories = smoke.check_upstream_stale_advisories(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    )
+
+    assert failures == []
+    assert advisories == [
+        "required source official.wra_iow.flood_depth upstream_stale "
+        "(worker healthy, upstream not updating since 2026-09-02T04:29:00Z)"
+    ]
+
+
+def test_stale_freshness_between_thresholds_is_also_advisory() -> None:
+    # IoW crosses "stale" before it reaches "failed"; the two-to-three hour
+    # window must not fail the smoke while the worker is still running.
+    recent_run_at = (
+        (datetime.now(UTC) - timedelta(minutes=4)).replace(microsecond=0).isoformat()
+    )
+    source = _source_payload(
+        "official.wra_iow.flood_depth",
+        health_status="degraded",
+        freshness_state="stale",
+        observed_at="2026-09-02T04:29:00Z",
+    )
+    source["upstream_status"] = "succeeded"
+    source["last_success_at"] = recent_run_at
+    payload = {"sources": [source]}
+
+    failures = smoke.check_sources(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    )
+    advisories = smoke.check_upstream_stale_advisories(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    )
+
+    assert failures == []
+    assert advisories == [
+        "required source official.wra_iow.flood_depth upstream_stale "
+        "(worker healthy, upstream not updating since 2026-09-02T04:29:00Z)"
+    ]
+
+
+def test_worker_run_timestamp_slightly_ahead_of_our_clock_is_still_recent() -> None:
+    skewed_run_at = (
+        (datetime.now(UTC) + timedelta(minutes=2)).replace(microsecond=0).isoformat()
+    )
+    source = _source_payload(
+        "official.wra_iow.flood_depth",
+        health_status="degraded",
+        freshness_state="failed",
+        observed_at="2026-09-02T04:29:00Z",
+    )
+    source["upstream_status"] = "partial"
+    source["last_success_at"] = skewed_run_at
+    payload = {"sources": [source]}
+
+    assert smoke.check_sources(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    ) == []
+    assert smoke.check_upstream_stale_advisories(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    )
+
+
+def test_failed_freshness_without_a_recent_worker_run_still_fails() -> None:
+    source = _source_payload(
+        "official.wra_iow.flood_depth",
+        health_status="degraded",
+        freshness_state="failed",
+    )
+    source["upstream_status"] = "partial"
+    source["last_success_at"] = "2026-06-30T04:56:00Z"
+    payload = {"sources": [source]}
+
+    failures = smoke.check_sources(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    )
+    advisories = smoke.check_upstream_stale_advisories(
+        payload,
+        required_adapter_keys=("official.wra_iow.flood_depth",),
+    )
+
+    assert (
+        "required source official.wra_iow.flood_depth freshness_state is failed"
+        in failures
+    )
+    assert advisories == []
 
 
 def _sources_payload() -> dict:

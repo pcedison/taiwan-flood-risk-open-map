@@ -832,6 +832,7 @@ def test_nearby_source_health_contract_is_public_safe_and_documented() -> None:
         "operational",
         "delayed",
         "upstream_unavailable",
+        "upstream_stale",
         "pipeline_unavailable",
         "pipeline_stalled",
         "source_misconfigured",
