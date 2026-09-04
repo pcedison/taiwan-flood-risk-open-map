@@ -25,6 +25,7 @@ const nearbyCoverageFallbackSummaries: Record<NearbyCoverageLevel, string> = {
 // map is the historical-evidence footprint, not the sensor search radius, so
 // the two numbers must never be presented as the same thing.
 export const REALTIME_SCORING_RADIUS_M = 5000;
+
 export function nearbyCoverageLevelLabel(level: NearbyCoverageLevel): string {
   return nearbyCoverageLabels[level];
 }
