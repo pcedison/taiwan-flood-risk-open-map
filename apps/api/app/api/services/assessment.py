@@ -98,6 +98,8 @@ class AssessmentService:
         if self._response_cache is not None:
             cached_response = self._response_cache.get(request, now=now)
             if cached_response is not None:
+                # Same object the cache returned (shared across requests when the
+                # backend is in-process memory) -- callers must not mutate it.
                 return cached_response
         data = self._repository.load(
             lat=request.point.lat,
