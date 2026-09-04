@@ -135,7 +135,32 @@ jobs:
         run: npm ci --prefix apps/web
 
       - name: Audit frontend dependencies
-        run: npm audit --audit-level=high --prefix apps/web
+        working-directory: apps/web
+        run: |
+          # `npm audit --prefix` resolves the tree from the workflow working
+          # directory, so npm falls back to the legacy "quick audit" endpoint,
+          # which npm retired (400 Invalid package tree, 2026-09-04). Auditing
+          # from inside apps/web uses the supported bulk advisory endpoint.
+          #
+          # A real high-severity advisory still fails this job. Only an
+          # unreachable advisory endpoint degrades to a warning, so an npm
+          # registry outage cannot block every pull request.
+          set -uo pipefail
+          for attempt in 1 2 3; do
+            if npm audit --audit-level=high >"${RUNNER_TEMP}/npm-audit.log" 2>&1; then
+              cat "${RUNNER_TEMP}/npm-audit.log"
+              exit 0
+            fi
+            if grep -q "audit endpoint returned an error" "${RUNNER_TEMP}/npm-audit.log"; then
+              cat "${RUNNER_TEMP}/npm-audit.log"
+              echo "::warning title=npm audit endpoint unreachable::attempt ${attempt} of 3 failed"
+              sleep "$((attempt * 15))"
+              continue
+            fi
+            cat "${RUNNER_TEMP}/npm-audit.log"
+            exit 1
+          done
+          echo "::warning title=npm audit not enforced::the npm advisory endpoint failed three times; dependency audit was skipped for this run"
 
       - name: Install E2E API dependencies
         run: |
