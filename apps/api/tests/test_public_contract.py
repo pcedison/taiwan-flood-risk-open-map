@@ -22,8 +22,10 @@ from app.api.schemas import (
     NearbySourceHealth,
     PlaceCandidate,
     RiskAssessmentResponse,
+    RiskAssessRequest,
 )
 from app.api.services import public_layers as public_layer_service
+from app.api.services import public_response_cache
 from app.api.services.assessment import AssessmentService
 from app.core.config import get_settings
 from app.domain.assessment import AssessmentData, AssessmentSourceState
@@ -217,7 +219,12 @@ def _install_route_data(
 
 
 @pytest.fixture(autouse=True)
-def repository_service_seam(monkeypatch: pytest.MonkeyPatch) -> None:
+def repository_service_seam(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if request.node.get_closest_marker("no_repository_seam") is not None:
+        return
+
     def layers_unavailable(**_kwargs: object) -> tuple[LayerRecord, ...]:
         raise LayerRepositoryUnavailable("database unavailable in contract tests")
 
@@ -1502,6 +1509,115 @@ def test_production_risk_route_has_no_legacy_or_sensitive_cache_wiring() -> None
     )
 
     assert [symbol for symbol in forbidden if symbol in source] == []
+
+
+def _cache_key_request(
+    *, lat: float = 22.99974, lng: float = 120.22704, radius_m: int = 750
+) -> RiskAssessRequest:
+    return RiskAssessRequest(
+        point=LatLng(lat=lat, lng=lng),
+        radius_m=radius_m,
+        time_context="now",
+        location_text=None,
+    )
+
+
+def test_response_cache_key_is_stable_for_the_same_point_and_radius() -> None:
+    settings = get_settings()
+
+    key_a = public_routes._response_cache_key(_cache_key_request(), settings)
+    key_b = public_routes._response_cache_key(_cache_key_request(), settings)
+
+    assert key_a == key_b
+
+
+def test_response_cache_key_differs_when_radius_differs() -> None:
+    settings = get_settings()
+
+    key_750 = public_routes._response_cache_key(_cache_key_request(radius_m=750), settings)
+    key_1000 = public_routes._response_cache_key(_cache_key_request(radius_m=1000), settings)
+
+    assert key_750 != key_1000
+
+
+def test_response_cache_key_ignores_sixth_decimal_of_latitude() -> None:
+    settings = get_settings()
+
+    key_a = public_routes._response_cache_key(_cache_key_request(lat=22.999741), settings)
+    key_b = public_routes._response_cache_key(_cache_key_request(lat=22.999744), settings)
+
+    assert key_a == key_b
+
+
+@pytest.mark.no_repository_seam
+def test_assessment_service_has_no_response_cache_when_ttl_is_zero() -> None:
+    settings = replace(get_settings(), risk_assessment_response_cache_seconds=0)
+
+    service = public_routes._assessment_service(settings)
+
+    assert service._response_cache is None
+
+
+@pytest.mark.no_repository_seam
+def test_assessment_service_has_response_cache_when_ttl_is_positive() -> None:
+    settings = replace(get_settings(), risk_assessment_response_cache_seconds=120)
+
+    service = public_routes._assessment_service(settings)
+
+    assert service._response_cache is not None
+
+
+def test_settings_response_cache_round_trips_through_the_memory_backend() -> None:
+    public_response_cache._MEMORY_CACHE.clear()
+    try:
+        settings = replace(
+            get_settings(),
+            risk_assessment_response_cache_seconds=60,
+            risk_assessment_response_cache_backend="memory",
+        )
+        cache = public_routes.SettingsResponseCache(settings)
+        request = _cache_key_request(radius_m=750)
+        other_radius_request = _cache_key_request(radius_m=1000)
+        response = AssessmentService(RouteRepository(_route_data()), score_risk).assess(
+            request, now=ROUTE_NOW
+        )
+
+        assert cache.get(request, now=ROUTE_NOW) is None
+
+        cache.set(request, response, now=ROUTE_NOW)
+
+        assert cache.get(request, now=ROUTE_NOW) is response
+        assert cache.get(other_radius_request, now=ROUTE_NOW) is None
+    finally:
+        public_response_cache._MEMORY_CACHE.clear()
+
+
+@pytest.mark.no_repository_seam
+def test_assessment_service_serves_the_second_request_from_the_response_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    public_response_cache._MEMORY_CACHE.clear()
+    try:
+        repository = RouteRepository(_route_data())
+        monkeypatch.setattr(
+            public_routes,
+            "PostgresAssessmentRepository",
+            lambda *_args, **_kwargs: repository,
+        )
+        settings = replace(
+            get_settings(),
+            risk_assessment_response_cache_seconds=60,
+            risk_assessment_response_cache_backend="memory",
+        )
+        request = _cache_key_request()
+
+        first = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW)
+        second = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW)
+
+        assert second.assessment_id == first.assessment_id
+        assert len(repository.loads) == 1
+    finally:
+        public_response_cache._MEMORY_CACHE.clear()
 
 
 def _db_evidence_record() -> EvidenceRecord:

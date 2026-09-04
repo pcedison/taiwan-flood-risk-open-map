@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Literal
@@ -35,8 +36,9 @@ from app.api.services import (
     public_evidence,
     public_geocoding,
     public_layers,
+    public_response_cache,
 )
-from app.api.services.assessment import AssessmentService
+from app.api.services.assessment import AssessmentService, ResponseCache
 from app.api.services.client_signal import resolve_client_signal
 from app.api.services.official_history import OfficialRecentHistoryLookup
 from app.domain.history.news_enrichment import (
@@ -577,7 +579,87 @@ def assess_risk(
     return _assessment_service(settings).assess(request, now=_now())
 
 
+def _response_cache_key(request: RiskAssessRequest, settings: Settings) -> str:
+    return json.dumps(
+        {
+            "lat": round(request.point.lat, 5),
+            "lng": round(request.point.lng, 5),
+            "radius_m": request.radius_m,
+            "time_context": request.time_context,
+            "location_text": (request.location_text or "").strip(),
+            "app_env": settings.app_env,
+            "cache_version": "assessment-service-v1",
+            "realtime_official_enabled": settings.realtime_official_enabled,
+            "realtime_official_diagnostic_fallback_enabled": (
+                settings.realtime_official_diagnostic_fallback_enabled
+            ),
+            "source_cwa_api_enabled": settings.source_cwa_api_enabled,
+            "source_wra_api_enabled": settings.source_wra_api_enabled,
+            "source_news_enabled": settings.source_news_enabled,
+            "source_terms_review_ack": settings.source_terms_review_ack,
+            "historical_news_on_demand_enabled": (
+                settings.historical_news_on_demand_enabled
+            ),
+            "historical_news_on_demand_writeback_enabled": (
+                settings.historical_news_on_demand_writeback_enabled
+            ),
+            "historical_news_on_demand_max_records": (
+                settings.historical_news_on_demand_max_records
+            ),
+            "historical_news_on_demand_timeout_seconds": (
+                settings.historical_news_on_demand_timeout_seconds
+            ),
+            "official_flood_disaster_points_enabled": (
+                settings.official_flood_disaster_points_enabled
+            ),
+            "official_nationwide_history_citations_enabled": (
+                settings.official_nationwide_history_citations_enabled
+            ),
+            "evidence_repository_enabled": settings.evidence_repository_enabled,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+
+
+class SettingsResponseCache:
+    """Adapts the shared response cache backend to `AssessmentService`."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+
+    def get(
+        self, request: RiskAssessRequest, *, now: datetime
+    ) -> RiskAssessmentResponse | None:
+        return public_response_cache.cached_response(
+            _response_cache_key(request, self._settings),
+            now=now,
+            ttl_seconds=self._settings.risk_assessment_response_cache_seconds,
+            backend=self._settings.risk_assessment_response_cache_backend,
+            redis_url=self._settings.redis_url,
+        )
+
+    def set(
+        self,
+        request: RiskAssessRequest,
+        response: RiskAssessmentResponse,
+        *,
+        now: datetime,
+    ) -> None:
+        public_response_cache.store_response(
+            _response_cache_key(request, self._settings),
+            response,
+            now=now,
+            ttl_seconds=self._settings.risk_assessment_response_cache_seconds,
+            backend=self._settings.risk_assessment_response_cache_backend,
+            redis_url=self._settings.redis_url,
+        )
+
+
 def _assessment_service(settings: Settings) -> AssessmentService:
+    response_cache: ResponseCache | None = None
+    if settings.risk_assessment_response_cache_seconds > 0:
+        response_cache = SettingsResponseCache(settings)
     excluded_adapter_keys: set[str] = set()
     if not settings.official_nationwide_history_citations_enabled:
         excluded_adapter_keys.add(TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY)
@@ -601,6 +683,7 @@ def _assessment_service(settings: Settings) -> AssessmentService:
                 4.0,
             ),
         ),
+        response_cache=response_cache,
     )
 
 

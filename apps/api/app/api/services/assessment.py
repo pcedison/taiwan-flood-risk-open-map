@@ -58,6 +58,20 @@ class RecentHistoryLookup(Protocol):
     ) -> tuple[EvidenceRecord, ...]: ...
 
 
+class ResponseCache(Protocol):
+    def get(
+        self, request: RiskAssessRequest, *, now: datetime
+    ) -> RiskAssessmentResponse | None: ...
+
+    def set(
+        self,
+        request: RiskAssessRequest,
+        response: RiskAssessmentResponse,
+        *,
+        now: datetime,
+    ) -> None: ...
+
+
 _RECENT_HISTORY_REFRESH_AFTER = timedelta(days=30)
 
 
@@ -68,10 +82,12 @@ class AssessmentService:
         scorer: RiskScorer,
         *,
         recent_history_lookup: RecentHistoryLookup | None = None,
+        response_cache: ResponseCache | None = None,
     ) -> None:
         self._repository = repository
         self._scorer = scorer
         self._recent_history_lookup = recent_history_lookup
+        self._response_cache = response_cache
 
     def assess(
         self,
@@ -79,6 +95,12 @@ class AssessmentService:
         *,
         now: datetime,
     ) -> RiskAssessmentResponse:
+        if self._response_cache is not None:
+            cached_response = self._response_cache.get(request, now=now)
+            if cached_response is not None:
+                # Same object the cache returned (shared across requests when the
+                # backend is in-process memory) -- callers must not mutate it.
+                return cached_response
         data = self._repository.load(
             lat=request.point.lat,
             lng=request.point.lng,
@@ -207,6 +229,14 @@ class AssessmentService:
             self._repository.persist(persistence)
         except EvidenceRepositoryUnavailable:
             pass
+        if self._response_cache is not None and (
+            data.current_available
+            and data.historical_available
+            and data.coverage_available
+            and data.health_available
+            and data.jurisdiction_available
+        ):
+            self._response_cache.set(request, response, now=now)
         return response
 
 

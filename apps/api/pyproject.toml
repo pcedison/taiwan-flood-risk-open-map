@@ -25,6 +25,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "no_repository_seam: skip the autouse repository_service_seam fixture in test_public_contract.py so `_assessment_service` and `_now` stay the real implementations.",
+]
 
 [tool.ruff]
 line-length = 100
