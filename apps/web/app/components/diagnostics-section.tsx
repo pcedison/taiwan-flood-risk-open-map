@@ -45,10 +45,8 @@ export function DiagnosticsSection({
   return (
     <section className="panel-section diagnostics-panel" data-testid="diagnostics-panel">
       <details className="diagnostics-drawer" data-testid="diagnostics-drawer">
-        <summary data-testid="diagnostics-summary">
-          <span className="section-kicker">{text.diagnosticsKicker}</span>
-          <strong>{text.diagnosticsTitle}</strong>
-          <span>{assessment ? text.diagnosticsReady : text.diagnosticsPending}</span>
+        <summary data-testid="diagnostics-summary" aria-label={text.diagnosticsSummaryLabel}>
+          <strong>{text.diagnosticsSummaryLabel}</strong>
         </summary>
         <div className="diagnostics-body">
           <section
