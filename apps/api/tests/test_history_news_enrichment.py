@@ -413,6 +413,13 @@ def test_official_history_text_qualifies_rejects_typhoon_preparedness_notice() -
     assert _official_history_text_qualifies("迎戰巴威颱風！楊文科坐鎮防颱整備") is False
 
 
+def test_official_history_text_qualifies_rejects_completed_drainage_project_notice() -> None:
+    assert (
+        _official_history_text_qualifies("改善板本排水及護岸橋梁 解決大村、秀水淹水問題")
+        is False
+    )
+
+
 def test_official_history_text_qualifies_accepts_genuine_incident_report() -> None:
     assert (
         _official_history_text_qualifies("卓揆赴宜蘭蘇澳關心淹水災情 指示地方政府加速清淤復原")
