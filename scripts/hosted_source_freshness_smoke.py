@@ -46,6 +46,11 @@ HOSTED_WORKER_REQUIREMENT_EVIDENCE_PATHS = {
 ACCEPTABLE_HEALTH_STATUSES = {"healthy", "degraded"}
 ACCEPTABLE_FRESHNESS_STATES = {"fresh", "degraded"}
 REQUIRED_SOURCE_GATE = "data_sources.is_enabled"
+# A source whose worker still runs on schedule while the upstream publisher has
+# stopped emitting new observations is an upstream outage, not a deployment
+# failure.  It stays visible as an advisory finding instead of failing the smoke.
+WORKER_HEALTHY_UPSTREAM_STATUSES = {"succeeded", "partial"}
+WORKER_RECENT_RUN_WINDOW_SECONDS = 1800
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -161,6 +166,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             failures.extend(
                 check_sources(sources_payload, required_adapter_keys=required_adapter_keys)
+            )
+            advisory_findings.extend(
+                check_upstream_stale_advisories(
+                    sources_payload,
+                    required_adapter_keys=required_adapter_keys,
+                )
             )
             advisory_findings.extend(
                 check_advisory_sources(
@@ -344,7 +355,7 @@ def _check_required_source(adapter_key: str, source: Mapping[str, Any]) -> list[
         failures.append(f"required source {adapter_key} health_status is {health_status}")
 
     freshness_state = source.get("freshness_state")
-    if freshness_state not in ACCEPTABLE_FRESHNESS_STATES:
+    if freshness_state not in ACCEPTABLE_FRESHNESS_STATES and not _is_upstream_stale(source):
         failures.append(f"required source {adapter_key} freshness_state is {freshness_state}")
 
     if not _non_empty_string(source.get("latest_ingested_at")):
@@ -374,6 +385,59 @@ def _check_required_source(adapter_key: str, source: Mapping[str, Any]) -> list[
     if not isinstance(enabled_gates, list) or REQUIRED_SOURCE_GATE not in enabled_gates:
         failures.append(f"required source {adapter_key} missing {REQUIRED_SOURCE_GATE} gate")
     return failures
+
+
+def check_upstream_stale_advisories(
+    payload: Mapping[str, Any],
+    *,
+    required_adapter_keys: Sequence[str],
+) -> list[str]:
+    findings: list[str] = []
+    sources = payload.get("sources")
+    if not isinstance(sources, list):
+        return findings
+    by_adapter_key = {
+        str(source.get("adapter_key")): source
+        for source in sources
+        if isinstance(source, Mapping) and source.get("adapter_key")
+    }
+    for adapter_key in required_adapter_keys:
+        source = by_adapter_key.get(adapter_key)
+        if not isinstance(source, Mapping) or not _is_upstream_stale(source):
+            continue
+        observed_at = source.get("latest_observed_at") or "unknown"
+        findings.append(
+            f"required source {adapter_key} upstream_stale "
+            f"(worker healthy, upstream not updating since {observed_at})"
+        )
+    return findings
+
+
+def _is_upstream_stale(source: Mapping[str, Any]) -> bool:
+    if source.get("freshness_state") != "failed":
+        return False
+    if source.get("upstream_status") not in WORKER_HEALTHY_UPSTREAM_STATUSES:
+        return False
+    run_at = _parse_timestamp(
+        source.get("last_success_at")
+        or source.get("latest_ingested_at")
+        or source.get("latest_fetched_at")
+    )
+    if run_at is None:
+        return False
+    run_age_seconds = (datetime.now(UTC) - run_at).total_seconds()
+    return 0 <= run_age_seconds <= WORKER_RECENT_RUN_WINDOW_SECONDS
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not _non_empty_string(value):
+        return None
+    text = str(value).strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _checked_source_summaries(

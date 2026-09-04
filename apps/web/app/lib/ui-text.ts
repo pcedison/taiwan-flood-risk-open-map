@@ -165,6 +165,15 @@ const healthLabels: Record<string, string> = {
 
 export const healthLabel = (value: string) => healthLabels[value] ?? "未知";
 
+// An upstream publication gap is not a fault of this site.  Naming it keeps a
+// stalled government feed from reading as a broken pipeline here.
+const sourceReasonLabels: Record<string, string> = {
+  upstream_stale: "上游資料來源未更新（非本站問題）",
+};
+
+export const sourceReasonLabel = (value: string): string | null =>
+  sourceReasonLabels[value] ?? null;
+
 const geocodePrecisionLabels: Record<string, string> = {
   admin_area: "行政區",
   exact_address: "門牌",

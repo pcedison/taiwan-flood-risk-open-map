@@ -277,7 +277,7 @@ def _health_row(
     configured_health_status: str = "healthy",
     latest_run_status: str | None = "succeeded",
     latest_run_error_code: str | None = None,
-    latest_run_delta_minutes: int | None = 5,
+    latest_run_delta_minutes: float | None = 5,
     observed_delta_minutes: int | None = 5,
     station_count: int | None = 10,
     inventory_complete: bool = False,
@@ -291,6 +291,7 @@ def _health_row(
     fresh_station_count: int | None = None,
     delayed_station_count: int | None = None,
     stale_station_count: int | None = None,
+    active_station_count: int | None = None,
     freshness_threshold_seconds: int | None = None,
 ) -> RealtimeSourceHealthRow:
     latest_run_at = (
@@ -342,6 +343,7 @@ def _health_row(
         fresh_station_count=fresh_station_count,
         delayed_station_count=delayed_station_count,
         stale_station_count=stale_station_count,
+        active_station_count=active_station_count,
         freshness_threshold_seconds=freshness_threshold_seconds,
     )
 
@@ -1004,7 +1006,7 @@ def test_one_fresh_station_cannot_hide_stale_stations() -> None:
     rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
     assert rainfall.missing_cause == "source_degraded"
     assert coverage.source_health[0].health_status == "degraded"
-    assert coverage.source_health[0].reason_code == "delayed"
+    assert coverage.source_health[0].reason_code == "upstream_unavailable"
 
 
 def test_recent_queued_job_is_delayed_instead_of_unknown() -> None:
@@ -1663,3 +1665,103 @@ def test_empty_source_health_without_mapping_fault_still_reports_not_configured(
 
     rainfall = next(item for item in coverage.signal_breakdown if item.signal_type == "rainfall")
     assert rainfall.missing_cause == "source_not_configured"
+
+
+def test_majority_fresh_active_stations_are_healthy() -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.cwa.rainfall",
+            station_count=1_000,
+            active_station_count=1_000,
+            fresh_station_count=950,
+            delayed_station_count=20,
+            stale_station_count=30,
+            observed_delta_minutes=1,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "healthy"
+    assert health.reason_code == "operational"
+    assert "950/1000" in health.message
+
+
+def test_partially_updated_station_network_is_delayed() -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.cwa.rainfall",
+            station_count=1_000,
+            active_station_count=1_000,
+            fresh_station_count=600,
+            delayed_station_count=300,
+            stale_station_count=100,
+            observed_delta_minutes=1,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "degraded"
+    assert health.reason_code == "delayed"
+    assert "600" in health.message
+    assert "300" in health.message
+
+
+def test_stalled_upstream_with_running_worker_is_upstream_stale() -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.wra_iow.flood_depth",
+            latest_run_status="succeeded",
+            latest_run_delta_minutes=0.5,
+            observed_delta_minutes=60 * 20,
+            station_count=1_366,
+            active_station_count=1_366,
+            fresh_station_count=0,
+            delayed_station_count=0,
+            stale_station_count=1_366,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "degraded"
+    assert health.reason_code == "upstream_stale"
+    assert "上游" in health.message
+    assert "本站背景更新正常" in health.message
+
+
+def test_partial_run_with_fresh_observations_stays_healthy() -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.cwa.rainfall",
+            latest_run_status="partial",
+            latest_run_delta_minutes=2,
+            observed_delta_minutes=1,
+            station_count=1_000,
+            active_station_count=1_000,
+            fresh_station_count=950,
+            delayed_station_count=20,
+            stale_station_count=30,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "healthy"
+    assert health.reason_code == "operational"
+
+
+def test_missing_active_station_count_falls_back_to_station_count() -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.cwa.rainfall",
+            station_count=10,
+            active_station_count=None,
+            fresh_station_count=9,
+            delayed_station_count=1,
+            stale_station_count=0,
+            observed_delta_minutes=1,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "healthy"
+    assert health.reason_code == "operational"
+    assert "9/10" in health.message

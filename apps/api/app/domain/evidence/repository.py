@@ -127,6 +127,7 @@ class RealtimeSourceHealthRow:
     fresh_station_count: int | None = None
     delayed_station_count: int | None = None
     stale_station_count: int | None = None
+    active_station_count: int | None = None
     upstream_station_count: int | None = None
     pages_fetched: int | None = None
     pagination_complete: bool | None = None
@@ -1842,7 +1843,10 @@ def _query_realtime_source_health_rows(
                         OR latest.observed_at < now() - make_interval(
                             secs => freshness_threshold.fresh_seconds * 3
                         )
-                )::integer AS stale_station_count
+                )::integer AS stale_station_count,
+                count(DISTINCT latest.station_id) FILTER (
+                    WHERE latest.observed_at >= now() - interval '7 days'
+                )::integer AS active_station_count
             FROM official_realtime_latest latest
             JOIN requested ON requested.adapter_key = latest.adapter_key
             JOIN resolved_freshness
@@ -1862,7 +1866,9 @@ def _query_realtime_source_health_rows(
             COALESCE(latest_observations.delayed_station_count, 0)::integer
                 AS delayed_station_count,
             COALESCE(latest_observations.stale_station_count, 0)::integer
-                AS stale_station_count
+                AS stale_station_count,
+            COALESCE(latest_observations.active_station_count, 0)::integer
+                AS active_station_count
     """
     observation_join = """
         LEFT JOIN latest_observations
@@ -1935,7 +1941,8 @@ def _query_realtime_source_health_rows(
             NULL::integer AS station_count,
             NULL::integer AS fresh_station_count,
             NULL::integer AS delayed_station_count,
-            NULL::integer AS stale_station_count
+            NULL::integer AS stale_station_count,
+            NULL::integer AS active_station_count
         """
         observation_join = ""
         inventory_complete_column = "false AS inventory_complete"
@@ -2799,7 +2806,7 @@ def _realtime_source_health_row(
             if value("station_count", 19) is not None
             else None
         ),
-        inventory_complete=bool(value("inventory_complete", 28, False)),
+        inventory_complete=bool(value("inventory_complete", 29, False)),
         is_registered=bool(value("is_registered", 2, True)),
         runtime_enabled=(
             bool(value("runtime_enabled", 7))
@@ -2832,28 +2839,33 @@ def _realtime_source_health_row(
             if value("stale_station_count", 22) is not None
             else None
         ),
+        active_station_count=(
+            int(value("active_station_count", 23))
+            if value("active_station_count", 23) is not None
+            else None
+        ),
         upstream_station_count=(
-            int(value("upstream_station_count", 23))
-            if value("upstream_station_count", 23) is not None
+            int(value("upstream_station_count", 24))
+            if value("upstream_station_count", 24) is not None
             else None
         ),
         pages_fetched=(
-            int(value("pages_fetched", 24))
-            if value("pages_fetched", 24) is not None
+            int(value("pages_fetched", 25))
+            if value("pages_fetched", 25) is not None
             else None
         ),
         pagination_complete=(
-            bool(value("pagination_complete", 25))
-            if value("pagination_complete", 25) is not None
+            bool(value("pagination_complete", 26))
+            if value("pagination_complete", 26) is not None
             else None
         ),
         inventory_manifest_sha256=(
-            str(value("inventory_manifest_sha256", 26))
-            if value("inventory_manifest_sha256", 26) is not None
+            str(value("inventory_manifest_sha256", 27))
+            if value("inventory_manifest_sha256", 27) is not None
             else None
         ),
         inventory_proof_status=str(
-            value("inventory_proof_status", 27) or "missing"
+            value("inventory_proof_status", 28) or "missing"
         ),
         latest_run_error_code=(
             str(value("latest_run_error_code", 15))
