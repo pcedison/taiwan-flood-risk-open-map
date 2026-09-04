@@ -26,6 +26,7 @@ export const text = {
   pendingData: "尚未查詢",
   riskPlaceholder: "搜尋地點或點選地圖後，按下查詢即可整理半徑內公開淹水相關資料。",
   insufficientData: "資料不足",
+  noLocalSensorHeading: "本區沒有淹水感測器",
   riskMeter: "風險等級",
   riskMethodSummary: "查看分級依據",
   realtime: "即時",

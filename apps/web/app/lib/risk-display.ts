@@ -69,9 +69,11 @@ export {
 } from "./risk-display/evidence.ts";
 
 export {
+  confirmedNoLocalSensor,
   nearbyCoverageLevelLabel,
   nearbyCoverageSummary,
   nearbySensingState,
+  REALTIME_SCORING_RADIUS_M,
 } from "./risk-display/coverage.ts";
 
 export {

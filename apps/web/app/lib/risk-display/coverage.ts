@@ -20,6 +20,12 @@ const nearbyCoverageFallbackSummaries: Record<NearbyCoverageLevel, string> = {
   unavailable: "即時感測覆蓋暫時無法評估，不能判斷附近是否有感測器。",
 };
 
+// SDD Amendment B: a realtime observation only contributes to the realtime
+// level when its station is inside this radius. The 500 m risk circle in the
+// map is the historical-evidence footprint, not the sensor search radius, so
+// the two numbers must never be presented as the same thing.
+export const REALTIME_SCORING_RADIUS_M = 5000;
+
 export function nearbyCoverageLevelLabel(level: NearbyCoverageLevel): string {
   return nearbyCoverageLabels[level];
 }
@@ -636,7 +642,11 @@ function signalDetail(
   const observedAt = signal.nearest_observed_at
     ? `；${formatDateTime(signal.nearest_observed_at)}`
     : "";
-  return `距查詢點 ${formatDistanceMeters(signal.nearest_distance_m)}；${status[availability]}${sourceStatus}${observedAt}`;
+  const scoringScope =
+    signal.nearest_distance_m <= REALTIME_SCORING_RADIUS_M
+      ? `；在 ${formatDistanceMeters(REALTIME_SCORING_RADIUS_M)}評分範圍內`
+      : `；超出 ${formatDistanceMeters(REALTIME_SCORING_RADIUS_M)}評分範圍，僅供區域參考`;
+  return `距查詢點 ${formatDistanceMeters(signal.nearest_distance_m)}；${status[availability]}${sourceStatus}${observedAt}${scoringScope}`;
 }
 
 const observationUnitLabels = {
@@ -750,6 +760,15 @@ function legacySourceAvailabilityNote(input: {
     return "本次資料來源均未提供可用狀態；這是資料缺口，不代表現地安全。";
   }
   return null;
+}
+
+export function confirmedNoLocalSensor(
+  coverage: NearbyRealtimeCoverage | null | undefined,
+): boolean {
+  // "No sensor here" is only honest when the source inventory was actually
+  // checked; an unverified inventory is "we cannot tell", not "none exists".
+  if (!coverage) return false;
+  return diagnoseCoverage(coverage).confirmedNoStation;
 }
 
 export function nearbySensingState(input: {
