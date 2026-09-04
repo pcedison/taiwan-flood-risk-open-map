@@ -573,9 +573,13 @@ sources:
     implementation: api
     runtime_scope: not_applicable
     worker_default_enabled: null
-    catalog_state: enabled
+    # Retired on the request path 2026-09-04 (#326): the Google/Bing citation
+    # lookup added 4-13 s per assessment and admitted non-incident pages.  Rows
+    # already written stay in the evidence table for audit, but they are
+    # excluded from scoring and are labelled as coming from a retired source.
+    catalog_state: disabled
     deployment_default: false
-    enablement_decision: request_time_fallback
+    enablement_decision: audit_only
   - adapter_key: official.tainan.disaster_news
     family: official
     contract: tainan_history
