@@ -476,8 +476,20 @@ def search_taiwan_official_flood_citations(
                 )
                 if comparable < oldest_allowed or comparable > now + timedelta(days=1):
                     continue
+                # At admin-area precision, an article's RSS description/snippet
+                # is untrusted body text: a nationwide notice can mention many
+                # unrelated place names there, which previously let the same
+                # generic page satisfy several different counties' queries.
+                # Require the county/district name in the title itself; a
+                # body-only mention falls through to the bounded direct-page
+                # verification below instead of being auto-accepted.
+                metadata_match_text = (
+                    str(article.get("title", "")).strip()
+                    if target.scope == "admin_area"
+                    else match_text
+                )
                 metadata_location_match = _location_match(
-                    match_text,
+                    metadata_match_text,
                     target.term,
                     relaxed_location_terms=relaxed_terms,
                 )
@@ -1162,8 +1174,31 @@ def _official_history_record_time(record: EvidenceUpsert) -> datetime:
     return value.astimezone(UTC)
 
 
+_NON_INCIDENT_PHRASES = (
+    "防蚊",
+    "登革熱",
+    "病媒蚊",
+    "積水容器",
+    "孳生源",
+    "衛教",
+    "消毒",
+    "儲備",
+    "應向哪個單位",
+    "通報單位",
+    "常見問題",
+    "faq",
+    "q&a",
+    "整備",
+    "演練",
+    "宣導",
+    "防颱準備",
+)
+
+
 def _official_history_text_qualifies(text: str) -> bool:
     normalized = _normalize(text)
+    if any(_normalize(phrase) in normalized for phrase in _NON_INCIDENT_PHRASES):
+        return False
     if not any(_normalize(term) in normalized for term in PRIMARY_FLOOD_TERMS):
         return False
     planning_phrases = (

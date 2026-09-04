@@ -361,6 +361,9 @@ def signal_from_official_realtime(observation: OfficialRealtimeObservation) -> R
         source_weight=observation.source_weight,
         risk_factor=observation.risk_factor,
         observed_at=observation.observed_at,
+        # Official realtime observations are single-station rainfall/water-level
+        # readings at an exact, surveyed coordinate.
+        location_precision="point",
     )
 
 
@@ -378,6 +381,9 @@ def signal_from_historical_record(
         source_weight=record.source_weight,
         risk_factor=record.risk_factor,
         observed_at=record.occurred_at,
+        # The bundled historical records are curated citations naming a
+        # specific road/lane, not county-wide admin-area citations.
+        location_precision="road_or_lane",
     )
 
 
@@ -394,6 +400,7 @@ def signal_from_evidence(evidence: Evidence) -> RiskEvidenceSignal:
         ),
         observed_at=evidence.observed_at or evidence.occurred_at,
         evidence_scope=evidence.evidence_scope,
+        location_precision=evidence.location_precision,
     )
 
 

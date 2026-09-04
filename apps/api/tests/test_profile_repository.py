@@ -34,7 +34,7 @@ def test_fetch_best_profile_for_point_reads_fresh_grid_or_admin_profile() -> Non
             "profile_key": "h3:842ab57ffffffff",
             "profile_scope": "h3:8",
             "profile_radius_m": 1000,
-            "score_version": "risk-v0.2.0",
+            "score_version": "risk-v0.3.0",
             "realtime_level": "unknown",
             "historical_level": "high",
             "confidence_level": "medium",
