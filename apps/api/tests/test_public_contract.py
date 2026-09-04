@@ -1467,14 +1467,12 @@ def test_risk_assess_clients_do_not_send_admin_code(
 
 def test_risk_assess_does_not_call_legacy_or_request_time_upstreams(monkeypatch) -> None:
     from app.api.services import public_response_cache
-    from app.api.services import public_risk as legacy_public_risk
     from app.domain.history import news_enrichment
     from app.domain.realtime import official as official_realtime_module
 
     def forbidden(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("legacy/request-time risk path was called")
 
-    monkeypatch.setattr(legacy_public_risk, "assess_risk", forbidden)
     monkeypatch.setattr(public_response_cache, "cached_response", forbidden)
     monkeypatch.setattr(public_response_cache, "store_response", forbidden)
     monkeypatch.setattr(official_realtime_module, "fetch_official_realtime_bundle", forbidden)

@@ -5,19 +5,44 @@ import redis
 from pydantic import ValidationError
 
 import app.api.services.public_response_cache as response_cache
-from app.api.services.public_risk import build_placeholder_nearby_realtime_coverage
 from app.api.services.redis_support import FailOpenRedisClients
 from app.api.schemas import (
     ConfidenceBlock,
     Explanation,
     LatLng,
+    NearbyRealtimeCoverage,
     QueryHeat,
     RiskAssessmentResponse,
     RiskLevelBlock,
 )
+from app.domain.realtime.nearby_coverage import RADIUS_BUCKETS_M
 
 
 NOW = datetime(2026, 6, 11, 8, 0, tzinfo=UTC)
+_COVERAGE_NOTE = "縣市層級涵蓋只作背景參考，不代表查詢點附近的感測器覆蓋；附近涵蓋會依查詢點重新計算。"
+
+
+def _placeholder_nearby_realtime_coverage(
+    *, evaluated_at: datetime, query_radius_m: int
+) -> NearbyRealtimeCoverage:
+    """Minimal valid coverage block for cache round-trip fixtures."""
+
+    return NearbyRealtimeCoverage(
+        overall_level="unavailable",
+        evaluated_at=evaluated_at,
+        query_radius_m=query_radius_m,
+        radius_buckets_m=list(RADIUS_BUCKETS_M),
+        summary="目前僅提供縣市層級背景涵蓋資訊；查詢點附近涵蓋會依查詢點重新計算。",
+        signal_breakdown=[],
+        missing_signal_types=[
+            "rainfall",
+            "water_level",
+            "flood_depth",
+            "sewer_water_level",
+        ],
+        limitations=[_COVERAGE_NOTE],
+        county_level_note=_COVERAGE_NOTE,
+    )
 
 
 class _FakeRedis:
@@ -61,7 +86,7 @@ def _response(assessment_id: str = "assessment-1", **overrides: object) -> RiskA
         "evidence": [],
         "data_freshness": [],
         "query_heat": QueryHeat(period="weekly", attention_level="未知", updated_at=NOW),
-        "nearby_realtime_coverage": build_placeholder_nearby_realtime_coverage(
+        "nearby_realtime_coverage": _placeholder_nearby_realtime_coverage(
             evaluated_at=NOW, query_radius_m=500
         ),
     }
