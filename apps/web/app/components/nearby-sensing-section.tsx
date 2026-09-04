@@ -2,7 +2,7 @@
 
 import type { RiskAssessmentResponse } from "../lib/page-types";
 import type { EvidenceItem } from "../lib/risk-display";
-import { nearbySensingState } from "../lib/risk-display";
+import { nearbySensingState, REALTIME_SCORING_RADIUS_M } from "../lib/risk-display";
 import { text } from "../lib/ui-text";
 
 type NearbySensingSectionProps = {
@@ -88,11 +88,14 @@ export function NearbySensingSection({
         <summary>{text.nearbySensingDetails}</summary>
         {coverage && searchRadiusM !== null ? (
           <p>
-            風險圈 {Math.round(assessment.radius_m ?? coverage.query_radius_m)} 公尺；感測站搜尋至{" "}
+            風險圈 {Math.round(assessment.radius_m ?? coverage.query_radius_m)} 公尺是歷史證據的比對範圍，不是感測站的搜尋範圍。
+            即時風險以 {Math.round(REALTIME_SCORING_RADIUS_M / 1000)} 公里內的測站為準；為了讓你知道最近的測站在哪裡，清單會一路列到{" "}
             {searchRadiusM >= 1000
               ? `${Math.round(searchRadiusM / 1000)} 公里`
               : `${Math.round(searchRadiusM)} 公尺`}
-            {searchRadiusM > 5000 ? "，5 公里外僅供區域參考。" : "。"}
+            {searchRadiusM > REALTIME_SCORING_RADIUS_M
+              ? `，但 ${Math.round(REALTIME_SCORING_RADIUS_M / 1000)} 公里外的測站只作區域背景參考，不會提高即時風險等級。`
+              : "。"}
           </p>
         ) : null}
         <p>{state.note}</p>
