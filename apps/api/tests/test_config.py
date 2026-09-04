@@ -70,7 +70,7 @@ def test_settings_enables_bundled_official_disaster_points_for_hosted_runtime(mo
     assert settings.official_flood_disaster_points_path is not None
     assert settings.official_flood_disaster_points_path.endswith("flood_disaster_points_130016.csv")
     assert settings.official_tainan_history_news_enabled is False
-    assert settings.official_nationwide_history_citations_enabled is True
+    assert settings.official_nationwide_history_citations_enabled is False
     get_settings.cache_clear()
 
 
@@ -295,4 +295,15 @@ def test_realtime_wra_bridge_defaults_to_public_endpoint_enabled(monkeypatch):
     settings = get_settings()
 
     assert settings.source_wra_api_enabled is True
+    get_settings.cache_clear()
+
+
+def test_settings_can_enable_nationwide_history_citations_explicitly(monkeypatch):
+    get_settings.cache_clear()
+    monkeypatch.setenv("APP_ENV", "production-beta")
+    monkeypatch.setenv("OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED", "true")
+
+    settings = get_settings()
+
+    assert settings.official_nationwide_history_citations_enabled is True
     get_settings.cache_clear()
