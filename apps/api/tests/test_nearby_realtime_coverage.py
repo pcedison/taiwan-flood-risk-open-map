@@ -1728,6 +1728,51 @@ def test_stalled_upstream_with_running_worker_is_upstream_stale() -> None:
     assert "本站背景更新正常" in health.message
 
 
+def test_ten_day_upstream_stall_stays_upstream_stale_after_active_drains() -> None:
+    # After the seven-day active window closes, active_station_count reaches
+    # zero.  The public reason must still name the upstream publisher instead of
+    # claiming this site produced no station observations.
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.wra_iow.flood_depth",
+            latest_run_status="succeeded",
+            latest_run_delta_minutes=1,
+            observed_delta_minutes=60 * 24 * 10,
+            station_count=1_366,
+            active_station_count=0,
+            fresh_station_count=0,
+            delayed_station_count=0,
+            stale_station_count=1_366,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.health_status == "degraded"
+    assert health.reason_code == "upstream_stale"
+    assert "上游" in health.message
+    assert "尚未產生可用站點觀測" not in health.message
+
+
+def test_zero_active_stations_without_a_stalled_upstream_stays_unavailable() -> None:
+    coverage = _coverage_with_health(
+        _health_row(
+            adapter_key="official.cwa.rainfall",
+            latest_run_status="succeeded",
+            latest_run_delta_minutes=20,
+            observed_delta_minutes=60 * 24 * 10,
+            station_count=42,
+            active_station_count=0,
+            fresh_station_count=0,
+            delayed_station_count=0,
+            stale_station_count=42,
+        )
+    )
+
+    health = coverage.source_health[0]
+    assert health.reason_code == "upstream_unavailable"
+    assert "尚未產生可用站點觀測" in health.message
+
+
 def test_partial_run_with_fresh_observations_stays_healthy() -> None:
     coverage = _coverage_with_health(
         _health_row(

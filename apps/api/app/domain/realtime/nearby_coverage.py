@@ -1145,6 +1145,19 @@ def _observation_health_decision(
         return _source_decision(
             "unknown", "not_yet_observed", "目前無法確認此來源的站點清冊狀態。"
         )
+    fresh_seconds = row.freshness_threshold_seconds
+    if fresh_seconds is None or fresh_seconds <= 0:
+        fresh_seconds = _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS
+    # A feed frozen for longer than the active-station window drains
+    # active_station_count to zero.  Decide the upstream stall before the
+    # "no usable station observation" branch, or a longer outage would be
+    # reported as our own missing inventory.
+    upstream_stale = _upstream_stale_decision(
+        row,
+        evaluated_at=evaluated_at,
+        run_age=run_age,
+        fresh_seconds=fresh_seconds,
+    )
     active_station_count = max(
         0,
         row.active_station_count
@@ -1152,12 +1165,11 @@ def _observation_health_decision(
         else row.station_count,
     )
     if active_station_count == 0 or row.latest_observed_at is None:
+        if upstream_stale is not None and row.station_count > 0:
+            return upstream_stale
         return _source_decision(
             "degraded", "upstream_unavailable", "來源有更新紀錄，但尚未產生可用站點觀測。"
         )
-    fresh_seconds = row.freshness_threshold_seconds
-    if fresh_seconds is None or fresh_seconds <= 0:
-        fresh_seconds = _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS
     if row.fresh_station_count is not None:
         fresh_station_count = max(0, row.fresh_station_count)
         delayed_station_count = max(0, row.delayed_station_count or 0)
@@ -1166,7 +1178,7 @@ def _observation_health_decision(
             return _source_decision(
                 "healthy",
                 "operational",
-                "多數已觀測站點皆在預期時間內更新"
+                "多數活躍站點皆在預期時間內更新"
                 f"（{fresh_station_count}/{active_station_count}）；清冊完整性另行判定。",
             )
         if usable_station_count / active_station_count >= SOURCE_DEGRADED_USABLE_RATIO:
@@ -1182,12 +1194,6 @@ def _observation_health_decision(
                 "upstream_unavailable",
                 "多數站點已超過可用時效。",
             )
-        upstream_stale = _upstream_stale_decision(
-            row,
-            evaluated_at=evaluated_at,
-            run_age=run_age,
-            fresh_seconds=fresh_seconds,
-        )
         if upstream_stale is not None:
             return upstream_stale
         return _source_decision(

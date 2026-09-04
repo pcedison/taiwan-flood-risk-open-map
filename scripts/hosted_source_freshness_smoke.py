@@ -51,6 +51,12 @@ REQUIRED_SOURCE_GATE = "data_sources.is_enabled"
 # failure.  It stays visible as an advisory finding instead of failing the smoke.
 WORKER_HEALTHY_UPSTREAM_STATUSES = {"succeeded", "partial"}
 WORKER_RECENT_RUN_WINDOW_SECONDS = 1800
+# Per-adapter freshness thresholds mean a frozen upstream feed passes through
+# "stale" before it reaches "failed", so both states must reach the advisory.
+UPSTREAM_STALE_FRESHNESS_STATES = {"failed", "stale"}
+# Hosted and local clocks drift.  A run timestamp slightly in the future is skew,
+# not evidence that the worker stopped.
+WORKER_CLOCK_SKEW_TOLERANCE_SECONDS = 300
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -414,7 +420,7 @@ def check_upstream_stale_advisories(
 
 
 def _is_upstream_stale(source: Mapping[str, Any]) -> bool:
-    if source.get("freshness_state") != "failed":
+    if source.get("freshness_state") not in UPSTREAM_STALE_FRESHNESS_STATES:
         return False
     if source.get("upstream_status") not in WORKER_HEALTHY_UPSTREAM_STATUSES:
         return False
@@ -426,7 +432,11 @@ def _is_upstream_stale(source: Mapping[str, Any]) -> bool:
     if run_at is None:
         return False
     run_age_seconds = (datetime.now(UTC) - run_at).total_seconds()
-    return 0 <= run_age_seconds <= WORKER_RECENT_RUN_WINDOW_SECONDS
+    return (
+        -WORKER_CLOCK_SKEW_TOLERANCE_SECONDS
+        <= run_age_seconds
+        <= WORKER_RECENT_RUN_WINDOW_SECONDS
+    )
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
