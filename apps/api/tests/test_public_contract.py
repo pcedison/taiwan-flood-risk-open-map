@@ -22,6 +22,7 @@ from app.api.schemas import (
     NearbySourceHealth,
     PlaceCandidate,
     RiskAssessmentResponse,
+    RiskAssessRequest,
 )
 from app.api.services import public_layers as public_layer_service
 from app.api.services.assessment import AssessmentService
@@ -1501,6 +1502,68 @@ def test_production_risk_route_has_no_legacy_or_sensitive_cache_wiring() -> None
     )
 
     assert [symbol for symbol in forbidden if symbol in source] == []
+
+
+def _cache_key_request(
+    *, lat: float = 22.99974, lng: float = 120.22704, radius_m: int = 750
+) -> RiskAssessRequest:
+    return RiskAssessRequest(
+        point=LatLng(lat=lat, lng=lng),
+        radius_m=radius_m,
+        time_context="now",
+        location_text=None,
+    )
+
+
+def test_response_cache_key_is_stable_for_the_same_point_and_radius() -> None:
+    settings = get_settings()
+
+    key_a = public_routes._response_cache_key(_cache_key_request(), settings)
+    key_b = public_routes._response_cache_key(_cache_key_request(), settings)
+
+    assert key_a == key_b
+
+
+def test_response_cache_key_differs_when_radius_differs() -> None:
+    settings = get_settings()
+
+    key_750 = public_routes._response_cache_key(_cache_key_request(radius_m=750), settings)
+    key_1000 = public_routes._response_cache_key(_cache_key_request(radius_m=1000), settings)
+
+    assert key_750 != key_1000
+
+
+def test_response_cache_key_ignores_sixth_decimal_of_latitude() -> None:
+    settings = get_settings()
+
+    key_a = public_routes._response_cache_key(_cache_key_request(lat=22.999741), settings)
+    key_b = public_routes._response_cache_key(_cache_key_request(lat=22.999744), settings)
+
+    assert key_a == key_b
+
+
+def test_assessment_service_has_no_response_cache_when_ttl_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The module-level `repository_service_seam` autouse fixture replaces
+    # `_assessment_service` with a stub; undo that to reach the real factory.
+    monkeypatch.undo()
+    settings = replace(get_settings(), risk_assessment_response_cache_seconds=0)
+
+    service = public_routes._assessment_service(settings)
+
+    assert service._response_cache is None
+
+
+def test_assessment_service_has_response_cache_when_ttl_is_positive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.undo()
+    settings = replace(get_settings(), risk_assessment_response_cache_seconds=120)
+
+    service = public_routes._assessment_service(settings)
+
+    assert service._response_cache is not None
 
 
 def _db_evidence_record() -> EvidenceRecord:

@@ -7,7 +7,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.api.schemas import LatLng, NearbyCoverageSignal, RiskAssessRequest
+from app.api.schemas import (
+    LatLng,
+    NearbyCoverageSignal,
+    RiskAssessmentResponse,
+    RiskAssessRequest,
+)
 from app.api.services.assessment import AssessmentService
 from app.domain.assessment import AssessmentData, AssessmentSourceState
 from app.domain.evidence import (
@@ -585,3 +590,95 @@ def test_response_preserves_evidence_precision_and_limitations(
     current = response.evidence[0]
     assert current.location_precision == "road_or_lane"
     assert current.limitations == ["位置為道路尺度"]
+
+
+@dataclass
+class FakeResponseCache:
+    cached: RiskAssessmentResponse | None = None
+    get_calls: list[RiskAssessRequest] = field(default_factory=list)
+    set_calls: list[tuple[RiskAssessRequest, RiskAssessmentResponse]] = field(
+        default_factory=list
+    )
+
+    def get(
+        self, request: RiskAssessRequest, *, now: datetime
+    ) -> RiskAssessmentResponse | None:
+        self.get_calls.append(request)
+        return self.cached
+
+    def set(
+        self,
+        request: RiskAssessRequest,
+        response: RiskAssessmentResponse,
+        *,
+        now: datetime,
+    ) -> None:
+        self.set_calls.append((request, response))
+
+
+class ExplodingRepository:
+    def load(self, **_kwargs: object) -> AssessmentData:
+        raise AssertionError("repository.load must not be called on a response cache hit")
+
+    def persist(self, _assessment: RiskAssessmentPersistence) -> None:
+        raise AssertionError("persist must not be called on a response cache hit")
+
+
+def test_response_cache_hit_returns_cached_response_without_loading_repository(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    baseline = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now)
+    cache = FakeResponseCache(cached=baseline)
+
+    response = AssessmentService(
+        ExplodingRepository(), score_risk, response_cache=cache
+    ).assess(risk_request, now=now)
+
+    assert response is baseline
+    assert cache.get_calls == [risk_request]
+
+
+def test_response_cache_is_populated_when_all_data_sources_are_available(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    available_data = replace(
+        data,
+        current_available=True,
+        historical_available=True,
+        coverage_available=True,
+        health_available=True,
+        jurisdiction_available=True,
+    )
+    cache = FakeResponseCache()
+
+    response = AssessmentService(
+        FakeRepository(available_data), score_risk, response_cache=cache
+    ).assess(risk_request, now=now)
+
+    assert cache.set_calls == [(risk_request, response)]
+
+
+def test_response_cache_is_not_populated_when_current_data_is_unavailable(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    degraded_data = replace(
+        data,
+        current_available=False,
+        historical_available=True,
+        coverage_available=True,
+        health_available=True,
+        jurisdiction_available=True,
+    )
+    cache = FakeResponseCache()
+
+    AssessmentService(
+        FakeRepository(degraded_data), score_risk, response_cache=cache
+    ).assess(risk_request, now=now)
+
+    assert cache.set_calls == []
