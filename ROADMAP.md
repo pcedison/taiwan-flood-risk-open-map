@@ -2,6 +2,12 @@
 
 Reviewed: 2026-06-10
 
+Status note 2026-09-04: floodrisk.cc has served public traffic since June
+2026. The "not yet hosted production-beta-ready" statement below describes
+validator evidence, not whether the site is live. Current defects and the
+correction track are in `PROJECT_STATUS.md` and
+`docs/reviews/audit-2026-09-03-codex-drift-and-realtime-health.md`.
+
 This roadmap is the engineering execution backlog for the next production-beta push. It complements `docs/PROJECT_WORK_PLAN.md`: the work plan records the broader phase strategy, while this file lists the concrete blockers, runtime gaps, and trust/scale improvements that should be executed next.
 
 ## Current State

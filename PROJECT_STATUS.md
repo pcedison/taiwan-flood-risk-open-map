@@ -23,6 +23,36 @@ the live verification sources listed below.
 - Work queue: open GitHub issues and pull requests. Do not infer completion from
   an old roadmap checkbox.
 
+## 2026-09-03 audit and correction track
+
+- Audit report: `docs/reviews/audit-2026-09-03-codex-drift-and-realtime-health.md`
+  (22-county production probe, root causes, SDD comparison). Community and
+  civic source options: `docs/reviews/community-sources-research-2026-09-04.md`.
+- Findings that change how the rest of this file should be read:
+  - `official.wra_iow.flood_depth` has been stale since 2026-09-02 04:29Z
+    because the WRA open-data feed itself stopped at that timestamp (verified
+    by reading the upstream API directly). It is not a worker or promotion
+    fault, and every Hosted Monitoring failure since 2026-08-31 (#289) is this
+    single source.
+  - Every "degraded" backbone source was produced by an all-stations-fresh
+    rule in `nearby_coverage.py`, not by stale data.
+  - Historical `極高` levels in several counties came from request-time
+    Google/Bing government-page citations (dengue notices, FAQ pages), not
+    from flood records. The request path also bypassed the response cache.
+- Correction track (P0 → P1 → P2): #326 disable request-time citations;
+  #339 reconnect the response cache; #341 precision-weighted
+  historical scoring; #338 active-station ratio health and
+  `upstream_stale`; #340 collapse operator diagnostics; this PR
+  (documentation single source of truth).
+- Source-of-truth rule from this point: enablement decisions live in
+  `config/source-registry.yaml`; runtime evidence lives in `/health`, `/ready`
+  and `/v1/ingestion-readiness`; this file summarizes and never decides.
+- The community-signal question is answered in the research file above: the
+  citizen flood reports the product needs already exist as an official WRA
+  feed (`official.wra.flood_incident`, adapter landed, waiting for an API key
+  and terms review); scraping Facebook/Instagram/Threads/Dcard stays out of
+  scope per SDD 2.3 and 8.2.
+
 ## Active nationwide data debt plan
 
 - The current engineering correction plan is
