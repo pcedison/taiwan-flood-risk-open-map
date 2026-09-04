@@ -17,6 +17,7 @@ const {
   buildLayerDisplayState,
   buildUserReportPayload,
   combinedRiskLevel,
+  confirmedNoLocalSensor,
   evidenceDisplayText,
   evidencePublishedAt,
   evidenceSourceUrl,
@@ -1660,3 +1661,129 @@ test("jurisdiction mapping gaps are not described as sources being switched off"
   assert.match(state.note, /來源對應/);
   assert.equal(state.tone, "warn");
 });
+
+
+test("a nearby station reading says whether it is inside the realtime scoring radius", () => {
+  // Readers kept asking why a 500 m "risk circle" listed a station kilometres
+  // away.  Each reading must state its distance AND whether that distance still
+  // counts toward the realtime level.
+  const inRange = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: coverageWithRainfallAt(820),
+    },
+  });
+  const outOfRange = nearbySensingState({
+    assessment: {
+      nearby_realtime_coverage: coverageWithRainfallAt(8200),
+    },
+  });
+
+  assert.match(inRange.items[0].detail, /距查詢點 820 公尺/);
+  assert.match(inRange.items[0].detail, /在 5 公里評分範圍內/);
+  assert.match(outOfRange.items[0].detail, /超出 5 公里評分範圍，僅供區域參考/);
+});
+
+test("a verified empty sensor inventory is reported as no sensor, not as missing data", () => {
+  // Offshore islands and counties with no flood sensors get a definite answer:
+  // we looked, the inventory is audited, and there is nothing here. "資料不足"
+  // implies we failed to look, which is a different and more alarming claim.
+  const audited = emptyInventoryCoverage();
+  const unaudited = emptyInventoryCoverage();
+  unaudited.source_health_checked = false;
+
+  assert.equal(confirmedNoLocalSensor(audited), true);
+  assert.equal(confirmedNoLocalSensor(unaudited), false);
+  assert.equal(confirmedNoLocalSensor(null), false);
+});
+
+function emptyInventoryCoverage(): NearbyRealtimeCoverage {
+  const signalTypes = [
+    "rainfall",
+    "water_level",
+    "flood_depth",
+    "sewer_water_level",
+  ] as const;
+  return {
+    county_level_note: "縣市資料源不代表近距觀測。",
+    considered_jurisdictions: ["連江縣"],
+    evaluated_at: "2026-07-18T08:00:00Z",
+    home_jurisdiction: "連江縣",
+    jurisdiction_catalog_complete: true,
+    jurisdiction_checked: true,
+    jurisdiction_mapping_revisions: ["official-source-catalog-v1"],
+    jurisdiction_status: "verified",
+    jurisdiction_unverified_signal_types: [],
+    limitations: [],
+    missing_signal_types: [...signalTypes],
+    overall_level: "no_local_sensor",
+    query_radius_m: 500,
+    radius_buckets_m: [500, 1000, 3000, 5000, 10000, 15000],
+    signal_breakdown: signalTypes.map((signalType) => ({
+      availability_state: "no_station",
+      counts_by_radius_m: { "500": 0, "15000": 0 },
+      coverage_level: "no_local_sensor",
+      degraded_count: 0,
+      failed_source_count: 0,
+      fresh_count: 0,
+      label: signalType,
+      missing_cause: "no_station_in_range",
+      missing_reason: null,
+      nearest_distance_m: null,
+      nearest_observation_unit: null,
+      nearest_observation_value: null,
+      nearest_observed_at: null,
+      nearest_source_id: null,
+      signal_type: signalType as CoverageSignalType,
+      source_count: 1,
+      source_health_status: "healthy",
+      stale_count: 0,
+      status_only_count: 0,
+    })),
+    source_health: signalTypes.map((signalType) =>
+      realtimeSourceHealth({
+        signal_types: [signalType],
+        station_count: 120,
+      }),
+    ),
+    source_health_checked: true,
+    summary: "本區沒有已登錄的淹水感測器。",
+  } as unknown as NearbyRealtimeCoverage;
+}
+
+function coverageWithRainfallAt(distanceM: number): NearbyRealtimeCoverage {
+  return {
+    county_level_note: "縣市資料源不代表近距觀測。",
+    evaluated_at: "2026-07-18T08:00:00Z",
+    limitations: [],
+    missing_signal_types: [],
+    overall_level: "medium",
+    query_radius_m: 500,
+    radius_buckets_m: [500, 1000, 3000, 5000, 10000, 15000],
+    signal_breakdown: [
+      {
+        availability_state: distanceM <= 5000 ? "fresh_nearby" : "regional_reference",
+        counts_by_radius_m: { "500": 0, "15000": 1 },
+        coverage_level: distanceM <= 5000 ? "medium" : "low",
+        degraded_count: 0,
+        fresh_count: 1,
+        label: "雨量",
+        missing_cause: "none",
+        missing_reason: null,
+        nearest_distance_m: distanceM,
+        nearest_freshness_state: "fresh",
+        nearest_observation_unit: "mm_1h",
+        nearest_observation_value: 3.5,
+        nearest_observed_at: "2026-07-18T07:55:00Z",
+        nearest_source_id: "cwa-rainfall:001",
+        signal_type: "rainfall" as CoverageSignalType,
+        source_count: 1,
+        failed_source_count: 0,
+        source_health_status: "healthy",
+        stale_count: 0,
+        status_only_count: 0,
+      },
+    ],
+    source_health_checked: true,
+    summary: "附近有雨量觀測。",
+  } as unknown as NearbyRealtimeCoverage;
+}
