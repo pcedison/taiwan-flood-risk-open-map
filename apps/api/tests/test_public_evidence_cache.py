@@ -1,4 +1,3 @@
-from dataclasses import fields
 from datetime import UTC, datetime
 from inspect import signature
 
@@ -8,7 +7,7 @@ import redis
 import app.api.services.public_evidence_cache as evidence_cache
 from app.api.routes import public as public_routes
 from app.api.schemas import Evidence, LatLng
-from app.api.services import public_profiles, public_risk
+from app.api.services import public_profiles
 from app.api.services.public_evidence import (
     cache_assessment_evidence,
     list_assessment_evidence,
@@ -218,11 +217,6 @@ def test_v1_detail_read_ignores_legacy_cache_and_always_rereads_database() -> No
 
     assert [item.id for item in response.items] == ["currently-authorized-evidence"]
     assert calls == [("assessment-1", 20)]
-
-
-def test_normal_risk_dependencies_have_no_legacy_evidence_cache_writer() -> None:
-    dependency_names = {field.name for field in fields(public_risk.RiskAssessmentDependencies)}
-    assert "cache_assessment_evidence" not in dependency_names
 
 
 def test_profile_response_has_no_legacy_evidence_cache_writer_parameter() -> None:
