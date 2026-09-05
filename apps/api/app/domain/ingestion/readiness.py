@@ -13,6 +13,23 @@ INGESTION_SCHEDULER_KEY = "scheduler.v1-baseline-adapters"
 EXPECTED_JURISDICTION_COUNT = 22
 EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT = 12
 REQUIRED_SIGNAL_TYPES = ("rainfall", "water_level", "flood_depth", "flood_warning")
+# 1800, the same value as nearby_coverage's
+# _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS, so both public surfaces call an
+# unreviewed source stale at the same age.
+DEFAULT_FRESHNESS_THRESHOLD_SECONDS = 1800
+MAX_FRESHNESS_THRESHOLD_SECONDS = 86400
+# An upstream feed is only called stalled once it has missed several publication
+# windows, matching the public nearby-coverage diagnosis.
+UPSTREAM_STALE_THRESHOLD_MULTIPLIER = 3
+# Warning feeds only publish while an event is active, so their newest
+# observation is legitimately old between events.  Mirrors the worker's
+# WARNING_EVENT_ADAPTER_KEYS.
+UPSTREAM_STALE_EXEMPT_ADAPTER_KEYS = frozenset(
+    {"official.ncdr.cap", "official.cwa.heavy_rain_warning"}
+)
+# Nationwide history refreshes on a daily-or-slower cadence over decade-old
+# events; observation age says nothing about the publisher there.
+UPSTREAM_STALE_EXEMPT_COVERAGE_KINDS = frozenset({"nationwide_history"})
 
 # Adapter failures are persisted as the raised exception class name in
 # ``ingestion_jobs.error_code``. Suffix matching keeps one public-safe answer to
@@ -225,6 +242,8 @@ def _source_readiness(
         status, reason_code = "degraded", "run_incomplete"
     elif not _pipeline_complete_for_latest_run(row, latest_run_at):
         status, reason_code = "degraded", "pipeline_incomplete"
+    elif _upstream_stale(row, evaluated_at=evaluated_at):
+        status, reason_code = "degraded", "upstream_stale"
     else:
         status, reason_code = "operational", "operational"
 
@@ -317,6 +336,41 @@ def _pipeline_failed_for_latest_run(row: dict[str, object], latest_run_at: datet
     return comparison is not None and _normalized_utc(comparison) >= _normalized_utc(latest_run_at)
 
 
+def _upstream_stale(row: dict[str, object], *, evaluated_at: datetime) -> bool:
+    """Report an upstream publication gap behind an otherwise healthy pipeline.
+
+    Reached only after the run and the pipeline both completed, so an aged-out
+    observation is the publisher's outage, not ours.  Saying so keeps the public
+    diagnosis honest and stops monitoring from paging on a foreign outage.
+    """
+
+    if str(row.get("adapter_key") or "") in UPSTREAM_STALE_EXEMPT_ADAPTER_KEYS:
+        return False
+    if str(row.get("coverage_kind") or "") in UPSTREAM_STALE_EXEMPT_COVERAGE_KINDS:
+        return False
+    observed_at = cast(datetime | None, row.get("latest_observed_at"))
+    if observed_at is None:
+        return False
+    threshold_seconds = _freshness_threshold_seconds(row)
+    return _age(evaluated_at, observed_at) > timedelta(
+        seconds=threshold_seconds * UPSTREAM_STALE_THRESHOLD_MULTIPLIER
+    )
+
+
+def _freshness_threshold_seconds(row: dict[str, object]) -> int:
+    """Read the reviewed catalog cadence without trusting metadata to be numeric."""
+
+    raw = str(row.get("freshness_threshold_seconds") or "").strip()
+    if raw.isascii() and raw.isdigit():
+        threshold_seconds = int(raw)
+        if threshold_seconds > 0:
+            # Clamp an over-large catalog value rather than falling back to the
+            # default. A longer window only delays calling the upstream stalled,
+            # which is the conservative direction for a public diagnosis.
+            return min(threshold_seconds, MAX_FRESHNESS_THRESHOLD_SECONDS)
+    return DEFAULT_FRESHNESS_THRESHOLD_SECONDS
+
+
 def _pipeline_complete_for_latest_run(row: dict[str, object], latest_run_at: datetime) -> bool:
     pipeline_run_at = cast(datetime | None, row.get("runtime_pipeline_run_at"))
     return (
@@ -368,6 +422,14 @@ _SOURCE_READINESS_SQL = """
             jobs.created_at DESC,
             jobs.id DESC
     ),
+    latest_observations AS (
+        SELECT
+            latest.adapter_key,
+            max(latest.observed_at) AS latest_observed_at
+        FROM official_realtime_latest latest
+        JOIN requested ON requested.adapter_key = latest.adapter_key
+        GROUP BY latest.adapter_key
+    ),
     latest_runtime AS (
         SELECT
             latest_job.adapter_key,
@@ -399,10 +461,15 @@ _SOURCE_READINESS_SQL = """
         COALESCE(source.runtime_pipeline_complete, false) AS runtime_pipeline_complete,
         latest_runtime.latest_run_status,
         latest_runtime.latest_run_error_code,
-        latest_runtime.latest_run_at
+        latest_runtime.latest_run_at,
+        latest_observations.latest_observed_at,
+        btrim(COALESCE(source.metadata->>'freshness_threshold_seconds', ''))
+            AS freshness_threshold_seconds
     FROM requested
     LEFT JOIN data_sources source ON source.adapter_key = requested.adapter_key
     LEFT JOIN latest_runtime ON latest_runtime.adapter_key = requested.adapter_key
+    LEFT JOIN latest_observations
+        ON latest_observations.adapter_key = requested.adapter_key
     ORDER BY requested.adapter_key
 """
 

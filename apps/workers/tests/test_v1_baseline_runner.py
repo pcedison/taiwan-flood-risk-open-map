@@ -378,7 +378,14 @@ def test_tick_reports_every_runnable_source_not_just_the_last_one(
         return type(
             "R",
             (),
-            {"failed": False, "has_alerts": False, "status": "succeeded", "reason": None, "promoted": 0},
+            {
+                "failed": False,
+                "has_alerts": False,
+                "freshness_alerts": (),
+                "status": "succeeded",
+                "reason": None,
+                "promoted": 0,
+            },
         )()
 
     def fake_record(_writer: Any, *, enabled_adapter_keys: Any, known_adapter_keys: Any) -> None:
@@ -1091,3 +1098,155 @@ def test_runtime_selection_override_rejects_unknown_or_gate_off_key(
     assert missing_scoped.reason == "invalid_v1_baseline_scope"
     assert empty.reason == "invalid_v1_baseline_scope"
     assert calls == []
+
+
+def test_upstream_freshness_alert_is_an_advisory_not_a_source_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _install_tick_writer(monkeypatch)
+    events: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {SOURCE_A: _Adapter(SOURCE_A)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A,),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_v1_baseline_adapter_cycle",
+        lambda *_args, **_kwargs: ManagedRuntimeIngestionResult(
+            status="succeeded",
+            summaries=(SimpleNamespace(status="succeeded"),),
+            freshness_checks=(
+                FreshnessCheck(
+                    adapter_key=SOURCE_A,
+                    status="failed",
+                    checked_at=datetime(2026, 9, 3, 10, 30, tzinfo=UTC),
+                    max_age_seconds=10800,
+                    cadence="realtime",
+                    source_timestamp_max=datetime(2026, 9, 2, 4, 29, tzinfo=UTC),
+                    age_seconds=108060,
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(load_worker_settings({}), enabled_adapter_keys=(SOURCE_A,)),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+
+    assert failed is False
+    assert writer.pipeline_statuses == []
+    advisory = next(
+        fields
+        for event, fields in events
+        if event == "worker.runtime.v1_baseline.freshness_alert"
+    )
+    assert advisory["adapter_key"] == SOURCE_A
+    assert advisory["freshness_status"] == "failed"
+    assert advisory["age_seconds"] == 108060
+    assert not [
+        fields
+        for event, fields in events
+        if event == "worker.runtime.v1_baseline.source_failed"
+    ]
+    tick = next(
+        fields
+        for event, fields in events
+        if event == "worker.runtime.v1_baseline.tick_completed"
+    )
+    assert tick["failed_count"] == 0
+    assert tick["completed_count"] == 1
+
+
+def test_source_failure_is_stamped_with_its_own_run_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure stamped before its batch is dropped by the pipeline writer."""
+
+    writer = _install_tick_writer(monkeypatch)
+    summary_started_at = datetime(2026, 9, 3, 11, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {SOURCE_A: _Adapter(SOURCE_A)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A,),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_v1_baseline_adapter_cycle",
+        lambda *_args, **_kwargs: ManagedRuntimeIngestionResult(
+            status="failed",
+            summaries=(
+                SimpleNamespace(
+                    adapter_key=SOURCE_A,
+                    started_at=summary_started_at,
+                    status="failed",
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(runtime_cli, "log_event", lambda *_args, **_kwargs: None)
+
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(load_worker_settings({}), enabled_adapter_keys=(SOURCE_A,)),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+
+    assert failed is True
+    assert writer.pipeline_statuses[0]["status"] == "failed"
+    assert writer.pipeline_statuses[0]["run_at"] == summary_started_at
+
+
+def test_cycle_exception_records_a_failure_the_pipeline_writer_accepts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run_at older than the recorded run is silently dropped by the writer."""
+
+    writer = _install_tick_writer(monkeypatch)
+
+    def exploding_cycle(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("postgresql://operator:private@example.test/flood")
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {SOURCE_A: _Adapter(SOURCE_A)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A,),
+    )
+    monkeypatch.setattr(runtime_cli, "run_v1_baseline_adapter_cycle", exploding_cycle)
+    monkeypatch.setattr(runtime_cli, "log_event", lambda *_args, **_kwargs: None)
+
+    before = datetime.now(UTC)
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(load_worker_settings({}), enabled_adapter_keys=(SOURCE_A,)),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+    after = datetime.now(UTC)
+
+    assert failed is True
+    assert writer.pipeline_statuses[0]["status"] == "failed"
+    assert before <= writer.pipeline_statuses[0]["run_at"] <= after

@@ -25,6 +25,7 @@ from app.jobs.historical_coverage import (
     PostgresHistoricalCoverageWriter,
 )
 from app.jobs.ingestion import (
+    AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
     record_pipeline_status,
     record_runtime_selection,
@@ -455,10 +456,14 @@ def _run_v1_baseline_tick(
         except Exception as exc:  # noqa: BLE001 - isolate one source cycle
             had_failure = True
             failed_count += 1
+            # The cycle raised before returning a summary, so there is no batch
+            # generation to borrow.  Stamp the failure now, as the adapter
+            # construction path does, or the pipeline writer drops it as older
+            # than the run it is meant to fault.
             _record_v1_source_failure(
                 run_writer,
                 adapter_key=adapter_key,
-                run_at=source_started_at,
+                run_at=datetime.now(UTC),
             )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
@@ -468,7 +473,7 @@ def _run_v1_baseline_tick(
             )
             continue
 
-        if result.failed or result.has_alerts:
+        if result.failed:
             had_failure = True
             failed_count += 1
             pipeline_failed = (
@@ -480,7 +485,11 @@ def _run_v1_baseline_tick(
                 _record_v1_source_failure(
                     run_writer,
                     adapter_key=adapter_key,
-                    run_at=source_started_at,
+                    run_at=_v1_source_failure_run_at(
+                        result.summaries,
+                        adapter_key=adapter_key,
+                        fallback=source_started_at,
+                    ),
                 )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
@@ -492,6 +501,22 @@ def _run_v1_baseline_tick(
                 elapsed_ms=_elapsed_ms(source_started),
             )
             continue
+
+        # Fetch and promotion succeeded and only the upstream feed is stale.
+        # Report it as an advisory so a foreign publication gap never lands in
+        # this source's pipeline failure state.
+        for alert in result.freshness_alerts:
+            log_event(
+                "worker.runtime.v1_baseline.freshness_alert",
+                adapter_key=adapter_key,
+                freshness_status=alert.status,
+                age_seconds=alert.age_seconds,
+                source_timestamp_max=(
+                    alert.source_timestamp_max.isoformat()
+                    if alert.source_timestamp_max is not None
+                    else None
+                ),
+            )
 
         if adapter_key in HISTORICAL_COVERAGE_ADAPTER_KEYS:
             summary = next(
@@ -555,6 +580,25 @@ def _run_v1_baseline_tick(
         gated_off_count=gated_off_count,
     )
     return had_failure
+
+
+def _v1_source_failure_run_at(
+    summaries: tuple[AdapterBatchRunSummary, ...],
+    *,
+    adapter_key: str,
+    fallback: datetime,
+) -> datetime:
+    """Stamp the failure with the run generation it describes.
+
+    ``write_pipeline_status`` refuses a status older than the recorded pipeline
+    run, so a failure stamped before its own batch would be silently dropped and
+    the source would keep reporting the cycle-level success.
+    """
+
+    started = [
+        summary.started_at for summary in summaries if summary.adapter_key == adapter_key
+    ]
+    return max(started) if started else fallback
 
 
 def _record_v1_source_failure(

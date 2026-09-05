@@ -204,3 +204,116 @@ def test_source_readiness_keeps_run_failed_for_non_upstream_error_codes() -> Non
 def test_source_readiness_sql_selects_the_latest_run_error_code() -> None:
     assert "jobs.error_code AS latest_run_error_code" in _SOURCE_READINESS_SQL
     assert "latest_runtime.latest_run_error_code" in _SOURCE_READINESS_SQL
+
+
+def test_source_readiness_separates_upstream_staleness_from_pipeline_failure() -> None:
+    stale = _source_readiness(
+        _source_row(
+            adapter_key="official.wra_iow.flood_depth",
+            latest_observed_at=NOW - timedelta(hours=30),
+            freshness_threshold_seconds="5400",
+        ),
+        evaluated_at=NOW,
+    )
+    fresh = _source_readiness(
+        _source_row(
+            adapter_key="official.wra_iow.flood_depth",
+            latest_observed_at=NOW - timedelta(minutes=10),
+            freshness_threshold_seconds="5400",
+        ),
+        evaluated_at=NOW,
+    )
+    default_threshold = _source_readiness(
+        _source_row(latest_observed_at=NOW - timedelta(hours=3)),
+        evaluated_at=NOW,
+    )
+    unobserved = _source_readiness(_source_row(), evaluated_at=NOW)
+
+    assert stale.status == "degraded"
+    assert stale.reason_code == "upstream_stale"
+    assert fresh.status == "operational"
+    assert fresh.reason_code == "operational"
+    assert default_threshold.reason_code == "upstream_stale"
+    assert unobserved.status == "operational"
+
+
+def test_upstream_staleness_never_masks_a_real_pipeline_failure() -> None:
+    failed = _source_readiness(
+        _source_row(
+            runtime_pipeline_status="failed",
+            runtime_pipeline_complete=False,
+            latest_observed_at=NOW - timedelta(hours=30),
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert failed.status == "failed"
+    assert failed.reason_code == "pipeline_failed"
+
+
+def test_source_readiness_sql_reads_observations_and_catalog_threshold() -> None:
+    assert "official_realtime_latest" in _SOURCE_READINESS_SQL
+    assert "latest_observed_at" in _SOURCE_READINESS_SQL
+    assert "'freshness_threshold_seconds'" in _SOURCE_READINESS_SQL
+
+
+def test_upstream_stale_exempts_warning_and_static_cadence_sources() -> None:
+    warning = _source_readiness(
+        _source_row(
+            adapter_key="official.ncdr.cap",
+            latest_observed_at=NOW - timedelta(days=4),
+        ),
+        evaluated_at=NOW,
+    )
+    heavy_rain = _source_readiness(
+        _source_row(
+            adapter_key="official.cwa.heavy_rain_warning",
+            latest_observed_at=NOW - timedelta(days=4),
+        ),
+        evaluated_at=NOW,
+    )
+    history = _source_readiness(
+        _source_row(
+            adapter_key="official.wra.historical_flood",
+            coverage_kind="nationwide_history",
+            stale_after_seconds=90000,
+            latest_run_at=NOW - timedelta(hours=23),
+            runtime_pipeline_run_at=NOW - timedelta(hours=23),
+            latest_observed_at=NOW - timedelta(days=3650),
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert warning.status == "operational"
+    assert heavy_rain.status == "operational"
+    assert history.status == "operational"
+
+
+def test_over_large_catalog_threshold_is_clamped_not_discarded() -> None:
+    # 999999s clamps to the 86400s ceiling, so the stall call lands at 3 days,
+    # not at the 1800s default's 90 minutes.
+    within_clamped_window = _source_readiness(
+        _source_row(
+            latest_observed_at=NOW - timedelta(days=2),
+            freshness_threshold_seconds="999999",
+        ),
+        evaluated_at=NOW,
+    )
+    past_clamped_window = _source_readiness(
+        _source_row(
+            latest_observed_at=NOW - timedelta(days=4),
+            freshness_threshold_seconds="999999",
+        ),
+        evaluated_at=NOW,
+    )
+    unparsable = _source_readiness(
+        _source_row(
+            latest_observed_at=NOW - timedelta(hours=3),
+            freshness_threshold_seconds="not-a-number",
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert within_clamped_window.status == "operational"
+    assert past_clamped_window.reason_code == "upstream_stale"
+    assert unparsable.reason_code == "upstream_stale"

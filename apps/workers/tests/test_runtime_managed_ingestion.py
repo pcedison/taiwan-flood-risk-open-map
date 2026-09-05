@@ -1169,7 +1169,10 @@ def test_complete_replace_audit_summary_failure_cannot_activate_snapshot() -> No
 
     assert result.summaries[0].status == "failed"
     assert result.summaries[0].snapshot_activation_eligible is True
-    assert run_writer.snapshot_activations == [None]
+    # A failed batch now records no cycle-level success at all, so nothing can
+    # activate the snapshot behind it.
+    assert run_writer.snapshot_activations == []
+    assert run_writer.pipeline_statuses == []
 
 
 def test_managed_runtime_cycle_records_builder_exception_as_pipeline_failure() -> None:
@@ -2097,3 +2100,289 @@ class _SuccessfulAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         return self.run().normalized[0]
+
+
+def test_upstream_freshness_alert_keeps_the_cycle_and_pipeline_succeeded() -> None:
+    adapter = _UpstreamStaleRealtimeAdapter()
+    key = adapter.metadata.key
+    run_writer = _MemoryRunWriter()
+
+    result = run_v1_baseline_adapter_cycle(
+        {key: adapter},
+        settings=replace(_settings(key), enabled_adapter_keys=(key,)),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({key})),
+        promote=True,
+        promotion_adapter_keys=(key,),
+    )
+
+    assert result.status == "succeeded"
+    assert result.has_alerts is True
+    assert len(result.freshness_alerts) == 1
+    assert result.freshness_alerts[0].status == "failed"
+    assert run_writer.pipeline_statuses == [
+        ((key,), "succeeded", True, result.summaries[0].started_at)
+    ]
+
+
+def test_failed_summary_still_fails_the_cycle_when_freshness_also_alerts() -> None:
+    adapter = _ExplodingAdapter("official.wra.water_level")
+    key = adapter.metadata.key
+    run_writer = _MemoryRunWriter()
+
+    result = run_v1_baseline_adapter_cycle(
+        {key: adapter},
+        settings=replace(_settings(key), enabled_adapter_keys=(key,)),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({key})),
+        promote=True,
+        promotion_adapter_keys=(key,),
+    )
+
+    assert result.status == "failed"
+    assert result.summaries[0].status == "failed"
+
+
+class _UpstreamStaleRealtimeAdapter:
+    """A realtime source whose fetch succeeds while upstream stopped publishing."""
+
+    metadata = AdapterMetadata(
+        key="official.wra.water_level",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="WRA water level upstream-stale fixture",
+    )
+
+    def __init__(self, *, age: timedelta = timedelta(hours=30)) -> None:
+        self.observed_at = FETCHED_AT - age
+
+    def run(self) -> AdapterRunResult:
+        raw_item = RawSourceItem(
+            source_id="wra-water-level-1",
+            source_url="https://example.test/wra/water-level",
+            fetched_at=FETCHED_AT,
+            payload={"observed_at": self.observed_at.isoformat()},
+        )
+        evidence = NormalizedEvidence(
+            evidence_id="wra-water-level-evidence-1",
+            adapter_key=self.metadata.key,
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.WATER_LEVEL,
+            source_id=raw_item.source_id,
+            source_url=raw_item.source_url,
+            source_title="River water level",
+            source_timestamp=self.observed_at,
+            fetched_at=FETCHED_AT,
+            summary="Upstream stopped publishing new water level observations.",
+            location_text="臺南市",
+            confidence=0.9,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw_item,),
+            normalized=(evidence,),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return self.run().normalized[0]
+
+
+def test_repeated_stale_iow_snapshot_promotes_nothing_without_failing_the_pipeline() -> None:
+    """Two identical cycles over a frozen upstream feed must stay succeeded.
+
+    WRA IoW kept serving the same 30-hour-old observations. The second cycle
+    promotes nothing because every candidate was already used, and that zero is
+    a legitimate outcome, not a promotion failure.
+    """
+
+    adapter = _UpstreamStaleIowAdapter(station_count=3)
+    key = adapter.metadata.key
+    settings = replace(
+        load_worker_settings({"WORKER_ENABLED_ADAPTER_KEYS": key}),
+        enabled_adapter_keys=(key,),
+        source_wra_iow_flood_depth_enabled=True,
+    )
+    run_writer = _MemoryRunWriter()
+    promotion_writer = _AlreadyPromotedStagingWriter(
+        tuple(_iow_candidate(index, adapter.observed_at) for index in range(3))
+    )
+
+    cycles = [
+        run_v1_baseline_adapter_cycle(
+            {key: adapter},
+            settings=settings,
+            staging_writer=_MemoryStagingWriter(),
+            run_writer=run_writer,
+            promotion_writer=promotion_writer,
+            source_catalog_reader=_StaticCatalogReader(enabled=frozenset({key})),
+            promote=True,
+            promotion_adapter_keys=(key,),
+        )
+        for _round in range(2)
+    ]
+
+    first, second = cycles
+    assert first.status == "succeeded"
+    assert first.promoted == 3
+    assert second.status == "succeeded"
+    assert second.reason is None
+    assert second.error_code is None
+    assert second.promoted == 0
+    assert len(second.freshness_alerts) == 1
+    assert second.freshness_alerts[0].status == "failed"
+    assert second.summaries[0].status == "succeeded"
+    assert run_writer.pipeline_statuses[-1] == (
+        (key,),
+        "succeeded",
+        True,
+        second.summaries[0].started_at,
+    )
+
+
+def _iow_candidate(index: int, observed_at: datetime) -> PromotionCandidate:
+    return PromotionCandidate(
+        staging_evidence_id=f"staging-iow-{index}",
+        raw_snapshot_id="raw-snapshot-iow",
+        raw_ref="raw/official/wra_iow/flood_depth/frozen.json",
+        data_source_id="data-source-iow",
+        source_id=f"iow-station-{index}",
+        source_type="official",
+        event_type="flood_report",
+        title="淹水感測器水深",
+        summary="WRA IoW flood depth observation.",
+        url="https://example.test/wra-iow/frozen",
+        occurred_at=observed_at,
+        observed_at=observed_at,
+        confidence=0.9,
+        validation_status="accepted",
+        payload={"adapter_key": "official.wra_iow.flood_depth"},
+    )
+
+
+class _AlreadyPromotedStagingWriter:
+    """Model the promotion writer over an upstream feed that stopped moving.
+
+    The first cycle promotes every candidate. Later cycles see the same staging
+    rows, which the database rejects as already used, so ``write_evidence``
+    returns ``None`` instead of raising.
+    """
+
+    def __init__(self, candidates: tuple[PromotionCandidate, ...]) -> None:
+        self._candidates = candidates
+        self.promoted_source_ids: set[str] = set()
+        self.payloads: list[EvidencePromotionPayload] = []
+
+    def fetch_accepted_staging(
+        self,
+        *,
+        limit: int | None = None,
+        adapter_keys: tuple[str, ...] | None = None,
+        raw_refs: tuple[str, ...] | None = None,
+    ) -> tuple[PromotionCandidate, ...]:
+        del limit, adapter_keys, raw_refs
+        return self._candidates
+
+    def write_evidence(self, payload: EvidencePromotionPayload) -> str | None:
+        self.payloads.append(payload)
+        if payload.source_id in self.promoted_source_ids:
+            return None
+        self.promoted_source_ids.add(payload.source_id)
+        return f"evidence-{payload.source_id}"
+
+    def retire_warning_latest_for_no_active_event(
+        self,
+        *,
+        adapter_key: str,
+        generation_started_at: datetime,
+        completed_at: datetime,
+    ) -> int:
+        del adapter_key, generation_started_at, completed_at
+        return 0
+
+
+class _UpstreamStaleIowAdapter:
+    """WRA IoW serving the same aged observations every cycle."""
+
+    metadata = AdapterMetadata(
+        key="official.wra_iow.flood_depth",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="WRA IoW flood depth frozen-upstream fixture",
+    )
+
+    def __init__(
+        self,
+        *,
+        station_count: int = 3,
+        age: timedelta = timedelta(hours=30),
+    ) -> None:
+        self.station_count = station_count
+        self.observed_at = FETCHED_AT - age
+
+    def run(self) -> AdapterRunResult:
+        fetched = tuple(
+            RawSourceItem(
+                source_id=f"iow-station-{index}",
+                source_url="https://example.test/wra-iow/frozen",
+                fetched_at=FETCHED_AT,
+                payload={"observed_at": self.observed_at.isoformat()},
+            )
+            for index in range(self.station_count)
+        )
+        normalized = tuple(
+            NormalizedEvidence(
+                evidence_id=f"iow-evidence-{index}",
+                adapter_key=self.metadata.key,
+                source_family=SourceFamily.OFFICIAL,
+                event_type=EventType.FLOOD_REPORT,
+                source_id=raw_item.source_id,
+                source_url=raw_item.source_url,
+                source_title="淹水感測器水深",
+                source_timestamp=self.observed_at,
+                fetched_at=FETCHED_AT,
+                summary="WRA IoW flood depth observation.",
+                location_text="臺南市",
+                confidence=0.9,
+            )
+            for index, raw_item in enumerate(fetched)
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=fetched,
+            normalized=normalized,
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        index = int(raw_item.source_id.rsplit("-", 1)[1])
+        return self.run().normalized[index]
+
+
+def test_failed_batch_keeps_its_pipeline_failure_through_promotion() -> None:
+    adapter = _ExplodingAdapter("official.wra.water_level")
+    key = adapter.metadata.key
+    run_writer = _MemoryRunWriter()
+
+    result = run_v1_baseline_adapter_cycle(
+        {key: adapter},
+        settings=replace(_settings(key), enabled_adapter_keys=(key,)),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({key})),
+        promote=True,
+        promotion_adapter_keys=(key,),
+    )
+
+    assert result.status == "failed"
+    assert run_writer.pipeline_statuses == []
