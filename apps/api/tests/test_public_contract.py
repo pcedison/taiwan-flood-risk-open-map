@@ -1578,7 +1578,7 @@ def test_settings_response_cache_round_trips_through_the_memory_backend() -> Non
         other_radius_request = _cache_key_request(radius_m=1000)
         response = AssessmentService(RouteRepository(_route_data()), score_risk).assess(
             request, now=ROUTE_NOW
-        )
+        ).response
 
         assert cache.get(request, now=ROUTE_NOW) is None
 
@@ -1609,8 +1609,8 @@ def test_assessment_service_serves_the_second_request_from_the_response_cache(
         )
         request = _cache_key_request()
 
-        first = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW)
-        second = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW)
+        first = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW).response
+        second = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW).response
 
         assert second.assessment_id == first.assessment_id
         assert len(repository.loads) == 1
@@ -2535,3 +2535,69 @@ def test_cors_rejects_unknown_web_origin() -> None:
     )
 
     assert response.status_code == 400
+
+
+_ASSESS_BODY = {
+    "point": {"lat": 22.99974, "lng": 120.22704},
+    "radius_m": 750,
+    "time_context": "now",
+}
+
+
+class _StubResponseCache:
+    def __init__(self) -> None:
+        self.stored: RiskAssessmentResponse | None = None
+
+    def get(
+        self, _request: RiskAssessRequest, *, now: datetime
+    ) -> RiskAssessmentResponse | None:
+        return self.stored
+
+    def set(
+        self,
+        _request: RiskAssessRequest,
+        response: RiskAssessmentResponse,
+        *,
+        now: datetime,
+    ) -> None:
+        self.stored = response
+
+
+def test_risk_assess_reports_per_phase_server_timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_route_data(monkeypatch, replace(_route_data(), timings_ms={"db_latest": 12.3}))
+
+    response = client.post("/v1/risk/assess", json=_ASSESS_BODY)
+
+    assert response.status_code == 200
+    server_timing = response.headers["Server-Timing"]
+    assert "db_latest;dur=12.3" in server_timing
+    assert "scoring;dur=" in server_timing
+    assert "persist;dur=" in server_timing
+    assert server_timing.split(", ")[-1].startswith("total;dur=")
+    assert "cache_hit" not in server_timing
+    assert_openapi_schema(response.json(), "RiskAssessmentResponse")
+
+
+def test_risk_assess_marks_a_response_cache_hit_in_server_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AssessmentService(
+        RouteRepository(_route_data()),
+        score_risk,
+        response_cache=_StubResponseCache(),
+    )
+    monkeypatch.setattr(public_routes, "_assessment_service", lambda _settings: service)
+    monkeypatch.setattr(public_routes, "_now", lambda: ROUTE_NOW)
+
+    first = client.post("/v1/risk/assess", json=_ASSESS_BODY)
+    second = client.post("/v1/risk/assess", json=_ASSESS_BODY)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "cache_hit" not in first.headers["Server-Timing"]
+    server_timing = second.headers["Server-Timing"]
+    assert 'cache_hit;desc="true"' in server_timing
+    assert "cache_get;dur=" in server_timing
+    assert "scoring;dur=" not in server_timing
+    assert server_timing.split(", ")[-1].startswith("total;dur=")
+    assert second.json()["assessment_id"] == first.json()["assessment_id"]

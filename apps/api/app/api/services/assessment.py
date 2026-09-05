@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -88,6 +90,23 @@ _SIGNAL_LABEL_ORDER: dict[str, int] = {
 }
 
 
+@dataclass(frozen=True)
+class AssessmentOutcome:
+    """A public response plus the internal latency profile that produced it.
+
+    ``timings_ms`` is diagnostics only: it never reaches the public JSON
+    payload, only the ``Server-Timing`` response header and the structured log.
+    """
+
+    response: RiskAssessmentResponse
+    timings_ms: dict[str, float] = field(default_factory=dict)
+    cache_hit: bool = False
+
+
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 1)
+
+
 class AssessmentService:
     def __init__(
         self,
@@ -107,19 +126,27 @@ class AssessmentService:
         request: RiskAssessRequest,
         *,
         now: datetime,
-    ) -> RiskAssessmentResponse:
+    ) -> AssessmentOutcome:
+        timings_ms: dict[str, float] = {}
         if self._response_cache is not None:
+            started = time.perf_counter()
             cached_response = self._response_cache.get(request, now=now)
+            timings_ms["cache_get"] = _elapsed_ms(started)
             if cached_response is not None:
                 # Same object the cache returned (shared across requests when the
                 # backend is in-process memory) -- callers must not mutate it.
-                return cached_response
+                return AssessmentOutcome(
+                    response=cached_response,
+                    timings_ms=timings_ms,
+                    cache_hit=True,
+                )
         data = self._repository.load(
             lat=request.point.lat,
             lng=request.point.lng,
             radius_m=request.radius_m,
             as_of=now,
         )
+        timings_ms.update(data.timings_ms)
         current_items = tuple(evidence_from_record(item) for item in data.current_official)
         recent_history: tuple[EvidenceRecord, ...] = ()
         if self._recent_history_lookup is not None and _history_needs_refresh(
@@ -133,6 +160,7 @@ class AssessmentService:
         # Display-only. Context never becomes a scorer signal, so it cannot move
         # realtime, historical, overall, confidence, or coverage.
         context_items = tuple(evidence_from_record(item) for item in data.recent_incident_context)
+        scoring_started = time.perf_counter()
         current_scoring = self._scorer(
             tuple(signal_from_evidence(item) for item in current_items),
             now=now,
@@ -143,6 +171,7 @@ class AssessmentService:
         )
         current_scoring = apply_realtime_safety(current_scoring, data)
         overall = compose_base_overall(current_scoring, historical_scoring)
+        timings_ms["scoring"] = _elapsed_ms(scoring_started)
 
         display_items = display_evidence_items(
             list(_deduplicate_evidence((*current_items, *context_items, *historical_items)))
@@ -238,10 +267,12 @@ class AssessmentService:
             created_at=now,
             expires_at=expires_at,
         )
+        persist_started = time.perf_counter()
         try:
             self._repository.persist(persistence)
         except EvidenceRepositoryUnavailable:
             pass
+        timings_ms["persist"] = _elapsed_ms(persist_started)
         if self._response_cache is not None and (
             data.current_available
             and data.historical_available
@@ -249,8 +280,10 @@ class AssessmentService:
             and data.health_available
             and data.jurisdiction_available
         ):
+            cache_set_started = time.perf_counter()
             self._response_cache.set(request, response, now=now)
-        return response
+            timings_ms["cache_set"] = _elapsed_ms(cache_set_started)
+        return AssessmentOutcome(response=response, timings_ms=timings_ms, cache_hit=False)
 
 
 def _deduplicate_evidence(items: tuple[Evidence, ...]) -> tuple[Evidence, ...]:

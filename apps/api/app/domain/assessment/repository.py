@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Protocol
 
@@ -125,11 +128,13 @@ class PostgresAssessmentRepository:
                 local_machine_feed_missing=(),
             )
 
-        jurisdiction, jurisdiction_available = self._load_jurisdiction(
-            lat=lat,
-            lng=lng,
-            search_radius_m=radius_m,
-        )
+        timings_ms: dict[str, float] = {}
+        with _timed(timings_ms, "db_jurisdiction"):
+            jurisdiction, jurisdiction_available = self._load_jurisdiction(
+                lat=lat,
+                lng=lng,
+                search_radius_m=radius_m,
+            )
         applicable_keys = (
             frozenset(jurisdiction.adapter_keys)
             if jurisdiction_available and jurisdiction.resolution_status == "verified"
@@ -144,36 +149,41 @@ class PostgresAssessmentRepository:
             if applicable_keys
             else frozenset()
         )
-        latest, current_available = self._load_latest(
-            lat=lat,
-            lng=lng,
-            radius_m=max(radius_m, _REALTIME_SUPPORT_RADIUS_M),
-            as_of=as_of,
-        )
-        history, historical_available = self._load_history(
-            lat=lat,
-            lng=lng,
-            radius_m=radius_m,
-        )
-        observed_flood_history, observed_flood_history_available = (
-            self._load_observed_flood_history(
+        with _timed(timings_ms, "db_latest"):
+            latest, current_available = self._load_latest(
                 lat=lat,
                 lng=lng,
-                radius_m=max(radius_m, _OBSERVED_FLOOD_HISTORY_SUPPORT_RADIUS_M),
+                radius_m=max(radius_m, _REALTIME_SUPPORT_RADIUS_M),
                 as_of=as_of,
             )
-        )
-        coverage_rows, coverage_available = self._load_coverage(
-            lat=lat,
-            lng=lng,
-            as_of=as_of,
-        )
-        recent_context = self._load_recent_context(
-            lat=lat,
-            lng=lng,
-            radius_m=radius_m,
-            as_of=as_of,
-        )
+        with _timed(timings_ms, "db_history"):
+            history, historical_available = self._load_history(
+                lat=lat,
+                lng=lng,
+                radius_m=radius_m,
+            )
+        with _timed(timings_ms, "db_observed_history"):
+            observed_flood_history, observed_flood_history_available = (
+                self._load_observed_flood_history(
+                    lat=lat,
+                    lng=lng,
+                    radius_m=max(radius_m, _OBSERVED_FLOOD_HISTORY_SUPPORT_RADIUS_M),
+                    as_of=as_of,
+                )
+            )
+        with _timed(timings_ms, "db_coverage"):
+            coverage_rows, coverage_available = self._load_coverage(
+                lat=lat,
+                lng=lng,
+                as_of=as_of,
+            )
+        with _timed(timings_ms, "db_context"):
+            recent_context = self._load_recent_context(
+                lat=lat,
+                lng=lng,
+                radius_m=radius_m,
+                as_of=as_of,
+            )
         latest = tuple(item for item in latest if item.adapter_key in applicable_keys)
         coverage_rows = tuple(item for item in coverage_rows if item.adapter_key in applicable_keys)
         history = _without_excluded(history, self._excluded_adapter_keys)
@@ -181,7 +191,8 @@ class PostgresAssessmentRepository:
             observed_flood_history, self._excluded_adapter_keys
         )
         recent_context = _without_excluded(recent_context, self._excluded_adapter_keys)
-        health_rows, health_available = self._load_health(tuple(sorted(applicable_keys)))
+        with _timed(timings_ms, "db_health"):
+            health_rows, health_available = self._load_health(tuple(sorted(applicable_keys)))
         source_health = build_nearby_source_health(
             health_rows,
             evaluated_at=as_of,
@@ -231,6 +242,7 @@ class PostgresAssessmentRepository:
             resolved_admin_name=jurisdiction.home_jurisdiction_name,
             local_machine_feed_missing=_local_machine_gaps(jurisdiction, source_health),
             recent_incident_context=recent_context,
+            timings_ms=timings_ms,
         )
 
     def persist(self, assessment: RiskAssessmentPersistence) -> None:
@@ -345,6 +357,17 @@ class PostgresAssessmentRepository:
             )
         except EvidenceRepositoryUnavailable:
             return (), False
+
+
+@contextmanager
+def _timed(timings_ms: dict[str, float], phase: str) -> Iterator[None]:
+    """Record the wall time of one read phase, including a failing one."""
+
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        timings_ms[phase] = round((time.perf_counter() - started) * 1000, 1)
 
 
 def _official_current(records: tuple[EvidenceRecord, ...]) -> tuple[EvidenceRecord, ...]:

@@ -165,7 +165,7 @@ def test_service_scores_current_and_history_in_separate_calls(
         calls.append(signals)
         return score_risk(signals, now=now)
 
-    response = AssessmentService(FakeRepository(data), scorer).assess(risk_request, now=now)
+    response = AssessmentService(FakeRepository(data), scorer).assess(risk_request, now=now).response
 
     assert len(calls) == 2
     assert {signal.source_type for signal in calls[0]} == {"official"}
@@ -218,7 +218,7 @@ def test_service_enriches_history_when_latest_observed_event_is_over_one_year_ol
         FakeRepository(replace(data, historical=(old_history,))),
         score_risk,
         recent_history_lookup=lookup,
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert calls == [risk_request]
     assert [item.id for item in response.evidence].index(recent_id) < [
@@ -247,7 +247,7 @@ def test_service_skips_enrichment_when_recent_observed_history_exists(
         FakeRepository(replace(data, historical=(recent_history,))),
         score_risk,
         recent_history_lookup=fail,
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
 
 def test_service_refreshes_history_when_latest_event_is_over_30_days_old(
@@ -276,7 +276,7 @@ def test_service_refreshes_history_when_latest_event_is_over_30_days_old(
         FakeRepository(replace(data, historical=(previous_history,))),
         score_risk,
         recent_history_lookup=lookup,
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert calls == [risk_request]
 
@@ -295,7 +295,7 @@ def test_historical_scorer_missing_sources_do_not_leak_into_current_explanation(
         )
         return replace(result, missing_sources=(marker,))
 
-    response = AssessmentService(FakeRepository(data), scorer).assess(risk_request, now=now)
+    response = AssessmentService(FakeRepository(data), scorer).assess(risk_request, now=now).response
 
     assert "目前即時資料缺口" in response.explanation.missing_sources
     assert "歷史評分器不應輸出的即時資料缺口" not in response.explanation.missing_sources
@@ -318,7 +318,7 @@ def test_optional_disabled_source_is_diagnostic_not_a_required_limitation(
     response = AssessmentService(
         FakeRepository(replace(data, source_states=(*data.source_states, optional_state))),
         score_risk,
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert any(
         source.source_key == optional_state.source_key for source in response.data_status.sources
@@ -363,11 +363,11 @@ def test_recent_context_is_display_only_and_never_changes_the_score(
 
     without_context = AssessmentService(FakeRepository(data), _scorer(without_calls)).assess(
         risk_request, now=now
-    )
+    ).response
     with_data = replace(data, recent_incident_context=_context_records())
     with_context = AssessmentService(FakeRepository(with_data), _scorer(with_calls)).assess(
         risk_request, now=now
-    )
+    ).response
 
     assert with_context.realtime == without_context.realtime
     assert with_context.historical == without_context.historical
@@ -395,7 +395,7 @@ def test_recent_context_is_ordered_after_current_and_before_historical(
 
     response = AssessmentService(FakeRepository(with_data), score_risk).assess(
         risk_request, now=now
-    )
+    ).response
 
     ordered = [item.id for item in response.evidence]
     assert ordered.index(CURRENT_ID) < ordered.index(POLICE_CONTEXT_ID)
@@ -432,7 +432,7 @@ def test_response_preview_is_not_crowded_out_by_dense_flood_sensors(
         current_official=(*flood_sensors, water, rainfall),
     )
 
-    response = AssessmentService(FakeRepository(crowded), score_risk).assess(risk_request, now=now)
+    response = AssessmentService(FakeRepository(crowded), score_risk).assess(risk_request, now=now).response
 
     assert len(response.evidence) == 10
     assert {item.event_type for item in response.evidence} >= {
@@ -457,7 +457,7 @@ def test_persist_failure_does_not_change_successful_response(
 ) -> None:
     response = AssessmentService(FakeRepository(data, fail_persist=True), score_risk).assess(
         risk_request, now=now
-    )
+    ).response
     assert response.assessment_id
     assert response.overall is not None
 
@@ -470,7 +470,7 @@ def test_persist_programming_error_is_not_swallowed(
     repository = FakeRepository(data, programming_error=TypeError("bad persistence code"))
 
     with pytest.raises(TypeError, match="bad persistence code"):
-        AssessmentService(repository, score_risk).assess(risk_request, now=now)
+        AssessmentService(repository, score_risk).assess(risk_request, now=now).response
 
 
 def test_persisted_snapshot_is_coarsened_and_has_no_raw_query(
@@ -479,7 +479,7 @@ def test_persisted_snapshot_is_coarsened_and_has_no_raw_query(
     data: AssessmentData,
 ) -> None:
     repository = FakeRepository(data)
-    AssessmentService(repository, score_risk).assess(risk_request, now=now)
+    AssessmentService(repository, score_risk).assess(risk_request, now=now).response
     snapshot = repository.persisted[0].result_snapshot
     assert snapshot["location"] == {
         "lat": round(risk_request.point.lat, 2),
@@ -504,7 +504,7 @@ def test_persistence_keeps_only_valid_uuid_evidence_ids(
         )
     )
 
-    AssessmentService(repository, score_risk).assess(risk_request, now=now)
+    AssessmentService(repository, score_risk).assess(risk_request, now=now).response
 
     assert repository.persisted[0].evidence_ids == (CURRENT_ID, HISTORY_ID)
     assert repository.persisted[0].result_snapshot["evidence_ids"] == [
@@ -549,10 +549,10 @@ def test_required_current_read_failure_is_unknown_not_low(
     )
     available_response = AssessmentService(FakeRepository(available_data), score_risk).assess(
         risk_request, now=now
-    )
+    ).response
     response = AssessmentService(
         FakeRepository(replace(available_data, current_available=False)), score_risk
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert available_response.realtime.level == "低"
     assert response.realtime.level == "未知"
@@ -565,7 +565,7 @@ def test_response_uses_same_data_for_status_freshness_and_coverage(
     risk_request: RiskAssessRequest,
     data: AssessmentData,
 ) -> None:
-    response = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now)
+    response = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now).response
 
     assert response.nearby_realtime_coverage is data.nearby_coverage
     assert {item.source_key for item in response.data_status.sources} == {
@@ -585,7 +585,7 @@ def test_response_preserves_evidence_precision_and_limitations(
     risk_request: RiskAssessRequest,
     data: AssessmentData,
 ) -> None:
-    response = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now)
+    response = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now).response
 
     current = response.evidence[0]
     assert current.location_precision == "road_or_lane"
@@ -629,12 +629,12 @@ def test_response_cache_hit_returns_cached_response_without_loading_repository(
     risk_request: RiskAssessRequest,
     data: AssessmentData,
 ) -> None:
-    baseline = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now)
+    baseline = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now).response
     cache = FakeResponseCache(cached=baseline)
 
     response = AssessmentService(
         ExplodingRepository(), score_risk, response_cache=cache
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response is baseline
     assert cache.get_calls == [risk_request]
@@ -657,7 +657,7 @@ def test_response_cache_is_populated_when_all_data_sources_are_available(
 
     response = AssessmentService(
         FakeRepository(available_data), score_risk, response_cache=cache
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert cache.set_calls == [(risk_request, response)]
 
@@ -679,7 +679,7 @@ def test_response_cache_is_not_populated_when_current_data_is_unavailable(
 
     AssessmentService(
         FakeRepository(degraded_data), score_risk, response_cache=cache
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert cache.set_calls == []
 
@@ -754,7 +754,7 @@ def test_degraded_required_sources_collapse_into_one_user_facing_sentence(
 
     response = AssessmentService(
         FakeRepository(_required_source_data(data, states)), score_risk
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response.data_status.missing == [DELAYED_SUMMARY]
     assert "新鮮" not in "".join(response.explanation.missing_sources)
@@ -787,7 +787,7 @@ def test_failed_required_source_keeps_its_own_message_beside_the_summary(
 
     response = AssessmentService(
         FakeRepository(_required_source_data(data, states)), score_risk
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response.data_status.missing == [
         failed_message,
@@ -807,7 +807,7 @@ def test_fresh_required_sources_report_no_user_facing_gap(
 
     response = AssessmentService(
         FakeRepository(_required_source_data(data, states)), score_risk
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response.data_status.missing == []
 
@@ -840,7 +840,7 @@ def test_upstream_stale_message_is_kept_verbatim_and_only_once(
 
     response = AssessmentService(
         FakeRepository(_required_source_data(data, states)), score_risk
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response.data_status.missing == [
         UPSTREAM_STALE_MESSAGE,
@@ -869,7 +869,7 @@ def test_explanation_missing_sources_matches_data_status_missing(
 
     response = AssessmentService(
         FakeRepository(_required_source_data(data, states)), scorer
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response.explanation.missing_sources == response.data_status.missing
     assert response.data_status.missing == [
@@ -896,7 +896,7 @@ def test_stale_required_source_keeps_its_own_message(
 
     response = AssessmentService(
         FakeRepository(_required_source_data(data, states)), score_risk
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response.data_status.missing == [
         stale_message,
@@ -916,6 +916,72 @@ def test_disabled_required_source_keeps_its_own_message(
 
     response = AssessmentService(
         FakeRepository(_required_source_data(data, states)), score_risk
-    ).assess(risk_request, now=now)
+    ).assess(risk_request, now=now).response
 
     assert response.data_status.missing == [disabled_message]
+
+
+def test_outcome_merges_repository_timings_with_service_phases(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    measured = replace(data, timings_ms={"db_latest": 12.3})
+    cache = FakeResponseCache()
+
+    outcome = AssessmentService(
+        FakeRepository(measured), score_risk, response_cache=cache
+    ).assess(risk_request, now=now)
+
+    assert outcome.cache_hit is False
+    assert outcome.response.assessment_id
+    assert outcome.timings_ms["db_latest"] == 12.3
+    assert {"cache_get", "scoring", "persist"} <= set(outcome.timings_ms)
+    assert all(value >= 0 for value in outcome.timings_ms.values())
+
+
+def test_outcome_records_cache_set_only_when_the_response_is_cacheable(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    available_data = replace(
+        data,
+        current_available=True,
+        historical_available=True,
+        coverage_available=True,
+        health_available=True,
+        jurisdiction_available=True,
+    )
+
+    cached = AssessmentService(
+        FakeRepository(available_data), score_risk, response_cache=FakeResponseCache()
+    ).assess(risk_request, now=now)
+    uncacheable = AssessmentService(
+        FakeRepository(replace(available_data, current_available=False)),
+        score_risk,
+        response_cache=FakeResponseCache(),
+    ).assess(risk_request, now=now)
+
+    assert "cache_set" in cached.timings_ms
+    assert "cache_set" not in uncacheable.timings_ms
+
+
+def test_cache_hit_outcome_reports_only_the_cache_read(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    baseline = AssessmentService(FakeRepository(data), score_risk).assess(
+        risk_request, now=now
+    ).response
+    cache = FakeResponseCache(cached=baseline)
+
+    outcome = AssessmentService(
+        ExplodingRepository(), score_risk, response_cache=cache
+    ).assess(risk_request, now=now)
+
+    assert outcome.cache_hit is True
+    assert outcome.response is baseline
+    assert set(outcome.timings_ms) == {"cache_get"}
+    assert outcome.timings_ms["cache_get"] >= 0

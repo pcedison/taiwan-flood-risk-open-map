@@ -313,10 +313,11 @@ def test_assessment_data_context_field_defaults_to_empty() -> None:
     from app.domain.assessment.models import AssessmentData
 
     fields = list(AssessmentData.__dataclass_fields__)
-    assert fields[-1] == "recent_incident_context"
+    assert fields[-2:] == ["recent_incident_context", "timings_ms"]
     assert AssessmentData.__dataclass_fields__[
         "recent_incident_context"
     ].default_factory() == ()
+    assert AssessmentData.__dataclass_fields__["timings_ms"].default_factory() == {}
 
 
 def test_recent_news_forum_and_social_never_enter_core_scoring_partitions() -> None:
@@ -827,3 +828,37 @@ def test_excluded_adapter_keys_default_to_keeping_every_persisted_row(
     data = repository.load(**POINT)
 
     assert "gov-citation" in [item.id for item in data.historical]
+
+
+_TIMING_PHASES = (
+    "db_jurisdiction",
+    "db_latest",
+    "db_history",
+    "db_observed_history",
+    "db_coverage",
+    "db_context",
+    "db_health",
+)
+
+
+def test_load_measures_every_database_phase(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = _repository(monkeypatch).load(**POINT)
+
+    assert tuple(data.timings_ms) == _TIMING_PHASES
+    assert all(value >= 0 for value in data.timings_ms.values())
+    assert all(round(value, 1) == value for value in data.timings_ms.values())
+
+
+def test_failed_phase_is_still_measured(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = _repository(monkeypatch, query_nearby_latest_official=_unavailable).load(**POINT)
+
+    assert set(data.timings_ms) == set(_TIMING_PHASES)
+    assert data.current_available is False
+
+
+def test_disabled_repository_reports_no_timings() -> None:
+    data = PostgresAssessmentRepository("postgresql://example.test/flood", enabled=False).load(
+        **POINT
+    )
+
+    assert data.timings_ms == {}
