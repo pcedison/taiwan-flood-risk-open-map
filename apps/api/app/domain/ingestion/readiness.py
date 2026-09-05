@@ -13,6 +13,9 @@ INGESTION_SCHEDULER_KEY = "scheduler.v1-baseline-adapters"
 EXPECTED_JURISDICTION_COUNT = 22
 EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT = 12
 REQUIRED_SIGNAL_TYPES = ("rainfall", "water_level", "flood_depth", "flood_warning")
+# 1800, the same value as nearby_coverage's
+# _DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS, so both public surfaces call an
+# unreviewed source stale at the same age.
 DEFAULT_FRESHNESS_THRESHOLD_SECONDS = 1800
 MAX_FRESHNESS_THRESHOLD_SECONDS = 86400
 # An upstream feed is only called stalled once it has missed several publication
@@ -360,8 +363,11 @@ def _freshness_threshold_seconds(row: dict[str, object]) -> int:
     raw = str(row.get("freshness_threshold_seconds") or "").strip()
     if raw.isascii() and raw.isdigit():
         threshold_seconds = int(raw)
-        if 0 < threshold_seconds <= MAX_FRESHNESS_THRESHOLD_SECONDS:
-            return threshold_seconds
+        if threshold_seconds > 0:
+            # Clamp an over-large catalog value rather than falling back to the
+            # default. A longer window only delays calling the upstream stalled,
+            # which is the conservative direction for a public diagnosis.
+            return min(threshold_seconds, MAX_FRESHNESS_THRESHOLD_SECONDS)
     return DEFAULT_FRESHNESS_THRESHOLD_SECONDS
 
 

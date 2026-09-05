@@ -1214,3 +1214,39 @@ def test_source_failure_is_stamped_with_its_own_run_generation(
     assert failed is True
     assert writer.pipeline_statuses[0]["status"] == "failed"
     assert writer.pipeline_statuses[0]["run_at"] == summary_started_at
+
+
+def test_cycle_exception_records_a_failure_the_pipeline_writer_accepts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run_at older than the recorded run is silently dropped by the writer."""
+
+    writer = _install_tick_writer(monkeypatch)
+
+    def exploding_cycle(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("postgresql://operator:private@example.test/flood")
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {SOURCE_A: _Adapter(SOURCE_A)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A,),
+    )
+    monkeypatch.setattr(runtime_cli, "run_v1_baseline_adapter_cycle", exploding_cycle)
+    monkeypatch.setattr(runtime_cli, "log_event", lambda *_args, **_kwargs: None)
+
+    before = datetime.now(UTC)
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(load_worker_settings({}), enabled_adapter_keys=(SOURCE_A,)),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+    after = datetime.now(UTC)
+
+    assert failed is True
+    assert writer.pipeline_statuses[0]["status"] == "failed"
+    assert before <= writer.pipeline_statuses[0]["run_at"] <= after

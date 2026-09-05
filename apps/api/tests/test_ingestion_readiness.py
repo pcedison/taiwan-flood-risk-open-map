@@ -287,3 +287,33 @@ def test_upstream_stale_exempts_warning_and_static_cadence_sources() -> None:
     assert warning.status == "operational"
     assert heavy_rain.status == "operational"
     assert history.status == "operational"
+
+
+def test_over_large_catalog_threshold_is_clamped_not_discarded() -> None:
+    # 999999s clamps to the 86400s ceiling, so the stall call lands at 3 days,
+    # not at the 1800s default's 90 minutes.
+    within_clamped_window = _source_readiness(
+        _source_row(
+            latest_observed_at=NOW - timedelta(days=2),
+            freshness_threshold_seconds="999999",
+        ),
+        evaluated_at=NOW,
+    )
+    past_clamped_window = _source_readiness(
+        _source_row(
+            latest_observed_at=NOW - timedelta(days=4),
+            freshness_threshold_seconds="999999",
+        ),
+        evaluated_at=NOW,
+    )
+    unparsable = _source_readiness(
+        _source_row(
+            latest_observed_at=NOW - timedelta(hours=3),
+            freshness_threshold_seconds="not-a-number",
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert within_clamped_window.status == "operational"
+    assert past_clamped_window.reason_code == "upstream_stale"
+    assert unparsable.reason_code == "upstream_stale"

@@ -243,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
                 *(f"- deferred: {note}" for note in degraded_notes),
             ]
         )
+        _report_advisories(advisories)
         return 0
 
     if args.completion_evidence_output:

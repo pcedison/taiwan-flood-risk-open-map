@@ -456,10 +456,14 @@ def _run_v1_baseline_tick(
         except Exception as exc:  # noqa: BLE001 - isolate one source cycle
             had_failure = True
             failed_count += 1
+            # The cycle raised before returning a summary, so there is no batch
+            # generation to borrow.  Stamp the failure now, as the adapter
+            # construction path does, or the pipeline writer drops it as older
+            # than the run it is meant to fault.
             _record_v1_source_failure(
                 run_writer,
                 adapter_key=adapter_key,
-                run_at=source_started_at,
+                run_at=datetime.now(UTC),
             )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
