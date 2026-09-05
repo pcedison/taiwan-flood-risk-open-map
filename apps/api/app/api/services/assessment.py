@@ -28,6 +28,7 @@ from app.api.services.public_evidence import (
 from app.domain.assessment import (
     AssessmentData,
     AssessmentRepository,
+    AssessmentSourceState,
     apply_realtime_safety,
     compose_base_overall,
 )
@@ -36,6 +37,7 @@ from app.domain.evidence import (
     EvidenceRepositoryUnavailable,
     RiskAssessmentPersistence,
 )
+from app.domain.realtime import SIGNAL_LABELS
 from app.domain.risk import RiskEvidenceSignal, RiskScoringResult
 
 
@@ -73,6 +75,17 @@ class ResponseCache(Protocol):
 
 
 _RECENT_HISTORY_REFRESH_AFTER = timedelta(days=30)
+# States a reader must be told about verbatim; "degraded" is summarised instead.
+_VERBATIM_REQUIRED_SOURCE_STATES = frozenset({"failed", "stale", "disabled", "unknown"})
+# An upstream publication gap names a date the reader can judge, so it survives
+# the delayed-source summary even though the state is only degraded.
+_UPSTREAM_STALE_PREFIX = "上游資料來源"
+_SIGNAL_LABEL_BY_TYPE: dict[str, str] = {
+    str(signal_type): label for signal_type, label in SIGNAL_LABELS.items()
+}
+_SIGNAL_LABEL_ORDER: dict[str, int] = {
+    str(signal_type): index for index, signal_type in enumerate(SIGNAL_LABELS)
+}
 
 
 class AssessmentService:
@@ -325,6 +338,41 @@ def _source_health(state: str) -> HealthStatus:
     return health_by_state.get(state, "unknown")
 
 
+def _is_upstream_stale(message: str | None) -> bool:
+    return message is not None and message.startswith(_UPSTREAM_STALE_PREFIX)
+
+
+def _delayed_sources_summary(states: list[AssessmentSourceState]) -> str | None:
+    """Collapse per-source delay diagnostics into one sentence a reader can act on.
+
+    A degraded source still publishes usable observations, so listing one
+    station-count line per source turns the public data-gap list into
+    operator telemetry.  One sentence naming the affected signals keeps the
+    SDD 9.6 explanation contract readable; the per-source detail stays in
+    ``data_status.sources``.
+    """
+
+    delayed = [
+        state.signal_type
+        for state in states
+        if state.state == "degraded" and not _is_upstream_stale(state.message)
+    ]
+    if not delayed:
+        return None
+    ordered = sorted(
+        delayed,
+        key=lambda signal_type: (
+            _SIGNAL_LABEL_ORDER.get(signal_type, len(_SIGNAL_LABEL_ORDER)),
+            signal_type,
+        ),
+    )
+    labels = dict.fromkeys(
+        _SIGNAL_LABEL_BY_TYPE.get(signal_type, signal_type) for signal_type in ordered
+    )
+    signal_text = "、".join(labels)
+    return f"部分官方即時來源更新較慢（{signal_text}），仍可作當下參考。"
+
+
 def _data_status(data: AssessmentData) -> DataStatus:
     sources = [
         PublicSourceStatus(
@@ -337,13 +385,26 @@ def _data_status(data: AssessmentData) -> DataStatus:
         )
         for state in data.source_states
     ]
-    missing = [
-        state.message
+    required_states = [
+        state
         for state in data.source_states
         if state.source_key in data.required_realtime_source_keys
-        and state.state not in {"fresh", "not_applicable"}
-        and state.message
     ]
+    # A source that failed, went stale, is disabled, or reports an upstream
+    # publication gap is a real limitation for the reader, so it keeps its own
+    # message.  Merely delayed sources are summarised once instead.
+    missing = [
+        state.message
+        for state in required_states
+        if state.message
+        and (
+            state.state in _VERBATIM_REQUIRED_SOURCE_STATES
+            or _is_upstream_stale(state.message)
+        )
+    ]
+    delayed_summary = _delayed_sources_summary(required_states)
+    if delayed_summary is not None:
+        missing.append(delayed_summary)
     missing.extend(data.local_machine_feed_missing)
     availability_messages = (
         (data.current_available, "官方即時資料庫讀取暫時無法使用。"),

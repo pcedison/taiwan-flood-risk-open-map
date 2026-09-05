@@ -682,3 +682,197 @@ def test_response_cache_is_not_populated_when_current_data_is_unavailable(
     ).assess(risk_request, now=now)
 
     assert cache.set_calls == []
+
+
+DELAYED_SUMMARY = "部分官方即時來源更新較慢（雨量、水位、下水道水位），仍可作當下參考。"
+UPSTREAM_STALE_MESSAGE = "上游資料來源自 2026/08/24 03:00 起未更新；本站背景更新正常。"
+
+
+def _station_count_message(fresh: int, delayed: int, active: int) -> str:
+    return f"部分站點更新較慢（新鮮 {fresh}、較慢 {delayed}、活躍 {active}）。"
+
+
+def _source_state(
+    signal_type: str,
+    *,
+    state: str,
+    message: str | None,
+    now: datetime,
+) -> AssessmentSourceState:
+    return AssessmentSourceState(
+        source_key=f"official.test.{signal_type}",
+        signal_type=signal_type,
+        state=state,  # type: ignore[arg-type]
+        observed_at=now,
+        checked_at=now,
+        message=message,
+    )
+
+
+def _required_source_data(
+    data: AssessmentData,
+    states: tuple[AssessmentSourceState, ...],
+) -> AssessmentData:
+    """Isolate required-source messages from the other data-gap channels."""
+
+    return replace(
+        data,
+        source_states=states,
+        required_realtime_source_keys=frozenset(state.source_key for state in states),
+        local_machine_feed_missing=(),
+        coverage_available=True,
+        health_available=True,
+        jurisdiction_available=True,
+    )
+
+
+def test_degraded_required_sources_collapse_into_one_user_facing_sentence(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    states = (
+        _source_state(
+            "sewer_water_level",
+            state="degraded",
+            message=_station_count_message(0, 288, 358),
+            now=now,
+        ),
+        _source_state(
+            "water_level",
+            state="degraded",
+            message=_station_count_message(0, 1317, 1342),
+            now=now,
+        ),
+        _source_state(
+            "rainfall",
+            state="degraded",
+            message=_station_count_message(0, 1770, 1998),
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now)
+
+    assert response.data_status.missing == [DELAYED_SUMMARY]
+    assert "新鮮" not in "".join(response.explanation.missing_sources)
+    assert [source.message for source in response.data_status.sources] == [
+        state.message for state in states
+    ]
+
+
+def test_failed_required_source_keeps_its_own_message_beside_the_summary(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    failed_message = "官方水位來源暫時無法使用。"
+    states = (
+        _source_state("water_level", state="failed", message=failed_message, now=now),
+        _source_state(
+            "rainfall",
+            state="degraded",
+            message=_station_count_message(0, 1770, 1998),
+            now=now,
+        ),
+        _source_state(
+            "sewer_water_level",
+            state="degraded",
+            message=_station_count_message(0, 288, 358),
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now)
+
+    assert response.data_status.missing == [
+        failed_message,
+        "部分官方即時來源更新較慢（雨量、下水道水位），仍可作當下參考。",
+    ]
+
+
+def test_fresh_required_sources_report_no_user_facing_gap(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    states = (
+        _source_state("rainfall", state="fresh", message=None, now=now),
+        _source_state("water_level", state="fresh", message=None, now=now),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now)
+
+    assert response.data_status.missing == []
+
+
+def test_upstream_stale_message_is_kept_verbatim_and_only_once(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    states = (
+        _source_state(
+            "water_level",
+            state="degraded",
+            message=UPSTREAM_STALE_MESSAGE,
+            now=now,
+        ),
+        _source_state(
+            "sewer_water_level",
+            state="degraded",
+            message=UPSTREAM_STALE_MESSAGE,
+            now=now,
+        ),
+        _source_state(
+            "rainfall",
+            state="degraded",
+            message=_station_count_message(0, 1770, 1998),
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now)
+
+    assert response.data_status.missing == [
+        UPSTREAM_STALE_MESSAGE,
+        "部分官方即時來源更新較慢（雨量），仍可作當下參考。",
+    ]
+
+
+def test_explanation_missing_sources_matches_data_status_missing(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    def scorer(signals: tuple[RiskEvidenceSignal, ...], *, now: datetime) -> RiskScoringResult:
+        # Isolate the source-state channel from scorer-authored gaps.
+        return replace(score_risk(signals, now=now), missing_sources=(), realtime_level="未知")
+
+    states = (
+        _source_state("water_level", state="failed", message="官方水位來源暫時無法使用。", now=now),
+        _source_state(
+            "rainfall",
+            state="degraded",
+            message=_station_count_message(0, 1770, 1998),
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), scorer
+    ).assess(risk_request, now=now)
+
+    assert response.explanation.missing_sources == response.data_status.missing
+    assert response.data_status.missing == [
+        "官方水位來源暫時無法使用。",
+        "部分官方即時來源更新較慢（雨量），仍可作當下參考。",
+    ]
