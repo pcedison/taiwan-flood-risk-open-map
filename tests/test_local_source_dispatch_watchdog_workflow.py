@@ -115,6 +115,21 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "github.rest.issues.update" in script
     assert "issue_number: existing.number" in script
     assert "body," in script
+    # Comments are deduplicated by the dispatch digest (#71).
+    assert "scripts/ci/local-source-watchdog-state.js" in script
+    assert "dispatchDigest({" in script
+    assert (
+        "bundleDir: `${process.env.GITHUB_WORKSPACE}/artifacts/request-packet-bundle`"
+        in script
+    )
+    # The live status and counts are part of the digest, not just the bundle:
+    # the bundle is rebuilt from the static catalog and barely moves.
+    digest_call = script.split("dispatchDigest({", 1)[1].split("});", 1)[0]
+    assert "status," in digest_call
+    assert "summary," in digest_call
+    assert "decideDispatchComment" in script
+    assert "decision.shouldComment" in script
+    assert "body: decision.newBody" in script
     assert "private evidence" in script
     assert "ADMIN_BEARER_TOKEN" not in step_text
 

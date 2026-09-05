@@ -186,6 +186,22 @@ jobs:
               "Artifacts, if uploaded, are attached to the workflow run.",
               "This issue route is public-safe and does not include tokens, private evidence refs, manifests, or official correspondence.",
             ].join("\n");
+            const {
+              decideDispatchComment,
+              dispatchDigest,
+            } = require(
+              `${process.env.GITHUB_WORKSPACE}/scripts/ci/local-source-watchdog-state.js`,
+            );
+            // What the operator acts on is the request-packet bundle plus the
+            // status and counts quoted above; an unchanged ask does not earn
+            // another comment. The bundle alone would not do: it is rebuilt
+            // from the static catalog and holds steady for weeks, while the
+            // status and counts come from live discovery.
+            const digest = dispatchDigest({
+              bundleDir: `${process.env.GITHUB_WORKSPACE}/artifacts/request-packet-bundle`,
+              status,
+              summary,
+            });
             const { owner, repo } = context.repo;
             const { data: issues } = await github.rest.issues.listForRepo({
               owner,
@@ -194,27 +210,45 @@ jobs:
               per_page: 100,
             });
             const existing = issues.find((issue) => issue.title === title);
-            if (existing) {
-              await github.rest.issues.update({
-                owner,
-                repo,
-                issue_number: existing.number,
-                body,
-              });
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: existing.number,
-                body,
-              });
-            } else {
-              await github.rest.issues.create({
+            if (!existing) {
+              const opened = decideDispatchComment({ digest, newBody: body });
+              const { data: created } = await github.rest.issues.create({
                 owner,
                 repo,
                 title,
-                body,
+                body: opened.newBody,
               });
+              core.info(`Opened #${created.number} (dispatch digest ${digest}).`);
+              return;
             }
+            const decision = decideDispatchComment({
+              digest,
+              body: existing.body || "",
+              newBody: body,
+            });
+            // Refresh the body every run so the newest report is visible even
+            // when the comment is suppressed.
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number: existing.number,
+              body: decision.newBody,
+            });
+            if (!decision.shouldComment) {
+              core.info(
+                `Suppressed duplicate comment on #${existing.number}: dispatch digest ${digest} unchanged inside the backoff window.`,
+              );
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: existing.number,
+              body,
+            });
+            core.info(
+              `Commented on #${existing.number} (${decision.reason}, dispatch digest ${digest}).`,
+            );
 
       - name: Close resolved local source dispatch issue
         if: ${{ success() }}
