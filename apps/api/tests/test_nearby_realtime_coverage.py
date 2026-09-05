@@ -1932,3 +1932,28 @@ def test_missing_active_station_count_falls_back_to_station_count() -> None:
     assert health.health_status == "healthy"
     assert health.reason_code == "operational"
     assert "9/10" in health.message
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ("QueryCanceled", "LockNotAvailable", "OperationalError", "InterfaceError"),
+)
+def test_database_timeout_is_reported_as_degraded_not_a_pipeline_failure(
+    error_code: str,
+) -> None:
+    row = _health_row(
+        adapter_key="official.wra_iow.flood_depth",
+        latest_run_status="failed",
+        latest_run_error_code=error_code,
+        runtime_enabled=True,
+        runtime_enabled_delta_minutes=1,
+        runtime_pipeline_status="failed",
+        runtime_pipeline_delta_minutes=2,
+        runtime_pipeline_run_delta_minutes=5,
+    )
+
+    health = build_nearby_source_health((row,), evaluated_at=NOW)
+
+    assert health[0].health_status == "degraded"
+    assert health[0].reason_code == "database_unavailable"
+    assert "資料庫" in health[0].message

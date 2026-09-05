@@ -171,6 +171,7 @@ export const healthLabel = (value: string) => healthLabels[value] ?? "未知";
 // stalled government feed from reading as a broken pipeline here.
 const sourceReasonLabels: Record<string, string> = {
   upstream_stale: "上游資料來源未更新（非本站問題）",
+  database_unavailable: "本站資料庫暫時忙碌，下一輪自動重試",
 };
 
 export const sourceReasonLabel = (value: string): string | null =>
