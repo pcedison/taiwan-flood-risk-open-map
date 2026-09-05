@@ -37,7 +37,7 @@ from app.domain.evidence import (
     EvidenceRepositoryUnavailable,
     RiskAssessmentPersistence,
 )
-from app.domain.realtime import SIGNAL_LABELS
+from app.domain.realtime import SIGNAL_LABELS, UPSTREAM_STALE_MESSAGE_PREFIX
 from app.domain.risk import RiskEvidenceSignal, RiskScoringResult
 
 
@@ -76,10 +76,10 @@ class ResponseCache(Protocol):
 
 _RECENT_HISTORY_REFRESH_AFTER = timedelta(days=30)
 # States a reader must be told about verbatim; "degraded" is summarised instead.
+# "unknown" is not a SourceState literal -- the repository maps an unknown
+# health status to "stale" -- and stays here only as a defence in case another
+# producer starts emitting it.
 _VERBATIM_REQUIRED_SOURCE_STATES = frozenset({"failed", "stale", "disabled", "unknown"})
-# An upstream publication gap names a date the reader can judge, so it survives
-# the delayed-source summary even though the state is only degraded.
-_UPSTREAM_STALE_PREFIX = "上游資料來源"
 _SIGNAL_LABEL_BY_TYPE: dict[str, str] = {
     str(signal_type): label for signal_type, label in SIGNAL_LABELS.items()
 }
@@ -339,7 +339,7 @@ def _source_health(state: str) -> HealthStatus:
 
 
 def _is_upstream_stale(message: str | None) -> bool:
-    return message is not None and message.startswith(_UPSTREAM_STALE_PREFIX)
+    return message is not None and message.startswith(UPSTREAM_STALE_MESSAGE_PREFIX)
 
 
 def _delayed_sources_summary(states: list[AssessmentSourceState]) -> str | None:

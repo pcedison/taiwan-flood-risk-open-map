@@ -876,3 +876,46 @@ def test_explanation_missing_sources_matches_data_status_missing(
         "官方水位來源暫時無法使用。",
         "部分官方即時來源更新較慢（雨量），仍可作當下參考。",
     ]
+
+
+def test_stale_required_source_keeps_its_own_message(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    stale_message = "站點觀測已超過可用時效。"
+    states = (
+        _source_state("water_level", state="stale", message=stale_message, now=now),
+        _source_state(
+            "rainfall",
+            state="degraded",
+            message=_station_count_message(0, 1770, 1998),
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now)
+
+    assert response.data_status.missing == [
+        stale_message,
+        "部分官方即時來源更新較慢（雨量），仍可作當下參考。",
+    ]
+
+
+def test_disabled_required_source_keeps_its_own_message(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    disabled_message = "必要來源尚未登錄或沒有健康紀錄。"
+    states = (
+        _source_state("water_level", state="disabled", message=disabled_message, now=now),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now)
+
+    assert response.data_status.missing == [disabled_message]
