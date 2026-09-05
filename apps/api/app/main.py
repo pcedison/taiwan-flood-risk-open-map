@@ -40,6 +40,9 @@ def create_app() -> FastAPI:
         allow_credentials=False,
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
+        # Latency diagnostics only, no user or location data; without this the
+        # browser hides Server-Timing from cross-origin callers such as the web app.
+        expose_headers=["Server-Timing"],
     )
     application.include_router(api_router)
 

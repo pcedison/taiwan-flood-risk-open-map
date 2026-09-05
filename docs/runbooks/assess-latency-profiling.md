@@ -46,6 +46,11 @@ A response served from the assessment response cache is short by design:
 Server-Timing: cache_get;dur=0.6, cache_hit;desc="true", total;dur=0.9
 ```
 
+`total` measures the route handler only. It excludes network round trip, TLS,
+and any proxy in front of the service, so the 0.2-0.3 s a browser reports for a
+cached query is end-to-end and will always be larger than `total`. Compare
+`total` with `total`, never with a browser timing.
+
 The first request after a deploy, or after the cache TTL expires, is the one
 worth profiling. Repeat the same point at least three times and keep the
 uncached runs; a single sample is noise.

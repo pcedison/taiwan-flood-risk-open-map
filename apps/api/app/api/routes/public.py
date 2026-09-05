@@ -586,6 +586,8 @@ def assess_risk(
         "total": round((time.perf_counter() - started) * 1000, 1),
     }
     response.headers["Server-Timing"] = _server_timing(timings_ms, cache_hit=outcome.cache_hit)
+    # Phase durations carry no user or location data, so any origin may read them.
+    response.headers["Timing-Allow-Origin"] = "*"
     log_event("api.risk.assess.timings", cache_hit=outcome.cache_hit, **timings_ms)
     return outcome.response
 

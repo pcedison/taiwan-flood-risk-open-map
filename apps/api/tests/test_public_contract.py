@@ -1,6 +1,8 @@
 import inspect
 import json
+import logging
 import warnings
+from io import StringIO
 from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -27,6 +29,7 @@ from app.api.schemas import (
 from app.api.services import public_layers as public_layer_service
 from app.api.services import public_response_cache
 from app.api.services.assessment import AssessmentService
+from app.core import logging as app_logging
 from app.core.config import get_settings
 from app.domain.assessment import AssessmentData, AssessmentSourceState
 from app.domain.evidence import (
@@ -2601,3 +2604,56 @@ def test_risk_assess_marks_a_response_cache_hit_in_server_timing(
     assert "scoring;dur=" not in server_timing
     assert server_timing.split(", ")[-1].startswith("total;dur=")
     assert second.json()["assessment_id"] == first.json()["assessment_id"]
+
+
+def _event_log_handler() -> logging.Handler:
+    logger = logging.getLogger(app_logging._EVENT_LOGGER_NAME)
+    return next(
+        handler
+        for handler in logger.handlers
+        if handler.get_name() == app_logging._HANDLER_NAME
+    )
+
+
+def test_event_logger_can_emit_without_any_external_logging_config() -> None:
+    logger = logging.getLogger(app_logging._EVENT_LOGGER_NAME)
+
+    # Nothing in this service or in uvicorn's default config gives the root
+    # logger a handler, so the event logger must carry its own.
+    assert logger.handlers
+    assert logger.isEnabledFor(logging.INFO)
+    assert logger.propagate is False
+
+
+def test_risk_assess_timings_log_is_one_json_line_without_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_route_data(monkeypatch, replace(_route_data(), timings_ms={"db_latest": 12.3}))
+    stream = StringIO()
+    monkeypatch.setattr(_event_log_handler(), "stream", stream)
+
+    assert client.post("/v1/risk/assess", json=_ASSESS_BODY).status_code == 200
+
+    written = stream.getvalue()
+    lines = written.strip().splitlines()
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["event"] == "api.risk.assess.timings"
+    assert payload["cache_hit"] is False
+    assert payload["db_latest"] == 12.3
+    assert payload["total"] >= 0
+    assert not {"lat", "lng", "point", "location", "location_text"} & set(payload)
+    for coordinate in ("22.99974", "120.22704"):
+        assert coordinate not in written
+
+
+def test_server_timing_is_readable_by_the_browser_cross_origin() -> None:
+    response = client.post(
+        "/v1/risk/assess",
+        json=_ASSESS_BODY,
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 200
+    assert "Server-Timing" in response.headers["access-control-expose-headers"]
+    assert response.headers["Timing-Allow-Origin"] == "*"
