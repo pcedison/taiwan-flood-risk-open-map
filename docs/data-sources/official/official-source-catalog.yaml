@@ -201,7 +201,7 @@ sources:
       - "Must not be used as land-use control or legal determination evidence."
   - key: official.gov_tw.flood_citation
     need: recent_official_flood_history_gap_recovery
-    status: primary_gap_recovery
+    status: retired_request_time
     data_gov_dataset_id: null
     data_gov_url: null
     title: "Taiwan government recent flood citation lookup"
@@ -211,13 +211,14 @@ sources:
     resource_format: "citation metadata from public search/RSS indexes"
     update_frequency: "on demand with a bounded per-query time budget"
     license: "citation metadata only; each official source page retains its own terms"
-    integration_decision: "When nearby observed history is older than one year, search a rolling seven-year window and accept only direct HTTPS Taiwan government citation URLs."
+    integration_decision: "Retired on the request path 2026-09-04 (#326, audit 2026-09-03): the lookup cost 4-13 s per assessment and admitted non-incident pages such as dengue notices and FAQs. Rows already written stay in the evidence table for audit only and are excluded from scoring; re-enabling requires the worker-side L2 news adapter in #329."
     limitations:
       - "Search indexes are not complete event registries; no result never means no historical flooding."
       - "Only title, URL, publication time, official publisher domain, and location-match metadata are stored; article bodies are not fetched."
       - "An official publisher tag does not authorize a Google/Bing aggregator redirect; the user-facing citation URL must itself be an approved government URL."
       - "Road and administrative-area matches are labeled explicitly and never claim doorplate-level measured depth."
       - "This nationwide source supersedes the Tainan-only request-time lookup; previously stored Tainan evidence remains auditable."
+      - "Disabled since 2026-09-04. Persisted rows are retained for audit and are filtered out of assessment reads and scoring, so they cannot raise a historical risk level."
   - key: official.wra.flood_warning
     need: official_warning_context
     status: disabled_by_default
