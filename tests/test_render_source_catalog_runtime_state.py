@@ -46,6 +46,12 @@ def test_mapping_covers_every_enablement_decision_used_by_the_registry() -> None
     assert used <= set(renderer.RUNTIME_STATE_BY_ENABLEMENT_DECISION)
 
 
+def test_mapping_covers_every_enablement_decision_the_validator_allows() -> None:
+    assert set(validator.ALLOWED_ENABLEMENT_DECISIONS) <= set(
+        renderer.RUNTIME_STATE_BY_ENABLEMENT_DECISION
+    )
+
+
 def test_unknown_enablement_decision_is_listed_and_exits_non_zero(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -117,6 +123,19 @@ def test_render_only_adds_runtime_state_lines_and_keeps_review_status(tmp_path: 
     for key, source in before_sources.items():
         assert after_sources[key]["status"] == source["status"], key
         assert {k: v for k, v in after_sources[key].items() if k != "runtime_state"} == source
+
+
+def test_render_keeps_a_crlf_checkout_on_crlf(tmp_path: Path) -> None:
+    registry, catalog = _copies(tmp_path)
+    catalog.write_bytes(_read(catalog).replace("\n", "\r\n").encode("utf-8"))
+
+    assert renderer.render_catalog_file(catalog_path=catalog, registry_path=registry) is True
+    after = _read(catalog)
+    assert "\r\n" in after
+    assert "\n" not in after.replace("\r\n", "")
+    assert after.replace("\r\n", "\n") == _read(CATALOG_PATH)
+    assert renderer.main(["--check", "--registry", str(registry), "--catalog", str(catalog)]) == 0
+    assert renderer.render_catalog_file(catalog_path=catalog, registry_path=registry) is False
 
 
 def test_render_derives_states_from_the_registry_decisions(tmp_path: Path) -> None:

@@ -7,9 +7,14 @@ review_method: "Browser Use inspection of data.gov.tw dataset pages"
 # `status` values below are the review state at `reviewed_at`; they are not
 # runtime enablement and can lag the registry. When they disagree, the
 # registry wins.
+# The per-source `runtime_state` values are generated from that registry by
+# infra/scripts/render_source_catalog_runtime_state.py. Never edit them by
+# hand; rerun the renderer instead. When `runtime_state` and `status` disagree,
+# the registry wins.
 governance:
   enablement_source_of_truth: config/source-registry.yaml
   status_field_semantics: "review state at reviewed_at; not runtime enablement"
+  runtime_state_field_semantics: "generated from config/source-registry.yaml by infra/scripts/render_source_catalog_runtime_state.py; do not edit by hand"
 policy:
   primary_catalog: "https://data.gov.tw/"
   source_url_policy: "Public evidence should point to the data.gov.tw dataset landing page when a matching official dataset exists; raw snapshots may retain the concrete resource URL."

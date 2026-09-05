@@ -37,6 +37,7 @@ RUNTIME_STATE_BY_ENABLEMENT_DECISION: Mapping[str, str] = {
     "credential_and_contract_pending": "blocked",
     "context_only": "reference",
     "planning_reference": "reference",
+    "static_snapshot": "reference",
     "request_time_fallback": "reference",
     "request_time_legacy": "reference",
 }
@@ -145,8 +146,11 @@ def render_catalog_text(text: str, expected: Mapping[str, str]) -> str:
     """Rewrite the catalog text so each source carries its derived runtime state.
 
     Only `runtime_state` lines are added, replaced, or removed; every other line,
-    including comments and quoting, is preserved byte for byte.
+    including comments and quoting, is preserved byte for byte. Input line
+    endings are normalised so a CRLF checkout still matches; the caller restores
+    the original style.
     """
+    text = text.replace("\r\n", "\n")
     rendered: list[str] = []
     entry: list[str] | None = None
     entry_key: str | None = None
@@ -227,7 +231,12 @@ def render_catalog_file(
     """Write the derived runtime states into the catalog; return True when changed."""
     expected = expected_runtime_states(catalog_path, registry_path)
     original = catalog_path.read_bytes()
-    rendered = render_catalog_text(original.decode("utf-8"), expected).encode("utf-8")
+    original_text = original.decode("utf-8")
+    newline = "\r\n" if "\r\n" in original_text else "\n"
+    rendered_text = render_catalog_text(original_text, expected)
+    if newline != "\n":
+        rendered_text = rendered_text.replace("\n", newline)
+    rendered = rendered_text.encode("utf-8")
     if rendered == original:
         return False
     catalog_path.write_bytes(rendered)
