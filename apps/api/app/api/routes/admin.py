@@ -68,6 +68,13 @@ REALTIME_THRESHOLDS_BY_ADAPTER = {
     "official.cwa.tide_level": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
     "official.wra_iow.flood_depth": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
 }
+# With no active CAP alert there is no observation to age, so the NCDR feed is
+# judged on whether we are still polling it. That is a liveness check on our own
+# five-minute scheduler, not an upstream publication cadence, so it must not
+# drift with the realtime observation windows above.
+NCDR_CAP_POLL_FRESH_SECONDS = 10 * 60
+NCDR_CAP_POLL_DEGRADED_SECONDS = 30 * 60
+NCDR_CAP_POLL_STALE_SECONDS = 60 * 60
 CENTRAL_BACKBONE_REQUIRED_FAMILIES = ("CWA", "WRA", "NCDR", "Civil IoT")
 CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS = (
     "official.cwa.rainfall",
@@ -1016,11 +1023,11 @@ def _ncdr_cap_freshness_state(
         poll_age_seconds = _lag_seconds(latest_ingested_at)
         if poll_age_seconds is None:
             return "stale"
-        if poll_age_seconds <= REALTIME_FRESH_SECONDS:
+        if poll_age_seconds <= NCDR_CAP_POLL_FRESH_SECONDS:
             return "fresh"
-        if poll_age_seconds <= REALTIME_DEGRADED_SECONDS:
+        if poll_age_seconds <= NCDR_CAP_POLL_DEGRADED_SECONDS:
             return "degraded"
-        if poll_age_seconds <= REALTIME_STALE_SECONDS:
+        if poll_age_seconds <= NCDR_CAP_POLL_STALE_SECONDS:
             return "stale"
         return "failed"
     if effective_at is None or expires_at is None:

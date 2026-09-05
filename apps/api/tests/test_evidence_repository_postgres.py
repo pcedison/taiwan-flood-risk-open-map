@@ -338,11 +338,11 @@ def test_source_health_safely_resolves_bounded_catalog_thresholds() -> None:
     adapter_key = f"test.threshold.{uuid4().hex}"
     cases = (
         (" 120 ", 120),
-        ("not-a-number", 600),
-        ("0", 600),
-        ("-1", 600),
-        ("9" * 1000, 600),
-        ("86401", 600),
+        ("not-a-number", 1800),
+        ("0", 1800),
+        ("-1", 1800),
+        ("9" * 1000, 1800),
+        ("86401", 1800),
         ("86400", 86_400),
     )
 

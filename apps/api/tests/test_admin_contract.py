@@ -408,6 +408,49 @@ def test_admin_freshness_accepts_the_normal_ten_minute_publication_lag(
 
 
 @pytest.mark.parametrize(
+    ("ingested_at", "expected_state"),
+    [
+        ("2026-04-28T12:52:00+00:00", "fresh"),
+        ("2026-04-28T12:45:00+00:00", "degraded"),
+        ("2026-04-28T12:20:00+00:00", "stale"),
+        ("2026-04-28T11:00:00+00:00", "failed"),
+    ],
+)
+def test_ncdr_cap_poll_liveness_keeps_its_own_ten_minute_ladder(
+    monkeypatch: pytest.MonkeyPatch,
+    ingested_at: str,
+    expected_state: str,
+) -> None:
+    """With no active alert the CAP feed is judged on OUR polling, not upstream.
+
+    There is no observation to age, so this measures whether the five-minute
+    scheduler is still running. It must not inherit the realtime observation
+    windows, which allow for upstream publication lag we do not have here.
+    """
+
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-04-28T13:00:00+00:00"),
+    )
+
+    assert (
+        admin_route._freshness_state(
+            adapter_key="official.ncdr.cap",
+            health_status="healthy",
+            is_enabled=True,
+            source_timestamp_min=None,
+            source_timestamp_max=None,
+            latest_observed_at=None,
+            upstream_status="succeeded",
+            latest_ingested_at=datetime.fromisoformat(ingested_at),
+            row_count=0,
+        )
+        == expected_state
+    )
+
+
+@pytest.mark.parametrize(
     "adapter_key",
     [
         "official.cwa.tide_level",

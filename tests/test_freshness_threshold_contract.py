@@ -34,6 +34,22 @@ WORKERS_ROOT = REPO_ROOT / "apps" / "workers"
 MIGRATION = (
     REPO_ROOT / "infra" / "migrations" / "0061_realtime_freshness_thresholds.sql"
 )
+# Every source migration 0061 is responsible for seeding. Pinned as a set so a
+# dropped or silently renamed adapter key fails here instead of leaving that
+# source back on the fallback window that produced the "fresh 0" report.
+EXPECTED_SEEDED_ADAPTER_KEYS = frozenset(
+    {
+        "official.cwa.rainfall",
+        "official.wra.water_level",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "official.civil_iot.river_water_level",
+        "official.civil_iot.pond_water_level",
+        "official.wra_iow.flood_depth",
+    }
+)
 
 _DUMP = (
     "import json;"
@@ -71,18 +87,38 @@ def _worker_constants() -> dict[str, Any]:
 
 
 def _migration_thresholds() -> dict[str, int]:
-    sql = MIGRATION.read_text(encoding="utf-8")
+    """Read the seconds migration 0061 seeds, per adapter key.
+
+    Every ``UPDATE data_sources`` in the file must parse. A statement this
+    cannot read is a failure, not something to skip past: quietly ignoring one
+    would let through exactly the drift this test exists to catch.
+    """
+
+    sql = "\n".join(
+        line
+        for line in MIGRATION.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("--")
+    )
     thresholds: dict[str, int] = {}
     for statement in sql.split(";"):
-        seconds_match = re.search(r"to_jsonb\((\d+)\)", statement)
-        if seconds_match is None:
+        if re.search(r"\bUPDATE\s+data_sources\b", statement) is None:
             continue
+        seconds_match = re.search(r"to_jsonb\((\d+)\)", statement)
+        assert (
+            seconds_match is not None
+        ), f"UPDATE without a parsable to_jsonb(<seconds>) value:\n{statement}"
         where_clause = statement.split("WHERE", 1)
         assert len(where_clause) == 2, f"UPDATE without a WHERE clause:\n{statement}"
-        for adapter_key in re.findall(r"'([a-z0-9_.]+)'", where_clause[1]):
+        adapter_keys = re.findall(r"'([a-z0-9_.]+)'", where_clause[1])
+        assert adapter_keys, f"UPDATE without a parsable adapter key:\n{statement}"
+        for adapter_key in adapter_keys:
             assert adapter_key not in thresholds, f"{adapter_key} set twice"
             thresholds[adapter_key] = int(seconds_match.group(1))
-    assert thresholds, "migration 0061 set no freshness thresholds"
+    assert set(thresholds) == EXPECTED_SEEDED_ADAPTER_KEYS, (
+        "migration 0061 seeds a different set of sources than expected: "
+        f"missing={sorted(EXPECTED_SEEDED_ADAPTER_KEYS - set(thresholds))} "
+        f"unexpected={sorted(set(thresholds) - EXPECTED_SEEDED_ADAPTER_KEYS)}"
+    )
     return thresholds
 
 
