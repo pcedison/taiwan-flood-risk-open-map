@@ -18,6 +18,7 @@ sources:
   - key: official.cwa.rainfall
     need: realtime_rainfall
     status: primary
+    runtime_state: live
     data_gov_dataset_id: "9177"
     data_gov_url: "https://data.gov.tw/dataset/9177"
     title: "Rainfall observation station rainfall data"
@@ -33,6 +34,7 @@ sources:
   - key: official.cwa.tide_level
     need: realtime_coastal_tide_level
     status: primary
+    runtime_state: live
     data_gov_dataset_id: "O-B0075-001"
     data_gov_url: "https://opendata.cwa.gov.tw/dataset/observation/O-B0075-001"
     title: "Sea surface observations from buoy and tide stations"
@@ -51,6 +53,7 @@ sources:
   - key: official.cwa.heavy_rain_warning
     need: official_heavy_rain_warning_audit
     status: disabled_by_default
+    runtime_state: retired
     data_gov_dataset_id: "W-C0033-003"
     data_gov_url: "https://opendata.cwa.gov.tw/dataset/warning/W-C0033-003"
     title: "Heavy-rain CAP warnings"
@@ -68,6 +71,7 @@ sources:
   - key: official.ncdr.cap
     need: official_ncdr_cap_alert_audit
     status: disabled_by_default
+    runtime_state: live
     data_gov_dataset_id: "NCDR-CAP"
     data_gov_url: "https://alerts.ncdr.nat.gov.tw/"
     title: "NCDR public active-warning Atom and CAP alerts"
@@ -86,6 +90,7 @@ sources:
   - key: official.npa.police_radio_traffic
     need: reported_flood_road_incident_context
     status: disabled_by_default
+    runtime_state: reference
     data_gov_dataset_id: "15221"
     data_gov_url: "https://data.gov.tw/dataset/15221"
     title: "Police Broadcasting Service realtime road conditions"
@@ -101,6 +106,7 @@ sources:
   - key: official.wra.water_level
     need: realtime_water_level
     status: primary
+    runtime_state: live
     data_gov_dataset_id: "25768"
     data_gov_url: "https://data.gov.tw/dataset/25768"
     title: "Realtime water level data"
@@ -117,6 +123,7 @@ sources:
   - key: official.wra_iow.flood_depth
     need: realtime_flood_depth
     status: primary
+    runtime_state: live
     data_gov_dataset_id: "142980"
     data_gov_url: "https://data.gov.tw/dataset/142980"
     title: "WRA IoW latest flood depth observations"
@@ -135,6 +142,7 @@ sources:
   - key: official.wra.historical_flood
     need: observed_historical_flood_footprints
     status: disabled_by_default
+    runtime_state: live
     data_gov_dataset_id: "25770"
     data_gov_url: "https://data.gov.tw/dataset/25770"
     title: "Historical flood data"
@@ -152,6 +160,7 @@ sources:
   - key: official.nstc.flood_disaster_points
     need: nationwide_recent_historical_flood_points
     status: primary
+    runtime_state: live
     data_gov_dataset_id: "130016"
     data_gov_url: "https://data.gov.tw/dataset/130016"
     title: "近5年淹水災點資料"
@@ -168,6 +177,7 @@ sources:
   - key: official.wra.flood_incident
     need: nationwide_reported_flood_incidents
     status: disabled_by_default
+    runtime_state: blocked
     data_gov_dataset_id: null
     data_gov_url: null
     title: "WRA nationwide latest-event reported flood incidents"
@@ -187,6 +197,7 @@ sources:
   - key: official.flood_potential.geojson
     need: planning_flood_potential
     status: primary_reference
+    runtime_state: reference
     data_gov_dataset_id: "25766"
     data_gov_url: "https://data.gov.tw/dataset/25766"
     title: "Flood potential maps"
@@ -202,6 +213,7 @@ sources:
   - key: official.gov_tw.flood_citation
     need: recent_official_flood_history_gap_recovery
     status: retired_request_time
+    runtime_state: retired
     data_gov_dataset_id: null
     data_gov_url: null
     title: "Taiwan government recent flood citation lookup"
@@ -222,6 +234,7 @@ sources:
   - key: official.wra.flood_warning
     need: official_warning_context
     status: disabled_by_default
+    runtime_state: reference
     data_gov_dataset_id: "5982"
     data_gov_dataset_ids:
       - "5982"
@@ -254,6 +267,7 @@ sources:
   - key: geocoder.moi.village_boundary
     need: village_admin_fallback
     status: primary
+    runtime_state: unregistered
     data_gov_dataset_id: "7438"
     data_gov_url: "https://data.gov.tw/dataset/7438"
     title: "Village boundaries, TWD97 geographic coordinates"
@@ -275,6 +289,7 @@ sources:
   - key: geocoder.moi.road_names
     need: road_name_fallback
     status: primary_fallback
+    runtime_state: unregistered
     data_gov_dataset_id: "35321"
     data_gov_url: "https://data.gov.tw/dataset/35321"
     title: "National road-name data"
@@ -289,6 +304,7 @@ sources:
   - key: geocoder.nfa.shelters
     need: shelter_poi_geocoder
     status: primary
+    runtime_state: unregistered
     data_gov_dataset_id: "73242"
     data_gov_url: "https://data.gov.tw/dataset/73242"
     title: "Shelter location point file"

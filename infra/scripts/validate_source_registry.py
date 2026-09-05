@@ -13,6 +13,17 @@ from typing import Any
 import psycopg
 import yaml
 
+try:  # imported as `infra.scripts.validate_source_registry`
+    from infra.scripts.render_source_catalog_runtime_state import (
+        RuntimeStateRenderError,
+        check_catalog_runtime_state,
+    )
+except ImportError:  # executed as `python infra/scripts/validate_source_registry.py`
+    from render_source_catalog_runtime_state import (
+        RuntimeStateRenderError,
+        check_catalog_runtime_state,
+    )
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "config" / "source-registry.yaml"
@@ -282,6 +293,24 @@ def validate_catalog(
     _raise_errors(errors)
 
 
+def validate_catalog_runtime_state() -> None:
+    """Fail when the catalog runtime_state no longer matches the registry decisions."""
+    try:
+        differences = check_catalog_runtime_state(
+            OFFICIAL_SOURCE_CATALOG_PATH,
+            REGISTRY_PATH,
+        )
+    except RuntimeStateRenderError as exc:
+        raise SourceRegistryValidationError(str(exc)) from exc
+    if differences:
+        _raise_errors(
+            [
+                *differences,
+                "rerun `python infra/scripts/render_source_catalog_runtime_state.py`",
+            ]
+        )
+
+
 def _validate_enum(
     errors: list[str],
     adapter_key: str,
@@ -422,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
             validate_catalog(sources, database_url=args.database_url)
         elif args.catalog_only:
             parser.error("--catalog-only requires --database-url")
+        validate_catalog_runtime_state()
     except SourceRegistryValidationError as exc:
         print(f"Source registry invalid:\n{exc}", file=sys.stderr)
         return 1

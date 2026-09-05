@@ -50,6 +50,28 @@ Latest data.gov.tw review:
   national road names dataset 35321, and shelter points dataset 73242. The
   closed doorplate suggestion 136942 is explicitly tracked as unavailable.
 
+Generated `runtime_state`:
+
+- Every `sources[]` entry in `official-source-catalog.yaml` carries a generated
+  `runtime_state` field. Do not edit it by hand. It is derived from
+  `enablement_decision` in `config/source-registry.yaml` and is one of `live`,
+  `available_off`, `retired`, `blocked`, `reference`, or `unregistered` for
+  catalog entries the registry does not decide on, such as the geocoder inputs.
+- The neighbouring `status` field stays the manual review state recorded at
+  `reviewed_at`. It can disagree with `runtime_state`; when it does, the
+  registry wins.
+- Regenerate the field after every registry change:
+
+  ```bash
+  python infra/scripts/render_source_catalog_runtime_state.py
+  ```
+
+  `infra/scripts/validate_source_registry.py` runs the same comparison in check
+  form, and CI runs that validator, so changing the registry without rerunning
+  the renderer turns CI red. Run
+  `python infra/scripts/render_source_catalog_runtime_state.py --check` to see
+  the drift on its own.
+
 Source mapping notes:
 
 - data.gov.tw dataset 9177 maps to the CWA `O-A0002-001` automatic rainfall
