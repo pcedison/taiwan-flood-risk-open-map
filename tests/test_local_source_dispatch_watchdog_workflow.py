@@ -115,6 +115,13 @@ def test_local_source_dispatch_watchdog_refreshes_dispatch_artifacts_and_routes_
     assert "github.rest.issues.update" in script
     assert "issue_number: existing.number" in script
     assert "body," in script
+    # Comments are deduplicated by the request-packet bundle digest (#71).
+    assert "scripts/ci/local-source-watchdog-state.js" in script
+    assert "bundleDigest" in script
+    assert 'bundleDigest("artifacts/request-packet-bundle")' in script
+    assert "decideDispatchComment" in script
+    assert "decision.shouldComment" in script
+    assert "body: decision.newBody" in script
     assert "private evidence" in script
     assert "ADMIN_BEARER_TOKEN" not in step_text
 
