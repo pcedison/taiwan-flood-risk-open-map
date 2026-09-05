@@ -53,9 +53,14 @@ from app.domain.reports import (
 
 router = APIRouter(prefix="/admin/v1", tags=["Admin"])
 admin_bearer = HTTPBearer(auto_error=False)
-REALTIME_FRESH_SECONDS = 10 * 60
-REALTIME_DEGRADED_SECONDS = 30 * 60
-REALTIME_STALE_SECONDS = 60 * 60
+# Ten-minute networks (CWA rainfall, WRA water level, Civil IoT water levels)
+# publish several minutes after the observation time and are polled every five
+# minutes, so a healthy feed is routinely 10-20 minutes old at query time. Judge
+# freshness against one publication cycle plus that lag instead of the raw
+# observation interval, or every backbone source reports permanently stale.
+REALTIME_FRESH_SECONDS = 30 * 60
+REALTIME_DEGRADED_SECONDS = 90 * 60
+REALTIME_STALE_SECONDS = 3 * 60 * 60
 # These official datasets publish hourly. Keep the admin diagnostics aligned
 # with the worker freshness policy so healthy hourly sources are not reported
 # stale before the next expected observation has had time to arrive.
@@ -63,6 +68,13 @@ REALTIME_THRESHOLDS_BY_ADAPTER = {
     "official.cwa.tide_level": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
     "official.wra_iow.flood_depth": (90 * 60, 2 * 60 * 60, 3 * 60 * 60),
 }
+# With no active CAP alert there is no observation to age, so the NCDR feed is
+# judged on whether we are still polling it. That is a liveness check on our own
+# five-minute scheduler, not an upstream publication cadence, so it must not
+# drift with the realtime observation windows above.
+NCDR_CAP_POLL_FRESH_SECONDS = 10 * 60
+NCDR_CAP_POLL_DEGRADED_SECONDS = 30 * 60
+NCDR_CAP_POLL_STALE_SECONDS = 60 * 60
 CENTRAL_BACKBONE_REQUIRED_FAMILIES = ("CWA", "WRA", "NCDR", "Civil IoT")
 CENTRAL_BACKBONE_REQUIRED_ADAPTER_KEYS = (
     "official.cwa.rainfall",
@@ -1011,11 +1023,11 @@ def _ncdr_cap_freshness_state(
         poll_age_seconds = _lag_seconds(latest_ingested_at)
         if poll_age_seconds is None:
             return "stale"
-        if poll_age_seconds <= REALTIME_FRESH_SECONDS:
+        if poll_age_seconds <= NCDR_CAP_POLL_FRESH_SECONDS:
             return "fresh"
-        if poll_age_seconds <= REALTIME_DEGRADED_SECONDS:
+        if poll_age_seconds <= NCDR_CAP_POLL_DEGRADED_SECONDS:
             return "degraded"
-        if poll_age_seconds <= REALTIME_STALE_SECONDS:
+        if poll_age_seconds <= NCDR_CAP_POLL_STALE_SECONDS:
             return "stale"
         return "failed"
     if effective_at is None or expires_at is None:

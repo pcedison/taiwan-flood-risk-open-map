@@ -14,9 +14,15 @@ from app.logging import log_event
 FreshnessStatus = Literal["fresh", "degraded", "stale", "failed"]
 FreshnessCadence = Literal["realtime", "event", "static", "legacy"]
 
-REALTIME_FRESH_SECONDS = 10 * 60
-REALTIME_DEGRADED_SECONDS = 30 * 60
-REALTIME_STALE_SECONDS = 60 * 60
+# Ten-minute networks (CWA rainfall, WRA water level, Civil IoT water levels)
+# publish several minutes after the observation time and are polled every five
+# minutes, so a healthy feed is routinely 10-20 minutes old when it is checked.
+# Allow one publication cycle plus that lag before degrading at 30 minutes;
+# alerting (stale) starts past 90 minutes — nine missed ten-minute cycles — so a
+# normally lagging feed never pages while a real outage still does.
+REALTIME_FRESH_SECONDS = 30 * 60
+REALTIME_DEGRADED_SECONDS = 90 * 60
+REALTIME_STALE_SECONDS = 3 * 60 * 60
 # These official datasets publish hourly. Allow publication/ingestion headroom,
 # degrade after one missed cycle, alert after two, and fail after three.
 REALTIME_THRESHOLDS_BY_ADAPTER = {

@@ -131,7 +131,7 @@ _EVENT_TYPE_ALIASES: dict[str, NearbyCoverageSignalType] = {
     "flood_sensor": "flood_depth",
 }
 REALTIME_SOURCE_ADAPTER_KEYS = tuple(_ADAPTER_SIGNAL_TYPES)
-_DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS = 600
+_DEFAULT_SOURCE_FRESHNESS_THRESHOLD_SECONDS = 1800
 _SOURCE_WORKER_DELAYED = timedelta(minutes=15)
 _SOURCE_WORKER_STOPPED = timedelta(minutes=30)
 # National networks always carry a tail of stations that report late.  Demanding

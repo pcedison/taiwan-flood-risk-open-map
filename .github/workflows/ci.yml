@@ -80,6 +80,7 @@ jobs:
           tests/test_official_dual_parse_contract.py
           tests/test_source_registry_validator.py
           tests/test_render_source_catalog_runtime_state.py
+          tests/test_freshness_threshold_contract.py
           -q
 
       - name: Migration runner unit tests
