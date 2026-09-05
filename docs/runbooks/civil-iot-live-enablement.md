@@ -218,6 +218,79 @@ host, set the matching `CIVIL_IOT_*_URL` override to the new full `Things?...`
 query (or the documented flood-sensor `Datastreams?...` query), redeploy one
 source at a time, and record the incident in the source matrix.
 
+## 上游 500 通報流程 (upstream outage escalation)
+
+Since 2026-07-01 15:05Z the `STA_WaterResource_v2` service has returned HTTP 500
+on every request, while `STA_RainSewer` on the same host stays healthy. Three
+production backbone sources depend on it and fail every cycle:
+`official.civil_iot.flood_sensor`, `official.civil_iot.pump_water_level`, and
+`official.civil_iot.gate_water_level`. This is an upstream outage, not a
+regression in this project, so `/v1/ingestion-readiness` reports those sources as
+`status=failed` with `reason_code=upstream_unavailable` and counts them in
+`source_summary.upstream_unavailable_source_count` instead of
+`failed_source_count`. Do not roll back or "fix" the adapters on this signal
+alone — confirm the upstream first.
+
+Only transport failures are excused this way. If a source instead reports
+`reason_code=upstream_contract_changed`, the upstream answered but the payload no
+longer matches our parser: that stays inside `failed_source_count` because the
+fix is an adapter change here, not a wait. Likewise, readiness stays `down`
+whenever anything other than an upstream outage is keeping sources from
+`operational` — the outage only excuses the sources it actually took out.
+
+### 1. Minimal reproduction
+
+Run both probes from an ordinary network (no VPN, no proxy). One failing while
+the other succeeds is the signature of a service-side outage:
+
+```powershell
+curl.exe -sS -o NUL -w "%{http_code}`n" 'https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/Things?$top=1'
+curl.exe -sS -o NUL -w "%{http_code}`n" 'https://sta.colife.org.tw/STA_RainSewer/v1.0/Things?$top=1'
+```
+
+Expected during this incident: `500` for the first, `200` for the second. Keep
+the raw output — the response body and the timestamp are what the operator asks
+for. Repeat once per day so the report carries a duration, not a single sample.
+
+### 2. What to send Civil IoT Taiwan support
+
+Report through the Civil IoT Taiwan portal (<https://ci.taiwan.gov.tw/>) contact
+form. Include, and nothing beyond, these public facts:
+
+- Affected service base: `https://sta.colife.org.tw/STA_WaterResource_v2/v1.0/`
+- The exact failing request above (`Things?$top=1`) and the HTTP 500 response
+  body verbatim.
+- First observed UTC timestamp and the latest confirmation timestamp, plus the
+  fact that the failure is continuous rather than intermittent.
+- The contrast probe: `STA_RainSewer` on the same host returns 200, so the
+  problem is scoped to `STA_WaterResource_v2`, not DNS, TLS, or the caller.
+- Client details: plain `GET`, `Accept: application/json`, User-Agent
+  `FloodRiskTaiwan/0.1 worker-civil-iot-sta`, no authentication required by the
+  published contract, request rate one poll per source per cycle.
+- Which public datasets this blocks (flood sensors, pump station outer water
+  level, gate water level) and that this is a public-interest flood risk map.
+
+Never send credentials, internal hostnames, database details, or worker logs.
+
+### 3. Verification after recovery
+
+1. Both probes in step 1 return `200`.
+2. Let one scheduler cycle complete (or run the adapters once manually per the
+   Procedure section above).
+3. `GET /v1/ingestion-readiness` shows all three sources back at
+   `status=operational`, `reason_code=operational`, and
+   `source_summary.upstream_unavailable_source_count` back to `0`:
+
+   ```powershell
+   curl.exe -sS "$env:API_BASE_URL/v1/ingestion-readiness" | python -c "import json,sys; p=json.load(sys.stdin); print(p['status'], p['source_summary']['upstream_unavailable_source_count']); print([(s['source_id'], s['status'], s['reason_code']) for s in p['sources'] if 'civil-iot' in s['source_id']])"
+   ```
+
+4. Remove the `upstream_incident` note from the three entries in
+   `config/source-registry.yaml`, update the adapter keys hard-coded in
+   `tests/test_source_registry_validator.py`
+   (`test_registry_records_the_open_civil_iot_upstream_incident`) to match, and
+   record the recovery in the source matrix.
+
 ## Rollback (per source)
 
 1. Set the source's gate flag to `false` (e.g. `SOURCE_FLOOD_SENSOR_ENABLED=false`)

@@ -14,6 +14,34 @@ EXPECTED_JURISDICTION_COUNT = 22
 EXPECTED_PRODUCTION_BACKBONE_SOURCE_COUNT = 12
 REQUIRED_SIGNAL_TYPES = ("rainfall", "water_level", "flood_depth", "flood_warning")
 
+# Adapter failures are persisted as the raised exception class name in
+# ``ingestion_jobs.error_code``. Suffix matching keeps one public-safe answer to
+# "is this our bug or theirs?" as adapter-specific wrapper classes come and go,
+# without exposing a URL, credential, or stack detail.
+#
+# Transport failures: the upstream never delivered a usable response at all
+# (HTTP 5xx, DNS/TLS/socket failure, timeout, dropped connection). Nothing in
+# this repository can fix that, and retrying on the next cycle is the remedy.
+UPSTREAM_TRANSPORT_ERROR_CODE_SUFFIXES = (
+    "ConnectionError",
+    "FetchError",
+    "HTTPError",
+    "HttpError",
+    "RemoteDisconnected",
+    "TimeoutError",
+    "URLError",
+)
+# Contract drift: the upstream answered, but the payload no longer matches the
+# shape our parser was written against. The data is just as unavailable, yet the
+# fix is an adapter change here, so this must keep counting as our failure.
+UPSTREAM_CONTRACT_ERROR_CODE_SUFFIXES = ("PayloadError",)
+# Everything else stays "run_failed", i.e. ours. In particular:
+#   *ConfigurationError - a missing or invalid setting in our deployment.
+#   *RateLimitError     - we exceeded the published quota; our polling cadence.
+#   *AuthorizationError - our credential is missing, expired, or revoked.
+# None of those are evidence that the upstream service is down, so excusing them
+# as an outage would hide a failure only we can clear.
+
 SchedulerReadinessStatus = Literal["healthy", "stale", "stopped", "missing"]
 SourceReadinessStatus = Literal[
     "operational",
@@ -184,7 +212,13 @@ def _source_readiness(
     elif _age(evaluated_at, latest_run_at) > timedelta(seconds=stale_after_seconds):
         status, reason_code = "stale", "run_stale"
     elif str(row.get("latest_run_status") or "") == "failed":
-        status, reason_code = "failed", "run_failed"
+        # An upstream outage and a broken adapter both fail the run; only the
+        # second one is ours to fix, so operators must be able to tell them
+        # apart without reading a private error message.
+        status = "failed"
+        reason_code = _failed_run_reason_code(
+            cast(str | None, row.get("latest_run_error_code"))
+        )
     elif _pipeline_failed_for_latest_run(row, latest_run_at):
         status, reason_code = "failed", "pipeline_failed"
     elif str(row.get("latest_run_status") or "") != "succeeded":
@@ -207,6 +241,15 @@ def _source_readiness(
         last_succeeded_at=last_success_at,
         stale_after_seconds=stale_after_seconds,
     )
+
+
+def _failed_run_reason_code(error_code: str | None) -> str:
+    code = error_code or ""
+    if code.endswith(UPSTREAM_TRANSPORT_ERROR_CODE_SUFFIXES):
+        return "upstream_unavailable"
+    if code.endswith(UPSTREAM_CONTRACT_ERROR_CODE_SUFFIXES):
+        return "upstream_contract_changed"
+    return "run_failed"
 
 
 def _jurisdiction_readiness(
@@ -315,6 +358,7 @@ _SOURCE_READINESS_SQL = """
             jobs.id,
             jobs.adapter_key,
             jobs.status,
+            jobs.error_code AS latest_run_error_code,
             COALESCE(jobs.started_at, jobs.created_at) AS latest_run_at
         FROM ingestion_jobs jobs
         JOIN requested ON requested.adapter_key = jobs.adapter_key
@@ -331,6 +375,7 @@ _SOURCE_READINESS_SQL = """
                 WHEN adapter_run.status = 'partial' THEN 'partial'
                 ELSE latest_job.status
             END AS latest_run_status,
+            latest_job.latest_run_error_code,
             latest_job.latest_run_at
         FROM latest_jobs latest_job
         LEFT JOIN adapter_runs adapter_run
@@ -353,6 +398,7 @@ _SOURCE_READINESS_SQL = """
         source.runtime_pipeline_run_at,
         COALESCE(source.runtime_pipeline_complete, false) AS runtime_pipeline_complete,
         latest_runtime.latest_run_status,
+        latest_runtime.latest_run_error_code,
         latest_runtime.latest_run_at
     FROM requested
     LEFT JOIN data_sources source ON source.adapter_key = requested.adapter_key

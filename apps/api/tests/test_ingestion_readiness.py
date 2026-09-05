@@ -1,6 +1,9 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.domain.ingestion.readiness import (
+    _SOURCE_READINESS_SQL,
     _jurisdiction_readiness,
     _scheduler_readiness,
     _source_readiness,
@@ -27,6 +30,7 @@ def _source_row(**overrides: object) -> dict[str, object]:
         "runtime_pipeline_run_at": NOW - timedelta(minutes=2),
         "runtime_pipeline_complete": True,
         "latest_run_status": "succeeded",
+        "latest_run_error_code": None,
         "latest_run_at": NOW - timedelta(minutes=2),
     }
     row.update(overrides)
@@ -111,3 +115,92 @@ def test_jurisdiction_readiness_requires_all_four_proved_signals() -> None:
     assert healthy[0].operational_signal_count == 4
     assert unavailable[0].status == "unavailable"
     assert unavailable[0].unavailable_signal_count == 1
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    (
+        "HTTPError",
+        "URLError",
+        "TimeoutError",
+        "RemoteDisconnected",
+        "ConnectionError",
+        "CivilIotStaFetchError",
+        "TainanFloodSensorHttpError",
+    ),
+)
+def test_source_readiness_separates_upstream_outage_from_our_own_failure(
+    error_code: str,
+) -> None:
+    upstream = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=error_code),
+        evaluated_at=NOW,
+    )
+
+    assert upstream.status == "failed"
+    assert upstream.reason_code == "upstream_unavailable"
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ("CivilIotStaPayloadError", "TainanFloodSensorPayloadError"),
+)
+def test_source_readiness_marks_payload_drift_as_a_contract_change(
+    error_code: str,
+) -> None:
+    # The upstream answered; our parser no longer matches what it answered with.
+    # That is our adapter to fix, so it must not be excused as an outage.
+    drifted = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=error_code),
+        evaluated_at=NOW,
+    )
+
+    assert drifted.status == "failed"
+    assert drifted.reason_code == "upstream_contract_changed"
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    (
+        "CivilIotStaConfigurationError",
+        "CwaRateLimitError",
+        "WraAuthorizationError",
+    ),
+)
+def test_source_readiness_keeps_our_own_faults_out_of_the_upstream_bucket(
+    error_code: str,
+) -> None:
+    ours = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=error_code),
+        evaluated_at=NOW,
+    )
+
+    assert ours.reason_code == "run_failed"
+
+
+def test_source_readiness_keeps_run_failed_for_non_upstream_error_codes() -> None:
+    ours = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code="ValueError"),
+        evaluated_at=NOW,
+    )
+    unknown = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=None),
+        evaluated_at=NOW,
+    )
+    misconfigured = _source_readiness(
+        _source_row(
+            latest_run_status="failed",
+            latest_run_error_code="CivilIotStaConfigurationError",
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert ours.status == "failed"
+    assert ours.reason_code == "run_failed"
+    assert unknown.reason_code == "run_failed"
+    assert misconfigured.reason_code == "run_failed"
+
+
+def test_source_readiness_sql_selects_the_latest_run_error_code() -> None:
+    assert "jobs.error_code AS latest_run_error_code" in _SOURCE_READINESS_SQL
+    assert "latest_runtime.latest_run_error_code" in _SOURCE_READINESS_SQL

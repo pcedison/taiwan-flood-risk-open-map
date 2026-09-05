@@ -398,6 +398,23 @@ def _ingestion_readiness_response(
         status: sum(1 for source in snapshot.sources if source.status == status)
         for status in ("operational", "degraded", "stale", "failed", "disabled", "missing")
     }
+    # A source the upstream service knocked out is still unusable, but it is not
+    # evidence that this deployment is broken. Report it in its own count so the
+    # two causes stay distinguishable from the outside. Contract drift
+    # ("upstream_contract_changed") is deliberately not counted here: it needs an
+    # adapter change from us, so it stays in failed_source_count.
+    upstream_unavailable_source_count = sum(
+        1
+        for source in snapshot.sources
+        if source.status == "failed" and source.reason_code == "upstream_unavailable"
+    )
+    # An outage only excuses the sources it actually took out. If anything else
+    # is non-operational, the readiness answer must stay fail-closed.
+    only_upstream_outage_blocks_sources = (
+        upstream_unavailable_source_count > 0
+        and upstream_unavailable_source_count
+        == len(snapshot.sources) - source_counts["operational"]
+    )
     latest_success_at = max(
         (
             source.last_succeeded_at
@@ -427,7 +444,10 @@ def _ingestion_readiness_response(
         snapshot.scheduler.status != "healthy"
         or not source_contract_complete
         or not jurisdiction_contract_complete
-        or source_counts["operational"] == 0
+        or (
+            source_counts["operational"] == 0
+            and not only_upstream_outage_blocks_sources
+        )
     ):
         overall_status = "down"
     elif (
@@ -453,7 +473,10 @@ def _ingestion_readiness_response(
             operational_source_count=source_counts["operational"],
             degraded_source_count=source_counts["degraded"],
             stale_source_count=source_counts["stale"],
-            failed_source_count=source_counts["failed"],
+            failed_source_count=(
+                source_counts["failed"] - upstream_unavailable_source_count
+            ),
+            upstream_unavailable_source_count=upstream_unavailable_source_count,
             disabled_source_count=source_counts["disabled"],
             missing_source_count=(
                 source_counts["missing"]

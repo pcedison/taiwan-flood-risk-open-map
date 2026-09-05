@@ -1109,9 +1109,26 @@ def _pipeline_failure_decision(
             "upstream_unavailable",
             "背景來源在限定時間內未完成回應；未公開內部連線資訊。",
         )
+    # Transport failures: the upstream never delivered a usable response. Adapter
+    # wrappers such as CivilIotStaFetchError are what actually reach this row, so
+    # they must be matched here rather than by a payload-shaped branch.
     if (row.latest_run_error_code or "").endswith(
-        ("FetchError", "HttpError", "PayloadError")
+        (
+            "ConnectionError",
+            "FetchError",
+            "HTTPError",
+            "HttpError",
+            "RemoteDisconnected",
+            "URLError",
+        )
     ):
+        return _source_decision(
+            "failed",
+            "upstream_unavailable",
+            "上游服務目前回應錯誤；本站每輪重試中，未公開內部連線資訊。",
+        )
+    # Contract drift: the upstream answered with a payload our parser cannot read.
+    if (row.latest_run_error_code or "").endswith("PayloadError"):
         return _source_decision(
             "failed",
             "upstream_unavailable",

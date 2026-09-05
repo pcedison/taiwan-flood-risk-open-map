@@ -50,6 +50,9 @@ REQUIRED_SOURCE_FIELDS = frozenset(
         "enablement_decision",
     }
 )
+# Optional annotations. They record operational facts about a source without
+# changing any enablement decision, so they must never be required.
+OPTIONAL_SOURCE_FIELDS = frozenset({"upstream_incident"})
 ALLOWED_FAMILIES = frozenset({"official", "news", "forum"})
 ALLOWED_IMPLEMENTATIONS = frozenset({"worker", "api", "catalog"})
 ALLOWED_RUNTIME_SCOPES = frozenset(
@@ -123,11 +126,19 @@ def validate_registry_schema(
     seen: set[str] = set()
     for index, source in enumerate(sources):
         fields = frozenset(source)
-        if fields != REQUIRED_SOURCE_FIELDS:
+        if not fields >= REQUIRED_SOURCE_FIELDS or not (
+            fields - REQUIRED_SOURCE_FIELDS
+        ) <= OPTIONAL_SOURCE_FIELDS:
             errors.append(
                 f"sources[{index}] fields differ: missing={sorted(REQUIRED_SOURCE_FIELDS - fields)} "
-                f"extra={sorted(fields - REQUIRED_SOURCE_FIELDS)}"
+                f"extra={sorted(fields - REQUIRED_SOURCE_FIELDS - OPTIONAL_SOURCE_FIELDS)}"
             )
+            continue
+        upstream_incident = source.get("upstream_incident")
+        if upstream_incident is not None and (
+            not isinstance(upstream_incident, str) or not upstream_incident.strip()
+        ):
+            errors.append(f"sources[{index}] upstream_incident must be a non-empty string")
             continue
         adapter_key = source["adapter_key"]
         if not isinstance(adapter_key, str) or ADAPTER_KEY_PATTERN.fullmatch(adapter_key) is None:
