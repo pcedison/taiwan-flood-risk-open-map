@@ -204,3 +204,54 @@ def test_source_readiness_keeps_run_failed_for_non_upstream_error_codes() -> Non
 def test_source_readiness_sql_selects_the_latest_run_error_code() -> None:
     assert "jobs.error_code AS latest_run_error_code" in _SOURCE_READINESS_SQL
     assert "latest_runtime.latest_run_error_code" in _SOURCE_READINESS_SQL
+
+
+def test_source_readiness_separates_upstream_staleness_from_pipeline_failure() -> None:
+    stale = _source_readiness(
+        _source_row(
+            adapter_key="official.wra_iow.flood_depth",
+            latest_observed_at=NOW - timedelta(hours=30),
+            freshness_threshold_seconds="5400",
+        ),
+        evaluated_at=NOW,
+    )
+    fresh = _source_readiness(
+        _source_row(
+            adapter_key="official.wra_iow.flood_depth",
+            latest_observed_at=NOW - timedelta(minutes=10),
+            freshness_threshold_seconds="5400",
+        ),
+        evaluated_at=NOW,
+    )
+    default_threshold = _source_readiness(
+        _source_row(latest_observed_at=NOW - timedelta(hours=3)),
+        evaluated_at=NOW,
+    )
+    unobserved = _source_readiness(_source_row(), evaluated_at=NOW)
+
+    assert stale.status == "degraded"
+    assert stale.reason_code == "upstream_stale"
+    assert fresh.status == "operational"
+    assert fresh.reason_code == "operational"
+    assert default_threshold.reason_code == "upstream_stale"
+    assert unobserved.status == "operational"
+
+
+def test_upstream_staleness_never_masks_a_real_pipeline_failure() -> None:
+    failed = _source_readiness(
+        _source_row(
+            runtime_pipeline_status="failed",
+            runtime_pipeline_complete=False,
+            latest_observed_at=NOW - timedelta(hours=30),
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert failed.status == "failed"
+    assert failed.reason_code == "pipeline_failed"
+
+
+def test_source_readiness_sql_reads_observations_and_catalog_threshold() -> None:
+    assert "official_realtime_latest" in _SOURCE_READINESS_SQL
+    assert "latest_observed_at" in _SOURCE_READINESS_SQL
+    assert "'freshness_threshold_seconds'" in _SOURCE_READINESS_SQL

@@ -107,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     captured_at = args.captured_at or datetime.now(UTC).replace(microsecond=0).isoformat()
     contract_failures: list[str] = []
     data_source_failures: list[str] = []
+    advisories: list[str] = []
     official_source_state = "unknown"
 
     health = request_json("GET", f"{base_url}/health", timeout_seconds=args.timeout_seconds)
@@ -159,11 +160,15 @@ def main(argv: list[str] | None = None) -> int:
             f"/v1/risk/assess returned HTTP {risk.status_code}: {risk.error or risk.payload}"
         )
     else:
-        payload_contract, payload_data_source, official_source_state = check_risk_payload(
-            risk.payload, radius_m=args.radius_m
-        )
+        (
+            payload_contract,
+            payload_data_source,
+            official_source_state,
+            payload_advisories,
+        ) = check_risk_payload(risk.payload, radius_m=args.radius_m)
         contract_failures.extend(payload_contract)
         data_source_failures.extend(payload_data_source)
+        advisories.extend(payload_advisories)
 
     degraded_notes: list[str] = []
     if (
@@ -195,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         contract_failures=contract_failures,
         data_source_failures=data_source_failures,
         degraded_notes=degraded_notes,
+        advisories=advisories,
         health=health_evidence,
         geocode_admin_canary=geocode_evidence,
         request={
@@ -212,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         print("HOSTED_PUBLIC_RISK_EVIDENCE_SMOKE failed")
         for failure in failures:
             print(f"- {failure}")
+        _report_advisories(advisories)
         return 1
 
     if degraded_notes:
@@ -252,15 +259,19 @@ def main(argv: list[str] | None = None) -> int:
         f"assessment_id={risk.payload.get('assessment_id')} | "
         f"nearby={risk.payload.get('nearby_realtime_coverage', {}).get('overall_level')}"
     )
+    _report_advisories(advisories)
     return 0
 
 
 def check_risk_payload(
     payload: Mapping[str, Any], *, radius_m: int
-) -> tuple[list[str], list[str], str]:
+) -> tuple[list[str], list[str], str, list[str]]:
     """Split risk payload assertions into contract and data-source classes.
 
-    Returns ``(contract_failures, data_source_failures, official_source_state)``.
+    Returns ``(contract_failures, data_source_failures, official_source_state,
+    advisories)``. Advisories name required sources whose upstream publisher
+    stopped updating while our own pipeline stayed healthy; they are reported,
+    never failed on.
 
     Contract failures mean the public API shape or the hosted service itself
     regressed; they always fail the run. Data-source failures mean the response
@@ -291,11 +302,12 @@ def check_risk_payload(
 
     coverage = payload.get("nearby_realtime_coverage")
     worker_source_health_failures: list[str] = []
+    advisories: list[str] = []
     if not isinstance(coverage, Mapping):
         contract_failures.append("risk response missing nearby_realtime_coverage")
     else:
         contract_failures.extend(_check_nearby_coverage(coverage, radius_m=radius_m))
-        worker_source_health_failures = _check_worker_source_health(coverage)
+        worker_source_health_failures, advisories = _check_worker_source_health(coverage)
         data_source_failures.extend(worker_source_health_failures)
 
     # The API intentionally fails closed from low to unknown when a required
@@ -311,7 +323,12 @@ def check_risk_payload(
             "risk response had usable official realtime evidence but still returned an unknown "
             "realtime level"
         )
-    return contract_failures, data_source_failures, resolve_official_source_state(payload)
+    return (
+        contract_failures,
+        data_source_failures,
+        resolve_official_source_state(payload),
+        advisories,
+    )
 
 
 def check_geocode_admin_canary(response: JsonResponse) -> tuple[list[str], dict[str, Any]]:
@@ -426,6 +443,7 @@ def build_evidence_artifact(
     contract_failures: list[str],
     data_source_failures: list[str],
     degraded_notes: list[str],
+    advisories: list[str],
     health: Mapping[str, Any],
     geocode_admin_canary: Mapping[str, Any],
     request: Mapping[str, Any],
@@ -464,6 +482,7 @@ def build_evidence_artifact(
         "contract_failures": list(contract_failures),
         "data_source_failures": list(data_source_failures),
         "degraded_notes": list(degraded_notes),
+        "advisories": list(advisories),
         "failures": failures,
     }
 
@@ -521,23 +540,42 @@ def _check_nearby_coverage(coverage: Mapping[str, Any], *, radius_m: int) -> lis
     return failures
 
 
-def _check_worker_source_health(coverage: Mapping[str, Any]) -> list[str]:
+def _check_worker_source_health(
+    coverage: Mapping[str, Any],
+) -> tuple[list[str], list[str]]:
+    """Split required-source health into run failures and upstream advisories.
+
+    ``upstream_stale`` means our ingestion and publication ran on schedule while
+    the upstream publisher stopped updating. That is not this deployment's
+    regression, so it is reported, never failed on.
+    """
+
     if coverage.get("source_health_checked") is not True:
-        return [
-            "nearby_realtime_coverage did not verify worker source health; "
-            "request-time official observations are not worker persistence evidence"
-        ]
+        return (
+            [
+                "nearby_realtime_coverage did not verify worker source health; "
+                "request-time official observations are not worker persistence evidence"
+            ],
+            [],
+        )
 
     source_health = coverage.get("source_health")
     if not isinstance(source_health, list) or not source_health:
-        return ["nearby_realtime_coverage returned no worker source health records"]
+        return (["nearby_realtime_coverage returned no worker source health records"], [])
 
     failures: list[str] = []
+    advisories: list[str] = []
     for source in source_health:
         if not isinstance(source, Mapping) or source.get("required_for_absence") is False:
             continue
         status = source.get("health_status")
         reason = source.get("reason_code")
+        source_id = source.get("source_id") or source.get("name") or "unknown-source"
+        if reason == "upstream_stale":
+            advisories.append(
+                f"required worker source {source_id} is {status} "
+                "(upstream_stale); the upstream feed stopped publishing"
+            )
         if (
             status not in ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES
             or reason == "pipeline_stalled"
@@ -548,11 +586,10 @@ def _check_worker_source_health(coverage: Mapping[str, Any]) -> list[str]:
                 coverage,
             ):
                 continue
-            source_id = source.get("source_id") or source.get("name") or "unknown-source"
             failures.append(
                 f"required worker source {source_id} health is {status} ({reason})"
             )
-    return failures
+    return failures, advisories
 
 
 def _has_hydrology_redundancy(
@@ -725,6 +762,23 @@ def _requirement_evidence(*, captured_at: str, evidence_ref: str) -> list[dict[s
         }
         for requirement, path in PUBLIC_RISK_REQUIREMENT_EVIDENCE_PATHS.items()
     ]
+
+
+def _report_advisories(advisories: list[str]) -> None:
+    """Surface upstream publication gaps without changing the run outcome."""
+
+    if not advisories:
+        return
+    for advisory in advisories:
+        print(f"- advisory: {advisory}")
+    _append_step_summary(
+        [
+            "### Hosted public risk evidence advisories",
+            "",
+            "- The background pipeline is healthy; the upstream publisher is not.",
+            *(f"- advisory: {advisory}" for advisory in advisories),
+        ]
+    )
 
 
 def _append_step_summary(lines: list[str]) -> None:

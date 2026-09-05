@@ -66,7 +66,7 @@ def test_canonical_production_freshness_source_ids_are_accepted() -> None:
     payload["data_freshness"][0]["source_id"] = "official.cwa.rainfall"
     payload["data_freshness"][1]["source_id"] = "official.wra.water_level"
 
-    contract_failures, data_source_failures, state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
 
@@ -217,7 +217,7 @@ def test_check_risk_payload_requires_nearby_coverage_and_worker_evidence() -> No
     del payload["nearby_realtime_coverage"]
     payload["evidence"] = []
 
-    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, _state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
     failures = contract_failures + data_source_failures
@@ -255,7 +255,7 @@ def test_check_risk_payload_rejects_unknown_when_official_realtime_evidence_exis
     payload = _risk_payload()
     payload["realtime"]["level"] = "未知"
 
-    contract_failures, data_source_failures, state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
 
@@ -274,7 +274,7 @@ def test_check_risk_payload_does_not_contradict_fail_closed_source_failure() -> 
     rainfall_health["health_status"] = "failed"
     rainfall_health["reason_code"] = "upstream_unavailable"
 
-    contract_failures, data_source_failures, state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
 
@@ -298,7 +298,7 @@ def test_check_risk_payload_accepts_zero_radius_counts_without_nearest_sensor() 
         signal["fresh_count"] = 0
         signal["missing_reason"] = "no nearby fixture"
 
-    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, _state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
     failures = contract_failures + data_source_failures
@@ -318,7 +318,7 @@ def test_check_risk_payload_requires_counts_when_nearest_sensor_missing() -> Non
         signal["nearest_distance_m"] = None
         signal.pop("counts_by_radius_m", None)
 
-    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, _state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
     failures = contract_failures + data_source_failures
@@ -335,7 +335,7 @@ def test_check_risk_payload_rejects_unchecked_worker_source_health() -> None:
     coverage["source_health_checked"] = False
     coverage["source_health"] = []
 
-    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, _state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
     failures = contract_failures + data_source_failures
@@ -355,7 +355,7 @@ def test_check_risk_payload_rejects_stalled_required_worker_source() -> None:
         reason_code="pipeline_stalled",
     )
 
-    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, _state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
     failures = contract_failures + data_source_failures
@@ -389,7 +389,7 @@ def test_transient_hydrology_failure_uses_query_local_redundancy() -> None:
         },
     ]
 
-    assert smoke._check_worker_source_health(coverage) == []
+    assert smoke._check_worker_source_health(coverage) == ([], [])
 
 
 def test_transient_hydrology_failure_without_redundancy_still_fails() -> None:
@@ -405,10 +405,13 @@ def test_transient_hydrology_failure_without_redundancy_still_fails() -> None:
         }
     ]
 
-    assert smoke._check_worker_source_health(coverage) == [
-        "required worker source official.wra.water_level health is failed "
-        "(upstream_unavailable)"
-    ]
+    assert smoke._check_worker_source_health(coverage) == (
+        [
+            "required worker source official.wra.water_level health is failed "
+            "(upstream_unavailable)"
+        ],
+        [],
+    )
 
 
 def test_disabled_redundant_cwa_warning_does_not_fail_required_source_health() -> None:
@@ -430,7 +433,7 @@ def test_disabled_redundant_cwa_warning_does_not_fail_required_source_health() -
         },
     ]
 
-    contract_failures, data_source_failures, _state = smoke.check_risk_payload(
+    contract_failures, data_source_failures, _state, _advisories = smoke.check_risk_payload(
         payload, radius_m=500
     )
 
@@ -820,3 +823,71 @@ def test_degraded_ok_mode_fails_when_the_jurisdiction_mapping_is_missing(
     assert evidence["degraded_notes"] == []
     assert evidence["data_source_failures"]
     assert not completion_output.exists()
+
+
+def test_upstream_stale_required_source_is_an_advisory_not_a_failure() -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"] = [
+        {
+            "source_id": "official.wra_iow.flood_depth",
+            "name": "WRA IoW flood depth",
+            "signal_types": ["flood_depth"],
+            "health_status": "degraded",
+            "reason_code": "upstream_stale",
+            "required_for_absence": True,
+        }
+    ]
+
+    failures, advisories = smoke._check_worker_source_health(
+        payload["nearby_realtime_coverage"]
+    )
+
+    assert failures == []
+    assert advisories == [
+        "required worker source official.wra_iow.flood_depth is degraded "
+        "(upstream_stale); the upstream feed stopped publishing"
+    ]
+
+
+def test_check_risk_payload_reports_upstream_stale_advisories_without_failing() -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"] = [
+        {
+            "source_id": "official.wra_iow.flood_depth",
+            "health_status": "degraded",
+            "reason_code": "upstream_stale",
+            "required_for_absence": True,
+        }
+    ]
+
+    contract_failures, data_source_failures, _state, advisories = smoke.check_risk_payload(
+        payload, radius_m=500
+    )
+
+    assert contract_failures == []
+    assert data_source_failures == []
+    assert len(advisories) == 1
+
+
+def test_evidence_artifact_records_upstream_stale_advisories() -> None:
+    artifact = smoke.build_evidence_artifact(
+        base_url="https://example.test",
+        captured_at="2026-09-05T00:00:00Z",
+        completion_evidence_ref="evidence.json",
+        status="passed",
+        data_source_mode="strict",
+        official_source_state="configured",
+        contract_failures=[],
+        data_source_failures=[],
+        degraded_notes=[],
+        advisories=["required worker source x is degraded (upstream_stale)"],
+        health={},
+        geocode_admin_canary={},
+        request={},
+        risk_payload={},
+        failures=[],
+    )
+
+    assert artifact["advisories"] == [
+        "required worker source x is degraded (upstream_stale)"
+    ]

@@ -3199,7 +3199,15 @@ components:
         status:
           type: string
           enum: [operational, degraded, stale, failed, disabled, missing]
-        reason_code: {type: string}
+        reason_code:
+          type: string
+          description: >-
+            Machine-readable cause: operational, catalog_missing, catalog_disabled,
+            runtime_selection_missing, runtime_selection_stale, runtime_disabled,
+            run_missing, run_stale, run_failed, run_incomplete, pipeline_failed,
+            pipeline_incomplete, or upstream_stale. upstream_stale means this
+            deployment ingested and published on schedule while the upstream
+            publisher stopped updating, so it is reported as degraded, not failed.
         checked_at:
           type: [string, "null"]
           format: date-time

@@ -2097,3 +2097,96 @@ class _SuccessfulAdapter:
     def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
         del raw_item
         return self.run().normalized[0]
+
+
+def test_upstream_freshness_alert_keeps_the_cycle_and_pipeline_succeeded() -> None:
+    adapter = _UpstreamStaleRealtimeAdapter()
+    key = adapter.metadata.key
+    run_writer = _MemoryRunWriter()
+
+    result = run_v1_baseline_adapter_cycle(
+        {key: adapter},
+        settings=replace(_settings(key), enabled_adapter_keys=(key,)),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({key})),
+        promote=True,
+        promotion_adapter_keys=(key,),
+    )
+
+    assert result.status == "succeeded"
+    assert result.has_alerts is True
+    assert len(result.freshness_alerts) == 1
+    assert result.freshness_alerts[0].status == "failed"
+    assert run_writer.pipeline_statuses == [
+        ((key,), "succeeded", True, result.summaries[0].started_at)
+    ]
+
+
+def test_failed_summary_still_fails_the_cycle_when_freshness_also_alerts() -> None:
+    adapter = _ExplodingAdapter("official.wra.water_level")
+    key = adapter.metadata.key
+    run_writer = _MemoryRunWriter()
+
+    result = run_v1_baseline_adapter_cycle(
+        {key: adapter},
+        settings=replace(_settings(key), enabled_adapter_keys=(key,)),
+        staging_writer=_MemoryStagingWriter(),
+        run_writer=run_writer,
+        promotion_writer=_MemoryPromotionWriter([]),
+        source_catalog_reader=_StaticCatalogReader(enabled=frozenset({key})),
+        promote=True,
+        promotion_adapter_keys=(key,),
+    )
+
+    assert result.status == "failed"
+    assert result.summaries[0].status == "failed"
+
+
+class _UpstreamStaleRealtimeAdapter:
+    """A realtime source whose fetch succeeds while upstream stopped publishing."""
+
+    metadata = AdapterMetadata(
+        key="official.wra.water_level",
+        family=SourceFamily.OFFICIAL,
+        enabled_by_default=False,
+        display_name="WRA water level upstream-stale fixture",
+    )
+
+    def __init__(self, *, age: timedelta = timedelta(hours=30)) -> None:
+        self.observed_at = FETCHED_AT - age
+
+    def run(self) -> AdapterRunResult:
+        raw_item = RawSourceItem(
+            source_id="wra-water-level-1",
+            source_url="https://example.test/wra/water-level",
+            fetched_at=FETCHED_AT,
+            payload={"observed_at": self.observed_at.isoformat()},
+        )
+        evidence = NormalizedEvidence(
+            evidence_id="wra-water-level-evidence-1",
+            adapter_key=self.metadata.key,
+            source_family=SourceFamily.OFFICIAL,
+            event_type=EventType.WATER_LEVEL,
+            source_id=raw_item.source_id,
+            source_url=raw_item.source_url,
+            source_title="River water level",
+            source_timestamp=self.observed_at,
+            fetched_at=FETCHED_AT,
+            summary="Upstream stopped publishing new water level observations.",
+            location_text="臺南市",
+            confidence=0.9,
+        )
+        return AdapterRunResult(
+            adapter_key=self.metadata.key,
+            fetched=(raw_item,),
+            normalized=(evidence,),
+        )
+
+    def fetch(self) -> tuple[RawSourceItem, ...]:
+        return self.run().fetched
+
+    def normalize(self, raw_item: RawSourceItem) -> NormalizedEvidence | None:
+        del raw_item
+        return self.run().normalized[0]

@@ -126,8 +126,12 @@ class ManagedRuntimeIngestionResult:
     error_message: str | None = None
 
     @property
+    def freshness_alerts(self) -> tuple[FreshnessCheck, ...]:
+        return tuple(check for check in self.freshness_checks if check.is_alert())
+
+    @property
     def has_alerts(self) -> bool:
-        return any(check.is_alert() for check in self.freshness_checks)
+        return bool(self.freshness_alerts)
 
     @property
     def failed(self) -> bool:
@@ -395,10 +399,7 @@ def _execute_managed_runtime_ingestion_cycle(
         run_writer=persistence.run_writer,
         pipeline_run_at=cycle_started_at,
     )
-    status = _status_from_cycle(
-        summaries=cycle.summaries,
-        freshness_checks=cycle.freshness_checks,
-    )
+    status = _status_from_cycle(summaries=cycle.summaries)
     reason = _reason_from_cycle(
         summaries=cycle.summaries,
         missing_adapter_keys=missing_adapter_keys,
@@ -732,13 +733,17 @@ def _record_pipeline_status_for_adapter_keys(
 def _status_from_cycle(
     *,
     summaries: tuple[AdapterBatchRunSummary, ...],
-    freshness_checks: tuple[FreshnessCheck, ...],
 ) -> ManagedRuntimeStatus:
+    """Derive the cycle outcome from the ingestion summaries alone.
+
+    A freshness alert means the upstream publisher stopped updating, not that
+    our fetch, staging, or promotion failed.  Folding it in here would record a
+    foreign outage as this pipeline's own failure and hide the real cause.
+    """
+
     if not summaries:
         return "skipped"
     if any(summary.status == "failed" for summary in summaries):
-        return "failed"
-    if any(check.is_alert() for check in freshness_checks):
         return "failed"
     if any(summary.status in {"partial", "skipped"} for summary in summaries):
         return "partial"

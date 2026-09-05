@@ -468,7 +468,7 @@ def _run_v1_baseline_tick(
             )
             continue
 
-        if result.failed or result.has_alerts:
+        if result.failed:
             had_failure = True
             failed_count += 1
             pipeline_failed = (
@@ -492,6 +492,22 @@ def _run_v1_baseline_tick(
                 elapsed_ms=_elapsed_ms(source_started),
             )
             continue
+
+        # Fetch and promotion succeeded and only the upstream feed is stale.
+        # Report it as an advisory so a foreign publication gap never lands in
+        # this source's pipeline failure state.
+        for alert in result.freshness_alerts:
+            log_event(
+                "worker.runtime.v1_baseline.freshness_alert",
+                adapter_key=adapter_key,
+                freshness_status=alert.status,
+                age_seconds=alert.age_seconds,
+                source_timestamp_max=(
+                    alert.source_timestamp_max.isoformat()
+                    if alert.source_timestamp_max is not None
+                    else None
+                ),
+            )
 
         if adapter_key in HISTORICAL_COVERAGE_ADAPTER_KEYS:
             summary = next(
