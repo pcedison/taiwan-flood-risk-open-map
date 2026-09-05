@@ -27,6 +27,11 @@ REQUIRED_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = (
     "water_level",
     "flood_depth",
 )
+# The public risk explanation keeps an upstream publication gap verbatim while
+# it summarises every other delayed source, so the reader-facing filter matches
+# on this prefix.  Producer and consumer share the constant rather than the
+# literal.
+UPSTREAM_STALE_MESSAGE_PREFIX = "上游資料來源"
 SIGNAL_LABELS: dict[NearbyCoverageSignalType, str] = {
     "rainfall": "雨量",
     "water_level": "水位",
@@ -1244,7 +1249,8 @@ def _upstream_stale_decision(
     return _source_decision(
         "degraded",
         "upstream_stale",
-        f"上游資料來源自 {stalled_since:%Y/%m/%d %H:%M} 起未更新；本站背景更新正常。",
+        f"{UPSTREAM_STALE_MESSAGE_PREFIX}自 {stalled_since:%Y/%m/%d %H:%M} 起未更新；"
+        "本站背景更新正常。",
     )
 
 
@@ -1344,6 +1350,7 @@ __all__ = [
     "REALTIME_SOURCE_ADAPTER_KEYS",
     "REQUIRED_SIGNAL_TYPES",
     "SIGNAL_LABELS",
+    "UPSTREAM_STALE_MESSAGE_PREFIX",
     "build_nearby_realtime_coverage",
     "build_nearby_source_health",
     "coverage_signal_type",

@@ -1,4 +1,6 @@
 from app.domain.realtime.nearby_coverage import (
+    SIGNAL_LABELS,
+    UPSTREAM_STALE_MESSAGE_PREFIX,
     build_nearby_realtime_coverage,
     build_nearby_source_health,
     coverage_signal_type,
@@ -16,6 +18,8 @@ from app.domain.realtime.official import (
 
 __all__ = [
     "HOSTED_RUNTIME_ENVS",
+    "SIGNAL_LABELS",
+    "UPSTREAM_STALE_MESSAGE_PREFIX",
     "OfficialRealtimeBundle",
     "OfficialRealtimeObservation",
     "OfficialRealtimeSourceStatus",
