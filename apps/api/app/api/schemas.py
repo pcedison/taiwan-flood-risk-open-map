@@ -227,6 +227,7 @@ class IngestionSourceReadinessSummary(ContractModel):
     degraded_source_count: int = Field(ge=0)
     stale_source_count: int = Field(ge=0)
     failed_source_count: int = Field(ge=0)
+    upstream_unavailable_source_count: int = Field(default=0, ge=0)
     disabled_source_count: int = Field(ge=0)
     missing_source_count: int = Field(ge=0)
     latest_success_at: datetime | None = None

@@ -1,6 +1,9 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.domain.ingestion.readiness import (
+    _SOURCE_READINESS_SQL,
     _jurisdiction_readiness,
     _scheduler_readiness,
     _source_readiness,
@@ -27,6 +30,7 @@ def _source_row(**overrides: object) -> dict[str, object]:
         "runtime_pipeline_run_at": NOW - timedelta(minutes=2),
         "runtime_pipeline_complete": True,
         "latest_run_status": "succeeded",
+        "latest_run_error_code": None,
         "latest_run_at": NOW - timedelta(minutes=2),
     }
     row.update(overrides)
@@ -111,3 +115,55 @@ def test_jurisdiction_readiness_requires_all_four_proved_signals() -> None:
     assert healthy[0].operational_signal_count == 4
     assert unavailable[0].status == "unavailable"
     assert unavailable[0].unavailable_signal_count == 1
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    (
+        "HTTPError",
+        "URLError",
+        "TimeoutError",
+        "RemoteDisconnected",
+        "ConnectionError",
+        "CivilIotStaFetchError",
+        "CivilIotStaPayloadError",
+    ),
+)
+def test_source_readiness_separates_upstream_outage_from_our_own_failure(
+    error_code: str,
+) -> None:
+    upstream = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=error_code),
+        evaluated_at=NOW,
+    )
+
+    assert upstream.status == "failed"
+    assert upstream.reason_code == "upstream_unavailable"
+
+
+def test_source_readiness_keeps_run_failed_for_non_upstream_error_codes() -> None:
+    ours = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code="ValueError"),
+        evaluated_at=NOW,
+    )
+    unknown = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=None),
+        evaluated_at=NOW,
+    )
+    misconfigured = _source_readiness(
+        _source_row(
+            latest_run_status="failed",
+            latest_run_error_code="CivilIotStaConfigurationError",
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert ours.status == "failed"
+    assert ours.reason_code == "run_failed"
+    assert unknown.reason_code == "run_failed"
+    assert misconfigured.reason_code == "run_failed"
+
+
+def test_source_readiness_sql_selects_the_latest_run_error_code() -> None:
+    assert "jobs.error_code AS latest_run_error_code" in _SOURCE_READINESS_SQL
+    assert "latest_runtime.latest_run_error_code" in _SOURCE_READINESS_SQL

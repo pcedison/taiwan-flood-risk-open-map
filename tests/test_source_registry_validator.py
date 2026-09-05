@@ -70,6 +70,51 @@ def test_checked_in_registry_covers_every_source_surface() -> None:
     assert sum(source["catalog_state"] != "absent" for source in sources) == 59
 
 
+def test_registry_records_the_open_civil_iot_upstream_incident() -> None:
+    _, sources = _registry()
+    quarantined = {
+        str(source["adapter_key"]): source.get("upstream_incident")
+        for source in sources
+        if source.get("upstream_incident") is not None
+    }
+
+    assert set(quarantined) == {
+        "official.civil_iot.flood_sensor",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+    }
+    assert all("HTTP 500" in str(note) for note in quarantined.values())
+
+
+def test_static_validator_accepts_the_optional_upstream_incident_note() -> None:
+    contracts, sources = _registry()
+    source = next(
+        item for item in sources if item["adapter_key"] == "official.cwa.rainfall"
+    )
+    source["upstream_incident"] = "2026-07-01 example upstream HTTP 500"
+
+    validator.validate_registry_schema(contracts, sources)
+
+
+def test_static_validator_still_rejects_unknown_source_fields() -> None:
+    contracts, sources = _registry()
+    sources[0]["not_a_registry_field"] = True
+
+    with pytest.raises(validator.SourceRegistryValidationError, match="fields differ"):
+        validator.validate_registry_schema(contracts, sources)
+
+
+def test_static_validator_rejects_a_blank_upstream_incident_note() -> None:
+    contracts, sources = _registry()
+    sources[0]["upstream_incident"] = "   "
+
+    with pytest.raises(
+        validator.SourceRegistryValidationError,
+        match="upstream_incident must be a non-empty string",
+    ):
+        validator.validate_registry_schema(contracts, sources)
+
+
 def test_static_validator_rejects_silent_deployment_default_drift() -> None:
     _, sources = _registry()
     source = next(

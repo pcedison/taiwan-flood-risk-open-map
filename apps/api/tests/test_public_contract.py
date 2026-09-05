@@ -578,6 +578,123 @@ def test_ingestion_readiness_contract_is_public_safe_and_fail_closed(
     assert_openapi_schema(payload, "IngestionReadinessResponse")
 
 
+def _full_readiness_snapshot(
+    *,
+    now: datetime,
+    failed_reason_codes: tuple[str, ...] = (),
+) -> IngestionReadinessSnapshot:
+    """A contract-complete snapshot: 12 sources, 22 operational counties.
+
+    ``failed_reason_codes`` replaces the first N sources with failed sources
+    carrying the given reason codes, so the summary and the top level status
+    can be exercised without any other contract gap in the way.
+    """
+
+    sources = []
+    for index in range(12):
+        reason_code = (
+            failed_reason_codes[index] if index < len(failed_reason_codes) else None
+        )
+        sources.append(
+            IngestionSourceReadiness(
+                adapter_key=f"official.example.source_{index}",
+                source_id=f"official-example-source-{index}",
+                name=f"示範來源 {index}",
+                coverage_kind="national_realtime",
+                status="failed" if reason_code else "operational",
+                reason_code=reason_code or "operational",
+                checked_at=now,
+                last_attempted_at=now,
+                last_succeeded_at=None if reason_code else now,
+                stale_after_seconds=1800,
+            )
+        )
+    jurisdictions = tuple(
+        IngestionJurisdictionReadiness(
+            county_code=f"{10000000 + index:08d}",
+            county=f"示範縣 {index}",
+            status="operational",
+            operational_signal_count=4,
+            degraded_signal_count=0,
+            unavailable_signal_count=0,
+        )
+        for index in range(22)
+    )
+    return IngestionReadinessSnapshot(
+        generated_at=now,
+        scheduler=IngestionSchedulerReadiness(
+            status="healthy",
+            checked_at=now,
+            last_heartbeat_at=now,
+            stale_after_seconds=600,
+        ),
+        sources=tuple(sources),
+        jurisdictions=jurisdictions,
+    )
+
+
+def test_ingestion_readiness_counts_upstream_outages_outside_failed_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    snapshot = _full_readiness_snapshot(
+        now=now,
+        failed_reason_codes=("upstream_unavailable",),
+    )
+    monkeypatch.setattr(public_routes, "fetch_ingestion_readiness", lambda **kwargs: snapshot)
+
+    payload = client.get("/v1/ingestion-readiness").json()
+
+    summary = payload["source_summary"]
+    assert summary["upstream_unavailable_source_count"] == 1
+    assert summary["failed_source_count"] == 0
+    assert summary["operational_source_count"] == 11
+    assert payload["status"] == "degraded"
+    assert_openapi_schema(payload, "IngestionReadinessResponse")
+
+
+def test_ingestion_readiness_keeps_counting_our_own_run_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    snapshot = _full_readiness_snapshot(now=now, failed_reason_codes=("run_failed",))
+    monkeypatch.setattr(public_routes, "fetch_ingestion_readiness", lambda **kwargs: snapshot)
+
+    payload = client.get("/v1/ingestion-readiness").json()
+
+    summary = payload["source_summary"]
+    assert summary["failed_source_count"] == 1
+    assert summary["upstream_unavailable_source_count"] == 0
+    assert payload["status"] == "degraded"
+
+
+def test_ingestion_readiness_stays_degraded_when_only_upstreams_are_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    upstream_only = _full_readiness_snapshot(
+        now=now,
+        failed_reason_codes=("upstream_unavailable",) * 12,
+    )
+    our_failure = _full_readiness_snapshot(
+        now=now,
+        failed_reason_codes=("run_failed",) * 12,
+    )
+
+    monkeypatch.setattr(
+        public_routes, "fetch_ingestion_readiness", lambda **kwargs: upstream_only
+    )
+    upstream_payload = client.get("/v1/ingestion-readiness").json()
+    monkeypatch.setattr(
+        public_routes, "fetch_ingestion_readiness", lambda **kwargs: our_failure
+    )
+    failure_payload = client.get("/v1/ingestion-readiness").json()
+
+    assert upstream_payload["status"] == "degraded"
+    assert upstream_payload["source_summary"]["upstream_unavailable_source_count"] == 12
+    assert failure_payload["status"] == "down"
+
+
 def test_ingestion_readiness_returns_503_when_repository_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1110,6 +1110,14 @@ def _pipeline_failure_decision(
             "背景來源在限定時間內未完成回應；未公開內部連線資訊。",
         )
     if (row.latest_run_error_code or "").endswith(
+        ("HTTPError", "URLError", "RemoteDisconnected", "ConnectionError")
+    ):
+        return _source_decision(
+            "failed",
+            "upstream_unavailable",
+            "上游服務目前回應錯誤；本站每輪重試中，未公開內部連線資訊。",
+        )
+    if (row.latest_run_error_code or "").endswith(
         ("FetchError", "HttpError", "PayloadError")
     ):
         return _source_decision(

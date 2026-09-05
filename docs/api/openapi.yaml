@@ -3153,6 +3153,7 @@ components:
         - degraded_source_count
         - stale_source_count
         - failed_source_count
+        - upstream_unavailable_source_count
         - disabled_source_count
         - missing_source_count
       properties:
@@ -3161,6 +3162,7 @@ components:
         degraded_source_count: {type: integer, minimum: 0}
         stale_source_count: {type: integer, minimum: 0}
         failed_source_count: {type: integer, minimum: 0}
+        upstream_unavailable_source_count: {type: integer, minimum: 0, default: 0}
         disabled_source_count: {type: integer, minimum: 0}
         missing_source_count: {type: integer, minimum: 0}
         latest_success_at:
