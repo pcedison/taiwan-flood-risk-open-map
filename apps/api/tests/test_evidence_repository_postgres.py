@@ -21,6 +21,7 @@ from app.domain.evidence import (
     query_nearby_recent_context,
 )
 from app.domain.evidence.repository import (
+    query_nearby_realtime_coverage_rows,
     query_realtime_jurisdiction_context,
     query_realtime_source_health_rows,
 )
@@ -2064,3 +2065,146 @@ def test_recent_context_reader_returns_only_latest_active_recent_in_radius_rows(
             )
             == ()
         )
+
+
+def _prepare_coverage_schema(database_url: str) -> None:
+    with psycopg.connect(database_url) as connection:
+        connection.execute(
+            """
+            CREATE TABLE data_sources (
+                id uuid PRIMARY KEY,
+                adapter_key text NOT NULL UNIQUE,
+                is_enabled boolean NOT NULL,
+                metadata jsonb NOT NULL DEFAULT '{}'::jsonb
+            );
+            CREATE TABLE evidence (
+                id uuid PRIMARY KEY,
+                data_source_id uuid,
+                source_id text NOT NULL,
+                source_type text NOT NULL,
+                event_type text NOT NULL,
+                observed_at timestamptz,
+                ingested_at timestamptz NOT NULL DEFAULT now(),
+                geom geometry(Geometry, 4326),
+                privacy_level text NOT NULL DEFAULT 'public',
+                ingestion_status text NOT NULL DEFAULT 'accepted',
+                properties jsonb NOT NULL DEFAULT '{}'::jsonb
+            );
+            CREATE TABLE official_realtime_latest (
+                source_id text NOT NULL,
+                adapter_key text NOT NULL,
+                event_type text NOT NULL,
+                station_id text NOT NULL,
+                observed_at timestamptz NOT NULL,
+                ingested_at timestamptz NOT NULL DEFAULT now(),
+                geom geometry(Point, 4326) NOT NULL,
+                rainfall_mm_1h double precision,
+                water_level_m double precision,
+                warning_level_m double precision,
+                flood_depth_cm double precision,
+                PRIMARY KEY (adapter_key, event_type, station_id)
+            )
+            """
+        )
+
+
+def test_coverage_supplement_budget_does_not_change_returned_rows() -> None:
+    """The capped evidence supplement must be transparent when the scan finishes.
+
+    ``query_nearby_realtime_coverage_rows`` gives the ``evidence`` supplement a
+    reduced statement budget once ``official_realtime_latest`` has answered.  On
+    any dataset small enough for that scan to complete, the merged result must be
+    byte-identical to the result under an effectively unbounded budget.
+    """
+
+    database_url = _database_url()
+    observed_at = datetime.now(UTC) - timedelta(minutes=5)
+    with _isolated_schema(database_url) as isolated_url:
+        _prepare_coverage_schema(isolated_url)
+        rainfall_source = uuid4()
+        water_source = uuid4()
+        with psycopg.connect(isolated_url) as connection:
+            connection.execute(
+                """
+                INSERT INTO data_sources (id, adapter_key, is_enabled, metadata)
+                VALUES (%s, 'official.cwa.rainfall', true, '{}'::jsonb),
+                       (%s, 'official.wra.water_level', true, '{}'::jsonb)
+                """,
+                (rainfall_source, water_source),
+            )
+            # Two stations the projection knows about, plus one it does not, so
+            # the merge genuinely depends on the evidence supplement.
+            connection.execute(
+                """
+                INSERT INTO official_realtime_latest (
+                    source_id, adapter_key, event_type, station_id,
+                    observed_at, ingested_at, geom, rainfall_mm_1h
+                )
+                VALUES (
+                    'cwa-rainfall:C0A520', 'official.cwa.rainfall', 'rainfall',
+                    'C0A520', %s, %s,
+                    ST_SetSRID(ST_MakePoint(120.3020, 22.6280), 4326), 4.5
+                )
+                """,
+                (observed_at, observed_at),
+            )
+            for index, (source_uuid, adapter, event_type, station, lng) in enumerate(
+                (
+                    (rainfall_source, "official.cwa.rainfall", "rainfall", "C0A520", 120.3020),
+                    (water_source, "official.wra.water_level", "water_level", "W001", 120.3035),
+                    (water_source, "official.wra.water_level", "water_level", "W002", 120.3050),
+                )
+            ):
+                # Several retained observations per station: the query must keep
+                # only the newest, exactly as it does on the production table.
+                for offset in range(4):
+                    connection.execute(
+                        """
+                        INSERT INTO evidence (
+                            id, data_source_id, source_id, source_type, event_type,
+                            observed_at, ingested_at, geom, privacy_level,
+                            ingestion_status, properties
+                        )
+                        VALUES (
+                            %s, %s, %s, 'official', %s, %s, %s,
+                            ST_SetSRID(ST_MakePoint(%s, 22.6280), 4326),
+                            'public', 'accepted', %s
+                        )
+                        """,
+                        (
+                            uuid4(),
+                            source_uuid,
+                            f"{adapter}:{station}:{offset}",
+                            event_type,
+                            observed_at - timedelta(minutes=10 * offset),
+                            observed_at - timedelta(minutes=10 * offset),
+                            lng + index * 0.0001,
+                            Jsonb({"station_id": station}),
+                        ),
+                    )
+
+        def _identity(rows: tuple) -> list[tuple]:
+            return [
+                (row.adapter_key, row.event_type, row.station_id, row.source_id)
+                for row in rows
+            ]
+
+        capped = query_nearby_realtime_coverage_rows(
+            database_url=isolated_url,
+            lat=22.6273,
+            lng=120.3014,
+            observed_since=None,
+        )
+        unbounded = query_nearby_realtime_coverage_rows(
+            database_url=isolated_url,
+            lat=22.6273,
+            lng=120.3014,
+            observed_since=None,
+            statement_timeout_ms=0,
+        )
+
+        # The supplement contributes the two stations missing from the projection.
+        assert len(capped) == 3
+        assert _identity(capped) == _identity(unbounded)
+        # Only the newest observation per station survives the DISTINCT ON.
+        assert all(row.source_id.endswith(":0") for row in capped if row.station_id != "C0A520")

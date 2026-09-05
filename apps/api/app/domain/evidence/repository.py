@@ -46,6 +46,11 @@ _RECENT_INCIDENT_CONTEXT_SUPPRESSED_STATES = ("resolved", "excluded")
 _LATEST_OFFICIAL_RELATION = "official_realtime_latest"
 _DEFAULT_FRESHNESS_THRESHOLD_SECONDS = 1800
 _MAX_FRESHNESS_THRESHOLD_SECONDS = 86_400
+# Budget for the evidence coverage supplement when official_realtime_latest
+# already answered.  Measured against a production-shaped fixture, that scan
+# needs ~950 ms warm and never finishes inside the request budget on the
+# 2 GB production node, so the rows it would add are discarded either way.
+_COVERAGE_EVIDENCE_SUPPLEMENT_TIMEOUT_MS = 250
 
 
 class EvidenceRepositoryUnavailable(RuntimeError):
@@ -1368,7 +1373,10 @@ def query_nearby_realtime_coverage_rows(
             lng=lng,
             radius_buckets_m=radius_buckets_m,
             observed_since=observed_since,
-            statement_timeout_ms=statement_timeout_ms,
+            statement_timeout_ms=_coverage_evidence_timeout_ms(
+                statement_timeout_ms,
+                latest_rows=latest_rows,
+            ),
             connection_factory=connection_factory,
         )
     except EvidenceRepositoryUnavailable:
@@ -1376,6 +1384,33 @@ def query_nearby_realtime_coverage_rows(
             return latest_rows
         raise
     return _merge_nearby_coverage_rows(latest_rows, evidence_rows)
+
+
+def _coverage_evidence_timeout_ms(
+    statement_timeout_ms: int,
+    *,
+    latest_rows: tuple[NearbyCoverageRow, ...],
+) -> int:
+    """Budget the evidence coverage scan against the authoritative projection.
+
+    ``official_realtime_latest`` holds exactly one bounded row per station and
+    answers this query in single-digit milliseconds.  The ``evidence`` scan is a
+    supplement that only matters for stations the projection has not captured,
+    yet it has to read every retained observation inside the 15 km bucket --
+    roughly 116k rows on a production-sized table -- to keep the newest row per
+    station.  On production that scan already exhausts the whole statement
+    budget and its result is discarded by its caller, so the request pays
+    the full timeout for nothing.
+
+    When the projection answered, cap the supplement so an unfinishable scan is
+    abandoned early instead of burning the entire budget.  When the projection
+    returned nothing the evidence table is the only remaining source, so it
+    keeps the full budget and the fallback behaviour is unchanged.
+    """
+
+    if not latest_rows or statement_timeout_ms <= 0:
+        return statement_timeout_ms
+    return min(statement_timeout_ms, _COVERAGE_EVIDENCE_SUPPLEMENT_TIMEOUT_MS)
 
 
 def query_realtime_source_health_rows(
