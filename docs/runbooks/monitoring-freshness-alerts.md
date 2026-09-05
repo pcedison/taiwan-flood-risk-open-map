@@ -810,6 +810,24 @@ rows include the request type, completion target count, required read API
 fields, accepted completion statuses, and public counterparty label when
 available. They do not include tokens, private evidence refs, manifests, or
 official correspondence.
+
+Comments on that issue are deduplicated by
+`scripts/ci/local-source-watchdog-state.js`. Each run hashes the request packet
+bundle together with the watchdog report `status` and `summary` counts, and
+compares that digest with the state marker at the end of the issue body:
+
+    <!-- dispatch-state: {"digest":...,"first_seen_at":...,"last_seen_at":...,"last_comment_at":...,"occurrences":N} -->
+
+A new comment is added only when the digest changes or when seven days have
+passed since the last comment. Otherwise the run rewrites the issue body with
+the newest report and bumps `last_seen_at` and `occurrences`, so the issue
+always shows current state without growing a comment per day. The bundle
+digest deliberately ignores the per-run `captured_at` stamp; without that, every
+run would look different and nothing would be deduplicated. To see why a run
+stayed quiet, read the marker, or run the helper locally:
+
+    node scripts/ci/local-source-watchdog-state.js --print-digest --bundle-dir artifacts/request-packet-bundle --report-file artifacts/local-source-dispatch-watchdog.json
+
 The next steps point operators to review the request packet bundle, send
 signal-family and source-contract follow-up requests, then store reviewed
 dispatch progress in

@@ -7,11 +7,18 @@
  * one comment per run to the same issue even when nothing had changed; issue
  * #71 in this repository collected 18 comments that all said the same thing.
  *
- * The identity of a run is the request-packet bundle it produced: when the
- * bundle is byte-identical to the previous run's, the operator has nothing new
- * to act on. State is stored in an HTML comment at the end of the issue body,
- * the same trick `scripts/ci/route-alert-issue.js` uses, so no external storage
- * is needed and a human can still read it.
+ * The identity of a run is everything the issue asks the operator to act on:
+ * the request-packet bundle it produced, plus the watchdog report's `status`
+ * and `summary` counts. The bundle alone is not enough -- it is rebuilt from
+ * the repository's static catalog and a reviewed-evidence secret, so it holds
+ * steady for weeks, while the status and the counts come from live discovery
+ * and are the part that actually moves. Hashing only the bundle would keep
+ * suppressing comments even after the status flipped to
+ * `watchdog_failed_before_report` or the pending counts changed.
+ *
+ * State is stored in an HTML comment at the end of the issue body, the same
+ * trick `scripts/ci/route-alert-issue.js` uses, so no external storage is
+ * needed and a human can still read it.
  */
 
 const crypto = require("crypto");
@@ -22,7 +29,7 @@ const DEFAULT_BACKOFF_DAYS = 7;
 const DEFAULT_BUNDLE_DIR = "artifacts/request-packet-bundle";
 const STATE_PREFIX = "<!-- dispatch-state: ";
 const STATE_SUFFIX = " -->";
-const STATE_PATTERN = /<!-- dispatch-state: (\{[\s\S]*?\}) -->/;
+const STATE_PATTERN = /<!-- dispatch-state: (\{[\s\S]*?\}) -->/g;
 
 // Every bundle file stamps the run's wall clock into `captured_at`. Hashing it
 // would make every run look different and defeat the deduplication, so it is
@@ -85,13 +92,43 @@ function bundleDigest(bundleDir = DEFAULT_BUNDLE_DIR) {
   return hash.digest("hex");
 }
 
+/**
+ * SHA-256 over everything the issue asks the operator to act on.
+ *
+ * That is the bundle plus the watchdog report's `status` and `summary` counts,
+ * which the issue body quotes and which the bundle digest cannot see.
+ *
+ * @param {object} [options]
+ * @param {string} [options.bundleDir]
+ * @param {string} [options.status] watchdog report status for this run
+ * @param {object} [options.summary] watchdog report summary counts
+ * @returns {string} hex digest
+ */
+function dispatchDigest({
+  bundleDir = DEFAULT_BUNDLE_DIR,
+  status = "",
+  summary = {},
+} = {}) {
+  return crypto
+    .createHash("sha256")
+    .update(`bundle\n${bundleDigest(bundleDir)}\n`)
+    .update(`report\n${JSON.stringify(canonicalize({ status, summary }))}\n`)
+    .digest("hex");
+}
+
+/**
+ * Read the state marker from an issue body.
+ *
+ * The last marker wins: an older one can survive earlier in the body when a
+ * human edits the issue, and the newest is the one this helper wrote.
+ */
 function parseState(body) {
-  const match = STATE_PATTERN.exec(body || "");
-  if (!match) {
+  const matches = [...(body || "").matchAll(STATE_PATTERN)];
+  if (matches.length === 0) {
     return {};
   }
   try {
-    return JSON.parse(match[1]);
+    return JSON.parse(matches[matches.length - 1][1]);
   } catch {
     return {};
   }
@@ -131,6 +168,8 @@ function decideDispatchComment({
   const backoffMs = backoffDays * 24 * 60 * 60 * 1000;
   const backoffElapsed =
     !Number.isFinite(lastCommentAt) || nowDate.getTime() - lastCommentAt >= backoffMs;
+  // A JSON round-trip has turned this counter into a string before now.
+  const previousOccurrences = Number(previous.occurrences);
 
   let reason;
   if (!sameDigest) {
@@ -149,7 +188,7 @@ function decideDispatchComment({
     last_seen_at: nowIso,
     last_comment_at: shouldComment ? nowIso : previous.last_comment_at || nowIso,
     occurrences:
-      sameDigest && Number.isFinite(previous.occurrences) ? previous.occurrences + 1 : 1,
+      sameDigest && Number.isFinite(previousOccurrences) ? previousOccurrences + 1 : 1,
   };
 
   const content =
@@ -185,8 +224,22 @@ function readFileArg(value) {
 
 function main(argv) {
   const args = parseArgs(argv);
+  let report = {};
+  if (typeof args["report-file"] === "string") {
+    try {
+      report = JSON.parse(fs.readFileSync(args["report-file"], "utf8"));
+    } catch {
+      report = {};
+    }
+  }
   const digest =
-    typeof args.digest === "string" ? args.digest : bundleDigest(args["bundle-dir"] || DEFAULT_BUNDLE_DIR);
+    typeof args.digest === "string"
+      ? args.digest
+      : dispatchDigest({
+          bundleDir: args["bundle-dir"] || DEFAULT_BUNDLE_DIR,
+          status: typeof report.status === "string" ? report.status : "",
+          summary: report.summary || {},
+        });
   if (args["print-digest"]) {
     process.stdout.write(`${digest}\n`);
     return;
@@ -213,6 +266,7 @@ module.exports = {
   DEFAULT_BUNDLE_DIR,
   bundleDigest,
   decideDispatchComment,
+  dispatchDigest,
   parseState,
   renderBody,
 };

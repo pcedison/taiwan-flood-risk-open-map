@@ -216,3 +216,111 @@ def test_bundle_digest_of_a_missing_directory_is_distinct_and_stable(
         missing_digest
         != _run(["--bundle-dir", str(populated), "--print-digest"]).strip()
     )
+
+
+def _write_bundle(bundle: Path) -> None:
+    bundle.mkdir()
+    (bundle / "local-source-request-dispatch-queue.json").write_text(
+        json.dumps(
+            {
+                "captured_at": "2026-09-01T00:00:00Z",
+                "queue": [{"queue_id": "q1", "request_type": "signal_gap"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _report(tmp_path: Path, name: str, status: str, groups: int) -> Path:
+    report = tmp_path / name
+    report.write_text(
+        json.dumps(
+            {
+                "captured_at": "2026-09-01T00:00:00Z",
+                "status": status,
+                "summary": {
+                    "dispatch_required": status == "dispatch_required",
+                    "signal_gap_dispatch_recommended_group_count": groups,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return report
+
+
+def test_digest_tracks_the_watchdog_status_even_when_the_bundle_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    """The bundle barely moves; the live status and counts are what change."""
+    bundle = tmp_path / "bundle"
+    _write_bundle(bundle)
+
+    def digest_for(report: Path) -> str:
+        return _run(
+            [
+                "--bundle-dir",
+                str(bundle),
+                "--report-file",
+                str(report),
+                "--print-digest",
+            ]
+        ).strip()
+
+    dispatch_required = digest_for(_report(tmp_path, "a.json", "dispatch_required", 3))
+    same_again = digest_for(_report(tmp_path, "b.json", "dispatch_required", 3))
+    failed_early = digest_for(
+        _report(tmp_path, "c.json", "watchdog_failed_before_report", 3)
+    )
+    more_groups = digest_for(_report(tmp_path, "d.json", "dispatch_required", 4))
+
+    assert dispatch_required == same_again
+    assert failed_early != dispatch_required
+    assert more_groups != dispatch_required
+
+    # A status flip one day later still earns a comment, backoff notwithstanding.
+    out = _decide(
+        tmp_path,
+        digest=failed_early,
+        body=_body_with_state(_prior_state(digest=dispatch_required)),
+        now="2026-09-02T00:00:00Z",
+    )
+    assert out["shouldComment"] is True
+    assert out["reason"] == "digest_changed"
+
+    # An unchanged status and bundle stays suppressed.
+    quiet = _decide(
+        tmp_path,
+        digest=same_again,
+        body=_body_with_state(_prior_state(digest=dispatch_required)),
+        now="2026-09-02T00:00:00Z",
+    )
+    assert quiet["shouldComment"] is False
+    assert quiet["reason"] == "suppressed"
+
+
+def test_the_last_state_marker_in_the_body_wins(tmp_path: Path) -> None:
+    stale = json.dumps(_prior_state(digest=DIGEST_B, occurrences=99))
+    body = (
+        f"a human pasted an old body\n\n<!-- dispatch-state: {stale} -->\n\n"
+        + _body_with_state(_prior_state(occurrences=4))
+    )
+    out = _decide(tmp_path, digest=DIGEST_A, body=body, now="2026-09-02T00:00:00Z")
+
+    assert out["reason"] == "suppressed"
+    assert _state_of(out["newBody"])["occurrences"] == 5
+    # Stale markers do not survive the rewrite.
+    assert out["newBody"].count("<!-- dispatch-state:") == 1
+
+
+def test_occurrences_survives_a_json_round_trip_as_a_string(tmp_path: Path) -> None:
+    state = _prior_state()
+    state["occurrences"] = "4"
+    out = _decide(
+        tmp_path,
+        digest=DIGEST_A,
+        body=_body_with_state(state),
+        now="2026-09-02T00:00:00Z",
+    )
+
+    assert _state_of(out["newBody"])["occurrences"] == 5
