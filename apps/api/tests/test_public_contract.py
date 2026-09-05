@@ -1,6 +1,8 @@
 import inspect
 import json
+import logging
 import warnings
+from io import StringIO
 from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -27,6 +29,7 @@ from app.api.schemas import (
 from app.api.services import public_layers as public_layer_service
 from app.api.services import public_response_cache
 from app.api.services.assessment import AssessmentService
+from app.core import logging as app_logging
 from app.core.config import get_settings
 from app.domain.assessment import AssessmentData, AssessmentSourceState
 from app.domain.evidence import (
@@ -1578,7 +1581,7 @@ def test_settings_response_cache_round_trips_through_the_memory_backend() -> Non
         other_radius_request = _cache_key_request(radius_m=1000)
         response = AssessmentService(RouteRepository(_route_data()), score_risk).assess(
             request, now=ROUTE_NOW
-        )
+        ).response
 
         assert cache.get(request, now=ROUTE_NOW) is None
 
@@ -1609,8 +1612,8 @@ def test_assessment_service_serves_the_second_request_from_the_response_cache(
         )
         request = _cache_key_request()
 
-        first = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW)
-        second = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW)
+        first = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW).response
+        second = public_routes._assessment_service(settings).assess(request, now=ROUTE_NOW).response
 
         assert second.assessment_id == first.assessment_id
         assert len(repository.loads) == 1
@@ -2535,3 +2538,122 @@ def test_cors_rejects_unknown_web_origin() -> None:
     )
 
     assert response.status_code == 400
+
+
+_ASSESS_BODY = {
+    "point": {"lat": 22.99974, "lng": 120.22704},
+    "radius_m": 750,
+    "time_context": "now",
+}
+
+
+class _StubResponseCache:
+    def __init__(self) -> None:
+        self.stored: RiskAssessmentResponse | None = None
+
+    def get(
+        self, _request: RiskAssessRequest, *, now: datetime
+    ) -> RiskAssessmentResponse | None:
+        return self.stored
+
+    def set(
+        self,
+        _request: RiskAssessRequest,
+        response: RiskAssessmentResponse,
+        *,
+        now: datetime,
+    ) -> None:
+        self.stored = response
+
+
+def test_risk_assess_reports_per_phase_server_timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_route_data(monkeypatch, replace(_route_data(), timings_ms={"db_latest": 12.3}))
+
+    response = client.post("/v1/risk/assess", json=_ASSESS_BODY)
+
+    assert response.status_code == 200
+    server_timing = response.headers["Server-Timing"]
+    assert "db_latest;dur=12.3" in server_timing
+    assert "scoring;dur=" in server_timing
+    assert "persist;dur=" in server_timing
+    assert server_timing.split(", ")[-1].startswith("total;dur=")
+    assert "cache_hit" not in server_timing
+    assert_openapi_schema(response.json(), "RiskAssessmentResponse")
+
+
+def test_risk_assess_marks_a_response_cache_hit_in_server_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AssessmentService(
+        RouteRepository(_route_data()),
+        score_risk,
+        response_cache=_StubResponseCache(),
+    )
+    monkeypatch.setattr(public_routes, "_assessment_service", lambda _settings: service)
+    monkeypatch.setattr(public_routes, "_now", lambda: ROUTE_NOW)
+
+    first = client.post("/v1/risk/assess", json=_ASSESS_BODY)
+    second = client.post("/v1/risk/assess", json=_ASSESS_BODY)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert "cache_hit" not in first.headers["Server-Timing"]
+    server_timing = second.headers["Server-Timing"]
+    assert 'cache_hit;desc="true"' in server_timing
+    assert "cache_get;dur=" in server_timing
+    assert "scoring;dur=" not in server_timing
+    assert server_timing.split(", ")[-1].startswith("total;dur=")
+    assert second.json()["assessment_id"] == first.json()["assessment_id"]
+
+
+def _event_log_handler() -> logging.Handler:
+    logger = logging.getLogger(app_logging._EVENT_LOGGER_NAME)
+    return next(
+        handler
+        for handler in logger.handlers
+        if handler.get_name() == app_logging._HANDLER_NAME
+    )
+
+
+def test_event_logger_can_emit_without_any_external_logging_config() -> None:
+    logger = logging.getLogger(app_logging._EVENT_LOGGER_NAME)
+
+    # Nothing in this service or in uvicorn's default config gives the root
+    # logger a handler, so the event logger must carry its own.
+    assert logger.handlers
+    assert logger.isEnabledFor(logging.INFO)
+    assert logger.propagate is False
+
+
+def test_risk_assess_timings_log_is_one_json_line_without_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_route_data(monkeypatch, replace(_route_data(), timings_ms={"db_latest": 12.3}))
+    stream = StringIO()
+    monkeypatch.setattr(_event_log_handler(), "stream", stream)
+
+    assert client.post("/v1/risk/assess", json=_ASSESS_BODY).status_code == 200
+
+    written = stream.getvalue()
+    lines = written.strip().splitlines()
+    assert len(lines) == 1
+    payload = json.loads(lines[0])
+    assert payload["event"] == "api.risk.assess.timings"
+    assert payload["cache_hit"] is False
+    assert payload["db_latest"] == 12.3
+    assert payload["total"] >= 0
+    assert not {"lat", "lng", "point", "location", "location_text"} & set(payload)
+    for coordinate in ("22.99974", "120.22704"):
+        assert coordinate not in written
+
+
+def test_server_timing_is_readable_by_the_browser_cross_origin() -> None:
+    response = client.post(
+        "/v1/risk/assess",
+        json=_ASSESS_BODY,
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 200
+    assert "Server-Timing" in response.headers["access-control-expose-headers"]
+    assert response.headers["Timing-Allow-Origin"] == "*"

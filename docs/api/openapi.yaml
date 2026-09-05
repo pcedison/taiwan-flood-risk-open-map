@@ -183,6 +183,16 @@ paths:
       responses:
         "200":
           description: Flood risk assessment with evidence preview and freshness metadata.
+          headers:
+            Server-Timing:
+              description: >
+                Per-phase server latency in milliseconds for operators, for
+                example `db_latest;dur=812.4, scoring;dur=3.1, total;dur=980.2`.
+                A response served from the assessment response cache carries
+                `cache_hit;desc="true"`. Diagnostic only; the metric names are
+                not a stable public contract.
+              schema:
+                type: string
           content:
             application/json:
               schema:

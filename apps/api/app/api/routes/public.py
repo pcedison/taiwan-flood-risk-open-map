@@ -1,11 +1,12 @@
 import json
+import time
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Literal
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi import Request as FastAPIRequest
 
 from app.api.errors import error_payload
@@ -46,6 +47,7 @@ from app.domain.history.news_enrichment import (
     TAIWAN_OFFICIAL_HISTORY_ADAPTER_KEY,
 )
 from app.core.config import Settings, get_settings
+from app.core.logging import log_event
 from app.domain.assessment import PostgresAssessmentRepository
 from app.domain.evidence import fetch_assessment_evidence
 from app.domain.geocoding import build_open_data_geocoder
@@ -567,6 +569,7 @@ def _historical_coverage_response(
 def assess_risk(
     request: RiskAssessRequest,
     http_request: FastAPIRequest,
+    response: Response,
 ) -> RiskAssessmentResponse:
     settings = get_settings()
     _enforce_public_rate_limit(
@@ -576,7 +579,29 @@ def assess_risk(
         max_requests=settings.risk_assessment_rate_limit_max_requests,
         endpoint_name="Risk assessment",
     )
-    return _assessment_service(settings).assess(request, now=_now())
+    started = time.perf_counter()
+    outcome = _assessment_service(settings).assess(request, now=_now())
+    timings_ms = {
+        **outcome.timings_ms,
+        "total": round((time.perf_counter() - started) * 1000, 1),
+    }
+    response.headers["Server-Timing"] = _server_timing(timings_ms, cache_hit=outcome.cache_hit)
+    # Phase durations carry no user or location data, so any origin may read them.
+    response.headers["Timing-Allow-Origin"] = "*"
+    log_event("api.risk.assess.timings", cache_hit=outcome.cache_hit, **timings_ms)
+    return outcome.response
+
+
+def _server_timing(timings_ms: dict[str, float], *, cache_hit: bool) -> str:
+    """Render one phase per metric, with ``total`` last, per the Server-Timing header."""
+
+    parts = [
+        f"{phase};dur={duration}" for phase, duration in timings_ms.items() if phase != "total"
+    ]
+    if cache_hit:
+        parts.append('cache_hit;desc="true"')
+    parts.append(f"total;dur={timings_ms['total']}")
+    return ", ".join(parts)
 
 
 def _response_cache_key(request: RiskAssessRequest, settings: Settings) -> str:

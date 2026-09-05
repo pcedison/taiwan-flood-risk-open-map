@@ -37,6 +37,9 @@ class AssessmentData:
     resolved_admin_name: str | None
     local_machine_feed_missing: tuple[str, ...]
     recent_incident_context: tuple[EvidenceRecord, ...] = field(default_factory=tuple)
+    # Internal latency profile in milliseconds, keyed by read phase.  Never part
+    # of any public payload; see docs/runbooks/assess-latency-profiling.md.
+    timings_ms: dict[str, float] = field(default_factory=dict, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
