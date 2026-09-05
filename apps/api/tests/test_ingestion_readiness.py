@@ -255,3 +255,35 @@ def test_source_readiness_sql_reads_observations_and_catalog_threshold() -> None
     assert "official_realtime_latest" in _SOURCE_READINESS_SQL
     assert "latest_observed_at" in _SOURCE_READINESS_SQL
     assert "'freshness_threshold_seconds'" in _SOURCE_READINESS_SQL
+
+
+def test_upstream_stale_exempts_warning_and_static_cadence_sources() -> None:
+    warning = _source_readiness(
+        _source_row(
+            adapter_key="official.ncdr.cap",
+            latest_observed_at=NOW - timedelta(days=4),
+        ),
+        evaluated_at=NOW,
+    )
+    heavy_rain = _source_readiness(
+        _source_row(
+            adapter_key="official.cwa.heavy_rain_warning",
+            latest_observed_at=NOW - timedelta(days=4),
+        ),
+        evaluated_at=NOW,
+    )
+    history = _source_readiness(
+        _source_row(
+            adapter_key="official.wra.historical_flood",
+            coverage_kind="nationwide_history",
+            stale_after_seconds=90000,
+            latest_run_at=NOW - timedelta(hours=23),
+            runtime_pipeline_run_at=NOW - timedelta(hours=23),
+            latest_observed_at=NOW - timedelta(days=3650),
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert warning.status == "operational"
+    assert heavy_rain.status == "operational"
+    assert history.status == "operational"

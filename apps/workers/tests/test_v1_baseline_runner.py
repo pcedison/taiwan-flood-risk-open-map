@@ -1169,3 +1169,48 @@ def test_upstream_freshness_alert_is_an_advisory_not_a_source_failure(
     )
     assert tick["failed_count"] == 0
     assert tick["completed_count"] == 1
+
+
+def test_source_failure_is_stamped_with_its_own_run_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure stamped before its batch is dropped by the pipeline writer."""
+
+    writer = _install_tick_writer(monkeypatch)
+    summary_started_at = datetime(2026, 9, 3, 11, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(
+        runtime_cli,
+        "build_runtime_adapters",
+        lambda settings: {SOURCE_A: _Adapter(SOURCE_A)},
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "v1_baseline_eligible_adapter_keys",
+        lambda _settings: (SOURCE_A,),
+    )
+    monkeypatch.setattr(
+        runtime_cli,
+        "run_v1_baseline_adapter_cycle",
+        lambda *_args, **_kwargs: ManagedRuntimeIngestionResult(
+            status="failed",
+            summaries=(
+                SimpleNamespace(
+                    adapter_key=SOURCE_A,
+                    started_at=summary_started_at,
+                    status="failed",
+                ),
+            ),
+        ),
+    )
+    monkeypatch.setattr(runtime_cli, "log_event", lambda *_args, **_kwargs: None)
+
+    failed = runtime_cli._run_v1_baseline_tick(
+        settings=replace(load_worker_settings({}), enabled_adapter_keys=(SOURCE_A,)),
+        database_url="postgresql://example.test/flood",
+        job_key="test",
+    )
+
+    assert failed is True
+    assert writer.pipeline_statuses[0]["status"] == "failed"
+    assert writer.pipeline_statuses[0]["run_at"] == summary_started_at

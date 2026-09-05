@@ -18,6 +18,15 @@ MAX_FRESHNESS_THRESHOLD_SECONDS = 86400
 # An upstream feed is only called stalled once it has missed several publication
 # windows, matching the public nearby-coverage diagnosis.
 UPSTREAM_STALE_THRESHOLD_MULTIPLIER = 3
+# Warning feeds only publish while an event is active, so their newest
+# observation is legitimately old between events.  Mirrors the worker's
+# WARNING_EVENT_ADAPTER_KEYS.
+UPSTREAM_STALE_EXEMPT_ADAPTER_KEYS = frozenset(
+    {"official.ncdr.cap", "official.cwa.heavy_rain_warning"}
+)
+# Nationwide history refreshes on a daily-or-slower cadence over decade-old
+# events; observation age says nothing about the publisher there.
+UPSTREAM_STALE_EXEMPT_COVERAGE_KINDS = frozenset({"nationwide_history"})
 
 # Adapter failures are persisted as the raised exception class name in
 # ``ingestion_jobs.error_code``. Suffix matching keeps one public-safe answer to
@@ -332,6 +341,10 @@ def _upstream_stale(row: dict[str, object], *, evaluated_at: datetime) -> bool:
     diagnosis honest and stops monitoring from paging on a foreign outage.
     """
 
+    if str(row.get("adapter_key") or "") in UPSTREAM_STALE_EXEMPT_ADAPTER_KEYS:
+        return False
+    if str(row.get("coverage_kind") or "") in UPSTREAM_STALE_EXEMPT_COVERAGE_KINDS:
+        return False
     observed_at = cast(datetime | None, row.get("latest_observed_at"))
     if observed_at is None:
         return False

@@ -25,6 +25,7 @@ from app.jobs.historical_coverage import (
     PostgresHistoricalCoverageWriter,
 )
 from app.jobs.ingestion import (
+    AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
     record_pipeline_status,
     record_runtime_selection,
@@ -480,7 +481,11 @@ def _run_v1_baseline_tick(
                 _record_v1_source_failure(
                     run_writer,
                     adapter_key=adapter_key,
-                    run_at=source_started_at,
+                    run_at=_v1_source_failure_run_at(
+                        result.summaries,
+                        adapter_key=adapter_key,
+                        fallback=source_started_at,
+                    ),
                 )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
@@ -571,6 +576,25 @@ def _run_v1_baseline_tick(
         gated_off_count=gated_off_count,
     )
     return had_failure
+
+
+def _v1_source_failure_run_at(
+    summaries: tuple[AdapterBatchRunSummary, ...],
+    *,
+    adapter_key: str,
+    fallback: datetime,
+) -> datetime:
+    """Stamp the failure with the run generation it describes.
+
+    ``write_pipeline_status`` refuses a status older than the recorded pipeline
+    run, so a failure stamped before its own batch would be silently dropped and
+    the source would keep reporting the cycle-level success.
+    """
+
+    started = [
+        summary.started_at for summary in summaries if summary.adapter_key == adapter_key
+    ]
+    return max(started) if started else fallback
 
 
 def _record_v1_source_failure(

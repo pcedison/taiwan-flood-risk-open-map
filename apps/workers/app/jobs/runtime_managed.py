@@ -707,6 +707,10 @@ def _record_pipeline_status_for_adapter_keys(
     summary_by_key = {summary.adapter_key: summary for summary in summaries}
     for adapter_key in adapter_keys:
         summary = summary_by_key.get(adapter_key)
+        if status == "succeeded" and (summary is None or summary.status == "failed"):
+            # A failed or absent batch already carries its own pipeline failure.
+            # Promoting the cycle-level success over it would hide the fault.
+            continue
         active_snapshot_raw_ref = (
             summary.raw_ref
             if (
