@@ -695,6 +695,61 @@ def test_ingestion_readiness_stays_degraded_when_only_upstreams_are_down(
     assert failure_payload["status"] == "down"
 
 
+def test_ingestion_readiness_stays_down_when_our_own_failure_joins_an_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Fail closed: an outage only excuses the sources the outage actually took
+    # out. With nothing operational and one of our own failures in the mix the
+    # deployment is still down, exactly as it was before outages were split out.
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    mixed = _full_readiness_snapshot(
+        now=now,
+        failed_reason_codes=("run_failed",) + ("upstream_unavailable",) * 11,
+    )
+    monkeypatch.setattr(public_routes, "fetch_ingestion_readiness", lambda **kwargs: mixed)
+
+    payload = client.get("/v1/ingestion-readiness").json()
+
+    assert payload["source_summary"]["operational_source_count"] == 0
+    assert payload["source_summary"]["upstream_unavailable_source_count"] == 11
+    assert payload["source_summary"]["failed_source_count"] == 1
+    assert payload["status"] == "down"
+
+
+def test_ingestion_readiness_stays_down_when_a_contract_change_joins_an_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    mixed = _full_readiness_snapshot(
+        now=now,
+        failed_reason_codes=("upstream_contract_changed",)
+        + ("upstream_unavailable",) * 11,
+    )
+    monkeypatch.setattr(public_routes, "fetch_ingestion_readiness", lambda **kwargs: mixed)
+
+    payload = client.get("/v1/ingestion-readiness").json()
+
+    assert payload["status"] == "down"
+
+
+def test_ingestion_readiness_counts_contract_changes_as_our_own_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    snapshot = _full_readiness_snapshot(
+        now=now,
+        failed_reason_codes=("upstream_contract_changed",),
+    )
+    monkeypatch.setattr(public_routes, "fetch_ingestion_readiness", lambda **kwargs: snapshot)
+
+    payload = client.get("/v1/ingestion-readiness").json()
+
+    summary = payload["source_summary"]
+    assert summary["failed_source_count"] == 1
+    assert summary["upstream_unavailable_source_count"] == 0
+    assert payload["status"] == "degraded"
+
+
 def test_ingestion_readiness_returns_503_when_repository_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

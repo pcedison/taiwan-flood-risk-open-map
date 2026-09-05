@@ -126,7 +126,7 @@ def test_jurisdiction_readiness_requires_all_four_proved_signals() -> None:
         "RemoteDisconnected",
         "ConnectionError",
         "CivilIotStaFetchError",
-        "CivilIotStaPayloadError",
+        "TainanFloodSensorHttpError",
     ),
 )
 def test_source_readiness_separates_upstream_outage_from_our_own_failure(
@@ -139,6 +139,43 @@ def test_source_readiness_separates_upstream_outage_from_our_own_failure(
 
     assert upstream.status == "failed"
     assert upstream.reason_code == "upstream_unavailable"
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ("CivilIotStaPayloadError", "TainanFloodSensorPayloadError"),
+)
+def test_source_readiness_marks_payload_drift_as_a_contract_change(
+    error_code: str,
+) -> None:
+    # The upstream answered; our parser no longer matches what it answered with.
+    # That is our adapter to fix, so it must not be excused as an outage.
+    drifted = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=error_code),
+        evaluated_at=NOW,
+    )
+
+    assert drifted.status == "failed"
+    assert drifted.reason_code == "upstream_contract_changed"
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    (
+        "CivilIotStaConfigurationError",
+        "CwaRateLimitError",
+        "WraAuthorizationError",
+    ),
+)
+def test_source_readiness_keeps_our_own_faults_out_of_the_upstream_bucket(
+    error_code: str,
+) -> None:
+    ours = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=error_code),
+        evaluated_at=NOW,
+    )
+
+    assert ours.reason_code == "run_failed"
 
 
 def test_source_readiness_keeps_run_failed_for_non_upstream_error_codes() -> None:

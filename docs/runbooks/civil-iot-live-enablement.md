@@ -231,6 +231,13 @@ regression in this project, so `/v1/ingestion-readiness` reports those sources a
 `failed_source_count`. Do not roll back or "fix" the adapters on this signal
 alone — confirm the upstream first.
 
+Only transport failures are excused this way. If a source instead reports
+`reason_code=upstream_contract_changed`, the upstream answered but the payload no
+longer matches our parser: that stays inside `failed_source_count` because the
+fix is an adapter change here, not a wait. Likewise, readiness stays `down`
+whenever anything other than an upstream outage is keeping sources from
+`operational` — the outage only excuses the sources it actually took out.
+
 ### 1. Minimal reproduction
 
 Run both probes from an ordinary network (no VPN, no proxy). One failing while
@@ -279,7 +286,10 @@ Never send credentials, internal hostnames, database details, or worker logs.
    ```
 
 4. Remove the `upstream_incident` note from the three entries in
-   `config/source-registry.yaml` and record the recovery in the source matrix.
+   `config/source-registry.yaml`, update the adapter keys hard-coded in
+   `tests/test_source_registry_validator.py`
+   (`test_registry_records_the_open_civil_iot_upstream_incident`) to match, and
+   record the recovery in the source matrix.
 
 ## Rollback (per source)
 

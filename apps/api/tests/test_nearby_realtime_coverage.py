@@ -604,8 +604,6 @@ def test_configuration_failure_has_public_reason_without_leaking_error_code() ->
     "error_code",
     (
         "TainanFloodSensorTimeoutError",
-        "TainanFloodSensorFetchError",
-        "TainanFloodSensorHttpError",
         "TainanFloodSensorPayloadError",
     ),
 )
@@ -641,7 +639,9 @@ def test_upstream_response_failures_have_public_reason_without_leaking_error_cod
         "URLError",
         "RemoteDisconnected",
         "ConnectionError",
-        "CivilIotStaHTTPError",
+        # The class name this project actually persists for a Civil IoT outage.
+        "CivilIotStaFetchError",
+        "TainanFloodSensorHttpError",
     ),
 )
 def test_upstream_transport_failures_report_a_retrying_upstream_outage(
