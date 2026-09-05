@@ -1,6 +1,8 @@
 ## Summary 摘要
 
-<!-- 這個 PR 做什麼、為什麼。關聯 issue 用 "Fixes #123"。 -->
+Linked issue: Fixes #
+
+<!-- 這個 PR 做什麼、為什麼。每個 PR 必須連結一張 issue（Fixes #N 或 Refs #N）；一個 PR 只做一件事；不得只為更新 PROJECT_STATUS.md 開 PR。規則見 CONTRIBUTING.md「Pull Request Rules」。 -->
 
 ## Changes 變更內容
 
