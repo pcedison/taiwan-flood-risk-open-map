@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
@@ -936,8 +937,46 @@ def test_outcome_merges_repository_timings_with_service_phases(
     assert outcome.cache_hit is False
     assert outcome.response.assessment_id
     assert outcome.timings_ms["db_latest"] == 12.3
-    assert {"cache_get", "scoring", "persist"} <= set(outcome.timings_ms)
+    assert {"cache_get", "history_lookup", "scoring", "persist"} <= set(outcome.timings_ms)
     assert all(value >= 0 for value in outcome.timings_ms.values())
+    phases = list(outcome.timings_ms)
+    assert phases.index("history_lookup") < phases.index("scoring")
+
+
+def test_recent_history_lookup_is_measured_as_its_own_phase(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    stale = replace(
+        data,
+        historical=(
+            replace(
+                _record(HISTORY_ID, event_type="flood_report", evidence_scope="historical"),
+                occurred_at=now - timedelta(days=90),
+                observed_at=now - timedelta(days=90),
+            ),
+        ),
+    )
+
+    def slow_lookup(
+        _request: RiskAssessRequest,
+        _data: AssessmentData,
+        *,
+        now: datetime,
+    ) -> tuple[EvidenceRecord, ...]:
+        time.sleep(0.01)
+        return ()
+
+    without_lookup = AssessmentService(FakeRepository(stale), score_risk).assess(
+        risk_request, now=now
+    )
+    with_lookup = AssessmentService(
+        FakeRepository(stale), score_risk, recent_history_lookup=slow_lookup
+    ).assess(risk_request, now=now)
+
+    assert without_lookup.timings_ms["history_lookup"] >= 0
+    assert with_lookup.timings_ms["history_lookup"] >= 10
 
 
 def test_outcome_records_cache_set_only_when_the_response_is_cacheable(

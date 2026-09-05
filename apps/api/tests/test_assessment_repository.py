@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -854,6 +855,13 @@ def test_failed_phase_is_still_measured(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert set(data.timings_ms) == set(_TIMING_PHASES)
     assert data.current_available is False
+
+
+def test_timings_never_change_assessment_equality(monkeypatch: pytest.MonkeyPatch) -> None:
+    data = _repository(monkeypatch).load(**POINT)
+
+    assert replace(data, timings_ms={"db_latest": 12.3}) == replace(data, timings_ms={})
+    assert "timings_ms" not in repr(data)
 
 
 def test_disabled_repository_reports_no_timings() -> None:

@@ -148,12 +148,16 @@ class AssessmentService:
         )
         timings_ms.update(data.timings_ms)
         current_items = tuple(evidence_from_record(item) for item in data.current_official)
+        # Always recorded, so a request that skipped the lookup and one that ran
+        # it are comparable; the lookup itself can reach an external boundary.
+        history_lookup_started = time.perf_counter()
         recent_history: tuple[EvidenceRecord, ...] = ()
         if self._recent_history_lookup is not None and _history_needs_refresh(
             data.historical,
             now=now,
         ):
             recent_history = self._recent_history_lookup(request, data, now=now)
+        timings_ms["history_lookup"] = _elapsed_ms(history_lookup_started)
         historical_items = tuple(
             evidence_from_record(item) for item in (*recent_history, *data.historical)
         )

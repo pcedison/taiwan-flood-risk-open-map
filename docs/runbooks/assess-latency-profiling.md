@@ -36,8 +36,8 @@ An uncached response looks like this (durations in milliseconds):
 ```
 Server-Timing: cache_get;dur=0.4, db_jurisdiction;dur=118.7, db_latest;dur=812.4,
  db_history;dur=2140.9, db_observed_history;dur=95.2, db_coverage;dur=311.0,
- db_context;dur=66.8, db_health;dur=41.3, scoring;dur=3.1, persist;dur=180.5,
- cache_set;dur=1.2, total;dur=3771.9
+ db_context;dur=66.8, db_health;dur=41.3, history_lookup;dur=0.0, scoring;dur=3.1,
+ persist;dur=180.5, cache_set;dur=1.2, total;dur=3771.9
 ```
 
 A response served from the assessment response cache is short by design:
@@ -70,6 +70,7 @@ available in hosted logs without a manual curl:
 | `db_coverage` | Nearby realtime coverage rows | `_load_coverage` |
 | `db_context` | Display-only recent incident context | `_load_recent_context` |
 | `db_health` | Health rows for the applicable adapter keys | `_load_health` |
+| `history_lookup` | On-demand official recent-history enrichment, only attempted when retained history is stale | `OfficialRecentHistoryLookup` |
 | `scoring` | Both scorer passes plus realtime safety and overall composition | `AssessmentService.assess` |
 | `persist` | Audit write of the assessment | `PostgresAssessmentRepository.persist` |
 | `cache_set` | Response-cache write; absent when the read set was incomplete and the response was not cacheable | `AssessmentService.assess` |
@@ -80,9 +81,15 @@ Notes:
 - Every `db_*` phase is measured even when its read fails, so a slow *failing*
   read (a timeout, for example) shows up as a large duration next to a
   `data_status.missing` entry in the body.
+- `history_lookup` is always reported, so a request that skipped the lookup and
+  one that ran it stay comparable. It is near `0.0` when retained history is
+  recent enough, or when the lookup is switched off by flag
+  (`OFFICIAL_NATIONWIDE_HISTORY_CITATIONS_ENABLED=false`); the lookup reaches an
+  external boundary with its own timeout, so a large value here is not a
+  database problem.
 - `total` is larger than the sum of the phases. The gap is the unmeasured
-  remainder of the request: request validation, the on-demand recent-history
-  lookup when history is stale, response building and serialisation.
+  remainder of the request: request validation, evidence de-duplication and
+  preview selection, response building and serialisation.
 - A repository that is switched off (`EVIDENCE_REPOSITORY_ENABLED=false`)
   reports no `db_*` phases at all.
 
@@ -105,6 +112,5 @@ Notes:
    lines in the issue or PR.
 
 If `total` is high while every phase is small, the cost is in the unmeasured
-remainder: check the recent-history lookup path
-(`OfficialRecentHistoryLookup`, which has its own timeout) and the response
-size before touching any database read.
+remainder: check the response size and the evidence preview path before
+touching any database read.
