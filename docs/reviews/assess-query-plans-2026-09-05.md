@@ -136,8 +136,34 @@ taichung:    old=374 new=374 identical=True
 chiayi_city: old=154 new=154 identical=True
 ```
 
-The 116,178-row supplement contributes nothing the projection had not already
-provided, which is exactly why production discarding it has been invisible.
+This result is necessary rather than informative, and must not be read as
+evidence on its own: `seed_perf_fixture.py` projects `official_realtime_latest`
+from the same station list it uses to write `evidence`, so the projection is a
+superset of the supplement by construction. **The fixture cannot disprove that
+the supplement matters; it can only fail to.**
+
+The reason the cap is low risk comes from the ingestion pipeline instead.
+`REVIEWED_OFFICIAL_REALTIME_ADAPTER_EVENTS`
+(`apps/workers/app/pipelines/promotion.py:26-42`) enumerates every
+`(adapter_key, event_type)` pair promoted as an official realtime observation,
+and it covers **all** official rainfall and water level adapters the coverage
+query can select — `official.cwa.rainfall`, `official.cwa.tide_level`,
+`official.wra.water_level`, and the five `official.civil_iot.*` water level
+feeds. `_is_reviewed_current_candidate` gates on exactly that set
+(`promotion.py:2118-2124`), and every promotion that passes it upserts the
+station's newest row into `official_realtime_latest` (`promotion.py:556-558`).
+
+So a station can only exist in `evidence` but not in the projection if its
+promotion wrote the evidence row and then failed before the upsert. In that
+case the projection is stale for that station, not missing it, and the merge
+keeps whichever row is newer. The residual risk is therefore a station whose
+projection upsert has been failing while its evidence writes succeed — which is
+an ingestion defect that should surface as a pipeline alert, not something the
+read path should spend 1.3 s per request compensating for.
+
+The supplement being cancelled is logged as
+`api.coverage.supplement_cancelled` with the budget it was given, so this
+assumption stays falsifiable on production rather than silently baked in.
 
 ## db_history — not reproducible locally
 

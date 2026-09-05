@@ -12,6 +12,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from app.core.db import pooled_connection
+from app.core.logging import log_event
 
 ConnectionFactory = Callable[[], Any]
 EvidenceLocationPrecision = Literal[
@@ -1366,6 +1367,10 @@ def query_nearby_realtime_coverage_rows(
         statement_timeout_ms=statement_timeout_ms,
         connection_factory=connection_factory,
     )
+    evidence_budget_ms = _coverage_evidence_timeout_ms(
+        statement_timeout_ms,
+        latest_rows=latest_rows,
+    )
     try:
         evidence_rows = _query_nearby_evidence_coverage_rows(
             database_url=database_url,
@@ -1373,14 +1378,19 @@ def query_nearby_realtime_coverage_rows(
             lng=lng,
             radius_buckets_m=radius_buckets_m,
             observed_since=observed_since,
-            statement_timeout_ms=_coverage_evidence_timeout_ms(
-                statement_timeout_ms,
-                latest_rows=latest_rows,
-            ),
+            statement_timeout_ms=evidence_budget_ms,
             connection_factory=connection_factory,
         )
     except EvidenceRepositoryUnavailable:
         if latest_rows:
+            # The whole point of the reduced budget is that this branch is
+            # expected on production. Record it so the assumption stays
+            # falsifiable instead of being invisible in the timings.
+            log_event(
+                "api.coverage.supplement_cancelled",
+                budget_ms=evidence_budget_ms,
+                latest_row_count=len(latest_rows),
+            )
             return latest_rows
         raise
     return _merge_nearby_coverage_rows(latest_rows, evidence_rows)

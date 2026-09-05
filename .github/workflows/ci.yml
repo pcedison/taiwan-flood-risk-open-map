@@ -260,6 +260,19 @@ jobs:
           PYTHONPATH=apps/workers \
             python -m pytest tests/test_historical_coverage_writer_postgres.py -q
 
+      # The evidence repository acceptance suite skips itself without a live
+      # PostGIS, so it only ever runs in this job. Without it the read-path
+      # guarantees it covers are asserted nowhere in CI.
+      - name: Evidence repository acceptance on PostGIS
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet -r apps/api/requirements.lock
+          python -m pip install --quiet -e apps/api --no-deps
+          cd apps/api
+          EVIDENCE_TEST_DATABASE_URL=postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk \
+          OFFICIAL_DB_ACCEPTANCE_REQUIRED=1 \
+            python -m pytest tests/test_evidence_repository_postgres.py -q
+
       - name: Populated migration upgrade smoke from 0032 to 0036
         env:
           MIGRATION_UPGRADE_TEST_DATABASE_URL: postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk_upgrade_test

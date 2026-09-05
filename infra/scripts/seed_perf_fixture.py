@@ -33,6 +33,13 @@ import psycopg
 
 SOURCE_ID_PREFIX = "perf:"
 
+# This script writes over a million rows into `evidence`. It exists to make a
+# development database look like production, never to touch production itself,
+# so it refuses any host that is not loopback unless the caller says out loud
+# that they mean it.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+PRODUCTION_OVERRIDE_FLAG = "--i-know-this-is-not-production"
+
 RAINFALL_ADAPTER = "official.cwa.rainfall"
 WATER_LEVEL_ADAPTER = "official.wra.water_level"
 SEWER_ADAPTER = "official.civil_iot.sewer_water_level"
@@ -397,6 +404,42 @@ def _analyze(connection: psycopg.Connection) -> None:
     print("analyzed evidence, official_realtime_latest, data_sources")
 
 
+class NonLocalDatabaseError(RuntimeError):
+    """Raised when the fixture would be written to a non-loopback database."""
+
+
+def _database_host(database_url: str) -> str:
+    """Return the normalised host of a connection string.
+
+    An empty host means a Unix socket, which is local by definition.
+    """
+
+    try:
+        parsed = psycopg.conninfo.conninfo_to_dict(database_url)
+    except psycopg.ProgrammingError as exc:
+        raise NonLocalDatabaseError(f"unparsable --database-url: {exc}") from exc
+    host = parsed.get("host")
+    if not isinstance(host, str):
+        return ""
+    # IPv6 hosts arrive bracketed from URL forms; compare the address itself.
+    return host.strip().strip("[]").lower()
+
+
+def _require_local_database(database_url: str, *, override: bool) -> None:
+    host = _database_host(database_url)
+    # An absolute path is a Unix socket directory, which cannot be remote.
+    if not host or host.startswith("/") or host in LOOPBACK_HOSTS:
+        return
+    if override:
+        print(f"WARNING: seeding the performance fixture into non-local host {host!r}")
+        return
+    raise NonLocalDatabaseError(
+        f"refusing to seed the performance fixture into non-local host {host!r}. "
+        "This inserts over a million evidence rows and is for development "
+        f"databases only. Pass {PRODUCTION_OVERRIDE_FLAG} to override."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -410,7 +453,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Delete previously seeded fixture rows before inserting.",
     )
     parser.add_argument("--seed", type=int, default=20260905, help="Station layout seed.")
+    parser.add_argument(
+        PRODUCTION_OVERRIDE_FLAG,
+        dest="allow_non_local",
+        action="store_true",
+        help=(
+            "Allow seeding a database that is not on loopback. Required for any "
+            "remote host, because this script writes over a million rows."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    try:
+        _require_local_database(args.database_url, override=args.allow_non_local)
+    except NonLocalDatabaseError as exc:
+        parser.error(str(exc))
 
     rng = random.Random(args.seed)
     stations = _build_stations(rng)
