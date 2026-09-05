@@ -52,6 +52,19 @@ UPSTREAM_TRANSPORT_ERROR_CODE_SUFFIXES = (
 # shape our parser was written against. The data is just as unavailable, yet the
 # fix is an adapter change here, so this must keep counting as our failure.
 UPSTREAM_CONTRACT_ERROR_CODE_SUFFIXES = ("PayloadError",)
+# Our own database timed out, was locked out, or dropped the connection. The
+# fetch and the upstream were fine and the next cycle retries, so this is a
+# transient local fault, not a broken source: report it as degraded, never
+# failed.
+DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES = (
+    "QueryCanceled",
+    "LockNotAvailable",
+    "DeadlockDetected",
+    "OperationalError",
+    "InterfaceError",
+    "AdminShutdown",
+    "TooManyConnections",
+)
 # Everything else stays "run_failed", i.e. ours. In particular:
 #   *ConfigurationError - a missing or invalid setting in our deployment.
 #   *RateLimitError     - we exceeded the published quota; our polling cadence.
@@ -232,8 +245,7 @@ def _source_readiness(
         # An upstream outage and a broken adapter both fail the run; only the
         # second one is ours to fix, so operators must be able to tell them
         # apart without reading a private error message.
-        status = "failed"
-        reason_code = _failed_run_reason_code(
+        status, reason_code = _failed_run_decision(
             cast(str | None, row.get("latest_run_error_code"))
         )
     elif _pipeline_failed_for_latest_run(row, latest_run_at):
@@ -262,13 +274,15 @@ def _source_readiness(
     )
 
 
-def _failed_run_reason_code(error_code: str | None) -> str:
+def _failed_run_decision(error_code: str | None) -> tuple[SourceReadinessStatus, str]:
     code = error_code or ""
+    if code.endswith(DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES):
+        return "degraded", "database_unavailable"
     if code.endswith(UPSTREAM_TRANSPORT_ERROR_CODE_SUFFIXES):
-        return "upstream_unavailable"
+        return "failed", "upstream_unavailable"
     if code.endswith(UPSTREAM_CONTRACT_ERROR_CODE_SUFFIXES):
-        return "upstream_contract_changed"
-    return "run_failed"
+        return "failed", "upstream_contract_changed"
+    return "failed", "run_failed"
 
 
 def _jurisdiction_readiness(

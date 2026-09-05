@@ -547,8 +547,9 @@ def _check_worker_source_health(
     """Split required-source health into run failures and upstream advisories.
 
     ``upstream_stale`` means our ingestion and publication ran on schedule while
-    the upstream publisher stopped updating. That is not this deployment's
-    regression, so it is reported, never failed on.
+    the upstream publisher stopped updating, and ``database_unavailable`` means
+    our own database was busy for one cycle. Neither is a regression this run
+    should fail on, so both are reported instead.
     """
 
     if coverage.get("source_health_checked") is not True:
@@ -576,6 +577,12 @@ def _check_worker_source_health(
             advisories.append(
                 f"required worker source {source_id} is {status} "
                 "(upstream_stale); the upstream feed stopped publishing"
+            )
+        if reason == "database_unavailable":
+            advisories.append(
+                f"required worker source {source_id} is {status} "
+                "(database_unavailable); the database was busy and the next "
+                "cycle retries"
             )
         if (
             status not in ACCEPTABLE_WORKER_SOURCE_HEALTH_STATUSES

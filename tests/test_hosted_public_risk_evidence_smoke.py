@@ -891,3 +891,27 @@ def test_evidence_artifact_records_upstream_stale_advisories() -> None:
     assert artifact["advisories"] == [
         "required worker source x is degraded (upstream_stale)"
     ]
+
+
+def test_database_unavailable_required_source_is_an_advisory_not_a_failure() -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"] = [
+        {
+            "source_id": "official.wra_iow.flood_depth",
+            "name": "WRA IoW flood depth",
+            "signal_types": ["flood_depth"],
+            "health_status": "degraded",
+            "reason_code": "database_unavailable",
+            "required_for_absence": True,
+        }
+    ]
+
+    failures, advisories = smoke._check_worker_source_health(
+        payload["nearby_realtime_coverage"]
+    )
+
+    assert failures == []
+    assert advisories == [
+        "required worker source official.wra_iow.flood_depth is degraded "
+        "(database_unavailable); the database was busy and the next cycle retries"
+    ]

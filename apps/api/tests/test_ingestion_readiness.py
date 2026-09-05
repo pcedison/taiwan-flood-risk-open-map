@@ -317,3 +317,21 @@ def test_over_large_catalog_threshold_is_clamped_not_discarded() -> None:
     assert within_clamped_window.status == "operational"
     assert past_clamped_window.reason_code == "upstream_stale"
     assert unparsable.reason_code == "upstream_stale"
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ("QueryCanceled", "LockNotAvailable", "OperationalError", "InterfaceError"),
+)
+def test_our_database_timing_out_is_degraded_not_a_failed_source(
+    error_code: str,
+) -> None:
+    # The upstream answered and the next cycle retries; a busy database of ours
+    # must not read as a broken source.
+    busy = _source_readiness(
+        _source_row(latest_run_status="failed", latest_run_error_code=error_code),
+        evaluated_at=NOW,
+    )
+
+    assert busy.status == "degraded"
+    assert busy.reason_code == "database_unavailable"
