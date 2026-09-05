@@ -36,14 +36,14 @@ def test_freshness_check_marks_recent_source_timestamp_fresh() -> None:
 
 def test_realtime_freshness_thresholds_progress_from_degraded_to_stale_to_failed() -> None:
     degraded = check_summary_freshness(
-        _summary(source_timestamp_max=CHECKED_AT - timedelta(minutes=20)),
+        _summary(source_timestamp_max=CHECKED_AT - timedelta(minutes=45)),
         checked_at=CHECKED_AT,
         max_age_seconds=60 * 60,
     )
     stale = check_summary_freshness(
         _summary(
             adapter_key="official.wra.water_level",
-            source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+            source_timestamp_max=CHECKED_AT - timedelta(minutes=120),
         ),
         checked_at=CHECKED_AT,
         max_age_seconds=60 * 60,
@@ -51,7 +51,7 @@ def test_realtime_freshness_thresholds_progress_from_degraded_to_stale_to_failed
     failed = check_summary_freshness(
         _summary(
             adapter_key="official.civil_iot.flood_sensor",
-            source_timestamp_max=CHECKED_AT - timedelta(minutes=75),
+            source_timestamp_max=CHECKED_AT - timedelta(minutes=200),
         ),
         checked_at=CHECKED_AT,
         max_age_seconds=60 * 60,
@@ -123,7 +123,7 @@ def test_civil_iot_water_level_sources_use_realtime_freshness_cadence() -> None:
         check = check_summary_freshness(
             _summary(
                 adapter_key=adapter_key,
-                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=120),
             ),
             checked_at=CHECKED_AT,
             max_age_seconds=6 * 60 * 60,
@@ -142,7 +142,7 @@ def test_local_taipei_sources_use_realtime_freshness_cadence() -> None:
         check = check_summary_freshness(
             _summary(
                 adapter_key=adapter_key,
-                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=120),
             ),
             checked_at=CHECKED_AT,
             max_age_seconds=6 * 60 * 60,
@@ -161,7 +161,7 @@ def test_local_taoyuan_sources_use_realtime_freshness_cadence() -> None:
         check = check_summary_freshness(
             _summary(
                 adapter_key=adapter_key,
-                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=120),
             ),
             checked_at=CHECKED_AT,
             max_age_seconds=6 * 60 * 60,
@@ -180,7 +180,7 @@ def test_local_chiayi_taichung_sources_use_realtime_freshness_cadence() -> None:
         check = check_summary_freshness(
             _summary(
                 adapter_key=adapter_key,
-                source_timestamp_max=CHECKED_AT - timedelta(minutes=45),
+                source_timestamp_max=CHECKED_AT - timedelta(minutes=120),
             ),
             checked_at=CHECKED_AT,
             max_age_seconds=6 * 60 * 60,

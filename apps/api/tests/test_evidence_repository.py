@@ -575,7 +575,7 @@ def test_query_realtime_source_health_rows_returns_public_safe_runtime_state() -
     assert "btrim(COALESCE(" in sql
     assert "~ '^[0-9]{1,5}$'" in sql
     assert "BETWEEN 1 AND 86400" in sql
-    assert "ELSE 600" in sql
+    assert "ELSE 1800" in sql
     assert "NULLIF(data_sources.metadata->>'freshness_threshold_seconds', '')::integer" not in sql
     assert sql.count("/* resolved-freshness-threshold */") == 1
     assert "FROM official_realtime_latest latest" in sql

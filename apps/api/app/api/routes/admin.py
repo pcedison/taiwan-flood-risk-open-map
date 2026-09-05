@@ -53,9 +53,14 @@ from app.domain.reports import (
 
 router = APIRouter(prefix="/admin/v1", tags=["Admin"])
 admin_bearer = HTTPBearer(auto_error=False)
-REALTIME_FRESH_SECONDS = 10 * 60
-REALTIME_DEGRADED_SECONDS = 30 * 60
-REALTIME_STALE_SECONDS = 60 * 60
+# Ten-minute networks (CWA rainfall, WRA water level, Civil IoT water levels)
+# publish several minutes after the observation time and are polled every five
+# minutes, so a healthy feed is routinely 10-20 minutes old at query time. Judge
+# freshness against one publication cycle plus that lag instead of the raw
+# observation interval, or every backbone source reports permanently stale.
+REALTIME_FRESH_SECONDS = 30 * 60
+REALTIME_DEGRADED_SECONDS = 90 * 60
+REALTIME_STALE_SECONDS = 3 * 60 * 60
 # These official datasets publish hourly. Keep the admin diagnostics aligned
 # with the worker freshness policy so healthy hourly sources are not reported
 # stale before the next expected observation has had time to arrive.

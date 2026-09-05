@@ -442,10 +442,10 @@ def test_public_source_names_distinguish_multiple_water_networks() -> None:
 
 def test_source_observation_freshness_boundaries_are_inclusive() -> None:
     cases = (
-        (10, "healthy", "operational"),
-        (11, "degraded", "delayed"),
-        (30, "degraded", "delayed"),
-        (31, "failed", "upstream_unavailable"),
+        (30, "healthy", "operational"),
+        (31, "degraded", "delayed"),
+        (90, "degraded", "delayed"),
+        (91, "failed", "upstream_unavailable"),
     )
 
     for observed_minutes, expected_status, expected_reason in cases:
@@ -469,12 +469,12 @@ def test_source_observation_freshness_boundaries_are_inclusive() -> None:
         (120, 3, "degraded"),
         (120, 6, "degraded"),
         (120, 7, "failed"),
-        (None, 10, "healthy"),
-        (None, 30, "degraded"),
-        (None, 31, "failed"),
+        (None, 30, "healthy"),
+        (None, 90, "degraded"),
+        (None, 91, "failed"),
     ),
 )
-def test_station_health_uses_catalog_threshold_with_600_second_fallback(
+def test_station_health_uses_catalog_threshold_with_1800_second_fallback(
     threshold_seconds: int | None,
     observed_minutes: int,
     expected_status: str,
@@ -492,6 +492,69 @@ def test_station_health_uses_catalog_threshold_with_600_second_fallback(
     )[0]
 
     assert health.health_status == expected_status
+
+
+def test_ten_minute_network_observation_lag_is_healthy_not_permanently_degraded() -> None:
+    """CWA rainfall publishes 10-minute observations minutes after the fact.
+
+    Production reported "fresh 0" for all 1,342 active rainfall stations because
+    an 18-minute observation age never fit the old ten-minute window, even
+    though the feed was current.  The default window now covers a publication
+    cycle plus ingestion and query lag.
+    """
+
+    health = build_nearby_source_health(
+        (
+            _health_row(
+                adapter_key="official.cwa.rainfall",
+                station_count=1_342,
+                active_station_count=1_342,
+                observed_delta_minutes=18,
+                freshness_threshold_seconds=None,
+            ),
+        ),
+        evaluated_at=NOW,
+    )[0]
+
+    assert health.health_status == "healthy"
+    assert health.reason_code == "operational"
+
+
+def test_ten_minute_network_still_degrades_after_a_missed_publication_cycle() -> None:
+    health = build_nearby_source_health(
+        (
+            _health_row(
+                adapter_key="official.cwa.rainfall",
+                station_count=1_342,
+                active_station_count=1_342,
+                observed_delta_minutes=40,
+                freshness_threshold_seconds=None,
+            ),
+        ),
+        evaluated_at=NOW,
+    )[0]
+
+    assert health.health_status == "degraded"
+    assert health.reason_code == "delayed"
+
+
+def test_hourly_iow_feed_frozen_for_a_day_reports_upstream_stale() -> None:
+    health = build_nearby_source_health(
+        (
+            _health_row(
+                adapter_key="official.wra_iow.flood_depth",
+                station_count=358,
+                active_station_count=0,
+                observed_delta_minutes=30 * 60,
+                latest_run_delta_minutes=5,
+                freshness_threshold_seconds=5_400,
+            ),
+        ),
+        evaluated_at=NOW,
+    )[0]
+
+    assert health.health_status == "degraded"
+    assert health.reason_code == "upstream_stale"
 
 
 def test_recent_no_active_warning_poll_is_healthy_without_local_coverage() -> None:

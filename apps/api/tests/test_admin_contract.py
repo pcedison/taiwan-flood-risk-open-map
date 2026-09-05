@@ -365,11 +365,45 @@ def test_admin_freshness_uses_realtime_cadence_for_new_backbone_sources(
             health_status="healthy",
             is_enabled=True,
             source_timestamp_min=None,
-            source_timestamp_max=datetime.fromisoformat("2026-04-28T12:15:00+00:00"),
-            latest_observed_at=datetime.fromisoformat("2026-04-28T12:15:00+00:00"),
+            source_timestamp_max=datetime.fromisoformat("2026-04-28T11:00:00+00:00"),
+            latest_observed_at=datetime.fromisoformat("2026-04-28T11:00:00+00:00"),
             upstream_status="succeeded",
         )
         == "stale"
+    )
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    [
+        "official.cwa.rainfall",
+        "official.wra.water_level",
+        "official.civil_iot.sewer_water_level",
+    ],
+)
+def test_admin_freshness_accepts_the_normal_ten_minute_publication_lag(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter_key: str,
+) -> None:
+    """A 10-minute network is routinely 10-20 minutes old and is still healthy."""
+
+    monkeypatch.setattr(
+        admin_route,
+        "_now",
+        lambda: datetime.fromisoformat("2026-04-28T13:00:00+00:00"),
+    )
+
+    assert (
+        admin_route._freshness_state(
+            adapter_key=adapter_key,
+            health_status="healthy",
+            is_enabled=True,
+            source_timestamp_min=None,
+            source_timestamp_max=datetime.fromisoformat("2026-04-28T12:42:00+00:00"),
+            latest_observed_at=datetime.fromisoformat("2026-04-28T12:42:00+00:00"),
+            upstream_status="succeeded",
+        )
+        == "fresh"
     )
 
 
