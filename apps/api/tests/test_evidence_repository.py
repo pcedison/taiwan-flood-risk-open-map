@@ -8,6 +8,7 @@ from typing import Self
 import psycopg
 import pytest
 
+from app.domain.evidence import repository as repository_module
 from app.domain.evidence.repository import (
     OBSERVED_FLOOD_HISTORY_CURRENT_GRACE,
     OBSERVED_FLOOD_HISTORY_WINDOW,
@@ -499,6 +500,107 @@ def test_query_nearby_realtime_coverage_rows_merges_partial_latest_and_newer_evi
     assert rows[0].source_id == "cwa-rainfall:C0A520:new"
     assert rows[0].freshness_state == "fresh"
     assert rows[1].source_id == "wra-water-level:W001:new"
+
+
+def _statement_timeouts(connection: _FakeConnection) -> list[object]:
+    return [
+        params[0]
+        for sql, params in connection.cursor_instance.executions
+        if "statement_timeout" in sql
+    ]
+
+
+def test_coverage_evidence_supplement_is_budgeted_when_latest_answers() -> None:
+    latest_connection = _FakeConnection(
+        rows=[
+            {
+                "adapter_key": "official.cwa.rainfall",
+                "source_id": "cwa-rainfall:C0A520",
+                "event_type": "rainfall",
+                "station_id": "C0A520",
+                "observed_at": datetime(2026, 6, 29, 11, 55, tzinfo=UTC),
+                "ingested_at": datetime(2026, 6, 29, 11, 56, tzinfo=UTC),
+                "distance_to_query_m": 1219.4,
+                "freshness_state": "fresh",
+            }
+        ]
+    )
+    evidence_connection = _FakeConnection(rows=[])
+    connections = iter([latest_connection, evidence_connection])
+
+    query_nearby_realtime_coverage_rows(
+        database_url="postgresql://example",
+        lat=22.6273,
+        lng=120.3014,
+        observed_since=None,
+        connection_factory=lambda: next(connections),
+    )
+
+    assert _statement_timeouts(latest_connection) == ["1500ms"]
+    assert _statement_timeouts(evidence_connection) == ["250ms"]
+
+
+def test_cancelled_coverage_supplement_is_logged_with_its_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    latest_connection = _FakeConnection(
+        rows=[
+            {
+                "adapter_key": "official.cwa.rainfall",
+                "source_id": "cwa-rainfall:C0A520",
+                "event_type": "rainfall",
+                "station_id": "C0A520",
+                "observed_at": datetime(2026, 6, 29, 11, 55, tzinfo=UTC),
+                "ingested_at": datetime(2026, 6, 29, 11, 56, tzinfo=UTC),
+                "distance_to_query_m": 1219.4,
+                "freshness_state": "fresh",
+            }
+        ]
+    )
+    evidence_connection = _FakeConnection(
+        rows=[],
+        execute_side_effects=[psycopg.OperationalError("canceling statement due to statement timeout")],
+    )
+    connections = iter([latest_connection, evidence_connection])
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        repository_module,
+        "log_event",
+        lambda event, **fields: events.append((event, fields)),
+    )
+
+    rows = query_nearby_realtime_coverage_rows(
+        database_url="postgresql://example",
+        lat=22.6273,
+        lng=120.3014,
+        observed_since=None,
+        connection_factory=lambda: next(connections),
+    )
+
+    assert len(rows) == 1
+    assert events == [
+        (
+            "api.coverage.supplement_cancelled",
+            {"budget_ms": 250, "latest_row_count": 1},
+        )
+    ]
+
+
+def test_coverage_evidence_fallback_keeps_full_budget_when_latest_is_empty() -> None:
+    latest_connection = _FakeConnection(rows=[])
+    evidence_connection = _FakeConnection(rows=[])
+    connections = iter([latest_connection, evidence_connection])
+
+    query_nearby_realtime_coverage_rows(
+        database_url="postgresql://example",
+        lat=22.6273,
+        lng=120.3014,
+        observed_since=None,
+        connection_factory=lambda: next(connections),
+    )
+
+    assert _statement_timeouts(latest_connection) == ["1500ms"]
+    assert _statement_timeouts(evidence_connection) == ["1500ms"]
 
 
 def test_query_nearby_realtime_coverage_rows_falls_back_when_table_missing() -> None:
