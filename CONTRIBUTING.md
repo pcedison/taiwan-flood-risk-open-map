@@ -54,6 +54,33 @@ editing.
   vulnerabilities.
 - Issues and PRs use the templates in `.github/`.
 
+## Pull Request Rules
+
+These apply to every PR, including ones opened by automation (Codex, Claude,
+Dependabot excepted):
+
+1. **Link an issue.** The PR body must contain `Fixes #N` or `Refs #N`. Work
+   that has no issue gets an issue first; the issue states the user-visible
+   problem, not the implementation.
+2. **One PR, one change.** A fix, a refactor and a status update are three PRs.
+   Do not open a PR whose only change is `PROJECT_STATUS.md`; status is
+   recorded in the PR that changed the behaviour, or by the release checklist.
+3. **Migrations that rewrite data need rehearsal evidence.** A migration that
+   updates or deletes rows in `evidence`, `evidence_staging` or
+   `official_realtime_latest` must link a staging-clone rehearsal (row counts
+   before/after, duration) in the PR body. Catalog-row updates in
+   `data_sources` do not need this. Migrations run inside the API start-up
+   transaction, so a whole-table rewrite takes production down (see #317).
+4. **Plans are not requirements.** Documents under `docs/superpowers/plans/`
+   describe how a task could be done; the requirement is the linked issue and
+   the SDD. A PR must not cite a plan document as its only justification.
+5. **Monitoring red is a symptom.** A PR that changes a smoke test, watchdog or
+   alert must state which upstream or code fault it responds to; loosening a
+   check without a named cause is not accepted.
+6. **Verification numbers, not adjectives.** The Verification section lists
+   the commands run and their result counts; "tests pass" without numbers is
+   incomplete.
+
 ## Subagent Rule
 
 Multiple agents may work in parallel. Do not revert or overwrite another
