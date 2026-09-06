@@ -52,6 +52,9 @@ _MAX_FRESHNESS_THRESHOLD_SECONDS = 86_400
 # needs ~950 ms warm and never finishes inside the request budget on the
 # 2 GB production node, so the rows it would add are discarded either way.
 _COVERAGE_EVIDENCE_SUPPLEMENT_TIMEOUT_MS = 250
+# Distance buckets the realtime coverage readers report against. Shared so a
+# diagnostics EXPLAIN probes the same radii the request path uses.
+DEFAULT_COVERAGE_RADIUS_BUCKETS_M: tuple[int, ...] = (500, 1000, 3000, 5000, 10000, 15000)
 
 
 class EvidenceRepositoryUnavailable(RuntimeError):
@@ -1350,7 +1353,7 @@ def query_nearby_realtime_coverage_rows(
     database_url: str,
     lat: float,
     lng: float,
-    radius_buckets_m: tuple[int, ...] = (500, 1000, 3000, 5000, 10000, 15000),
+    radius_buckets_m: tuple[int, ...] = DEFAULT_COVERAGE_RADIUS_BUCKETS_M,
     observed_since: datetime | None = None,
     statement_timeout_ms: int = 1500,
     connection_factory: ConnectionFactory | None = None,
@@ -2190,16 +2193,20 @@ def _query_nearby_latest_coverage_rows(
         raise EvidenceRepositoryUnavailable(str(exc)) from exc
 
 
-def _query_nearby_evidence_coverage_rows(
+def nearby_evidence_coverage_statement(
     *,
-    database_url: str,
     lat: float,
     lng: float,
-    radius_buckets_m: tuple[int, ...],
-    observed_since: datetime | None,
-    statement_timeout_ms: int,
-    connection_factory: ConnectionFactory | None,
-) -> tuple[NearbyCoverageRow, ...]:
+    radius_buckets_m: tuple[int, ...] = DEFAULT_COVERAGE_RADIUS_BUCKETS_M,
+    observed_since: datetime | None = None,
+) -> tuple[str, tuple[Any, ...]]:
+    """Return the coverage supplement statement and its parameters.
+
+    Exposed so read-only diagnostics can ``EXPLAIN`` exactly what the reader
+    below executes, instead of keeping a second copy of this SQL that would
+    drift the moment either one is edited.
+    """
+
     max_radius_m = max(radius_buckets_m)
     observed_filter = "AND e.observed_at >= %s::timestamptz" if observed_since else ""
     observed_params: tuple[datetime, ...] = (observed_since,) if observed_since else ()
@@ -2276,6 +2283,25 @@ def _query_nearby_evidence_coverage_rows(
         LIMIT 200
     """
     params = (lng, lat, lng, lat, max_radius_m, *observed_params, max_radius_m)
+    return sql, params
+
+
+def _query_nearby_evidence_coverage_rows(
+    *,
+    database_url: str,
+    lat: float,
+    lng: float,
+    radius_buckets_m: tuple[int, ...],
+    observed_since: datetime | None,
+    statement_timeout_ms: int,
+    connection_factory: ConnectionFactory | None,
+) -> tuple[NearbyCoverageRow, ...]:
+    sql, params = nearby_evidence_coverage_statement(
+        lat=lat,
+        lng=lng,
+        radius_buckets_m=radius_buckets_m,
+        observed_since=observed_since,
+    )
     try:
         with (
             _connect(database_url, connection_factory) as connection,

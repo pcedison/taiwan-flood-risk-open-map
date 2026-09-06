@@ -118,6 +118,63 @@ class AdminJobsResponse(ContractModel):
     jobs: list[IngestionJob]
 
 
+class AdminDbTableStat(ContractModel):
+    relname: str
+    n_live_tup: int | None = None
+    n_dead_tup: int | None = None
+    dead_tuple_ratio: float | None = None
+    n_tup_ins: int | None = None
+    n_tup_upd: int | None = None
+    n_tup_del: int | None = None
+    last_vacuum: datetime | None = None
+    last_autovacuum: datetime | None = None
+    last_analyze: datetime | None = None
+    last_autoanalyze: datetime | None = None
+    autovacuum_count: int | None = None
+    total_relation_size_bytes: int | None = None
+    table_size_bytes: int | None = None
+    indexes_size_bytes: int | None = None
+
+
+class AdminDbIndexStat(ContractModel):
+    relname: str
+    indexrelname: str
+    idx_scan: int | None = None
+    idx_tup_read: int | None = None
+    idx_tup_fetch: int | None = None
+    index_size_bytes: int | None = None
+
+
+class AdminDbStatementStat(ContractModel):
+    query: str
+    calls: int | None = None
+    total_exec_time_ms: float | None = None
+    mean_exec_time_ms: float | None = None
+    rows: int | None = None
+
+
+class AdminDbQueryPlan(ContractModel):
+    name: str
+    status: Literal["ok", "timeout", "unavailable", "skipped"]
+    plan: list[dict[str, Any]] | None = None
+    error: str | None = None
+
+
+class AdminDbSamplePoint(ContractModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    radius_m: int = Field(ge=1)
+
+
+class AdminDbDiagnosticsResponse(ContractModel):
+    captured_at: datetime
+    sample_point: AdminDbSamplePoint
+    tables: list[AdminDbTableStat]
+    indexes: list[AdminDbIndexStat]
+    query_plans: list[AdminDbQueryPlan]
+    statements: list[AdminDbStatementStat] | None = None
+
+
 class DataSource(ContractModel):
     id: str
     name: str
