@@ -618,6 +618,13 @@ class PostgresEvidencePromotionWriter:
 
         Anything that is not an exact re-observation of the row already stored
         falls through to the full per-row path with all of its guards.
+
+        The read holds a share lock on every latest row it decides from. A
+        concurrent inactive-station retirement or central/local peer
+        replacement that deleted one between the read and the staging update
+        would leave that station rejected for the cycle with nothing left to
+        point at, and a frozen upstream never changes its raw_ref to offer the
+        candidate again.
         """
 
         keyed: dict[str, tuple[EvidencePromotionPayload, tuple[str, str, str]]] = {}
@@ -641,6 +648,7 @@ class PostgresEvidencePromotionWriter:
                 WHERE (adapter_key, event_type, station_id) IN (
                     SELECT * FROM unnest(%s::text[], %s::text[], %s::text[])
                 )
+                FOR SHARE OF official_realtime_latest
                 """,
                 (
                     [key[0] for _payload, key in keyed.values()],

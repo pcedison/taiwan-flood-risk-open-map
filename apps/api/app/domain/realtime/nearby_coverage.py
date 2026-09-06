@@ -20,6 +20,13 @@ from app.domain.evidence.repository import NearbyCoverageRow, RealtimeSourceHeal
 # Five kilometres remains the boundary for "nearby" coverage.  The wider
 # buckets deliberately retain a regional fallback so a sparse network does not
 # become an empty UI when a useful station exists just outside that boundary.
+LOCAL_COVERAGE_RADIUS_M = 5000
+RADIUS_BUCKETS_M = (500, 1000, 3000, LOCAL_COVERAGE_RADIUS_M, 10000, 15000)
+REQUIRED_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = (
+    "rainfall",
+    "water_level",
+    "flood_depth",
+)
 # Our own database timed out, was locked out, or dropped the connection. The
 # fetch and the upstream were fine and the next cycle retries, so this is a
 # transient local fault, not a broken source: report it as degraded, never
@@ -32,13 +39,6 @@ DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES = (
     "InterfaceError",
     "AdminShutdown",
     "TooManyConnections",
-)
-LOCAL_COVERAGE_RADIUS_M = 5000
-RADIUS_BUCKETS_M = (500, 1000, 3000, LOCAL_COVERAGE_RADIUS_M, 10000, 15000)
-REQUIRED_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = (
-    "rainfall",
-    "water_level",
-    "flood_depth",
 )
 # The public risk explanation keeps an upstream publication gap verbatim while
 # it summarises every other delayed source, so the reader-facing filter matches
