@@ -16,6 +16,7 @@ from app.jobs.evidence_retention import (
     LocationQueryRetentionSummary,
     PostgresEvidenceRetentionJob,
     RawSnapshotRetentionSummary,
+    StagingEvidenceRetentionSummary,
 )
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.frozen_legacy import report_frozen_legacy
@@ -79,6 +80,7 @@ class MaintenanceCycleResult:
     evidence_retention: EvidenceRetentionSummary | None = None
     location_query_retention: LocationQueryRetentionSummary | None = None
     raw_snapshot_retention: RawSnapshotRetentionSummary | None = None
+    staging_evidence_retention: StagingEvidenceRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
 
@@ -270,6 +272,7 @@ def run_maintenance_once(
     evidence_retention: EvidenceRetentionSummary | None = None
     location_query_retention: LocationQueryRetentionSummary | None = None
     raw_snapshot_retention: RawSnapshotRetentionSummary | None = None
+    staging_evidence_retention: StagingEvidenceRetentionSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
     del retention_days, tile_feature_limit, tile_prune_limit, tile_expired_before
@@ -285,6 +288,20 @@ def run_maintenance_once(
             retention_hours=resolved_location_query_retention_hours
         )
         raw_snapshot_retention = retention_job.prune_expired_raw_snapshots()
+        # staging_evidence is the largest table on the hosted node and has
+        # never been pruned (#367). The job is bounded per cycle, so leave it
+        # last: an over-running staging prune must not delay the privacy
+        # retention passes above.
+        if resolved_settings.staging_evidence_retention_enabled:
+            staging_evidence_retention = retention_job.prune_staging_evidence(
+                retention_days=resolved_settings.staging_evidence_retention_days,
+                batch_size=resolved_settings.staging_evidence_retention_batch_size,
+                max_batches=resolved_settings.staging_evidence_retention_max_batches,
+                statement_timeout_ms=(
+                    resolved_settings.staging_evidence_retention_statement_timeout_ms
+                ),
+                ensure_index=resolved_settings.staging_evidence_retention_ensure_index,
+            )
 
     except (
         EvidenceRetentionUnavailable,
@@ -304,6 +321,7 @@ def run_maintenance_once(
             evidence_retention=evidence_retention,
             location_query_retention=location_query_retention,
             raw_snapshot_retention=raw_snapshot_retention,
+            staging_evidence_retention=staging_evidence_retention,
             tile_refresh=tile_refresh,
             tile_prune=tile_prune,
         )
@@ -321,6 +339,22 @@ def run_maintenance_once(
         raw_snapshot_rows_pruned=(
             raw_snapshot_retention.rows_deleted if raw_snapshot_retention else 0
         ),
+        staging_evidence_retention_days=resolved_settings.staging_evidence_retention_days,
+        staging_evidence_rows_pruned=(
+            staging_evidence_retention.deleted_rows
+            if staging_evidence_retention
+            else 0
+        ),
+        staging_evidence_stopped_reason=(
+            staging_evidence_retention.stopped_reason
+            if staging_evidence_retention
+            else "disabled"
+        ),
+        staging_evidence_index_state=(
+            staging_evidence_retention.index_state
+            if staging_evidence_retention
+            else "disabled"
+        ),
         frozen_query_heat=True,
         frozen_local_tiles=True,
     )
@@ -331,6 +365,7 @@ def run_maintenance_once(
         evidence_retention=evidence_retention,
         location_query_retention=location_query_retention,
         raw_snapshot_retention=raw_snapshot_retention,
+        staging_evidence_retention=staging_evidence_retention,
         tile_refresh=tile_refresh,
         tile_prune=tile_prune,
     )
