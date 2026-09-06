@@ -349,6 +349,7 @@ def _run_v1_baseline_tick(
                 run_writer,
                 adapter_key=adapter_key,
                 run_at=run_at,
+                error_code=exc.__class__.__name__,
             )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
@@ -398,6 +399,7 @@ def _run_v1_baseline_tick(
                 run_writer,
                 adapter_key=adapter_key,
                 run_at=datetime.now(UTC),
+                error_code=exc.__class__.__name__,
             )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
@@ -464,6 +466,7 @@ def _run_v1_baseline_tick(
                 run_writer,
                 adapter_key=adapter_key,
                 run_at=datetime.now(UTC),
+                error_code=exc.__class__.__name__,
             )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
@@ -490,6 +493,7 @@ def _run_v1_baseline_tick(
                         adapter_key=adapter_key,
                         fallback=source_started_at,
                     ),
+                    error_code=result.error_code,
                 )
             _log_v1_source_failed(
                 adapter_key=adapter_key,
@@ -543,6 +547,7 @@ def _run_v1_baseline_tick(
                         run_writer,
                         adapter_key=adapter_key,
                         run_at=summary.started_at,
+                        error_code=exc.__class__.__name__,
                     )
                     _log_v1_source_failed(
                         adapter_key=adapter_key,
@@ -606,6 +611,7 @@ def _record_v1_source_failure(
     *,
     adapter_key: str,
     run_at: datetime,
+    error_code: str | None = None,
 ) -> None:
     try:
         record_pipeline_status(
@@ -614,6 +620,7 @@ def _record_v1_source_failure(
             status="failed",
             complete=False,
             run_at=run_at,
+            error_code=error_code,
         )
     except Exception as exc:  # noqa: BLE001 - preserve source continuation
         log_event(

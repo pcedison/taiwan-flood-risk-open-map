@@ -450,6 +450,7 @@ def _execute_managed_runtime_ingestion_cycle(
                 summaries=cycle.summaries,
                 status="failed",
                 complete=False,
+                error_code=exc.__class__.__name__,
             )
             log_event(
                 "runtime.managed.no_active_event_retirement.failed",
@@ -487,6 +488,7 @@ def _execute_managed_runtime_ingestion_cycle(
                 summaries=cycle.summaries,
                 status="failed",
                 complete=False,
+                error_code=exc.__class__.__name__,
             )
             log_event(
                 "runtime.managed.promotion.failed",
@@ -703,6 +705,7 @@ def _record_pipeline_status_for_adapter_keys(
     summaries: tuple[AdapterBatchRunSummary, ...],
     status: Literal["succeeded", "failed"],
     complete: bool,
+    error_code: str | None = None,
 ) -> None:
     summary_by_key = {summary.adapter_key: summary for summary in summaries}
     for adapter_key in adapter_keys:
@@ -731,6 +734,7 @@ def _record_pipeline_status_for_adapter_keys(
             complete=complete,
             run_at=summary.started_at if summary is not None else None,
             active_snapshot_raw_ref=active_snapshot_raw_ref,
+            error_code=error_code,
         )
 
 

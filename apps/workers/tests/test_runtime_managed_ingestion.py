@@ -1036,6 +1036,10 @@ def test_managed_runtime_cycle_records_safe_promotion_timeout_exception_class(
         False,
         result.summaries[0].started_at,
     )
+    # Without the persisted class name the API cannot tell a transient local
+    # database timeout from a broken publish step, and falls back to the
+    # pipeline_unavailable wording that pages Hosted Monitoring.
+    assert run_writer.pipeline_error_codes[-1] == "QueryCanceled"
 
 
 def test_managed_runtime_cycle_retries_one_transient_database_promotion_failure(
@@ -1294,6 +1298,7 @@ class _MemoryRunWriter:
         self.runtime_selections: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
         self.pipeline_statuses: list[tuple[tuple[str, ...], str, bool, datetime | None]] = []
         self.snapshot_activations: list[str | None] = []
+        self.pipeline_error_codes: list[str | None] = []
         self.timeline = timeline
 
     def write_summary(
@@ -1326,10 +1331,12 @@ class _MemoryRunWriter:
         checked_at: datetime,
         run_at: datetime | None,
         active_snapshot_raw_ref: str | None = None,
+        error_code: str | None = None,
     ) -> None:
         del checked_at
         self.pipeline_statuses.append((adapter_keys, status, complete, run_at))
         self.snapshot_activations.append(active_snapshot_raw_ref)
+        self.pipeline_error_codes.append(error_code)
 
 
 class _FailingSummaryMemoryRunWriter(_MemoryRunWriter):

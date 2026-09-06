@@ -246,10 +246,57 @@ def test_postgres_ingestion_run_writer_persists_final_pipeline_status() -> None:
         STARTED_AT,
         None,
         None,
+        None,
         ["official.wra.water_level"],
         STARTED_AT,
         STARTED_AT,
     )
+
+
+def test_pipeline_status_persists_the_promotion_error_code() -> None:
+    connection = _FakeConnection(job_id="unused")
+    writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    writer.write_pipeline_status(
+        adapter_keys=("official.wra.water_level",),
+        status="failed",
+        complete=False,
+        checked_at=FINISHED_AT,
+        run_at=STARTED_AT,
+        error_code="QueryCanceled",
+    )
+
+    sql, params = connection.cursor_instance.executions[0]
+    assert "runtime_pipeline_error_code = %s" in sql
+    assert params == (
+        "failed",
+        FINISHED_AT,
+        False,
+        STARTED_AT,
+        "QueryCanceled",
+        None,
+        None,
+        ["official.wra.water_level"],
+        STARTED_AT,
+        STARTED_AT,
+    )
+
+
+def test_pipeline_status_clears_the_error_code_once_the_cycle_succeeds() -> None:
+    connection = _FakeConnection(job_id="unused")
+    writer = PostgresIngestionRunWriter(connection_factory=lambda: connection)
+
+    writer.write_pipeline_status(
+        adapter_keys=("official.wra.water_level",),
+        status="succeeded",
+        complete=True,
+        checked_at=FINISHED_AT,
+        run_at=STARTED_AT,
+        error_code="QueryCanceled",
+    )
+
+    _, params = connection.cursor_instance.executions[0]
+    assert params[4] is None
 
 
 def test_pipeline_status_atomically_activates_bounded_complete_replace_snapshot() -> None:
@@ -276,6 +323,7 @@ def test_pipeline_status_atomically_activates_bounded_complete_replace_snapshot(
         FINISHED_AT,
         True,
         STARTED_AT,
+        None,
         raw_ref,
         raw_ref,
         ["official.wra.historical_flood"],

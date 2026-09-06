@@ -249,7 +249,13 @@ def _source_readiness(
             cast(str | None, row.get("latest_run_error_code"))
         )
     elif _pipeline_failed_for_latest_run(row, latest_run_at):
-        status, reason_code = "failed", "pipeline_failed"
+        # The promotion stage stamps its own exception class name, so a local
+        # database timeout after a healthy fetch is reported as degraded rather
+        # than as a broken publish step nobody can act on.
+        status, reason_code = _failed_run_decision(
+            cast(str | None, row.get("runtime_pipeline_error_code")),
+            fallback_reason_code="pipeline_failed",
+        )
     elif str(row.get("latest_run_status") or "") != "succeeded":
         status, reason_code = "degraded", "run_incomplete"
     elif not _pipeline_complete_for_latest_run(row, latest_run_at):
@@ -274,7 +280,11 @@ def _source_readiness(
     )
 
 
-def _failed_run_decision(error_code: str | None) -> tuple[SourceReadinessStatus, str]:
+def _failed_run_decision(
+    error_code: str | None,
+    *,
+    fallback_reason_code: str = "run_failed",
+) -> tuple[SourceReadinessStatus, str]:
     code = error_code or ""
     if code.endswith(DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES):
         return "degraded", "database_unavailable"
@@ -282,7 +292,7 @@ def _failed_run_decision(error_code: str | None) -> tuple[SourceReadinessStatus,
         return "failed", "upstream_unavailable"
     if code.endswith(UPSTREAM_CONTRACT_ERROR_CODE_SUFFIXES):
         return "failed", "upstream_contract_changed"
-    return "failed", "run_failed"
+    return "failed", fallback_reason_code
 
 
 def _jurisdiction_readiness(
@@ -473,6 +483,7 @@ _SOURCE_READINESS_SQL = """
         source.runtime_pipeline_checked_at,
         source.runtime_pipeline_run_at,
         COALESCE(source.runtime_pipeline_complete, false) AS runtime_pipeline_complete,
+        source.runtime_pipeline_error_code,
         latest_runtime.latest_run_status,
         latest_runtime.latest_run_error_code,
         latest_runtime.latest_run_at,

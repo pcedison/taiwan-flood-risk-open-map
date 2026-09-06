@@ -289,6 +289,7 @@ def _health_row(
     runtime_pipeline_delta_minutes: int | None = None,
     runtime_pipeline_run_delta_minutes: int | None = None,
     runtime_pipeline_complete: bool = False,
+    runtime_pipeline_error_code: str | None = None,
     fresh_station_count: int | None = None,
     delayed_station_count: int | None = None,
     stale_station_count: int | None = None,
@@ -341,6 +342,7 @@ def _health_row(
         runtime_pipeline_checked_at=runtime_pipeline_checked_at,
         runtime_pipeline_run_at=runtime_pipeline_run_at,
         runtime_pipeline_complete=runtime_pipeline_complete,
+        runtime_pipeline_error_code=runtime_pipeline_error_code,
         fresh_station_count=fresh_station_count,
         delayed_station_count=delayed_station_count,
         stale_station_count=stale_station_count,
@@ -1957,3 +1959,68 @@ def test_database_timeout_is_reported_as_degraded_not_a_pipeline_failure(
     assert health[0].health_status == "degraded"
     assert health[0].reason_code == "database_unavailable"
     assert "資料庫" in health[0].message
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ("QueryCanceled", "LockNotAvailable", "OperationalError"),
+)
+def test_promotion_database_timeout_is_degraded_not_pipeline_unavailable(
+    error_code: str,
+) -> None:
+    # Fetch and staging succeeded; only our own database stalled while
+    # promoting. Without the persisted promotion code this fell through to the
+    # pipeline_unavailable fallback and paged Hosted Monitoring.
+    row = _health_row(
+        adapter_key="official.wra_iow.flood_depth",
+        latest_run_status="succeeded",
+        runtime_enabled=True,
+        runtime_enabled_delta_minutes=1,
+        runtime_pipeline_status="failed",
+        runtime_pipeline_delta_minutes=2,
+        runtime_pipeline_run_delta_minutes=5,
+        runtime_pipeline_error_code=error_code,
+    )
+
+    health = build_nearby_source_health((row,), evaluated_at=NOW)
+
+    assert health[0].health_status == "degraded"
+    assert health[0].reason_code == "database_unavailable"
+    assert health[0].message == (
+        "本站資料庫暫時逾時或忙碌；資料取得正常，將於下一輪重試。"
+    )
+
+
+def test_promotion_transport_failure_still_reads_as_an_upstream_outage() -> None:
+    row = _health_row(
+        adapter_key="official.wra_iow.flood_depth",
+        latest_run_status="succeeded",
+        runtime_enabled=True,
+        runtime_enabled_delta_minutes=1,
+        runtime_pipeline_status="failed",
+        runtime_pipeline_delta_minutes=2,
+        runtime_pipeline_run_delta_minutes=5,
+        runtime_pipeline_error_code="CivilIotStaFetchError",
+    )
+
+    health = build_nearby_source_health((row,), evaluated_at=NOW)
+
+    assert health[0].health_status == "failed"
+    assert health[0].reason_code == "upstream_unavailable"
+
+
+def test_promotion_failure_without_a_recorded_code_keeps_the_fallback() -> None:
+    row = _health_row(
+        adapter_key="official.wra_iow.flood_depth",
+        latest_run_status="succeeded",
+        runtime_enabled=True,
+        runtime_enabled_delta_minutes=1,
+        runtime_pipeline_status="failed",
+        runtime_pipeline_delta_minutes=2,
+        runtime_pipeline_run_delta_minutes=5,
+    )
+
+    health = build_nearby_source_health((row,), evaluated_at=NOW)
+
+    assert health[0].health_status == "failed"
+    assert health[0].reason_code == "pipeline_unavailable"

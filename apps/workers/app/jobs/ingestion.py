@@ -119,6 +119,7 @@ def record_pipeline_status(
     complete: bool,
     run_at: datetime | None = None,
     active_snapshot_raw_ref: str | None = None,
+    error_code: str | None = None,
 ) -> None:
     if run_writer is None or not adapter_keys:
         return
@@ -137,6 +138,8 @@ def record_pipeline_status(
         }
         if active_snapshot_raw_ref is not None:
             arguments["active_snapshot_raw_ref"] = active_snapshot_raw_ref
+        if error_code is not None:
+            arguments["error_code"] = error_code
         write_pipeline_status(**arguments)
 
 

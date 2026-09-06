@@ -971,8 +971,11 @@ def _source_health_decision(
         and row.runtime_pipeline_checked_at is not None
         and _pipeline_outcome_matches_run(row, run_at)
     ):
+        # The promotion stage stamps its own exception class name, so a local
+        # database timeout there is classified exactly like one raised by the
+        # adapter batch instead of collapsing to the pipeline fallback.
         return _pipeline_failure_decision(
-            row,
+            row.runtime_pipeline_error_code or row.latest_run_error_code,
             fallback_message="資料取得後的處理或發布流程未完成。",
         )
     if status == "disabled" and not runtime_enabled_now:
@@ -1037,7 +1040,7 @@ def _source_health_decision(
 
     if status == "failed":
         return _pipeline_failure_decision(
-            row,
+            row.latest_run_error_code,
             fallback_message="最近一次背景更新未完成；不公開內部錯誤內容。",
         )
     if status in {"queued", "running"}:
@@ -1103,16 +1106,15 @@ def _source_health_decision(
 
 
 def _pipeline_failure_decision(
-    row: RealtimeSourceHealthRow,
+    error_code: str | None,
     *,
     fallback_message: str,
 ) -> _SourceHealthDecision:
+    code = error_code or ""
     # Our own database timed out, was locked out, or dropped the connection.
     # The fetch succeeded and the next cycle retries, so this is a transient
     # local fault rather than a broken source.
-    if (row.latest_run_error_code or "").endswith(
-        DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES
-    ):
+    if code.endswith(DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES):
         return _source_decision(
             "degraded",
             "database_unavailable",
@@ -1121,13 +1123,13 @@ def _pipeline_failure_decision(
     # Adapter error class names are already stored as a bounded operational
     # code.  Collapse every present and future *ConfigurationError to one
     # public-safe reason without exposing a credential name, URL, or secret.
-    if (row.latest_run_error_code or "").endswith("ConfigurationError"):
+    if code.endswith("ConfigurationError"):
         return _source_decision(
             "failed",
             "source_misconfigured",
             "背景來源缺少必要設定或設定無效；未公開任何憑證內容。",
         )
-    if (row.latest_run_error_code or "").endswith("TimeoutError"):
+    if code.endswith("TimeoutError"):
         return _source_decision(
             "failed",
             "upstream_unavailable",
@@ -1136,7 +1138,7 @@ def _pipeline_failure_decision(
     # Transport failures: the upstream never delivered a usable response. Adapter
     # wrappers such as CivilIotStaFetchError are what actually reach this row, so
     # they must be matched here rather than by a payload-shaped branch.
-    if (row.latest_run_error_code or "").endswith(
+    if code.endswith(
         (
             "ConnectionError",
             "FetchError",
@@ -1152,7 +1154,7 @@ def _pipeline_failure_decision(
             "上游服務目前回應錯誤；本站每輪重試中，未公開內部連線資訊。",
         )
     # Contract drift: the upstream answered with a payload our parser cannot read.
-    if (row.latest_run_error_code or "").endswith("PayloadError"):
+    if code.endswith("PayloadError"):
         return _source_decision(
             "failed",
             "upstream_unavailable",

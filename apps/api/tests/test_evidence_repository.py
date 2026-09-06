@@ -760,6 +760,7 @@ def test_query_realtime_source_health_rows_maps_positional_task9_fields() -> Non
                 None,
                 "missing",
                 False,
+                "QueryCanceled",
             )
         ]
     )
@@ -776,6 +777,9 @@ def test_query_realtime_source_health_rows_maps_positional_task9_fields() -> Non
     assert rows[0].active_station_count == 0
     assert rows[0].inventory_proof_status == "missing"
     assert rows[0].inventory_complete is False
+    # Appended last on purpose: the mapper is positional, so a mid-list column
+    # would shift every index above by one.
+    assert rows[0].runtime_pipeline_error_code == "QueryCanceled"
 
 
 def test_query_realtime_jurisdiction_context_resolves_home_adjacent_and_mappings() -> None:
