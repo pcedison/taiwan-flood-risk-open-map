@@ -20,6 +20,19 @@ from app.domain.evidence.repository import NearbyCoverageRow, RealtimeSourceHeal
 # Five kilometres remains the boundary for "nearby" coverage.  The wider
 # buckets deliberately retain a regional fallback so a sparse network does not
 # become an empty UI when a useful station exists just outside that boundary.
+# Our own database timed out, was locked out, or dropped the connection. The
+# fetch and the upstream were fine and the next cycle retries, so this is a
+# transient local fault, not a broken source: report it as degraded, never
+# failed.
+DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES = (
+    "QueryCanceled",
+    "LockNotAvailable",
+    "DeadlockDetected",
+    "OperationalError",
+    "InterfaceError",
+    "AdminShutdown",
+    "TooManyConnections",
+)
 LOCAL_COVERAGE_RADIUS_M = 5000
 RADIUS_BUCKETS_M = (500, 1000, 3000, LOCAL_COVERAGE_RADIUS_M, 10000, 15000)
 REQUIRED_SIGNAL_TYPES: tuple[NearbyCoverageSignalType, ...] = (
@@ -1094,6 +1107,17 @@ def _pipeline_failure_decision(
     *,
     fallback_message: str,
 ) -> _SourceHealthDecision:
+    # Our own database timed out, was locked out, or dropped the connection.
+    # The fetch succeeded and the next cycle retries, so this is a transient
+    # local fault rather than a broken source.
+    if (row.latest_run_error_code or "").endswith(
+        DATABASE_UNAVAILABLE_ERROR_CODE_SUFFIXES
+    ):
+        return _source_decision(
+            "degraded",
+            "database_unavailable",
+            "本站資料庫暫時逾時或忙碌；資料取得正常，將於下一輪重試。",
+        )
     # Adapter error class names are already stored as a bounded operational
     # code.  Collapse every present and future *ConfigurationError to one
     # public-safe reason without exposing a credential name, URL, or secret.

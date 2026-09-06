@@ -17,6 +17,18 @@ from app.logging import log_event
 
 ConnectionFactory = Callable[[], Any]
 DEFAULT_PROMOTION_BATCH_SIZE = 100
+# Fixed column order shared by the per-row latest decision and the batched
+# unchanged-observation pre-check, so both compare identical fingerprints.
+LATEST_DECISION_COLUMNS = """
+            observed_at,
+            station_id,
+            rainfall_mm_1h,
+            rainfall_mm_24h,
+            water_level_m,
+            flood_depth_cm,
+            warning_level_m,
+            ST_AsGeoJSON(geom)
+"""
 DEFAULT_PROMOTION_CONNECT_TIMEOUT_SECONDS = 10
 DEFAULT_PROMOTION_LOCK_TIMEOUT_MS = 5_000
 DEFAULT_PROMOTION_STATEMENT_TIMEOUT_MS = 30_000
@@ -572,7 +584,16 @@ class PostgresEvidencePromotionWriter:
 
         results: list[str | None] = []
         with self._connect() as connection:
+            try:
+                settled = self._settle_unchanged_observations(connection, payloads)
+            except Exception:
+                connection.rollback()
+                raise
             for payload in payloads:
+                staging_id = _validated_staging_id(payload)
+                if staging_id is not None and staging_id in settled:
+                    results.append(None)
+                    continue
                 try:
                     results.append(
                         self._write_evidence_transaction(payload, _connection=connection)
@@ -581,6 +602,87 @@ class PostgresEvidencePromotionWriter:
                     connection.rollback()
                     raise
         return tuple(results)
+
+    def _settle_unchanged_observations(
+        self,
+        connection: Any,
+        payloads: tuple[EvidencePromotionPayload, ...],
+    ) -> frozenset[str]:
+        """Retire re-observations of unchanged rows in one transaction.
+
+        A frozen upstream republishes the same observation for every station on
+        every cycle. Deciding each one in its own transaction costs eight
+        statements and a commit per station, which is what turns a no-op cycle
+        into minutes of database work. Read the whole chunk's latest rows once,
+        keep the per-row staging authorization, and retire the matches together.
+
+        Anything that is not an exact re-observation of the row already stored
+        falls through to the full per-row path with all of its guards.
+        """
+
+        keyed: dict[str, tuple[EvidencePromotionPayload, tuple[str, str, str]]] = {}
+        for payload in payloads:
+            staging_id = _validated_staging_id(payload)
+            if staging_id is None or staging_id in keyed:
+                continue
+            key = _batch_idempotent_station_key(payload)
+            if key is not None:
+                keyed[staging_id] = (payload, key)
+        if not keyed:
+            return frozenset()
+
+        with connection.cursor() as cursor:
+            _apply_promotion_transaction_timeouts(cursor)
+            cursor.execute(
+                f"""
+                /* unchanged-observations */
+                SELECT adapter_key, event_type, station_id, {LATEST_DECISION_COLUMNS}
+                FROM official_realtime_latest
+                WHERE (adapter_key, event_type, station_id) IN (
+                    SELECT * FROM unnest(%s::text[], %s::text[], %s::text[])
+                )
+                """,
+                (
+                    [key[0] for _payload, key in keyed.values()],
+                    [key[1] for _payload, key in keyed.values()],
+                    [key[2] for _payload, key in keyed.values()],
+                ),
+            )
+            existing = {
+                (str(row[0]), str(row[1]), str(row[2])): row[3:]
+                for row in cursor.fetchall()
+            }
+            settled: list[str] = []
+            for staging_id, (payload, key) in keyed.items():
+                row = existing.get(key)
+                if row is None:
+                    continue
+                if _latest_row_fingerprint(row, event_type=payload.event_type) != (
+                    _candidate_latest_fingerprint(payload, station_id=key[2])
+                ):
+                    continue
+                # Keep the staging authorization boundary: a payload that does
+                # not match its own staging row may not retire it.
+                if _authorize_staging_candidate(cursor, payload) is True:
+                    settled.append(staging_id)
+            if settled:
+                cursor.execute(
+                    """
+                    UPDATE staging_evidence
+                    SET validation_status = 'rejected',
+                        rejection_reason = 'idempotent_existing_observation'
+                    WHERE id = ANY(%s::uuid[])
+                        AND validation_status = 'accepted'
+                    """,
+                    (settled,),
+                )
+        connection.commit()
+        log_event(
+            "worker.promotion.unchanged_observations_settled",
+            candidate_count=len(payloads),
+            settled_count=len(settled),
+        )
+        return frozenset(settled)
 
     def retire_warning_latest_for_no_active_event(
         self,
@@ -1082,17 +1184,9 @@ def _classify_latest_decision(cursor: Any, payload: EvidencePromotionPayload) ->
     if station_id is None or payload.adapter_key is None or payload.observed_at is None:
         return "historical_only"
     cursor.execute(
-        """
+        f"""
         /* latest-decision */
-        SELECT
-            observed_at,
-            station_id,
-            rainfall_mm_1h,
-            rainfall_mm_24h,
-            water_level_m,
-            flood_depth_cm,
-            warning_level_m,
-            ST_AsGeoJSON(geom)
+        SELECT {LATEST_DECISION_COLUMNS}
         FROM official_realtime_latest
         WHERE adapter_key = %s
             AND event_type = %s
@@ -1109,8 +1203,22 @@ def _classify_latest_decision(cursor: Any, payload: EvidencePromotionPayload) ->
         return "historical_only"
     if payload.observed_at > existing_observed_at:
         return "update"
-    existing_fingerprint = (
-        payload.event_type,
+    if _latest_row_fingerprint(row, event_type=payload.event_type) == (
+        _candidate_latest_fingerprint(payload, station_id=station_id)
+    ):
+        return "idempotent"
+    return "conflict"
+
+
+def _latest_row_fingerprint(row: tuple[Any, ...], *, event_type: str) -> tuple[Any, ...]:
+    """Fingerprint one official_realtime_latest row.
+
+    The column order is fixed by LATEST_DECISION_COLUMNS so the per-row and the
+    batched pre-check compare exactly the same values.
+    """
+
+    return (
+        event_type,
         str(row[1]),
         _optional_float(row[2]),
         _optional_float(row[3]),
@@ -1118,9 +1226,17 @@ def _classify_latest_decision(cursor: Any, payload: EvidencePromotionPayload) ->
         _optional_float(row[5]),
         _optional_float(row[6]),
         _rounded_geometry(row[7]),
-        existing_observed_at.astimezone(UTC).isoformat(),
+        row[0].astimezone(UTC).isoformat(),
     )
-    candidate_fingerprint = (
+
+
+def _candidate_latest_fingerprint(
+    payload: EvidencePromotionPayload,
+    *,
+    station_id: str,
+) -> tuple[Any, ...]:
+    assert payload.observed_at is not None
+    return (
         payload.event_type,
         station_id,
         _optional_float(payload.properties.get("rainfall_mm_1h")),
@@ -1131,7 +1247,30 @@ def _classify_latest_decision(cursor: Any, payload: EvidencePromotionPayload) ->
         _rounded_geometry(_geojson_point_geometry(payload.properties)),
         payload.observed_at.astimezone(UTC).isoformat(),
     )
-    return "idempotent" if candidate_fingerprint == existing_fingerprint else "conflict"
+
+
+def _batch_idempotent_station_key(
+    payload: EvidencePromotionPayload,
+) -> tuple[str, str, str] | None:
+    """Return the latest-table key when a payload may be a plain re-observation.
+
+    Only candidates whose full path would end at `_classify_latest_decision` are
+    eligible: warning and CAP lifecycle rows, rejected candidates, and rows with
+    no station identity all keep the per-row transaction and its extra guards.
+    """
+
+    if _is_current_cap_lifecycle_candidate(payload):
+        return None
+    if payload.event_type == "flood_warning":
+        return None
+    if not _should_upsert_official_realtime_latest(payload):
+        return None
+    if _current_candidate_rejection_reason(payload) is not None:
+        return None
+    station_id = _official_realtime_station_id(payload)
+    if station_id is None or payload.adapter_key is None or payload.observed_at is None:
+        return None
+    return (payload.adapter_key, payload.event_type, station_id)
 
 
 def _handle_exact_central_local_duplicate(

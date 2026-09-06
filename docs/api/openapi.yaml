@@ -2461,6 +2461,7 @@ components:
             - delayed
             - upstream_unavailable
             - upstream_stale
+            - database_unavailable
             - pipeline_unavailable
             - pipeline_stalled
             - source_misconfigured
@@ -3205,7 +3206,8 @@ components:
             Machine-readable cause: operational, catalog_missing, catalog_disabled,
             runtime_selection_missing, runtime_selection_stale, runtime_disabled,
             run_missing, run_stale, run_failed, run_incomplete, pipeline_failed,
-            pipeline_incomplete, or upstream_stale. upstream_stale means this
+            pipeline_incomplete, upstream_stale, or database_unavailable.
+            upstream_stale means this
             deployment ingested and published on schedule while the upstream
             publisher stopped updating, so it is reported as degraded, not failed.
         checked_at:

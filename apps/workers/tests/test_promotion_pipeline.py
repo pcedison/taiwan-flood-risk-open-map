@@ -2612,9 +2612,11 @@ class _FakeConnection:
         max_no_active_generation: datetime | None = None,
         fail_timeout_on_call: int | None = None,
         source_catalog_resolved: bool = True,
+        unchanged_observation_rows: tuple[tuple[object, ...], ...] = (),
     ) -> None:
         self.cursor_instance = _FakeCursor(
             rows=rows,
+            unchanged_observation_rows=unchanged_observation_rows,
             evidence_id=evidence_id,
             existing_latest_observed_at=existing_latest_observed_at,
             existing_latest_row=existing_latest_row,
@@ -2674,8 +2676,10 @@ class _FakeCursor:
         max_no_active_generation: datetime | None,
         fail_timeout_on_call: int | None,
         source_catalog_resolved: bool,
+        unchanged_observation_rows: tuple[tuple[object, ...], ...] = (),
     ) -> None:
         self._rows = tuple(rows)
+        self._unchanged_observation_rows = tuple(unchanged_observation_rows)
         self._evidence_id = evidence_id
         self._admin_area_row = admin_area_row
         self._central_duplicate_row = central_duplicate_row
@@ -2714,7 +2718,7 @@ class _FakeCursor:
                 raise _QueryCanceled("private database detail")
             return
         self.executions.append((sql, params))
-        if "UPDATE staging_evidence" in sql:
+        if "UPDATE staging_evidence" in sql and len(params) > 1:
             self.terminal_rejections.append((str(params[1]), str(params[0])))
         if "INSERT INTO official_realtime_latest" not in sql:
             return
@@ -2736,6 +2740,8 @@ class _FakeCursor:
         self.latest_updated = True
 
     def fetchall(self) -> tuple[tuple[object, ...], ...]:
+        if self.executions and "/* unchanged-observations */" in self.executions[-1][0]:
+            return self._unchanged_observation_rows
         return self._rows
 
     def fetchone(self) -> tuple[str]:
@@ -2788,3 +2794,136 @@ class _FakeCursor:
                 return (None, True)
             return (self._evidence_id, True)
         return (self._evidence_id,)
+
+
+def test_batch_settles_unchanged_observations_without_per_row_transactions() -> None:
+    """A frozen upstream must not cost one transaction per station.
+
+    Every candidate here repeats an observation the latest table already holds,
+    which is what WRA IoW republished for thirty hours.
+    """
+
+    payloads = _unchanged_iow_payloads(1366)
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="unused",
+        unchanged_observation_rows=tuple(
+            _unchanged_latest_row(index) for index in range(1366)
+        ),
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    results = writer.write_evidence_batch(payloads)
+
+    assert results == (None,) * 1366
+    assert connection.commit_count == 1
+    executions = connection.cursor_instance.executions
+    assert sum("/* unchanged-observations */" in sql for sql, _params in executions) == 1
+    assert sum("UPDATE staging_evidence" in sql for sql, _params in executions) == 1
+    # Only the batch read, one authorization per candidate, and one retirement.
+    assert len(executions) == 1366 + 2
+    assert not any("/* latest-decision */" in sql for sql, _params in executions)
+    assert not any("/* same-staging-evidence */" in sql for sql, _params in executions)
+    assert not any("pg_advisory_xact_lock" in sql for sql, _params in executions)
+    assert not any(
+        "/* exact-central-local-duplicate */" in sql for sql, _params in executions
+    )
+    rejection_sql, rejection_params = next(
+        (sql, params) for sql, params in executions if "UPDATE staging_evidence" in sql
+    )
+    assert "idempotent_existing_observation" in rejection_sql
+    assert len(rejection_params[0]) == 1366
+
+
+def test_batch_keeps_the_full_path_for_a_changed_observation() -> None:
+    payloads = _unchanged_iow_payloads(1)
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        unchanged_observation_rows=(_unchanged_latest_row(0, flood_depth_cm=9.0),),
+        existing_latest_row=None,
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    writer.write_evidence_batch(payloads)
+
+    executions = connection.cursor_instance.executions
+    assert any("/* latest-decision */" in sql for sql, _params in executions)
+    assert any("pg_advisory_xact_lock" in sql for sql, _params in executions)
+
+
+def test_batch_never_retires_a_candidate_that_fails_staging_authorization() -> None:
+    payloads = _unchanged_iow_payloads(2)
+    connection = _FakeConnection(
+        rows=[],
+        evidence_id="evidence-id",
+        unchanged_observation_rows=tuple(
+            _unchanged_latest_row(index) for index in range(2)
+        ),
+        staging_authorized=False,
+        existing_latest_row=None,
+    )
+    writer = PostgresEvidencePromotionWriter(connection_factory=lambda: connection)
+
+    writer.write_evidence_batch(payloads)
+
+    executions = connection.cursor_instance.executions
+    batch_rejections = [
+        params
+        for sql, params in executions
+        if "UPDATE staging_evidence" in sql and isinstance(params[0], list)
+    ]
+    # An unauthorized candidate is never retired by the batch, and the full
+    # per-row path re-checks it and refuses to touch the staging row.
+    assert batch_rejections == []
+    assert connection.cursor_instance.terminal_rejections == []
+
+
+def _unchanged_iow_payloads(count: int) -> tuple[EvidencePromotionPayload, ...]:
+    return tuple(
+        EvidencePromotionPayload(
+            data_source_id="data-source-id",
+            adapter_key="official.wra_iow.flood_depth",
+            source_id=f"wra-iow-{index}",
+            source_type="official",
+            event_type="flood_report",
+            title="IoW flood depth",
+            summary="IoW flood depth",
+            url=f"https://example.test/wra-iow/{index}",
+            occurred_at=OBSERVED_AT,
+            observed_at=OBSERVED_AT,
+            confidence=0.9,
+            raw_ref="raw/official/wra_iow/flood_depth/frozen.json",
+            properties={
+                "adapter_key": "official.wra_iow.flood_depth",
+                "evidence_scope": "current",
+                "station_id": f"IOW{index}",
+                "flood_depth_cm": 0.0,
+                "staging_evidence_id": f"00000000-0000-4000-8000-{index:012d}",
+                "location_payload": {
+                    "geometry": {"type": "Point", "coordinates": [120.2, 23.0]}
+                },
+            },
+        )
+        for index in range(count)
+    )
+
+
+def _unchanged_latest_row(
+    index: int,
+    *,
+    flood_depth_cm: float = 0.0,
+) -> tuple[object, ...]:
+    return (
+        "official.wra_iow.flood_depth",
+        "flood_report",
+        f"IOW{index}",
+        OBSERVED_AT,
+        f"IOW{index}",
+        None,
+        None,
+        None,
+        flood_depth_cm,
+        None,
+        '{"type":"Point","coordinates":[120.2,23.0]}',
+    )
