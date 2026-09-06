@@ -3112,6 +3112,91 @@ components:
           type: [integer, "null"]
         shared_blks_hit:
           type: [integer, "null"]
+    AdminDbStagingStatusCount:
+      description: >-
+        One `staging_evidence.validation_status` group. `oldest`/`newest` are
+        null when the row was estimated from catalog statistics rather than
+        counted.
+      type: object
+      required:
+        - validation_status
+        - rows
+      properties:
+        validation_status:
+          type: string
+        rows:
+          type: integer
+          minimum: 0
+        oldest:
+          type: [string, "null"]
+          format: date-time
+        newest:
+          type: [string, "null"]
+          format: date-time
+    AdminDbStagingStatusCounts:
+      description: >-
+        How `staging_evidence` splits across validation_status, which is what
+        decides how much of the table retention may prune (#367). The exact
+        aggregate needs min/max(created_at) per group, so no index can serve it
+        and on a bloated table it exceeds the probe budget. `status` reports
+        that probe; `method` says whether `rows` were counted (`exact`) or
+        estimated from the planner's sampled distribution (`pg_stats_estimate`),
+        which is only as fresh as the last ANALYZE and omits statuses too rare
+        to reach the most-common list. Read an estimate as a proportion.
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - timeout
+            - unavailable
+        method:
+          type: [string, "null"]
+          enum:
+            - exact
+            - pg_stats_estimate
+            - null
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDbStagingStatusCount"
+        error:
+          type: [string, "null"]
+    AdminDbStagingUsedByEvidence:
+      description: >-
+        Evidence rows carrying `properties ->> 'staging_evidence_id'`, i.e. the
+        staging rows already promoted. The schema has no `promoted`
+        validation_status, so this count is how the already-promoted share of
+        `accepted` staging rows is sized. `method` is `exact` for the counted
+        answer or `index_reltuples_estimate` for the entry count of
+        `index_name` taken from catalog statistics.
+      type: object
+      required:
+        - status
+        - index_name
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - timeout
+            - unavailable
+        method:
+          type: [string, "null"]
+          enum:
+            - exact
+            - index_reltuples_estimate
+            - null
+        rows:
+          type: [integer, "null"]
+          minimum: 0
+        index_name:
+          type: string
+        error:
+          type: [string, "null"]
     AdminDbQueryPlan:
       description: >-
         An EXPLAIN ANALYZE probe of one risk-path query. The probe budget is
@@ -3154,6 +3239,8 @@ components:
         - sample_point
         - tables
         - indexes
+        - staging_status_counts
+        - staging_used_by_evidence_estimate
         - query_plans
       properties:
         captured_at:
@@ -3169,6 +3256,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdminDbIndexStat"
+        staging_status_counts:
+          $ref: "#/components/schemas/AdminDbStagingStatusCounts"
+        staging_used_by_evidence_estimate:
+          $ref: "#/components/schemas/AdminDbStagingUsedByEvidence"
         query_plans:
           type: array
           items:

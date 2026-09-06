@@ -126,6 +126,10 @@ def summarize(diagnostics: dict[str, Any]) -> dict[str, Any]:
             }
             for plan in plans
         ],
+        "staging_status_counts": diagnostics.get("staging_status_counts") or {},
+        "staging_used_by_evidence_estimate": (
+            diagnostics.get("staging_used_by_evidence_estimate") or {}
+        ),
         "index_count": len(diagnostics.get("indexes") or []),
         "statements_available": diagnostics.get("statements") is not None,
     }
@@ -150,12 +154,53 @@ def summary_lines(summary: dict[str, Any]) -> list[str]:
             f"dead={table['n_dead_tup']} dead_ratio={table['dead_tuple_ratio']} "
             f"last_autovacuum={table['last_autovacuum']}"
         )
+    lines.extend(staging_status_lines(summary.get("staging_status_counts") or {}))
+    lines.extend(
+        staging_use_lines(summary.get("staging_used_by_evidence_estimate") or {})
+    )
     for plan in summary.get("query_plans", []):
         lines.append(
             f"PLAN {plan['name']} | status={plan['status']} "
             f"execution_ms={plan['execution_time_ms']}"
         )
     return lines
+
+
+def staging_status_lines(section: dict[str, Any]) -> list[str]:
+    """Print the staging split, saying plainly when the numbers are estimates.
+
+    #367 turns on which share of staging_evidence is terminal `rejected`, so a
+    reader must never mistake a sampled estimate for a count.
+    """
+
+    if not section:
+        return []
+    status = section.get("status")
+    method = section.get("method")
+    rows = section.get("rows") or []
+    if not rows:
+        return [f"STAGING STATUS | status={status} method={method} rows=none"]
+    total = sum(row.get("rows") or 0 for row in rows)
+    lines = []
+    for row in rows:
+        count = row.get("rows") or 0
+        share = f"{count / total:.1%}" if total else "n/a"
+        lines.append(
+            f"STAGING {row.get('validation_status')} | rows={count} share={share} "
+            f"oldest={row.get('oldest')} newest={row.get('newest')} "
+            f"method={method} probe={status}"
+        )
+    return lines
+
+
+def staging_use_lines(section: dict[str, Any]) -> list[str]:
+    if not section:
+        return []
+    return [
+        f"STAGING USED BY EVIDENCE | rows={section.get('rows')} "
+        f"method={section.get('method')} probe={section.get('status')} "
+        f"index={section.get('index_name')}"
+    ]
 
 
 def write_output(output: str, evidence: dict[str, Any]) -> None:

@@ -60,6 +60,32 @@ def _diagnostics_payload() -> dict[str, Any]:
                 "index_size_bytes": 153_092_096,
             }
         ],
+        "staging_status_counts": {
+            "status": "ok",
+            "method": "exact",
+            "rows": [
+                {
+                    "validation_status": "rejected",
+                    "rows": 11_600_000,
+                    "oldest": datetime(2026, 6, 13, tzinfo=UTC),
+                    "newest": datetime(2026, 9, 5, 11, 55, tzinfo=UTC),
+                },
+                {
+                    "validation_status": "accepted",
+                    "rows": 2_400_000,
+                    "oldest": datetime(2026, 6, 13, 0, 10, tzinfo=UTC),
+                    "newest": datetime(2026, 9, 5, 11, 55, tzinfo=UTC),
+                },
+            ],
+            "error": None,
+        },
+        "staging_used_by_evidence_estimate": {
+            "status": "ok",
+            "method": "exact",
+            "rows": 2_310_000,
+            "index_name": "idx_evidence_staging_evidence_id",
+            "error": None,
+        },
         "query_plans": [
             {
                 "name": "nearby_evidence",
@@ -153,6 +179,22 @@ def test_db_diagnostics_returns_structure(monkeypatch: pytest.MonkeyPatch) -> No
     assert plans["coverage_supplement"]["status"] == "timeout"
     assert plans["coverage_supplement"]["error"] == "timeout"
     assert payload["statements"] is None
+    # #367 turns on the staging status split, so it has to survive the contract.
+    staging = payload["staging_status_counts"]
+    assert staging["status"] == "ok"
+    assert staging["method"] == "exact"
+    assert [row["validation_status"] for row in staging["rows"]] == [
+        "rejected",
+        "accepted",
+    ]
+    assert staging["rows"][0]["rows"] == 11_600_000
+    assert payload["staging_used_by_evidence_estimate"] == {
+        "status": "ok",
+        "method": "exact",
+        "rows": 2_310_000,
+        "index_name": "idx_evidence_staging_evidence_id",
+        "error": None,
+    }
     datetime.fromisoformat(payload["captured_at"].replace("Z", "+00:00"))
     assert_openapi_schema(payload, "AdminDbDiagnosticsResponse")
 
@@ -346,9 +388,212 @@ def test_table_and_index_sections_survive_an_unavailable_database() -> None:
     assert diagnostics["tables"] == []
     assert diagnostics["indexes"] == []
     assert diagnostics["statements"] is None
+    assert diagnostics["staging_status_counts"] == {
+        "status": "unavailable",
+        "method": None,
+        "rows": [],
+        "error": "OSError",
+    }
+    assert diagnostics["staging_used_by_evidence_estimate"] == {
+        "status": "unavailable",
+        "method": None,
+        "rows": None,
+        "index_name": db_diagnostics.STAGING_USE_INDEX,
+        "error": "OSError",
+    }
     assert [plan["status"] for plan in diagnostics["query_plans"]] == [
         "unavailable",
         "unavailable",
         "unavailable",
     ]
     assert all(plan["note"] for plan in diagnostics["query_plans"])
+
+
+class _ScriptedCursor:
+    """Cursor answering each statement from a scripted (error, row) pair."""
+
+    def __init__(self, script: list[tuple[BaseException | None, Any]]) -> None:
+        self._script = script
+        self._row: Any = None
+        self.executed: list[str] = []
+
+    def __enter__(self) -> "_ScriptedCursor":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def execute(self, query: str, params: object = None) -> None:
+        self.executed.append(query)
+        if query.startswith("SET ") or "set_config" in query:
+            return
+        error, row = self._script.pop(0)
+        if error is not None:
+            raise error
+        self._row = row
+
+    def fetchone(self) -> Any:
+        return self._row
+
+    def fetchall(self) -> list[Any]:
+        return self._row if isinstance(self._row, list) else []
+
+
+def _scripted(script: list[tuple[BaseException | None, Any]]) -> Any:
+    cursor = _ScriptedCursor(script)
+    return lambda: _FakeConnection(cursor), cursor
+
+
+def test_staging_status_counts_returns_the_exact_group_by() -> None:
+    rows = [
+        {
+            "validation_status": "rejected",
+            "rows": 11_600_000,
+            "oldest": datetime(2026, 6, 13, tzinfo=UTC),
+            "newest": datetime(2026, 9, 5, tzinfo=UTC),
+        }
+    ]
+    factory, cursor = _scripted([(None, rows)])
+
+    section = db_diagnostics._staging_status_counts("postgresql://example", factory)
+
+    assert section["status"] == "ok"
+    assert section["method"] == "exact"
+    assert section["rows"] == rows
+    assert section["error"] is None
+    # Read-only and the shared budget come first, as everywhere else here.
+    assert cursor.executed[0] == "SET TRANSACTION READ ONLY"
+    assert "statement_timeout" in cursor.executed[1]
+    aggregate = cursor.executed[2]
+    assert "GROUP BY staging.validation_status" in aggregate
+    assert "min(staging.created_at)" in aggregate
+    assert "max(staging.created_at)" in aggregate
+
+
+def test_staging_status_counts_falls_back_to_sampled_statistics_on_timeout() -> None:
+    """The exact aggregate is a heap scan, so on the hosted node it times out.
+
+    A timeout must still answer the question #367 asks -- the proportions --
+    rather than returning nothing.
+    """
+
+    estimate_row = {
+        "common_values": ["rejected", "accepted"],
+        "common_freqs": [0.83, 0.17],
+        "reltuples": 14_003_032.0,
+    }
+    factory, _cursor = _scripted(
+        [
+            (psycopg.errors.QueryCanceled("canceling statement"), None),
+            (None, estimate_row),
+        ]
+    )
+
+    factory_cursor = factory()
+    section = db_diagnostics._staging_status_counts("postgresql://example", factory)
+
+    # most_common_vals is anyarray: a direct ::text[] cast is a hard error, so
+    # the double cast is load-bearing and a fake cursor cannot catch losing it.
+    assert "most_common_vals::text::text[]" in factory_cursor.cursor().executed[-1]
+    assert section["status"] == "timeout"
+    assert section["error"] == "timeout"
+    # The method is what tells a reader these are estimates, not counts.
+    assert section["method"] == "pg_stats_estimate"
+    assert section["rows"] == [
+        {
+            "validation_status": "rejected",
+            "rows": 11_622_517,
+            "oldest": None,
+            "newest": None,
+        },
+        {
+            "validation_status": "accepted",
+            "rows": 2_380_515,
+            "oldest": None,
+            "newest": None,
+        },
+    ]
+
+
+def test_staging_status_counts_reports_a_timeout_with_no_usable_statistics() -> None:
+    # reltuples is -1 until the table has been analyzed once; that is not an
+    # estimate and must not be presented as one.
+    factory, _cursor = _scripted(
+        [
+            (psycopg.errors.QueryCanceled("canceling statement"), None),
+            (None, {"common_values": ["rejected"], "common_freqs": [1.0], "reltuples": -1}),
+        ]
+    )
+
+    section = db_diagnostics._staging_status_counts("postgresql://example", factory)
+
+    assert section["status"] == "timeout"
+    assert section["method"] is None
+    assert section["rows"] == []
+
+
+def test_staging_status_counts_never_leaks_the_connection_string() -> None:
+    secret_url = "postgresql://flood_risk:super-secret@db.internal:5432/flood_risk"
+    factory, _cursor = _scripted(
+        [(psycopg.OperationalError(f'could not connect to "{secret_url}"'), None)]
+    )
+
+    section = db_diagnostics._staging_status_counts(secret_url, factory)
+
+    assert section["status"] == "unavailable"
+    assert section["error"] == "OperationalError"
+    assert "super-secret" not in repr(section)
+    assert "db.internal" not in repr(section)
+
+
+def test_staging_used_by_evidence_counts_rows_carrying_a_staging_id() -> None:
+    factory, cursor = _scripted([(None, {"rows": 2_310_000})])
+
+    section = db_diagnostics._staging_used_by_evidence_estimate(
+        "postgresql://example", factory
+    )
+
+    assert section == {
+        "status": "ok",
+        "method": "exact",
+        "rows": 2_310_000,
+        "index_name": "idx_evidence_staging_evidence_id",
+        "error": None,
+    }
+    # The jsonb existence operator is what migration 0042's partial index covers.
+    assert "properties ? 'staging_evidence_id'" in cursor.executed[2]
+
+
+def test_staging_used_by_evidence_falls_back_to_the_index_row_estimate() -> None:
+    factory, _cursor = _scripted(
+        [
+            (psycopg.errors.QueryCanceled("canceling statement"), None),
+            (None, {"rows": 2_298_400.0}),
+        ]
+    )
+
+    section = db_diagnostics._staging_used_by_evidence_estimate(
+        "postgresql://example", factory
+    )
+
+    assert section["status"] == "timeout"
+    assert section["method"] == "index_reltuples_estimate"
+    assert section["rows"] == 2_298_400
+    assert section["index_name"] == db_diagnostics.STAGING_USE_INDEX
+
+
+def test_staging_used_by_evidence_reports_an_unanalyzed_index_as_no_estimate() -> None:
+    factory, _cursor = _scripted(
+        [
+            (psycopg.errors.QueryCanceled("canceling statement"), None),
+            (None, {"rows": -1.0}),
+        ]
+    )
+
+    section = db_diagnostics._staging_used_by_evidence_estimate(
+        "postgresql://example", factory
+    )
+
+    assert section["status"] == "timeout"
+    assert section["method"] is None
+    assert section["rows"] is None
