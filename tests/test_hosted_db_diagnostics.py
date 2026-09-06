@@ -34,6 +34,32 @@ def _diagnostics() -> dict[str, Any]:
         "indexes": [
             {"relname": "evidence", "indexrelname": "evidence_pkey", "idx_scan": 11_262}
         ],
+        "staging_status_counts": {
+            "status": "ok",
+            "method": "exact",
+            "rows": [
+                {
+                    "validation_status": "rejected",
+                    "rows": 11_600_000,
+                    "oldest": "2026-06-13T00:00:00Z",
+                    "newest": "2026-09-05T11:55:00Z",
+                },
+                {
+                    "validation_status": "accepted",
+                    "rows": 2_400_000,
+                    "oldest": "2026-06-13T00:10:00Z",
+                    "newest": "2026-09-05T11:55:00Z",
+                },
+            ],
+            "error": None,
+        },
+        "staging_used_by_evidence_estimate": {
+            "status": "ok",
+            "method": "exact",
+            "rows": 2_310_000,
+            "index_name": "idx_evidence_staging_evidence_id",
+            "error": None,
+        },
         "query_plans": [
             {
                 "name": "nearby_evidence",
@@ -103,11 +129,29 @@ def test_collects_diagnostics_and_writes_the_artifact(
     assert summary["tables"][0]["n_dead_tup"] == 402_118
     assert summary["index_count"] == 1
     assert summary["statements_available"] is False
+    assert summary["staging_status_counts"]["method"] == "exact"
+    assert summary["staging_used_by_evidence_estimate"]["rows"] == 2_310_000
     plans = {plan["name"]: plan for plan in summary["query_plans"]}
     assert plans["nearby_evidence"]["execution_time_ms"] == pytest.approx(5624.1)
     # A timed-out plan still appears in the summary, with no execution time.
     assert plans["coverage_supplement"]["status"] == "timeout"
     assert plans["coverage_supplement"]["execution_time_ms"] is None
+
+
+def test_client_outwaits_every_section_of_the_endpoint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Each section has its own 8 s budget, and the staging ones can spend two.
+
+    A client timeout under the server's worst case turns a slow-but-working
+    capture into no evidence at all, which is the one thing this script exists
+    to prevent.
+    """
+
+    calls = _fake_response(monkeypatch, payload=_diagnostics())
+
+    assert collector.main(["--output", str(tmp_path / "out.json")]) == 0
+    assert calls[0]["timeout"] >= 200.0
 
 
 def test_missing_admin_token_is_recorded_without_calling_the_endpoint(
@@ -189,9 +233,63 @@ def test_summary_tolerates_a_payload_without_plans_or_tables() -> None:
     assert summary == {
         "tables": [],
         "query_plans": [],
+        "staging_status_counts": {},
+        "staging_used_by_evidence_estimate": {},
         "index_count": 0,
         "statements_available": False,
     }
+    assert collector.summary_lines(summary) == []
+
+
+def test_summary_prints_the_staging_split_with_shares() -> None:
+    lines = collector.summary_lines(collector.summarize(_diagnostics()))
+    staging = [line for line in lines if line.startswith("STAGING ")]
+
+    assert staging[0].startswith("STAGING rejected | rows=11600000 share=82.9%")
+    assert "method=exact" in staging[0]
+    assert "oldest=2026-06-13T00:00:00Z" in staging[0]
+    assert staging[1].startswith("STAGING accepted | rows=2400000 share=17.1%")
+    assert any(
+        line.startswith("STAGING USED BY EVIDENCE | rows=2310000") for line in lines
+    )
+
+
+def test_summary_marks_an_estimated_staging_split_as_estimated() -> None:
+    """A sampled estimate must never read as a count."""
+
+    diagnostics = _diagnostics()
+    diagnostics["staging_status_counts"] = {
+        "status": "timeout",
+        "method": "pg_stats_estimate",
+        "rows": [
+            {
+                "validation_status": "rejected",
+                "rows": 11_600_000,
+                "oldest": None,
+                "newest": None,
+            }
+        ],
+        "error": "timeout",
+    }
+    lines = collector.summary_lines(collector.summarize(diagnostics))
+    staging = next(line for line in lines if line.startswith("STAGING rejected"))
+
+    assert "method=pg_stats_estimate" in staging
+    assert "probe=timeout" in staging
+    assert "oldest=None" in staging
+
+
+def test_summary_reports_a_staging_section_that_returned_nothing() -> None:
+    diagnostics = _diagnostics()
+    diagnostics["staging_status_counts"] = {
+        "status": "unavailable",
+        "method": None,
+        "rows": [],
+        "error": "OperationalError",
+    }
+    lines = collector.summary_lines(collector.summarize(diagnostics))
+
+    assert "STAGING STATUS | status=unavailable method=None rows=none" in lines
 
 
 @pytest.mark.parametrize(

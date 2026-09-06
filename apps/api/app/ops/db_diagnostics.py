@@ -59,6 +59,12 @@ SAMPLE_COVERAGE_BUCKETS_M = DEFAULT_COVERAGE_RADIUS_BUCKETS_M
 STATEMENT_TIMEOUT_MS = 8_000
 EXPLAIN_STATEMENT_TIMEOUT_MS = STATEMENT_TIMEOUT_MS
 STATEMENT_STATS_LIMIT = 10
+# The partial index from migration 0042 over
+# evidence ((properties ->> 'staging_evidence_id')). Its entry count is exactly
+# the number of evidence rows that record which staging row produced them, so
+# pg_class.reltuples for this index is a usable estimate when counting the rows
+# outright does not finish.
+STAGING_USE_INDEX = "idx_evidence_staging_evidence_id"
 # The probe budget exceeds what the request path allows, so a plan here can
 # report work the real request would have abandoned. Say so next to the number.
 EXPLAIN_BUDGET_NOTE = (
@@ -91,6 +97,12 @@ def collect_db_diagnostics(
         },
         "tables": _table_stats(database_url, connection_factory),
         "indexes": _index_stats(database_url, connection_factory),
+        "staging_status_counts": _staging_status_counts(
+            database_url, connection_factory
+        ),
+        "staging_used_by_evidence_estimate": _staging_used_by_evidence_estimate(
+            database_url, connection_factory
+        ),
         "query_plans": _query_plans(database_url, connection_factory),
         "statements": _statement_stats(database_url, connection_factory),
     }
@@ -169,6 +181,204 @@ def _index_stats(
         ORDER BY stat.relname, stat.indexrelname
     """
     return _rows(database_url, connection_factory, sql, (list(DIAGNOSTIC_TABLES),))
+
+
+def _staging_status_counts(
+    database_url: str, connection_factory: ConnectionFactory | None
+) -> dict[str, Any]:
+    """Break ``staging_evidence`` down by ``validation_status``.
+
+    #367 needs to know what share of the 14 M staging rows is terminal
+    ``rejected`` (safe to prune) versus still ``accepted`` (which promotion and
+    historical coverage read, and which the schema gives no ``promoted`` state
+    to subdivide). The exact answer needs ``min``/``max(created_at)`` per group,
+    which no index can serve, so on a bloated table it is a full heap scan that
+    will not fit the 8 s budget. When that happens the section reports the
+    timeout and falls back to the planner's own sampled distribution, which
+    costs one catalog read -- a proportion is what the retention decision needs.
+    """
+
+    sql = """
+        SELECT
+            staging.validation_status AS validation_status,
+            count(*)::bigint AS rows,
+            min(staging.created_at) AS oldest,
+            max(staging.created_at) AS newest
+        FROM staging_evidence staging
+        GROUP BY staging.validation_status
+        ORDER BY count(*) DESC, staging.validation_status
+    """
+    try:
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_read_only_budget(cursor)
+            cursor.execute(sql)
+            rows = [dict(row) for row in cursor.fetchall()]
+    except psycopg.errors.QueryCanceled:
+        estimated = _estimated_status_counts(database_url, connection_factory)
+        return {
+            "status": "timeout",
+            "method": "pg_stats_estimate" if estimated else None,
+            "rows": estimated,
+            "error": "timeout",
+        }
+    except (OSError, psycopg.Error) as exc:
+        # Only the exception class: psycopg renders the full conninfo, which
+        # would put the database host and password in the payload.
+        return {
+            "status": "unavailable",
+            "method": None,
+            "rows": [],
+            "error": type(exc).__name__,
+        }
+    return {"status": "ok", "method": "exact", "rows": rows, "error": None}
+
+
+def _estimated_status_counts(
+    database_url: str, connection_factory: ConnectionFactory | None
+) -> list[dict[str, Any]]:
+    """Estimate the status split from ANALYZE statistics, or return nothing.
+
+    ``most_common_vals``/``most_common_freqs`` hold the sampled distribution and
+    ``reltuples`` the sampled row count, so their product estimates each status
+    without touching the table. Statuses too rare to reach the most-common list
+    are missing, and the estimate is only as fresh as the last ANALYZE -- read
+    it as a proportion, never as a row count.
+    """
+
+    sql = """
+        SELECT
+            -- most_common_vals is anyarray, which casts only via text.
+            -- validation_status values are bare identifiers, so the text
+            -- form round-trips through the array parser unambiguously.
+            stat.most_common_vals::text::text[] AS common_values,
+            stat.most_common_freqs AS common_freqs,
+            (
+                SELECT cls.reltuples
+                FROM pg_class cls
+                WHERE cls.oid = 'staging_evidence'::regclass
+            ) AS reltuples
+        FROM pg_stats stat
+        WHERE stat.schemaname = current_schema()
+            AND stat.tablename = 'staging_evidence'
+            AND stat.attname = 'validation_status'
+    """
+    try:
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_read_only_budget(cursor)
+            cursor.execute(sql)
+            row = cursor.fetchone()
+    except (OSError, psycopg.Error):
+        return []
+    if row is None:
+        return []
+    values = row["common_values"] or []
+    freqs = row["common_freqs"] or []
+    reltuples = row["reltuples"] or 0
+    # PostgreSQL reports -1 for a relation that has never been analyzed.
+    if reltuples <= 0:
+        return []
+    estimated = [
+        {
+            "validation_status": str(value),
+            "rows": int(round(float(freq) * float(reltuples))),
+            "oldest": None,
+            "newest": None,
+        }
+        for value, freq in zip(values, freqs)
+    ]
+    return sorted(estimated, key=lambda item: (-item["rows"], item["validation_status"]))
+
+
+def _staging_used_by_evidence_estimate(
+    database_url: str, connection_factory: ConnectionFactory | None
+) -> dict[str, Any]:
+    """Count the evidence rows that name the staging row they came from.
+
+    Subtracting this from the ``accepted`` staging count is how #367 sizes the
+    already-promoted population the schema cannot label. The partial index from
+    migration 0042 makes the exact count an index-only scan; when even that does
+    not fit the budget, the index's own ``reltuples`` is the same number
+    estimated from catalog statistics.
+    """
+
+    result: dict[str, Any] = {
+        "status": "ok",
+        "method": "exact",
+        "rows": None,
+        "index_name": STAGING_USE_INDEX,
+        "error": None,
+    }
+    sql = """
+        SELECT count(*)::bigint AS rows
+        FROM evidence
+        WHERE evidence.properties ? 'staging_evidence_id'
+    """
+    try:
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_read_only_budget(cursor)
+            cursor.execute(sql)
+            row = cursor.fetchone()
+    except psycopg.errors.QueryCanceled:
+        estimated = _estimated_staging_use(database_url, connection_factory)
+        return {
+            **result,
+            "status": "timeout",
+            "method": "index_reltuples_estimate" if estimated is not None else None,
+            "rows": estimated,
+            "error": "timeout",
+        }
+    except (OSError, psycopg.Error) as exc:
+        return {
+            **result,
+            "status": "unavailable",
+            "method": None,
+            "error": type(exc).__name__,
+        }
+    return {**result, "rows": _scalar_rows(row)}
+
+
+def _estimated_staging_use(
+    database_url: str, connection_factory: ConnectionFactory | None
+) -> int | None:
+    # relname alone is ambiguous across schemas: the acceptance suites build
+    # throwaway schemas holding a same-named index, and a match there would be
+    # reported as production's estimate.
+    sql = """
+        SELECT cls.reltuples AS rows
+        FROM pg_class cls
+        WHERE cls.relname = %s
+            AND cls.relkind = 'i'
+            AND cls.relnamespace = current_schema()::regnamespace
+    """
+    try:
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_read_only_budget(cursor)
+            cursor.execute(sql, (STAGING_USE_INDEX,))
+            row = cursor.fetchone()
+    except (OSError, psycopg.Error):
+        return None
+    estimated = _scalar_rows(row)
+    # -1 means the index has never been analyzed, which is not an estimate.
+    return estimated if estimated is not None and estimated >= 0 else None
+
+
+def _scalar_rows(row: Any) -> int | None:
+    if row is None:
+        return None
+    value = row["rows"] if isinstance(row, dict) else row[0]
+    return None if value is None else int(value)
 
 
 def _statement_stats(

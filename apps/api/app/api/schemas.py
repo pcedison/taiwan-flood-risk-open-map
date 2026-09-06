@@ -182,6 +182,31 @@ class AdminDbQueryPlan(ContractModel):
     note: str
 
 
+class AdminDbStagingStatusCount(ContractModel):
+    validation_status: str
+    rows: int = Field(ge=0)
+    # Null on an estimated row: catalog statistics carry no timestamps.
+    oldest: datetime | None = None
+    newest: datetime | None = None
+
+
+class AdminDbStagingStatusCounts(ContractModel):
+    # status describes the exact GROUP BY probe; method says whether the rows
+    # below came from it or from the planner's sampled distribution.
+    status: Literal["ok", "timeout", "unavailable"]
+    method: Literal["exact", "pg_stats_estimate"] | None = None
+    rows: list[AdminDbStagingStatusCount] = Field(default_factory=list)
+    error: str | None = None
+
+
+class AdminDbStagingUsedByEvidence(ContractModel):
+    status: Literal["ok", "timeout", "unavailable"]
+    method: Literal["exact", "index_reltuples_estimate"] | None = None
+    rows: int | None = Field(default=None, ge=0)
+    index_name: str
+    error: str | None = None
+
+
 class AdminDbSamplePoint(ContractModel):
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
@@ -193,6 +218,8 @@ class AdminDbDiagnosticsResponse(ContractModel):
     sample_point: AdminDbSamplePoint
     tables: list[AdminDbTableStat]
     indexes: list[AdminDbIndexStat]
+    staging_status_counts: AdminDbStagingStatusCounts
+    staging_used_by_evidence_estimate: AdminDbStagingUsedByEvidence
     query_plans: list[AdminDbQueryPlan]
     statements: list[AdminDbStatementStat] | None = None
 
