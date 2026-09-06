@@ -84,6 +84,7 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "npm run e2e:hosted" in step_text
     assert '--data-source-mode "${DATA_SOURCE_MODE}"' in step_text
     assert "scripts/hosted_source_freshness_smoke.py" in step_text
+    assert "scripts/hosted_db_diagnostics.py" in step_text
     assert "scripts/hosted_worker_evidence.py" in step_text
     assert "scripts/hosted_worker_policy_evidence.py" in step_text
     assert "scripts/hosted_monitoring_evidence.py" in step_text
@@ -97,6 +98,19 @@ def test_hosted_monitoring_workflow_schedules_public_and_admin_smokes() -> None:
     assert "scripts/local-source-request-followups.py" in step_text
     assert "scripts/local-source-completion-audit.py" in step_text
     assert "--markdown-output artifacts/hosted-completion-audit.md" in step_text
+
+    # Database diagnostics really run three EXPLAIN ANALYZE statements against
+    # the node under investigation, so they are manual-dispatch only and must
+    # never decide whether monitoring passed.
+    diagnostics = next(
+        step for step in steps if step.get("name") == "Hosted database diagnostics"
+    )
+    assert diagnostics["continue-on-error"] == "true"
+    assert diagnostics["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' "
+        "&& env.ADMIN_BEARER_TOKEN != '' }}"
+    )
+    assert "artifacts/hosted-db-diagnostics.json" in diagnostics["run"]
     assert (
         "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"
         in step_text

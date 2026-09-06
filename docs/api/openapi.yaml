@@ -760,6 +760,43 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /admin/v1/db-diagnostics:
+    get:
+      tags:
+        - Admin
+      operationId: getAdminDbDiagnostics
+      summary: Read-only database statistics and risk-path query plans.
+      description: >-
+        Catalog statistics, index usage and EXPLAIN ANALYZE plans for the
+        risk-assessment read path, used to triage hosted latency when the
+        database has no external client access. Read-only. Returns no evidence
+        content, no user data and no connection strings. Each plan carries its
+        own statement budget and reports a timeout as a result instead of
+        failing the request.
+      security:
+        - AdminBearerAuth: []
+      x-required-roles:
+        - admin
+      responses:
+        "200":
+          description: Database diagnostics for the fixed sample point.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDbDiagnosticsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          description: Database diagnostics are temporarily unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /admin/v1/local-source-coverage:
     get:
       tags:
@@ -2963,6 +3000,169 @@ components:
             type: string
       additionalProperties: true
 
+    AdminDbSamplePoint:
+      type: object
+      required:
+        - lat
+        - lng
+        - radius_m
+      properties:
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+        lng:
+          type: number
+          minimum: -180
+          maximum: 180
+        radius_m:
+          type: integer
+          minimum: 1
+    AdminDbTableStat:
+      type: object
+      required:
+        - relname
+      properties:
+        relname:
+          type: string
+        n_live_tup:
+          type: [integer, "null"]
+        n_dead_tup:
+          type: [integer, "null"]
+        dead_tuple_ratio:
+          type: [number, "null"]
+        n_tup_ins:
+          type: [integer, "null"]
+        n_tup_upd:
+          type: [integer, "null"]
+        n_tup_del:
+          type: [integer, "null"]
+        last_vacuum:
+          type: [string, "null"]
+          format: date-time
+        last_autovacuum:
+          type: [string, "null"]
+          format: date-time
+        last_analyze:
+          type: [string, "null"]
+          format: date-time
+        last_autoanalyze:
+          type: [string, "null"]
+          format: date-time
+        autovacuum_count:
+          type: [integer, "null"]
+        total_relation_size_bytes:
+          type: [integer, "null"]
+        table_size_bytes:
+          type: [integer, "null"]
+        indexes_size_bytes:
+          type: [integer, "null"]
+    AdminDbIndexStat:
+      type: object
+      required:
+        - relname
+        - indexrelname
+      properties:
+        relname:
+          type: string
+        indexrelname:
+          type: string
+        idx_scan:
+          type: [integer, "null"]
+        idx_tup_read:
+          type: [integer, "null"]
+        idx_tup_fetch:
+          type: [integer, "null"]
+        index_size_bytes:
+          type: [integer, "null"]
+    AdminDbStatementStat:
+      description: >-
+        Statement-level cost from pg_stat_statements. Deliberately carries no
+        query text: utility statements are stored verbatim and can contain
+        credentials, so only the queryid is exposed for correlation.
+      type: object
+      required:
+        - queryid
+      properties:
+        queryid:
+          type: string
+        calls:
+          type: [integer, "null"]
+        total_exec_time_ms:
+          type: [number, "null"]
+        mean_exec_time_ms:
+          type: [number, "null"]
+        rows:
+          type: [integer, "null"]
+        shared_blks_read:
+          type: [integer, "null"]
+        shared_blks_hit:
+          type: [integer, "null"]
+    AdminDbQueryPlan:
+      description: >-
+        An EXPLAIN ANALYZE probe of one risk-path query. The probe budget is
+        larger than the request path allows, so a plan here can report work the
+        real request would have abandoned. Read `note` before comparing these
+        numbers with Server-Timing.
+      type: object
+      required:
+        - name
+        - radius_m
+        - status
+        - note
+      properties:
+        name:
+          type: string
+        radius_m:
+          type: integer
+          description: Search radius this probe used, in metres.
+        note:
+          type: string
+          description: How this probe relates to the request path.
+        status:
+          type: string
+          enum:
+            - ok
+            - timeout
+            - unavailable
+            - skipped
+        plan:
+          type: [array, "null"]
+          items:
+            type: object
+            additionalProperties: true
+        error:
+          type: [string, "null"]
+    AdminDbDiagnosticsResponse:
+      type: object
+      required:
+        - captured_at
+        - sample_point
+        - tables
+        - indexes
+        - query_plans
+      properties:
+        captured_at:
+          type: string
+          format: date-time
+        sample_point:
+          $ref: "#/components/schemas/AdminDbSamplePoint"
+        tables:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDbTableStat"
+        indexes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDbIndexStat"
+        query_plans:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDbQueryPlan"
+        statements:
+          type: [array, "null"]
+          items:
+            $ref: "#/components/schemas/AdminDbStatementStat"
     AdminJobsResponse:
       type: object
       required:

@@ -192,6 +192,22 @@ jobs:
             --evidence-output artifacts/hosted-source-freshness-smoke.json \
             --completion-evidence-output artifacts/hosted-source-freshness-completion-evidence.json
 
+      - name: Hosted database diagnostics
+        # Read-only latency triage evidence (table bloat, index usage, EXPLAIN of
+        # the assessment reads). Advisory only: it never fails the run.
+        #
+        # Manual dispatch only. Each run really executes three heavy EXPLAIN
+        # ANALYZE statements against a 2 GB node that is already the thing we
+        # are investigating, so it must not fire on every scheduled monitoring
+        # pass. Collect it when triaging: gh workflow run hosted-monitoring.yml
+        if: ${{ github.event_name == 'workflow_dispatch' && env.ADMIN_BEARER_TOKEN != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python scripts/hosted_db_diagnostics.py \
+            --admin-token-env ADMIN_BEARER_TOKEN \
+            --output artifacts/hosted-db-diagnostics.json
+
       - name: Skip admin freshness smoke without token
         if: ${{ env.ADMIN_BEARER_TOKEN == '' && env.REQUIRE_ADMIN_SOURCE_FRESHNESS != 'true' }}
         run: |

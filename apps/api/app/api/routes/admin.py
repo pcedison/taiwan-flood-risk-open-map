@@ -13,6 +13,7 @@ from psycopg.rows import dict_row
 
 from app.api.errors import error_payload
 from app.api.schemas import (
+    AdminDbDiagnosticsResponse,
     AdminJobsResponse,
     AdminLocalSourceActionPlanResponse,
     AdminLocalSourceCoverageResponse,
@@ -35,6 +36,7 @@ from app.api.schemas import (
     UserReportPrivacyRedactionResponse,
 )
 from app.core.config import get_settings
+from app.ops.db_diagnostics import collect_db_diagnostics
 from app.ops.local_source.local_source_coverage import (
     LocalSourceCoverageRecord,
     list_local_source_coverage,
@@ -334,6 +336,28 @@ def list_admin_sources(
                 "Admin sources repository is temporarily unavailable."
             ) from exc
     return AdminSourcesResponse(sources=sources)
+
+
+@router.get("/db-diagnostics", response_model=AdminDbDiagnosticsResponse)
+def get_admin_db_diagnostics(
+    _admin: Annotated[str, Depends(_require_admin)],
+) -> AdminDbDiagnosticsResponse:
+    """Expose read-only PostgreSQL statistics and risk-path query plans.
+
+    Hosted latency cannot be reproduced locally, and the production database has
+    no external client access, so plan and bloat evidence has to come back
+    through the admin API. Nothing here returns evidence content or a connection
+    string.
+    """
+
+    settings = get_settings()
+    try:
+        diagnostics = collect_db_diagnostics(database_url=settings.database_url)
+    except (OSError, psycopg.Error) as exc:
+        raise _admin_repository_unavailable(
+            "Database diagnostics are temporarily unavailable."
+        ) from exc
+    return AdminDbDiagnosticsResponse(**diagnostics)
 
 
 @router.get("/local-source-coverage", response_model=AdminLocalSourceCoverageResponse)
