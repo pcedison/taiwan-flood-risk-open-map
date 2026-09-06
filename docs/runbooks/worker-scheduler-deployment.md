@@ -272,6 +272,52 @@ psql "$DATABASE_URL" -c "SELECT indexrelid::regclass, indisvalid FROM pg_index W
 Set `STAGING_EVIDENCE_RETENTION_ENABLED=false` to stop the pass without a
 redeploy.
 
+### Autovacuum thresholds
+
+Deleting rows is only half the job: until autovacuum runs, the dead tuples and
+their index entries still occupy the page cache of a 2 GB node. PostgreSQL's
+default `autovacuum_vacuum_scale_factor` is 0.2, so `staging_evidence` would
+have to accumulate ~2.9 M dead rows -- roughly 58 full retention cycles, i.e.
+days -- before a single vacuum triggered. `0063_autovacuum_tuning_for_evidence_tables.sql`
+sets per-table storage parameters instead:
+
+| Table | scale factors (vacuum / analyze) | dead rows before a vacuum | cost delay / limit |
+| --- | --- | --- | --- |
+| `staging_evidence` | 0.02 / 0.02 | ~287 k (of 14.35 M) | 2 ms / 1000 |
+| `evidence` | 0.05 / 0.05 | ~113 k (of 2.25 M) | 2 ms / default 200 |
+
+`staging_evidence` gets the tighter factor and the 5x cost limit because it is
+the table the retention pass churns (up to 600 k deleted rows per hour during
+the backfill); `evidence` churns far more slowly and is read-hot, so it keeps
+the default IO budget. The analyze factors move with the vacuum factors so the
+planner statistics behind the prune and promotion queries stay current on a
+table whose live-row count is falling fast.
+
+These are thresholds, not a schedule: they change *when* autovacuum fires, so
+they need no worker change and cost nothing when the table is quiet. They also
+do not replace the one-off `VACUUM (ANALYZE)` below -- that is still the way to
+force the first pass rather than wait for the threshold.
+
+Confirm the settings landed:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT relname, reloptions FROM pg_class WHERE relname IN ('staging_evidence','evidence');"
+```
+
+Then watch them work in `hosted-db-diagnostics.json`
+(`python scripts/hosted_db_diagnostics.py`), under `tables[]`:
+
+- `last_autovacuum` for both tables should start advancing within hours instead
+  of standing days stale (it was 2026-09-04 for `staging_evidence` and the
+  morning of 2026-09-06 for `evidence` before this change).
+- `n_dead_tup` for `staging_evidence` should oscillate under ~300 k rather than
+  climbing monotonically; `dead_tuple_ratio` should stay near or below 0.02.
+- If `n_dead_tup` keeps climbing past those numbers while `last_autovacuum`
+  stays stale, autovacuum is being starved, not mis-tuned: check for a long-
+  running transaction holding back the xmin horizon
+  (`SELECT pid, state, xact_start FROM pg_stat_activity ORDER BY xact_start;`)
+  and check whether the hosted node caps `autovacuum_max_workers`.
+
 ### After the backlog clears
 
 Deleting rows does not return disk to the operating system; it only marks
