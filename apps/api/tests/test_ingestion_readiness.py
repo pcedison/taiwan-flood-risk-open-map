@@ -32,6 +32,7 @@ def _source_row(**overrides: object) -> dict[str, object]:
         "latest_run_status": "succeeded",
         "latest_run_error_code": None,
         "latest_run_at": NOW - timedelta(minutes=2),
+        "runtime_pipeline_error_code": None,
     }
     row.update(overrides)
     return row
@@ -251,8 +252,46 @@ def test_upstream_staleness_never_masks_a_real_pipeline_failure() -> None:
     assert failed.reason_code == "pipeline_failed"
 
 
+@pytest.mark.parametrize(
+    "error_code",
+    ("QueryCanceled", "LockNotAvailable", "OperationalError"),
+)
+def test_promotion_database_timeout_is_degraded_not_a_pipeline_fault(
+    error_code: str,
+) -> None:
+    # The fetch and the upstream were fine; only our own database stalled while
+    # publishing, and the next cycle retries. Reporting it as a pipeline failure
+    # pages an operator for a fault that clears itself.
+    stalled = _source_readiness(
+        _source_row(
+            runtime_pipeline_status="failed",
+            runtime_pipeline_complete=False,
+            runtime_pipeline_error_code=error_code,
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert stalled.status == "degraded"
+    assert stalled.reason_code == "database_unavailable"
+
+
+def test_promotion_failure_without_a_recorded_code_stays_a_pipeline_fault() -> None:
+    unexplained = _source_readiness(
+        _source_row(
+            runtime_pipeline_status="failed",
+            runtime_pipeline_complete=False,
+            runtime_pipeline_error_code="PromotionWriterError",
+        ),
+        evaluated_at=NOW,
+    )
+
+    assert unexplained.status == "failed"
+    assert unexplained.reason_code == "pipeline_failed"
+
+
 def test_source_readiness_sql_reads_observations_and_catalog_threshold() -> None:
     assert "official_realtime_latest" in _SOURCE_READINESS_SQL
+    assert "source.runtime_pipeline_error_code" in _SOURCE_READINESS_SQL
     assert "latest_observed_at" in _SOURCE_READINESS_SQL
     assert "'freshness_threshold_seconds'" in _SOURCE_READINESS_SQL
 

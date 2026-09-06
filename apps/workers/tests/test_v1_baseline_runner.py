@@ -1250,3 +1250,5 @@ def test_cycle_exception_records_a_failure_the_pipeline_writer_accepts(
     assert failed is True
     assert writer.pipeline_statuses[0]["status"] == "failed"
     assert before <= writer.pipeline_statuses[0]["run_at"] <= after
+    # The class name alone is public-safe; the message carries a credential.
+    assert writer.pipeline_statuses[0]["error_code"] == "RuntimeError"

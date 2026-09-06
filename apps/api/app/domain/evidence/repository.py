@@ -144,6 +144,7 @@ class RealtimeSourceHealthRow:
     inventory_proof_status: str = "missing"
     latest_run_error_code: str | None = None
     freshness_threshold_seconds: int | None = None
+    runtime_pipeline_error_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -2081,7 +2082,8 @@ def _query_realtime_source_health_rows(
                     THEN 'checksum_mismatch'
                 ELSE 'approved'
             END AS inventory_proof_status,
-            {inventory_complete_column}
+            {inventory_complete_column},
+            data_sources.runtime_pipeline_error_code
         FROM requested
         LEFT JOIN data_sources ON data_sources.adapter_key = requested.adapter_key
         JOIN resolved_freshness
@@ -2946,6 +2948,13 @@ def _realtime_source_health_row(
         freshness_threshold_seconds=(
             int(value("freshness_threshold_seconds", 16))
             if value("freshness_threshold_seconds", 16) is not None
+            else None
+        ),
+        # Appended as the final SELECT column: every index above is positional,
+        # so inserting mid-list would shift all of them by one.
+        runtime_pipeline_error_code=(
+            str(value("runtime_pipeline_error_code", 30))
+            if value("runtime_pipeline_error_code", 30) is not None
             else None
         ),
     )

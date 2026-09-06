@@ -95,6 +95,7 @@ class PostgresIngestionRunWriter:
         checked_at: datetime | None = None,
         run_at: datetime | None = None,
         active_snapshot_raw_ref: str | None = None,
+        error_code: str | None = None,
     ) -> None:
         if not adapter_keys:
             return
@@ -111,6 +112,10 @@ class PostgresIngestionRunWriter:
                 )
         resolved_checked_at = checked_at or datetime.now(UTC)
         resolved_run_at = run_at or resolved_checked_at
+        # A succeeded pipeline has nothing to explain, and leaving the previous
+        # cycle's class name behind would let the public diagnosis keep quoting
+        # a fault that has already cleared.
+        resolved_error_code = error_code if status == "failed" else None
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -121,6 +126,7 @@ class PostgresIngestionRunWriter:
                         runtime_pipeline_checked_at = %s,
                         runtime_pipeline_complete = %s,
                         runtime_pipeline_run_at = %s,
+                        runtime_pipeline_error_code = %s,
                         metadata = CASE
                             WHEN %s::text IS NULL THEN metadata
                             ELSE jsonb_set(
@@ -148,6 +154,7 @@ class PostgresIngestionRunWriter:
                         resolved_checked_at,
                         complete,
                         resolved_run_at,
+                        resolved_error_code,
                         active_snapshot_raw_ref,
                         active_snapshot_raw_ref,
                         list(adapter_keys),

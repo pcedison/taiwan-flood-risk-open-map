@@ -9,9 +9,9 @@ from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summar
 
 router = APIRouter(tags=["health"])
 
-REQUIRED_SCHEMA_VERSION = 61
-REQUIRED_SCHEMA_FILENAME = "0061_realtime_freshness_thresholds.sql"
-REQUIRED_SCHEMA_CHECKSUM = "5a124093836294a0fcd7eea47cf2d2d55fff8aa588866400a0c6f0cb4a27ef22"
+REQUIRED_SCHEMA_VERSION = 62
+REQUIRED_SCHEMA_FILENAME = "0062_runtime_pipeline_error_code.sql"
+REQUIRED_SCHEMA_CHECKSUM = "2d181b5fb0cc08a5ab3301afbaf0b59bf929e30e00e752b068ca872e4fe49467"
 REQUIRED_SCHEMA_RELATIONS = (
     "public.ingestion_scheduler_heartbeats",
     "public.ingestion_readiness_sources",
