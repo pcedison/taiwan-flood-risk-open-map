@@ -580,6 +580,10 @@ def test_staging_used_by_evidence_falls_back_to_the_index_row_estimate() -> None
     assert section["method"] == "index_reltuples_estimate"
     assert section["rows"] == 2_298_400
     assert section["index_name"] == db_diagnostics.STAGING_USE_INDEX
+    # relname alone matches a same-named index in any schema, including the
+    # throwaway ones the acceptance suites build.
+    estimate_sql = _cursor.executed[-1]
+    assert "cls.relnamespace = current_schema()::regnamespace" in estimate_sql
 
 
 def test_staging_used_by_evidence_reports_an_unanalyzed_index_as_no_estimate() -> None:

@@ -3172,7 +3172,10 @@ components:
         validation_status, so this count is how the already-promoted share of
         `accepted` staging rows is sized. `method` is `exact` for the counted
         answer or `index_reltuples_estimate` for the entry count of
-        `index_name` taken from catalog statistics.
+        `index_name` taken from catalog statistics. An estimate is only as
+        fresh as the last VACUUM or ANALYZE of that index, and it lags behind
+        rows inserted since, so it errs low -- treat it as a conservative
+        floor for the already-promoted population, never as a count.
       type: object
       required:
         - status

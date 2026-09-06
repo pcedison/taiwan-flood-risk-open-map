@@ -349,11 +349,15 @@ def _staging_used_by_evidence_estimate(
 def _estimated_staging_use(
     database_url: str, connection_factory: ConnectionFactory | None
 ) -> int | None:
+    # relname alone is ambiguous across schemas: the acceptance suites build
+    # throwaway schemas holding a same-named index, and a match there would be
+    # reported as production's estimate.
     sql = """
         SELECT cls.reltuples AS rows
         FROM pg_class cls
         WHERE cls.relname = %s
             AND cls.relkind = 'i'
+            AND cls.relnamespace = current_schema()::regnamespace
     """
     try:
         with (

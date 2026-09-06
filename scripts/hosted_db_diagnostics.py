@@ -43,9 +43,13 @@ def main(argv: list[str] | None = None) -> int:
         "--captured-at",
         help="Optional ISO 8601 timestamp for reproducible evidence artifacts.",
     )
-    # The endpoint runs three EXPLAIN ANALYZE statements with an 8 s budget each,
-    # so the client has to outwait the server rather than the other way round.
-    parser.add_argument("--timeout-seconds", type=float, default=90.0)
+    # Every section of the endpoint carries its own 8 s budget: three tables,
+    # indexes and statements catalog reads, three EXPLAIN ANALYZE probes, and
+    # the two staging sections, each of which can spend its budget on the exact
+    # query and then fall back to a catalog estimate. That is about 80 s of
+    # server work in the worst case, so the client has to outwait the server
+    # rather than the other way round.
+    parser.add_argument("--timeout-seconds", type=float, default=200.0)
     parser.add_argument(
         "--output",
         required=True,

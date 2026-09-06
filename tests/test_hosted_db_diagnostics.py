@@ -138,6 +138,22 @@ def test_collects_diagnostics_and_writes_the_artifact(
     assert plans["coverage_supplement"]["execution_time_ms"] is None
 
 
+def test_client_outwaits_every_section_of_the_endpoint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Each section has its own 8 s budget, and the staging ones can spend two.
+
+    A client timeout under the server's worst case turns a slow-but-working
+    capture into no evidence at all, which is the one thing this script exists
+    to prevent.
+    """
+
+    calls = _fake_response(monkeypatch, payload=_diagnostics())
+
+    assert collector.main(["--output", str(tmp_path / "out.json")]) == 0
+    assert calls[0]["timeout"] >= 200.0
+
+
 def test_missing_admin_token_is_recorded_without_calling_the_endpoint(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
