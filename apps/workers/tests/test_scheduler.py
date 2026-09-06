@@ -15,6 +15,10 @@ SETTINGS = load_worker_settings(
         "WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood",
         "EVIDENCE_REALTIME_RETENTION_HOURS": "72",
         "LOCATION_QUERIES_RETENTION_HOURS": "24",
+        "STAGING_EVIDENCE_RETENTION_DAYS": "7",
+        "STAGING_EVIDENCE_RETENTION_MAX_BATCHES": "4",
+        "STAGING_EVIDENCE_RETENTION_BATCH_SIZE": "2500",
+        "STAGING_EVIDENCE_RETENTION_STATEMENT_TIMEOUT_MS": "6000",
         "SCHEDULER_MAX_TICKS": "1",
     }
 )
@@ -23,6 +27,8 @@ SETTINGS = load_worker_settings(
 class RecordingEvidenceRetentionJob:
     def __init__(self) -> None:
         self.calls: list[tuple[str, int]] = []
+        self.staging_max_batches: int | None = None
+        self.staging_kwargs: dict[str, object] = {}
 
     def prune_realtime(self, *, retention_hours: int) -> object:
         self.calls.append(("prune_realtime", retention_hours))
@@ -35,6 +41,29 @@ class RecordingEvidenceRetentionJob:
     def prune_expired_raw_snapshots(self) -> object:
         self.calls.append(("prune_expired_raw_snapshots", 0))
         return SimpleNamespace(rows_deleted=4)
+
+    def prune_staging_evidence(
+        self,
+        *,
+        retention_days: int,
+        batch_size: int,
+        max_batches: int,
+        statement_timeout_ms: int,
+        ensure_index: bool,
+    ) -> object:
+        self.calls.append(("prune_staging_evidence", retention_days))
+        self.staging_max_batches = max_batches
+        self.staging_kwargs = {
+            "batch_size": batch_size,
+            "statement_timeout_ms": statement_timeout_ms,
+            "ensure_index": ensure_index,
+        }
+        return SimpleNamespace(
+            deleted_rows=5,
+            batches=1,
+            index_state="ready",
+            stopped_reason="exhausted",
+        )
 
 
 def test_scheduler_maintenance_keeps_privacy_retention_only(
@@ -64,7 +93,41 @@ def test_scheduler_maintenance_keeps_privacy_retention_only(
         ("prune_realtime", SETTINGS.evidence_realtime_retention_hours),
         ("prune_location_queries", SETTINGS.location_queries_retention_hours),
         ("prune_expired_raw_snapshots", 0),
+        ("prune_staging_evidence", SETTINGS.staging_evidence_retention_days),
     ]
+    assert retention.staging_max_batches == (
+        SETTINGS.staging_evidence_retention_max_batches
+    )
+    assert result.staging_evidence_retention is not None
+    assert result.staging_evidence_retention.deleted_rows == 5
+    assert retention.staging_kwargs == {
+        "batch_size": SETTINGS.staging_evidence_retention_batch_size,
+        "statement_timeout_ms": (
+            SETTINGS.staging_evidence_retention_statement_timeout_ms
+        ),
+        "ensure_index": SETTINGS.staging_evidence_retention_ensure_index,
+    }
+
+
+def test_scheduler_maintenance_skips_staging_retention_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood",
+            "STAGING_EVIDENCE_RETENTION_ENABLED": "false",
+        }
+    )
+    retention = RecordingEvidenceRetentionJob()
+    monkeypatch.setattr(
+        scheduler, "PostgresEvidenceRetentionJob", lambda **_kwargs: retention
+    )
+
+    result = scheduler.run_maintenance_once(settings=settings)
+
+    assert result.status == "succeeded"
+    assert result.staging_evidence_retention is None
+    assert "prune_staging_evidence" not in [name for name, _ in retention.calls]
 
 
 def test_scheduler_maintenance_loop_never_constructs_generic_runtime_queue(
@@ -92,6 +155,7 @@ def test_scheduler_maintenance_loop_never_constructs_generic_runtime_queue(
         ("prune_realtime", SETTINGS.evidence_realtime_retention_hours),
         ("prune_location_queries", SETTINGS.location_queries_retention_hours),
         ("prune_expired_raw_snapshots", 0),
+        ("prune_staging_evidence", 7),
     ]
 
 

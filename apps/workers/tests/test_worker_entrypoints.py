@@ -1441,6 +1441,12 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
     class _RawSnapshotRetentionSummary:
         rows_deleted = 1
 
+    class _StagingEvidenceRetentionSummary:
+        deleted_rows = 5
+        batches = 1
+        index_state = "ready"
+        stopped_reason = "exhausted"
+
     class FakeEvidenceRetentionJob:
         def __init__(self, *, database_url: str) -> None:
             calls.append(("evidence.init", database_url))
@@ -1458,6 +1464,22 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         def prune_expired_raw_snapshots(self) -> _RawSnapshotRetentionSummary:
             calls.append(("raw_snapshots.retention", None))
             return _RawSnapshotRetentionSummary()
+
+        def prune_staging_evidence(
+            self,
+            *,
+            retention_days: int,
+            batch_size: int,
+            max_batches: int,
+            statement_timeout_ms: int,
+            ensure_index: bool,
+        ) -> _StagingEvidenceRetentionSummary:
+            calls.append(("staging_evidence.retention", retention_days))
+            calls.append(("staging_evidence.max_batches", max_batches))
+            calls.append(("staging_evidence.batch_size", batch_size))
+            calls.append(("staging_evidence.statement_timeout_ms", statement_timeout_ms))
+            calls.append(("staging_evidence.ensure_index", ensure_index))
+            return _StagingEvidenceRetentionSummary()
 
     monkeypatch.setattr(
         scheduler_module,
@@ -1486,6 +1508,7 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
     assert result.query_heat_retention is None
     assert result.evidence_retention is not None
     assert result.location_query_retention is not None
+    assert result.staging_evidence_retention is not None
     assert result.tile_refresh is None
     assert result.tile_prune is None
     assert calls == [
@@ -1493,6 +1516,11 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         ("evidence.retention", 48),
         ("location_queries.retention", 720),
         ("raw_snapshots.retention", None),
+        ("staging_evidence.retention", 7),
+        ("staging_evidence.max_batches", 10),
+        ("staging_evidence.batch_size", 5_000),
+        ("staging_evidence.statement_timeout_ms", 5_000),
+        ("staging_evidence.ensure_index", True),
     ]
 
 

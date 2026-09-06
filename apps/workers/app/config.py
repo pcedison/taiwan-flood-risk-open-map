@@ -138,6 +138,12 @@ class WorkerSettings:
     scheduler_lease_ttl_seconds: int
     evidence_realtime_retention_hours: int
     location_queries_retention_hours: int
+    staging_evidence_retention_enabled: bool
+    staging_evidence_retention_days: int
+    staging_evidence_retention_max_batches: int
+    staging_evidence_retention_batch_size: int
+    staging_evidence_retention_statement_timeout_ms: int
+    staging_evidence_retention_ensure_index: bool
     freshness_max_age_seconds: int
     runtime_fixtures_enabled: bool
     runtime_job_lease_seconds: int
@@ -666,6 +672,38 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             "LOCATION_QUERIES_RETENTION_HOURS",
             default=720,
         ),
+        staging_evidence_retention_enabled=env_bool(
+            values,
+            "STAGING_EVIDENCE_RETENTION_ENABLED",
+            default=True,
+        )
+        is True,
+        staging_evidence_retention_days=env_int(
+            values,
+            "STAGING_EVIDENCE_RETENTION_DAYS",
+            default=7,
+        ),
+        staging_evidence_retention_max_batches=env_int(
+            values,
+            "STAGING_EVIDENCE_RETENTION_MAX_BATCHES",
+            default=10,
+        ),
+        staging_evidence_retention_batch_size=env_int(
+            values,
+            "STAGING_EVIDENCE_RETENTION_BATCH_SIZE",
+            default=5000,
+        ),
+        staging_evidence_retention_statement_timeout_ms=env_int(
+            values,
+            "STAGING_EVIDENCE_RETENTION_STATEMENT_TIMEOUT_MS",
+            default=5000,
+        ),
+        staging_evidence_retention_ensure_index=env_bool(
+            values,
+            "STAGING_EVIDENCE_RETENTION_ENSURE_INDEX",
+            default=True,
+        )
+        is True,
         freshness_max_age_seconds=env_int(
             values,
             "FRESHNESS_MAX_AGE_SECONDS",
