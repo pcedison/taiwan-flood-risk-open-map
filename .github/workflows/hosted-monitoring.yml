@@ -192,6 +192,17 @@ jobs:
             --evidence-output artifacts/hosted-source-freshness-smoke.json \
             --completion-evidence-output artifacts/hosted-source-freshness-completion-evidence.json
 
+      - name: Hosted database diagnostics
+        # Read-only latency triage evidence (table bloat, index usage, EXPLAIN of
+        # the assessment reads). Advisory only: it never fails the run.
+        if: ${{ env.ADMIN_BEARER_TOKEN != '' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python scripts/hosted_db_diagnostics.py \
+            --admin-token-env ADMIN_BEARER_TOKEN \
+            --output artifacts/hosted-db-diagnostics.json
+
       - name: Skip admin freshness smoke without token
         if: ${{ env.ADMIN_BEARER_TOKEN == '' && env.REQUIRE_ADMIN_SOURCE_FRESHNESS != 'true' }}
         run: |
