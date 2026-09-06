@@ -30,6 +30,20 @@ PublicSourceState = Literal[
     "disabled",
     "not_applicable",
 ]
+# Why a source is in that state.  Shared by the operational NearbySourceHealth
+# and the public PublicSourceStatus so both name a reason from one vocabulary.
+NearbySourceHealthReason = Literal[
+    "operational",
+    "delayed",
+    "upstream_unavailable",
+    "upstream_stale",
+    "database_unavailable",
+    "pipeline_unavailable",
+    "pipeline_stalled",
+    "source_misconfigured",
+    "disabled",
+    "not_yet_observed",
+]
 GeocodePrecision = Literal[
     "exact_address",
     "road_or_lane",
@@ -760,6 +774,7 @@ class PublicSourceStatus(ContractModel):
     source_key: str
     signal_type: str
     state: PublicSourceState
+    reason_code: NearbySourceHealthReason
     observed_at: datetime | None = None
     checked_at: datetime | None = None
     message: str | None = None
@@ -840,18 +855,6 @@ NearbySignalAvailability = Literal[
     "source_unavailable",
     "source_status_unknown",
     "no_station",
-]
-NearbySourceHealthReason = Literal[
-    "operational",
-    "delayed",
-    "upstream_unavailable",
-    "upstream_stale",
-    "database_unavailable",
-    "pipeline_unavailable",
-    "pipeline_stalled",
-    "source_misconfigured",
-    "disabled",
-    "not_yet_observed",
 ]
 NearbyMissingCause = Literal[
     "none",

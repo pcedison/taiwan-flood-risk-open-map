@@ -6,7 +6,12 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Protocol
 
-from app.domain.assessment.models import AssessmentData, AssessmentSourceState
+from app.api.schemas import HealthStatus, NearbySourceHealth
+from app.domain.assessment.models import (
+    AssessmentData,
+    AssessmentSourceState,
+    SourceState,
+)
 from app.domain.evidence import (
     EvidenceRecord,
     EvidenceRepositoryUnavailable,
@@ -431,7 +436,21 @@ def _historical_only(records: tuple[EvidenceRecord, ...]) -> tuple[EvidenceRecor
     )
 
 
-def _source_states(*, source_health, applicable_keys, required_keys):
+_SOURCE_STATE_BY_HEALTH: dict[HealthStatus, SourceState] = {
+    "healthy": "fresh",
+    "degraded": "degraded",
+    "failed": "failed",
+    "disabled": "disabled",
+    "unknown": "stale",
+}
+
+
+def _source_states(
+    *,
+    source_health: tuple[NearbySourceHealth, ...],
+    applicable_keys: frozenset[str],
+    required_keys: frozenset[str],
+) -> tuple[AssessmentSourceState, ...]:
     by_public_id = {item.source_id: item for item in source_health}
     output: list[AssessmentSourceState] = []
     for key in sorted(applicable_keys):
@@ -442,6 +461,7 @@ def _source_states(*, source_health, applicable_keys, required_keys):
                     source_key=key,
                     signal_type=coverage_signal_type("status_only", key),
                     state="disabled" if key in required_keys else "not_applicable",
+                    reason_code="not_yet_observed",
                     observed_at=None,
                     checked_at=None,
                     message=("必要來源尚未登錄或沒有健康紀錄。" if key in required_keys else None),
@@ -452,13 +472,8 @@ def _source_states(*, source_health, applicable_keys, required_keys):
             AssessmentSourceState(
                 source_key=key,
                 signal_type=item.signal_types[0],
-                state={
-                    "healthy": "fresh",
-                    "degraded": "degraded",
-                    "failed": "failed",
-                    "disabled": "disabled",
-                    "unknown": "stale",
-                }[item.health_status],
+                state=_SOURCE_STATE_BY_HEALTH[item.health_status],
+                reason_code=item.reason_code,
                 observed_at=item.observed_at,
                 checked_at=item.checked_at,
                 message=item.message,

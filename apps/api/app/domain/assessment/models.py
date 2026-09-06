@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
-from app.api.schemas import NearbyRealtimeCoverage
+from app.api.schemas import NearbyRealtimeCoverage, NearbySourceHealthReason
 from app.domain.evidence import EvidenceRecord
 
 RiskLevel = Literal["低", "中", "高", "極高", "未知"]
@@ -16,6 +16,11 @@ class AssessmentSourceState:
     source_key: str
     signal_type: str
     state: SourceState
+    # Why the source is in that state, carried verbatim from
+    # ``NearbySourceHealth.reason_code``.  ``state`` alone cannot separate a
+    # merely delayed feed from an upstream outage, and the reader-facing
+    # explanation phrases those two very differently.
+    reason_code: NearbySourceHealthReason
     observed_at: datetime | None
     checked_at: datetime | None
     message: str | None

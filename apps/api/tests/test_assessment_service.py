@@ -128,6 +128,7 @@ def data(now: datetime) -> AssessmentData:
                 source_key="official.cwa.rainfall",
                 signal_type="rainfall",
                 state="fresh",
+                reason_code="operational",
                 observed_at=now,
                 checked_at=now,
                 message=None,
@@ -136,6 +137,7 @@ def data(now: datetime) -> AssessmentData:
                 source_key="official.wra.water_level",
                 signal_type="water_level",
                 state="failed",
+                reason_code="upstream_unavailable",
                 observed_at=None,
                 checked_at=now,
                 message="官方水位來源暫時無法使用",
@@ -312,6 +314,7 @@ def test_optional_disabled_source_is_diagnostic_not_a_required_limitation(
         source_key="official.cwa.heavy_rain_warning",
         signal_type="flood_warning",
         state="disabled",
+        reason_code="disabled",
         observed_at=None,
         checked_at=now,
         message=optional_message,
@@ -699,11 +702,22 @@ def _source_state(
     state: str,
     message: str | None,
     now: datetime,
+    reason_code: str | None = None,
 ) -> AssessmentSourceState:
+    default_reason = {
+        "fresh": "operational",
+        "degraded": "delayed",
+        "failed": "upstream_unavailable",
+        # A "stale" state is the repository's mapping of an unknown health
+        # status, which production only reaches via "not_yet_observed".
+        "stale": "not_yet_observed",
+        "disabled": "disabled",
+    }
     return AssessmentSourceState(
         source_key=f"official.test.{signal_type}",
         signal_type=signal_type,
         state=state,  # type: ignore[arg-type]
+        reason_code=reason_code or default_reason.get(state, "not_yet_observed"),
         observed_at=now,
         checked_at=now,
         message=message,
@@ -822,12 +836,14 @@ def test_upstream_stale_message_is_kept_verbatim_and_only_once(
         _source_state(
             "water_level",
             state="degraded",
+            reason_code="upstream_stale",
             message=UPSTREAM_STALE_MESSAGE,
             now=now,
         ),
         _source_state(
             "sewer_water_level",
             state="degraded",
+            reason_code="upstream_stale",
             message=UPSTREAM_STALE_MESSAGE,
             now=now,
         ),
@@ -920,6 +936,158 @@ def test_disabled_required_source_keeps_its_own_message(
     ).assess(risk_request, now=now).response
 
     assert response.data_status.missing == [disabled_message]
+
+
+UPSTREAM_UNAVAILABLE_MESSAGE = "多數站點已超過可用時效。"
+DATABASE_UNAVAILABLE_MESSAGE = "本站資料庫暫時逾時或忙碌；資料取得正常，將於下一輪重試。"
+
+
+def test_upstream_unavailable_degraded_source_is_not_called_usable_for_now(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    """A degraded source whose stations aged out must not be summarised as usable.
+
+    ``upstream_unavailable`` and ``delayed`` share the ``degraded`` state, so
+    only the reason code can stop "仍可作當下參考" from being said about a feed
+    whose observations are all out of date.
+    """
+
+    states = (
+        _source_state(
+            "water_level",
+            state="degraded",
+            reason_code="upstream_unavailable",
+            message=UPSTREAM_UNAVAILABLE_MESSAGE,
+            now=now,
+        ),
+        _source_state(
+            "rainfall",
+            state="degraded",
+            reason_code="delayed",
+            message=_station_count_message(0, 1770, 1998),
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now).response
+
+    assert response.data_status.missing == [
+        UPSTREAM_UNAVAILABLE_MESSAGE,
+        "部分官方即時來源更新較慢（雨量），仍可作當下參考。",
+    ]
+    assert "水位" not in "".join(
+        message for message in response.data_status.missing if "仍可作當下參考" in message
+    )
+
+
+def test_database_unavailable_degraded_source_keeps_its_own_message(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    states = (
+        _source_state(
+            "water_level",
+            state="degraded",
+            reason_code="database_unavailable",
+            message=DATABASE_UNAVAILABLE_MESSAGE,
+            now=now,
+        ),
+        _source_state(
+            "sewer_water_level",
+            state="degraded",
+            reason_code="database_unavailable",
+            message=DATABASE_UNAVAILABLE_MESSAGE,
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now).response
+
+    assert response.data_status.missing == [DATABASE_UNAVAILABLE_MESSAGE]
+
+
+def test_every_degraded_reason_is_reported_on_its_own_terms(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    states = (
+        _source_state(
+            "rainfall",
+            state="degraded",
+            reason_code="delayed",
+            message=_station_count_message(0, 1770, 1998),
+            now=now,
+        ),
+        _source_state(
+            "water_level",
+            state="degraded",
+            reason_code="upstream_stale",
+            message=UPSTREAM_STALE_MESSAGE,
+            now=now,
+        ),
+        _source_state(
+            "sewer_water_level",
+            state="degraded",
+            reason_code="upstream_unavailable",
+            message=UPSTREAM_UNAVAILABLE_MESSAGE,
+            now=now,
+        ),
+        _source_state(
+            "flood_depth",
+            state="degraded",
+            reason_code="database_unavailable",
+            message=DATABASE_UNAVAILABLE_MESSAGE,
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now).response
+
+    assert response.data_status.missing == [
+        UPSTREAM_STALE_MESSAGE,
+        UPSTREAM_UNAVAILABLE_MESSAGE,
+        DATABASE_UNAVAILABLE_MESSAGE,
+        "部分官方即時來源更新較慢（雨量），仍可作當下參考。",
+    ]
+
+
+def test_data_status_sources_expose_the_reason_behind_each_state(
+    now: datetime,
+    risk_request: RiskAssessRequest,
+    data: AssessmentData,
+) -> None:
+    states = (
+        _source_state("rainfall", state="fresh", reason_code="operational", message=None, now=now),
+        _source_state(
+            "water_level",
+            state="degraded",
+            reason_code="upstream_unavailable",
+            message=UPSTREAM_UNAVAILABLE_MESSAGE,
+            now=now,
+        ),
+    )
+
+    response = AssessmentService(
+        FakeRepository(_required_source_data(data, states)), score_risk
+    ).assess(risk_request, now=now).response
+
+    assert [
+        (source.signal_type, source.state, source.reason_code)
+        for source in response.data_status.sources
+    ] == [
+        ("rainfall", "fresh", "operational"),
+        ("water_level", "degraded", "upstream_unavailable"),
+    ]
 
 
 def test_outcome_merges_repository_timings_with_service_phases(

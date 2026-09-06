@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.domain.evidence.repository import NearbyCoverageRow, RealtimeSourceHealthRow
-from app.api.services.assessment import _is_upstream_stale
+from app.api.services.assessment import _is_merely_delayed
+from app.domain.assessment.repository import _source_states
 from app.domain.realtime.nearby_coverage import (
     RADIUS_BUCKETS_M,
     REQUIRED_SIGNAL_TYPES,
@@ -1827,10 +1828,11 @@ def test_stalled_upstream_with_running_worker_is_upstream_stale() -> None:
     assert "本站背景更新正常" in health.message
 
 
-def test_upstream_stale_message_survives_the_public_explanation_filter() -> None:
+def test_upstream_stale_reason_survives_the_public_explanation_filter() -> None:
     # The risk explanation keeps an upstream publication gap verbatim while it
-    # summarises every other delayed source.  Pin producer and consumer
-    # together so a reworded message cannot silently drop out of the filter.
+    # summarises every merely delayed source.  Pin producer and consumer
+    # together on the reason code, so rewording the message cannot change which
+    # sentence the reader is shown.
     coverage = _coverage_with_health(
         _health_row(
             adapter_key="official.wra_iow.flood_depth",
@@ -1846,8 +1848,15 @@ def test_upstream_stale_message_survives_the_public_explanation_filter() -> None
     )
 
     health = coverage.source_health[0]
+    state = _source_states(
+        source_health=coverage.source_health,
+        applicable_keys={"official.wra_iow.flood_depth"},
+        required_keys={"official.wra_iow.flood_depth"},
+    )[0]
+
     assert health.reason_code == "upstream_stale"
-    assert _is_upstream_stale(health.message)
+    assert state.reason_code == health.reason_code
+    assert not _is_merely_delayed(state)
 
 
 def test_ten_day_upstream_stall_stays_upstream_stale_after_active_drains() -> None:
