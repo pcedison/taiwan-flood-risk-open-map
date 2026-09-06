@@ -146,18 +146,26 @@ class AdminDbIndexStat(ContractModel):
 
 
 class AdminDbStatementStat(ContractModel):
-    query: str
+    # No query text: pg_stat_statements stores utility statements verbatim, so
+    # the text can contain a credential. queryid correlates without that risk.
+    queryid: str
     calls: int | None = None
     total_exec_time_ms: float | None = None
     mean_exec_time_ms: float | None = None
     rows: int | None = None
+    shared_blks_read: int | None = None
+    shared_blks_hit: int | None = None
 
 
 class AdminDbQueryPlan(ContractModel):
     name: str
+    radius_m: int
     status: Literal["ok", "timeout", "unavailable", "skipped"]
     plan: list[dict[str, Any]] | None = None
     error: str | None = None
+    # How this probe relates to the request path, so a plan is never mistaken
+    # for the latency a user experiences.
+    note: str
 
 
 class AdminDbSamplePoint(ContractModel):

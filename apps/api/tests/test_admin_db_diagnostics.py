@@ -63,15 +63,19 @@ def _diagnostics_payload() -> dict[str, Any]:
         "query_plans": [
             {
                 "name": "nearby_evidence",
+                "radius_m": 500,
                 "status": "ok",
                 "plan": [{"Plan": {"Node Type": "Limit"}, "Execution Time": 5624.1}],
                 "error": None,
+                "note": "matches the request path",
             },
             {
                 "name": "coverage_supplement",
+                "radius_m": 15000,
                 "status": "timeout",
                 "plan": None,
                 "error": "timeout",
+                "note": "the request path abandons this query after 250 ms",
             },
         ],
         "statements": None,
@@ -141,6 +145,10 @@ def test_db_diagnostics_returns_structure(monkeypatch: pytest.MonkeyPatch) -> No
     plans = {plan["name"]: plan for plan in payload["query_plans"]}
     assert plans["nearby_evidence"]["status"] == "ok"
     assert plans["nearby_evidence"]["plan"][0]["Execution Time"] == pytest.approx(5624.1)
+    # Each plan states the radius it searched and how it relates to a request.
+    assert plans["nearby_evidence"]["radius_m"] == 500
+    assert plans["coverage_supplement"]["radius_m"] == 15000
+    assert "abandons" in plans["coverage_supplement"]["note"]
     # A query that could not finish is reported, not raised.
     assert plans["coverage_supplement"]["status"] == "timeout"
     assert plans["coverage_supplement"]["error"] == "timeout"
@@ -227,20 +235,24 @@ def test_explain_reports_timeout_without_raising() -> None:
 
     result = db_diagnostics._explain(
         "coverage_supplement",
+        15_000,
         _statement,
         "postgresql://example",
         lambda: _FakeConnection(cursor),
     )
 
-    assert result == {
-        "name": "coverage_supplement",
-        "status": "timeout",
-        "plan": None,
-        "error": "timeout",
-    }
-    # The budget must be applied before the EXPLAIN runs.
-    assert "statement_timeout" in cursor.executed[0]
-    assert cursor.executed[1].startswith("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ")
+    assert result["status"] == "timeout"
+    assert result["error"] == "timeout"
+    assert result["plan"] is None
+    assert result["radius_m"] == 15_000
+    # The probe budget is larger than the request path allows, so the payload
+    # must say so rather than letting the number read as request latency.
+    assert "250 ms" in result["note"]
+    assert "not as request latency" in result["note"]
+    # Read-only first, then the budget, then the EXPLAIN.
+    assert cursor.executed[0] == "SET TRANSACTION READ ONLY"
+    assert "statement_timeout" in cursor.executed[1]
+    assert cursor.executed[2].startswith("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ")
 
 
 def test_explain_never_leaks_the_connection_string() -> None:
@@ -248,7 +260,7 @@ def test_explain_never_leaks_the_connection_string() -> None:
     cursor = _FakeCursor(psycopg.OperationalError(f'could not connect to "{secret_url}"'))
 
     result = db_diagnostics._explain(
-        "jurisdiction", _statement, secret_url, lambda: _FakeConnection(cursor)
+        "jurisdiction", 500, _statement, secret_url, lambda: _FakeConnection(cursor)
     )
 
     assert result["status"] == "unavailable"
@@ -264,7 +276,11 @@ def test_explain_returns_the_plan_on_success() -> None:
     cursor = _FakeCursor(None, plan=plan)
 
     result = db_diagnostics._explain(
-        "nearby_evidence", _statement, "postgresql://example", lambda: _FakeConnection(cursor)
+        "nearby_evidence",
+        500,
+        _statement,
+        "postgresql://example",
+        lambda: _FakeConnection(cursor),
     )
 
     assert result["status"] == "ok"
@@ -277,30 +293,45 @@ def test_explain_skips_when_the_statement_cannot_be_built() -> None:
         raise RuntimeError("reader changed shape")
 
     result = db_diagnostics._explain(
-        "nearby_evidence", broken, "postgresql://example", lambda: None
+        "nearby_evidence", 500, broken, "postgresql://example", lambda: None
     )
 
-    assert result == {
-        "name": "nearby_evidence",
-        "status": "skipped",
-        "plan": None,
-        "error": "sql_unavailable",
-    }
+    assert result["status"] == "skipped"
+    assert result["error"] == "sql_unavailable"
+    assert result["plan"] is None
 
 
 def test_statement_sources_cover_all_three_risk_path_segments() -> None:
-    sources = dict(db_diagnostics._statement_sources())
+    sources = {
+        name: (radius, fn) for name, radius, fn in db_diagnostics._statement_sources()
+    }
 
     assert list(sources) == [
         "nearby_evidence",
         "coverage_supplement",
         "jurisdiction",
     ]
-    for name, statement in sources.items():
+    for name, (_radius, statement) in sources.items():
         captured = statement()
         assert captured is not None, name
         sql, _params = captured
         assert "SELECT" in sql, name
+
+
+def test_jurisdiction_probe_uses_the_request_radius_not_the_reader_default() -> None:
+    sources = {name: radius for name, radius, _fn in db_diagnostics._statement_sources()}
+
+    # The reader defaults to 15 km, which the request path never passes; probing
+    # at that radius resolves a different set of county polygons.
+    assert sources["jurisdiction"] == db_diagnostics.SAMPLE_RADIUS_M == 500
+    assert sources["nearby_evidence"] == db_diagnostics.SAMPLE_RADIUS_M
+    assert sources["coverage_supplement"] == max(db_diagnostics.SAMPLE_COVERAGE_BUCKETS_M)
+
+    _name, _radius, jurisdiction = db_diagnostics._statement_sources()[2]
+    captured = jurisdiction()
+    assert captured is not None
+    _sql, params = captured
+    assert params[-1] == db_diagnostics.SAMPLE_RADIUS_M
 
 
 def test_table_and_index_sections_survive_an_unavailable_database() -> None:
@@ -320,3 +351,4 @@ def test_table_and_index_sections_survive_an_unavailable_database() -> None:
         "unavailable",
         "unavailable",
     ]
+    assert all(plan["note"] for plan in diagnostics["query_plans"])

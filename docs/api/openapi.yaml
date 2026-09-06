@@ -3076,11 +3076,15 @@ components:
         index_size_bytes:
           type: [integer, "null"]
     AdminDbStatementStat:
+      description: >-
+        Statement-level cost from pg_stat_statements. Deliberately carries no
+        query text: utility statements are stored verbatim and can contain
+        credentials, so only the queryid is exposed for correlation.
       type: object
       required:
-        - query
+        - queryid
       properties:
-        query:
+        queryid:
           type: string
         calls:
           type: [integer, "null"]
@@ -3090,14 +3094,31 @@ components:
           type: [number, "null"]
         rows:
           type: [integer, "null"]
+        shared_blks_read:
+          type: [integer, "null"]
+        shared_blks_hit:
+          type: [integer, "null"]
     AdminDbQueryPlan:
+      description: >-
+        An EXPLAIN ANALYZE probe of one risk-path query. The probe budget is
+        larger than the request path allows, so a plan here can report work the
+        real request would have abandoned. Read `note` before comparing these
+        numbers with Server-Timing.
       type: object
       required:
         - name
+        - radius_m
         - status
+        - note
       properties:
         name:
           type: string
+        radius_m:
+          type: integer
+          description: Search radius this probe used, in metres.
+        note:
+          type: string
+          description: How this probe relates to the request path.
         status:
           type: string
           enum:

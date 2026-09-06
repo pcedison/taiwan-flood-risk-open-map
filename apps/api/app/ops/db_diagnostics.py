@@ -8,8 +8,18 @@ points at node-level state -- heap and index bloat from the 48 hour retention
 cycle, autovacuum falling behind, or plans that differ because nothing stays
 resident in cache -- rather than at the SQL itself.
 
-Everything here is read-only.  It exposes catalog statistics and query plans; it
-never returns evidence content, user data, or connection strings.
+**These plans are not request latency.** Each probe runs under its own 8 s
+budget, which is deliberately larger than the budget the request path gives the
+same query.  Since #359 the coverage supplement is abandoned after 250 ms when
+``official_realtime_latest`` has already answered, so its probe here measures
+how long the abandoned query *would* have taken, not what a request waits for.
+Read the plans as evidence about the database -- rows examined, buffers touched,
+index choice, bloat -- and read ``Server-Timing`` for what users experience.
+
+Everything here is read-only.  Each probe runs in a ``READ ONLY`` transaction,
+and every statement carries a bounded timeout.  It exposes catalog statistics
+and query plans; it never returns evidence content, user data, SQL text, or
+connection strings.
 """
 
 from __future__ import annotations
@@ -42,14 +52,20 @@ SAMPLE_LAT = 25.033
 SAMPLE_LNG = 121.5654
 SAMPLE_RADIUS_M = 500
 SAMPLE_COVERAGE_BUCKETS_M = DEFAULT_COVERAGE_RADIUS_BUCKETS_M
-# Each EXPLAIN gets its own budget. Production segments run 1.5-5.6 s, so 8 s
+# Each probe gets its own budget. Production segments run 1.5-5.6 s, so 8 s
 # leaves headroom for a plan that is merely slow while still bounding a plan
-# that will never finish.
-EXPLAIN_STATEMENT_TIMEOUT_MS = 8_000
+# that will never finish. Catalog reads share the budget so no section of this
+# endpoint can hang on a lock.
+STATEMENT_TIMEOUT_MS = 8_000
+EXPLAIN_STATEMENT_TIMEOUT_MS = STATEMENT_TIMEOUT_MS
 STATEMENT_STATS_LIMIT = 10
-# pg_stat_statements normalises literals to placeholders, so the text is query
-# shape rather than data. Truncate anyway to keep the artifact small.
-STATEMENT_TEXT_MAX_CHARS = 500
+# The probe budget exceeds what the request path allows, so a plan here can
+# report work the real request would have abandoned. Say so next to the number.
+EXPLAIN_BUDGET_NOTE = (
+    f"probe ran under a {STATEMENT_TIMEOUT_MS} ms budget, which is larger than "
+    "the request path allows; treat this as evidence about the database, not as "
+    "request latency"
+)
 
 ConnectionFactory = Callable[[], Any]
 
@@ -84,6 +100,22 @@ def _connect(database_url: str, connection_factory: ConnectionFactory | None) ->
     if connection_factory is not None:
         return connection_factory()
     return psycopg.connect(database_url, connect_timeout=5, row_factory=dict_row)
+
+
+def _apply_read_only_budget(cursor: Any) -> None:
+    """Bound every statement and make writes impossible at the server.
+
+    The queries here are all ``SELECT``s, so ``READ ONLY`` changes nothing today.
+    It is structural insurance: an admin endpoint that runs EXPLAIN ANALYZE --
+    which really executes the statement -- should not be one editing mistake away
+    from mutating production.
+    """
+
+    cursor.execute("SET TRANSACTION READ ONLY")
+    cursor.execute(
+        "SELECT set_config('statement_timeout', %s, true)",
+        (f"{STATEMENT_TIMEOUT_MS}ms",),
+    )
 
 
 def _table_stats(
@@ -148,15 +180,21 @@ def _statement_stats(
     extension is a normal answer here rather than a diagnostic failure.
     """
 
+    # No query text. pg_stat_statements only normalises literals in statements
+    # it can parse as DML; utility statements are stored verbatim, so a
+    # `CREATE ROLE ... PASSWORD '...'` or an `ALTER USER` would put a live
+    # credential in this payload. queryid is enough to correlate with a plan.
     sql = f"""
         SELECT
-            left(stat.query, {STATEMENT_TEXT_MAX_CHARS}) AS query,
+            stat.queryid::text AS queryid,
             stat.calls AS calls,
             round(stat.total_exec_time::numeric, 2)::double precision
                 AS total_exec_time_ms,
             round(stat.mean_exec_time::numeric, 2)::double precision
                 AS mean_exec_time_ms,
-            stat.rows AS rows
+            stat.rows AS rows,
+            stat.shared_blks_read AS shared_blks_read,
+            stat.shared_blks_hit AS shared_blks_hit
         FROM pg_stat_statements stat
         ORDER BY stat.total_exec_time DESC
         LIMIT {STATEMENT_STATS_LIMIT}
@@ -166,6 +204,7 @@ def _statement_stats(
             _connect(database_url, connection_factory) as connection,
             connection.cursor() as cursor,
         ):
+            _apply_read_only_budget(cursor)
             cursor.execute(sql)
             return [dict(row) for row in cursor.fetchall()]
     except psycopg.errors.UndefinedTable:
@@ -185,6 +224,7 @@ def _rows(
             _connect(database_url, connection_factory) as connection,
             connection.cursor() as cursor,
         ):
+            _apply_read_only_budget(cursor)
             cursor.execute(sql, params)
             return [dict(row) for row in cursor.fetchall()]
     except (OSError, psycopg.Error):
@@ -250,8 +290,28 @@ def _capture_statement(
     return cursor.statements[0]
 
 
-def _statement_sources() -> tuple[tuple[str, Callable[[], tuple[str, Any] | None]], ...]:
-    """Pair each probe name with the statement it should EXPLAIN.
+# The radius each probe searches, and how it relates to the request path. The
+# request path calls all three with the caller's radius, so the probes must use
+# it too -- a jurisdiction probe left on the 15 km default resolves a different
+# number of county polygons than the 500 m the request actually asks for.
+PROBE_NOTES: dict[str, str] = {
+    "nearby_evidence": (
+        "matches the request path: same radius and the same unbounded lookback"
+    ),
+    "coverage_supplement": (
+        "since #359 the request path abandons this query after 250 ms once "
+        "official_realtime_latest has answered, so this measures how long the "
+        "abandoned query would have taken, not what a request waits for"
+    ),
+    "jurisdiction": (
+        "searches the request radius; the reader defaults to 15 km, which the "
+        "request path never uses"
+    ),
+}
+
+
+def _statement_sources() -> tuple[tuple[str, int, Callable[[], tuple[str, Any] | None]], ...]:
+    """Pair each probe with its search radius and the statement to EXPLAIN.
 
     The coverage reader exposes its statement directly. The other two build
     their SQL inline while executing, so their statement is recovered by
@@ -262,6 +322,7 @@ def _statement_sources() -> tuple[tuple[str, Callable[[], tuple[str, Any] | None
     return (
         (
             "nearby_evidence",
+            SAMPLE_RADIUS_M,
             lambda: _capture_statement(
                 lambda factory: query_nearby_evidence(
                     database_url="",
@@ -274,6 +335,7 @@ def _statement_sources() -> tuple[tuple[str, Callable[[], tuple[str, Any] | None
         ),
         (
             "coverage_supplement",
+            max(SAMPLE_COVERAGE_BUCKETS_M),
             lambda: nearby_evidence_coverage_statement(
                 lat=SAMPLE_LAT,
                 lng=SAMPLE_LNG,
@@ -283,11 +345,13 @@ def _statement_sources() -> tuple[tuple[str, Callable[[], tuple[str, Any] | None
         ),
         (
             "jurisdiction",
+            SAMPLE_RADIUS_M,
             lambda: _capture_statement(
                 lambda factory: query_realtime_jurisdiction_context(
                     database_url="",
                     lat=SAMPLE_LAT,
                     lng=SAMPLE_LNG,
+                    search_radius_m=SAMPLE_RADIUS_M,
                     connection_factory=factory,
                 )
             ),
@@ -299,13 +363,32 @@ def _query_plans(
     database_url: str, connection_factory: ConnectionFactory | None
 ) -> list[dict[str, Any]]:
     return [
-        _explain(name, statement, database_url, connection_factory)
-        for name, statement in _statement_sources()
+        _explain(name, radius_m, statement, database_url, connection_factory)
+        for name, radius_m, statement in _statement_sources()
     ]
+
+
+def _plan_result(
+    name: str,
+    radius_m: int,
+    *,
+    status: str,
+    plan: list[dict[str, Any]] | None,
+    error: str | None,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "radius_m": radius_m,
+        "status": status,
+        "plan": plan,
+        "error": error,
+        "note": f"{PROBE_NOTES[name]}; {EXPLAIN_BUDGET_NOTE}",
+    }
 
 
 def _explain(
     name: str,
+    radius_m: int,
     statement: Callable[[], tuple[str, Any] | None],
     database_url: str,
     connection_factory: ConnectionFactory | None,
@@ -315,17 +398,18 @@ def _explain(
     except Exception:  # noqa: BLE001 - a probe must never break the payload
         captured = None
     if captured is None:
-        return {"name": name, "status": "skipped", "plan": None, "error": "sql_unavailable"}
+        return _plan_result(
+            name, radius_m, status="skipped", plan=None, error="sql_unavailable"
+        )
     sql, params = captured
     try:
         with (
             _connect(database_url, connection_factory) as connection,
             connection.cursor() as cursor,
         ):
-            cursor.execute(
-                "SELECT set_config('statement_timeout', %s, true)",
-                (f"{EXPLAIN_STATEMENT_TIMEOUT_MS}ms",),
-            )
+            # EXPLAIN ANALYZE really runs the statement, so the read-only
+            # transaction matters more here than anywhere else in this module.
+            _apply_read_only_budget(cursor)
             cursor.execute(
                 "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql,
                 params,
@@ -334,20 +418,19 @@ def _explain(
     except psycopg.errors.QueryCanceled:
         # The sole reason this endpoint exists is queries that do not finish, so
         # a timeout is a result to report rather than an error to raise.
-        return {"name": name, "status": "timeout", "plan": None, "error": "timeout"}
+        return _plan_result(name, radius_m, status="timeout", plan=None, error="timeout")
     except (OSError, psycopg.Error) as exc:
         # Deliberately only the exception class: a psycopg connection error
         # renders the full conninfo, which would leak the database host.
-        return {
-            "name": name,
-            "status": "unavailable",
-            "plan": None,
-            "error": type(exc).__name__,
-        }
+        return _plan_result(
+            name, radius_m, status="unavailable", plan=None, error=type(exc).__name__
+        )
     plan = _plan_from_row(row)
     if plan is None:
-        return {"name": name, "status": "unavailable", "plan": None, "error": "empty_plan"}
-    return {"name": name, "status": "ok", "plan": plan, "error": None}
+        return _plan_result(
+            name, radius_m, status="unavailable", plan=None, error="empty_plan"
+        )
+    return _plan_result(name, radius_m, status="ok", plan=plan, error=None)
 
 
 def _plan_from_row(row: Any) -> list[dict[str, Any]] | None:
