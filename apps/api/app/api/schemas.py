@@ -760,6 +760,7 @@ class PublicSourceStatus(ContractModel):
     source_key: str
     signal_type: str
     state: PublicSourceState
+    reason_code: str
     observed_at: datetime | None = None
     checked_at: datetime | None = None
     message: str | None = None

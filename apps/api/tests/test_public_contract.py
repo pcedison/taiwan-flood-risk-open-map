@@ -181,6 +181,7 @@ def _route_data(
             source_key=source_key,
             signal_type=signal_type,
             state="fresh",
+            reason_code="operational",
             observed_at=ROUTE_NOW,
             checked_at=ROUTE_NOW,
             message=None,

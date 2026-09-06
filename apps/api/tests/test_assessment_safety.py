@@ -26,11 +26,13 @@ def _source_state(
     *,
     state: str = "fresh",
     signal_type: str | None = None,
+    reason_code: str = "operational",
 ) -> AssessmentSourceState:
     return AssessmentSourceState(
         source_key=source_key,
         signal_type=signal_type or source_key.rsplit(".", 1)[-1],
         state=state,
+        reason_code=reason_code,
         observed_at=NOW,
         checked_at=NOW,
         message=None,

@@ -2038,6 +2038,7 @@ components:
         - source_key
         - signal_type
         - state
+        - reason_code
       properties:
         source_key:
           type: string
@@ -2052,6 +2053,8 @@ components:
             - failed
             - disabled
             - not_applicable
+        reason_code:
+          type: string
         observed_at:
           type:
             - string

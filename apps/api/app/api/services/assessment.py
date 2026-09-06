@@ -39,7 +39,7 @@ from app.domain.evidence import (
     EvidenceRepositoryUnavailable,
     RiskAssessmentPersistence,
 )
-from app.domain.realtime import SIGNAL_LABELS, UPSTREAM_STALE_MESSAGE_PREFIX
+from app.domain.realtime import SIGNAL_LABELS
 from app.domain.risk import RiskEvidenceSignal, RiskScoringResult
 
 
@@ -77,11 +77,14 @@ class ResponseCache(Protocol):
 
 
 _RECENT_HISTORY_REFRESH_AFTER = timedelta(days=30)
-# States a reader must be told about verbatim; "degraded" is summarised instead.
-# "unknown" is not a SourceState literal -- the repository maps an unknown
-# health status to "stale" -- and stays here only as a defence in case another
-# producer starts emitting it.
-_VERBATIM_REQUIRED_SOURCE_STATES = frozenset({"failed", "stale", "disabled", "unknown"})
+# States a reader must be told about verbatim.  "degraded" belongs here because
+# an upstream outage is reported as a degraded source too; only the "delayed"
+# reason within it is summarised instead.  "unknown" is not a SourceState
+# literal -- the repository maps an unknown health status to "stale" -- and
+# stays here only as a defence in case another producer starts emitting it.
+_VERBATIM_REQUIRED_SOURCE_STATES = frozenset(
+    {"failed", "stale", "disabled", "unknown", "degraded"}
+)
 _SIGNAL_LABEL_BY_TYPE: dict[str, str] = {
     str(signal_type): label for signal_type, label in SIGNAL_LABELS.items()
 }
@@ -375,25 +378,29 @@ def _source_health(state: str) -> HealthStatus:
     return health_by_state.get(state, "unknown")
 
 
-def _is_upstream_stale(message: str | None) -> bool:
-    return message is not None and message.startswith(UPSTREAM_STALE_MESSAGE_PREFIX)
+def _is_merely_delayed(state: AssessmentSourceState) -> bool:
+    """Tell a slow-but-usable feed apart from every other degraded reason.
+
+    ``degraded`` covers both a source that is publishing a little late and one
+    whose stations have all aged out of usefulness.  Only ``delayed`` earns the
+    reassuring summary sentence; every other reason keeps the wording its own
+    diagnosis chose.
+    """
+
+    return state.state == "degraded" and state.reason_code == "delayed"
 
 
 def _delayed_sources_summary(states: list[AssessmentSourceState]) -> str | None:
     """Collapse per-source delay diagnostics into one sentence a reader can act on.
 
-    A degraded source still publishes usable observations, so listing one
+    A delayed source still publishes usable observations, so listing one
     station-count line per source turns the public data-gap list into
     operator telemetry.  One sentence naming the affected signals keeps the
     SDD 9.6 explanation contract readable; the per-source detail stays in
     ``data_status.sources``.
     """
 
-    delayed = [
-        state.signal_type
-        for state in states
-        if state.state == "degraded" and not _is_upstream_stale(state.message)
-    ]
+    delayed = [state.signal_type for state in states if _is_merely_delayed(state)]
     if not delayed:
         return None
     ordered = sorted(
@@ -416,6 +423,7 @@ def _data_status(data: AssessmentData) -> DataStatus:
             source_key=state.source_key,
             signal_type=state.signal_type,
             state=state.state,
+            reason_code=state.reason_code,
             observed_at=state.observed_at,
             checked_at=state.checked_at,
             message=state.message,
@@ -427,17 +435,16 @@ def _data_status(data: AssessmentData) -> DataStatus:
         for state in data.source_states
         if state.source_key in data.required_realtime_source_keys
     ]
-    # A source that failed, went stale, is disabled, or reports an upstream
-    # publication gap is a real limitation for the reader, so it keeps its own
-    # message.  Merely delayed sources are summarised once instead.
+    # A source that failed, went stale, is disabled, or is degraded for any
+    # reason other than a plain delay is a real limitation for the reader, so
+    # it keeps its own message.  Merely delayed sources are summarised once
+    # instead; duplicate wording is removed when the list is built below.
     missing = [
         state.message
         for state in required_states
         if state.message
-        and (
-            state.state in _VERBATIM_REQUIRED_SOURCE_STATES
-            or _is_upstream_stale(state.message)
-        )
+        and state.state in _VERBATIM_REQUIRED_SOURCE_STATES
+        and not _is_merely_delayed(state)
     ]
     delayed_summary = _delayed_sources_summary(required_states)
     if delayed_summary is not None:
