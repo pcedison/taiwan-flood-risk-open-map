@@ -859,6 +859,111 @@ def test_live_central_local_negative_controls_keep_both_latest_rows(
         _cleanup_depth_race(database_url, suffix, central, local)
 
 
+def test_live_batch_replay_keeps_the_exact_central_local_peer_latest_row(
+    database_url: str,
+) -> None:
+    """A frozen central snapshot must stop retiring its Tainan peer every cycle.
+
+    The per-row path runs the central/local duplicate handler before it decides
+    the observation is unchanged, so a stalled upstream deleted the peer latest
+    row on every no-op cycle and only then rejected itself as idempotent. The
+    batch pre-check settles the re-observation first, which is what keeps the
+    peer on the map.
+    """
+
+    import psycopg
+
+    suffix = uuid4().hex
+    central = _depth_payload(
+        suffix=suffix,
+        adapter_key="official.wra_iow.flood_depth",
+        station_id=f"WRA-{suffix}",
+        observed_at=NOW,
+        value=12.0,
+        longitude=120.2190,
+        latitude=22.9160,
+    )
+    peer = _depth_payload(
+        suffix=suffix,
+        adapter_key="local.tainan.flood_sensor",
+        station_id=f"TN-{suffix}",
+        observed_at=NOW,
+        value=12.0,
+        longitude=120.2195,
+        latitude=22.9160,
+    )
+    central_longitude, central_latitude = central.properties["location_payload"][
+        "geometry"
+    ]["coordinates"]
+    staged_central, fixture = _insert_staged_payload(database_url, central)
+    replay, replay_staging_id = _duplicate_staged_payload(
+        database_url, staged_central, fixture["staging_id"]
+    )
+    writer = PostgresEvidencePromotionWriter(database_url=database_url)
+    try:
+        assert writer.write_evidence(staged_central) is not None
+        # The two rows coexist whenever the adapters promoted concurrently:
+        # neither duplicate check can see the other transaction's uncommitted
+        # latest row, so both land and the Tainan peer is left for the next
+        # central cycle to find.
+        _insert_peer_latest_row(database_url, peer)
+
+        assert writer.write_evidence_batch((replay,)) == (None,)
+
+        with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT station_id
+                FROM official_realtime_latest
+                WHERE adapter_key = 'local.tainan.flood_sensor'
+                    AND event_type = 'flood_report'
+                    AND observed_at = %s
+                    AND flood_depth_cm = %s
+                    AND ST_DWithin(
+                        geom::geography,
+                        ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography,
+                        150
+                    )
+                """,
+                (NOW, 12.0, central_longitude, central_latitude),
+            )
+            # Without this the survival assertion could pass on a peer the
+            # duplicate handler was never going to delete anyway.
+            assert cursor.fetchall() == [(peer.properties["station_id"],)]
+            cursor.execute(
+                """
+                SELECT adapter_key, observed_at
+                FROM official_realtime_latest
+                WHERE station_id = ANY(%s)
+                ORDER BY adapter_key
+                """,
+                ([central.properties["station_id"], peer.properties["station_id"]],),
+            )
+            assert cursor.fetchall() == [
+                ("local.tainan.flood_sensor", NOW),
+                ("official.wra_iow.flood_depth", NOW),
+            ]
+            cursor.execute(
+                """
+                SELECT validation_status, rejection_reason
+                FROM staging_evidence
+                WHERE id = %s
+                """,
+                (replay_staging_id,),
+            )
+            assert cursor.fetchone() == ("rejected", "idempotent_existing_observation")
+            cursor.execute(
+                "SELECT count(*) FROM evidence WHERE source_id = %s",
+                (central.source_id,),
+            )
+            assert cursor.fetchone() == (1,)
+    finally:
+        _cleanup_depth_race(database_url, suffix, central, peer)
+        _cleanup_staged_payload(
+            database_url, fixture, extra_staging_ids=(replay_staging_id,)
+        )
+
+
 def test_live_inactive_tainan_tombstone_retires_existing_latest(
     database_url: str,
 ) -> None:
@@ -2974,6 +3079,42 @@ def _cleanup_staged_payload(
         cursor.execute(
             "DELETE FROM raw_snapshots WHERE id = %s",
             (fixture["raw_snapshot_id"],),
+        )
+
+
+def _insert_peer_latest_row(
+    database_url: str, payload: EvidencePromotionPayload
+) -> None:
+    """Seed one latest row for a station whose own promotion is not under test."""
+
+    import psycopg
+
+    longitude, latitude = payload.properties["location_payload"]["geometry"][
+        "coordinates"
+    ]
+    with psycopg.connect(database_url) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO official_realtime_latest (
+                source_id, adapter_key, event_type, station_id, observed_at,
+                geom, flood_depth_cm, confidence
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s, %s
+            )
+            """,
+            (
+                payload.source_id,
+                payload.adapter_key,
+                payload.event_type,
+                payload.properties["station_id"],
+                payload.observed_at,
+                longitude,
+                latitude,
+                payload.properties["flood_depth_cm"],
+                payload.confidence,
+            ),
         )
 
 
