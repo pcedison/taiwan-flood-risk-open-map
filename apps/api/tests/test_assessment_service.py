@@ -708,7 +708,9 @@ def _source_state(
         "fresh": "operational",
         "degraded": "delayed",
         "failed": "upstream_unavailable",
-        "stale": "upstream_unavailable",
+        # A "stale" state is the repository's mapping of an unknown health
+        # status, which production only reaches via "not_yet_observed".
+        "stale": "not_yet_observed",
         "disabled": "disabled",
     }
     return AssessmentSourceState(
