@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-03 09:28 Asia/Taipei (2026-09-03 01:28 UTC)
+Last verified: 2026-09-07 10:38 Asia/Taipei (2026-09-07 02:38 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -32,8 +32,9 @@ the live verification sources listed below.
   - `official.wra_iow.flood_depth` has been stale since 2026-09-02 04:29Z
     because the WRA open-data feed itself stopped at that timestamp (verified
     by reading the upstream API directly). It is not a worker or promotion
-    fault, and every Hosted Monitoring failure since 2026-08-31 (#289) is this
-    single source.
+    fault. Every Hosted Monitoring failure examined by the 2026-09-03 audit
+    since 2026-08-31 (#289) was this single source; the later 2026-09-06 CWA
+    upstream outage is recorded separately in the current checkpoint below.
   - Every "degraded" backbone source was produced by an all-stations-fresh
     rule in `nearby_coverage.py`, not by stale data.
   - Historical `極高` levels in several counties came from request-time
@@ -42,8 +43,8 @@ the live verification sources listed below.
 - Correction track (P0 → P1 → P2): #326 disable request-time citations;
   #339 reconnect the response cache; #341 precision-weighted
   historical scoring; #338 active-station ratio health and
-  `upstream_stale`; #340 collapse operator diagnostics; this PR
-  (documentation single source of truth).
+  `upstream_stale`; #340 collapse operator diagnostics; and the documentation
+  consolidation that followed.
 - Source-of-truth rule from this point: enablement decisions live in
   `config/source-registry.yaml`; runtime evidence lives in `/health`, `/ready`
   and `/v1/ingestion-readiness`; this file summarizes and never decides.
@@ -95,7 +96,34 @@ the live verification sources listed below.
   the source run instead of disappearing. This slice does not invent 2026
   events or mark years absent from the official payload as checked.
 
-## Recorded production checkpoint
+## Recorded production checkpoints
+
+- At 2026-09-07 10:38 Asia/Taipei, `origin/main`, Zeabur production deployment
+  `6300913665`, `/health`, and `/ready` all reported
+  `f5c76c00415ea440d027da3186889078c18b9ad4`. PostgreSQL and Redis were
+  healthy. The SHA-pinned deployment smoke and strict public-risk evidence
+  smoke passed; main CI and CodeQL passed; open Dependabot, code-scanning, and
+  secret-scanning alert counts were zero; and no pull request was open. The
+  strict smoke reported the required WRA IoW flood-depth source as advisory
+  while redundant hydrology evidence remained usable; a direct upstream replay
+  still found no observation newer than `2026-09-02T04:29:42Z`.
+- The latest genuine scheduled Hosted Monitoring run is
+  [#34057465057](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34057465057)
+  on preceding main `7f7836714cbf65667ef6b422d7e27a0d8cc45431`. Deployment
+  identity passed, but the public-risk step failed because the CWA rainfall
+  upstream was temporarily unavailable. PR
+  [#380](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/380)
+  added a bounded six-hour advisory for that self-healing state; manual
+  post-deploy runs passed, but the next genuine schedule run has not yet
+  exercised the new policy. Issues
+  [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
+  [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
+  closed on 2026-09-04 after earlier successful genuine schedule evidence.
+- A 2026-09-07 refresh for issue
+  [#71](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/71)
+  fetched the public catalog and again found three unresolved signal groups,
+  nine metadata-only candidates, and zero live-read APIs. The generated request
+  packet remains handoff material, not dispatch or completion evidence.
 
 - At 2026-09-03 09:28 Asia/Taipei, `origin/main`, Zeabur production deployment
   `6235041060`, `/health`, and `/ready` all reported
@@ -103,11 +131,11 @@ the live verification sources listed below.
   healthy, the SHA-pinned deployment smoke and strict public-risk evidence
   smoke passed, and main CI and CodeQL were green. Open Dependabot,
   code-scanning, and secret-scanning alerts and pull requests were all zero.
-  This proves production recovery, but issues
+  This proved production recovery. At that checkpoint, issues
   [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
   [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
-  remain open until a genuine `schedule` Hosted Monitoring run passes on the
-  current main SHA.
+  still awaited a genuine `schedule` Hosted Monitoring pass; both subsequently
+  closed on 2026-09-04 after that evidence arrived.
 - At 2026-09-03 04:58 Asia/Taipei, `origin/main` was
   `68b985b7c0d0e66f2232ba22c7e9330e820cd735`; CI and CodeQL passed and open
   Dependabot, code-scanning, and secret-scanning alerts were all zero. Zeabur's
@@ -132,7 +160,7 @@ the live verification sources listed below.
   healthy. CI and CodeQL passed, and the deployment-identity and strict
   public-risk smokes both passed. Open security alerts were Dependabot 0, code
   scanning 0, and secret scanning 0.
-- The latest genuine schedule run is Hosted Monitoring
+- At that checkpoint, the latest genuine schedule run was Hosted Monitoring
   [#33682011765](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/33682011765)
   on checkpoint main `68b985b7c0d0e66f2232ba22c7e9330e820cd735`. Its public API
   contract probe passed, but the deployment smoke exhausted all six attempts;
@@ -379,10 +407,13 @@ the deployment plus strict public-risk smokes must be rerun.
 
 ## Remaining open work
 
-Operational issues
-[#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
-[#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
-remain open for the Civil IoT source failure and real-schedule readiness.
+At the current checkpoint, the open queue is #71, #328, #329, #330, #337, and
+#383; there is no open pull request. Issues #289 and #293 are closed, so they
+must not be used as the current monitoring queue. #328 and #337 are
+authorization or approval gates, #329 is the worker-side L2 historical-news
+path, and #330 and #383 track measured query and retention-index performance
+work.
+
 Issue [#71](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/71)
 remains the external source-contract queue; it does not represent a broken
 central or Tainan ingestion path. Its audited queue contains nine grouped
