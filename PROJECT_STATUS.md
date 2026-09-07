@@ -112,11 +112,12 @@ the live verification sources listed below.
 - The latest genuine scheduled Hosted Monitoring run is
   [#34081913876](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34081913876)
   on current main `e05e802b5a4384216f5e13040fa3cb534f0a7893`. It passed the
-  deployment, strict public-risk, desktop and mobile browser,
+  deployment, `degraded-ok` public-risk, desktop and mobile browser,
   source-freshness, schedule-evidence, and completion-audit steps. This
   exercised the bounded six-hour advisory added by PR
   [#380](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/380)
-  after the preceding CWA rainfall upstream outage. Issues
+  after the preceding CWA rainfall upstream outage; the strict result above is
+  from the separate SHA-pinned checkpoint smoke. Issues
   [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
   [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
   closed on 2026-09-04 after earlier successful genuine schedule evidence.

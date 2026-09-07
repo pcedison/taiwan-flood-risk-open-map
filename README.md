@@ -92,12 +92,13 @@ documentation as a permanent deployment pin: derive the current expected SHA
 only after `git fetch origin --prune`, then verify both health endpoints. The
 latest genuine scheduled Hosted Monitoring run,
 [#34081913876](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34081913876),
-passed on that release, including the deployment, strict public-risk, desktop
-and mobile browser, source-freshness, schedule-evidence, and completion-audit
-steps. This exercised PR #380's bounded six-hour advisory after the preceding
-CWA rainfall upstream outage. Issues #289 and #293 had already closed on
-2026-09-04 after earlier successful genuine schedule evidence. Hosted
-Monitoring also
+passed on that release, including the deployment, `degraded-ok` public-risk,
+desktop and mobile browser, source-freshness, schedule-evidence, and
+completion-audit steps. This exercised PR #380's bounded six-hour advisory
+after the preceding CWA rainfall upstream outage; the strict result above is
+from the separate SHA-pinned checkpoint smoke. Issues #289 and #293 had
+already closed on 2026-09-04 after earlier successful genuine schedule
+evidence. Hosted Monitoring also
 exercises the production basemap and a real public location query in desktop
 and mobile Chromium; major MapLibre and ESLint upgrades require an explicit
 migration review instead of an automatic Dependabot PR.
