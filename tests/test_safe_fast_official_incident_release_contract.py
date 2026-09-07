@@ -56,6 +56,12 @@ WRA_FLOOD_WARNING_KML_URLS = (
 )
 POLICE_LIMITATION = "警廣即時路況通報，尚未由淹水感測器確認。"
 RELEASE_STATEMENT = "code landed/default off; not production activated"
+NCDR_PUBLIC_ACTIVE_FEED_URL = "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx"
+NCDR_MEMBER_DUMP_URL = "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
+NCDR_RESOURCE_FORMAT = (
+    "public active-warning Atom index to CAP XML; member datastore remains "
+    "supported when an API key is configured"
+)
 ROLLBACK_ORDER = (
     "disable the catalog row first",
     "then the runtime, api, and contract gates",
@@ -105,12 +111,13 @@ def test_runtime_builders_require_every_independent_gate() -> None:
             assert f"settings.{prefix}{suffix}" in runtime, f"{prefix}{suffix}"
 
 
-def test_ncdr_keeps_its_exact_datastore_and_dump_contract() -> None:
+def test_ncdr_keeps_its_public_feed_and_member_dump_contract() -> None:
     ncdr = _catalog_sources()["official.ncdr.cap"]
 
-    assert ncdr["resource_url"] == "https://alerts.ncdr.nat.gov.tw/api/datastore"
-    assert ncdr["dump_url"] == "https://alerts.ncdr.nat.gov.tw/api/dump/datastore"
-    assert ncdr["resource_format"] == "JSON datastore index to CAP XML dump"
+    assert ncdr["resource_url"] == NCDR_PUBLIC_ACTIVE_FEED_URL
+    assert "?" not in str(ncdr["resource_url"])
+    assert ncdr["dump_url"] == NCDR_MEMBER_DUMP_URL
+    assert ncdr["resource_format"] == NCDR_RESOURCE_FORMAT
 
 
 def test_wra_warning_allowlist_is_exact_and_immutable() -> None:
