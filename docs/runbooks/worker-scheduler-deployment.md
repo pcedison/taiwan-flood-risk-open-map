@@ -149,6 +149,10 @@ cycle, in this order: realtime `evidence`, `location_queries`, expired
 last on purpose -- it is the largest and newest, and must never delay the
 privacy passes above it.
 
+One more step follows the four: the concurrent `evidence` index rebuild, under
+"Evidence Index Rebuilds" below. It is pure housekeeping and runs behind its own
+guard, so it can neither delay nor fail the retention passes.
+
 ### staging_evidence
 
 `staging_evidence` holds one audit row per normalized item per ingestion cycle
@@ -548,6 +552,237 @@ separate, scheduled decision:
 
 Do neither on the hosted node without confirming free disk first; a rewrite that
 runs out of space leaves the table locked and the node down.
+
+## Evidence Index Rebuilds
+
+The last step of a maintenance cycle rebuilds one bloated `evidence` index with
+`REINDEX INDEX CONCURRENTLY`. See
+`apps/workers/app/jobs/index_maintenance.py`.
+
+Why it exists: `evidence` is high churn. Realtime station rows are inserted
+every ingestion cycle and deleted 48 h later, and every NSTC/WRA historical
+snapshot re-imports a whole batch before the old one is dropped. No VACUUM ever
+returns an index page, and a GiST index grown one insert at a time ends up with
+heavily overlapping bounding boxes. On 2026-09-07 the hosted table was 2.27 M
+rows / 5.4 GB of heap under 2.26 GB of indexes, and the `nearby_evidence` probe
+in `GET /admin/v1/db-diagnostics` (Taipei City Hall, 500 m) took 2.3 s, of which
+1.87 s was 2 875 cold shared blocks read from
+`idx_evidence_nearby_non_realtime_geom` to fetch 168 candidate rows whose
+geometry and properties add up to 0.1 MiB. Nearly all of those blocks were index
+pages, or index entries pointing at heap tuples retention had already deleted.
+
+It cannot be a migration: migrations run inside the API start-up transaction, so
+an index build there locks the table and returns 502s (#317). Hence a worker
+job, on an autocommit connection, `CONCURRENTLY`, exactly like
+`_ensure_rejected_index` above.
+
+### Policy
+
+- **Window only.** `EVIDENCE_INDEX_REINDEX_WINDOW_UTC` (default `18:00-21:00`
+  UTC = 02:00-05:00 Taipei). Outside it the pass records
+  `skipped_outside_window` and opens no connection. A window may cross midnight.
+- **One index per cycle**, the first eligible entry of
+  `EVIDENCE_INDEX_REINDEX_INDEXES` (default: the list in the job module, which
+  starts with `idx_evidence_nearby_non_realtime_geom`, the index the assessment
+  read path scans). A cycle is 300 s and a rebuild is minutes, so a cycle never
+  queues two.
+- **`EVIDENCE_INDEX_REINDEX_MAX_PER_WINDOW` rebuilds a night** (default 2).
+  One per cycle alone would still allow 36 in a three-hour window, so the first
+  night after a deploy would rebuild the whole list back to back. Cycles past
+  the budget record `skipped_window_budget` and open no connection. With the
+  defaults the seven listed indexes are worked through over about three nights:
+  night one takes `idx_evidence_nearby_non_realtime_geom` (52 MiB) and
+  `idx_evidence_official_water_level_geom` (62 MiB), night two
+  `idx_evidence_official_rainfall_geom` (62 MiB) and
+  `idx_evidence_observed_flood_history_geom` (7.5 MiB -- skipped as
+  `skipped_small` under the 8 MiB floor, so night two also picks up
+  `idx_evidence_geom_geography`, 296 MiB), night three
+  `idx_evidence_staging_evidence_id` (309 MiB).
+  `evidence_source_raw_ref_unique` (933 MiB) is held back by the disk ceiling
+  below. After that first pass each index is only due again a week later, so
+  steady state is at most one or two rebuilds a night.
+- **One rebuild per index per `EVIDENCE_INDEX_REINDEX_INTERVAL_HOURS`**
+  (default 168 = a week).
+- **One *attempt* per index per window.** A rebuild that fails records the
+  attempt, so the next cycle five minutes later does not retry into the same
+  contention. The next window tries again.
+- **Nothing over `EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES`** (default 512 MiB) --
+  see "The disk ceiling" below.
+- **Skips**, all recorded in the log line: `skipped_missing` (not in the current
+  schema), `skipped_invalid` (`pg_index.indisvalid = false` -- needs a human,
+  see below), `skipped_small` (under
+  `EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES`, default 8 MiB),
+  `skipped_too_large`, `skipped_interval`, `skipped_attempted`,
+  `skipped_unsupported` (PostgreSQL < 12, where `REINDEX ... CONCURRENTLY` does
+  not exist). A skip never consumes the cycle's single rebuild: the pass moves
+  on to the next index on the list.
+- **A timeout is not always a failure.** `REINDEX INDEX CONCURRENTLY` swaps the
+  rebuilt index in and only then waits for the last readers of the old one, and
+  that wait conflicts with a plain `AccessShareLock` -- so one ordinary reader
+  sitting in an open transaction is enough to make the statement report `55P03`
+  over a rebuild that already finished (measured on PostgreSQL 16.4). After a
+  `55P03`/`57014` the pass re-reads `pg_class.relfilenode`: if it changed and
+  the index is valid, the rebuild happened and the outcome is
+  `reindexed_after_lock_timeout`, which counts against the interval like any
+  other success. Without that check the index would be rebuilt again every
+  night, leaving another dead copy behind each time.
+- **Bounds.** `EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS` (default 5 000) so the
+  brief locks a concurrent rebuild takes never queue behind ingestion, and
+  `EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS` (default 1 800 000 = 30 min) so
+  a rebuild cannot run past the window into morning traffic. Both are session
+  settings, because `REINDEX CONCURRENTLY` runs outside a transaction block.
+  The statement timeout is only the ceiling: right before each `REINDEX` the
+  job sets it again to the time left in the window (minus what the cycle's
+  probes and leftover sweep already used), so a rebuild that starts at 20:45
+  gets 15 minutes, not 30. With less than
+  `EVIDENCE_INDEX_REINDEX_MIN_REMAINING_SECONDS` (default 600) left the cycle
+  logs `skipped_window_closing` and starts nothing; the index stays due for
+  the next window.
+- **Failure is not a failed cycle.** A refused lock, a cancelled statement, or
+  an unreachable server is logged as `failed:<sqlstate>` and maintenance
+  finishes normally. A malformed `EVIDENCE_INDEX_REINDEX_*` value logs
+  `scheduler.maintenance.evidence_reindex_misconfigured` and the pass is
+  skipped; retention still runs.
+- Set `EVIDENCE_INDEX_REINDEX_ENABLED=false` to stop rebuilding without a
+  redeploy.
+
+### The disk ceiling
+
+`REINDEX INDEX CONCURRENTLY` builds the replacement alongside the original and
+only then swaps them, so for the whole of the rebuild the index exists twice:
+the operation needs the index's own size again in free disk, plus WAL. The
+hosted database is roughly 30 GB on a Zeabur volume, and neither the worker nor
+`hosted-db-diagnostics.json` can read how much space that volume has left.
+Running it out mid-rebuild leaves the table locked and the node down -- the
+exact #317 failure this job exists to avoid.
+
+So `EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES` (default 512 MiB) holds back
+anything the pass cannot prove is safe, recording `skipped_too_large`. At the
+default that is `evidence_source_raw_ref_unique` (932.9 MiB on 2026-09-07, and
+the busiest index on the table: 784 M scans serving promotion idempotency). It
+stays bloated on purpose until an operator has looked at the volume.
+
+To clear it, check the volume first. Zeabur shows the service's volume usage in
+the dashboard under the Postgres service's Storage/Volume panel; from a shell on
+the node `df -h "$PGDATA"` answers the same question. Also ask PostgreSQL what
+the rebuild will need:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT indexrelname, pg_size_pretty(pg_relation_size(indexrelid)) FROM pg_stat_user_indexes WHERE relname = 'evidence' ORDER BY pg_relation_size(indexrelid) DESC;"
+psql "$DATABASE_URL" -c "SELECT pg_size_pretty(pg_database_size(current_database()));"
+```
+
+Raise the ceiling only when free space is comfortably more than twice the
+largest index you are enabling -- for the 933 MiB unique index that means at
+least ~3 GB free, which leaves room for the duplicate plus the WAL the build
+generates. Then set it to just above that index and redeploy the worker:
+
+```
+EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES=1073741824   # 1 GiB
+```
+
+Prefer raising it one index at a time over removing the bound. Put it back to
+the default once the backlog of oversized indexes is rebuilt.
+
+### Restart semantics
+
+"When was this index last rebuilt" lives in a module-level dict in the
+scheduler process, not in the database -- the same trade-off the staging timeout
+streak makes, and the scheduler is a single long-lived process. A worker restart
+forgets the history, so the next window rebuilds one more round of indexes than
+it strictly needed, and an index that failed earlier in the current window is
+retried inside it rather than waiting for the next one. That is wasted I/O
+inside the low-traffic window, never a correctness problem; there is nothing to
+reconcile after a deploy.
+
+### Observing it
+
+Each cycle logs one line:
+
+```
+worker.maintenance.evidence_reindex
+  index, outcome, window_utc, before_bytes, after_bytes, reltuples,
+  elapsed_ms, skipped, leftovers_dropped
+```
+
+but only when it has something new to say: never outside the window (21 of
+every 24 hours, which at one cycle per 300 s would be 288 lines a day nobody
+reads), and inside it once per distinct answer rather than once per cycle. The
+current state is always in `scheduler.maintenance.completed`, which carries
+`evidence_reindex_outcome` and `evidence_reindex_index` every cycle
+(`disabled` when the pass is switched off). Every other field of that event is
+unchanged.
+
+To confirm a rebuild landed, compare `indexes[].index_size_bytes` in
+`hosted-db-diagnostics.json` (`python scripts/hosted_db_diagnostics.py`) across
+the window, and re-read the `nearby_evidence` probe timing in the same file:
+
+```sh
+python scripts/hosted_db_diagnostics.py > /tmp/before.json
+# ... after the window ...
+python scripts/hosted_db_diagnostics.py > /tmp/after.json
+python - <<'PY'
+import json
+load = lambda p: {i["indexrelname"]: i["index_size_bytes"] for i in json.load(open(p))["indexes"]}
+before, after = load("/tmp/before.json"), load("/tmp/after.json")
+for name, size in sorted(after.items()):
+    if before.get(name) and size != before[name]:
+        print(name, before[name], "->", size)
+PY
+```
+
+Measured locally on an isolated schema with the hosted write pattern (150 000
+non-realtime point rows inserted across three rounds, nine tenths deleted each
+round, no VACUUM):
+`idx_evidence_nearby_non_realtime_geom` went from 6 242 304 to 622 592 bytes,
+and the 500 m bounding-box probe went from 2 994 shared blocks and 1 849
+candidate index entries to 409 blocks and 201 entries for the same 201 matching
+rows. See `apps/workers/tests/test_index_maintenance_postgres.py`.
+
+### When a rebuild fails
+
+A `REINDEX INDEX CONCURRENTLY` that does not finish leaves a transient index
+behind: `<name>_ccnew` if it died before the swap, `<name>_ccold` (the old
+index, now dead) if it died after, and `_ccnew1`/`_ccold1` and so on when an
+earlier corpse still holds the plain name. All of them are invalid and ignored
+by the planner.
+
+The leftover does **not** block the next rebuild -- PostgreSQL simply takes the
+next free suffix and succeeds. What it costs is disk: a full copy of the index,
+up to 933 MiB on this table, on a node whose whole database is ~30 GB. That is
+the only reason to clear it.
+
+Every maintenance cycle inside the window sweeps them up itself, for every
+index on the list, before it picks one to rebuild. So a corpse survives at most
+one cycle (five minutes) after whatever held the lock lets go, and normally no
+action is needed. `leftovers_dropped` in the log line names what each cycle
+reclaimed.
+
+To look at what is there:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT cls.relname, idx.indisvalid, pg_size_pretty(pg_relation_size(cls.oid)) FROM pg_class cls JOIN pg_index idx ON idx.indexrelid = cls.oid WHERE NOT idx.indisvalid ORDER BY pg_relation_size(cls.oid) DESC;"
+```
+
+To clear one by hand (it takes no exclusive lock):
+
+```sh
+psql "$DATABASE_URL" -c "DROP INDEX CONCURRENTLY IF EXISTS idx_evidence_nearby_non_realtime_geom_ccold;"
+```
+
+- Only ever drop rows with `indisvalid = false`. A valid `_ccold` is not
+  wreckage; it means a swap is in flight right now.
+- A **base** index reported `indisvalid = false` is a different problem, and is
+  why the job records `skipped_invalid` and refuses to touch it: dropping it
+  would leave the read path without an index. Either a build is still running
+  (`SELECT * FROM pg_stat_progress_create_index;`) or one died. If nothing is
+  running, drop and recreate it concurrently using the definition in
+  `infra/migrations/` -- never inside a migration, and never without
+  `CONCURRENTLY`.
+- Repeated `worker.maintenance.evidence_reindex_leftover_drop_failed` lines mean
+  the sweep cannot get its lock night after night: look for a long-lived
+  transaction (`SELECT pid, state, xact_start FROM pg_stat_activity ORDER BY
+  xact_start;`) rather than dropping by hand into the same contention.
 
 ## Failure Detection
 
