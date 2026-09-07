@@ -50,6 +50,11 @@ class RecordingEvidenceRetentionJob:
         max_batches: int,
         statement_timeout_ms: int,
         ensure_index: bool,
+        accepted_enabled: bool,
+        accepted_max_batches: int,
+        accepted_window_seconds: int,
+        accepted_min_window_seconds: int,
+        accepted_max_window_seconds: int,
     ) -> object:
         self.calls.append(("prune_staging_evidence", retention_days))
         self.staging_max_batches = max_batches
@@ -57,12 +62,24 @@ class RecordingEvidenceRetentionJob:
             "batch_size": batch_size,
             "statement_timeout_ms": statement_timeout_ms,
             "ensure_index": ensure_index,
+            "accepted_enabled": accepted_enabled,
+            "accepted_max_batches": accepted_max_batches,
+            "accepted_window_seconds": accepted_window_seconds,
+            "accepted_min_window_seconds": accepted_min_window_seconds,
+            "accepted_max_window_seconds": accepted_max_window_seconds,
         }
         return SimpleNamespace(
             deleted_rows=5,
             batches=1,
             index_state="ready",
             stopped_reason="exhausted",
+            accepted_deleted_rows=3,
+            accepted_batches=1,
+            accepted_index_state="ready",
+            accepted_stopped_reason="exhausted",
+            accepted_source_count=54,
+            accepted_watermark=None,
+            accepted_window_seconds=3600,
         )
 
 
@@ -138,6 +155,21 @@ def test_scheduler_maintenance_keeps_privacy_retention_only(
             SETTINGS.staging_evidence_retention_statement_timeout_ms
         ),
         "ensure_index": SETTINGS.staging_evidence_retention_ensure_index,
+        "accepted_enabled": (
+            SETTINGS.staging_evidence_accepted_retention_enabled
+        ),
+        "accepted_max_batches": (
+            SETTINGS.staging_evidence_accepted_retention_max_batches
+        ),
+        "accepted_window_seconds": (
+            SETTINGS.staging_evidence_accepted_retention_window_seconds
+        ),
+        "accepted_min_window_seconds": (
+            SETTINGS.staging_evidence_accepted_retention_min_window_seconds
+        ),
+        "accepted_max_window_seconds": (
+            SETTINGS.staging_evidence_accepted_retention_max_window_seconds
+        ),
     }
 
 

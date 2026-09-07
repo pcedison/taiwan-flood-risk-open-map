@@ -30,8 +30,11 @@ from collections.abc import Callable, Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from functools import partial
+from typing import Any, Literal, TypeVar
 
+from app.jobs.freshness import FreshnessCadence, cadence_for_adapter
+from app.jobs.historical_coverage import HISTORICAL_COVERAGE_ADAPTER_KEYS
 from app.logging import log_event
 
 ConnectionFactory = Callable[[], Any]
@@ -60,12 +63,12 @@ DEFAULT_LOCATION_QUERY_RETENTION_HOURS = 720
 #   the batched ``idempotent_existing_observation`` settle) and is never read
 #   again -- ``fetch_accepted_staging`` and ``jobs/historical_coverage.py``
 #   both select ``validation_status = 'accepted'`` only.
-# * ``accepted`` is deliberately NOT pruned. The schema has no ``promoted``
-#   state (``0002_phase1_core_domain.sql`` allows pending/accepted/rejected/
-#   quarantined and ``pipelines/staging.py`` only ever writes accepted or
-#   rejected), so a promoted row stays ``accepted``; telling a promoted row
-#   from one still awaiting promotion needs a per-row probe into ``evidence``,
-#   and ``jobs/historical_coverage.py`` still reads aged accepted rows.
+# * ``accepted`` is pruned only for the narrow orphan case described below.
+#   The schema has no ``promoted`` state (``0002_phase1_core_domain.sql``
+#   allows pending/accepted/rejected/quarantined and ``pipelines/staging.py``
+#   only ever writes accepted or rejected), so a promoted row stays
+#   ``accepted`` and telling it from one still awaiting promotion needs a
+#   per-row probe into ``evidence``.
 # * ``pending``/``quarantined`` are schema-allowed but never written by the
 #   pipeline; they are left alone for human review.
 #
@@ -76,6 +79,26 @@ DEFAULT_LOCATION_QUERY_RETENTION_HOURS = 720
 # ``evidence_embeddings.staging_evidence_id`` is ``ON DELETE CASCADE``
 # (migration 0015), so the embedding rows of a deleted staging row -- which
 # only ever described that staging row -- go with it.
+#
+# The accepted pass (#372) is the per-row probe the paragraph above called
+# too expensive to guess at, run for real against the partial index from
+# migration 0042. On the hosted node 12.6 M of the 14.35 M staging rows are
+# ``accepted`` but only ~2.25 M are still referenced by an evidence row, so
+# ~10.4 M are orphans: realtime telemetry that was promoted, whose evidence
+# row the 48 h ``prune_realtime`` pass above then deleted. Nothing can ever
+# read them again -- ``fetch_accepted_staging`` only promotes rows no
+# evidence points at, and a week-old realtime observation is long past its
+# scoring window -- so past the retention window they are deleted, subject
+# to two guards:
+#
+# * the row's adapter must be realtime-cadence (see
+#   ``is_orphan_prunable_adapter``): ``jobs/historical_coverage.py`` reads
+#   aged accepted rows for the NSTC / WRA historical-flood adapters, and the
+#   static and warning-event adapters publish too rarely for "older than a
+#   week" to mean "already superseded";
+# * no evidence row may reference it (``NOT EXISTS`` against
+#   ``idx_evidence_staging_evidence_id``), so a row still awaiting promotion,
+#   or one whose evidence is retained, is never touched.
 DEFAULT_STAGING_EVIDENCE_RETENTION_DAYS = 7
 DEFAULT_STAGING_EVIDENCE_BATCH_SIZE = 5_000
 # 10 batches x 5 000 rows = 50 000 rows per maintenance cycle. With the partial
@@ -83,7 +106,43 @@ DEFAULT_STAGING_EVIDENCE_BATCH_SIZE = 5_000
 # so a cycle spends about a second on this and the 300 s scheduler interval,
 # not the batch cost, is what paces the backlog: ~14.4 M rows/day.
 DEFAULT_STAGING_EVIDENCE_MAX_BATCHES = 10
+# The accepted pass gets its own batch budget so it can be throttled -- or
+# turned off -- without touching the rejected backlog it runs after.
+DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_BATCHES = 10
+# The accepted pass sweeps a created_at *window* per batch rather than
+# "the next 5 000 orphans", because the rows it keeps stay in the index
+# forever: on the hosted node ~2.25 M accepted rows are still referenced by
+# an evidence row, and an unwindowed batch has to re-probe that whole
+# surviving prefix before it reaches a single new orphan. Measured by the
+# #381 reviewer with a 400 k-row survivor prefix: 405 k NOT EXISTS probes,
+# 1.6 M buffers and 1.43 s for one batch on a warm SSD -- and the prefix
+# grows with every cycle, so on the 2 GB IO-bound node every batch would
+# soon hit the 5 s statement_timeout and roll back, forever.
+#
+# With a window the work per statement is set by the window's row count
+# instead. An hour of hosted ingestion is ~48 k staging rows, so a 1 h
+# window costs ~48 k probes whatever the survivor prefix has grown to.
+DEFAULT_STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS = 3_600
+# A window that still times out is halved down to this floor before the
+# pass gives up for the cycle; below five minutes the per-statement
+# overhead stops being worth the smaller scan.
+DEFAULT_STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS = 300
+# A window that deleted *nothing* may grow past the normal ceiling, up to
+# this one. Empty windows are what a restart costs: the watermark lives in
+# memory, so the next sweep re-walks ground that is already clear, and at a
+# fixed 1 h ceiling that is 10 h of history per cycle -- 38 cycles, ~3.2 h,
+# to re-cross 16 days. Doubling through empty history instead crosses the
+# same span in about four cycles. Any window that actually finds rows drops
+# straight back to the normal ceiling, and the halving path collects the
+# overshoot, so this only ever buys speed over ground with nothing in it.
+DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_WINDOW_SECONDS = 86_400
 DEFAULT_STAGING_EVIDENCE_STATEMENT_TIMEOUT_MS = 5_000
+# The sweep's two setup reads -- the data_sources catalogue and min(created_at)
+# over the accepted partial index -- are bounded lookups, not scans, and they
+# are not what the per-batch budget is sizing. Giving them their own fixed
+# budget means lowering the batch budget to protect ingestion cannot starve
+# the sweep of the setup it needs to run at all.
+STAGING_EVIDENCE_METADATA_STATEMENT_TIMEOUT_MS = 5_000
 DEFAULT_STAGING_EVIDENCE_LOCK_TIMEOUT_MS = 2_000
 
 # Without this index the batch select has to walk the table to find 5 000 aged
@@ -102,6 +161,16 @@ CREATE_STAGING_EVIDENCE_REJECTED_INDEX_SQL = f"""
         ON staging_evidence (created_at)
         WHERE validation_status = 'rejected'
 """
+# The accepted pass needs the same shape over the other half of the table,
+# and for the same reason: without it the batch select walks 12.6 M rows to
+# find 5 000 aged accepted ones. It is built the same way, and the accepted
+# deletes likewise refuse to run until it is valid.
+STAGING_EVIDENCE_ACCEPTED_INDEX = "idx_staging_evidence_accepted_created_at"
+CREATE_STAGING_EVIDENCE_ACCEPTED_INDEX_SQL = f"""
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS {STAGING_EVIDENCE_ACCEPTED_INDEX}
+        ON staging_evidence (created_at)
+        WHERE validation_status = 'accepted'
+"""
 # Consecutive cycles ending in a timeout before the job says so out loud. One
 # timeout is a busy node; a run of them means the bound is wrong for this
 # database and an operator has to look.
@@ -116,12 +185,133 @@ StagingRetentionStopReason = Literal[
     "statement_timeout",
     "lock_timeout",
     "index_not_ready",
+    # Accepted pass only: the operator turned it off, or data_sources named
+    # no adapter whose accepted rows may be pruned. Both mean "ran no DELETE".
+    "disabled",
+    "no_adapter_sources",
+    # Accepted pass only: the sweep watermark reached the retention cutoff,
+    # so every aged row has already been visited once. The steady state.
+    "caught_up",
 ]
+# "ready" is the only state that deletes. "skipped" means the job was told
+# not to build the index (ENSURE_INDEX=false) and the operator-managed index
+# is absent or invalid -- the earlier behaviour of deleting anyway on that
+# flag bought the pathological scan one cancelled batch per cycle, forever.
 StagingIndexState = Literal["ready", "building", "skipped", "unavailable"]
 
 # The scheduler builds one job per maintenance cycle, so a streak has to
 # outlive the instance. The scheduler process is the single writer.
 _staging_timeout_streak = 0
+# The accepted pass keeps its own streak: the two passes have different
+# indexes, budgets and query shapes, so one timing out says nothing about
+# the other and a shared counter would hide whichever is healthy.
+_accepted_timeout_streak = 0
+# Where the accepted sweep has got to, and the window size it is currently
+# using. Module level for the same reason as the streak: the scheduler is
+# one long-lived process building a fresh job per cycle.
+#
+# Sweeping once from oldest to newest is enough, and never re-scanning is
+# the whole point. A row's orphan status is settled well before it reaches
+# the 7-day cutoff: a row that was never promoted is an orphan from birth,
+# and a promoted row loses its evidence within
+# EVIDENCE_REALTIME_RETENTION_HOURS (48 h). Losing the watermark on restart
+# just costs one sweep from the oldest row, which is why it is not
+# persisted.
+_accepted_sweep_watermark: datetime | None = None
+_accepted_sweep_window_seconds: int | None = None
+# The adapters admitted only by the legacy fallback, as of the last cycle
+# that logged them. 34 keys every 300 s is noise nobody reads; the same 34
+# keys the one time they change is the thing worth seeing.
+_accepted_fallback_adapter_keys: tuple[str, ...] | None = None
+
+
+# Cadences whose accepted staging rows are one-cycle telemetry. A realtime
+# adapter republishes every station every few minutes, so a week-old accepted
+# row has been superseded hundreds of times over; "legacy" is the fallback
+# ``cadence_for_adapter`` returns for everything that is neither a slow static
+# snapshot nor a warning event, which is the same per-cycle shape. The static
+# and event cadences are excluded: they publish rarely enough that a week-old
+# accepted row can still be the current one.
+ORPHAN_PRUNABLE_CADENCES: tuple[FreshnessCadence, ...] = ("realtime", "legacy")
+
+
+def is_orphan_prunable_adapter(adapter_key: str) -> bool:
+    """True when this adapter's aged, unreferenced accepted rows are dead.
+
+    Deliberately derived from ``jobs/freshness.cadence_for_adapter`` rather
+    than a hand-kept list, so a new adapter cannot be realtime for freshness
+    and something else for retention. ``HISTORICAL_COVERAGE_ADAPTER_KEYS`` is
+    excluded on top of the cadence rule -- ``jobs/historical_coverage.py``
+    re-reads those accepted staging rows years after ingestion -- even though
+    both of its keys are already static-cadence today; the belt is cheap and
+    the braces would otherwise depend on freshness never reclassifying them.
+    """
+
+    if adapter_key in HISTORICAL_COVERAGE_ADAPTER_KEYS:
+        return False
+    return cadence_for_adapter(adapter_key) in ORPHAN_PRUNABLE_CADENCES
+
+
+def orphan_prunable_source_ids(sources: Iterable[tuple[Any, Any]]) -> tuple[str, ...]:
+    """Filter ``(data_sources.id, adapter_key)`` rows down to prunable ids.
+
+    ``staging_evidence`` carries ``data_source_id``, not ``adapter_key``
+    (migration 0002), so the classification happens here -- in Python, over the
+    few dozen rows of ``data_sources`` -- and the batch SQL only ever sees a
+    resolved id list.
+    """
+
+    resolved: list[str] = []
+    for source_id, adapter_key in sources:
+        if source_id is None or adapter_key is None:
+            continue
+        if not is_orphan_prunable_adapter(str(adapter_key)):
+            continue
+        resolved.append(str(source_id))
+    return tuple(dict.fromkeys(resolved))
+
+
+def legacy_fallback_adapter_keys(
+    sources: Iterable[tuple[Any, Any]],
+) -> tuple[str, ...]:
+    """Adapters admitted only because the cadence rule is fail-open.
+
+    ``cadence_for_adapter`` returns ``legacy`` for anything none of the
+    three freshness sets names, and ``legacy`` is prunable. That is
+    deliberate -- an adapter nobody classified still writes one accepted
+    audit row per item per cycle, and the ``NOT EXISTS`` guard already
+    protects everything that was promoted -- but it means a *new* adapter
+    is opted in by omission rather than by decision. 33 of the 58 seeded
+    adapters arrive this way today. Naming them once per cycle in the log
+    is what makes that visible instead of implicit.
+    """
+
+    fallback: list[str] = []
+    for _source_id, adapter_key in sources:
+        if adapter_key is None:
+            continue
+        key = str(adapter_key)
+        if cadence_for_adapter(key) != "legacy":
+            continue
+        if not is_orphan_prunable_adapter(key):
+            continue
+        fallback.append(key)
+    return tuple(sorted(dict.fromkeys(fallback)))
+
+
+_BatchResult = TypeVar("_BatchResult")
+
+
+@dataclass(frozen=True)
+class _AcceptedSweepResult:
+    """What one cycle of the accepted sweep did, and where it left off."""
+
+    deleted_rows: int
+    batches: int
+    stopped_reason: StagingRetentionStopReason
+    source_count: int
+    watermark: datetime | None
+    window_seconds: int
 
 
 class EvidenceRetentionUnavailable(RuntimeError):
@@ -182,12 +372,26 @@ class RawSnapshotRetentionSummary:
 
 @dataclass(frozen=True)
 class StagingEvidenceRetentionSummary:
+    """One maintenance cycle's two staging passes.
+
+    The unprefixed fields are the rejected pass, unchanged from #370 so the
+    log queries and dashboards built on it keep working; ``accepted_*``
+    mirrors them for the orphan pass added in #372.
+    """
+
     retention_days: int
     cutoff: datetime
     deleted_rows: int
     batches: int
     index_state: StagingIndexState
     stopped_reason: StagingRetentionStopReason
+    accepted_deleted_rows: int
+    accepted_batches: int
+    accepted_index_state: StagingIndexState
+    accepted_stopped_reason: StagingRetentionStopReason
+    accepted_source_count: int
+    accepted_watermark: datetime | None
+    accepted_window_seconds: int
     started_at: datetime
     finished_at: datetime
 
@@ -199,6 +403,23 @@ class StagingEvidenceRetentionSummary:
             "batches": self.batches,
             "index_state": self.index_state,
             "stopped_reason": self.stopped_reason,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+
+    def accepted_log_fields(self) -> dict[str, object]:
+        """The accepted pass in the same shape, under its own event name."""
+
+        return {
+            "retention_days": self.retention_days,
+            "cutoff": self.cutoff,
+            "deleted_rows": self.accepted_deleted_rows,
+            "batches": self.accepted_batches,
+            "index_state": self.accepted_index_state,
+            "stopped_reason": self.accepted_stopped_reason,
+            "source_count": self.accepted_source_count,
+            "watermark": self.accepted_watermark,
+            "window_seconds": self.accepted_window_seconds,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }
@@ -353,9 +574,20 @@ class PostgresEvidenceRetentionJob:
         statement_timeout_ms: int = DEFAULT_STAGING_EVIDENCE_STATEMENT_TIMEOUT_MS,
         lock_timeout_ms: int = DEFAULT_STAGING_EVIDENCE_LOCK_TIMEOUT_MS,
         ensure_index: bool = True,
+        accepted_enabled: bool = True,
+        accepted_max_batches: int = (
+            DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_BATCHES
+        ),
+        accepted_window_seconds: int = (
+            DEFAULT_STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS
+        ),
+        accepted_min_window_seconds: int = (
+            DEFAULT_STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS
+        ),
+        accepted_max_window_seconds: int | None = None,
         now: datetime | None = None,
     ) -> StagingEvidenceRetentionSummary:
-        """Delete terminal (rejected) staging rows past the retention window.
+        """Delete dead staging rows past the retention window, in two passes.
 
         The delete is bounded three ways so it can never hold the table long
         enough to stall ingestion on a small node (#317): a fixed row count per
@@ -368,6 +600,19 @@ class PostgresEvidenceRetentionJob:
         the next one necessarily sees different rows, and ordering by
         ``created_at`` means each batch takes the oldest rows still eligible --
         which is also the order the supporting partial index stores them in.
+
+        The rejected pass runs first and the accepted-orphan pass second,
+        each with its own index, its own batch budget, its own timeout
+        streak and its own ``stopped_reason``, so a stalled orphan pass can
+        never eat the budget of -- or mask the health of -- the backlog
+        pass that is already proven in production.
+
+        The two passes bound a batch differently. The rejected pass deletes
+        the rows it selects, so nothing it skips accumulates and "the
+        oldest 5 000 eligible rows" stays cheap forever. The accepted pass
+        keeps every referenced row, so it sweeps a ``created_at`` window at
+        a time behind a watermark instead; see
+        ``_sweep_accepted_staging``.
         """
 
         if retention_days < 1:
@@ -376,6 +621,32 @@ class PostgresEvidenceRetentionJob:
             raise ValueError("batch_size must be a positive integer")
         if max_batches < 1:
             raise ValueError("max_batches must be a positive integer")
+        if accepted_max_batches < 1:
+            raise ValueError(
+                "accepted_max_batches must be a positive integer"
+            )
+        if accepted_min_window_seconds < 1:
+            raise ValueError(
+                "accepted_min_window_seconds must be a positive integer"
+            )
+        if accepted_window_seconds < accepted_min_window_seconds:
+            raise ValueError(
+                "accepted_window_seconds must not be below accepted_min_window_seconds"
+            )
+        # Defaults to the constant, but never below the normal ceiling: raising
+        # only the window must not fail on a limit the caller never set.
+        resolved_max_window_seconds = (
+            max(
+                DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_WINDOW_SECONDS,
+                accepted_window_seconds,
+            )
+            if accepted_max_window_seconds is None
+            else accepted_max_window_seconds
+        )
+        if resolved_max_window_seconds < accepted_window_seconds:
+            raise ValueError(
+                "accepted_max_window_seconds must not be below accepted_window_seconds"
+            )
         if statement_timeout_ms < 1:
             raise ValueError("statement_timeout_ms must be a positive integer")
         if lock_timeout_ms < 1:
@@ -388,18 +659,25 @@ class PostgresEvidenceRetentionJob:
         deleted_rows = 0
         batches = 0
         stopped_reason: StagingRetentionStopReason = "max_batches"
+        accepted_deleted_rows = 0
+        accepted_batches = 0
+        accepted_index_state: StagingIndexState = "skipped"
+        accepted_stopped_reason: StagingRetentionStopReason = "disabled"
+        accepted_source_count = 0
+        accepted_watermark = _accepted_sweep_watermark
+        accepted_window = accepted_window_seconds
 
         try:
-            index_state = self._ensure_rejected_index(
-                enabled=ensure_index, lock_timeout_ms=lock_timeout_ms
+            index_state = self._ensure_partial_index(
+                index_name=STAGING_EVIDENCE_REJECTED_INDEX,
+                create_sql=CREATE_STAGING_EVIDENCE_REJECTED_INDEX_SQL,
+                enabled=ensure_index,
+                lock_timeout_ms=lock_timeout_ms,
             )
             # Deleting without the index is the pathological case the reviewer
             # measured: ~1.31 M buffers and 2.5 s per batch on 1 M rows. Wait
             # for the build instead, however many cycles that takes.
-            # "skipped" means an operator took the index on themselves, so the
-            # deletes still run; if the index is in fact missing, the per-batch
-            # statement_timeout bounds the damage to one refused batch.
-            if index_state in ("ready", "skipped"):
+            if index_state == "ready":
                 deleted_rows, batches, stopped_reason = self._delete_staging_batches(
                     cutoff=cutoff,
                     batch_size=batch_size,
@@ -409,6 +687,33 @@ class PostgresEvidenceRetentionJob:
                 )
             else:
                 stopped_reason = "index_not_ready"
+
+            if accepted_enabled:
+                accepted_index_state = self._ensure_partial_index(
+                    index_name=STAGING_EVIDENCE_ACCEPTED_INDEX,
+                    create_sql=CREATE_STAGING_EVIDENCE_ACCEPTED_INDEX_SQL,
+                    enabled=ensure_index,
+                    lock_timeout_ms=lock_timeout_ms,
+                )
+                if accepted_index_state == "ready":
+                    sweep = self._sweep_accepted_staging(
+                        cutoff=cutoff,
+                        batch_size=batch_size,
+                        max_batches=accepted_max_batches,
+                        statement_timeout_ms=statement_timeout_ms,
+                        lock_timeout_ms=lock_timeout_ms,
+                        window_seconds=accepted_window_seconds,
+                        min_window_seconds=accepted_min_window_seconds,
+                        max_window_seconds=resolved_max_window_seconds,
+                    )
+                    accepted_deleted_rows = sweep.deleted_rows
+                    accepted_batches = sweep.batches
+                    accepted_stopped_reason = sweep.stopped_reason
+                    accepted_source_count = sweep.source_count
+                    accepted_watermark = sweep.watermark
+                    accepted_window = sweep.window_seconds
+                else:
+                    accepted_stopped_reason = "index_not_ready"
         except EvidenceRetentionUnavailable:
             raise
         except Exception as exc:
@@ -421,11 +726,23 @@ class PostgresEvidenceRetentionJob:
             batches=batches,
             index_state=index_state,
             stopped_reason=stopped_reason,
+            accepted_deleted_rows=accepted_deleted_rows,
+            accepted_batches=accepted_batches,
+            accepted_index_state=accepted_index_state,
+            accepted_stopped_reason=accepted_stopped_reason,
+            accepted_source_count=accepted_source_count,
+            accepted_watermark=accepted_watermark,
+            accepted_window_seconds=accepted_window,
             started_at=started_at,
             finished_at=_now(),
         )
         log_event("worker.maintenance.staging_retention", **summary.log_fields())
+        log_event(
+            "worker.maintenance.staging_accepted_retention",
+            **summary.accepted_log_fields(),
+        )
         _record_staging_timeout_streak(stopped_reason)
+        _record_accepted_timeout_streak(accepted_stopped_reason)
         return summary
 
     def _delete_staging_batches(
@@ -444,16 +761,16 @@ class PostgresEvidenceRetentionJob:
         with self._connect() as connection:
             while batches < max_batches:
                 try:
-                    with connection.cursor() as cursor:
-                        _apply_staging_retention_timeouts(
-                            cursor,
-                            statement_timeout_ms=statement_timeout_ms,
-                            lock_timeout_ms=lock_timeout_ms,
-                        )
-                        batch_rows = _delete_staging_evidence_batch(
-                            cursor, cutoff=cutoff, batch_size=batch_size
-                        )
-                    connection.commit()
+                    batch_rows = _committed_batch(
+                        connection,
+                        statement_timeout_ms=statement_timeout_ms,
+                        lock_timeout_ms=lock_timeout_ms,
+                        work=partial(
+                            _delete_staging_evidence_batch,
+                            cutoff=cutoff,
+                            batch_size=batch_size,
+                        ),
+                    )
                 except Exception as exc:
                     timeout_reason = _timeout_stop_reason(exc)
                     if timeout_reason is None:
@@ -468,10 +785,193 @@ class PostgresEvidenceRetentionJob:
                 deleted_rows += batch_rows
         return deleted_rows, batches, stopped_reason
 
-    def _ensure_rejected_index(
-        self, *, enabled: bool, lock_timeout_ms: int
+    def _sweep_accepted_staging(
+        self,
+        *,
+        cutoff: datetime,
+        batch_size: int,
+        max_batches: int,
+        statement_timeout_ms: int,
+        lock_timeout_ms: int,
+        window_seconds: int,
+        min_window_seconds: int,
+        max_window_seconds: int,
+    ) -> _AcceptedSweepResult:
+        """Sweep aged accepted rows no evidence row points at any more.
+
+        Unlike the rejected pass this one cannot ask for "the oldest
+        batch_size eligible rows": the rows it must keep -- ~2.25 M on the
+        hosted node -- stay at the head of the index forever, so every
+        batch would re-probe that whole surviving prefix before reaching a
+        new orphan, and the prefix grows with every cycle. Measured by the
+        #381 reviewer at a 400 k-row prefix: 405 k probes, 1.6 M buffers,
+        1.43 s for one batch, heading straight for a permanent timeout.
+
+        So it sweeps instead. A watermark walks ``created_at`` from the
+        oldest accepted row towards the cutoff, one window at a time, and
+        each DELETE is bounded to ``[watermark, window_end)``. The work per
+        statement is then set by how many rows that window holds (~48 k an
+        hour of hosted ingestion) and not by how far into the table the
+        orphans have receded.
+
+        A window is done when a batch deletes fewer rows than it asked for:
+        the DELETE wanted ``batch_size`` matches and found fewer, so none
+        are left in it, and the watermark moves to its end. A full batch
+        leaves the watermark alone and takes the next batch out of the same
+        window.
+
+        A ``statement_timeout`` halves the window and retries -- each
+        attempt costs a batch from the budget -- down to
+        ``min_window_seconds``, below which the cycle gives up and reports
+        the timeout. A ``lock_timeout`` is contention rather than a sizing
+        problem, so it ends the cycle without shrinking anything. Each
+        swept window doubles the size back towards the configured maximum,
+        so one slow patch of history does not throttle the sweep forever.
+
+        A window that deleted nothing at all may double past
+        ``window_seconds`` up to ``max_window_seconds``, because empty
+        history is exactly what a restart makes the sweep re-cross and
+        there is nothing there to cost anything. The moment a window
+        yields rows the size drops back to ``window_seconds``.
+        """
+
+        global _accepted_sweep_watermark, _accepted_sweep_window_seconds
+
+        deleted_rows = 0
+        batches = 0
+        stopped_reason: StagingRetentionStopReason = "max_batches"
+        window = min(
+            max_window_seconds,
+            max(
+                min_window_seconds,
+                _accepted_sweep_window_seconds or window_seconds,
+            ),
+        )
+        watermark = _accepted_sweep_watermark
+
+        with self._connect() as connection:
+            try:
+                source_ids = _committed_batch(
+                    connection,
+                    statement_timeout_ms=(
+                        STAGING_EVIDENCE_METADATA_STATEMENT_TIMEOUT_MS
+                    ),
+                    lock_timeout_ms=lock_timeout_ms,
+                    work=_fetch_orphan_prunable_source_ids,
+                )
+                if watermark is None:
+                    watermark = _committed_batch(
+                        connection,
+                        statement_timeout_ms=(
+                            STAGING_EVIDENCE_METADATA_STATEMENT_TIMEOUT_MS
+                        ),
+                        lock_timeout_ms=lock_timeout_ms,
+                        work=_fetch_oldest_accepted_created_at,
+                    )
+            except Exception as exc:
+                timeout_reason = _timeout_stop_reason(exc)
+                if timeout_reason is None:
+                    raise
+                _rollback_quietly(connection)
+                return _AcceptedSweepResult(
+                    deleted_rows=0,
+                    batches=0,
+                    stopped_reason=timeout_reason,
+                    source_count=0,
+                    watermark=watermark,
+                    window_seconds=window,
+                )
+
+            if not source_ids:
+                return _AcceptedSweepResult(
+                    deleted_rows=0,
+                    batches=0,
+                    stopped_reason="no_adapter_sources",
+                    source_count=0,
+                    watermark=watermark,
+                    window_seconds=window,
+                )
+            if watermark is None:
+                # No accepted row exists at all, so there is nothing to
+                # sweep and nowhere to start one from next cycle either.
+                return _AcceptedSweepResult(
+                    deleted_rows=0,
+                    batches=0,
+                    stopped_reason="caught_up",
+                    source_count=len(source_ids),
+                    watermark=None,
+                    window_seconds=window,
+                )
+
+            while batches < max_batches:
+                if watermark >= cutoff:
+                    stopped_reason = "caught_up"
+                    break
+                window_end = min(watermark + timedelta(seconds=window), cutoff)
+                try:
+                    batch_rows = _committed_batch(
+                        connection,
+                        statement_timeout_ms=statement_timeout_ms,
+                        lock_timeout_ms=lock_timeout_ms,
+                        work=partial(
+                            _delete_accepted_staging_evidence_batch,
+                            window_start=watermark,
+                            window_end=window_end,
+                            batch_size=batch_size,
+                            source_ids=source_ids,
+                        ),
+                    )
+                except Exception as exc:
+                    timeout_reason = _timeout_stop_reason(exc)
+                    if timeout_reason is None:
+                        raise
+                    _rollback_quietly(connection)
+                    batches += 1
+                    if (
+                        timeout_reason != "statement_timeout"
+                        or window <= min_window_seconds
+                    ):
+                        stopped_reason = timeout_reason
+                        break
+                    window = max(min_window_seconds, window // 2)
+                    log_event(
+                        "worker.maintenance.staging_accepted_retention_window_shrunk",
+                        window_seconds=window,
+                        watermark=watermark,
+                    )
+                    continue
+                batches += 1
+                deleted_rows += batch_rows
+                if batch_rows >= batch_size:
+                    # Dense enough to fill a batch. A window grown wide over
+                    # empty history has done its job, so hand it back now
+                    # rather than pay a run of timeouts to discover the same.
+                    window = min(window, window_seconds)
+                    continue
+                watermark = window_end
+                ceiling = max_window_seconds if batch_rows == 0 else window_seconds
+                window = min(ceiling, window * 2)
+
+        _accepted_sweep_watermark = watermark
+        _accepted_sweep_window_seconds = window
+        return _AcceptedSweepResult(
+            deleted_rows=deleted_rows,
+            batches=batches,
+            stopped_reason=stopped_reason,
+            source_count=len(source_ids),
+            watermark=watermark,
+            window_seconds=window,
+        )
+
+    def _ensure_partial_index(
+        self,
+        *,
+        index_name: str,
+        create_sql: str,
+        enabled: bool,
+        lock_timeout_ms: int,
     ) -> StagingIndexState:
-        """Build the partial index the batch select needs, concurrently.
+        """Build the partial index a batch select needs, concurrently.
 
         ``CREATE INDEX CONCURRENTLY`` cannot run inside a transaction block, so
         this uses an autocommit connection, and it carries no
@@ -483,29 +983,37 @@ class PostgresEvidenceRetentionJob:
         A previous build that died half way leaves an ``indisvalid = false``
         index that the planner ignores and that blocks a rebuild, so it is
         dropped concurrently first.
+
+        ``enabled=False`` (``ENSURE_INDEX=false``) means an operator builds
+        the index by hand in a window of their choosing. The validity probe
+        still runs: taking the operator's word for it and deleting anyway
+        bought nothing but the pathological scan, one cancelled batch per
+        cycle, silently, for as long as the index stayed missing.
         """
 
-        if not enabled:
-            return "skipped"
         try:
             with (
                 self._connect(autocommit=True) as connection,
                 connection.cursor() as cursor,
             ):
-                if _index_is_valid(cursor):
+                if _index_is_valid(cursor, index_name):
                     return "ready"
+                if not enabled:
+                    log_event(
+                        "worker.maintenance.staging_retention_index_missing",
+                        level="warning",
+                        index_name=index_name,
+                    )
+                    return "skipped"
                 _apply_index_build_timeouts(cursor, lock_timeout_ms=lock_timeout_ms)
-                cursor.execute(
-                    "DROP INDEX CONCURRENTLY IF EXISTS "
-                    + STAGING_EVIDENCE_REJECTED_INDEX
-                )
-                cursor.execute(CREATE_STAGING_EVIDENCE_REJECTED_INDEX_SQL)
+                cursor.execute("DROP INDEX CONCURRENTLY IF EXISTS " + index_name)
+                cursor.execute(create_sql)
                 state: StagingIndexState = (
-                    "ready" if _index_is_valid(cursor) else "building"
+                    "ready" if _index_is_valid(cursor, index_name) else "building"
                 )
                 log_event(
                     "worker.maintenance.staging_retention_index_built",
-                    index_name=STAGING_EVIDENCE_REJECTED_INDEX,
+                    index_name=index_name,
                     index_state=state,
                 )
                 return state
@@ -514,7 +1022,7 @@ class PostgresEvidenceRetentionJob:
             # retries, and until then the job simply does not delete.
             log_event(
                 "worker.maintenance.staging_retention_index_failed",
-                index_name=STAGING_EVIDENCE_REJECTED_INDEX,
+                index_name=index_name,
                 error=type(exc).__name__,
             )
             return "unavailable"
@@ -626,6 +1134,33 @@ def _prune_expired_raw_snapshots(
     return _row_count(cursor.fetchone())
 
 
+def _committed_batch(
+    connection: Any,
+    *,
+    statement_timeout_ms: int,
+    lock_timeout_ms: int,
+    work: Callable[[Any], _BatchResult],
+) -> _BatchResult:
+    """Run one statement in its own transaction under the batch timeouts.
+
+    Every statement of every staging pass goes through here, so the
+    transaction-local timeouts are applied exactly once per transaction and
+    no pass can drift into forgetting either of them or the commit. The
+    caller keeps the ``except`` clause, because what a timeout *means*
+    differs per pass.
+    """
+
+    with connection.cursor() as cursor:
+        _apply_staging_retention_timeouts(
+            cursor,
+            statement_timeout_ms=statement_timeout_ms,
+            lock_timeout_ms=lock_timeout_ms,
+        )
+        result = work(cursor)
+    connection.commit()
+    return result
+
+
 def _apply_staging_retention_timeouts(
     cursor: Any,
     *,
@@ -661,8 +1196,14 @@ def _apply_index_build_timeouts(cursor: Any, *, lock_timeout_ms: int) -> None:
     )
 
 
-def _index_is_valid(cursor: Any) -> bool:
-    """True only when the index exists and the planner will actually use it."""
+def _index_is_valid(cursor: Any, index_name: str) -> bool:
+    """True only when the index exists here and the planner will use it.
+
+    Scoped to ``current_schema()``: ``pg_class.relname`` is not unique
+    across schemas, so without it a same-named index in another schema on
+    the search_path reads as ready and the job deletes against a table that
+    has no index at all.
+    """
 
     cursor.execute(
         """
@@ -670,8 +1211,9 @@ def _index_is_valid(cursor: Any) -> bool:
         FROM pg_class cls
         JOIN pg_index idx ON idx.indexrelid = cls.oid
         WHERE cls.relname = %s
+            AND cls.relnamespace = current_schema()::regnamespace
         """,
-        (STAGING_EVIDENCE_REJECTED_INDEX,),
+        (index_name,),
     )
     row = cursor.fetchone()
     if row is None:
@@ -709,6 +1251,175 @@ def _delete_staging_evidence_batch(
         (cutoff, batch_size),
     )
     return int(cursor.rowcount or 0)
+
+
+def _fetch_orphan_prunable_source_ids(cursor: Any) -> tuple[str, ...]:
+    """Resolve the allowed adapter keys into data_sources ids.
+
+    ``data_sources`` is a few dozen rows, so this reads it whole once per
+    cycle and classifies in Python; that keeps the adapter rule a pure,
+    directly testable function instead of a second copy of it in SQL.
+    """
+
+    cursor.execute(
+        """
+        SELECT id, adapter_key
+        FROM data_sources
+        """
+    )
+    pairs = tuple(
+        (
+            (row["id"], row["adapter_key"])
+            if isinstance(row, dict)
+            else (row[0], row[1])
+        )
+        for row in (cursor.fetchall() or ())
+    )
+    source_ids = orphan_prunable_source_ids(pairs)
+    _log_orphan_prunable_adapters(
+        source_ids=source_ids,
+        fallback_keys=legacy_fallback_adapter_keys(pairs),
+    )
+    return source_ids
+
+
+def _log_orphan_prunable_adapters(
+    *,
+    source_ids: tuple[str, ...],
+    fallback_keys: tuple[str, ...],
+) -> None:
+    """Report the allow-list, naming the fallback adapters only on a change.
+
+    The counts go out every cycle so a dashboard can watch them; the key
+    list only when the set actually moves, which is when a deploy added or
+    reclassified an adapter and somebody should look.
+    """
+
+    global _accepted_fallback_adapter_keys
+
+    changed = fallback_keys != _accepted_fallback_adapter_keys
+    _accepted_fallback_adapter_keys = fallback_keys
+    fields: dict[str, object] = {
+        "source_count": len(source_ids),
+        "legacy_fallback_count": len(fallback_keys),
+        "legacy_fallback_changed": changed,
+    }
+    if changed:
+        fields["legacy_fallback_adapter_keys"] = list(fallback_keys)
+    log_event(
+        "worker.maintenance.staging_accepted_retention_adapters", **fields
+    )
+
+
+def _fetch_oldest_accepted_created_at(cursor: Any) -> datetime | None:
+    """Where a fresh sweep starts.
+
+    ``min()`` over a partial index is a single descent of the btree, so
+    this costs a few buffers even on the 12.6 M row accepted half.
+    """
+
+    cursor.execute(
+        """
+        SELECT min(created_at) AS oldest
+        FROM staging_evidence
+        WHERE validation_status = 'accepted'
+        """
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    value = row["oldest"] if isinstance(row, dict) else row[0]
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _delete_accepted_staging_evidence_batch(
+    cursor: Any,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    batch_size: int,
+    source_ids: tuple[str, ...],
+) -> int:
+    # Like the rejected batch above, 'accepted' is a literal baked into the
+    # SQL text rather than a bind parameter. The NOT EXISTS is what makes
+    # deleting an accepted row safe at all: it is an index probe into
+    # idx_evidence_staging_evidence_id (migration 0042), whose partial
+    # predicate is repeated here so the planner can use it, and the
+    # evidence side stores str(UUID(...)) -- the same canonical lowercase
+    # text s.id::text produces.
+    #
+    # The half-open [window_start, window_end) bound is what keeps the cost
+    # of a batch flat as the sweep advances; see _sweep_accepted_staging.
+    # window_end is always capped at the retention cutoff by the caller, so
+    # this needs no separate cutoff predicate.
+    #
+    # OFFSET 0 is an optimizer fence, not dead syntax: simplify_EXISTS_query
+    # refuses to pull up a sublink carrying limitOffset, so the NOT EXISTS
+    # stays a per-row SubPlan probe into 0042's index rather than becoming
+    # an anti-join. Both shapes are correct and both use that index; the
+    # fence is here because the SubPlan's cost is simply (rows in window) x
+    # (one index probe), which is exactly what the window sizing reasons
+    # about. The anti-join's cost instead depends on the join strategy and
+    # on how many parallel workers happen to be available, which turns a
+    # budget the sweep is supposed to control into something it cannot
+    # predict.
+    cursor.execute(
+        """
+        /* staging-retention-accepted */
+        DELETE FROM staging_evidence
+        WHERE id IN (
+            SELECT s.id
+            FROM staging_evidence s
+            WHERE s.validation_status = 'accepted'
+                AND s.created_at >= %s::timestamptz
+                AND s.created_at < %s::timestamptz
+                AND s.data_source_id = ANY(%s::uuid[])
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM evidence e
+                    WHERE e.properties ? 'staging_evidence_id'
+                        AND e.properties ->> 'staging_evidence_id' = s.id::text
+                    OFFSET 0
+                )
+            ORDER BY s.created_at ASC
+            LIMIT %s
+        )
+        """,
+        (window_start, window_end, list(source_ids), batch_size),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def _record_accepted_timeout_streak(
+    stopped_reason: StagingRetentionStopReason,
+) -> None:
+    """The accepted pass's own streak.
+
+    Separate from the rejected one on purpose: the passes have different
+    indexes, query shapes and budgets, so a shared counter would let a
+    healthy rejected cycle keep resetting an accepted pass that is timing
+    out every five minutes.
+    """
+
+    global _accepted_timeout_streak
+
+    if stopped_reason not in ("statement_timeout", "lock_timeout"):
+        _accepted_timeout_streak = 0
+        return
+    _accepted_timeout_streak += 1
+    if _accepted_timeout_streak < STAGING_RETENTION_TIMEOUT_WARNING_STREAK:
+        return
+    log_event(
+        "worker.maintenance.staging_accepted_retention_timeout_streak",
+        level="warning",
+        streak=_accepted_timeout_streak,
+        stopped_reason=stopped_reason,
+        threshold=STAGING_RETENTION_TIMEOUT_WARNING_STREAK,
+    )
 
 
 def _record_staging_timeout_streak(stopped_reason: StagingRetentionStopReason) -> None:

@@ -144,6 +144,11 @@ class WorkerSettings:
     staging_evidence_retention_batch_size: int
     staging_evidence_retention_statement_timeout_ms: int
     staging_evidence_retention_ensure_index: bool
+    staging_evidence_accepted_retention_enabled: bool
+    staging_evidence_accepted_retention_max_batches: int
+    staging_evidence_accepted_retention_window_seconds: int
+    staging_evidence_accepted_retention_min_window_seconds: int
+    staging_evidence_accepted_retention_max_window_seconds: int
     evidence_index_reindex_enabled: bool
     evidence_index_reindex_indexes: tuple[str, ...] | None
     evidence_index_reindex_window_utc: str
@@ -712,6 +717,32 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             default=True,
         )
         is True,
+        staging_evidence_accepted_retention_enabled=env_bool(
+            values,
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_ENABLED",
+            default=True,
+        )
+        is True,
+        staging_evidence_accepted_retention_max_batches=env_int(
+            values,
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_BATCHES",
+            default=10,
+        ),
+        staging_evidence_accepted_retention_window_seconds=env_int(
+            values,
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_WINDOW_SECONDS",
+            default=3600,
+        ),
+        staging_evidence_accepted_retention_min_window_seconds=env_int(
+            values,
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_MIN_WINDOW_SECONDS",
+            default=300,
+        ),
+        staging_evidence_accepted_retention_max_window_seconds=env_int(
+            values,
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_WINDOW_SECONDS",
+            default=86400,
+        ),
         # Defaults mirror app/jobs/index_maintenance.py, which owns the policy;
         # config cannot import it because app.jobs.__init__ imports app.config.
         # None here means "the job's own list".
