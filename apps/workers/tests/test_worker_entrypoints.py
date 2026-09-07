@@ -1451,6 +1451,8 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         accepted_index_state = "ready"
         accepted_stopped_reason = "exhausted"
         accepted_source_count = 54
+        accepted_watermark = None
+        accepted_window_seconds = 3600
 
     class FakeEvidenceRetentionJob:
         def __init__(self, *, database_url: str) -> None:
@@ -1480,6 +1482,8 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
             ensure_index: bool,
             accepted_enabled: bool,
             accepted_max_batches: int,
+            accepted_window_seconds: int,
+            accepted_min_window_seconds: int,
         ) -> _StagingEvidenceRetentionSummary:
             calls.append(("staging_evidence.retention", retention_days))
             calls.append(("staging_evidence.max_batches", max_batches))
@@ -1489,6 +1493,18 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
             calls.append(("staging_evidence.accepted_enabled", accepted_enabled))
             calls.append(
                 ("staging_evidence.accepted_max_batches", accepted_max_batches)
+            )
+            calls.append(
+                (
+                    "staging_evidence.accepted_window_seconds",
+                    accepted_window_seconds,
+                )
+            )
+            calls.append(
+                (
+                    "staging_evidence.accepted_min_window_seconds",
+                    accepted_min_window_seconds,
+                )
             )
             return _StagingEvidenceRetentionSummary()
 
@@ -1534,6 +1550,8 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         ("staging_evidence.ensure_index", True),
         ("staging_evidence.accepted_enabled", True),
         ("staging_evidence.accepted_max_batches", 10),
+        ("staging_evidence.accepted_window_seconds", 3600),
+        ("staging_evidence.accepted_min_window_seconds", 300),
     ]
 
 

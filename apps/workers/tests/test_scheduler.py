@@ -52,6 +52,8 @@ class RecordingEvidenceRetentionJob:
         ensure_index: bool,
         accepted_enabled: bool,
         accepted_max_batches: int,
+        accepted_window_seconds: int,
+        accepted_min_window_seconds: int,
     ) -> object:
         self.calls.append(("prune_staging_evidence", retention_days))
         self.staging_max_batches = max_batches
@@ -61,6 +63,8 @@ class RecordingEvidenceRetentionJob:
             "ensure_index": ensure_index,
             "accepted_enabled": accepted_enabled,
             "accepted_max_batches": accepted_max_batches,
+            "accepted_window_seconds": accepted_window_seconds,
+            "accepted_min_window_seconds": accepted_min_window_seconds,
         }
         return SimpleNamespace(
             deleted_rows=5,
@@ -72,6 +76,8 @@ class RecordingEvidenceRetentionJob:
             accepted_index_state="ready",
             accepted_stopped_reason="exhausted",
             accepted_source_count=54,
+            accepted_watermark=None,
+            accepted_window_seconds=3600,
         )
 
 
@@ -120,6 +126,12 @@ def test_scheduler_maintenance_keeps_privacy_retention_only(
         ),
         "accepted_max_batches": (
             SETTINGS.staging_evidence_accepted_retention_max_batches
+        ),
+        "accepted_window_seconds": (
+            SETTINGS.staging_evidence_accepted_retention_window_seconds
+        ),
+        "accepted_min_window_seconds": (
+            SETTINGS.staging_evidence_accepted_retention_min_window_seconds
         ),
     }
 

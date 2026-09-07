@@ -176,17 +176,34 @@ week-old realtime observation is long past its 6 h scoring window.
 This pass deletes an `accepted` row only when **all** of the following hold:
 
 - `created_at` is older than `STAGING_EVIDENCE_RETENTION_DAYS`;
-- its `data_source_id` resolves to a realtime-cadence adapter. The rule is
-  `jobs/evidence_retention.is_orphan_prunable_adapter`, derived from
-  `jobs/freshness.cadence_for_adapter` rather than a hand-kept list, so an
-  adapter cannot be realtime for freshness and something else for retention.
-  Excluded: `HISTORICAL_COVERAGE_ADAPTER_KEYS` (`official.nstc.*`,
-  `official.wra.historical_flood` -- `jobs/historical_coverage.py` re-reads
-  those accepted rows years later), `STATIC_SLOW_CADENCE_ADAPTER_KEYS`
-  (flood potential and the other slow snapshots) and `WARNING_EVENT_ADAPTER_KEYS`
-  (NCDR CAP, CWA heavy rain). The allow-list resolves to 54 of the seeded
-  `data_sources` rows today; if it ever resolves to none the pass runs no
-  `DELETE` at all and reports `stopped_reason=no_adapter_sources`;
+- its `data_source_id` resolves to a prunable adapter. **The rule is
+  fail-open: every adapter is pruned except five named ones.**
+  `jobs/evidence_retention.is_orphan_prunable_adapter` asks
+  `jobs/freshness.cadence_for_adapter` -- so an adapter cannot be realtime
+  for freshness and something else for retention -- and that classifier
+  returns `legacy` for anything none of its three sets names, which is
+  prunable. Of the 59 seeded `data_sources` rows, 54 are pruned and 34 of
+  those arrive purely through the `legacy` fallback (all the `local.*`
+  councils, `news.public_web.*`, `official.gov_tw.flood_citation`,
+  `official.npa.police_radio_traffic`, `official.tainan.disaster_news`,
+  `official.wra.flood_incident`, `official.wra.flood_warning`). Each cycle
+  logs them by name under
+  `worker.maintenance.staging_accepted_retention_adapters`.
+
+  The five never pruned are `official.nstc.flood_disaster_points` and
+  `official.wra.historical_flood` (`jobs/historical_coverage.py` re-reads
+  those accepted rows years later), `official.flood_potential.geojson`
+  (a static snapshot is still current at 8 days), and
+  `official.ncdr.cap` / `official.cwa.heavy_rain_warning` (warning events
+  publish only when there is an event).
+
+  The practical consequence to accept before deploying: for any adapter
+  outside those five, an `accepted` staging audit row that was **never
+  promoted** is deleted 7 days later. Promoted rows are protected by the
+  `NOT EXISTS` guard below, not by this list. A new adapter is opted in by
+  omission, so add it to the freshness sets when it is anything other than
+  per-cycle telemetry. If the allow-list ever resolves to none the pass
+  runs no `DELETE` at all and reports `stopped_reason=no_adapter_sources`;
 - no `evidence` row references it. That is a `NOT EXISTS` probe through
   `idx_evidence_staging_evidence_id` (migration 0042), so a row still awaiting
   promotion, or one whose evidence is retained, is never touched.
@@ -227,10 +244,60 @@ next batch cannot see them again. They are ordered by `created_at`, which takes
 the oldest eligible rows first and matches the supporting index.
 
 The accepted pass has its own ceiling,
-`STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_BATCHES` (default 10), and its own
-on/off switch, `STAGING_EVIDENCE_ACCEPTED_RETENTION_ENABLED`, so throttling or
-stopping it never touches the rejected backlog it runs after. It shares the
-batch size, timeouts and retention window.
+`STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_BATCHES` (default 10), its own
+on/off switch, `STAGING_EVIDENCE_ACCEPTED_RETENTION_ENABLED`, and its own
+timeout streak, so throttling or stopping it never touches -- or masks the
+health of -- the rejected backlog it runs after. It shares the batch size,
+timeouts and retention window.
+
+#### The accepted sweep
+
+The two passes bound a batch differently, and the difference matters.
+The rejected pass deletes every row it selects, so nothing it skips
+accumulates and "the oldest 5 000 eligible rows" stays cheap forever.
+
+The accepted pass keeps every referenced row -- ~2.25 M of them -- and they
+stay at the head of `idx_staging_evidence_accepted_created_at` permanently.
+Asking it for "the oldest 5 000 orphans" makes every batch re-probe that
+whole surviving prefix before it reaches a new orphan, and the prefix grows
+as the sweep advances: measured on the #381 review database at a 400 k-row
+prefix, one batch cost 405 k `NOT EXISTS` probes, 1.6 M buffers and 1.43 s
+on a warm SSD. On the 2 GB IO-bound node that reaches the 5 s
+`statement_timeout` quickly and then never clears.
+
+So the pass sweeps instead. A watermark walks `created_at` from the oldest
+accepted row towards the cutoff, and each `DELETE` is bounded to
+`[watermark, window_end)` where the window is
+`STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS` (default 3600) wide. The work per
+statement is then set by how many rows that window holds -- an hour of hosted
+ingestion is ~48 k staging rows -- and not by how far into the table the
+orphans have receded. The acceptance test measures this directly: with a
+50 000-row survivor prefix the windowed select discards **0** rows by filter
+where the unwindowed one discards **50 000**.
+
+- A batch that deletes fewer rows than it asked for has finished its window,
+  so the watermark moves to `window_end`. A full batch leaves the watermark
+  alone and takes the next batch out of the same window.
+- A `statement_timeout` halves the window and retries -- each attempt costs a
+  batch from the budget -- down to `STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS`
+  (default 300), below which the cycle reports `stopped_reason=statement_timeout`
+  and leaves the watermark where it was. Each swept window doubles the size
+  back towards the configured maximum, so one slow patch of history does not
+  throttle the sweep forever. A `lock_timeout` is contention rather than a
+  sizing problem, so it ends the cycle without shrinking anything.
+- Reaching the cutoff reports `stopped_reason=caught_up`, which is the steady
+  state: such a cycle issues no `DELETE` at all.
+
+One pass from oldest to newest is enough, and there is no periodic full
+re-scan. A row's orphan status is settled well before it reaches the 7-day
+cutoff: a row that was never promoted is an orphan from birth, and a promoted
+row loses its evidence within `EVIDENCE_REALTIME_RETENTION_HOURS` (48 h).
+
+**The watermark lives in memory, not in the database.** Restarting the worker
+resets it, and the next sweep starts again from the oldest accepted row --
+one extra pass over ground already cleared, which costs windows that delete
+nothing rather than anything unsafe. Expect a burst of
+`deleted_rows=0` accepted cycles after every deploy.
 
 Measured on local PostGIS with 500 000 aged rejected rows (117 MB table): a
 5 000-row batch costs ~100 ms, so a full 10-batch cycle deletes 50 000 rows in
@@ -240,8 +307,16 @@ index and returns nothing in ~3 ms. On a 1 M row local table (800 k accepted,
 24 k buffers, and a whole 5 000-row accepted batch ~80 ms end to end. The hosted
 table is disk-bound, so budget several times that per batch and still well under
 the 5 s limit. What paces the backfill is the 300 s scheduler interval, not the
-batch cost: at 50 000 rows per cycle the ~10.4 M accepted orphan backlog clears
-in roughly **17 hours**, on top of the rejected backlog.
+batch cost.
+
+For the accepted pass, read that pace off the watermark rather than off a row
+count. A 10-batch cycle deletes at most 50 000 rows, and an hour of hosted
+history holds ~48 k staging rows, so a cycle advances the watermark by roughly
+one hour of history every five minutes of wall clock -- about 12 h of history
+per hour. The ~10.4 M orphans span roughly nine days of history behind the
+cutoff, so the sweep needs about **17-18 hours** to reach the cutoff, on top of
+the rejected backlog. If the watermark is advancing much slower than an hour
+per cycle, the windows are timing out; check `window_seconds`.
 
 ### The partial index
 
@@ -295,6 +370,13 @@ the statement above by hand and set:
 STAGING_EVIDENCE_RETENTION_ENSURE_INDEX=false
 ```
 
+> **Before deploying with `STAGING_EVIDENCE_RETENTION_ENSURE_INDEX=false`,
+> confirm both partial indexes exist and are `indisvalid = true`.** #381
+> changed what that flag means: the job used to delete on the operator's
+> word alone, and now withholds both passes when the index is not there.
+> A production node that had the flag set and only the rejected index built
+> will sit at `stopped_reason=index_not_ready` until the accepted one exists.
+
 That flag skips the build, **not** the safety check: the job still probes
 `pg_index.indisvalid` (scoped to `current_schema()`), and if the hand-built
 index is missing or invalid it reports `index_state=skipped`,
@@ -311,19 +393,33 @@ psql "$DATABASE_URL" -c "SELECT indexrelid::regclass, indisvalid FROM pg_index W
 - `worker.maintenance.staging_retention` (rejected) and
   `worker.maintenance.staging_accepted_retention` (accepted orphans) log events
   carry `deleted_rows`, `batches`, `index_state` and `stopped_reason` per cycle,
-  in the same shape; the accepted event adds `source_count`, the number of
-  `data_sources` rows the adapter rule allowed. Expect `index_state=building`
-  and `stopped_reason=index_not_ready` for the cycles each concurrent index
-  build occupies, before any row is deleted.
+  in the same shape; the accepted event adds `source_count` (how many
+  `data_sources` rows the adapter rule allowed), `watermark` and
+  `window_seconds`. Expect `index_state=building` and
+  `stopped_reason=index_not_ready` for the cycles each concurrent index
+  build occupies, before any row is deleted, and `stopped_reason=caught_up`
+  once the sweep has reached the cutoff.
+- `worker.maintenance.staging_accepted_retention_window_shrunk` fires each
+  time a `statement_timeout` halves the sweep window. A `window_seconds`
+  stuck at 300 with `stopped_reason=statement_timeout` means the node cannot
+  finish even the smallest window and needs a smaller `BATCH_SIZE` or an
+  operator.
+- `worker.maintenance.staging_accepted_retention_adapters` names, once per
+  cycle, the adapters admitted only by the `legacy` fallback. Read it after
+  adding any adapter.
+- `..._timeout_streak` and
+  `worker.maintenance.staging_accepted_retention_timeout_streak` are
+  separate: each pass warns on its own three consecutive timed-out cycles.
 - `worker.maintenance.staging_retention_index_built` /
   `..._index_failed` / `..._index_missing` report the index step, each naming
-  the `index_name` it applies to; `..._timeout_streak` warns after three
-  consecutive timed-out cycles.
+  the `index_name` it applies to.
 - `scheduler.maintenance.completed` carries `staging_evidence_rows_pruned`,
   `staging_evidence_stopped_reason` and `staging_evidence_index_state`, plus
   `staging_evidence_accepted_rows_pruned`,
-  `staging_evidence_accepted_stopped_reason` and
-  `staging_evidence_accepted_index_state`.
+  `staging_evidence_accepted_stopped_reason`,
+  `staging_evidence_accepted_index_state`,
+  `staging_evidence_accepted_watermark` and
+  `staging_evidence_accepted_window_seconds`.
 - A healthy accepted rollout ends with the accepted count near the ~2.25 M rows
   evidence still references:
 

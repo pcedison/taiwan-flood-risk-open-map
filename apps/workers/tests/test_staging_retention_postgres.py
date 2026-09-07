@@ -9,6 +9,7 @@ observed for real without touching a shared development dataset. Skips when
 from __future__ import annotations
 
 import os
+import re
 import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -20,6 +21,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from app.jobs import evidence_retention
 from app.jobs.evidence_retention import (
     STAGING_EVIDENCE_ACCEPTED_INDEX,
     STAGING_EVIDENCE_REJECTED_INDEX,
@@ -44,6 +46,15 @@ UNSOURCED_ACCEPTED_ROWS = 500
 # The production budget. A batch that cannot finish inside it deletes nothing.
 PRODUCTION_STATEMENT_TIMEOUT_MS = 5_000
 
+# The survivor prefix that made the first shape of this pass quadratic: rows
+# an evidence row still references stay at the head of the accepted index
+# forever, so an unwindowed batch re-probes all of them before it reaches a
+# single new orphan. Seeded in the oldest hour, with the orphans behind it.
+SURVIVOR_PREFIX_ROWS = 50_000
+SWEEP_ORPHAN_ROWS = 12_000
+SWEEP_ORIGIN = datetime(2026, 8, 1, tzinfo=UTC)
+SWEEP_NOW = SWEEP_ORIGIN + timedelta(days=14)
+
 REALTIME_ADAPTER_KEY = "official.cwa.rainfall"
 HISTORICAL_ADAPTER_KEY = "official.nstc.flood_disaster_points"
 
@@ -54,6 +65,16 @@ SURVIVING_ACCEPTED = {
     "historical-accepted": HISTORICAL_ACCEPTED_ROWS,
     "unsourced-accepted": UNSOURCED_ACCEPTED_ROWS,
 }
+
+
+@pytest.fixture(autouse=True)
+def _reset_sweep_state() -> None:
+    """The watermark is module level so it can outlive a maintenance cycle."""
+
+    evidence_retention._accepted_sweep_watermark = None
+    evidence_retention._accepted_sweep_window_seconds = None
+    evidence_retention._accepted_timeout_streak = 0
+    evidence_retention._staging_timeout_streak = 0
 
 
 def _database_url() -> str:
@@ -318,6 +339,66 @@ def _seeded_populations() -> dict[str, int]:
     }
 
 
+def _rows_removed_by_filter(plan_text: str) -> int:
+    """Total rows the index scan read and threw away -- the cost that used
+    to grow without bound as the survivor prefix grew.
+    """
+
+    return sum(
+        int(match)
+        for match in re.findall(r"Rows Removed by Filter: (\d+)", plan_text)
+    )
+
+
+def _explain_accepted_candidates(
+    database_url: str,
+    *,
+    window_start: datetime | None,
+    window_end: datetime,
+    batch_size: int = 5_000,
+) -> str:
+    """EXPLAIN the candidate select a batch issues, windowed or not.
+
+    ``window_start=None`` reproduces the unwindowed shape this pass shipped
+    with before #381, which is the regression the numbers below pin down.
+    """
+
+    window_clause = (
+        "AND s.created_at >= %(window_start)s::timestamptz"
+        if window_start is not None
+        else ""
+    )
+    with psycopg.connect(database_url) as connection:
+        source_id = _source_id(connection, REALTIME_ADAPTER_KEY)
+        plan = connection.execute(
+            f"""
+            EXPLAIN (ANALYZE, BUFFERS)
+            SELECT s.id
+            FROM staging_evidence s
+            WHERE s.validation_status = 'accepted'
+                {window_clause}
+                AND s.created_at < %(window_end)s::timestamptz
+                AND s.data_source_id = ANY(%(source_ids)s::uuid[])
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM evidence e
+                    WHERE e.properties ? 'staging_evidence_id'
+                        AND e.properties ->> 'staging_evidence_id' = s.id::text
+                    OFFSET 0
+                )
+            ORDER BY s.created_at ASC
+            LIMIT %(batch_size)s
+            """,
+            {
+                "window_start": window_start,
+                "window_end": window_end,
+                "source_ids": [source_id],
+                "batch_size": batch_size,
+            },
+        ).fetchall()
+    return "\n".join(str(line[0]) for line in plan)
+
+
 def _job(database_url: str) -> PostgresEvidenceRetentionJob:
     return PostgresEvidenceRetentionJob(
         connection_factory=lambda: psycopg.connect(database_url, connect_timeout=10)
@@ -518,13 +599,16 @@ def test_prune_staging_evidence_clears_orphaned_accepted_rows_only(
         batch_size=5_000,
         max_batches=10,
         accepted_max_batches=10,
+        # The whole seeded span in one window, so this test stays about which
+        # rows go and which stay; window sizing has its own tests below.
+        accepted_window_seconds=30 * 24 * 3_600,
         statement_timeout_ms=30_000,
         now=NOW,
     )
 
     assert summary.accepted_index_state == "ready"
     assert summary.accepted_deleted_rows == ORPHAN_ACCEPTED_ROWS
-    assert summary.accepted_stopped_reason == "exhausted"
+    assert summary.accepted_stopped_reason == "caught_up"
     assert summary.accepted_source_count > 0
     # Both passes run in one cycle, so the rejected backlog goes as well.
     assert summary.deleted_rows == AGED_REJECTED_ROWS
@@ -654,11 +738,13 @@ def test_prune_staging_evidence_builds_the_accepted_partial_index_concurrently(
     plan_text = "\n".join(str(line[0]) for line in plan)
     assert STAGING_EVIDENCE_ACCEPTED_INDEX in plan_text, plan_text
     assert "idx_evidence_staging_evidence_id" in plan_text, plan_text
-    # The cliff the OFFSET 0 fence exists to rule out: a hash anti-join has to
-    # read every aged accepted row and then Sort them, because the join
-    # destroys the index order the LIMIT relies on. A Sort node here means the
-    # fence stopped working and no batch would ever finish on the hosted table.
-    assert "Sort" not in plan_text, plan_text
+    # What the OFFSET 0 fence buys: the NOT EXISTS stays a per-row SubPlan
+    # probe, so a batch costs (rows in window) x (one index probe) and the
+    # window sizing in _sweep_accepted_staging can reason about it. Pulled
+    # up into an anti-join it would still be correct and still use the same
+    # index, but its cost would depend on the join strategy and on how many
+    # parallel workers happen to be free.
+    assert "SubPlan" in plan_text, plan_text
 
 
 def test_prune_staging_evidence_accepted_pass_can_be_switched_off(
@@ -678,3 +764,228 @@ def test_prune_staging_evidence_accepted_pass_can_be_switched_off(
         **_seeded_populations(),
         "aged-rejected": AGED_REJECTED_ROWS - 1_000,
     }
+
+
+# --------------------------------------------------------------------------
+# The watermark sweep (#381 review).
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def swept_url(migrated_schema_url: str) -> Iterator[str]:
+    """A survivor prefix in the oldest hour, with the orphans behind it.
+
+    This is the shape that made the first version of the accepted pass
+    quadratic: referenced rows are never deleted, so they stay at the head of
+    the accepted index and every unwindowed batch re-probes all of them.
+    """
+
+    with psycopg.connect(migrated_schema_url) as connection:
+        connection.execute("TRUNCATE staging_evidence CASCADE")
+        connection.execute("DELETE FROM evidence WHERE properties ? 'staging_evidence_id'")
+        realtime_source_id = _source_id(connection, REALTIME_ADAPTER_KEY)
+
+        connection.execute(
+            """
+            INSERT INTO staging_evidence (
+                data_source_id, source_id, source_type, event_type, title,
+                summary, validation_status, created_at
+            )
+            SELECT
+                %s,
+                'survivor-accepted-' || generated,
+                'official', 'flood_report', 'referenced accepted staging row',
+                'its evidence row is retained, so this stays forever',
+                'accepted',
+                %s
+            FROM generate_series(1, %s) AS generated
+            """,
+            (realtime_source_id, SWEEP_ORIGIN, SURVIVOR_PREFIX_ROWS),
+        )
+        connection.execute(
+            """
+            INSERT INTO evidence (
+                data_source_id, source_id, source_type, event_type, title,
+                summary, confidence, properties
+            )
+            SELECT
+                staging.data_source_id, staging.source_id, 'official',
+                'flood_report', 'promoted evidence', 'retained', 0.8,
+                jsonb_build_object('staging_evidence_id', staging.id::text)
+            FROM staging_evidence staging
+            WHERE staging.source_id LIKE 'survivor-accepted-%%'
+            """
+        )
+        # The orphans sit one hour later, i.e. in the window after the one the
+        # survivors occupy.
+        connection.execute(
+            """
+            INSERT INTO staging_evidence (
+                data_source_id, source_id, source_type, event_type, title,
+                summary, validation_status, created_at
+            )
+            SELECT
+                %s,
+                'sweep-orphan-' || generated,
+                'official', 'rainfall', 'aged accepted orphan',
+                'promoted, then the evidence row aged out at 48 h',
+                'accepted',
+                %s
+            FROM generate_series(1, %s) AS generated
+            """,
+            (realtime_source_id, SWEEP_ORIGIN + timedelta(hours=1), SWEEP_ORPHAN_ROWS),
+        )
+        connection.commit()
+    with psycopg.connect(migrated_schema_url, autocommit=True) as connection:
+        connection.execute("VACUUM (ANALYZE) staging_evidence")
+        connection.execute("VACUUM (ANALYZE) evidence")
+    yield migrated_schema_url
+
+
+def test_accepted_sweep_does_not_rescan_the_survivor_prefix(swept_url: str) -> None:
+    """The regression that made this pass unshippable, pinned with a number.
+
+    One batch pays for the survivor window once. After that the watermark is
+    past it, and every later batch reads only its own window -- where the old
+    unwindowed shape re-read all SURVIVOR_PREFIX_ROWS survivors on every batch,
+    forever, with the prefix growing as the sweep advanced.
+    """
+
+    summary = _job(swept_url).prune_staging_evidence(
+        retention_days=7,
+        batch_size=5_000,
+        max_batches=1,
+        accepted_max_batches=1,
+        accepted_window_seconds=3_600,
+        statement_timeout_ms=30_000,
+        now=SWEEP_NOW,
+    )
+
+    # The first batch swept the survivor window and deleted nothing from it.
+    assert summary.accepted_deleted_rows == 0
+    assert summary.accepted_watermark == SWEEP_ORIGIN + timedelta(hours=1)
+
+    windowed = _explain_accepted_candidates(
+        swept_url,
+        window_start=summary.accepted_watermark,
+        window_end=summary.accepted_watermark + timedelta(hours=1),
+    )
+    unwindowed = _explain_accepted_candidates(
+        swept_url,
+        window_start=None,
+        window_end=SWEEP_NOW - timedelta(days=7),
+    )
+    windowed_discarded = _rows_removed_by_filter(windowed)
+    unwindowed_discarded = _rows_removed_by_filter(unwindowed)
+    print(
+        "accepted_sweep_rows_removed_by_filter "
+        f"windowed={windowed_discarded} unwindowed={unwindowed_discarded} "
+        f"survivors={SURVIVOR_PREFIX_ROWS}"
+    )
+
+    # The unwindowed shape has to walk every survivor to reach an orphan.
+    assert unwindowed_discarded >= SURVIVOR_PREFIX_ROWS
+    # The windowed one reads only its own window, which holds no survivors.
+    assert windowed_discarded < SURVIVOR_PREFIX_ROWS // 10
+    assert STAGING_EVIDENCE_ACCEPTED_INDEX in windowed, windowed
+
+
+def test_accepted_sweep_holds_the_watermark_while_a_window_still_has_orphans(
+    swept_url: str,
+) -> None:
+    summary = _job(swept_url).prune_staging_evidence(
+        retention_days=7,
+        batch_size=5_000,
+        max_batches=1,
+        # One batch for the survivor window, two full batches of orphans.
+        accepted_max_batches=3,
+        accepted_window_seconds=3_600,
+        statement_timeout_ms=30_000,
+        now=SWEEP_NOW,
+    )
+
+    orphan_window_start = SWEEP_ORIGIN + timedelta(hours=1)
+    assert summary.accepted_deleted_rows == 10_000
+    assert summary.accepted_batches == 3
+    # Both orphan batches were full, so the window is not finished and the
+    # watermark has not moved past it.
+    assert summary.accepted_watermark == orphan_window_start
+
+    # The next cycle resumes inside the same window and finishes it.
+    summary = _job(swept_url).prune_staging_evidence(
+        retention_days=7,
+        batch_size=5_000,
+        max_batches=1,
+        accepted_max_batches=1,
+        accepted_window_seconds=3_600,
+        statement_timeout_ms=30_000,
+        now=SWEEP_NOW,
+    )
+    assert summary.accepted_deleted_rows == SWEEP_ORPHAN_ROWS - 10_000
+    assert summary.accepted_watermark == orphan_window_start + timedelta(hours=1)
+    with psycopg.connect(swept_url) as connection:
+        remaining = connection.execute(
+            "SELECT count(*)::integer FROM staging_evidence "
+            "WHERE source_id LIKE 'sweep-orphan-%'"
+        ).fetchone()
+    assert remaining is not None
+    assert remaining[0] == 0
+
+
+def test_accepted_sweep_reports_caught_up_once_the_watermark_reaches_the_cutoff(
+    swept_url: str,
+) -> None:
+    summary = _job(swept_url).prune_staging_evidence(
+        retention_days=7,
+        batch_size=5_000,
+        max_batches=1,
+        accepted_max_batches=100,
+        # One window covers everything from the oldest row to the cutoff.
+        accepted_window_seconds=30 * 24 * 3_600,
+        statement_timeout_ms=30_000,
+        now=SWEEP_NOW,
+    )
+
+    assert summary.accepted_stopped_reason == "caught_up"
+    assert summary.accepted_deleted_rows == SWEEP_ORPHAN_ROWS
+    assert summary.accepted_watermark == SWEEP_NOW - timedelta(days=7)
+    # Steady state: a caught-up cycle issues no DELETE at all.
+    summary = _job(swept_url).prune_staging_evidence(
+        retention_days=7,
+        max_batches=1,
+        accepted_max_batches=100,
+        accepted_window_seconds=30 * 24 * 3_600,
+        now=SWEEP_NOW,
+    )
+    assert summary.accepted_stopped_reason == "caught_up"
+    assert summary.accepted_batches == 0
+
+
+def test_accepted_sweep_halves_the_window_on_a_real_statement_timeout(
+    swept_url: str,
+) -> None:
+    """A 1 ms budget cannot finish any batch, so the window shrinks to the floor.
+
+    Proves the retry path against a real cancelled statement rather than a
+    synthetic sqlstate: the pass must roll back, shrink, retry and finally
+    report the timeout instead of raising or looping.
+    """
+
+    summary = _job(swept_url).prune_staging_evidence(
+        retention_days=7,
+        batch_size=5_000,
+        max_batches=1,
+        accepted_max_batches=10,
+        accepted_window_seconds=1_200,
+        accepted_min_window_seconds=300,
+        statement_timeout_ms=1,
+        now=SWEEP_NOW,
+    )
+
+    # 1200 -> 600 -> 300 -> give up: three attempts, and the watermark stays
+    # where it was so the next cycle retries the same ground.
+    assert summary.accepted_stopped_reason == "statement_timeout"
+    assert summary.accepted_batches == 3
+    assert summary.accepted_window_seconds == 300
+    assert summary.accepted_watermark == SWEEP_ORIGIN
+    assert summary.accepted_deleted_rows == 0

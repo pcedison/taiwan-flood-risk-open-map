@@ -146,6 +146,8 @@ class WorkerSettings:
     staging_evidence_retention_ensure_index: bool
     staging_evidence_accepted_retention_enabled: bool
     staging_evidence_accepted_retention_max_batches: int
+    staging_evidence_accepted_retention_window_seconds: int
+    staging_evidence_accepted_retention_min_window_seconds: int
     freshness_max_age_seconds: int
     runtime_fixtures_enabled: bool
     runtime_job_lease_seconds: int
@@ -716,6 +718,16 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_BATCHES",
             default=10,
+        ),
+        staging_evidence_accepted_retention_window_seconds=env_int(
+            values,
+            "STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS",
+            default=3600,
+        ),
+        staging_evidence_accepted_retention_min_window_seconds=env_int(
+            values,
+            "STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS",
+            default=300,
         ),
         freshness_max_age_seconds=env_int(
             values,
