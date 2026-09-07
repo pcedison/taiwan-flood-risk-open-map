@@ -9,14 +9,18 @@ from app.jobs import evidence_retention
 from app.jobs.evidence_retention import (
     DEFAULT_EVIDENCE_REALTIME_RETENTION_HOURS,
     DEFAULT_LOCATION_QUERY_RETENTION_HOURS,
+    DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_BATCHES,
     DEFAULT_STAGING_EVIDENCE_BATCH_SIZE,
     DEFAULT_STAGING_EVIDENCE_MAX_BATCHES,
     DEFAULT_STAGING_EVIDENCE_RETENTION_DAYS,
     DEFAULT_STAGING_EVIDENCE_STATEMENT_TIMEOUT_MS,
+    STAGING_EVIDENCE_ACCEPTED_INDEX,
     STAGING_EVIDENCE_REJECTED_INDEX,
     STAGING_RETENTION_TIMEOUT_WARNING_STREAK,
     EvidenceRetentionUnavailable,
     PostgresEvidenceRetentionJob,
+    is_orphan_prunable_adapter,
+    orphan_prunable_source_ids,
 )
 
 
@@ -241,18 +245,42 @@ def test_evidence_retention_hours_config_default_and_env() -> None:
     )
 
 
+REALTIME_SOURCE_ID = "11111111-1111-4111-8111-111111111111"
+HISTORICAL_SOURCE_ID = "22222222-2222-4222-8222-222222222222"
+DEFAULT_DATA_SOURCES = (
+    (REALTIME_SOURCE_ID, "official.cwa.rainfall"),
+    (HISTORICAL_SOURCE_ID, "official.nstc.flood_disaster_points"),
+)
+
+
 class _StagingFakeCursor:
-    """Cursor scripted with the per-batch delete counts, plus index answers."""
+    """Cursor scripted with the per-batch delete counts, plus index answers.
+
+    The two passes are scripted independently: ``batches`` drives the
+    rejected delete and ``accepted_batches`` the orphan delete, so a test
+    about one pass is not perturbed by the other running after it.
+    """
 
     def __init__(
         self,
         batches: list[int] | Exception,
         *,
         index_valid: list[bool] | None = None,
+        accepted_batches: list[int] | None = None,
+        accepted_index_valid: list[bool] | None = None,
+        data_sources: list[tuple[str, str]] | None = None,
     ) -> None:
         self._batches = batches
+        self._accepted_batches = list(accepted_batches or [])
         self._index_valid = list(index_valid if index_valid is not None else [True])
+        self._accepted_index_valid = list(
+            accepted_index_valid if accepted_index_valid is not None else [True]
+        )
+        self._data_sources = list(
+            data_sources if data_sources is not None else DEFAULT_DATA_SOURCES
+        )
         self._index_answer: bool = True
+        self._rows: list[object] = []
         self.rowcount = 0
         self.executions: list[tuple[str, tuple | None]] = []
 
@@ -265,21 +293,32 @@ class _StagingFakeCursor:
     def execute(self, sql: str, params: tuple | None = None) -> None:
         self.executions.append((sql, params))
         if "pg_index" in sql:
-            self._index_answer = (
-                self._index_valid.pop(0) if self._index_valid else False
+            queue = (
+                self._accepted_index_valid
+                if params and params[0] == STAGING_EVIDENCE_ACCEPTED_INDEX
+                else self._index_valid
             )
+            self._index_answer = queue.pop(0) if queue else False
+            return
+        if "FROM data_sources" in sql:
+            self._rows = list(self._data_sources)
             return
         if "DELETE FROM staging_evidence" not in sql:
             return
         if isinstance(self._batches, Exception):
             raise self._batches
-        self.rowcount = self._batches.pop(0) if self._batches else 0
+        queued = (
+            self._accepted_batches
+            if ACCEPTED_MARKER in sql
+            else self._batches
+        )
+        self.rowcount = queued.pop(0) if queued else 0
 
     def fetchone(self) -> object:
         return {"indisvalid": self._index_answer}
 
     def fetchall(self) -> list[object]:
-        return []
+        return list(self._rows)
 
 
 class _StagingFakeConnection:
@@ -288,8 +327,17 @@ class _StagingFakeConnection:
         batches: list[int] | Exception,
         *,
         index_valid: list[bool] | None = None,
+        accepted_batches: list[int] | None = None,
+        accepted_index_valid: list[bool] | None = None,
+        data_sources: list[tuple[str, str]] | None = None,
     ) -> None:
-        self.cursor_instance = _StagingFakeCursor(batches, index_valid=index_valid)
+        self.cursor_instance = _StagingFakeCursor(
+            batches,
+            index_valid=index_valid,
+            accepted_batches=accepted_batches,
+            accepted_index_valid=accepted_index_valid,
+            data_sources=data_sources,
+        )
         self.commits = 0
         self.rollbacks = 0
         self.autocommit = False
@@ -319,6 +367,9 @@ class _FakeDatabaseError(Exception):
         self.sqlstate = sqlstate
 
 
+ACCEPTED_MARKER = "/* staging-retention-accepted */"
+
+
 @pytest.fixture(autouse=True)
 def _reset_timeout_streak() -> None:
     evidence_retention._staging_timeout_streak = 0
@@ -333,7 +384,19 @@ def _statements(connection: _StagingFakeConnection, needle: str) -> list[tuple[s
 
 
 def _deletes(connection: _StagingFakeConnection) -> list[tuple[str, tuple | None]]:
-    return _statements(connection, "DELETE FROM staging_evidence")
+    """Rejected-pass deletes only, told apart by their SQL comment marker."""
+
+    return [
+        execution
+        for execution in _statements(connection, "DELETE FROM staging_evidence")
+        if ACCEPTED_MARKER not in execution[0]
+    ]
+
+
+def _accepted_deletes(
+    connection: _StagingFakeConnection,
+) -> list[tuple[str, tuple | None]]:
+    return _statements(connection, ACCEPTED_MARKER)
 
 
 def test_prune_staging_evidence_only_deletes_terminal_rejected_rows_past_cutoff() -> None:
@@ -393,13 +456,15 @@ def test_prune_staging_evidence_sets_transaction_local_timeouts_before_each_batc
         params
         for sql, params in _statements(connection, "set_config('statement_timeout'")
     ]
-    # One per executed batch (two deleting batches plus the empty terminal one).
-    assert timeout_calls == [("2000ms", "5000ms")] * 3
+    # Three for the rejected pass (two deleting batches plus the empty terminal
+    # one), then two for the accepted pass: the one-off data_sources lookup and
+    # its own terminal batch.
+    assert timeout_calls == [("2000ms", "5000ms")] * 5
     assert all(
         "true" in sql for sql, _params in _statements(connection, "set_config")
     )
     # Each batch commits on its own; nothing spans the whole cycle.
-    assert connection.commits == 3
+    assert connection.commits == 5
 
 
 def test_prune_staging_evidence_stops_at_max_batches() -> None:
@@ -441,9 +506,14 @@ def test_prune_staging_evidence_reports_timeouts_instead_of_raising(
     assert summary.stopped_reason == expected_reason
     assert summary.deleted_rows == 0
     assert summary.batches == 0
-    assert connection.rollbacks == 1
     # No retry: the cycle ends after the first refused batch.
     assert len(_deletes(connection)) == 1
+    # The accepted pass is independent, so it makes its own attempt and reports
+    # its own reason rather than inheriting the rejected pass's.
+    assert summary.accepted_stopped_reason == expected_reason
+    assert summary.accepted_deleted_rows == 0
+    assert len(_accepted_deletes(connection)) == 1
+    assert connection.rollbacks == 2
 
 
 def test_prune_staging_evidence_warns_after_a_streak_of_timeouts(
@@ -572,11 +642,297 @@ def test_prune_staging_evidence_can_be_told_the_index_is_managed_by_hand() -> No
 
     summary = job.prune_staging_evidence(batch_size=2, ensure_index=False)
 
-    assert summary.index_state == "skipped"
-    assert _statements(connection, "CREATE INDEX CONCURRENTLY") == []
     # An operator who built the index in a maintenance window still gets the
     # deletes; only the build step is skipped.
+    assert summary.index_state == "ready"
+    assert _statements(connection, "CREATE INDEX CONCURRENTLY") == []
     assert summary.deleted_rows == 2
+
+
+def test_prune_staging_evidence_still_probes_the_index_when_told_not_to_build(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """ENSURE_INDEX=false skips the build, not the safety check.
+
+    Taking the operator's word for it and deleting anyway bought nothing but
+    the pathological scan -- one cancelled batch per cycle, silently, for as
+    long as the index stayed missing.
+    """
+
+    connection = _StagingFakeConnection(
+        [2, 0], index_valid=[False], accepted_index_valid=[False]
+    )
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence(batch_size=2, ensure_index=False)
+    warned = capsys.readouterr().out
+
+    assert summary.index_state == "skipped"
+    assert summary.stopped_reason == "index_not_ready"
+    assert summary.deleted_rows == 0
+    assert _deletes(connection) == []
+    assert summary.accepted_index_state == "skipped"
+    assert summary.accepted_stopped_reason == "index_not_ready"
+    assert _accepted_deletes(connection) == []
+    assert _statements(connection, "CREATE INDEX CONCURRENTLY") == []
+    assert "worker.maintenance.staging_retention_index_missing" in warned
+
+
+def test_index_validity_probe_is_scoped_to_the_current_schema() -> None:
+    """relname is not unique across schemas.
+
+    Without the namespace filter a same-named index on another schema of the
+    search_path reads as ready and the job deletes with no index at all.
+    """
+
+    connection = _StagingFakeConnection([0])
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    job.prune_staging_evidence()
+
+    probes = _statements(connection, "pg_index")
+    assert probes
+    for sql, params in probes:
+        assert "cls.relnamespace = current_schema()::regnamespace" in sql
+        assert params in (
+            (STAGING_EVIDENCE_REJECTED_INDEX,),
+            (STAGING_EVIDENCE_ACCEPTED_INDEX,),
+        )
+
+
+# --------------------------------------------------------------------------
+# The accepted-orphan pass (#372).
+#
+# ~10.4 M of the hosted node's 12.6 M accepted staging rows are realtime
+# telemetry that was promoted and whose evidence row the 48 h realtime prune
+# then deleted, so nothing can read them again. Two guards keep the delete
+# narrow: the adapter must be realtime-cadence, and no evidence row may still
+# point at the staging row.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    [
+        "official.cwa.rainfall",
+        "official.cwa.tide_level",
+        "official.wra.water_level",
+        "official.wra_iow.flood_depth",
+        "official.civil_iot.sewer_water_level",
+        "official.civil_iot.pump_water_level",
+        "official.civil_iot.gate_water_level",
+        "local.taipei.sewer_water_level",
+        "local.tainan.flood_sensor",
+    ],
+)
+def test_is_orphan_prunable_adapter_accepts_realtime_telemetry(
+    adapter_key: str,
+) -> None:
+    assert is_orphan_prunable_adapter(adapter_key) is True
+
+
+@pytest.mark.parametrize(
+    "adapter_key",
+    [
+        # historical_coverage.py re-reads these accepted staging rows years
+        # after ingestion to build the county/year coverage grid.
+        "official.nstc.flood_disaster_points",
+        "official.wra.historical_flood",
+        # A static snapshot's accepted row is still the current one at 8 days.
+        "official.flood_potential.geojson",
+        # Warning events publish only when there is an event to publish.
+        "official.ncdr.cap",
+        "official.cwa.heavy_rain_warning",
+    ],
+)
+def test_is_orphan_prunable_adapter_excludes_historical_static_and_event_sources(
+    adapter_key: str,
+) -> None:
+    assert is_orphan_prunable_adapter(adapter_key) is False
+
+
+def test_orphan_prunable_source_ids_resolves_only_allowed_adapters() -> None:
+    resolved = orphan_prunable_source_ids(
+        [
+            (REALTIME_SOURCE_ID, "official.cwa.rainfall"),
+            (HISTORICAL_SOURCE_ID, "official.nstc.flood_disaster_points"),
+            ("33333333-3333-4333-8333-333333333333", "official.ncdr.cap"),
+            ("44444444-4444-4444-8444-444444444444", "official.flood_potential.geojson"),
+            # Rows with a missing id or adapter key can never be matched safely.
+            (None, "official.cwa.rainfall"),
+            (REALTIME_SOURCE_ID, None),
+            # A duplicate must not widen the array the batch SQL binds.
+            (REALTIME_SOURCE_ID, "official.cwa.rainfall"),
+        ]
+    )
+
+    assert resolved == (REALTIME_SOURCE_ID,)
+
+
+def test_prune_staging_evidence_accepted_pass_deletes_only_unreferenced_aged_rows() -> None:
+    connection = _StagingFakeConnection([0], accepted_batches=[4, 0])
+    now = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence(retention_days=7, batch_size=4, now=now)
+
+    assert summary.accepted_deleted_rows == 4
+    assert summary.accepted_batches == 2
+    assert summary.accepted_stopped_reason == "exhausted"
+    assert summary.accepted_source_count == 1
+
+    sql, params = _accepted_deletes(connection)[0]
+    # 'accepted' is a SQL literal like 'rejected' is, never a bind parameter.
+    assert "s.validation_status = 'accepted'" in sql
+    assert "s.created_at < %s::timestamptz" in sql
+    # The adapter allow-list is an id array resolved from data_sources, and the
+    # NOT EXISTS is what makes deleting an accepted row safe at all.
+    assert "s.data_source_id = ANY(%s::uuid[])" in sql
+    assert "NOT EXISTS (" in sql
+    assert "e.properties ->> 'staging_evidence_id' = s.id::text" in sql
+    # Repeating 0042's partial predicate is what lets the planner use it.
+    assert "e.properties ? 'staging_evidence_id'" in sql
+    assert "ORDER BY s.created_at ASC" in sql
+    assert "LIMIT %s" in sql
+    assert params == (now - timedelta(days=7), [REALTIME_SOURCE_ID], 4)
+
+
+def test_prune_staging_evidence_runs_the_rejected_pass_first() -> None:
+    """Order matters: the accepted pass must not delay the proven backlog pass."""
+
+    connection = _StagingFakeConnection([2, 0], accepted_batches=[2, 0])
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    job.prune_staging_evidence(batch_size=2)
+
+    order = [
+        ACCEPTED_MARKER in sql
+        for sql, _params in _statements(connection, "DELETE FROM staging_evidence")
+    ]
+    assert order == [False, False, True, True]
+
+
+def test_prune_staging_evidence_accepted_pass_runs_no_delete_without_source_ids() -> None:
+    """An empty allow-list must mean "delete nothing", not "delete anything"."""
+
+    connection = _StagingFakeConnection([0], accepted_batches=[5], data_sources=[])
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence()
+
+    assert summary.accepted_stopped_reason == "no_adapter_sources"
+    assert summary.accepted_deleted_rows == 0
+    assert summary.accepted_batches == 0
+    assert summary.accepted_source_count == 0
+    assert _accepted_deletes(connection) == []
+
+
+def test_prune_staging_evidence_accepted_pass_runs_no_delete_for_excluded_adapters() -> None:
+    connection = _StagingFakeConnection(
+        [0],
+        accepted_batches=[5],
+        data_sources=[(HISTORICAL_SOURCE_ID, "official.nstc.flood_disaster_points")],
+    )
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence()
+
+    assert summary.accepted_stopped_reason == "no_adapter_sources"
+    assert _accepted_deletes(connection) == []
+
+
+def test_prune_staging_evidence_accepted_pass_can_be_disabled() -> None:
+    connection = _StagingFakeConnection([2, 0], accepted_batches=[5])
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence(batch_size=2, accepted_enabled=False)
+
+    assert summary.accepted_stopped_reason == "disabled"
+    assert summary.accepted_index_state == "skipped"
+    assert summary.accepted_deleted_rows == 0
+    assert _accepted_deletes(connection) == []
+    assert _statements(connection, "FROM data_sources") == []
+    # The rejected pass is untouched by the switch.
+    assert summary.deleted_rows == 2
+
+
+def test_prune_staging_evidence_accepted_pass_has_its_own_batch_budget() -> None:
+    connection = _StagingFakeConnection([2] * 4, accepted_batches=[2] * 10)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence(
+        batch_size=2, max_batches=2, accepted_max_batches=3
+    )
+
+    assert summary.batches == 2
+    assert summary.deleted_rows == 4
+    assert summary.accepted_batches == 3
+    assert summary.accepted_deleted_rows == 6
+    assert summary.accepted_stopped_reason == "max_batches"
+
+
+def test_prune_staging_evidence_rejects_a_non_positive_accepted_batch_ceiling() -> None:
+    job = PostgresEvidenceRetentionJob(
+        connection_factory=lambda: _StagingFakeConnection([0])
+    )
+
+    with pytest.raises(ValueError):
+        job.prune_staging_evidence(accepted_max_batches=0)
+
+
+def test_prune_staging_evidence_builds_the_accepted_partial_index_concurrently() -> None:
+    connection = _StagingFakeConnection(
+        [0], accepted_batches=[0], accepted_index_valid=[False, True]
+    )
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence()
+
+    assert summary.accepted_index_state == "ready"
+    create_sql = [
+        sql
+        for sql, _params in _statements(connection, "CREATE INDEX CONCURRENTLY")
+        if STAGING_EVIDENCE_ACCEPTED_INDEX in sql
+    ]
+    assert create_sql
+    assert "ON staging_evidence (created_at)" in create_sql[0]
+    assert "WHERE validation_status = 'accepted'" in create_sql[0]
+
+
+def test_prune_staging_evidence_holds_accepted_deletes_until_its_index_is_valid() -> None:
+    connection = _StagingFakeConnection(
+        [0], accepted_batches=[5_000], accepted_index_valid=[False, False]
+    )
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence()
+
+    assert summary.accepted_index_state == "building"
+    assert summary.accepted_stopped_reason == "index_not_ready"
+    assert summary.accepted_deleted_rows == 0
+    assert _accepted_deletes(connection) == []
+    # The rejected pass has its own index and is not held up by this one.
+    assert summary.index_state == "ready"
+
+
+def test_prune_staging_evidence_logs_each_pass_under_its_own_event(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    connection = _StagingFakeConnection([3, 0], accepted_batches=[4, 0])
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    job.prune_staging_evidence(batch_size=4)
+    logged = capsys.readouterr().out
+
+    assert "worker.maintenance.staging_retention" in logged
+    assert "worker.maintenance.staging_accepted_retention" in logged
+    accepted_line = next(
+        line
+        for line in logged.splitlines()
+        if "worker.maintenance.staging_accepted_retention" in line
+    )
+    assert '"deleted_rows": 4' in accepted_line
+    assert '"source_count": 1' in accepted_line
 
 
 def test_staging_evidence_retention_config_defaults_and_env() -> None:
@@ -595,6 +951,10 @@ def test_staging_evidence_retention_config_defaults_and_env() -> None:
     assert defaults.staging_evidence_retention_statement_timeout_ms == (
         DEFAULT_STAGING_EVIDENCE_STATEMENT_TIMEOUT_MS
     )
+    assert defaults.staging_evidence_accepted_retention_enabled is True
+    assert defaults.staging_evidence_accepted_retention_max_batches == (
+        DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_BATCHES
+    )
 
     overridden = load_worker_settings(
         {
@@ -604,6 +964,8 @@ def test_staging_evidence_retention_config_defaults_and_env() -> None:
             "STAGING_EVIDENCE_RETENTION_MAX_BATCHES": "2",
             "STAGING_EVIDENCE_RETENTION_BATCH_SIZE": "1000",
             "STAGING_EVIDENCE_RETENTION_STATEMENT_TIMEOUT_MS": "9000",
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_ENABLED": "false",
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_BATCHES": "3",
         }
     )
     assert overridden.staging_evidence_retention_enabled is False
@@ -612,3 +974,5 @@ def test_staging_evidence_retention_config_defaults_and_env() -> None:
     assert overridden.staging_evidence_retention_max_batches == 2
     assert overridden.staging_evidence_retention_batch_size == 1000
     assert overridden.staging_evidence_retention_statement_timeout_ms == 9000
+    assert overridden.staging_evidence_accepted_retention_enabled is False
+    assert overridden.staging_evidence_accepted_retention_max_batches == 3

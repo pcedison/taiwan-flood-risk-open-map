@@ -98,7 +98,7 @@ def check_summary_freshness(
     max_age_seconds: int,
 ) -> FreshnessCheck:
     resolved_checked_at = _aware_utc(checked_at or datetime.now(UTC))
-    cadence = _cadence_for_adapter(summary.adapter_key)
+    cadence = cadence_for_adapter(summary.adapter_key)
     if summary.status == "failed":
         return FreshnessCheck(
             adapter_key=summary.adapter_key,
@@ -338,7 +338,15 @@ def _realtime_freshness_check(
     )
 
 
-def _cadence_for_adapter(adapter_key: str) -> FreshnessCadence:
+def cadence_for_adapter(adapter_key: str) -> FreshnessCadence:
+    """Classify an adapter by how often its source is expected to publish.
+
+    Public because ``jobs/evidence_retention.py`` reuses it to decide which
+    adapters' accepted staging rows are single-cycle telemetry (#372); keeping
+    one classifier means a new adapter cannot be realtime for freshness and
+    something else for retention.
+    """
+
     if adapter_key in STATIC_SLOW_CADENCE_ADAPTER_KEYS:
         return "static"
     if adapter_key in WARNING_EVENT_ADAPTER_KEYS:

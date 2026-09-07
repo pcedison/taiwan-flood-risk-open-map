@@ -143,44 +143,72 @@ realtime bridge as a substitute for this evidence.
 
 ## Maintenance Retention
 
-`python -m app.scheduler --maintenance` runs four bounded retention passes per
+`python -m app.scheduler --maintenance` runs four bounded retention jobs per
 cycle, in this order: realtime `evidence`, `location_queries`, expired
-`raw_snapshots`, then `staging_evidence`. The staging pass is last on purpose --
-it is the largest and newest, and must never delay the privacy passes above it.
+`raw_snapshots`, then `staging_evidence` (itself two passes). The staging job is
+last on purpose -- it is the largest and newest, and must never delay the
+privacy passes above it.
 
 ### staging_evidence
 
 `staging_evidence` holds one audit row per normalized item per ingestion cycle
-and was never pruned before #367 (14,003,032 live rows / 20.8 GB on the hosted
-node on 2026-09-06, against a 2 GB node whose whole database is ~30 GB, so every
-uncached query reads from disk).
+and was never pruned before #367 (14.35 M live rows / 21.5 GB on the hosted node
+on 2026-09-06, against a 2 GB node whose whole database is ~30 GB, so every
+uncached query reads from disk). It runs as two passes, rejected then accepted,
+each with its own partial index, batch budget and `stopped_reason`.
 
-What the pass deletes:
+#### Pass 1: rejected (#370)
 
-- Rows whose `validation_status` is `rejected` and whose `created_at` is older
-  than `STAGING_EVIDENCE_RETENTION_DAYS` (default 7). `rejected` is terminal:
-  `pipelines/promotion.py` writes it for a terminal rejection and for the
-  batched `idempotent_existing_observation` settle, and no reader selects it.
+Rows whose `validation_status` is `rejected` and whose `created_at` is older
+than `STAGING_EVIDENCE_RETENTION_DAYS` (default 7). `rejected` is terminal:
+`pipelines/promotion.py` writes it for a terminal rejection and for the batched
+`idempotent_existing_observation` settle, and no reader selects it.
 
-What the pass never deletes:
+#### Pass 2: accepted orphans (#372)
 
-- Anything still marked `accepted`. The schema has no `promoted`
-  `validation_status` (`0002_phase1_core_domain.sql` allows
-  pending/accepted/rejected/quarantined, and `pipelines/staging.py` only ever
-  writes accepted or rejected), so a promoted row stays `accepted` and cannot be
-  told apart from one still awaiting promotion without a per-row probe into
-  `evidence`. `jobs/historical_coverage.py` also still reads aged accepted rows.
-  Measure the split before proposing a wider window:
+Of the 12.64 M `accepted` rows on the hosted node only ~2.25 M are still
+referenced by an `evidence` row. The other ~10.4 M are realtime telemetry that
+*was* promoted and whose evidence row `EVIDENCE_REALTIME_RETENTION_HOURS` (48 h)
+then deleted, leaving a staging row nothing can ever read again:
+`fetch_accepted_staging` only promotes rows no evidence points at, and a
+week-old realtime observation is long past its 6 h scoring window.
 
-  ```sh
-  psql "$DATABASE_URL" -c "SELECT validation_status, count(*) FROM staging_evidence GROUP BY 1 ORDER BY 2 DESC;"
-  ```
+This pass deletes an `accepted` row only when **all** of the following hold:
+
+- `created_at` is older than `STAGING_EVIDENCE_RETENTION_DAYS`;
+- its `data_source_id` resolves to a realtime-cadence adapter. The rule is
+  `jobs/evidence_retention.is_orphan_prunable_adapter`, derived from
+  `jobs/freshness.cadence_for_adapter` rather than a hand-kept list, so an
+  adapter cannot be realtime for freshness and something else for retention.
+  Excluded: `HISTORICAL_COVERAGE_ADAPTER_KEYS` (`official.nstc.*`,
+  `official.wra.historical_flood` -- `jobs/historical_coverage.py` re-reads
+  those accepted rows years later), `STATIC_SLOW_CADENCE_ADAPTER_KEYS`
+  (flood potential and the other slow snapshots) and `WARNING_EVENT_ADAPTER_KEYS`
+  (NCDR CAP, CWA heavy rain). The allow-list resolves to 54 of the seeded
+  `data_sources` rows today; if it ever resolves to none the pass runs no
+  `DELETE` at all and reports `stopped_reason=no_adapter_sources`;
+- no `evidence` row references it. That is a `NOT EXISTS` probe through
+  `idx_evidence_staging_evidence_id` (migration 0042), so a row still awaiting
+  promotion, or one whose evidence is retained, is never touched.
+
+Rows with no `data_source_id` cannot be classified and are therefore never
+eligible.
+
+#### What neither pass deletes
 
 - `pending` and `quarantined` rows, which the pipeline never writes and which
   are left for human review.
+- Any `accepted` row an `evidence` row still points at, of any age.
+
+Measure the split before proposing a wider window:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT validation_status, count(*) FROM staging_evidence GROUP BY 1 ORDER BY 2 DESC;"
+```
 
 Promotion correctness is unaffected: idempotency compares
-`evidence.properties ->> 'staging_evidence_id'` on the evidence side, and
+`evidence.properties ->> 'staging_evidence_id'` on the evidence side -- which is
+exactly what the accepted pass checks before deleting -- and
 `staging_evidence.raw_snapshot_id` is `ON DELETE SET NULL`.
 
 ### Bounds
@@ -198,21 +226,35 @@ Batches need no cursor: each one deletes exactly the rows it selected, so the
 next batch cannot see them again. They are ordered by `created_at`, which takes
 the oldest eligible rows first and matches the supporting index.
 
+The accepted pass has its own ceiling,
+`STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_BATCHES` (default 10), and its own
+on/off switch, `STAGING_EVIDENCE_ACCEPTED_RETENTION_ENABLED`, so throttling or
+stopping it never touches the rejected backlog it runs after. It shares the
+batch size, timeouts and retention window.
+
 Measured on local PostGIS with 500 000 aged rejected rows (117 MB table): a
 5 000-row batch costs ~100 ms, so a full 10-batch cycle deletes 50 000 rows in
 about a second. Once the backlog is gone the terminal probing batch reads the
-index and returns nothing in ~3 ms. The hosted table is disk-bound, so budget
-several times that per batch and still well under the 5 s limit. What paces the
-backfill is the 300 s scheduler interval, not the batch cost.
+index and returns nothing in ~3 ms. On a 1 M row local table (800 k accepted,
+15 % of them still referenced, 248 MB) the accepted batch select is 12 ms and
+24 k buffers, and a whole 5 000-row accepted batch ~80 ms end to end. The hosted
+table is disk-bound, so budget several times that per batch and still well under
+the 5 s limit. What paces the backfill is the 300 s scheduler interval, not the
+batch cost: at 50 000 rows per cycle the ~10.4 M accepted orphan backlog clears
+in roughly **17 hours**, on top of the rejected backlog.
 
 ### The partial index
 
-The batch select depends on:
+Each pass depends on one:
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_staging_evidence_rejected_created_at
     ON staging_evidence (created_at)
     WHERE validation_status = 'rejected';
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_staging_evidence_accepted_created_at
+    ON staging_evidence (created_at)
+    WHERE validation_status = 'accepted';
 ```
 
 Without it the select has to walk the table to find 5 000 aged rejected rows:
@@ -230,9 +272,18 @@ left invalid by a build that died half way is dropped concurrently and rebuilt,
 because the planner ignores an invalid index and its presence blocks
 `CREATE INDEX ... IF NOT EXISTS` from replacing it.
 
-**Until the index is valid the job deletes nothing** and reports
+**Until the index is valid that pass deletes nothing** and reports
 `stopped_reason=index_not_ready`. That is deliberate: the alternative is the
-pathological scan above.
+pathological scan above. The two passes are independent, so the rejected pass
+keeps working while the accepted index is still building.
+
+The accepted batch select also carries an `OFFSET 0` inside its `NOT EXISTS`.
+That is an optimizer fence, not dead syntax: without it the planner may pull the
+subquery up into a *hash* anti-join, which has to read every aged accepted row
+(12.6 M of them) and then `Sort` them, because the join destroys the index order
+the `LIMIT` relies on. No batch would ever finish inside 5 s. The fence keeps it
+a per-row `SubPlan` probe into migration 0042's index; the PostGIS acceptance
+test asserts the plan shape, including the absence of a `Sort` node.
 
 On the hosted 14 M row table the concurrent build takes **minutes to tens of
 minutes** and is IO-heavy while it runs, and the maintenance cycle waits for it
@@ -244,33 +295,50 @@ the statement above by hand and set:
 STAGING_EVIDENCE_RETENTION_ENSURE_INDEX=false
 ```
 
-The deletes still run with that flag off; only the build step is skipped. If the
-index is in fact missing, the per-batch `statement_timeout` bounds the damage to
-one cancelled batch per cycle. Check the build afterwards with:
+That flag skips the build, **not** the safety check: the job still probes
+`pg_index.indisvalid` (scoped to `current_schema()`), and if the hand-built
+index is missing or invalid it reports `index_state=skipped`,
+`stopped_reason=index_not_ready` and logs
+`worker.maintenance.staging_retention_index_missing` at warning level rather
+than deleting into the pathological scan. Check the build afterwards with:
 
 ```sh
-psql "$DATABASE_URL" -c "SELECT indexrelid::regclass, indisvalid FROM pg_index WHERE indexrelid = 'idx_staging_evidence_rejected_created_at'::regclass;"
+psql "$DATABASE_URL" -c "SELECT indexrelid::regclass, indisvalid FROM pg_index WHERE indexrelid IN ('idx_staging_evidence_rejected_created_at'::regclass, 'idx_staging_evidence_accepted_created_at'::regclass);"
 ```
 
 ### Observing a rollout
 
-- `worker.maintenance.staging_retention` log events carry `deleted_rows`,
-  `batches`, `index_state`, and `stopped_reason` per cycle. Expect
-  `index_state=building` and `stopped_reason=index_not_ready` for the cycles the
-  concurrent index build occupies, before any row is deleted.
+- `worker.maintenance.staging_retention` (rejected) and
+  `worker.maintenance.staging_accepted_retention` (accepted orphans) log events
+  carry `deleted_rows`, `batches`, `index_state` and `stopped_reason` per cycle,
+  in the same shape; the accepted event adds `source_count`, the number of
+  `data_sources` rows the adapter rule allowed. Expect `index_state=building`
+  and `stopped_reason=index_not_ready` for the cycles each concurrent index
+  build occupies, before any row is deleted.
 - `worker.maintenance.staging_retention_index_built` /
-  `..._index_failed` report the index step;
-  `..._timeout_streak` warns after three consecutive timed-out cycles.
+  `..._index_failed` / `..._index_missing` report the index step, each naming
+  the `index_name` it applies to; `..._timeout_streak` warns after three
+  consecutive timed-out cycles.
 - `scheduler.maintenance.completed` carries `staging_evidence_rows_pruned`,
-  `staging_evidence_stopped_reason` and `staging_evidence_index_state`.
+  `staging_evidence_stopped_reason` and `staging_evidence_index_state`, plus
+  `staging_evidence_accepted_rows_pruned`,
+  `staging_evidence_accepted_stopped_reason` and
+  `staging_evidence_accepted_index_state`.
+- A healthy accepted rollout ends with the accepted count near the ~2.25 M rows
+  evidence still references:
+
+  ```sh
+  psql "$DATABASE_URL" -c "SELECT count(*) FROM staging_evidence WHERE validation_status = 'accepted';"
+  ```
 - The scheduler heartbeat in `GET /v1/ingestion-readiness` must stay fresh
   across the backfill; a stalling heartbeat means the prune is competing with
   ingestion and `STAGING_EVIDENCE_RETENTION_MAX_BATCHES` should be lowered.
 - The next `hosted-db-diagnostics.json` capture should show the
   `staging_evidence` live row count falling by up to 50 000 per cycle.
 
-Set `STAGING_EVIDENCE_RETENTION_ENABLED=false` to stop the pass without a
-redeploy.
+Set `STAGING_EVIDENCE_RETENTION_ENABLED=false` to stop both passes without a
+redeploy, or `STAGING_EVIDENCE_ACCEPTED_RETENTION_ENABLED=false` to stop only
+the accepted-orphan pass.
 
 ### Autovacuum thresholds
 
