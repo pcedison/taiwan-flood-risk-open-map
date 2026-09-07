@@ -53,6 +53,10 @@ SOURCE_NOT_CONFIGURED_CAUSES = {
     "source_not_enabled",
 }
 DATA_SOURCE_MODES = ("strict", "degraded-ok")
+# How long a required source may report ``upstream_unavailable`` before the run
+# fails. Below it the worker is simply retrying through a publisher outage;
+# above it the outage is no longer transient and needs a human.
+UPSTREAM_OUTAGE_ADVISORY_MAX_SECONDS = 6 * 3600
 REQUIRED_NEARBY_SIGNALS = {
     "rainfall",
     "water_level",
@@ -165,7 +169,11 @@ def main(argv: list[str] | None = None) -> int:
             payload_data_source,
             official_source_state,
             payload_advisories,
-        ) = check_risk_payload(risk.payload, radius_m=args.radius_m)
+        ) = check_risk_payload(
+            risk.payload,
+            radius_m=args.radius_m,
+            data_source_mode=args.data_source_mode,
+        )
         contract_failures.extend(payload_contract)
         data_source_failures.extend(payload_data_source)
         advisories.extend(payload_advisories)
@@ -265,7 +273,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def check_risk_payload(
-    payload: Mapping[str, Any], *, radius_m: int
+    payload: Mapping[str, Any],
+    *,
+    radius_m: int,
+    data_source_mode: str = "degraded-ok",
 ) -> tuple[list[str], list[str], str, list[str]]:
     """Split risk payload assertions into contract and data-source classes.
 
@@ -308,7 +319,9 @@ def check_risk_payload(
         contract_failures.append("risk response missing nearby_realtime_coverage")
     else:
         contract_failures.extend(_check_nearby_coverage(coverage, radius_m=radius_m))
-        worker_source_health_failures, advisories = _check_worker_source_health(coverage)
+        worker_source_health_failures, advisories = _check_worker_source_health(
+            coverage, data_source_mode=data_source_mode
+        )
         data_source_failures.extend(worker_source_health_failures)
 
     # The API intentionally fails closed from low to unknown when a required
@@ -543,6 +556,8 @@ def _check_nearby_coverage(coverage: Mapping[str, Any], *, radius_m: int) -> lis
 
 def _check_worker_source_health(
     coverage: Mapping[str, Any],
+    *,
+    data_source_mode: str = "degraded-ok",
 ) -> tuple[list[str], list[str]]:
     """Split required-source health into run failures and upstream advisories.
 
@@ -550,6 +565,15 @@ def _check_worker_source_health(
     the upstream publisher stopped updating, and ``database_unavailable`` means
     our own database was busy for one cycle. Neither is a regression this run
     should fail on, so both are reported instead.
+
+    ``upstream_unavailable`` is the same class of event seen from one step
+    further out: the publisher is unreachable and the worker retries every
+    cycle. In ``degraded-ok`` mode that is an advisory for as long as the last
+    successful observation is within
+    ``UPSTREAM_OUTAGE_ADVISORY_MAX_SECONDS``; past that the outage has stopped
+    being transient and fails the run. ``strict`` mode fails on it either way,
+    and a source that reports no ``observed_at`` fails too, because an outage
+    whose length cannot be measured cannot be called short.
     """
 
     if coverage.get("source_health_checked") is not True:
@@ -594,10 +618,48 @@ def _check_worker_source_health(
                 coverage,
             ):
                 continue
+            if reason == "upstream_unavailable" and data_source_mode == "degraded-ok":
+                outage_seconds = _upstream_outage_seconds(source)
+                if outage_seconds is not None:
+                    if outage_seconds <= UPSTREAM_OUTAGE_ADVISORY_MAX_SECONDS:
+                        advisories.append(
+                            f"required source {source_id} upstream_unavailable "
+                            "(worker retrying; upstream outage)"
+                        )
+                    else:
+                        failures.append(
+                            f"required worker source {source_id} health is {status} "
+                            "(upstream_unavailable); upstream outage exceeded 6h"
+                        )
+                    continue
             failures.append(
                 f"required worker source {source_id} health is {status} ({reason})"
             )
     return failures, advisories
+
+
+def _upstream_outage_seconds(source: Mapping[str, Any]) -> float | None:
+    """Seconds since this source last carried a usable observation.
+
+    ``observed_at`` is the worker's ``latest_observed_at`` for the source, so it
+    is the last moment the upstream publisher was reachable. ``None`` means the
+    payload gave no measurable outage length.
+    """
+
+    observed_at = _parse_timestamp(source.get("observed_at"))
+    if observed_at is None:
+        return None
+    return (datetime.now(UTC) - observed_at).total_seconds()
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _has_hydrology_redundancy(

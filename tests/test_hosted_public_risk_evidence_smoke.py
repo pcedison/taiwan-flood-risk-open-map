@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -914,4 +915,97 @@ def test_database_unavailable_required_source_is_an_advisory_not_a_failure() -> 
     assert advisories == [
         "required worker source official.wra_iow.flood_depth is degraded "
         "(database_unavailable); the database was busy and the next cycle retries"
+    ]
+
+
+def _upstream_outage_source(*, age_hours: float, reason: str = "upstream_unavailable") -> dict:
+    observed_at = datetime.now(UTC) - timedelta(hours=age_hours)
+    return {
+        "source_id": "official-cwa-rainfall",
+        "name": "中央氣象署雨量觀測",
+        "signal_types": ["rainfall"],
+        "health_status": "failed",
+        "reason_code": reason,
+        "observed_at": observed_at.isoformat(),
+        "required_for_absence": True,
+    }
+
+
+def test_short_upstream_outage_of_a_required_source_is_an_advisory() -> None:
+    coverage = _risk_payload()["nearby_realtime_coverage"]
+    coverage["source_health"] = [_upstream_outage_source(age_hours=1)]
+
+    failures, advisories = smoke._check_worker_source_health(
+        coverage, data_source_mode="degraded-ok"
+    )
+
+    assert failures == []
+    assert advisories == [
+        "required source official-cwa-rainfall upstream_unavailable "
+        "(worker retrying; upstream outage)"
+    ]
+
+
+def test_upstream_outage_longer_than_six_hours_still_fails() -> None:
+    coverage = _risk_payload()["nearby_realtime_coverage"]
+    coverage["source_health"] = [_upstream_outage_source(age_hours=7)]
+
+    failures, advisories = smoke._check_worker_source_health(
+        coverage, data_source_mode="degraded-ok"
+    )
+
+    assert failures == [
+        "required worker source official-cwa-rainfall health is failed "
+        "(upstream_unavailable); upstream outage exceeded 6h"
+    ]
+    assert advisories == []
+
+
+def test_strict_mode_fails_a_short_upstream_outage() -> None:
+    coverage = _risk_payload()["nearby_realtime_coverage"]
+    coverage["source_health"] = [_upstream_outage_source(age_hours=1)]
+
+    failures, advisories = smoke._check_worker_source_health(
+        coverage, data_source_mode="strict"
+    )
+
+    assert failures == [
+        "required worker source official-cwa-rainfall health is failed "
+        "(upstream_unavailable)"
+    ]
+    assert advisories == []
+
+
+def test_pipeline_unavailable_required_source_is_never_an_advisory() -> None:
+    coverage = _risk_payload()["nearby_realtime_coverage"]
+    coverage["source_health"] = [
+        _upstream_outage_source(age_hours=1, reason="pipeline_unavailable")
+    ]
+
+    failures, advisories = smoke._check_worker_source_health(
+        coverage, data_source_mode="degraded-ok"
+    )
+
+    assert failures == [
+        "required worker source official-cwa-rainfall health is failed "
+        "(pipeline_unavailable)"
+    ]
+    assert advisories == []
+
+
+def test_check_risk_payload_reports_a_short_upstream_outage_as_an_advisory() -> None:
+    payload = _risk_payload()
+    payload["nearby_realtime_coverage"]["source_health"] = [
+        _upstream_outage_source(age_hours=1)
+    ]
+
+    contract_failures, data_source_failures, _state, advisories = smoke.check_risk_payload(
+        payload, radius_m=500, data_source_mode="degraded-ok"
+    )
+
+    assert contract_failures == []
+    assert data_source_failures == []
+    assert advisories == [
+        "required source official-cwa-rainfall upstream_unavailable "
+        "(worker retrying; upstream outage)"
     ]

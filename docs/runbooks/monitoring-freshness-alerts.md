@@ -297,6 +297,22 @@ run from overlapping the next scheduled one. Each run executes:
   - A source that *is* enabled but stalled (`reason_code: pipeline_stalled`, or
     an unhealthy required source) still fails the run in both modes. Degrading
     only covers "the source was never switched on", not "the source broke".
+  - One exception to that, matching how `upstream_stale` and
+    `database_unavailable` are already handled: in `degraded-ok` mode a required
+    source that is `failed` with `reason_code: upstream_unavailable` is recorded
+    as an **advisory** rather than a failure, because the upstream publisher is
+    unreachable while our own worker keeps retrying every cycle. The advisory
+    reads `required source <id> upstream_unavailable (worker retrying; upstream
+    outage)`. This is bounded: the source's `observed_at` (the worker's last
+    usable observation) must be within
+    `UPSTREAM_OUTAGE_ADVISORY_MAX_SECONDS` (6 hours) of now. Past 6 hours the
+    outage is no longer transient and the run fails with `upstream outage
+    exceeded 6h`, so a permanently broken upstream cannot stay green. A source
+    that reports no `observed_at` also fails, because an outage whose length
+    cannot be measured cannot be called short. `strict` mode fails on
+    `upstream_unavailable` in every case, and every other failed reason
+    (`pipeline_unavailable`, `source_misconfigured`, `pipeline_stalled`) still
+    fails the run.
 - `scripts/local-source-signal-gap-discovery-refresh.py` against the
   data.gov.tw dataset export for every current signal-gap group.
 - `scripts/local-source-signal-gap-dispatch-readiness.py` to turn the latest
