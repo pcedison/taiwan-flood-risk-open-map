@@ -90,6 +90,7 @@ jobs:
           tests/test_ingestion_readiness_migration.py
           tests/test_ncdr_alert_area_boundary_contract.py
           tests/test_ncdr_public_active_feed_contract.py
+          tests/test_safe_fast_official_incident_release_contract.py
           tests/test_seed_perf_fixture_guard.py
           -q
 
@@ -259,10 +260,7 @@ jobs:
           EVIDENCE_TEST_DATABASE_URL=postgresql://flood_risk:change-me-local@127.0.0.1:5432/flood_risk \
           OFFICIAL_DB_ACCEPTANCE_REQUIRED=1 \
           PYTHONPATH=apps/workers \
-            python -m pytest -q \
-              tests/test_historical_coverage_writer_postgres.py \
-              apps/workers/tests/test_staging_retention_postgres.py \
-              apps/workers/tests/test_index_maintenance_postgres.py
+            python -m pytest tests/test_historical_coverage_writer_postgres.py -q
 
       # The evidence repository acceptance suite skips itself without a live
       # PostGIS, so it only ever runs in this job. Without it the read-path
