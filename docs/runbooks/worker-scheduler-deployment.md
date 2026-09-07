@@ -389,12 +389,16 @@ job, on an autocommit connection, `CONCURRENTLY`, exactly like
 - **One *attempt* per index per window.** A rebuild that fails records the
   attempt, so the next cycle five minutes later does not retry into the same
   contention. The next window tries again.
+- **Nothing over `EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES`** (default 512 MiB) --
+  see "The disk ceiling" below.
 - **Skips**, all recorded in the log line: `skipped_missing` (not in the current
   schema), `skipped_invalid` (`pg_index.indisvalid = false` -- needs a human,
   see below), `skipped_small` (under
   `EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES`, default 8 MiB),
-  `skipped_interval`, `skipped_attempted`, `skipped_unsupported`
-  (PostgreSQL < 12, where `REINDEX ... CONCURRENTLY` does not exist).
+  `skipped_too_large`, `skipped_interval`, `skipped_attempted`,
+  `skipped_unsupported` (PostgreSQL < 12, where `REINDEX ... CONCURRENTLY` does
+  not exist). A skip never consumes the cycle's single rebuild: the pass moves
+  on to the next index on the list.
 - **Bounds.** `EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS` (default 5 000) so the
   brief locks a concurrent rebuild takes never queue behind ingestion, and
   `EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS` (default 1 800 000 = 30 min) so
@@ -407,6 +411,44 @@ job, on an autocommit connection, `CONCURRENTLY`, exactly like
   skipped; retention still runs.
 - Set `EVIDENCE_INDEX_REINDEX_ENABLED=false` to stop rebuilding without a
   redeploy.
+
+### The disk ceiling
+
+`REINDEX INDEX CONCURRENTLY` builds the replacement alongside the original and
+only then swaps them, so for the whole of the rebuild the index exists twice:
+the operation needs the index's own size again in free disk, plus WAL. The
+hosted database is roughly 30 GB on a Zeabur volume, and neither the worker nor
+`hosted-db-diagnostics.json` can read how much space that volume has left.
+Running it out mid-rebuild leaves the table locked and the node down -- the
+exact #317 failure this job exists to avoid.
+
+So `EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES` (default 512 MiB) holds back
+anything the pass cannot prove is safe, recording `skipped_too_large`. At the
+default that is `evidence_source_raw_ref_unique` (932.9 MiB on 2026-09-07, and
+the busiest index on the table: 784 M scans serving promotion idempotency). It
+stays bloated on purpose until an operator has looked at the volume.
+
+To clear it, check the volume first. Zeabur shows the service's volume usage in
+the dashboard under the Postgres service's Storage/Volume panel; from a shell on
+the node `df -h "$PGDATA"` answers the same question. Also ask PostgreSQL what
+the rebuild will need:
+
+```sh
+psql "$DATABASE_URL" -c "SELECT indexrelname, pg_size_pretty(pg_relation_size(indexrelid)) FROM pg_stat_user_indexes WHERE relname = 'evidence' ORDER BY pg_relation_size(indexrelid) DESC;"
+psql "$DATABASE_URL" -c "SELECT pg_size_pretty(pg_database_size(current_database()));"
+```
+
+Raise the ceiling only when free space is comfortably more than twice the
+largest index you are enabling -- for the 933 MiB unique index that means at
+least ~3 GB free, which leaves room for the duplicate plus the WAL the build
+generates. Then set it to just above that index and redeploy the worker:
+
+```
+EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES=1073741824   # 1 GiB
+```
+
+Prefer raising it one index at a time over removing the bound. Put it back to
+the default once the backlog of oversized indexes is rebuilt.
 
 ### Restart semantics
 

@@ -17,6 +17,7 @@ import pytest
 from app.config import load_worker_settings
 from app.jobs import index_maintenance
 from app.jobs.index_maintenance import (
+    DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES,
     DEFAULT_EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES,
     EVIDENCE_REINDEX_INDEXES,
     MINIMUM_SERVER_VERSION_NUM,
@@ -391,6 +392,70 @@ def test_reindex_skips_an_index_below_the_size_floor() -> None:
     assert _reindexes(cursor) == []
 
 
+def test_reindex_skips_an_index_too_large_to_duplicate_safely() -> None:
+    """A concurrent rebuild needs the index's own size again in free disk.
+
+    The hosted database is ~30 GB on a Zeabur volume whose free space nothing
+    here can read, and filling it locks the table -- the #317 failure mode this
+    job exists to avoid. So the 933 MiB evidence_source_raw_ref_unique waits
+    until an operator has checked the volume and raised the ceiling.
+    """
+
+    huge = "evidence_source_raw_ref_unique"
+    cursor = _FakeCursor(
+        states={
+            huge: (978 * 1024 * 1024, 2_270_000.0, True),
+            **_bloated(PRIMARY_INDEX),
+        }
+    )
+
+    summary = _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+        index_names=(huge, PRIMARY_INDEX), now=IN_WINDOW
+    )
+
+    # And skipping it does not use up the cycle's single rebuild: the next
+    # index on the list still gets its turn.
+    assert summary.outcome == "reindexed"
+    assert summary.index == PRIMARY_INDEX
+    assert summary.skipped == {huge: "skipped_too_large"}
+    assert _reindexes(cursor) == [f'REINDEX INDEX CONCURRENTLY "{PRIMARY_INDEX}"']
+
+
+def test_reindex_rebuilds_a_large_index_once_the_ceiling_is_raised() -> None:
+    huge = "evidence_source_raw_ref_unique"
+    cursor = _FakeCursor(states={huge: (978 * 1024 * 1024, 2_270_000.0, True)})
+
+    summary = _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+        index_names=(huge,),
+        max_index_bytes=2 * 1024 * 1024 * 1024,
+        now=IN_WINDOW,
+    )
+
+    assert summary.outcome == "reindexed"
+    assert summary.index == huge
+
+
+def test_reindex_rejects_a_ceiling_at_or_below_the_size_floor() -> None:
+    cursor = _FakeCursor(states=_bloated(PRIMARY_INDEX))
+
+    with pytest.raises(ValueError, match="greater than min_size_bytes"):
+        _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+            index_names=(PRIMARY_INDEX,),
+            min_size_bytes=8 * 1024 * 1024,
+            max_index_bytes=8 * 1024 * 1024,
+            now=IN_WINDOW,
+        )
+
+
+def test_default_ceiling_holds_back_the_largest_hosted_evidence_index() -> None:
+    """933 MiB (evidence_source_raw_ref_unique on 2026-09-07) is over it."""
+
+    assert DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES == 512 * 1024 * 1024
+    assert 933 * 1024 * 1024 > DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES
+    # ...and the partial GiST index the read path scans (52 MiB) is well under.
+    assert 52 * 1024 * 1024 < DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES
+
+
 def test_reindex_disables_itself_below_postgresql_12() -> None:
     """REINDEX CONCURRENTLY is 12+; the fallback takes ACCESS EXCLUSIVE."""
 
@@ -469,6 +534,7 @@ def test_settings_default_to_the_low_traffic_taipei_window() -> None:
     assert settings.evidence_index_reindex_window_utc == "18:00-21:00"
     assert settings.evidence_index_reindex_interval_hours == 168
     assert settings.evidence_index_reindex_min_size_bytes == 8 * 1024 * 1024
+    assert settings.evidence_index_reindex_max_index_bytes == 512 * 1024 * 1024
     assert settings.evidence_index_reindex_lock_timeout_ms == 5_000
     assert settings.evidence_index_reindex_statement_timeout_ms == 1_800_000
     # None means "whatever the job's own list says".
@@ -483,6 +549,7 @@ def test_settings_can_override_the_index_list_and_the_window() -> None:
             "EVIDENCE_INDEX_REINDEX_WINDOW_UTC": "22:00-02:00",
             "EVIDENCE_INDEX_REINDEX_INTERVAL_HOURS": "24",
             "EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES": "1048576",
+            "EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES": "2147483648",
         }
     )
 
@@ -491,3 +558,4 @@ def test_settings_can_override_the_index_list_and_the_window() -> None:
     assert settings.evidence_index_reindex_window_utc == "22:00-02:00"
     assert settings.evidence_index_reindex_interval_hours == 24
     assert settings.evidence_index_reindex_min_size_bytes == 1_048_576
+    assert settings.evidence_index_reindex_max_index_bytes == 2_147_483_648

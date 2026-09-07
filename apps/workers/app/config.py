@@ -149,6 +149,7 @@ class WorkerSettings:
     evidence_index_reindex_window_utc: str
     evidence_index_reindex_interval_hours: int
     evidence_index_reindex_min_size_bytes: int
+    evidence_index_reindex_max_index_bytes: int
     evidence_index_reindex_lock_timeout_ms: int
     evidence_index_reindex_statement_timeout_ms: int
     freshness_max_age_seconds: int
@@ -736,6 +737,11 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES",
             default=8 * 1024 * 1024,
+        ),
+        evidence_index_reindex_max_index_bytes=env_int(
+            values,
+            "EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES",
+            default=512 * 1024 * 1024,
         ),
         evidence_index_reindex_lock_timeout_ms=env_int(
             values,

@@ -30,7 +30,10 @@ on a 2 GB node:
   02:00-05:00 Taipei, the daily traffic trough);
 * at most one index per maintenance cycle, so no cycle runs for an hour;
 * at most one rebuild per index per ``interval_hours`` (default one week);
-* at most one *attempt* per index per window, so a failing rebuild cannot spin.
+* at most one *attempt* per index per window, so a failing rebuild cannot spin;
+* nothing above ``max_index_bytes``, because a concurrent rebuild needs the
+  index's own size again in free disk and this job cannot see how much the
+  hosted volume has left.
 
 The "when did this last run" state lives in module-level dicts, the same
 trade-off ``evidence_retention._staging_timeout_streak`` makes: the scheduler is
@@ -75,6 +78,14 @@ DEFAULT_EVIDENCE_INDEX_REINDEX_INTERVAL_HOURS = 168
 # hosted numbers make 8 MiB the natural floor: every evidence index worth
 # rebuilding there is 7.5 MiB or larger.
 DEFAULT_EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES = 8 * 1024 * 1024
+# The old and the new index coexist for the whole of a concurrent rebuild, so
+# the operation needs its own size again in free space. The hosted database is
+# ~30 GB on a Zeabur volume whose free space nothing here can read, and running
+# it out of space would lock the table and take the node down -- the #317
+# failure mode this job exists to avoid. So a ceiling, low enough that the
+# 933 MiB evidence_source_raw_ref_unique waits until an operator has looked at
+# the volume and raised it deliberately.
+DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES = 512 * 1024 * 1024
 DEFAULT_EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS = 5_000
 DEFAULT_EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS = 1_800_000
 # REINDEX ... CONCURRENTLY landed in PostgreSQL 12. Below that the only
@@ -158,6 +169,7 @@ class PostgresIndexMaintenanceJob:
         window_utc: str = DEFAULT_EVIDENCE_INDEX_REINDEX_WINDOW_UTC,
         interval_hours: int = DEFAULT_EVIDENCE_INDEX_REINDEX_INTERVAL_HOURS,
         min_size_bytes: int = DEFAULT_EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES,
+        max_index_bytes: int = DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES,
         lock_timeout_ms: int = DEFAULT_EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS,
         statement_timeout_ms: int = DEFAULT_EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS,
         now: datetime | None = None,
@@ -180,6 +192,10 @@ class PostgresIndexMaintenanceJob:
             raise ValueError("interval_hours must be a positive integer")
         if min_size_bytes < 0:
             raise ValueError("min_size_bytes must not be negative")
+        if max_index_bytes < 1:
+            raise ValueError("max_index_bytes must be a positive integer")
+        if max_index_bytes <= min_size_bytes:
+            raise ValueError("max_index_bytes must be greater than min_size_bytes")
         if lock_timeout_ms < 1:
             raise ValueError("lock_timeout_ms must be a positive integer")
         if statement_timeout_ms < 1:
@@ -203,6 +219,7 @@ class PostgresIndexMaintenanceJob:
                 window_started_at=window_started_at,
                 interval_hours=interval_hours,
                 min_size_bytes=min_size_bytes,
+                max_index_bytes=max_index_bytes,
                 lock_timeout_ms=lock_timeout_ms,
                 statement_timeout_ms=statement_timeout_ms,
                 now=resolved_now,
@@ -226,6 +243,7 @@ class PostgresIndexMaintenanceJob:
         window_started_at: datetime,
         interval_hours: int,
         min_size_bytes: int,
+        max_index_bytes: int,
         lock_timeout_ms: int,
         statement_timeout_ms: int,
         now: datetime,
@@ -248,6 +266,7 @@ class PostgresIndexMaintenanceJob:
                     state,
                     index_name=index_name,
                     min_size_bytes=min_size_bytes,
+                    max_index_bytes=max_index_bytes,
                     interval_hours=interval_hours,
                     window_started_at=window_started_at,
                     now=now,
@@ -351,6 +370,7 @@ def _skip_reason(
     *,
     index_name: str,
     min_size_bytes: int,
+    max_index_bytes: int,
     interval_hours: int,
     window_started_at: datetime,
     now: datetime,
@@ -364,6 +384,13 @@ def _skip_reason(
         return "skipped_invalid"
     if state.size_bytes < min_size_bytes:
         return "skipped_small"
+    if state.size_bytes > max_index_bytes:
+        # Both copies exist until the swap, so the rebuild needs this much free
+        # space again. Nothing here can read the hosted volume's free space, and
+        # filling it locks the table -- so a big index waits for an operator to
+        # check the volume and raise the ceiling. Skipping does not use up the
+        # cycle's single rebuild: the loop moves on to the next index.
+        return "skipped_too_large"
     last_reindex_at = _last_reindex_at.get(index_name)
     if last_reindex_at is not None and now - last_reindex_at < timedelta(
         hours=interval_hours

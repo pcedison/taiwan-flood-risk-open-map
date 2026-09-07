@@ -395,6 +395,7 @@ def test_scheduler_maintenance_reindexes_after_the_staging_prune(
             "window_utc": SETTINGS.evidence_index_reindex_window_utc,
             "interval_hours": SETTINGS.evidence_index_reindex_interval_hours,
             "min_size_bytes": SETTINGS.evidence_index_reindex_min_size_bytes,
+            "max_index_bytes": SETTINGS.evidence_index_reindex_max_index_bytes,
             "lock_timeout_ms": SETTINGS.evidence_index_reindex_lock_timeout_ms,
             "statement_timeout_ms": (
                 SETTINGS.evidence_index_reindex_statement_timeout_ms
