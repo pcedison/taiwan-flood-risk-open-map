@@ -35,6 +35,7 @@ from infra.scripts.apply_migrations import apply_migrations  # noqa: E402
 
 TARGET_INDEX = "idx_evidence_nearby_non_realtime_geom"
 CCNEW_INDEX = f"{TARGET_INDEX}_ccnew"
+CCOLD_INDEX = f"{TARGET_INDEX}_ccold"
 
 # Inside the production default window, so the acceptance runs the shipped
 # policy rather than a test-only one. Time is injected, never read from the
@@ -186,6 +187,7 @@ def churned_url(migrated_schema_url: str) -> str:
 def _reset_module_schedule() -> None:
     index_maintenance._last_reindex_at.clear()
     index_maintenance._last_attempt_at.clear()
+    index_maintenance._last_logged = None
 
 
 def _job(database_url: str) -> PostgresIndexMaintenanceJob:
@@ -222,6 +224,56 @@ def _index_row(database_url: str, index_name: str) -> tuple[int, bool] | None:
             (index_name,),
         ).fetchone()
     return (int(row[0]), bool(row[1])) if row is not None else None
+
+
+def _relfilenode(database_url: str, index_name: str) -> int | None:
+    with psycopg.connect(database_url) as connection:
+        row = connection.execute(
+            """
+            SELECT cls.relfilenode::bigint
+            FROM pg_class cls
+            WHERE cls.relname = %s
+                AND cls.relnamespace = current_schema()::regnamespace
+            """,
+            (index_name,),
+        ).fetchone()
+    return int(row[0]) if row is not None else None
+
+
+def _cc_leftovers(database_url: str) -> list[tuple[str, bool]]:
+    with psycopg.connect(database_url) as connection:
+        rows = connection.execute(
+            """
+            SELECT cls.relname, idx.indisvalid
+            FROM pg_class cls
+            JOIN pg_index idx ON idx.indexrelid = cls.oid
+            WHERE cls.relnamespace = current_schema()::regnamespace
+                AND starts_with(cls.relname, %s)
+            ORDER BY cls.relname
+            """,
+            (TARGET_INDEX + "_cc",),
+        ).fetchall()
+    return [(str(name), bool(valid)) for name, valid in rows]
+
+
+def _make_invalid_index(database_url: str, index_name: str) -> None:
+    """Leave exactly the artefact an unfinished concurrent build leaves.
+
+    A CREATE INDEX CONCURRENTLY that fails in its validation pass leaves an
+    invalid index behind, which is what a cancelled REINDEX CONCURRENTLY leaves
+    too -- an index the planner ignores that still occupies disk.
+    """
+
+    with psycopg.connect(database_url, autocommit=True) as connection:
+        connection.execute(
+            sql.SQL("DROP INDEX IF EXISTS {}").format(sql.Identifier(index_name))
+        )
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            connection.execute(
+                sql.SQL(
+                    "CREATE UNIQUE INDEX CONCURRENTLY {} ON evidence (event_type)"
+                ).format(sql.Identifier(index_name))
+            )
 
 
 def _bbox_scan(database_url: str) -> tuple[int, int, str]:
@@ -398,39 +450,108 @@ def test_reindex_reports_a_refused_lock_and_leaves_the_index_usable(
     assert retried.skipped == {TARGET_INDEX: "skipped_attempted"}
 
 
-def test_reindex_drops_an_invalid_ccnew_left_by_a_previous_attempt(
+def test_reindex_treats_a_post_swap_lock_timeout_as_the_success_it_is(
     churned_url: str,
 ) -> None:
-    """A cancelled rebuild leaves ``<name>_ccnew`` behind; clear it first.
+    """PostgreSQL 16 reports 55P03 over a rebuild that already finished.
 
-    The leftover is manufactured the deterministic way: a CREATE INDEX
-    CONCURRENTLY that fails during its validation pass leaves exactly the same
-    artefact a cancelled REINDEX does -- an index the planner ignores, that
-    still occupies disk, and whose name blocks the next rebuild.
+    REINDEX CONCURRENTLY swaps the rebuilt index in and only then waits for the
+    last readers of the old one, and that wait is on a lock conflicting with
+    AccessShareLock -- so one ordinary reader sitting in an open transaction is
+    enough to make the statement fail with the new index already in place and
+    valid. Measured on PostgreSQL 16.4: the index came back 16 MiB -> 1.6 MiB
+    with a fresh relfilenode, and a dead 16 MiB ``_ccold`` behind it.
+
+    Believing the error would rebuild the index again the next night and leave
+    another dead copy every time, so the job checks the relfilenode instead.
     """
 
-    with psycopg.connect(churned_url, autocommit=True) as connection:
-        with pytest.raises(psycopg.errors.UniqueViolation):
-            connection.execute(
-                sql.SQL(
-                    "CREATE UNIQUE INDEX CONCURRENTLY {} ON evidence (event_type)"
-                ).format(sql.Identifier(CCNEW_INDEX))
-            )
+    before_relfilenode = _relfilenode(churned_url, TARGET_INDEX)
+    assert before_relfilenode is not None
 
-    leftover = _index_row(churned_url, CCNEW_INDEX)
-    assert leftover is not None
-    assert leftover[1] is False
+    reader = psycopg.connect(churned_url)
+    try:
+        # An ordinary READ COMMITTED reader. It holds AccessShareLock on
+        # evidence until it commits, which does not block the rebuild itself --
+        # only the final wait, after the swap.
+        reader.execute("SELECT count(*) FROM evidence")
+        summary = _reindex(churned_url, lock_timeout_ms=2_000)
+    finally:
+        reader.rollback()
+        reader.close()
+
+    print(
+        f"post_swap_timeout outcome={summary.outcome} "
+        f"before_bytes={summary.before_bytes} after_bytes={summary.after_bytes} "
+        f"leftovers_dropped={list(summary.leftovers_dropped)}"
+    )
+
+    assert summary.outcome == "reindexed_after_lock_timeout"
+    assert summary.index == TARGET_INDEX
+
+    rebuilt = _index_row(churned_url, TARGET_INDEX)
+    assert rebuilt is not None
+    assert rebuilt[1] is True
+    # The relfilenode is the whole point: it changes only when the index is
+    # really rebuilt, which is how the job knows the error was about the
+    # cleanup and not about the work. (Size proves nothing here -- an earlier
+    # test in this module already shrank this index to its floor.)
+    assert _relfilenode(churned_url, TARGET_INDEX) != before_relfilenode
+
+    # The swap left the old index behind as a dead copy of its own. Nothing is
+    # dropped in this cycle -- the reader that failed the rebuild still holds
+    # the lock a drop would need -- but the next cycle sweeps it up, five
+    # minutes later rather than in a week's time.
+    assert summary.leftovers_dropped == ()
+    assert _cc_leftovers(churned_url) == [(CCOLD_INDEX, False)]
+
+    next_cycle = _reindex(churned_url, now=IN_WINDOW + timedelta(minutes=5))
+    assert next_cycle.leftovers_dropped == (CCOLD_INDEX,)
+    assert _cc_leftovers(churned_url) == []
+
+    # And it counts as done, so neither that cycle nor the next night rebuilds
+    # what has already been rebuilt.
+    assert next_cycle.outcome == "skipped_no_candidate"
+    assert next_cycle.skipped == {TARGET_INDEX: "skipped_interval"}
+
+
+def test_reindex_drops_every_dead_cc_leftover_before_rebuilding(
+    churned_url: str,
+) -> None:
+    """Both halves of the swap leave a corpse; reclaim all of them.
+
+    PostgreSQL leaves ``_ccnew`` when a rebuild dies before the swap and
+    ``_ccold`` when it dies after, with numeric suffixes when an older corpse
+    still holds the plain name. None of them block the next rebuild -- it just
+    takes the next free suffix -- but each is a full index's worth of disk.
+    """
+
+    _make_invalid_index(churned_url, CCNEW_INDEX)
+    _make_invalid_index(churned_url, f"{TARGET_INDEX}_ccnew1")
+    _make_invalid_index(churned_url, CCOLD_INDEX)
+    assert _cc_leftovers(churned_url) == [
+        (CCNEW_INDEX, False),
+        (f"{TARGET_INDEX}_ccnew1", False),
+        (CCOLD_INDEX, False),
+    ]
 
     summary = _reindex(churned_url)
 
     assert summary.outcome == "reindexed"
-    assert _index_row(churned_url, CCNEW_INDEX) is None
+    assert summary.leftovers_dropped == (
+        CCNEW_INDEX,
+        f"{TARGET_INDEX}_ccnew1",
+        CCOLD_INDEX,
+    )
+    assert _cc_leftovers(churned_url) == []
     rebuilt = _index_row(churned_url, TARGET_INDEX)
     assert rebuilt is not None
     assert rebuilt[1] is True
 
 
-def test_reindex_leaves_an_invalid_target_index_for_a_human(churned_url: str) -> None:
+def test_reindex_skips_an_index_that_is_not_in_the_current_schema(
+    churned_url: str,
+) -> None:
     summary = _job(churned_url).reindex_evidence_indexes(
         index_names=("idx_evidence_not_a_real_index",),
         window_utc=WINDOW_UTC,

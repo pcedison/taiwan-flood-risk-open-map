@@ -29,6 +29,8 @@ on a 2 GB node:
 * only inside a UTC maintenance window (default 18:00-21:00 UTC, which is
   02:00-05:00 Taipei, the daily traffic trough);
 * at most one index per maintenance cycle, so no cycle runs for an hour;
+* at most ``max_per_window`` rebuilds per window (default 2), so the first
+  night after a deploy is not 36 back-to-back rebuilds;
 * at most one rebuild per index per ``interval_hours`` (default one week);
 * at most one *attempt* per index per window, so a failing rebuild cannot spin;
 * nothing above ``max_index_bytes``, because a concurrent rebuild needs the
@@ -38,7 +40,8 @@ on a 2 GB node:
 The "when did this last run" state lives in module-level dicts, the same
 trade-off ``evidence_retention._staging_timeout_streak`` makes: the scheduler is
 a single long-lived process and the sole writer. A restart forgets the history,
-so the next window rebuilds one more round; that is wasted I/O inside a
+so the next window rebuilds one more round, and an index that failed earlier in
+the current window is retried inside it; that is wasted I/O inside a
 low-traffic window, never a correctness problem.
 """
 
@@ -86,6 +89,11 @@ DEFAULT_EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES = 8 * 1024 * 1024
 # 933 MiB evidence_source_raw_ref_unique waits until an operator has looked at
 # the volume and raised it deliberately.
 DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES = 512 * 1024 * 1024
+# One index per 300 s cycle still means up to 36 rebuilds in a three-hour
+# window, so the first night after a deploy would rebuild the whole list back
+# to back -- an I/O and WAL spike on a 2 GB node, all of it optional work. Two
+# per night spreads the default list of seven over about three nights.
+DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_PER_WINDOW = 2
 DEFAULT_EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS = 5_000
 DEFAULT_EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS = 1_800_000
 # REINDEX ... CONCURRENTLY landed in PostgreSQL 12. Below that the only
@@ -101,16 +109,37 @@ INDEX_NAME_PATTERN = re.compile(r"^[a-z0-9_]+$")
 
 _WINDOW_PATTERN = re.compile(r"^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$")
 
-# A failed REINDEX CONCURRENTLY leaves the half-built index behind as
-# "<name>_ccnew", invalid and invisible to the planner but occupying disk and
-# blocking the next rebuild. (A crash between the two swap phases can also
-# leave "<name>_ccold"; that one needs a human, see the runbook.)
-CCNEW_SUFFIX = "_ccnew"
+# A REINDEX CONCURRENTLY that does not finish leaves a transient index behind,
+# invalid and invisible to the planner but holding a full index's worth of disk
+# -- 933 MiB in the worst hosted case. Which one depends on how far it got:
+# "<name>_ccnew" if it died before the swap, "<name>_ccold" (the *old* index,
+# now dead) if it died after, and "_ccnew1"/"_ccold1" and so on when an earlier
+# corpse still occupies the plain name.
+#
+# The leftover does not block anything -- PostgreSQL just picks the next free
+# suffix -- so this is purely about giving the disk back, which on a 2 GB node
+# with a ~30 GB database is reason enough.
+CC_LEFTOVER_INFIX = "_cc"
+
+# A REINDEX CONCURRENTLY can time out *after* it has already swapped the new
+# index in, while waiting for the last readers of the old one (measured on
+# PostgreSQL 16: an idle-in-transaction reader holding AccessShareLock blocks
+# that final wait, and lock_timeout fires with the rebuild already done). The
+# statement reports failure, but the index is rebuilt and valid. Treating that
+# as a failure would rebuild it again the next night, and leave another corpse
+# each time, so these two SQLSTATEs get a second look before being believed.
+_POST_SWAP_RECOVERABLE_SQLSTATES = frozenset({"55P03", "57014"})
+
+REINDEXED_OUTCOMES = ("reindexed", "reindexed_after_lock_timeout")
 
 # The scheduler builds a fresh job per maintenance cycle, so the schedule has
 # to outlive the instance. The scheduler process is the single writer.
 _last_reindex_at: dict[str, datetime] = {}
 _last_attempt_at: dict[str, datetime] = {}
+# The last line this pass actually logged, as (window, outcome, index). A cycle
+# runs every 300 s and almost always has nothing to say, so it says it once per
+# window per distinct answer instead of every five minutes.
+_last_logged: tuple[datetime, str, str | None, tuple[str, ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -125,10 +154,11 @@ class EvidenceReindexSummary:
     reltuples: float | None = None
     elapsed_ms: int = 0
     skipped: Mapping[str, str] = field(default_factory=dict)
+    leftovers_dropped: tuple[str, ...] = ()
 
     @property
     def reindexed(self) -> bool:
-        return self.outcome == "reindexed"
+        return self.outcome in REINDEXED_OUTCOMES
 
     def log_fields(self) -> dict[str, object]:
         return {
@@ -140,6 +170,7 @@ class EvidenceReindexSummary:
             "reltuples": self.reltuples,
             "elapsed_ms": self.elapsed_ms,
             "skipped": dict(self.skipped),
+            "leftovers_dropped": list(self.leftovers_dropped),
         }
 
 
@@ -148,6 +179,9 @@ class _IndexState:
     size_bytes: int
     reltuples: float
     indisvalid: bool
+    # Changes on every rebuild, which is the only way to tell "the swap already
+    # happened" from "nothing was done" after an ambiguous timeout.
+    relfilenode: int
 
 
 class PostgresIndexMaintenanceJob:
@@ -170,6 +204,7 @@ class PostgresIndexMaintenanceJob:
         interval_hours: int = DEFAULT_EVIDENCE_INDEX_REINDEX_INTERVAL_HOURS,
         min_size_bytes: int = DEFAULT_EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES,
         max_index_bytes: int = DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES,
+        max_per_window: int = DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_PER_WINDOW,
         lock_timeout_ms: int = DEFAULT_EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS,
         statement_timeout_ms: int = DEFAULT_EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS,
         now: datetime | None = None,
@@ -196,6 +231,8 @@ class PostgresIndexMaintenanceJob:
             raise ValueError("max_index_bytes must be a positive integer")
         if max_index_bytes <= min_size_bytes:
             raise ValueError("max_index_bytes must be greater than min_size_bytes")
+        if max_per_window < 1:
+            raise ValueError("max_per_window must be a positive integer")
         if lock_timeout_ms < 1:
             raise ValueError("lock_timeout_ms must be a positive integer")
         if statement_timeout_ms < 1:
@@ -209,7 +246,18 @@ class PostgresIndexMaintenanceJob:
                     outcome="skipped_outside_window",
                     index=None,
                     window_utc=window_utc,
-                )
+                ),
+                window_started_at=None,
+            )
+
+        if _rebuilds_in_window(window_started_at) >= max_per_window:
+            return _log_summary(
+                EvidenceReindexSummary(
+                    outcome="skipped_window_budget",
+                    index=None,
+                    window_utc=window_utc,
+                ),
+                window_started_at=window_started_at,
             )
 
         try:
@@ -233,7 +281,7 @@ class PostgresIndexMaintenanceJob:
                 index=None,
                 window_utc=window_utc,
             )
-        return _log_summary(summary)
+        return _log_summary(summary, window_started_at=window_started_at)
 
     def _reindex_first_eligible(
         self,
@@ -260,6 +308,18 @@ class PostgresIndexMaintenanceJob:
                     window_utc=window_utc,
                 )
 
+            _apply_reindex_timeouts(
+                cursor,
+                lock_timeout_ms=lock_timeout_ms,
+                statement_timeout_ms=statement_timeout_ms,
+            )
+            # Every cycle in the window, for every index on the list, not just
+            # the one about to be rebuilt. A rebuild that timed out after the
+            # swap leaves a full dead copy behind and is then not due again for
+            # a week; sweeping here reclaims that disk at the next cycle
+            # instead, as soon as whatever held the lock has finished.
+            leftovers = _sweep_invalid_cc_leftovers(cursor, index_names)
+
             for index_name in index_names:
                 state = _index_state(cursor, index_name)
                 reason = _skip_reason(
@@ -279,10 +339,9 @@ class PostgresIndexMaintenanceJob:
                     index_name=index_name,
                     before=state,
                     window_utc=window_utc,
-                    lock_timeout_ms=lock_timeout_ms,
-                    statement_timeout_ms=statement_timeout_ms,
                     now=now,
                     skipped=skipped,
+                    leftovers=leftovers,
                 )
 
         return EvidenceReindexSummary(
@@ -290,6 +349,7 @@ class PostgresIndexMaintenanceJob:
             index=None,
             window_utc=window_utc,
             skipped=skipped,
+            leftovers_dropped=leftovers,
         )
 
     def _reindex_one(
@@ -299,10 +359,9 @@ class PostgresIndexMaintenanceJob:
         index_name: str,
         before: _IndexState | None,
         window_utc: str,
-        lock_timeout_ms: int,
-        statement_timeout_ms: int,
         now: datetime,
         skipped: Mapping[str, str],
+        leftovers: tuple[str, ...],
     ) -> EvidenceReindexSummary:
         # Recorded before the work starts, not after: a rebuild that dies from
         # a refused lock must not be retried by the next cycle a few minutes
@@ -310,25 +369,25 @@ class PostgresIndexMaintenanceJob:
         _last_attempt_at[index_name] = now
         started_at = _now()
         try:
-            _apply_reindex_timeouts(
-                cursor,
-                lock_timeout_ms=lock_timeout_ms,
-                statement_timeout_ms=statement_timeout_ms,
-            )
-            # A previous attempt that timed out left an invalid "_ccnew"
-            # behind; REINDEX would fail on the name collision, so clear it
-            # first. Dropping concurrently keeps this step lock-free too.
-            cursor.execute(
-                sql.SQL("DROP INDEX CONCURRENTLY IF EXISTS {}").format(
-                    sql.Identifier(index_name + CCNEW_SUFFIX)
-                )
-            )
             cursor.execute(
                 sql.SQL("REINDEX INDEX CONCURRENTLY {}").format(
                     sql.Identifier(index_name)
                 )
             )
         except Exception as exc:
+            recovered = self._recover_post_swap_success(
+                cursor,
+                exc,
+                index_name=index_name,
+                before=before,
+                window_utc=window_utc,
+                elapsed_ms=_elapsed_ms(started_at),
+                now=now,
+                skipped=skipped,
+                leftovers=leftovers,
+            )
+            if recovered is not None:
+                return recovered
             return EvidenceReindexSummary(
                 outcome=f"failed:{_failure_code(exc)}",
                 index=index_name,
@@ -337,6 +396,7 @@ class PostgresIndexMaintenanceJob:
                 reltuples=before.reltuples if before else None,
                 elapsed_ms=_elapsed_ms(started_at),
                 skipped=skipped,
+                leftovers_dropped=leftovers,
             )
         elapsed_ms = _elapsed_ms(started_at)
         _last_reindex_at[index_name] = now
@@ -350,6 +410,66 @@ class PostgresIndexMaintenanceJob:
             reltuples=after.reltuples if after else None,
             elapsed_ms=elapsed_ms,
             skipped=skipped,
+            leftovers_dropped=leftovers,
+        )
+
+    def _recover_post_swap_success(
+        self,
+        cursor: Any,
+        exc: BaseException,
+        *,
+        index_name: str,
+        before: _IndexState | None,
+        window_utc: str,
+        elapsed_ms: int,
+        now: datetime,
+        skipped: Mapping[str, str],
+        leftovers: tuple[str, ...],
+    ) -> EvidenceReindexSummary | None:
+        """Tell "it timed out doing nothing" from "it timed out tidying up".
+
+        ``REINDEX INDEX CONCURRENTLY`` swaps the rebuilt index in and only then
+        waits for the last readers of the old one. A ``lock_timeout`` in that
+        final wait reports failure over a rebuild that has already happened --
+        measured on PostgreSQL 16, where one idle-in-transaction reader holding
+        ``AccessShareLock`` is enough to trigger it. Believing the error would
+        rebuild the index again the next night and leave another dead copy
+        behind each time.
+
+        ``relfilenode`` is the evidence: it changes only when the index is
+        actually rebuilt, so a changed one on a still-valid index means the
+        work is done, whatever the statement said.
+        """
+
+        if _failure_code(exc) not in _POST_SWAP_RECOVERABLE_SQLSTATES:
+            return None
+        if before is None:
+            return None
+        try:
+            after = _index_state(cursor, index_name)
+        except Exception:
+            # The connection is probably gone too; report the original failure.
+            return None
+        if after is None or not after.indisvalid:
+            return None
+        if after.relfilenode == before.relfilenode:
+            return None
+
+        _last_reindex_at[index_name] = now
+        # The swap left the old index behind as a dead copy. No attempt to drop
+        # it here: whatever held the lock long enough to fail the rebuild is by
+        # definition still holding it, so the drop would just burn another
+        # lock_timeout. The next cycle's sweep reclaims it, five minutes later.
+        return EvidenceReindexSummary(
+            outcome="reindexed_after_lock_timeout",
+            index=index_name,
+            window_utc=window_utc,
+            before_bytes=before.size_bytes,
+            after_bytes=after.size_bytes,
+            reltuples=after.reltuples,
+            elapsed_ms=elapsed_ms,
+            skipped=skipped,
+            leftovers_dropped=leftovers,
         )
 
     def _connect(self, *, autocommit: bool = False) -> Any:
@@ -416,7 +536,8 @@ def _index_state(cursor: Any, index_name: str) -> _IndexState | None:
         SELECT
             pg_relation_size(cls.oid)::bigint AS size_bytes,
             cls.reltuples::double precision AS reltuples,
-            idx.indisvalid AS indisvalid
+            idx.indisvalid AS indisvalid,
+            cls.relfilenode::bigint AS relfilenode
         FROM pg_class cls
         JOIN pg_index idx ON idx.indexrelid = cls.oid
         WHERE cls.relname = %s
@@ -431,6 +552,85 @@ def _index_state(cursor: Any, index_name: str) -> _IndexState | None:
         size_bytes=int(_row_value(row, "size_bytes", 0) or 0),
         reltuples=float(_row_value(row, "reltuples", 1) or 0.0),
         indisvalid=bool(_row_value(row, "indisvalid", 2)),
+        relfilenode=int(_row_value(row, "relfilenode", 3) or 0),
+    )
+
+
+def _sweep_invalid_cc_leftovers(
+    cursor: Any, index_names: tuple[str, ...]
+) -> tuple[str, ...]:
+    """Drop every dead transient index earlier attempts left behind.
+
+    PostgreSQL names them ``<name>_ccnew`` before the swap and ``<name>_ccold``
+    after it, with a numeric suffix when an older corpse still holds the plain
+    name, so this matches the whole family rather than one spelling. Only
+    ``indisvalid = false`` rows qualify, so a live index is never a candidate,
+    and the search is scoped to the current schema like every other probe here.
+
+    The scheduler is the only thing that rebuilds these indexes and it is a
+    single process, so a ``_ccnew`` seen here belongs to a dead attempt, not to
+    a build running right now.
+
+    Never raises. A drop that cannot get its lock is not a reason to skip the
+    cycle's actual work -- the next cycle sweeps again.
+    """
+
+    prefixes = [name + CC_LEFTOVER_INFIX for name in index_names]
+    try:
+        cursor.execute(
+            """
+            SELECT cls.relname AS relname
+            FROM pg_class cls
+            JOIN pg_index idx ON idx.indexrelid = cls.oid
+            WHERE cls.relnamespace = current_schema()::regnamespace
+                AND NOT idx.indisvalid
+                AND cls.relname LIKE ANY (%s::text[])
+            ORDER BY cls.relname
+            """,
+            ([_like_prefix(prefix) for prefix in prefixes],),
+        )
+        names = [str(_row_value(row, "relname", 0)) for row in cursor.fetchall()]
+    except Exception as exc:
+        log_event(
+            "worker.maintenance.evidence_reindex_leftover_probe_failed",
+            error=_failure_code(exc),
+        )
+        return ()
+
+    dropped: list[str] = []
+    for name in names:
+        try:
+            cursor.execute(
+                sql.SQL("DROP INDEX CONCURRENTLY IF EXISTS {}").format(
+                    sql.Identifier(name)
+                )
+            )
+        except Exception as exc:
+            log_event(
+                "worker.maintenance.evidence_reindex_leftover_drop_failed",
+                index=name,
+                error=_failure_code(exc),
+            )
+            continue
+        dropped.append(name)
+    return tuple(dropped)
+
+
+def _like_prefix(prefix: str) -> str:
+    """A LIKE pattern matching exactly ``prefix`` followed by anything.
+
+    Index names contain ``_``, which LIKE reads as "any single character", so
+    the literal parts have to be escaped or ``idx_evidence_geom_cc`` would also
+    match ``idxXevidenceXgeomXcc``.
+    """
+
+    escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return escaped + "%"
+
+
+def _rebuilds_in_window(window_started_at: datetime) -> int:
+    return sum(
+        1 for finished_at in _last_reindex_at.values() if finished_at >= window_started_at
     )
 
 
@@ -528,7 +728,34 @@ def _window_started_at(now: datetime, window: tuple[time, time]) -> datetime | N
     return None
 
 
-def _log_summary(summary: EvidenceReindexSummary) -> EvidenceReindexSummary:
+def _log_summary(
+    summary: EvidenceReindexSummary,
+    *,
+    window_started_at: datetime | None,
+) -> EvidenceReindexSummary:
+    """Log once per window per distinct answer, and never outside the window.
+
+    A maintenance cycle runs every 300 s, and for 21 of every 24 hours this
+    pass has nothing to do: logging that would be 288 lines a day nobody reads.
+    Inside the window it repeats too -- once the budget is spent every
+    remaining cycle says the same thing. The current state is always visible in
+    ``scheduler.maintenance.completed``'s ``evidence_reindex_outcome``; this
+    event is for the transitions.
+    """
+
+    global _last_logged
+
+    if window_started_at is None:
+        return summary
+    fingerprint = (
+        window_started_at,
+        summary.outcome,
+        summary.index,
+        summary.leftovers_dropped,
+    )
+    if fingerprint == _last_logged:
+        return summary
+    _last_logged = fingerprint
     log_event("worker.maintenance.evidence_reindex", **summary.log_fields())
     return summary
 

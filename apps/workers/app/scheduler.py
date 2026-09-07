@@ -449,6 +449,7 @@ def _reindex_evidence_indexes(
             interval_hours=settings.evidence_index_reindex_interval_hours,
             min_size_bytes=settings.evidence_index_reindex_min_size_bytes,
             max_index_bytes=settings.evidence_index_reindex_max_index_bytes,
+            max_per_window=settings.evidence_index_reindex_max_per_window,
             lock_timeout_ms=settings.evidence_index_reindex_lock_timeout_ms,
             statement_timeout_ms=(
                 settings.evidence_index_reindex_statement_timeout_ms

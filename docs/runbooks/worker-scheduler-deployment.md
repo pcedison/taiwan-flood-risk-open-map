@@ -586,6 +586,21 @@ job, on an autocommit connection, `CONCURRENTLY`, exactly like
   starts with `idx_evidence_nearby_non_realtime_geom`, the index the assessment
   read path scans). A cycle is 300 s and a rebuild is minutes, so a cycle never
   queues two.
+- **`EVIDENCE_INDEX_REINDEX_MAX_PER_WINDOW` rebuilds a night** (default 2).
+  One per cycle alone would still allow 36 in a three-hour window, so the first
+  night after a deploy would rebuild the whole list back to back. Cycles past
+  the budget record `skipped_window_budget` and open no connection. With the
+  defaults the seven listed indexes are worked through over about three nights:
+  night one takes `idx_evidence_nearby_non_realtime_geom` (52 MiB) and
+  `idx_evidence_official_water_level_geom` (62 MiB), night two
+  `idx_evidence_official_rainfall_geom` (62 MiB) and
+  `idx_evidence_observed_flood_history_geom` (7.5 MiB -- skipped as
+  `skipped_small` under the 8 MiB floor, so night two also picks up
+  `idx_evidence_geom_geography`, 296 MiB), night three
+  `idx_evidence_staging_evidence_id` (309 MiB).
+  `evidence_source_raw_ref_unique` (933 MiB) is held back by the disk ceiling
+  below. After that first pass each index is only due again a week later, so
+  steady state is at most one or two rebuilds a night.
 - **One rebuild per index per `EVIDENCE_INDEX_REINDEX_INTERVAL_HOURS`**
   (default 168 = a week).
 - **One *attempt* per index per window.** A rebuild that fails records the
@@ -601,6 +616,16 @@ job, on an autocommit connection, `CONCURRENTLY`, exactly like
   `skipped_unsupported` (PostgreSQL < 12, where `REINDEX ... CONCURRENTLY` does
   not exist). A skip never consumes the cycle's single rebuild: the pass moves
   on to the next index on the list.
+- **A timeout is not always a failure.** `REINDEX INDEX CONCURRENTLY` swaps the
+  rebuilt index in and only then waits for the last readers of the old one, and
+  that wait conflicts with a plain `AccessShareLock` -- so one ordinary reader
+  sitting in an open transaction is enough to make the statement report `55P03`
+  over a rebuild that already finished (measured on PostgreSQL 16.4). After a
+  `55P03`/`57014` the pass re-reads `pg_class.relfilenode`: if it changed and
+  the index is valid, the rebuild happened and the outcome is
+  `reindexed_after_lock_timeout`, which counts against the interval like any
+  other success. Without that check the index would be rebuilt again every
+  night, leaving another dead copy behind each time.
 - **Bounds.** `EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS` (default 5 000) so the
   brief locks a concurrent rebuild takes never queue behind ingestion, and
   `EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS` (default 1 800 000 = 30 min) so
@@ -658,8 +683,10 @@ the default once the backlog of oversized indexes is rebuilt.
 scheduler process, not in the database -- the same trade-off the staging timeout
 streak makes, and the scheduler is a single long-lived process. A worker restart
 forgets the history, so the next window rebuilds one more round of indexes than
-it strictly needed. That is wasted I/O inside the low-traffic window, never a
-correctness problem; there is nothing to reconcile after a deploy.
+it strictly needed, and an index that failed earlier in the current window is
+retried inside it rather than waiting for the next one. That is wasted I/O
+inside the low-traffic window, never a correctness problem; there is nothing to
+reconcile after a deploy.
 
 ### Observing it
 
@@ -668,12 +695,16 @@ Each cycle logs one line:
 ```
 worker.maintenance.evidence_reindex
   index, outcome, window_utc, before_bytes, after_bytes, reltuples,
-  elapsed_ms, skipped
+  elapsed_ms, skipped, leftovers_dropped
 ```
 
-and `scheduler.maintenance.completed` carries `evidence_reindex_outcome` and
-`evidence_reindex_index` (`disabled` when the pass is switched off). Every other
-field of that event is unchanged.
+but only when it has something new to say: never outside the window (21 of
+every 24 hours, which at one cycle per 300 s would be 288 lines a day nobody
+reads), and inside it once per distinct answer rather than once per cycle. The
+current state is always in `scheduler.maintenance.completed`, which carries
+`evidence_reindex_outcome` and `evidence_reindex_index` every cycle
+(`disabled` when the pass is switched off). Every other field of that event is
+unchanged.
 
 To confirm a rebuild landed, compare `indexes[].index_size_bytes` in
 `hosted-db-diagnostics.json` (`python scripts/hosted_db_diagnostics.py`) across
@@ -696,39 +727,55 @@ PY
 Measured locally on an isolated schema with the hosted write pattern (150 000
 non-realtime point rows inserted across three rounds, nine tenths deleted each
 round, no VACUUM):
-`idx_evidence_nearby_non_realtime_geom` went from 6 266 880 to 622 592 bytes,
-and the 500 m bounding-box probe went from 3 010 shared blocks and 1 866
-candidate index entries to 360 blocks and 178 entries for the same 178 matching
+`idx_evidence_nearby_non_realtime_geom` went from 6 242 304 to 622 592 bytes,
+and the 500 m bounding-box probe went from 2 994 shared blocks and 1 849
+candidate index entries to 409 blocks and 201 entries for the same 201 matching
 rows. See `apps/workers/tests/test_index_maintenance_postgres.py`.
 
 ### When a rebuild fails
 
-A cancelled or interrupted `REINDEX INDEX CONCURRENTLY` leaves the half-built
-index behind as `<name>_ccnew`: invalid, ignored by the planner, still occupying
-disk, and blocking the next rebuild on the name. The job drops it itself before
-its next attempt, so no action is normally needed. To clear one by hand (it
-takes no exclusive lock):
+A `REINDEX INDEX CONCURRENTLY` that does not finish leaves a transient index
+behind: `<name>_ccnew` if it died before the swap, `<name>_ccold` (the old
+index, now dead) if it died after, and `_ccnew1`/`_ccold1` and so on when an
+earlier corpse still holds the plain name. All of them are invalid and ignored
+by the planner.
+
+The leftover does **not** block the next rebuild -- PostgreSQL simply takes the
+next free suffix and succeeds. What it costs is disk: a full copy of the index,
+up to 933 MiB on this table, on a node whose whole database is ~30 GB. That is
+the only reason to clear it.
+
+Every maintenance cycle inside the window sweeps them up itself, for every
+index on the list, before it picks one to rebuild. So a corpse survives at most
+one cycle (five minutes) after whatever held the lock lets go, and normally no
+action is needed. `leftovers_dropped` in the log line names what each cycle
+reclaimed.
+
+To look at what is there:
 
 ```sh
-psql "$DATABASE_URL" -c "DROP INDEX CONCURRENTLY IF EXISTS idx_evidence_nearby_non_realtime_geom_ccnew;"
+psql "$DATABASE_URL" -c "SELECT cls.relname, idx.indisvalid, pg_size_pretty(pg_relation_size(cls.oid)) FROM pg_class cls JOIN pg_index idx ON idx.indexrelid = cls.oid WHERE NOT idx.indisvalid ORDER BY pg_relation_size(cls.oid) DESC;"
 ```
 
-List everything left over first:
+To clear one by hand (it takes no exclusive lock):
 
 ```sh
-psql "$DATABASE_URL" -c "SELECT cls.relname, idx.indisvalid, pg_size_pretty(pg_relation_size(cls.oid)) FROM pg_class cls JOIN pg_index idx ON idx.indexrelid = cls.oid WHERE cls.relname LIKE '%_ccnew' OR cls.relname LIKE '%_ccold' OR NOT idx.indisvalid;"
+psql "$DATABASE_URL" -c "DROP INDEX CONCURRENTLY IF EXISTS idx_evidence_nearby_non_realtime_geom_ccold;"
 ```
 
-- `_ccnew` rows: drop them concurrently as above.
-- `_ccold` rows: a crash between the two swap phases can leave the *old* index
-  under this name. It is a real index holding real entries; confirm the base
-  name exists and is valid before dropping it.
-- A base index reported `indisvalid = false` is why the job records
-  `skipped_invalid` and refuses to touch it. Either a build is still running
+- Only ever drop rows with `indisvalid = false`. A valid `_ccold` is not
+  wreckage; it means a swap is in flight right now.
+- A **base** index reported `indisvalid = false` is a different problem, and is
+  why the job records `skipped_invalid` and refuses to touch it: dropping it
+  would leave the read path without an index. Either a build is still running
   (`SELECT * FROM pg_stat_progress_create_index;`) or one died. If nothing is
   running, drop and recreate it concurrently using the definition in
   `infra/migrations/` -- never inside a migration, and never without
   `CONCURRENTLY`.
+- Repeated `worker.maintenance.evidence_reindex_leftover_drop_failed` lines mean
+  the sweep cannot get its lock night after night: look for a long-lived
+  transaction (`SELECT pid, state, xact_start FROM pg_stat_activity ORDER BY
+  xact_start;`) rather than dropping by hand into the same contention.
 
 ## Failure Detection
 

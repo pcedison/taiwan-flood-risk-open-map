@@ -261,6 +261,7 @@ jobs:
           PYTHONPATH=apps/workers \
             python -m pytest -q \
               tests/test_historical_coverage_writer_postgres.py \
+              apps/workers/tests/test_staging_retention_postgres.py \
               apps/workers/tests/test_index_maintenance_postgres.py
 
       # The evidence repository acceptance suite skips itself without a live
