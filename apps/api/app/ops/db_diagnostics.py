@@ -65,6 +65,74 @@ STATEMENT_STATS_LIMIT = 10
 # pg_class.reltuples for this index is a usable estimate when counting the rows
 # outright does not finish.
 STAGING_USE_INDEX = "idx_evidence_staging_evidence_id"
+# The nearby-evidence branch (every accepted row except official rainfall and
+# water-level observations) is pre-filtered by a GiST bounding-box test, so a
+# row whose box overlaps the query box is fetched from the heap -- and its
+# geometry and properties detoasted -- before ST_DWithin can discard it. On the
+# hosted node a 500 m probe reads about 24 blocks per candidate, which is the
+# cost of a large polygon or a long properties document, not of a point. This
+# profile groups those candidates by source and says how many survive the
+# exact distance test and how many bytes each group makes the request read.
+NEARBY_CANDIDATE_PROFILE_NOTE = (
+    "rows the bounding-box pre-filter of the nearby-evidence branch hands to the "
+    "exact ST_DWithin test at the sample point, grouped by source; geom_bytes and "
+    "properties_bytes are the stored (compressed) sizes the request reads before "
+    "it can discard a row; active_snapshot is false for rows of a superseded "
+    "historical snapshot, which the request also discards; a group that passes "
+    "both tests is an upper bound on what the request keeps, because the request "
+    "further drops disabled sources, stations flagged disabled in properties and "
+    "retired Tainan sensors, none of which change what the index scan reads; no "
+    "evidence content is returned"
+)
+NEARBY_CANDIDATE_PROFILE_SQL = """
+    WITH query_point AS (
+        SELECT
+            ST_SetSRID(ST_MakePoint(%s, %s), 4326) AS geom,
+            ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography AS geog,
+            %s::double precision AS radius_m
+    ),
+    candidates AS (
+        SELECT
+            ds.adapter_key AS adapter_key,
+            e.event_type AS event_type,
+            GeometryType(e.geom) AS geometry_type,
+            ST_DWithin(e.geom::geography, qp.geog, qp.radius_m) AS within_radius,
+            (
+                ds.adapter_key NOT IN (
+                    'official.wra.historical_flood',
+                    'official.nstc.flood_disaster_points'
+                )
+                OR e.raw_ref = NULLIF(ds.metadata->>'active_snapshot_raw_ref', '')
+            ) AS active_snapshot,
+            pg_column_size(e.geom) AS geom_bytes,
+            pg_column_size(e.properties) AS properties_bytes,
+            ST_NPoints(e.geom) AS npoints
+        FROM evidence e
+        JOIN data_sources ds ON ds.id = e.data_source_id
+        CROSS JOIN query_point qp
+        WHERE e.ingestion_status = 'accepted'
+            AND e.privacy_level IN ('public', 'aggregated')
+            AND e.geom IS NOT NULL
+            AND NOT (
+                e.source_type = 'official'
+                AND e.event_type IN ('rainfall', 'water_level')
+            )
+            AND e.geom && ST_Expand(qp.geom, qp.radius_m / 90000.0)
+    )
+    SELECT
+        adapter_key,
+        event_type,
+        geometry_type,
+        within_radius,
+        active_snapshot,
+        count(*)::bigint AS rows,
+        sum(geom_bytes)::bigint AS geom_bytes,
+        sum(properties_bytes)::bigint AS properties_bytes,
+        max(npoints)::bigint AS max_npoints
+    FROM candidates
+    GROUP BY adapter_key, event_type, geometry_type, within_radius, active_snapshot
+    ORDER BY sum(geom_bytes) + sum(properties_bytes) DESC, count(*) DESC
+"""
 # The probe budget exceeds what the request path allows, so a plan here can
 # report work the real request would have abandoned. Say so next to the number.
 EXPLAIN_BUDGET_NOTE = (
@@ -104,6 +172,9 @@ def collect_db_diagnostics(
             database_url, connection_factory
         ),
         "query_plans": _query_plans(database_url, connection_factory),
+        "nearby_candidate_profile": _nearby_candidate_profile(
+            database_url, connection_factory
+        ),
         "statements": _statement_stats(database_url, connection_factory),
     }
 
@@ -372,6 +443,47 @@ def _estimated_staging_use(
     estimated = _scalar_rows(row)
     # -1 means the index has never been analyzed, which is not an estimate.
     return estimated if estimated is not None and estimated >= 0 else None
+
+
+def _nearby_candidate_profile(
+    database_url: str, connection_factory: ConnectionFactory | None
+) -> dict[str, Any]:
+    """Profile the rows the nearby-evidence bounding-box scan fetches.
+
+    The ``nearby_evidence`` plan shows how long the branch takes and how many
+    blocks it reads, but not which rows cost those blocks. This runs the same
+    bounding-box pre-filter on the same partial index and reports, per source
+    and geometry type, how many candidates there are, how many the exact
+    distance and active-snapshot tests keep, and how many stored bytes the
+    group carries. Content never leaves the database: the payload is counts,
+    sizes and catalog names.
+    """
+
+    result: dict[str, Any] = {
+        "radius_m": SAMPLE_RADIUS_M,
+        "note": NEARBY_CANDIDATE_PROFILE_NOTE,
+    }
+    try:
+        with (
+            _connect(database_url, connection_factory) as connection,
+            connection.cursor() as cursor,
+        ):
+            _apply_read_only_budget(cursor)
+            cursor.execute(
+                NEARBY_CANDIDATE_PROFILE_SQL,
+                (SAMPLE_LNG, SAMPLE_LAT, SAMPLE_LNG, SAMPLE_LAT, SAMPLE_RADIUS_M),
+            )
+            groups = [dict(row) for row in cursor.fetchall()]
+    except psycopg.errors.QueryCanceled:
+        return {**result, "status": "timeout", "groups": [], "error": "timeout"}
+    except (OSError, psycopg.Error) as exc:
+        return {
+            **result,
+            "status": "unavailable",
+            "groups": [],
+            "error": type(exc).__name__,
+        }
+    return {**result, "status": "ok", "groups": groups, "error": None}
 
 
 def _scalar_rows(row: Any) -> int | None:

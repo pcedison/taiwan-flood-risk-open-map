@@ -207,6 +207,26 @@ class AdminDbStagingUsedByEvidence(ContractModel):
     error: str | None = None
 
 
+class AdminDbNearbyCandidateGroup(ContractModel):
+    adapter_key: str
+    event_type: str | None = None
+    geometry_type: str | None = None
+    within_radius: bool
+    active_snapshot: bool
+    rows: int = Field(ge=0)
+    geom_bytes: int | None = Field(default=None, ge=0)
+    properties_bytes: int | None = Field(default=None, ge=0)
+    max_npoints: int | None = Field(default=None, ge=0)
+
+
+class AdminDbNearbyCandidateProfile(ContractModel):
+    radius_m: int = Field(ge=1)
+    note: str
+    status: Literal["ok", "timeout", "unavailable"]
+    groups: list[AdminDbNearbyCandidateGroup]
+    error: str | None = None
+
+
 class AdminDbSamplePoint(ContractModel):
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
@@ -221,6 +241,7 @@ class AdminDbDiagnosticsResponse(ContractModel):
     staging_status_counts: AdminDbStagingStatusCounts
     staging_used_by_evidence_estimate: AdminDbStagingUsedByEvidence
     query_plans: list[AdminDbQueryPlan]
+    nearby_candidate_profile: AdminDbNearbyCandidateProfile
     statements: list[AdminDbStatementStat] | None = None
 
 

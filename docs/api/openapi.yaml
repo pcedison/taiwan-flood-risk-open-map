@@ -3245,6 +3245,7 @@ components:
         - staging_status_counts
         - staging_used_by_evidence_estimate
         - query_plans
+        - nearby_candidate_profile
       properties:
         captured_at:
           type: string
@@ -3267,10 +3268,73 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AdminDbQueryPlan"
+        nearby_candidate_profile:
+          $ref: "#/components/schemas/AdminDbNearbyCandidateProfile"
         statements:
           type: [array, "null"]
           items:
             $ref: "#/components/schemas/AdminDbStatementStat"
+    AdminDbNearbyCandidateProfile:
+      type: object
+      description: >-
+        The rows the bounding-box pre-filter of the nearby-evidence branch
+        fetches at the sample point, grouped by source and geometry type, with
+        how many survive the exact distance and active-snapshot tests and how
+        many stored bytes each group makes the request read. Counts, sizes and
+        catalog names only; no evidence content.
+      required:
+        - radius_m
+        - note
+        - status
+        - groups
+        - error
+      properties:
+        radius_m:
+          type: integer
+        note:
+          type: string
+        status:
+          type: string
+          enum: [ok, timeout, unavailable]
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminDbNearbyCandidateGroup"
+        error:
+          type: [string, "null"]
+      additionalProperties: false
+    AdminDbNearbyCandidateGroup:
+      type: object
+      required:
+        - adapter_key
+        - event_type
+        - geometry_type
+        - within_radius
+        - active_snapshot
+        - rows
+        - geom_bytes
+        - properties_bytes
+        - max_npoints
+      properties:
+        adapter_key:
+          type: string
+        event_type:
+          type: [string, "null"]
+        geometry_type:
+          type: [string, "null"]
+        within_radius:
+          type: boolean
+        active_snapshot:
+          type: boolean
+        rows:
+          type: integer
+        geom_bytes:
+          type: [integer, "null"]
+        properties_bytes:
+          type: [integer, "null"]
+        max_npoints:
+          type: [integer, "null"]
+      additionalProperties: false
     AdminJobsResponse:
       type: object
       required:
