@@ -111,7 +111,7 @@ the live verification sources listed below.
   `2026-09-02T04:29:42Z`.
 - The latest genuine scheduled Hosted Monitoring run is
   [#34081913876](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34081913876)
-  on current main `e05e802b5a4384216f5e13040fa3cb534f0a7893`. It passed the
+  on release `e05e802b5a4384216f5e13040fa3cb534f0a7893`. It passed the
   deployment, `degraded-ok` public-risk, desktop and mobile browser,
   source-freshness, schedule-evidence, and completion-audit steps. This
   exercised the bounded six-hour advisory added by PR
