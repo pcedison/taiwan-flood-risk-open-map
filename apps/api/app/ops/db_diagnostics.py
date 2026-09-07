@@ -78,8 +78,11 @@ NEARBY_CANDIDATE_PROFILE_NOTE = (
     "exact ST_DWithin test at the sample point, grouped by source; geom_bytes and "
     "properties_bytes are the stored (compressed) sizes the request reads before "
     "it can discard a row; active_snapshot is false for rows of a superseded "
-    "historical snapshot, which the request also discards; no evidence content "
-    "is returned"
+    "historical snapshot, which the request also discards; a group that passes "
+    "both tests is an upper bound on what the request keeps, because the request "
+    "further drops disabled sources, stations flagged disabled in properties and "
+    "retired Tainan sensors, none of which change what the index scan reads; no "
+    "evidence content is returned"
 )
 NEARBY_CANDIDATE_PROFILE_SQL = """
     WITH query_point AS (
