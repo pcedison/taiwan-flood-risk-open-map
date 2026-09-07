@@ -373,13 +373,92 @@ def test_reindex_sets_lock_and_statement_timeouts_at_session_level() -> None:
     timeouts = [
         (text, params) for text, params in cursor.statements if "set_config" in text
     ]
-    assert len(timeouts) == 1
+    assert len(timeouts) == 2
     text, params = timeouts[0]
     # is_local false: REINDEX CONCURRENTLY runs outside a transaction block, so
     # a transaction-local setting would not cover it.
     assert "'lock_timeout', %s, false" in text
     assert "'statement_timeout', %s, false" in text
     assert params == ("5000ms", "1800000ms")
+    # The rebuild's own budget is set again right before REINDEX; two hours
+    # into a three hour window the configured timeout is the smaller bound.
+    text, params = timeouts[1]
+    assert "'statement_timeout', %s, false" in text
+    assert params == ("1800000ms",)
+    assert _budget_statements(cursor) == ["1800000ms"]
+
+
+def _budget_statements(cursor: _FakeCursor) -> list[str]:
+    return [
+        str(params[0])
+        for text, params in cursor.statements
+        if text.startswith("SELECT set_config('statement_timeout'") and params
+    ]
+
+
+def test_reindex_caps_the_rebuild_budget_by_the_time_left_in_the_window() -> None:
+    """A rebuild started at 20:45 may not run to 21:15; the window ends at 21:00."""
+
+    cursor = _FakeCursor(states=_bloated(PRIMARY_INDEX))
+    summary = _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+        index_names=(PRIMARY_INDEX,),
+        statement_timeout_ms=1_800_000,
+        now=datetime(2026, 9, 7, 20, 45, tzinfo=UTC),
+    )
+
+    assert summary.outcome == "reindexed"
+    # 900 s were left; the cycle's own preamble is charged as one whole second.
+    assert summary.budget_ms == 899_000
+    assert _budget_statements(cursor) == ["899000ms"]
+
+
+def test_reindex_does_not_start_a_rebuild_when_the_window_is_about_to_close() -> None:
+    cursor = _FakeCursor(states=_bloated(PRIMARY_INDEX))
+    summary = _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+        index_names=(PRIMARY_INDEX,),
+        now=datetime(2026, 9, 7, 20, 55, tzinfo=UTC),
+    )
+
+    assert summary.outcome == "skipped_window_closing"
+    assert summary.index is None
+    # Five minutes is under the ten minute floor: no connection is opened.
+    assert cursor.statements == []
+    # Nothing was attempted, so the index is still due in the next window.
+    assert index_maintenance._last_attempt_at == {}
+
+
+def test_reindex_min_remaining_floor_is_configurable() -> None:
+    cursor = _FakeCursor(states=_bloated(PRIMARY_INDEX))
+    summary = _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+        index_names=(PRIMARY_INDEX,),
+        min_remaining_seconds=120,
+        now=datetime(2026, 9, 7, 20, 55, tzinfo=UTC),
+    )
+
+    assert summary.outcome == "reindexed"
+    assert summary.budget_ms == 299_000
+
+
+def test_reindex_budget_follows_a_window_that_crosses_midnight() -> None:
+    cursor = _FakeCursor(states=_bloated(PRIMARY_INDEX))
+    summary = _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+        index_names=(PRIMARY_INDEX,),
+        window_utc="22:00-02:00",
+        now=datetime(2026, 9, 8, 1, 49, tzinfo=UTC),
+    )
+
+    # Eleven minutes left, measured against the 02:00 close of the occurrence
+    # that opened at 22:00 the previous day.
+    assert summary.outcome == "reindexed"
+    assert summary.budget_ms == 659_000
+
+
+def test_reindex_rejects_a_zero_min_remaining_floor() -> None:
+    cursor = _FakeCursor(states=_bloated(PRIMARY_INDEX))
+    with pytest.raises(ValueError, match="min_remaining_seconds"):
+        _job(_FakeConnection(cursor)).reindex_evidence_indexes(
+            index_names=(PRIMARY_INDEX,), min_remaining_seconds=0, now=IN_WINDOW
+        )
 
 
 def test_reindex_rebuilds_at_most_one_index_per_maintenance_cycle() -> None:
@@ -838,6 +917,7 @@ def test_settings_default_to_the_low_traffic_taipei_window() -> None:
     assert settings.evidence_index_reindex_max_per_window == 2
     assert settings.evidence_index_reindex_lock_timeout_ms == 5_000
     assert settings.evidence_index_reindex_statement_timeout_ms == 1_800_000
+    assert settings.evidence_index_reindex_min_remaining_seconds == 600
     # None means "whatever the job's own list says".
     assert settings.evidence_index_reindex_indexes is None
 

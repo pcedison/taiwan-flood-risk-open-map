@@ -158,6 +158,7 @@ class WorkerSettings:
     evidence_index_reindex_max_per_window: int
     evidence_index_reindex_lock_timeout_ms: int
     evidence_index_reindex_statement_timeout_ms: int
+    evidence_index_reindex_min_remaining_seconds: int
     freshness_max_age_seconds: int
     runtime_fixtures_enabled: bool
     runtime_job_lease_seconds: int
@@ -789,6 +790,11 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             values,
             "EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS",
             default=1_800_000,
+        ),
+        evidence_index_reindex_min_remaining_seconds=env_int(
+            values,
+            "EVIDENCE_INDEX_REINDEX_MIN_REMAINING_SECONDS",
+            default=600,
         ),
         freshness_max_age_seconds=env_int(
             values,

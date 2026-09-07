@@ -631,6 +631,13 @@ job, on an autocommit connection, `CONCURRENTLY`, exactly like
   `EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS` (default 1 800 000 = 30 min) so
   a rebuild cannot run past the window into morning traffic. Both are session
   settings, because `REINDEX CONCURRENTLY` runs outside a transaction block.
+  The statement timeout is only the ceiling: right before each `REINDEX` the
+  job sets it again to the time left in the window (minus what the cycle's
+  probes and leftover sweep already used), so a rebuild that starts at 20:45
+  gets 15 minutes, not 30. With less than
+  `EVIDENCE_INDEX_REINDEX_MIN_REMAINING_SECONDS` (default 600) left the cycle
+  logs `skipped_window_closing` and starts nothing; the index stays due for
+  the next window.
 - **Failure is not a failed cycle.** A refused lock, a cancelled statement, or
   an unreachable server is logged as `failed:<sqlstate>` and maintenance
   finishes normally. A malformed `EVIDENCE_INDEX_REINDEX_*` value logs

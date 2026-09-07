@@ -433,6 +433,9 @@ def test_scheduler_maintenance_reindexes_after_the_staging_prune(
             "statement_timeout_ms": (
                 SETTINGS.evidence_index_reindex_statement_timeout_ms
             ),
+            "min_remaining_seconds": (
+                SETTINGS.evidence_index_reindex_min_remaining_seconds
+            ),
         }
     ]
 

@@ -454,6 +454,9 @@ def _reindex_evidence_indexes(
             statement_timeout_ms=(
                 settings.evidence_index_reindex_statement_timeout_ms
             ),
+            min_remaining_seconds=(
+                settings.evidence_index_reindex_min_remaining_seconds
+            ),
         )
     except Exception as exc:
         log_event(

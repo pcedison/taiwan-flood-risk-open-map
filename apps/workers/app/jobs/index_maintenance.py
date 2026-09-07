@@ -96,6 +96,12 @@ DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_INDEX_BYTES = 512 * 1024 * 1024
 DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_PER_WINDOW = 2
 DEFAULT_EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS = 5_000
 DEFAULT_EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS = 1_800_000
+# A rebuild that starts late in the window would otherwise run its whole
+# statement_timeout past the window's end, into the traffic the window exists
+# to keep clear. One rebuild's budget is therefore the configured timeout or
+# the time left in the window, whichever is less, and a cycle with less than
+# this left does not start one at all.
+DEFAULT_EVIDENCE_INDEX_REINDEX_MIN_REMAINING_SECONDS = 600
 # REINDEX ... CONCURRENTLY landed in PostgreSQL 12. Below that the only
 # rebuild available takes an ACCESS EXCLUSIVE lock, which is exactly what this
 # job exists to avoid, so the whole pass turns itself off instead.
@@ -155,6 +161,9 @@ class EvidenceReindexSummary:
     elapsed_ms: int = 0
     skipped: Mapping[str, str] = field(default_factory=dict)
     leftovers_dropped: tuple[str, ...] = ()
+    # What the rebuild was allowed: the configured statement_timeout capped by
+    # the time left in the window when it started.
+    budget_ms: int | None = None
 
     @property
     def reindexed(self) -> bool:
@@ -171,6 +180,7 @@ class EvidenceReindexSummary:
             "elapsed_ms": self.elapsed_ms,
             "skipped": dict(self.skipped),
             "leftovers_dropped": list(self.leftovers_dropped),
+            "budget_ms": self.budget_ms,
         }
 
 
@@ -207,6 +217,7 @@ class PostgresIndexMaintenanceJob:
         max_per_window: int = DEFAULT_EVIDENCE_INDEX_REINDEX_MAX_PER_WINDOW,
         lock_timeout_ms: int = DEFAULT_EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS,
         statement_timeout_ms: int = DEFAULT_EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS,
+        min_remaining_seconds: int = DEFAULT_EVIDENCE_INDEX_REINDEX_MIN_REMAINING_SECONDS,
         now: datetime | None = None,
     ) -> EvidenceReindexSummary:
         """Rebuild at most one bloated ``evidence`` index, concurrently.
@@ -237,6 +248,8 @@ class PostgresIndexMaintenanceJob:
             raise ValueError("lock_timeout_ms must be a positive integer")
         if statement_timeout_ms < 1:
             raise ValueError("statement_timeout_ms must be a positive integer")
+        if min_remaining_seconds < 1:
+            raise ValueError("min_remaining_seconds must be a positive integer")
 
         resolved_now = (now or _now()).astimezone(UTC)
         window_started_at = _window_started_at(resolved_now, window)
@@ -260,6 +273,25 @@ class PostgresIndexMaintenanceJob:
                 window_started_at=window_started_at,
             )
 
+        # The window is a promise to the morning traffic, and a rebuild
+        # started at 20:59 with a 30 minute timeout would break it. Whatever
+        # is left of the window is the most a rebuild may take; too little
+        # left and this cycle does not open a connection at all.
+        remaining_seconds = int(
+            (_window_ends_at(window_started_at, window) - resolved_now).total_seconds()
+        )
+        # Strictly more than the floor has to be left, because the cycle's own
+        # preamble is charged to the budget as one whole second.
+        if remaining_seconds <= min_remaining_seconds:
+            return _log_summary(
+                EvidenceReindexSummary(
+                    outcome="skipped_window_closing",
+                    index=None,
+                    window_utc=window_utc,
+                ),
+                window_started_at=window_started_at,
+            )
+
         try:
             summary = self._reindex_first_eligible(
                 index_names=resolved_names,
@@ -270,6 +302,9 @@ class PostgresIndexMaintenanceJob:
                 max_index_bytes=max_index_bytes,
                 lock_timeout_ms=lock_timeout_ms,
                 statement_timeout_ms=statement_timeout_ms,
+                min_remaining_seconds=min_remaining_seconds,
+                remaining_seconds=remaining_seconds,
+                cycle_started_at=_now(),
                 now=resolved_now,
             )
         except Exception as exc:
@@ -294,6 +329,9 @@ class PostgresIndexMaintenanceJob:
         max_index_bytes: int,
         lock_timeout_ms: int,
         statement_timeout_ms: int,
+        min_remaining_seconds: int,
+        remaining_seconds: int,
+        cycle_started_at: datetime,
         now: datetime,
     ) -> EvidenceReindexSummary:
         skipped: dict[str, str] = {}
@@ -342,6 +380,10 @@ class PostgresIndexMaintenanceJob:
                     now=now,
                     skipped=skipped,
                     leftovers=leftovers,
+                    statement_timeout_ms=statement_timeout_ms,
+                    min_remaining_seconds=min_remaining_seconds,
+                    remaining_seconds=remaining_seconds,
+                    cycle_started_at=cycle_started_at,
                 )
 
         return EvidenceReindexSummary(
@@ -362,7 +404,30 @@ class PostgresIndexMaintenanceJob:
         now: datetime,
         skipped: Mapping[str, str],
         leftovers: tuple[str, ...],
+        statement_timeout_ms: int,
+        min_remaining_seconds: int,
+        remaining_seconds: int,
+        cycle_started_at: datetime,
     ) -> EvidenceReindexSummary:
+        # The leftover sweep and the catalog probes above have used some of
+        # the window; what is left, capped by the configured timeout, is the
+        # rebuild's budget. Set right before the statement so the sweep's
+        # time cannot be spent twice.
+        budget_ms = _statement_budget_ms(
+            statement_timeout_ms=statement_timeout_ms,
+            remaining_seconds=remaining_seconds,
+            cycle_started_at=cycle_started_at,
+        )
+        if budget_ms < min_remaining_seconds * 1000:
+            return EvidenceReindexSummary(
+                outcome="skipped_window_closing",
+                index=None,
+                window_utc=window_utc,
+                skipped={**skipped, index_name: "skipped_window_closing"},
+                leftovers_dropped=leftovers,
+                budget_ms=budget_ms,
+            )
+        _apply_statement_budget(cursor, budget_ms)
         # Recorded before the work starts, not after: a rebuild that dies from
         # a refused lock must not be retried by the next cycle a few minutes
         # later, which is exactly when the contention is still there.
@@ -397,6 +462,7 @@ class PostgresIndexMaintenanceJob:
                 elapsed_ms=_elapsed_ms(started_at),
                 skipped=skipped,
                 leftovers_dropped=leftovers,
+                budget_ms=budget_ms,
             )
         elapsed_ms = _elapsed_ms(started_at)
         _last_reindex_at[index_name] = now
@@ -411,6 +477,7 @@ class PostgresIndexMaintenanceJob:
             elapsed_ms=elapsed_ms,
             skipped=skipped,
             leftovers_dropped=leftovers,
+            budget_ms=budget_ms,
         )
 
     def _recover_post_swap_success(
@@ -659,6 +726,32 @@ def _apply_reindex_timeouts(
     )
 
 
+def _statement_budget_ms(
+    *,
+    statement_timeout_ms: int,
+    remaining_seconds: int,
+    cycle_started_at: datetime,
+) -> int:
+    """The most one rebuild may take, in milliseconds.
+
+    ``remaining_seconds`` is what the window had left when the cycle began;
+    the time the cycle has spent since (catalog probes, the leftover sweep)
+    comes off it, rounded up to the next whole second so the answer does not
+    wobble by milliseconds from one run to the next.
+    """
+
+    spent_seconds = int((_now() - cycle_started_at).total_seconds()) + 1
+    left_ms = max(0, remaining_seconds - spent_seconds) * 1000
+    return min(statement_timeout_ms, left_ms)
+
+
+def _apply_statement_budget(cursor: Any, budget_ms: int) -> None:
+    cursor.execute(
+        "SELECT set_config('statement_timeout', %s, false)",
+        (f"{budget_ms}ms",),
+    )
+
+
 def _server_version_num(cursor: Any) -> int:
     cursor.execute("SHOW server_version_num")
     row = cursor.fetchone()
@@ -726,6 +819,18 @@ def _window_started_at(now: datetime, window: tuple[time, time]) -> datetime | N
     if current < end:
         return day_start - timedelta(days=1)
     return None
+
+
+def _window_ends_at(window_started_at: datetime, window: tuple[time, time]) -> datetime:
+    """When the window occurrence that opened at ``window_started_at`` closes."""
+
+    _start, end = window
+    ends_at = window_started_at.replace(
+        hour=end.hour, minute=end.minute, second=0, microsecond=0
+    )
+    if ends_at <= window_started_at:
+        ends_at += timedelta(days=1)
+    return ends_at
 
 
 def _log_summary(
