@@ -235,6 +235,7 @@ def test_summary_tolerates_a_payload_without_plans_or_tables() -> None:
         "query_plans": [],
         "staging_status_counts": {},
         "staging_used_by_evidence_estimate": {},
+        "nearby_candidate_profile": {},
         "index_count": 0,
         "statements_available": False,
     }
@@ -277,6 +278,54 @@ def test_summary_marks_an_estimated_staging_split_as_estimated() -> None:
     assert "method=pg_stats_estimate" in staging
     assert "probe=timeout" in staging
     assert "oldest=None" in staging
+
+
+def test_summary_prints_each_nearby_candidate_group_with_its_weight() -> None:
+    diagnostics = {
+        "nearby_candidate_profile": {
+            "radius_m": 500,
+            "note": "rows the bounding-box pre-filter hands to ST_DWithin",
+            "status": "ok",
+            "groups": [
+                {
+                    "adapter_key": "official.wra.historical_flood",
+                    "event_type": "flood",
+                    "geometry_type": "MULTIPOLYGON",
+                    "within_radius": False,
+                    "active_snapshot": False,
+                    "rows": 12,
+                    "geom_bytes": 3_145_728,
+                    "properties_bytes": 24_576,
+                    "max_npoints": 48_211,
+                }
+            ],
+            "error": None,
+        }
+    }
+
+    lines = collector.summary_lines(collector.summarize(diagnostics))
+
+    assert lines == [
+        "NEARBY CANDIDATES official.wra.historical_flood flood MULTIPOLYGON | "
+        "rows=12 within_radius=False active_snapshot=False "
+        "geom_kib=3072 properties_kib=24 max_npoints=48211 probe=ok"
+    ]
+
+
+def test_summary_reports_a_nearby_candidate_probe_that_timed_out() -> None:
+    diagnostics = {
+        "nearby_candidate_profile": {
+            "radius_m": 500,
+            "note": "rows the bounding-box pre-filter hands to ST_DWithin",
+            "status": "timeout",
+            "groups": [],
+            "error": "timeout",
+        }
+    }
+
+    lines = collector.summary_lines(collector.summarize(diagnostics))
+
+    assert lines == ["NEARBY CANDIDATES | probe=timeout groups=none"]
 
 
 def test_summary_reports_a_staging_section_that_returned_nothing() -> None:

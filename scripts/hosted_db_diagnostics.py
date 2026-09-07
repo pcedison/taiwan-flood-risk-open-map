@@ -134,6 +134,7 @@ def summarize(diagnostics: dict[str, Any]) -> dict[str, Any]:
         "staging_used_by_evidence_estimate": (
             diagnostics.get("staging_used_by_evidence_estimate") or {}
         ),
+        "nearby_candidate_profile": diagnostics.get("nearby_candidate_profile") or {},
         "index_count": len(diagnostics.get("indexes") or []),
         "statements_available": diagnostics.get("statements") is not None,
     }
@@ -166,6 +167,37 @@ def summary_lines(summary: dict[str, Any]) -> list[str]:
         lines.append(
             f"PLAN {plan['name']} | status={plan['status']} "
             f"execution_ms={plan['execution_time_ms']}"
+        )
+    lines.extend(nearby_candidate_lines(summary.get("nearby_candidate_profile") or {}))
+    return lines
+
+
+def nearby_candidate_lines(section: dict[str, Any]) -> list[str]:
+    """Print which sources the nearby-evidence bounding-box scan pays for.
+
+    #330 turns on whether the 2 s ``nearby_evidence`` segment is spent on rows
+    the request keeps or on rows it fetches only to discard, so every line says
+    whether the group survives the exact distance test and the active-snapshot
+    test, and how much it weighs.
+    """
+
+    if not section:
+        return []
+    status = section.get("status")
+    groups = section.get("groups") or []
+    if not groups:
+        return [f"NEARBY CANDIDATES | probe={status} groups=none"]
+    lines = []
+    for group in groups:
+        geom_kib = (group.get("geom_bytes") or 0) / 1024
+        properties_kib = (group.get("properties_bytes") or 0) / 1024
+        lines.append(
+            f"NEARBY CANDIDATES {group.get('adapter_key')} "
+            f"{group.get('event_type')} {group.get('geometry_type')} | "
+            f"rows={group.get('rows')} within_radius={group.get('within_radius')} "
+            f"active_snapshot={group.get('active_snapshot')} "
+            f"geom_kib={geom_kib:.0f} properties_kib={properties_kib:.0f} "
+            f"max_npoints={group.get('max_npoints')} probe={status}"
         )
     return lines
 

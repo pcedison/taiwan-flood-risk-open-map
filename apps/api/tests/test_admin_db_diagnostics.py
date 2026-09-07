@@ -104,8 +104,31 @@ def _diagnostics_payload() -> dict[str, Any]:
                 "note": "the request path abandons this query after 250 ms",
             },
         ],
+        "nearby_candidate_profile": {
+            "radius_m": 500,
+            "note": "rows the bounding-box pre-filter hands to ST_DWithin",
+            "status": "ok",
+            "groups": [_CANDIDATE_GROUP],
+            "error": None,
+        },
         "statements": None,
     }
+
+
+# One bounding-box candidate group as the endpoint reports it: a superseded
+# historical-flood snapshot polygon that overlaps the query box but lies
+# outside the radius, so the request reads it only to discard it.
+_CANDIDATE_GROUP: dict[str, Any] = {
+    "adapter_key": "official.wra.historical_flood",
+    "event_type": "flood",
+    "geometry_type": "MULTIPOLYGON",
+    "within_radius": False,
+    "active_snapshot": False,
+    "rows": 12,
+    "geom_bytes": 3_145_728,
+    "properties_bytes": 24_576,
+    "max_npoints": 48_211,
+}
 
 
 def test_db_diagnostics_requires_bearer_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -407,6 +430,13 @@ def test_table_and_index_sections_survive_an_unavailable_database() -> None:
         "unavailable",
     ]
     assert all(plan["note"] for plan in diagnostics["query_plans"])
+    assert diagnostics["nearby_candidate_profile"] == {
+        "radius_m": db_diagnostics.SAMPLE_RADIUS_M,
+        "note": db_diagnostics.NEARBY_CANDIDATE_PROFILE_NOTE,
+        "status": "unavailable",
+        "groups": [],
+        "error": "OSError",
+    }
 
 
 class _ScriptedCursor:
@@ -530,6 +560,57 @@ def test_staging_status_counts_reports_a_timeout_with_no_usable_statistics() -> 
     assert section["status"] == "timeout"
     assert section["method"] is None
     assert section["rows"] == []
+
+
+def test_nearby_candidate_profile_groups_candidates_by_source() -> None:
+    factory, cursor = _scripted([(None, [_CANDIDATE_GROUP])])
+
+    section = db_diagnostics._nearby_candidate_profile("postgresql://example", factory)
+
+    assert section["status"] == "ok"
+    assert section["error"] is None
+    assert section["radius_m"] == db_diagnostics.SAMPLE_RADIUS_M
+    assert section["groups"] == [_CANDIDATE_GROUP]
+    assert cursor.executed[0] == "SET TRANSACTION READ ONLY"
+    sql = cursor.executed[-1]
+    # The profile has to walk the same partial index as the request path, so
+    # it repeats that index's predicate and the request's bounding-box test.
+    assert "ingestion_status = 'accepted'" in sql
+    assert "e.event_type IN ('rainfall', 'water_level')" in sql
+    assert "ST_Expand(qp.geom, qp.radius_m / 90000.0)" in sql
+    assert "GROUP BY adapter_key, event_type, geometry_type" in sql
+    # Counts, sizes and names only: the row itself must never be selected.
+    assert "e.*" not in sql
+    assert "e.title" not in sql
+    assert "e.summary" not in sql
+
+
+def test_nearby_candidate_profile_reports_timeout_without_raising() -> None:
+    factory, _cursor = _scripted([(psycopg.errors.QueryCanceled(), None)])
+
+    section = db_diagnostics._nearby_candidate_profile("postgresql://example", factory)
+
+    assert section == {
+        "radius_m": db_diagnostics.SAMPLE_RADIUS_M,
+        "note": db_diagnostics.NEARBY_CANDIDATE_PROFILE_NOTE,
+        "status": "timeout",
+        "groups": [],
+        "error": "timeout",
+    }
+
+
+def test_nearby_candidate_profile_never_leaks_the_connection_string() -> None:
+    secret_url = "postgresql://flood_risk:super-secret@db.internal:5432/flood_risk"
+    factory, _cursor = _scripted(
+        [(psycopg.OperationalError(f'could not connect to "{secret_url}"'), None)]
+    )
+
+    section = db_diagnostics._nearby_candidate_profile(secret_url, factory)
+
+    assert section["status"] == "unavailable"
+    assert section["error"] == "OperationalError"
+    assert "super-secret" not in repr(section)
+    assert "db.internal" not in repr(section)
 
 
 def test_staging_status_counts_never_leaks_the_connection_string() -> None:
