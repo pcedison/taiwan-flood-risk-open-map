@@ -1,6 +1,6 @@
 # Taiwan Flood Risk Open Map — Current Project Status
 
-Last verified: 2026-09-07 10:38 Asia/Taipei (2026-09-07 02:38 UTC)
+Last verified: 2026-09-07 12:48 Asia/Taipei (2026-09-07 04:48 UTC)
 
 This file is the operational handoff for the current repository and production
 state. The SDD and work plan remain the product and implementation contracts;
@@ -98,24 +98,25 @@ the live verification sources listed below.
 
 ## Recorded production checkpoints
 
-- At 2026-09-07 10:38 Asia/Taipei, `origin/main`, Zeabur production deployment
-  `6300913665`, `/health`, and `/ready` all reported
-  `f5c76c00415ea440d027da3186889078c18b9ad4`. PostgreSQL and Redis were
+- At 2026-09-07 12:48 Asia/Taipei, `origin/main`, `/health`, and `/ready` all
+  reported `e05e802b5a4384216f5e13040fa3cb534f0a7893`. PostgreSQL and Redis were
   healthy. The SHA-pinned deployment smoke and strict public-risk evidence
-  smoke passed; main CI and CodeQL passed; open Dependabot, code-scanning, and
-  secret-scanning alert counts were zero; and no pull request was open. The
-  strict smoke reported the required WRA IoW flood-depth source as advisory
-  while redundant hydrology evidence remained usable; a direct upstream replay
-  still found no observation newer than `2026-09-02T04:29:42Z`.
+  smoke passed; main CI and CodeQL passed; and open Dependabot, code-scanning,
+  and secret-scanning alert counts were zero. Pull request
+  [#384](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/384)
+  remained open and blocked by an unresolved P2 review, so it was not part of
+  the production release. The strict smoke reported the required WRA IoW
+  flood-depth source as advisory while redundant hydrology evidence remained
+  usable; a direct upstream replay still found no observation newer than
+  `2026-09-02T04:29:42Z`.
 - The latest genuine scheduled Hosted Monitoring run is
-  [#34057465057](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34057465057)
-  on preceding main `7f7836714cbf65667ef6b422d7e27a0d8cc45431`. Deployment
-  identity passed, but the public-risk step failed because the CWA rainfall
-  upstream was temporarily unavailable. PR
+  [#34081913876](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34081913876)
+  on current main `e05e802b5a4384216f5e13040fa3cb534f0a7893`. It passed the
+  deployment, strict public-risk, desktop and mobile browser,
+  source-freshness, schedule-evidence, and completion-audit steps. This
+  exercised the bounded six-hour advisory added by PR
   [#380](https://github.com/pcedison/taiwan-flood-risk-open-map/pull/380)
-  added a bounded six-hour advisory for that self-healing state; manual
-  post-deploy runs passed, but the next genuine schedule run has not yet
-  exercised the new policy. Issues
+  after the preceding CWA rainfall upstream outage. Issues
   [#289](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/289) and
   [#293](https://github.com/pcedison/taiwan-flood-risk-open-map/issues/293)
   closed on 2026-09-04 after earlier successful genuine schedule evidence.

@@ -81,22 +81,23 @@ lint/typecheck commands, and contribution rules.
 ## Development Status
 
 The live operational checkpoint is [PROJECT_STATUS.md](PROJECT_STATUS.md). At
-the 2026-09-07 10:38 Asia/Taipei checkpoint, `origin/main`, Zeabur production
-deployment `6300913665`, `/health`, and `/ready` all reported
-`f5c76c00415ea440d027da3186889078c18b9ad4`. PostgreSQL and Redis were healthy,
+the 2026-09-07 12:48 Asia/Taipei checkpoint, `origin/main`, `/health`, and
+`/ready` all reported
+`e05e802b5a4384216f5e13040fa3cb534f0a7893`. PostgreSQL and Redis were healthy,
 the SHA-pinned deployment and strict public-risk smokes passed, main CI and
-CodeQL were green, all three open security-alert counts were zero, and no pull
-request was open. Do not treat a SHA copied into status documentation as a
-permanent deployment pin: derive the current expected SHA only after
-`git fetch origin --prune`, then verify both health endpoints. The latest
-genuine scheduled Hosted Monitoring run,
-[#34057465057](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34057465057),
-ran on the preceding release and failed when the CWA rainfall upstream was
-temporarily unavailable. PR #380 added a bounded six-hour advisory only for
-that self-healing upstream-outage state; post-deploy manual monitoring passed,
-but the next genuine schedule run has not yet exercised the new policy. Issues
-#289 and #293 closed on 2026-09-04 after earlier successful genuine schedule
-evidence. Hosted Monitoring also
+CodeQL were green, and all three open security-alert counts were zero. Pull
+request #384 remained open and blocked by an unresolved P2 review; it was not
+part of the production release. Do not treat a SHA copied into status
+documentation as a permanent deployment pin: derive the current expected SHA
+only after `git fetch origin --prune`, then verify both health endpoints. The
+latest genuine scheduled Hosted Monitoring run,
+[#34081913876](https://github.com/pcedison/taiwan-flood-risk-open-map/actions/runs/34081913876),
+passed on that release, including the deployment, strict public-risk, desktop
+and mobile browser, source-freshness, schedule-evidence, and completion-audit
+steps. This exercised PR #380's bounded six-hour advisory after the preceding
+CWA rainfall upstream outage. Issues #289 and #293 had already closed on
+2026-09-04 after earlier successful genuine schedule evidence. Hosted
+Monitoring also
 exercises the production basemap and a real public location query in desktop
 and mobile Chromium; major MapLibre and ESLint upgrades require an explicit
 migration review instead of an automatic Dependabot PR.
