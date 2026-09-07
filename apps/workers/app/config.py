@@ -144,6 +144,13 @@ class WorkerSettings:
     staging_evidence_retention_batch_size: int
     staging_evidence_retention_statement_timeout_ms: int
     staging_evidence_retention_ensure_index: bool
+    evidence_index_reindex_enabled: bool
+    evidence_index_reindex_indexes: tuple[str, ...] | None
+    evidence_index_reindex_window_utc: str
+    evidence_index_reindex_interval_hours: int
+    evidence_index_reindex_min_size_bytes: int
+    evidence_index_reindex_lock_timeout_ms: int
+    evidence_index_reindex_statement_timeout_ms: int
     freshness_max_age_seconds: int
     runtime_fixtures_enabled: bool
     runtime_job_lease_seconds: int
@@ -704,6 +711,42 @@ def load_worker_settings(env: Mapping[str, str] | None = None) -> WorkerSettings
             default=True,
         )
         is True,
+        # Defaults mirror app/jobs/index_maintenance.py, which owns the policy;
+        # config cannot import it because app.jobs.__init__ imports app.config.
+        # None here means "the job's own list".
+        evidence_index_reindex_enabled=env_bool(
+            values,
+            "EVIDENCE_INDEX_REINDEX_ENABLED",
+            default=True,
+        )
+        is True,
+        evidence_index_reindex_indexes=env_list(
+            values,
+            "EVIDENCE_INDEX_REINDEX_INDEXES",
+        ),
+        evidence_index_reindex_window_utc=(
+            env_str(values, "EVIDENCE_INDEX_REINDEX_WINDOW_UTC") or "18:00-21:00"
+        ),
+        evidence_index_reindex_interval_hours=env_int(
+            values,
+            "EVIDENCE_INDEX_REINDEX_INTERVAL_HOURS",
+            default=168,
+        ),
+        evidence_index_reindex_min_size_bytes=env_int(
+            values,
+            "EVIDENCE_INDEX_REINDEX_MIN_SIZE_BYTES",
+            default=8 * 1024 * 1024,
+        ),
+        evidence_index_reindex_lock_timeout_ms=env_int(
+            values,
+            "EVIDENCE_INDEX_REINDEX_LOCK_TIMEOUT_MS",
+            default=5_000,
+        ),
+        evidence_index_reindex_statement_timeout_ms=env_int(
+            values,
+            "EVIDENCE_INDEX_REINDEX_STATEMENT_TIMEOUT_MS",
+            default=1_800_000,
+        ),
         freshness_max_age_seconds=env_int(
             values,
             "FRESHNESS_MAX_AGE_SECONDS",

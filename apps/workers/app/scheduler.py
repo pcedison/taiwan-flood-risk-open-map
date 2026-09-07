@@ -20,6 +20,10 @@ from app.jobs.evidence_retention import (
 )
 from app.jobs.freshness import FreshnessCheck, check_batch_freshness
 from app.jobs.frozen_legacy import report_frozen_legacy
+from app.jobs.index_maintenance import (
+    EvidenceReindexSummary,
+    PostgresIndexMaintenanceJob,
+)
 from app.jobs.ingestion import (
     AdapterBatchRunSummary,
     IngestionRunSummaryWriter,
@@ -81,6 +85,7 @@ class MaintenanceCycleResult:
     location_query_retention: LocationQueryRetentionSummary | None = None
     raw_snapshot_retention: RawSnapshotRetentionSummary | None = None
     staging_evidence_retention: StagingEvidenceRetentionSummary | None = None
+    evidence_reindex: EvidenceReindexSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
 
@@ -273,6 +278,7 @@ def run_maintenance_once(
     location_query_retention: LocationQueryRetentionSummary | None = None
     raw_snapshot_retention: RawSnapshotRetentionSummary | None = None
     staging_evidence_retention: StagingEvidenceRetentionSummary | None = None
+    evidence_reindex: EvidenceReindexSummary | None = None
     tile_refresh: TileFeatureRefreshResult | None = None
     tile_prune: TileCachePruneResult | None = None
     del retention_days, tile_feature_limit, tile_prune_limit, tile_expired_before
@@ -303,6 +309,13 @@ def run_maintenance_once(
                 ensure_index=resolved_settings.staging_evidence_retention_ensure_index,
             )
 
+        # Dead last, and behind its own guard. A concurrent rebuild is the
+        # longest thing this cycle can do (minutes on the hosted evidence
+        # table), and unlike the passes above it is pure housekeeping: nothing
+        # depends on it having run, so it must never delay or fail retention.
+        if resolved_settings.evidence_index_reindex_enabled:
+            evidence_reindex = _reindex_evidence_indexes(resolved_settings)
+
     except (
         EvidenceRetentionUnavailable,
         ValueError,
@@ -322,6 +335,7 @@ def run_maintenance_once(
             location_query_retention=location_query_retention,
             raw_snapshot_retention=raw_snapshot_retention,
             staging_evidence_retention=staging_evidence_retention,
+            evidence_reindex=evidence_reindex,
             tile_refresh=tile_refresh,
             tile_prune=tile_prune,
         )
@@ -355,6 +369,10 @@ def run_maintenance_once(
             if staging_evidence_retention
             else "disabled"
         ),
+        evidence_reindex_outcome=(
+            evidence_reindex.outcome if evidence_reindex else "disabled"
+        ),
+        evidence_reindex_index=(evidence_reindex.index if evidence_reindex else None),
         frozen_query_heat=True,
         frozen_local_tiles=True,
     )
@@ -366,9 +384,43 @@ def run_maintenance_once(
         location_query_retention=location_query_retention,
         raw_snapshot_retention=raw_snapshot_retention,
         staging_evidence_retention=staging_evidence_retention,
+        evidence_reindex=evidence_reindex,
         tile_refresh=tile_refresh,
         tile_prune=tile_prune,
     )
+
+
+def _reindex_evidence_indexes(
+    settings: WorkerSettings,
+) -> EvidenceReindexSummary | None:
+    """Run the concurrent rebuild pass, absorbing anything it throws.
+
+    The job already swallows database-side failures. This also absorbs a
+    malformed configuration (a bad ``EVIDENCE_INDEX_REINDEX_*`` value), which
+    the job raises on: an operator typo must not stop the retention cycle that
+    keeps the node's disk bounded.
+    """
+
+    try:
+        job = PostgresIndexMaintenanceJob(database_url=settings.database_url)
+        return job.reindex_evidence_indexes(
+            index_names=settings.evidence_index_reindex_indexes,
+            window_utc=settings.evidence_index_reindex_window_utc,
+            interval_hours=settings.evidence_index_reindex_interval_hours,
+            min_size_bytes=settings.evidence_index_reindex_min_size_bytes,
+            lock_timeout_ms=settings.evidence_index_reindex_lock_timeout_ms,
+            statement_timeout_ms=(
+                settings.evidence_index_reindex_statement_timeout_ms
+            ),
+        )
+    except Exception as exc:
+        log_event(
+            "scheduler.maintenance.evidence_reindex_misconfigured",
+            level="warning",
+            error=type(exc).__name__,
+            detail=str(exc),
+        )
+        return None
 
 
 def run_maintenance_loop(

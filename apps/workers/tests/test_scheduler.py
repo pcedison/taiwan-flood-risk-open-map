@@ -66,6 +66,38 @@ class RecordingEvidenceRetentionJob:
         )
 
 
+class RecordingIndexMaintenanceJob:
+    """Stands in for the concurrent rebuild so no test opens a real socket."""
+
+    def __init__(self, outcome: str = "skipped_outside_window") -> None:
+        self.outcome = outcome
+        self.calls: list[dict[str, object]] = []
+
+    def reindex_evidence_indexes(self, **kwargs: object) -> object:
+        self.calls.append(dict(kwargs))
+        return SimpleNamespace(
+            outcome=self.outcome,
+            index=None if self.outcome != "reindexed" else "idx_evidence_geom",
+        )
+
+
+@pytest.fixture(autouse=True)
+def _stub_index_maintenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every test to a no-op rebuild pass.
+
+    Without this the maintenance cycle would try to dial the fake database URL
+    whenever the suite happens to run inside the 18:00-21:00 UTC window, which
+    is a real-clock dependency no unit test should carry. Tests that care about
+    the rebuild pass patch it again themselves; the later patch wins.
+    """
+
+    monkeypatch.setattr(
+        scheduler,
+        "PostgresIndexMaintenanceJob",
+        lambda **_kwargs: RecordingIndexMaintenanceJob(),
+    )
+
+
 def test_scheduler_maintenance_keeps_privacy_retention_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -320,3 +352,130 @@ def test_scheduler_maintenance_failure_is_preserved(
 
     assert result.status == "failed"
     assert result.reason == "retention unavailable"
+
+
+def test_scheduler_maintenance_reindexes_after_the_staging_prune(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The rebuild is the last thing a cycle does, and it is pure housekeeping.
+
+    A concurrent rebuild is the longest step in the cycle, so it must never sit
+    in front of the retention passes that keep the node's disk bounded.
+    """
+
+    order: list[str] = []
+
+    class OrderingRetentionJob(RecordingEvidenceRetentionJob):
+        def prune_staging_evidence(self, **kwargs: object) -> object:
+            order.append("staging_prune")
+            return super().prune_staging_evidence(**kwargs)  # type: ignore[arg-type]
+
+    reindex = RecordingIndexMaintenanceJob(outcome="reindexed")
+
+    def build_reindex_job(**kwargs: object) -> RecordingIndexMaintenanceJob:
+        order.append("reindex")
+        assert kwargs == {"database_url": SETTINGS.database_url}
+        return reindex
+
+    monkeypatch.setattr(
+        scheduler, "PostgresEvidenceRetentionJob", lambda **_kwargs: OrderingRetentionJob()
+    )
+    monkeypatch.setattr(scheduler, "PostgresIndexMaintenanceJob", build_reindex_job)
+
+    result = scheduler.run_maintenance_once(settings=SETTINGS)
+
+    assert result.status == "succeeded"
+    assert order == ["staging_prune", "reindex"]
+    assert result.evidence_reindex is not None
+    assert result.evidence_reindex.outcome == "reindexed"
+    assert reindex.calls == [
+        {
+            "index_names": SETTINGS.evidence_index_reindex_indexes,
+            "window_utc": SETTINGS.evidence_index_reindex_window_utc,
+            "interval_hours": SETTINGS.evidence_index_reindex_interval_hours,
+            "min_size_bytes": SETTINGS.evidence_index_reindex_min_size_bytes,
+            "lock_timeout_ms": SETTINGS.evidence_index_reindex_lock_timeout_ms,
+            "statement_timeout_ms": (
+                SETTINGS.evidence_index_reindex_statement_timeout_ms
+            ),
+        }
+    ]
+
+    completed = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if '"scheduler.maintenance.completed"' in line
+    ]
+    assert completed[-1]["evidence_reindex_outcome"] == "reindexed"
+    assert completed[-1]["evidence_reindex_index"] == "idx_evidence_geom"
+    # Backward compatible: the staging fields the runbook and dashboards read
+    # are untouched.
+    assert completed[-1]["staging_evidence_stopped_reason"] == "exhausted"
+    assert completed[-1]["staging_evidence_rows_pruned"] == 5
+
+
+def test_scheduler_maintenance_reports_a_disabled_reindex_pass(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    settings = load_worker_settings(
+        {
+            "WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood",
+            "EVIDENCE_INDEX_REINDEX_ENABLED": "false",
+        }
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "PostgresEvidenceRetentionJob",
+        lambda **_kwargs: RecordingEvidenceRetentionJob(),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "PostgresIndexMaintenanceJob",
+        lambda **_kwargs: pytest.fail("rebuild pass constructed while disabled"),
+    )
+
+    result = scheduler.run_maintenance_once(settings=settings)
+
+    assert result.status == "succeeded"
+    assert result.evidence_reindex is None
+    completed = [
+        json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if '"scheduler.maintenance.completed"' in line
+    ]
+    assert completed[-1]["evidence_reindex_outcome"] == "disabled"
+    assert completed[-1]["evidence_reindex_index"] is None
+
+
+def test_scheduler_maintenance_survives_a_misconfigured_reindex_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator typo in an env var must not stop retention from running."""
+
+    settings = load_worker_settings(
+        {
+            "WORKER_DATABASE_URL": "postgresql://worker:test@localhost/flood",
+            "EVIDENCE_INDEX_REINDEX_WINDOW_UTC": "sometime at night",
+        }
+    )
+    retention = RecordingEvidenceRetentionJob()
+
+    class ExplodingIndexMaintenanceJob:
+        def reindex_evidence_indexes(self, **kwargs: object) -> object:
+            del kwargs
+            raise ValueError("invalid maintenance window 'sometime at night'")
+
+    monkeypatch.setattr(scheduler, "PostgresEvidenceRetentionJob", lambda **_k: retention)
+    monkeypatch.setattr(
+        scheduler,
+        "PostgresIndexMaintenanceJob",
+        lambda **_kwargs: ExplodingIndexMaintenanceJob(),
+    )
+
+    result = scheduler.run_maintenance_once(settings=settings)
+
+    assert result.status == "succeeded"
+    assert result.evidence_reindex is None
+    assert ("prune_staging_evidence", 7) in retention.calls

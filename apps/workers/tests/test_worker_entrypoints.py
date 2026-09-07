@@ -1492,6 +1492,18 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         FakeEvidenceRetentionJob,
     )
     monkeypatch.setattr(scheduler_module, "PostgresTileCacheWriter", FakeTileCacheWriter)
+    # The concurrent index rebuild is housekeeping this test says nothing
+    # about, and letting it through would dial the fake database URL whenever
+    # the suite runs inside the maintenance window.
+    monkeypatch.setattr(
+        scheduler_module,
+        "PostgresIndexMaintenanceJob",
+        lambda **_kwargs: SimpleNamespace(
+            reindex_evidence_indexes=lambda **_call: SimpleNamespace(
+                outcome="skipped_outside_window", index=None
+            )
+        ),
+    )
 
     result = run_maintenance_once(
         settings=settings,
