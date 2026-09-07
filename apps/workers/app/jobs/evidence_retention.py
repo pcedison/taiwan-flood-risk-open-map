@@ -127,7 +127,22 @@ DEFAULT_STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS = 3_600
 # pass gives up for the cycle; below five minutes the per-statement
 # overhead stops being worth the smaller scan.
 DEFAULT_STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS = 300
+# A window that deleted *nothing* may grow past the normal ceiling, up to
+# this one. Empty windows are what a restart costs: the watermark lives in
+# memory, so the next sweep re-walks ground that is already clear, and at a
+# fixed 1 h ceiling that is 10 h of history per cycle -- 38 cycles, ~3.2 h,
+# to re-cross 16 days. Doubling through empty history instead crosses the
+# same span in about four cycles. Any window that actually finds rows drops
+# straight back to the normal ceiling, and the halving path collects the
+# overshoot, so this only ever buys speed over ground with nothing in it.
+DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_WINDOW_SECONDS = 86_400
 DEFAULT_STAGING_EVIDENCE_STATEMENT_TIMEOUT_MS = 5_000
+# The sweep's two setup reads -- the data_sources catalogue and min(created_at)
+# over the accepted partial index -- are bounded lookups, not scans, and they
+# are not what the per-batch budget is sizing. Giving them their own fixed
+# budget means lowering the batch budget to protect ingestion cannot starve
+# the sweep of the setup it needs to run at all.
+STAGING_EVIDENCE_METADATA_STATEMENT_TIMEOUT_MS = 5_000
 DEFAULT_STAGING_EVIDENCE_LOCK_TIMEOUT_MS = 2_000
 
 # Without this index the batch select has to walk the table to find 5 000 aged
@@ -204,6 +219,10 @@ _accepted_timeout_streak = 0
 # persisted.
 _accepted_sweep_watermark: datetime | None = None
 _accepted_sweep_window_seconds: int | None = None
+# The adapters admitted only by the legacy fallback, as of the last cycle
+# that logged them. 34 keys every 300 s is noise nobody reads; the same 34
+# keys the one time they change is the thing worth seeing.
+_accepted_fallback_adapter_keys: tuple[str, ...] | None = None
 
 
 # Cadences whose accepted staging rows are one-cycle telemetry. A realtime
@@ -565,6 +584,7 @@ class PostgresEvidenceRetentionJob:
         accepted_min_window_seconds: int = (
             DEFAULT_STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS
         ),
+        accepted_max_window_seconds: int | None = None,
         now: datetime | None = None,
     ) -> StagingEvidenceRetentionSummary:
         """Delete dead staging rows past the retention window, in two passes.
@@ -612,6 +632,20 @@ class PostgresEvidenceRetentionJob:
         if accepted_window_seconds < accepted_min_window_seconds:
             raise ValueError(
                 "accepted_window_seconds must not be below accepted_min_window_seconds"
+            )
+        # Defaults to the constant, but never below the normal ceiling: raising
+        # only the window must not fail on a limit the caller never set.
+        resolved_max_window_seconds = (
+            max(
+                DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_WINDOW_SECONDS,
+                accepted_window_seconds,
+            )
+            if accepted_max_window_seconds is None
+            else accepted_max_window_seconds
+        )
+        if resolved_max_window_seconds < accepted_window_seconds:
+            raise ValueError(
+                "accepted_max_window_seconds must not be below accepted_window_seconds"
             )
         if statement_timeout_ms < 1:
             raise ValueError("statement_timeout_ms must be a positive integer")
@@ -670,6 +704,7 @@ class PostgresEvidenceRetentionJob:
                         lock_timeout_ms=lock_timeout_ms,
                         window_seconds=accepted_window_seconds,
                         min_window_seconds=accepted_min_window_seconds,
+                        max_window_seconds=resolved_max_window_seconds,
                     )
                     accepted_deleted_rows = sweep.deleted_rows
                     accepted_batches = sweep.batches
@@ -760,6 +795,7 @@ class PostgresEvidenceRetentionJob:
         lock_timeout_ms: int,
         window_seconds: int,
         min_window_seconds: int,
+        max_window_seconds: int,
     ) -> _AcceptedSweepResult:
         """Sweep aged accepted rows no evidence row points at any more.
 
@@ -791,6 +827,12 @@ class PostgresEvidenceRetentionJob:
         problem, so it ends the cycle without shrinking anything. Each
         swept window doubles the size back towards the configured maximum,
         so one slow patch of history does not throttle the sweep forever.
+
+        A window that deleted nothing at all may double past
+        ``window_seconds`` up to ``max_window_seconds``, because empty
+        history is exactly what a restart makes the sweep re-cross and
+        there is nothing there to cost anything. The moment a window
+        yields rows the size drops back to ``window_seconds``.
         """
 
         global _accepted_sweep_watermark, _accepted_sweep_window_seconds
@@ -799,7 +841,7 @@ class PostgresEvidenceRetentionJob:
         batches = 0
         stopped_reason: StagingRetentionStopReason = "max_batches"
         window = min(
-            window_seconds,
+            max_window_seconds,
             max(
                 min_window_seconds,
                 _accepted_sweep_window_seconds or window_seconds,
@@ -811,14 +853,18 @@ class PostgresEvidenceRetentionJob:
             try:
                 source_ids = _committed_batch(
                     connection,
-                    statement_timeout_ms=statement_timeout_ms,
+                    statement_timeout_ms=(
+                        STAGING_EVIDENCE_METADATA_STATEMENT_TIMEOUT_MS
+                    ),
                     lock_timeout_ms=lock_timeout_ms,
                     work=_fetch_orphan_prunable_source_ids,
                 )
                 if watermark is None:
                     watermark = _committed_batch(
                         connection,
-                        statement_timeout_ms=statement_timeout_ms,
+                        statement_timeout_ms=(
+                            STAGING_EVIDENCE_METADATA_STATEMENT_TIMEOUT_MS
+                        ),
                         lock_timeout_ms=lock_timeout_ms,
                         work=_fetch_oldest_accepted_created_at,
                     )
@@ -896,9 +942,15 @@ class PostgresEvidenceRetentionJob:
                     continue
                 batches += 1
                 deleted_rows += batch_rows
-                if batch_rows < batch_size:
-                    watermark = window_end
-                    window = min(window_seconds, window * 2)
+                if batch_rows >= batch_size:
+                    # Dense enough to fill a batch. A window grown wide over
+                    # empty history has done its job, so hand it back now
+                    # rather than pay a run of timeouts to discover the same.
+                    window = min(window, window_seconds)
+                    continue
+                watermark = window_end
+                ceiling = max_window_seconds if batch_rows == 0 else window_seconds
+                window = min(ceiling, window * 2)
 
         _accepted_sweep_watermark = watermark
         _accepted_sweep_window_seconds = window
@@ -1224,15 +1276,39 @@ def _fetch_orphan_prunable_source_ids(cursor: Any) -> tuple[str, ...]:
         for row in (cursor.fetchall() or ())
     )
     source_ids = orphan_prunable_source_ids(pairs)
-    fallback_keys = legacy_fallback_adapter_keys(pairs)
-    if fallback_keys:
-        log_event(
-            "worker.maintenance.staging_accepted_retention_adapters",
-            source_count=len(source_ids),
-            legacy_fallback_count=len(fallback_keys),
-            legacy_fallback_adapter_keys=list(fallback_keys),
-        )
+    _log_orphan_prunable_adapters(
+        source_ids=source_ids,
+        fallback_keys=legacy_fallback_adapter_keys(pairs),
+    )
     return source_ids
+
+
+def _log_orphan_prunable_adapters(
+    *,
+    source_ids: tuple[str, ...],
+    fallback_keys: tuple[str, ...],
+) -> None:
+    """Report the allow-list, naming the fallback adapters only on a change.
+
+    The counts go out every cycle so a dashboard can watch them; the key
+    list only when the set actually moves, which is when a deploy added or
+    reclassified an adapter and somebody should look.
+    """
+
+    global _accepted_fallback_adapter_keys
+
+    changed = fallback_keys != _accepted_fallback_adapter_keys
+    _accepted_fallback_adapter_keys = fallback_keys
+    fields: dict[str, object] = {
+        "source_count": len(source_ids),
+        "legacy_fallback_count": len(fallback_keys),
+        "legacy_fallback_changed": changed,
+    }
+    if changed:
+        fields["legacy_fallback_adapter_keys"] = list(fallback_keys)
+    log_event(
+        "worker.maintenance.staging_accepted_retention_adapters", **fields
+    )
 
 
 def _fetch_oldest_accepted_created_at(cursor: Any) -> datetime | None:

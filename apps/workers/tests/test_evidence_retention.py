@@ -10,6 +10,7 @@ from app.jobs.evidence_retention import (
     DEFAULT_EVIDENCE_REALTIME_RETENTION_HOURS,
     DEFAULT_LOCATION_QUERY_RETENTION_HOURS,
     DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_BATCHES,
+    DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_WINDOW_SECONDS,
     DEFAULT_STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS,
     DEFAULT_STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS,
     DEFAULT_STAGING_EVIDENCE_BATCH_SIZE,
@@ -414,6 +415,7 @@ def _reset_sweep_state() -> None:
     evidence_retention._accepted_timeout_streak = 0
     evidence_retention._accepted_sweep_watermark = None
     evidence_retention._accepted_sweep_window_seconds = None
+    evidence_retention._accepted_fallback_adapter_keys = None
 
 
 def _statements(connection: _StagingFakeConnection, needle: str) -> list[tuple[str, tuple | None]]:
@@ -1000,12 +1002,14 @@ def test_prune_staging_evidence_logs_each_pass_under_its_own_event(
     )
     logged = capsys.readouterr().out
 
-    assert "worker.maintenance.staging_retention" in logged
-    assert "worker.maintenance.staging_accepted_retention" in logged
+    assert '"event": "worker.maintenance.staging_retention"' in logged
+    assert '"event": "worker.maintenance.staging_accepted_retention"' in logged
+    # Matched on the whole event field: the adapter-allow-list event shares a
+    # prefix with this one.
     accepted_line = next(
         line
         for line in logged.splitlines()
-        if "worker.maintenance.staging_accepted_retention" in line
+        if '"event": "worker.maintenance.staging_accepted_retention"' in line
     )
     assert '"deleted_rows": 5' in accepted_line
     assert '"source_count": 1' in accepted_line
@@ -1125,6 +1129,7 @@ def test_accepted_sweep_resumes_from_the_watermark_on_the_next_cycle() -> None:
         retention_days=7,
         accepted_max_batches=1,
         accepted_window_seconds=3_600,
+        accepted_max_window_seconds=3_600,
         now=now,
     )
 
@@ -1137,6 +1142,7 @@ def test_accepted_sweep_resumes_from_the_watermark_on_the_next_cycle() -> None:
         retention_days=7,
         accepted_max_batches=1,
         accepted_window_seconds=3_600,
+        accepted_max_window_seconds=3_600,
         now=now,
     )
 
@@ -1215,6 +1221,9 @@ def test_accepted_sweep_grows_the_window_back_after_a_swept_window() -> None:
         accepted_max_batches=3,
         accepted_window_seconds=1_200,
         accepted_min_window_seconds=300,
+        # Pinned to the normal ceiling: widening past it through empty history
+        # has its own test.
+        accepted_max_window_seconds=1_200,
         now=now,
     )
 
@@ -1328,6 +1337,189 @@ def test_accepted_pass_logs_the_adapters_admitted_by_fallback(
     assert "official.wra.flood_incident" in logged
 
 
+def test_accepted_sweep_doubles_past_the_normal_ceiling_through_empty_history() -> None:
+    """What a restart costs, and why it is not 38 cycles of nothing.
+
+    The watermark is in memory, so a restart re-crosses history that is
+    already clear. At a fixed 1 h ceiling that is ~10 h of history per cycle;
+    doubling through empty windows crosses days of it in a handful.
+    """
+
+    connection = _StagingFakeConnection(
+        [0], accepted_batches=[0, 0, 0, 0], oldest_accepted=AGED
+    )
+    now = AGED + timedelta(days=30)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence(
+        retention_days=7,
+        accepted_max_batches=4,
+        accepted_window_seconds=3_600,
+        accepted_max_window_seconds=86_400,
+        now=now,
+    )
+
+    assert [end - start for start, end in _accepted_windows(connection)] == [
+        timedelta(hours=1),
+        timedelta(hours=2),
+        timedelta(hours=4),
+        timedelta(hours=8),
+    ]
+    # 1 + 2 + 4 + 8 = 15 h of history in four batches, against 4 h at a fixed
+    # ceiling.
+    assert summary.accepted_watermark == AGED + timedelta(hours=15)
+    assert summary.accepted_window_seconds == 16 * 3_600
+
+
+def test_accepted_sweep_returns_to_the_normal_ceiling_once_a_window_yields_rows() -> None:
+    """Empty history is the only thing the wide window is for."""
+
+    connection = _StagingFakeConnection(
+        # Two empty windows widen it to 4 h, then one that finds a few rows.
+        [0],
+        accepted_batches=[0, 0, 1],
+        oldest_accepted=AGED,
+    )
+    now = AGED + timedelta(days=30)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence(
+        retention_days=7,
+        batch_size=5,
+        accepted_max_batches=3,
+        accepted_window_seconds=3_600,
+        accepted_max_window_seconds=86_400,
+        now=now,
+    )
+
+    assert summary.accepted_window_seconds == 3_600
+
+
+def test_accepted_sweep_hands_back_a_wide_window_when_a_batch_fills_up() -> None:
+    """A dense window must not be re-scanned at 24 h a time.
+
+    Without this the halving path would have to discover the same thing, one
+    timed-out statement at a time.
+    """
+
+    connection = _StagingFakeConnection(
+        [0], accepted_batches=[0, 0, 0, 2, 2], oldest_accepted=AGED
+    )
+    now = AGED + timedelta(days=30)
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    summary = job.prune_staging_evidence(
+        retention_days=7,
+        batch_size=2,
+        accepted_max_batches=5,
+        accepted_window_seconds=3_600,
+        accepted_max_window_seconds=86_400,
+        now=now,
+    )
+
+    widths = [end - start for start, end in _accepted_windows(connection)]
+    assert widths[:4] == [
+        timedelta(hours=1),
+        timedelta(hours=2),
+        timedelta(hours=4),
+        timedelta(hours=8),
+    ]
+    # The 8 h window filled a batch, so the next one is back to the ceiling.
+    assert widths[4] == timedelta(hours=1)
+    assert summary.accepted_window_seconds == 3_600
+
+
+def test_prune_staging_evidence_rejects_a_ceiling_below_the_window() -> None:
+    job = PostgresEvidenceRetentionJob(
+        connection_factory=lambda: _StagingFakeConnection([0])
+    )
+
+    with pytest.raises(ValueError):
+        job.prune_staging_evidence(
+            accepted_window_seconds=3_600, accepted_max_window_seconds=600
+        )
+
+
+def test_accepted_pass_names_the_fallback_adapters_only_when_the_set_changes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """34 keys every 300 s is noise; 34 keys the once they change is a signal."""
+
+    fallback_source = ("55555555-5555-4555-8555-555555555555", "official.wra.flood_incident")
+
+    def _run(data_sources: list[tuple[str, str]]) -> str:
+        connection = _StagingFakeConnection(
+            [0],
+            accepted_batches=[0],
+            data_sources=data_sources,
+            oldest_accepted=AGED,
+        )
+        PostgresEvidenceRetentionJob(
+            connection_factory=lambda: connection
+        ).prune_staging_evidence(accepted_window_seconds=WHOLE_SPAN_WINDOW_SECONDS)
+        return capsys.readouterr().out
+
+    first = _run([(REALTIME_SOURCE_ID, "official.cwa.rainfall"), fallback_source])
+    assert "official.wra.flood_incident" in first
+    assert '"legacy_fallback_changed": true' in first
+
+    # Same set: counts only.
+    second = _run([(REALTIME_SOURCE_ID, "official.cwa.rainfall"), fallback_source])
+    assert "worker.maintenance.staging_accepted_retention_adapters" in second
+    assert '"legacy_fallback_count": 1' in second
+    assert '"legacy_fallback_changed": false' in second
+    assert "official.wra.flood_incident" not in second
+
+    # A new fallback adapter appears, so the list is named again.
+    third = _run(
+        [
+            (REALTIME_SOURCE_ID, "official.cwa.rainfall"),
+            fallback_source,
+            ("66666666-6666-4666-8666-666666666666", "news.public_web.sample"),
+        ]
+    )
+    assert "news.public_web.sample" in third
+    assert '"legacy_fallback_changed": true' in third
+
+
+def test_accepted_sweep_gives_its_setup_reads_their_own_statement_budget() -> None:
+    """Lowering the batch budget to protect ingestion must not starve the setup.
+
+    The data_sources read and min(created_at) are bounded lookups, not scans,
+    and they are not what the per-batch budget is sizing.
+    """
+
+    connection = _StagingFakeConnection(
+        [0], accepted_batches=[0], oldest_accepted=AGED
+    )
+    job = PostgresEvidenceRetentionJob(connection_factory=lambda: connection)
+
+    job.prune_staging_evidence(
+        statement_timeout_ms=1, accepted_window_seconds=WHOLE_SPAN_WINDOW_SECONDS
+    )
+
+    executions = connection.cursor_instance.executions
+    budgets: dict[str, str] = {}
+    pending: str | None = None
+    for sql, params in executions:
+        if "set_config('statement_timeout'" in sql and params is not None:
+            pending = params[1]
+            continue
+        if pending is None:
+            continue
+        if "FROM data_sources" in sql:
+            budgets["data_sources"] = pending
+        elif "min(created_at)" in sql:
+            budgets["watermark"] = pending
+        elif ACCEPTED_MARKER in sql:
+            budgets["batch"] = pending
+        pending = None
+
+    assert budgets["data_sources"] == "5000ms"
+    assert budgets["watermark"] == "5000ms"
+    assert budgets["batch"] == "1ms"
+
+
 def test_staging_evidence_retention_config_defaults_and_env() -> None:
     defaults = load_worker_settings({})
     assert defaults.staging_evidence_retention_enabled is True
@@ -1354,6 +1546,9 @@ def test_staging_evidence_retention_config_defaults_and_env() -> None:
     assert defaults.staging_evidence_accepted_retention_min_window_seconds == (
         DEFAULT_STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS
     )
+    assert defaults.staging_evidence_accepted_retention_max_window_seconds == (
+        DEFAULT_STAGING_EVIDENCE_ACCEPTED_MAX_WINDOW_SECONDS
+    )
 
     overridden = load_worker_settings(
         {
@@ -1365,8 +1560,9 @@ def test_staging_evidence_retention_config_defaults_and_env() -> None:
             "STAGING_EVIDENCE_RETENTION_STATEMENT_TIMEOUT_MS": "9000",
             "STAGING_EVIDENCE_ACCEPTED_RETENTION_ENABLED": "false",
             "STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_BATCHES": "3",
-            "STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS": "1800",
-            "STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS": "120",
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_WINDOW_SECONDS": "1800",
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_MIN_WINDOW_SECONDS": "120",
+            "STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_WINDOW_SECONDS": "7200",
         }
     )
     assert overridden.staging_evidence_retention_enabled is False
@@ -1379,3 +1575,4 @@ def test_staging_evidence_retention_config_defaults_and_env() -> None:
     assert overridden.staging_evidence_accepted_retention_max_batches == 3
     assert overridden.staging_evidence_accepted_retention_window_seconds == 1800
     assert overridden.staging_evidence_accepted_retention_min_window_seconds == 120
+    assert overridden.staging_evidence_accepted_retention_max_window_seconds == 7200

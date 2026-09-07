@@ -73,6 +73,7 @@ def _reset_sweep_state() -> None:
 
     evidence_retention._accepted_sweep_watermark = None
     evidence_retention._accepted_sweep_window_seconds = None
+    evidence_retention._accepted_fallback_adapter_keys = None
     evidence_retention._accepted_timeout_streak = 0
     evidence_retention._staging_timeout_streak = 0
 
@@ -969,6 +970,12 @@ def test_accepted_sweep_halves_the_window_on_a_real_statement_timeout(
     Proves the retry path against a real cancelled statement rather than a
     synthetic sqlstate: the pass must roll back, shrink, retry and finally
     report the timeout instead of raising or looping.
+
+    The 1 ms budget applies to the batch DELETEs only. The sweep's two
+    setup reads carry STAGING_EVIDENCE_METADATA_STATEMENT_TIMEOUT_MS, so a
+    slow runner cannot turn this into a preamble timeout and a green-looking
+    but meaningless pass -- which is what it would have done when both
+    shared one budget.
     """
 
     summary = _job(swept_url).prune_staging_evidence(
@@ -989,3 +996,7 @@ def test_accepted_sweep_halves_the_window_on_a_real_statement_timeout(
     assert summary.accepted_window_seconds == 300
     assert summary.accepted_watermark == SWEEP_ORIGIN
     assert summary.accepted_deleted_rows == 0
+    # The setup reads got through on their own budget, which is how the
+    # sweep reached a batch at all: source_count is only ever non-zero
+    # once the data_sources read has committed.
+    assert summary.accepted_source_count > 0

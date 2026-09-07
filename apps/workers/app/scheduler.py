@@ -313,6 +313,9 @@ def run_maintenance_once(
                 accepted_min_window_seconds=(
                     resolved_settings.staging_evidence_accepted_retention_min_window_seconds
                 ),
+                accepted_max_window_seconds=(
+                    resolved_settings.staging_evidence_accepted_retention_max_window_seconds
+                ),
             )
 
     except (

@@ -1484,6 +1484,7 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
             accepted_max_batches: int,
             accepted_window_seconds: int,
             accepted_min_window_seconds: int,
+            accepted_max_window_seconds: int,
         ) -> _StagingEvidenceRetentionSummary:
             calls.append(("staging_evidence.retention", retention_days))
             calls.append(("staging_evidence.max_batches", max_batches))
@@ -1504,6 +1505,12 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
                 (
                     "staging_evidence.accepted_min_window_seconds",
                     accepted_min_window_seconds,
+                )
+            )
+            calls.append(
+                (
+                    "staging_evidence.accepted_max_window_seconds",
+                    accepted_max_window_seconds,
                 )
             )
             return _StagingEvidenceRetentionSummary()
@@ -1552,6 +1559,7 @@ def test_scheduler_maintenance_once_runs_retention_without_legacy_product_jobs(
         ("staging_evidence.accepted_max_batches", 10),
         ("staging_evidence.accepted_window_seconds", 3600),
         ("staging_evidence.accepted_min_window_seconds", 300),
+        ("staging_evidence.accepted_max_window_seconds", 86400),
     ]
 
 

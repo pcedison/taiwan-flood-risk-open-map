@@ -187,8 +187,8 @@ This pass deletes an `accepted` row only when **all** of the following hold:
   councils, `news.public_web.*`, `official.gov_tw.flood_citation`,
   `official.npa.police_radio_traffic`, `official.tainan.disaster_news`,
   `official.wra.flood_incident`, `official.wra.flood_warning`). Each cycle
-  logs them by name under
-  `worker.maintenance.staging_accepted_retention_adapters`.
+  are named under `worker.maintenance.staging_accepted_retention_adapters`
+  whenever that set changes.
 
   The five never pruned are `official.nstc.flood_disaster_points` and
   `official.wra.historical_flood` (`jobs/historical_coverage.py` re-reads
@@ -268,9 +268,9 @@ on a warm SSD. On the 2 GB IO-bound node that reaches the 5 s
 So the pass sweeps instead. A watermark walks `created_at` from the oldest
 accepted row towards the cutoff, and each `DELETE` is bounded to
 `[watermark, window_end)` where the window is
-`STAGING_EVIDENCE_ACCEPTED_WINDOW_SECONDS` (default 3600) wide. The work per
-statement is then set by how many rows that window holds -- an hour of hosted
-ingestion is ~48 k staging rows -- and not by how far into the table the
+`STAGING_EVIDENCE_ACCEPTED_RETENTION_WINDOW_SECONDS` (default 3600) wide. The
+work per statement is then set by how many rows that window holds -- an hour of
+hosted ingestion is ~48 k staging rows -- and not by how far into the table the
 orphans have receded. The acceptance test measures this directly: with a
 50 000-row survivor prefix the windowed select discards **0** rows by filter
 where the unwindowed one discards **50 000**.
@@ -279,12 +279,23 @@ where the unwindowed one discards **50 000**.
   so the watermark moves to `window_end`. A full batch leaves the watermark
   alone and takes the next batch out of the same window.
 - A `statement_timeout` halves the window and retries -- each attempt costs a
-  batch from the budget -- down to `STAGING_EVIDENCE_ACCEPTED_MIN_WINDOW_SECONDS`
-  (default 300), below which the cycle reports `stopped_reason=statement_timeout`
-  and leaves the watermark where it was. Each swept window doubles the size
-  back towards the configured maximum, so one slow patch of history does not
-  throttle the sweep forever. A `lock_timeout` is contention rather than a
-  sizing problem, so it ends the cycle without shrinking anything.
+  batch from the budget -- down to
+  `STAGING_EVIDENCE_ACCEPTED_RETENTION_MIN_WINDOW_SECONDS` (default 300), below
+  which the cycle reports `stopped_reason=statement_timeout` and leaves the
+  watermark where it was. Each swept window doubles the size back up, so one
+  slow patch of history does not throttle the sweep forever. A `lock_timeout`
+  is contention rather than a sizing problem, so it ends the cycle without
+  shrinking anything.
+- A window that deletes **nothing** doubles past the normal ceiling, up to
+  `STAGING_EVIDENCE_ACCEPTED_RETENTION_MAX_WINDOW_SECONDS` (default 86400).
+  Empty history costs nothing to cross and is exactly what a restart makes the
+  sweep re-cross. Any window that finds rows drops straight back to the normal
+  ceiling -- including one that fills a whole batch, so a wide window is handed
+  back on arriving at dense history rather than rediscovered through timeouts.
+- The sweep's two setup reads (the `data_sources` catalogue and
+  `min(created_at)`) carry their own fixed 5 s budget rather than the per-batch
+  one: they are bounded lookups, not scans, so lowering the batch budget to
+  protect ingestion cannot starve the sweep of the setup it needs to run.
 - Reaching the cutoff reports `stopped_reason=caught_up`, which is the steady
   state: such a cycle issues no `DELETE` at all.
 
@@ -293,11 +304,36 @@ re-scan. A row's orphan status is settled well before it reaches the 7-day
 cutoff: a row that was never promoted is an orphan from birth, and a promoted
 row loses its evidence within `EVIDENCE_REALTIME_RETENTION_HOURS` (48 h).
 
+Two consequences of sweeping once are worth knowing before you go looking for
+them, neither of which loses data:
+
+- `promotion.py` selects staging rows `FOR UPDATE`, so a batch running against
+  a window promotion currently holds can delete fewer rows than the window
+  actually had. The sweep reads that short batch as "window finished" and
+  advances the watermark past those rows, which then stay as uncollected
+  orphans. It is bounded by how many rows promotion has in flight (a batch's
+  worth), it never deletes anything it should have kept, and the next worker
+  restart re-sweeps from the oldest row and collects them.
+- The same applies to a row whose evidence is deleted *after* it passed the
+  watermark -- a `flood_report`, say, which the realtime pass never prunes.
+
+If the accepted count plateaus well above the ~2.25 M that evidence
+references, that residue is the likely cause, and a worker restart is the
+remedy rather than a code change.
+
 **The watermark lives in memory, not in the database.** Restarting the worker
 resets it, and the next sweep starts again from the oldest accepted row --
 one extra pass over ground already cleared, which costs windows that delete
-nothing rather than anything unsafe. Expect a burst of
-`deleted_rows=0` accepted cycles after every deploy.
+nothing rather than anything unsafe.
+
+That re-walk is why an empty window is allowed past the normal ceiling. At a
+fixed 1 h ceiling a cleared stretch advances ~10 h of history per cycle, so
+16 days of it takes ~38 cycles, about **3.2 hours** of `deleted_rows=0`
+cycles after each deploy. Doubling up to the 24 h ceiling crosses the same
+16 days in about **4 cycles**, i.e. 20 minutes. What you should see after a
+restart is a handful of accepted cycles with `deleted_rows=0` and a
+`window_seconds` climbing towards 86400, then it dropping back to 3600 as the
+sweep reaches history that still has orphans in it.
 
 Measured on local PostGIS with 500 000 aged rejected rows (117 MB table): a
 5 000-row batch costs ~100 ms, so a full 10-batch cycle deletes 50 000 rows in
@@ -404,9 +440,11 @@ psql "$DATABASE_URL" -c "SELECT indexrelid::regclass, indisvalid FROM pg_index W
   stuck at 300 with `stopped_reason=statement_timeout` means the node cannot
   finish even the smallest window and needs a smaller `BATCH_SIZE` or an
   operator.
-- `worker.maintenance.staging_accepted_retention_adapters` names, once per
-  cycle, the adapters admitted only by the `legacy` fallback. Read it after
-  adding any adapter.
+- `worker.maintenance.staging_accepted_retention_adapters` carries
+  `source_count` and `legacy_fallback_count` every cycle, but only names the
+  fallback adapters when the set changes (`legacy_fallback_changed=true`) --
+  34 keys every 300 s is noise nobody reads. A `changed=true` line you did not
+  expect means a deploy added or reclassified an adapter; read the list.
 - `..._timeout_streak` and
   `worker.maintenance.staging_accepted_retention_timeout_streak` are
   separate: each pass warns on its own three consecutive timed-out cycles.
