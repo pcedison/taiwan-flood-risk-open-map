@@ -301,6 +301,21 @@ def run_maintenance_once(
                     resolved_settings.staging_evidence_retention_statement_timeout_ms
                 ),
                 ensure_index=resolved_settings.staging_evidence_retention_ensure_index,
+                accepted_enabled=(
+                    resolved_settings.staging_evidence_accepted_retention_enabled
+                ),
+                accepted_max_batches=(
+                    resolved_settings.staging_evidence_accepted_retention_max_batches
+                ),
+                accepted_window_seconds=(
+                    resolved_settings.staging_evidence_accepted_retention_window_seconds
+                ),
+                accepted_min_window_seconds=(
+                    resolved_settings.staging_evidence_accepted_retention_min_window_seconds
+                ),
+                accepted_max_window_seconds=(
+                    resolved_settings.staging_evidence_accepted_retention_max_window_seconds
+                ),
             )
 
     except (
@@ -354,6 +369,31 @@ def run_maintenance_once(
             staging_evidence_retention.index_state
             if staging_evidence_retention
             else "disabled"
+        ),
+        staging_evidence_accepted_rows_pruned=(
+            staging_evidence_retention.accepted_deleted_rows
+            if staging_evidence_retention
+            else 0
+        ),
+        staging_evidence_accepted_stopped_reason=(
+            staging_evidence_retention.accepted_stopped_reason
+            if staging_evidence_retention
+            else "disabled"
+        ),
+        staging_evidence_accepted_index_state=(
+            staging_evidence_retention.accepted_index_state
+            if staging_evidence_retention
+            else "disabled"
+        ),
+        staging_evidence_accepted_watermark=(
+            staging_evidence_retention.accepted_watermark
+            if staging_evidence_retention
+            else None
+        ),
+        staging_evidence_accepted_window_seconds=(
+            staging_evidence_retention.accepted_window_seconds
+            if staging_evidence_retention
+            else 0
         ),
         frozen_query_heat=True,
         frozen_local_tiles=True,
