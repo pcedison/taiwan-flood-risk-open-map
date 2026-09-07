@@ -161,9 +161,18 @@ R8. **Repo 衛生**：見 §0 最後兩列。
 | T3 上游停更 | #357 | APPROVE（4 個一行修正補齊） | 已合併 828f743 | IoW 在部分週期已顯示「上游資料來源自 2026/09/02 12:29 起未更新；本站背景更新正常」 |
 | T6b DB 讀取優化 | #359 | 第 1 輪抓到 seed 腳本無生產防呆，修後 APPROVE | 已合併 26b7589 | 本機 112 萬列實測：`db_coverage` 1.5 s 是 supplement 撞 1500 ms 逾時後整批丟掉，預算降 250 ms；`db_history` 本機 30–40 ms 無法重現正式站，未加索引（planner 不選） |
 | T3b promotion 逐列交易 | #360 | APPROVE（建議 FOR SHARE 與 peer 存活測試 → T3c） | 已合併 0cff52c | 停更快照每輪 11,228 SQL／1,366 commit → 1,410／14；順帶修掉「凍結快照每輪刪臺南 peer latest 列」既有 bug |
-| T6c admin DB 診斷 | #364 | 審查中 | 開放 | `GET /admin/v1/db-diagnostics` ＋ Hosted Monitoring advisory artifact，讓正式站 EXPLAIN／表膨脹可見 |
+| T6c admin DB 診斷 | #364 | 規劃者自審＋補 workflow_dispatch 條件 | 已合併 3ebe086 | `GET /admin/v1/db-diagnostics` ＋ Hosted Monitoring advisory artifact，讓正式站 EXPLAIN／表膨脹可見 |
 | T3c 批次查重加鎖 | #365 | 規劃者自審（diff 小） | 已合併 efd8389 | `FOR SHARE OF official_realtime_latest` ＋ Postgres 測試釘住「凍結快照重放時臺南 peer latest 列存活」（mutation check 通過） |
+| T11 source reason_code 進評估狀態 | #368 | APPROVE（typed `_source_states`） | 已合併 a1f6439 | `data_status` 只摘要 delayed 來源 |
+| T12 rejected staging 清除 | #370 | 第 1 輪抓到 uuid PK 游標全表掃描，改 created_at partial index 後 APPROVE | 已合併 3ad6822 | 上線 11 小時後積壓清完，穩態每週期 ~1.4k 列 |
+| T13 Dependabot 四合一 | #379 | 規劃者自審（lock 檔） | 已合併 f37e85d | next 16.3.4 等四項 |
+| T14 短暫上游故障改 advisory | #380 | 規劃者自審（diff 小） | 已合併 2b2e5f7 | #374 於下次成功排程自動關閉；6 h 上限 |
+| T15 候選列剖析探針 | #382 | APPROVE（note 補「上界」語意） | 已合併 47ef1aa | 證明 nearby_evidence 2.3 s 是 partial GiST 索引頁，候選全是 point |
+| T16 accepted 孤兒清除 | #381 | 第 1 輪 REQUEST_CHANGES（每批重掃存活列前綴），改時間窗＋水位後 APPROVE | 已合併 f5c76c0 | 關 #372；上線後 50 分鐘刪 4.1 萬列，預估 18–24 h 追上 |
+| T17 evidence 索引夜間 REINDEX | #384 | APPROVE 後補 `_ccold` 殘骸清理、每視窗上限 2、視窗外靜默 | 已合併 8fdb99f | UTC 18–21 視窗；933 MiB 唯一索引被 512 MiB 磁碟上限擋下，待營運確認卷空間 |
 
 2026-09-06 08:0xZ 手動觸發 Hosted Monitoring（run 34020099663）**success**，#348 由 route-alert 自動關閉；這是 8/31 以來第一次在含 IoW 上游停更的狀態下綠燈。
 
 2026-09-06 07:40Z 部署 0cff52c 後三個週期：IoW readiness `degraded/run_incomplete`、公開 `degraded/upstream_stale`（不再 `pipeline_failed`）；`db_coverage` 1515 → 268–283 ms；`db_history` 3.0–5.6 s → 1.9–2.5 s；total 5.4–8.3 s → 4.3–4.6 s（仍未達 SDD 1.5 s，等 #364 的正式站 EXPLAIN）。新開 issue：#356（reason_code 串進 AssessmentSourceState）、#358（新鮮度門檻）、#361（促銷階段錯誤碼未保存）。
+
+2026-09-07 01:20Z–03:30Z（規劃者更新）：#374（CWA 上游 20:16Z 短暫故障）於 #380 上線後由手動 Hosted Monitoring 自動關閉。兩次相隔 7 分鐘的診斷差值證明 #370 的 rejected 清除已進入穩態（每週期 1 429 列、第二批 0 列），「吞吐只有設計值 3%」是誤判。#382 的 `nearby_candidate_profile` 顯示台北 500 m 的 bbox 候選 73 列全是 point、資料 0.1 MiB，2.3 s 花在 51.9 MiB 的 `idx_evidence_nearby_non_realtime_geom` 索引頁；#384 以夜間 REINDEX CONCURRENTLY 處理，審查員在 PG16 實測到 lock_timeout 在 swap 後失敗會留 `_ccold`、`_ccnew` 不會擋下次重建，已修。順帶開 #383（`prune_realtime` 索引欄位順序，每批讀 78 萬 tuple）與 #386（根目錄 NCDR 契約測試不在 CI 且已漂移）。Codex 仍自行開並合併 docs(status) PR（#385）。剩餘開放 issue：#330（等 #384 首夜重建與 #381 清完後量測）、#383、#386，以及需使用者決策的 #328、#329、#337、#71。
