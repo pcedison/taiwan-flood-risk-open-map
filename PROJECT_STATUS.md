@@ -32,8 +32,9 @@ the live verification sources listed below.
   - `official.wra_iow.flood_depth` has been stale since 2026-09-02 04:29Z
     because the WRA open-data feed itself stopped at that timestamp (verified
     by reading the upstream API directly). It is not a worker or promotion
-    fault, and every Hosted Monitoring failure since 2026-08-31 (#289) is this
-    single source.
+    fault. Every Hosted Monitoring failure examined by the 2026-09-03 audit
+    since 2026-08-31 (#289) was this single source; the later 2026-09-06 CWA
+    upstream outage is recorded separately in the current checkpoint below.
   - Every "degraded" backbone source was produced by an all-stations-fresh
     rule in `nearby_coverage.py`, not by stale data.
   - Historical `極高` levels in several counties came from request-time
