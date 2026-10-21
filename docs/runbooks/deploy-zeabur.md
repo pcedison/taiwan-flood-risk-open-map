@@ -529,3 +529,18 @@ Smoke checks after deploy:
   replay policy, real upstream URL/license review, and production egress
   verification are either accepted or explicitly documented as pending for the
   environment.
+
+
+### Public source identity for multi-stage builds
+
+Zeabur documents Git commit metadata as build-only. Declare its public
+ZEABUR_GIT_COMMIT_SHA ARG and retain it as IMAGE_SOURCE_SHA in the final image.
+Existing runtime SHA overrides retain priority. Unknown or malformed image
+metadata remains null and must fail the exact expected-SHA smoke gate. Do not
+pin a permanent service SHA setting or derive version from cached secret-mount
+contents. Explicit ARG/ENV values participate in image identity across cached
+builds; verify two different SHAs with unchanged source. Local builders can use
+`--build-arg ZEABUR_GIT_COMMIT_SHA=<full-source-commit>`.
+
+References: https://zeabur.com/docs/en-US/deploy/methods/dockerfile#arg and
+https://zeabur.com/docs/en-US/deploy/config/environment-variables#git-information

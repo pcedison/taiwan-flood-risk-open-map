@@ -39,3 +39,4 @@
 | [0010](0010-realtime-bridge-as-local-diagnostic.md) | Realtime Official Bridge as Local Diagnostic Tool | Accepted | 2026-06-11 |
 | [0011](0011-maplibre-6-worker-and-vector-validation.md) | MapLibre 6 Worker Packaging and Vector Validation | Proposed | 2026-10-01 |
 | [0012](0012-civil-iot-fetch-diagnostics.md) | Redacted Civil IoT Fetch Diagnostics | Proposed | 2026-10-21 |
+| [0013](0013-build-source-identity.md) | Retain Public Build Source Identity | Proposed | 2026-10-21 |
