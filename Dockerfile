@@ -102,6 +102,10 @@ RUN chmod +x /app/entrypoint.sh
 # Run as a non-root user; only Next.js needs a writable .next cache.
 RUN useradd --create-home --uid 10001 app   && chown -R app:app /app/apps/web/.next
 ENV HOME=/home/app
+# Zeabur Git metadata is build-only. Explicit ARG participates in image cache
+# identity; retain only this public commit in the final runtime configuration.
+ARG ZEABUR_GIT_COMMIT_SHA=""
+ENV IMAGE_SOURCE_SHA=${ZEABUR_GIT_COMMIT_SHA}
 USER app
 
 EXPOSE 8080

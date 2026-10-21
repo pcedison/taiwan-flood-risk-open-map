@@ -323,6 +323,13 @@ def _deployment_sha() -> str | None:
         value = _env_str_or_none(name)
         if value is not None:
             return value
+    # Public source metadata retained by the image from an explicit build ARG.
+    # Keep existing runtime overrides first and reject unknown/malformed input.
+    built_sha = _env_str_or_none("IMAGE_SOURCE_SHA")
+    if built_sha and len(built_sha) == 40 and all(
+        c in "0123456789abcdefABCDEF" for c in built_sha
+    ):
+        return built_sha.lower()
     return None
 
 
