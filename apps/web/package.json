@@ -3,10 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/prepare-maplibre-worker.mjs",
     "dev": "next dev",
     "clean:next": "node -e \"require('node:fs').rmSync('.next', { recursive: true, force: true })\"",
     "e2e": "npm run clean:next && playwright test",
     "e2e:hosted": "playwright test --config playwright.hosted.config.ts",
+    "e2e:vector": "playwright test --config playwright.vector.config.ts",
+    "prebuild": "node scripts/prepare-maplibre-worker.mjs",
     "build": "next build",
     "start": "node scripts/start.mjs",
     "lint": "eslint . --max-warnings=0",
@@ -14,18 +17,22 @@
     "test": "node --test --experimental-strip-types \"tests/unit/**/*.test.ts\""
   },
   "dependencies": {
-    "maplibre-gl": "^5.0.0",
-    "next": "^16.3.4",
+    "maplibre-gl": "6.4.1",
+    "next": "^16.3.8",
     "pmtiles": "^4.4.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "overrides": {
-    "brace-expansion": "5.0.9",
-    "js-yaml": "5.4.0",
+    "brace-expansion": "5.0.12",
+    "js-yaml": "5.4.1",
     "minimatch@3": "10.2.6",
     "postcss": "^8.5.26",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.5",
+    "source-map-js": "1.2.2",
+    "@next/eslint-plugin-next": {
+      "fast-glob": "npm:tinyglobby@0.2.17"
+    }
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
@@ -33,7 +40,7 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.2.7",
     "eslint": "^9.0.0",
-    "eslint-config-next": "^16.3.4",
+    "eslint-config-next": "^16.3.8",
     "typescript": "^6.0.3"
   }
 }
