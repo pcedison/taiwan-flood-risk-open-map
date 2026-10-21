@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "playwright-report/**",
     "test-results/**",
+    // Vendor ESM assets copied unchanged from the locked MapLibre package.
+    "public/maplibre/**",
   ]),
 ]);
 

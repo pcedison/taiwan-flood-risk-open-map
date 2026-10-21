@@ -40,6 +40,8 @@ build/
 # Node
 node_modules/
 .next/
+# Generated from the locked MapLibre package by predev/prebuild.
+apps/web/public/maplibre/
 out/
 dist/
 coverage/

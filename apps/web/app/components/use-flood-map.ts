@@ -78,6 +78,9 @@ export function useFloodMap({
       ]);
       if (disposed || !mapContainerRef.current || mapRef.current) return;
 
+      // v6 workers import a sibling ESM shared module. Serve the installed pair
+      // together so Next/Turbopack cannot rewrite that relative dependency.
+      maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
       unregisterPmtilesProtocol = registerPmtilesProtocol(maplibregl);
       basemap.warnings.forEach((warning) => console.warn(warning));
       const interactiveMaxZoom = getInteractiveBasemapMaxZoom(basemap.style);
