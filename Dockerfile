@@ -93,6 +93,7 @@ COPY infra/scripts/activate_ncdr_alert_area_boundary_snapshot.py /app/infra/scri
 COPY --from=web-builder /app/apps/web/package.json /app/apps/web/package-lock.json /app/apps/web/
 COPY --from=web-builder /app/apps/web/node_modules /app/apps/web/node_modules
 COPY --from=web-builder /app/apps/web/.next /app/apps/web/.next
+COPY --from=web-builder /app/apps/web/public /app/apps/web/public
 COPY apps/web/next.config.mjs /app/apps/web/next.config.mjs
 
 COPY infra/docker/entrypoint.sh /app/entrypoint.sh

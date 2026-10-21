@@ -959,3 +959,26 @@ python infra/scripts/validate_monitoring_assets.py
 
 This does not prove production freshness. It proves the supported monitoring
 entrypoints are syntactically valid and runnable.
+
+
+## Civil IoT fetch diagnosis (#421)
+
+A failed `upstream_status` describes the adapter/ingestion attempt; it does not
+establish an outage at the official publisher. Keep required-source and freshness
+checks enabled. Automatic recovery without a deployment is not a root-cause fix.
+
+Civil IoT fetch errors now retain HTTP status or a bounded category (`timeout`,
+`transport`, `invalid_json`), service (`STA_RainSewer`, `STA_WaterResource_v2`,
+`other`), attempts, and configured timeout seconds. Fetch failures during pagination retain
+completed-page and source-item counts; repeated-link errors retain the completed-page count. These fields flow through the existing
+`adapter.batch.completed` error message and ingestion summary. No URLs, query
+parameters, response bodies, or free-form transport exception reasons are copied
+into the new transport diagnostics. Exception chaining remains available only in
+private traceback handling; do not publish raw tracebacks.
+
+Use worker logs/adapter-run evidence from the failed interval to distinguish
+transport, HTTP, malformed response, and ingestion/promotion failure. A transport
+category alone does not distinguish DNS/TLS/socket failure, and progress counts
+are not proof of a complete inventory. Partial pagination still fails closed;
+this change neither accepts partial results nor alters requests, retry counts,
+timeouts, source requirements, health status, or freshness thresholds.

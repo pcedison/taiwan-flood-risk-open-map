@@ -163,10 +163,15 @@ def fetch_paginated_sta_things(
         pagination_key = _with_count_query(next_url)
         if pagination_key in seen_urls:
             raise CivilIotStaPayloadError(
-                f"Civil IoT SensorThings payload repeated @iot.nextLink: {next_url}"
+                f"Civil IoT SensorThings payload repeated @iot.nextLink; pages_fetched={pages_fetched}"
             )
         seen_urls.add(pagination_key)
-        payload = fetch_json(next_url, timeout_seconds)
+        try:
+            payload = fetch_json(next_url, timeout_seconds)
+        except CivilIotStaError as exc:
+            raise type(exc)(
+                f"{exc}; pages_fetched={pages_fetched}; source_items_seen={source_items_seen}"
+            ) from exc
         pages_fetched += 1
 
         count_present, upstream_total = _sta_upstream_total(payload)
@@ -253,10 +258,15 @@ def fetch_paginated_sta_datastreams(
         pagination_key = _with_count_query(next_url)
         if pagination_key in seen_urls:
             raise CivilIotStaPayloadError(
-                f"Civil IoT SensorThings payload repeated @iot.nextLink: {next_url}"
+                f"Civil IoT SensorThings payload repeated @iot.nextLink; pages_fetched={pages_fetched}"
             )
         seen_urls.add(pagination_key)
-        payload = fetch_json(next_url, timeout_seconds)
+        try:
+            payload = fetch_json(next_url, timeout_seconds)
+        except CivilIotStaError as exc:
+            raise type(exc)(
+                f"{exc}; pages_fetched={pages_fetched}; source_items_seen={source_items_seen}"
+            ) from exc
         pages_fetched += 1
 
         count_present, upstream_total = _sta_upstream_total(payload)
@@ -703,6 +713,14 @@ def _first_value(item: Mapping[str, Any], *keys: str) -> object:
 
 def fetch_sta_json(url: str, timeout_seconds: int) -> Any:
     request_url = _request_url(url)
+    # Never copy URLs, response bodies, or exception text into persisted/logged
+    # errors. Configured URLs and URLError reasons can contain credentials.
+    path = urlsplit(url).path
+    service = next(
+        (name for name in ("STA_RainSewer", "STA_WaterResource_v2")
+         if path.startswith(f"/{name}/")),
+        "other",
+    )
     payload: Any = None
     for attempt in range(STA_FETCH_ATTEMPTS):
         request = Request(
@@ -724,17 +742,24 @@ def fetch_sta_json(url: str, timeout_seconds: int) -> Any:
             ):
                 continue
             raise CivilIotStaFetchError(
-                f"Civil IoT SensorThings API returned HTTP {exc.code}"
+                f"Civil IoT SensorThings API returned HTTP {exc.code}; "
+                f"service={service}; attempts={attempt + 1}; timeout_seconds={timeout_seconds}"
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
             if attempt + 1 < STA_FETCH_ATTEMPTS:
                 continue
+            cause = exc.reason if isinstance(exc, URLError) else exc
+            category = (
+                "timeout" if isinstance(cause, TimeoutError) else "transport"
+            )
             raise CivilIotStaFetchError(
-                f"Civil IoT SensorThings API request failed: {exc}"
+                f"Civil IoT SensorThings API request failed; category={category}; "
+                f"service={service}; attempts={attempt + 1}; timeout_seconds={timeout_seconds}"
             ) from exc
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise CivilIotStaFetchError(
-                f"Civil IoT SensorThings API request failed: {exc}"
+                "Civil IoT SensorThings API request failed; category=invalid_json; "
+                f"service={service}; attempts={attempt + 1}; timeout_seconds={timeout_seconds}"
             ) from exc
 
     if not isinstance(payload, (Mapping, list)):
