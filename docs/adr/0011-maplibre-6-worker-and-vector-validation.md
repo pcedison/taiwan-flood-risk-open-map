@@ -122,3 +122,25 @@ are needed for the configured build.
 At the local-validation checkpoint, no commit, push, new security PR, CI rerun,
 merge, or deployment had been performed. Original 13 security files remain hash-identical to the
 preserved snapshot; PR #422 is separate and unchanged.
+
+## Security CI follow-up (2026-10-24, PR #429)
+
+The existing frontend audit gate reported the published Next.js advisories
+GHSA-2464-fhr4-w9xw, GHSA-p3m5-59mp-jv5r and GHSA-673q-mjm6-r5xr, plus Zod
+GHSA-mrhx-c7xc-m3w5. Pin Next and its ESLint config to the minimum patched
+16.x release, 16.4.1. Pin the transitive React Hooks lint dependency Zod to
+4.6.6 via an override; do not add a runtime Zod dependency or relax audit.
+React, MapLibre, PMTiles and existing security overrides remain unchanged.
+
+The installed Next ESLint 16.4.1 call site still uses only globSync with
+onlyDirectories for root discovery. The scoped tinyglobby 0.2.17 alias is
+retained and rechecked by the installed-plugin directory/link-rule tests,
+included in all 79 passing unit tests. This is compatibility with this locked
+plugin, not a general fast-glob substitute. Re-review future plugin upgrades.
+
+Clean npm ci and npm audit reported zero vulnerabilities. Lint, typecheck,
+production build and all 18 existing local desktop/mobile E2E tests passed.
+Detailed real-vector and final-head CI results belong to PR #429 and its
+security verification record. Docker image validation was not run in this
+follow-up: the local Docker daemon pipe was unavailable. Do not reuse the
+2026-10-21 Docker results as proof of this new Next version's image.

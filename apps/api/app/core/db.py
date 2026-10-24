@@ -10,7 +10,7 @@ database URL. Pool exhaustion raises ``PoolTimeout`` (a subclass of
 ``psycopg.OperationalError``), so existing ``except psycopg.Error`` →
 ``*Unavailable`` handling in the repositories applies unchanged.
 
-Deliberately NOT pooled: the ``/health`` database probe (its purpose is to
+Deliberately NOT pooled: the ``/ready`` database probe (its purpose is to
 verify a fresh connection can be established) and low-traffic admin/bootstrap
 paths whose tests patch ``psycopg.connect`` directly.
 """
@@ -18,11 +18,14 @@ paths whose tests patch ``psycopg.connect`` directly.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 from threading import Lock
 from typing import Any
 
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 DEFAULT_POOL_MIN_SIZE = 1
 DEFAULT_POOL_MAX_SIZE = 8
@@ -30,6 +33,23 @@ DEFAULT_POOL_TIMEOUT_SECONDS = 5.0
 
 _POOLS: dict[str, ConnectionPool] = {}
 _LOCK = Lock()
+_FAILED_ACQUISITIONS: ContextVar[set[str] | None] = ContextVar(
+    "failed_database_acquisitions", default=None
+)
+
+
+@contextmanager
+def database_attempt_scope() -> Iterator[None]:
+    """Avoid repeating a full pool wait within one assessment, including persist.
+
+    No global circuit breaker: the next assessment always gets a fresh attempt.
+    Only acquisition PoolTimeout trips this scope, never a SQL/query failure.
+    """
+    token = _FAILED_ACQUISITIONS.set(set())
+    try:
+        yield
+    finally:
+        _FAILED_ACQUISITIONS.reset(token)
 
 
 def pooled_connection(database_url: str) -> Any:
@@ -39,9 +59,29 @@ def pooled_connection(database_url: str) -> Any:
     clean exit, rolls back on exception, then returns the connection to the
     pool instead of closing it.
     """
+    failed = _FAILED_ACQUISITIONS.get()
+    if failed is not None:
+        return _scoped_connection(database_url, failed)
     return _get_pool(database_url).connection(
         timeout=_env_float("DB_POOL_TIMEOUT_SECONDS", DEFAULT_POOL_TIMEOUT_SECONDS)
     )
+
+
+@contextmanager
+def _scoped_connection(database_url: str, failed: set[str]) -> Iterator[Any]:
+    if database_url in failed:
+        raise PoolTimeout("Database connection acquisition already timed out in this assessment.")
+    with ExitStack() as stack:
+        try:
+            connection = stack.enter_context(
+                _get_pool(database_url).connection(
+                    timeout=_env_float("DB_POOL_TIMEOUT_SECONDS", DEFAULT_POOL_TIMEOUT_SECONDS)
+                )
+            )
+        except PoolTimeout:
+            failed.add(database_url)
+            raise
+        yield connection
 
 
 def _get_pool(database_url: str) -> ConnectionPool:

@@ -634,14 +634,19 @@ def test_response_cache_hit_returns_cached_response_without_loading_repository(
     data: AssessmentData,
 ) -> None:
     baseline = AssessmentService(FakeRepository(data), score_risk).assess(risk_request, now=now).response
+    original = baseline.model_dump(mode="json")
     cache = FakeResponseCache(cached=baseline)
 
     response = AssessmentService(
         ExplodingRepository(), score_risk, response_cache=cache
-    ).assess(risk_request, now=now).response
+    ).assess(risk_request, now=now + timedelta(minutes=1)).response
 
     assert response is baseline
+    assert response.model_dump(mode="json") == original
+    assert response.created_at == now
+    assert response.expires_at == now + timedelta(minutes=10)
     assert cache.get_calls == [risk_request]
+    assert cache.set_calls == []
 
 
 def test_response_cache_is_populated_when_all_data_sources_are_available(

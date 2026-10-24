@@ -1,5 +1,31 @@
 # Production Readiness and On-Call Drill
 
+## Database readiness incident evidence
+
+When `/health` is 200 but `/ready` reports database failed and
+`/v1/ingestion-readiness` returns repository_unavailable, process liveness does
+not establish database availability. These readiness checks use fresh
+connections rather than the public request connection pool. `/ready` checks
+connection, SELECT 1, required schema and transaction exit; ingestion readiness
+reads scheduler, sources and jurisdiction contracts. Either can fail for more
+than one reason, so their generic public responses do not identify a root cause.
+
+After the diagnostics change is deployed, existing runtime logs contain
+`database.operation.failed` with operation, stage, exception class, SQLSTATE
+and elapsed milliseconds only. Correlate those events with the same UTC window
+in database/provider logs. SQLSTATE 53300 indicates too many connections;
+57014 indicates query cancellation (not proof of which timeout policy fired).
+An error at schema stage does not by itself prove migration mismatch; check
+the exception class as well. No exception messages or connection strings are
+needed. Do not publish raw provider logs or credentials.
+
+For incident #428, inspect 2026-10-24 10:42 UTC onward (18:42 Asia/Taipei).
+Use only existing authorized provider access. If CLI reports 401, stop that
+path and report the access blocker; do not extract credentials or initiate a
+new login without approval. Do not restart, run migrations, change pool sizes
+or relax readiness just to turn monitoring green. Any production intervention
+requires a specific evidence-based proposal, verification and rollback plan.
+
 ## Purpose
 
 This runbook turns the Zeabur deployment and monitoring notes into an
