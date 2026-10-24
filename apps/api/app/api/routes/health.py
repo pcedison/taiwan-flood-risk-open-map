@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
+from time import monotonic
 
 from fastapi import APIRouter, Response
 from fastapi.responses import PlainTextResponse
 
 from app.api.schemas import DependencyReadiness, HealthResponse, ReadyResponse
 from app.core.config import get_settings
+from app.core.database_failures import log_database_failure
 from app.domain.geocoding.postgis_bootstrap import fetch_postgis_geocoder_summary
 
 router = APIRouter(tags=["health"])
@@ -137,15 +139,23 @@ def _geocoder_open_data_metrics(settings: object) -> tuple[str, ...]:
 
 
 def _check_database(database_url: str) -> DependencyReadiness:
+    started_at = monotonic()
+    stage = "connect"
     try:
         import psycopg
 
         with psycopg.connect(database_url, connect_timeout=2) as connection:
+            stage = "probe"
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
+                stage = "schema"
                 _check_required_schema(cursor)
-    except Exception:
+            stage = "transaction_exit"
+    except Exception as exc:
+        log_database_failure(
+            operation="readiness", stage=stage, started_at=started_at, error=exc
+        )
         return DependencyReadiness(
             status="failed",
             checked_at=_now_utc(),

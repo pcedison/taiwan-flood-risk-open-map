@@ -27,6 +27,7 @@ from app.api.services.public_evidence import (
     select_evidence_preview_items,
     signal_from_evidence,
 )
+from app.core.db import database_attempt_scope
 from app.domain.assessment import (
     AssessmentData,
     AssessmentRepository,
@@ -124,6 +125,7 @@ class AssessmentService:
         self._recent_history_lookup = recent_history_lookup
         self._response_cache = response_cache
 
+    @database_attempt_scope()
     def assess(
         self,
         request: RiskAssessRequest,

@@ -54,3 +54,38 @@ PostGIS gives the project first-class radius and spatial indexing support.
 The team must maintain migration discipline and avoid ad hoc database changes.
 
 Backend APIs become the stable boundary between UI, workers, data sources, and domain logic.
+
+## Proposed enforcement addendum: one acquisition timeout per assessment
+
+2026-10-24, WP-012, Refs #428; local validation only.
+
+An assessment reads seven repository sections and attempts persistence even
+after unavailable reads. Under a continuously exhausted connection pool this
+can repeat eight full acquisition waits. The default five-second timeout
+therefore permits a total forty-second acquisition budget (not a measured
+production duration). This amplifies an outage but does not establish the cause
+of the incident's fresh-connection readiness failures.
+
+Scope failed pool acquisition state to one AssessmentService.assess invocation.
+After acquisition raises PoolTimeout, further calls to that same database in
+the assessment raise PoolTimeout immediately through existing unavailable-data
+handling. Include persistence in the scope. Reset in finally so the next
+assessment always retries; do not share a circuit breaker across requests or
+databases. Query and transaction-exit errors must not trip acquisition state.
+Do not change scoring, cache admission, pool sizes or SQL timeout policy.
+If the pool recovers during the same assessment, additional sections remain
+unavailable until the next assessment rather than repeatedly retrying. Already
+loaded evidence is retained. This conservative tradeoff favors bounded failure
+latency without claiming absence of risk.
+
+Local regression compares the undecorated original flow (eight waits, forty
+seconds of simulated budget) against the scoped flow (one wait, five seconds)
+through actual repository/service code and an exhausted fake pool. Realtime
+risk remains unknown, with identical risk/data-status/explanation results.
+The test does not sleep or contact production.
+
+This only bounds repeated pool waits. Readiness uses fresh connections outside
+the pool, and connected SQL can still stall: latest/history/observed-history/
+recent-context readers default statement_timeout_ms to zero, while jurisdiction,
+coverage and health readers use 1500 ms. Production server-side timeout values
+are not established. Do not claim an overall request deadline or root-cause fix.

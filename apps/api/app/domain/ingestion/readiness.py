@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import Literal, cast
 
 import psycopg
 from psycopg.rows import dict_row
+
+from app.core.database_failures import log_database_failure
 
 
 INGESTION_READINESS_PROFILE = "production_backbone"
@@ -135,12 +138,15 @@ def fetch_ingestion_readiness(
     evaluated_at: datetime | None = None,
 ) -> IngestionReadinessSnapshot:
     checked_at = _normalized_utc(evaluated_at or datetime.now(UTC))
+    started_at = monotonic()
+    stage = "connect"
     try:
         with psycopg.connect(
             database_url,
             connect_timeout=2,
             row_factory=dict_row,
         ) as connection:
+            stage = "scheduler"
             scheduler_row = connection.execute(
                 """
                 SELECT runtime_status, last_seen_at, stale_after_seconds
@@ -149,16 +155,24 @@ def fetch_ingestion_readiness(
                 """,
                 (INGESTION_SCHEDULER_KEY,),
             ).fetchone()
+            stage = "sources"
             source_rows = connection.execute(
                 _SOURCE_READINESS_SQL,
                 (INGESTION_READINESS_PROFILE,),
             ).fetchall()
+            stage = "jurisdictions"
             contract_rows = connection.execute(
                 _JURISDICTION_READINESS_SQL,
                 (list(REQUIRED_SIGNAL_TYPES),),
             ).fetchall()
+            stage = "transaction_exit"
     except (OSError, psycopg.Error) as exc:
-        raise IngestionReadinessRepositoryUnavailable(str(exc)) from exc
+        log_database_failure(
+            operation="ingestion_readiness", stage=stage, started_at=started_at, error=exc
+        )
+        raise IngestionReadinessRepositoryUnavailable(
+            "Ingestion readiness storage is temporarily unavailable."
+        ) from exc
 
     scheduler = _scheduler_readiness(scheduler_row, evaluated_at=checked_at)
     sources = tuple(

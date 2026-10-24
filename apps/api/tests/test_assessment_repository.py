@@ -210,6 +210,69 @@ def test_latest_failure_keeps_historical_result(monkeypatch: pytest.MonkeyPatch)
     assert data.historical == (HISTORY,)
 
 
+def test_later_pool_timeout_keeps_loaded_high_risk_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    from psycopg_pool import PoolTimeout
+
+    from app.api.schemas import LatLng, RiskAssessRequest
+    from app.api.services.assessment import AssessmentService
+    from app.core import db
+    from app.domain.risk import score_risk
+
+    attempts: list[float] = []
+
+    class ExhaustedPool:
+        @contextmanager
+        def connection(self, timeout: float):
+            attempts.append(timeout)
+            raise PoolTimeout("test pool exhausted after current evidence loaded")
+            yield  # pragma: no cover
+
+    monkeypatch.setattr(db, "_get_pool", lambda _: ExhaustedPool())
+
+    def unavailable_query(**_kwargs):
+        try:
+            with db.pooled_connection("postgresql://example.test/flood"):
+                pass
+        except PoolTimeout as exc:
+            raise EvidenceRepositoryUnavailable("read unavailable") from exc
+
+    current = (
+        replace(LATEST, id="26900bf0-f51c-4326-8f75-68d03a36560e", realtime_risk_factor=1.0),
+        replace(
+            LATEST, id="911d1bdf-0cc9-49bc-896d-f92680054b08",
+            adapter_key="official.wra.water_level", event_type="water_level",
+            realtime_risk_factor=1.0,
+        ),
+    )
+    repository = _repository(
+        monkeypatch,
+        query_nearby_latest_official=lambda **_: current,
+        **{name: unavailable_query for name in (
+            "query_nearby_evidence", "query_nearby_observed_flood_history",
+            "query_nearby_realtime_coverage_rows", "query_nearby_recent_context",
+            "query_realtime_source_health_rows",
+        )},
+    )
+    response = AssessmentService(repository, score_risk).assess(
+        RiskAssessRequest(
+            point=LatLng(lat=POINT["lat"], lng=POINT["lng"]),
+            radius_m=750, time_context="now",
+        ),
+        now=NOW,
+    ).response
+
+    assert len(attempts) == 1
+    assert response.realtime.level == "\u9ad8"
+    assert response.overall is not None and response.overall.level == "\u9ad8"
+    assert {item.id for item in response.evidence} == {record.id for record in current}
+    assert response.data_status is not None
+    assert response.data_status.missing
+
+
 def test_history_failure_keeps_current_result(monkeypatch: pytest.MonkeyPatch) -> None:
     data = _repository(monkeypatch, query_nearby_evidence=_unavailable).load(**POINT)
     assert data.current_available is True
